@@ -1,6 +1,162 @@
-//! SemanticSnapshot (skeleton stub for the spec-defined entity; not yet implemented).
+//! An immutable, versioned snapshot of the semantic tree for adapters (§7.1).
 
-/// Placeholder for the `SemanticSnapshot` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
-#[derive(Debug)]
-pub struct SemanticSnapshot;
+use std::collections::BTreeMap;
+
+use obscur_identity::NodeId;
+
+use crate::semantic::SemanticNode;
+
+use super::SemanticTree;
+
+/// An immutable, versioned snapshot of a [`SemanticTree`] (spec §7.1).
+///
+/// Platform adapters consume **snapshots**, not the live tree: a snapshot
+/// clones the semantic nodes into an owned map, captures the
+/// [`root`](Self::root), and stamps the tree's [`version`](Self::version) at the
+/// moment of capture. It is immutable after construction — it exposes only read
+/// accessors and no mutators.
+///
+/// Because the live tree advances its version on every mutation, a retained
+/// snapshot can be checked with [`is_stale_against`](Self::is_stale_against)
+/// against the tree's current version to decide whether it must be refreshed
+/// (spec §7.1).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SemanticSnapshot {
+    /// Owned copies of the semantic nodes, keyed by their retained [`NodeId`].
+    nodes: BTreeMap<NodeId, SemanticNode>,
+    /// The tree root at the moment of capture, if any.
+    root: Option<NodeId>,
+    /// The tree version at the moment of capture.
+    version: u64,
+}
+
+impl SemanticSnapshot {
+    /// Builds a snapshot from the current state of `tree`.
+    ///
+    /// Clones every semantic node, captures the root, and records the tree's
+    /// current version through its public accessors.
+    #[must_use]
+    pub fn from_tree(tree: &SemanticTree) -> Self {
+        let nodes = tree.iter().map(|(id, node)| (id, node.clone())).collect();
+        Self {
+            nodes,
+            root: tree.root(),
+            version: tree.version(),
+        }
+    }
+
+    /// Returns the captured node for `id`, if it was present at capture.
+    #[must_use]
+    pub fn get(&self, id: NodeId) -> Option<&SemanticNode> {
+        self.nodes.get(&id)
+    }
+
+    /// Returns the captured tree root, if any.
+    #[must_use]
+    pub const fn root(&self) -> Option<NodeId> {
+        self.root
+    }
+
+    /// Returns the tree version captured with this snapshot.
+    #[must_use]
+    pub const fn version(&self) -> u64 {
+        self.version
+    }
+
+    /// Returns the number of nodes captured in this snapshot.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    /// Returns whether the snapshot captured no nodes.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    /// Returns whether `id` was present in the tree at capture.
+    #[must_use]
+    pub fn contains(&self, id: NodeId) -> bool {
+        self.nodes.contains_key(&id)
+    }
+
+    /// Iterates over every captured `(NodeId, &SemanticNode)` in deterministic
+    /// ascending id order.
+    #[must_use]
+    pub fn iter(&self) -> impl Iterator<Item = (NodeId, &SemanticNode)> {
+        self.nodes.iter().map(|(id, node)| (*id, node))
+    }
+
+    /// Returns whether this snapshot is stale relative to `current_version`
+    /// (i.e. the live tree has advanced past the captured version, spec §7.1).
+    #[must_use]
+    pub const fn is_stale_against(&self, current_version: u64) -> bool {
+        self.version < current_version
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::semantic::SemanticRole;
+
+    fn node(n: u64) -> SemanticNode {
+        SemanticNode::new(NodeId::from_raw(n), SemanticRole::Button)
+    }
+
+    fn populated() -> SemanticTree {
+        let mut tree = SemanticTree::new();
+        tree.insert(node(1), None);
+        tree.insert(node(2), Some(NodeId::from_raw(1)));
+        tree.set_root(NodeId::from_raw(1));
+        tree
+    }
+
+    #[test]
+    fn from_tree_captures_nodes_root_and_version() {
+        let tree = populated();
+        let snap = SemanticSnapshot::from_tree(&tree);
+        assert_eq!(snap.len(), 2);
+        assert!(!snap.is_empty());
+        assert_eq!(snap.root(), Some(NodeId::from_raw(1)));
+        assert_eq!(snap.version(), tree.version());
+        assert!(snap.contains(NodeId::from_raw(2)));
+        assert_eq!(
+            snap.get(NodeId::from_raw(1)).map(SemanticNode::node),
+            Some(NodeId::from_raw(1))
+        );
+    }
+
+    #[test]
+    fn iter_is_ascending_id_order() {
+        let snap = SemanticSnapshot::from_tree(&populated());
+        let ids: Vec<u64> = snap.iter().map(|(id, _)| id.raw()).collect();
+        assert_eq!(ids, [1, 2]);
+    }
+
+    #[test]
+    fn snapshot_is_immutable_after_further_mutation() {
+        let mut tree = populated();
+        let snap = SemanticSnapshot::from_tree(&tree);
+        let captured_version = snap.version();
+
+        tree.insert(node(3), Some(NodeId::from_raw(1)));
+        tree.remove(NodeId::from_raw(2));
+
+        assert_eq!(snap.len(), 2);
+        assert!(snap.contains(NodeId::from_raw(2)));
+        assert!(!snap.contains(NodeId::from_raw(3)));
+        assert_eq!(snap.version(), captured_version);
+        assert_ne!(tree.version(), captured_version);
+    }
+
+    #[test]
+    fn is_stale_against_compares_versions() {
+        let tree = populated();
+        let snap = SemanticSnapshot::from_tree(&tree);
+        assert!(!snap.is_stale_against(snap.version()));
+        assert!(snap.is_stale_against(snap.version() + 1));
+        assert!(!snap.is_stale_against(snap.version().saturating_sub(1)));
+    }
+}

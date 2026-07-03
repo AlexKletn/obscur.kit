@@ -1,2 +1,2 @@
 mod accessibility_bridge;
-pub use accessibility_bridge::AccessibilityBridge;
+pub use accessibility_bridge::{AccessibilityBridge, NullAccessibilityBridge, RecordingAccessibilityBridge};
