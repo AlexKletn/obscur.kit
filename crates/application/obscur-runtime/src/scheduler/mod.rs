@@ -1,5 +1,5 @@
 mod backpressure_policy;
-pub use backpressure_policy::BackpressurePolicy;
+pub use backpressure_policy::{BackpressureDecision, BackpressurePolicy};
 mod frame_scheduler;
 pub use frame_scheduler::FrameScheduler;
 mod scheduler_priority;
