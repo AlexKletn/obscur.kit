@@ -1,3 +1,5 @@
+mod cache_entry;
+pub use cache_entry::CacheEntry;
 mod layout_cache;
 pub use layout_cache::LayoutCache;
 mod layout_invalidation;
