@@ -1,5 +1,7 @@
 mod child_matcher;
 pub use child_matcher::ChildMatcher;
+mod child_matching;
+pub use child_matching::ChildMatching;
 mod identity_match;
 pub use identity_match::IdentityMatch;
 mod reconciler;
