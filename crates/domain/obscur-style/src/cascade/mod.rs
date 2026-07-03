@@ -8,3 +8,5 @@ mod declaration;
 pub use declaration::Declaration;
 mod important_flag;
 pub use important_flag::ImportantFlag;
+mod resolved_declarations;
+pub use resolved_declarations::ResolvedDeclarations;
