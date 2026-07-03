@@ -7,6 +7,6 @@ pub use window_event::WindowEvent;
 mod window_properties;
 pub use window_properties::WindowProperties;
 mod window_relation;
-pub use window_relation::WindowRelation;
+pub use window_relation::{Modality, WindowRelation};
 mod window_state;
 pub use window_state::WindowState;
