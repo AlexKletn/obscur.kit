@@ -75,6 +75,7 @@ name = "obscur-layout"
 version = "0.0.0"
 dependencies = [
  "obscur-geometry",
+ "obscur-identity",
 ]
 
 [[package]]

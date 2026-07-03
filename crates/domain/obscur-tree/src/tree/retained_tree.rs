@@ -23,7 +23,7 @@ struct Slot {
 /// The index occupies the low 32 bits and the generation the high 32 bits. This
 /// packing is an arena-private encoding: callers only ever see an opaque
 /// [`NodeId`] and must not depend on its layout.
-const fn pack_node_id(index: u32, generation: u32) -> NodeId {
+fn pack_node_id(index: u32, generation: u32) -> NodeId {
     NodeId::from_raw((u64::from(generation) << 32) | u64::from(index))
 }
 
