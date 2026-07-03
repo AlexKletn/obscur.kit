@@ -1,5 +1,5 @@
 mod activate_window;
-pub use activate_window::ActivateWindow;
+pub use activate_window::{ActivateWindow, ActivationResult, FocusRequest};
 mod close_window;
 pub use close_window::CloseWindow;
 mod create_window;
