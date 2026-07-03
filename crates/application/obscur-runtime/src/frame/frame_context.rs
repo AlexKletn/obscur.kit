@@ -1,6 +1,81 @@
-//! FrameContext (skeleton stub for the spec-defined entity; not yet implemented).
+//! The immutable inputs for one frame: [`FrameContext`].
 
-/// Placeholder for the `FrameContext` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
-#[derive(Debug)]
-pub struct FrameContext;
+use obscur_geometry::Size;
+
+use super::{FrameId, FrameReason};
+
+/// The immutable inputs that parameterise one frame's pipeline run.
+///
+/// A `FrameContext` bundles the identity ([`FrameId`]), the reason the frame is
+/// being produced ([`FrameReason`], spec §3.5), and the viewport the frame is
+/// laid out under. It is read-only for the duration of the frame: the pipeline
+/// consumes it but never mutates it, which keeps the synchronous frame phase
+/// deterministic (spec §3.4).
+///
+/// The type is a small plain value (`Copy`), so it can be threaded freely
+/// through the pipeline without borrowing concerns.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FrameContext {
+    id: FrameId,
+    reason: FrameReason,
+    viewport: Size,
+}
+
+impl FrameContext {
+    /// Creates a context for the frame `id`, produced for `reason`, laid out
+    /// under `viewport`.
+    #[must_use]
+    pub const fn new(id: FrameId, reason: FrameReason, viewport: Size) -> Self {
+        Self {
+            id,
+            reason,
+            viewport,
+        }
+    }
+
+    /// Returns the identity of this frame.
+    #[must_use]
+    pub const fn id(self) -> FrameId {
+        self.id
+    }
+
+    /// Returns the reason this frame is being produced.
+    #[must_use]
+    pub const fn reason(self) -> FrameReason {
+        self.reason
+    }
+
+    /// Returns the viewport size.
+    ///
+    /// This is the size the root of the retained tree is laid out under: layout
+    /// arranges the root at the viewport origin under a tight constraint of this
+    /// size (spec §4.2).
+    #[must_use]
+    pub const fn viewport(self) -> Size {
+        self.viewport
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accessors_return_constructor_inputs() {
+        let ctx = FrameContext::new(
+            FrameId::from_raw(3),
+            FrameReason::UiCommit,
+            Size::new(800.0, 600.0),
+        );
+        assert_eq!(ctx.id(), FrameId::from_raw(3));
+        assert_eq!(ctx.reason(), FrameReason::UiCommit);
+        assert_eq!(ctx.viewport(), Size::new(800.0, 600.0));
+    }
+
+    #[test]
+    fn is_copy_and_eq() {
+        let ctx = FrameContext::new(FrameId::FIRST, FrameReason::Input, Size::ZERO);
+        let copy = ctx;
+        assert_eq!(ctx, copy);
+    }
+}
