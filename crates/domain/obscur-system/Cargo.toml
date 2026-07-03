@@ -9,3 +9,8 @@ publish = false
 
 [lints]
 workspace = true
+
+[dependencies]
+obscur-identity = { workspace = true }
+obscur-geometry = { workspace = true }
+obscur-capability = { workspace = true }

@@ -5,6 +5,6 @@ pub use document_handle::DocumentHandle;
 mod document_metadata;
 pub use document_metadata::DocumentMetadata;
 mod document_permission;
-pub use document_permission::DocumentPermission;
+pub use document_permission::{AccessMode, DocumentPermission};
 mod document_service;
-pub use document_service::DocumentService;
+pub use document_service::{DocumentError, DocumentService, MemoryDocumentService};
