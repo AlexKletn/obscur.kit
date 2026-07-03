@@ -1,5 +1,9 @@
 mod pipeline_snapshot;
 pub use pipeline_snapshot::PipelineSnapshot;
+mod normalized_node;
+pub use normalized_node::NormalizedNode;
+mod normalized_pipeline;
+pub use normalized_pipeline::NormalizedPipeline;
 mod snapshot_normalizer;
 pub use snapshot_normalizer::SnapshotNormalizer;
 mod snapshot_stage;
