@@ -1,5 +1,5 @@
 mod history_provider;
-pub use history_provider::HistoryProvider;
+pub use history_provider::{HistoryProvider, MemoryHistory};
 mod navigation_direction;
 pub use navigation_direction::NavigationDirection;
 mod navigation_entry;
