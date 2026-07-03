@@ -5,7 +5,7 @@ pub use drag_effect::DragEffect;
 mod drag_preview;
 pub use drag_preview::DragPreview;
 mod drag_session;
-pub use drag_session::DragSession;
+pub use drag_session::{DragPhase, DragSession};
 mod drag_source;
 pub use drag_source::DragSource;
 mod drop_target;
