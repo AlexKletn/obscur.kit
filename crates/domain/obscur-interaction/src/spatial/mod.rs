@@ -5,6 +5,6 @@ pub use hit_test::HitTest;
 mod navigation_direction;
 pub use navigation_direction::NavigationDirection;
 mod spatial_index;
-pub use spatial_index::SpatialIndex;
+pub use spatial_index::{Entry, SpatialIndex};
 mod spatial_navigation;
 pub use spatial_navigation::SpatialNavigation;
