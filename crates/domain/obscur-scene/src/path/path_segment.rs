@@ -1,6 +1,78 @@
-//! PathSegment (skeleton stub for the spec-defined entity; not yet implemented).
+//! One command in a path outline.
 
-/// Placeholder for the `PathSegment` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
-#[derive(Debug)]
-pub struct PathSegment;
+use obscur_geometry::Point;
+
+/// One command in a path outline (spec §5.1).
+///
+/// Segments are plain geometric data with no backend meaning; a renderer or
+/// tessellator interprets them. Coordinates are absolute logical-pixel points.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PathSegment {
+    /// Start a new subpath at the given point, moving the pen without drawing.
+    MoveTo(Point),
+    /// Draw a straight line from the current point to the given point.
+    LineTo(Point),
+    /// Draw a quadratic Bézier curve to `end` using a single `control` point.
+    QuadTo {
+        /// The off-curve control point.
+        control: Point,
+        /// The on-curve end point.
+        end: Point,
+    },
+    /// Draw a cubic Bézier curve to `end` using `control1` and `control2`.
+    CubicTo {
+        /// The first off-curve control point (leaves the start point).
+        control1: Point,
+        /// The second off-curve control point (arrives at the end point).
+        control2: Point,
+        /// The on-curve end point.
+        end: Point,
+    },
+    /// Close the current subpath with a straight line back to its start.
+    Close,
+}
+
+impl PathSegment {
+    /// Returns the point this segment moves the pen to, if any.
+    ///
+    /// For [`PathSegment::Close`] there is no explicit end point (it returns to
+    /// the subpath start), so this yields `None`.
+    #[must_use]
+    pub fn end_point(&self) -> Option<Point> {
+        match self {
+            Self::MoveTo(p) | Self::LineTo(p) => Some(*p),
+            Self::QuadTo { end, .. } | Self::CubicTo { end, .. } => Some(*end),
+            Self::Close => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn end_point_of_each_variant() {
+        let p = Point::new(3.0, 4.0);
+        assert_eq!(PathSegment::MoveTo(p).end_point(), Some(p));
+        assert_eq!(PathSegment::LineTo(p).end_point(), Some(p));
+        assert_eq!(
+            PathSegment::QuadTo {
+                control: Point::ORIGIN,
+                end: p
+            }
+            .end_point(),
+            Some(p)
+        );
+        assert_eq!(
+            PathSegment::CubicTo {
+                control1: Point::ORIGIN,
+                control2: Point::ORIGIN,
+                end: p
+            }
+            .end_point(),
+            Some(p)
+        );
+        assert_eq!(PathSegment::Close.end_point(), None);
+    }
+}

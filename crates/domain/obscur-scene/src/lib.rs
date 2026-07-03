@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-mod color;
+pub mod color;
 
 pub use color::Color;
 

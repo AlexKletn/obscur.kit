@@ -175,6 +175,10 @@ dependencies = [
 [[package]]
 name = "obscur-scene"
 version = "0.0.0"
+dependencies = [
+ "obscur-geometry",
+ "obscur-identity",
+]
 
 [[package]]
 name = "obscur-style"

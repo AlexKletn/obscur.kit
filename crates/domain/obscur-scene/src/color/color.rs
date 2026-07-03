@@ -1,21 +1,28 @@
-//! A typed color with premultiplied-alpha semantics (skeleton).
+//! A typed color: the lightweight `{r, g, b, a}` component tuple.
 
-/// An sRGB color with straight alpha, as authored. Compositing converts to
-/// linear premultiplied form at paint time (spec §5.7).
+/// An sRGB color with straight alpha, as authored (spec §5.7).
+///
+/// `Color` is deliberately just the component tuple `{ r, g, b, a }`. Its
+/// interpretation — the [`ColorSpace`](super::ColorSpace) the components live in
+/// and the [`AlphaMode`](super::AlphaMode) (straight vs. premultiplied) — is
+/// tracked by the surrounding paint at each use site rather than stored here,
+/// keeping `Color` a small, copyable value. By convention the components are
+/// straight-alpha sRGB in the `0.0..=1.0` range; values outside that range are
+/// permitted (e.g. for wide-gamut or HDR authoring) and are not clamped.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Color {
-    /// Red channel, `0.0..=1.0`.
+    /// Red channel, conventionally `0.0..=1.0`.
     pub r: f32,
-    /// Green channel, `0.0..=1.0`.
+    /// Green channel, conventionally `0.0..=1.0`.
     pub g: f32,
-    /// Blue channel, `0.0..=1.0`.
+    /// Blue channel, conventionally `0.0..=1.0`.
     pub b: f32,
-    /// Alpha channel, `0.0..=1.0`.
+    /// Alpha channel, conventionally `0.0..=1.0`.
     pub a: f32,
 }
 
 impl Color {
-    /// Fully transparent.
+    /// Fully transparent (all channels zero).
     pub const TRANSPARENT: Self = Self {
         r: 0.0,
         g: 0.0,
@@ -31,9 +38,96 @@ impl Color {
         a: 1.0,
     };
 
+    /// Opaque white.
+    pub const WHITE: Self = Self {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+        a: 1.0,
+    };
+
     /// Creates a color from straight-alpha sRGB components.
     #[must_use]
     pub const fn rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }
+    }
+
+    /// Creates an opaque color (alpha `1.0`) from sRGB components.
+    #[must_use]
+    pub const fn rgb(r: f32, g: f32, b: f32) -> Self {
+        Self { r, g, b, a: 1.0 }
+    }
+
+    /// Returns a copy of this color with its alpha replaced by `a`.
+    #[must_use]
+    pub const fn with_alpha(self, a: f32) -> Self {
+        Self { a, ..self }
+    }
+
+    /// Returns whether the color is fully opaque (`a >= 1.0`).
+    #[must_use]
+    pub fn is_opaque(self) -> bool {
+        self.a >= 1.0
+    }
+
+    /// Returns whether the color is fully transparent (`a <= 0.0`).
+    #[must_use]
+    pub fn is_transparent(self) -> bool {
+        self.a <= 0.0
+    }
+
+    /// Returns the premultiplied form of this color: `(r*a, g*a, b*a, a)`.
+    ///
+    /// This is a numeric transform only; the result still lives in the same
+    /// color channels and color space — it merely folds alpha into the color
+    /// channels, as required by premultiplied-alpha compositing (spec §5.7).
+    /// The [`AlphaMode`](super::AlphaMode) of the surrounding paint should be
+    /// updated to [`Premultiplied`](super::AlphaMode::Premultiplied) at the use
+    /// site.
+    #[must_use]
+    pub fn premultiply(self) -> Color {
+        Self {
+            r: self.r * self.a,
+            g: self.g * self.a,
+            b: self.b * self.a,
+            a: self.a,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rgb_is_opaque() {
+        let c = Color::rgb(0.2, 0.4, 0.6);
+        assert_eq!(c, Color::rgba(0.2, 0.4, 0.6, 1.0));
+        assert!(c.is_opaque());
+        assert!(!c.is_transparent());
+    }
+
+    #[test]
+    fn with_alpha_replaces_alpha() {
+        let c = Color::WHITE.with_alpha(0.5);
+        assert_eq!(c, Color::rgba(1.0, 1.0, 1.0, 0.5));
+    }
+
+    #[test]
+    fn transparency_predicates() {
+        assert!(Color::TRANSPARENT.is_transparent());
+        assert!(!Color::TRANSPARENT.is_opaque());
+        assert!(Color::BLACK.is_opaque());
+    }
+
+    #[test]
+    fn premultiply_scales_channels() {
+        let c = Color::rgba(1.0, 0.5, 0.25, 0.5);
+        assert_eq!(c.premultiply(), Color::rgba(0.5, 0.25, 0.125, 0.5));
+    }
+
+    #[test]
+    fn default_is_transparent_black() {
+        assert_eq!(Color::default(), Color::TRANSPARENT);
     }
 }
