@@ -1,6 +1,81 @@
-//! SelectorMatch (skeleton stub for the spec-defined entity; not yet implemented).
+//! The typed outcome of testing a selector against a node: [`SelectorMatch`].
 
-/// Placeholder for the `SelectorMatch` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
-#[derive(Debug)]
-pub struct SelectorMatch;
+use super::selector_specificity::SelectorSpecificity;
+
+/// The result of testing one selector against one node.
+///
+/// It records whether the selector matched and, when it did, the
+/// [`SelectorSpecificity`] the matched selector contributes to the cascade.
+///
+/// The actual matching — walking combinators against the tree, evaluating
+/// `:nth-*`, attribute tests, and the required [`PseudoState`]s — is performed
+/// by `obscur-css` / the matcher. This type is only the typed outcome the
+/// cascade consumes.
+///
+/// [`PseudoState`]: super::pseudo_state::PseudoState
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectorMatch {
+    /// The selector matched the node, contributing the given specificity.
+    Matched {
+        /// The specificity the matched selector contributes to the cascade.
+        specificity: SelectorSpecificity,
+    },
+    /// The selector did not match the node.
+    NoMatch,
+}
+
+impl SelectorMatch {
+    /// Constructs a matched outcome carrying the given specificity.
+    #[must_use]
+    pub const fn matched(specificity: SelectorSpecificity) -> Self {
+        Self::Matched { specificity }
+    }
+
+    /// Constructs a non-matching outcome.
+    #[must_use]
+    pub const fn no_match() -> Self {
+        Self::NoMatch
+    }
+
+    /// Returns `true` if the selector matched the node.
+    #[must_use]
+    pub const fn is_match(self) -> bool {
+        matches!(self, Self::Matched { .. })
+    }
+
+    /// Returns the contributed specificity when matched, otherwise `None`.
+    #[must_use]
+    pub const fn specificity(self) -> Option<SelectorSpecificity> {
+        match self {
+            Self::Matched { specificity } => Some(specificity),
+            Self::NoMatch => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matched_reports_match_and_specificity() {
+        let spec = SelectorSpecificity::new(1, 2, 3);
+        let m = SelectorMatch::matched(spec);
+        assert!(m.is_match());
+        assert_eq!(m.specificity(), Some(spec));
+    }
+
+    #[test]
+    fn no_match_reports_no_match() {
+        let m = SelectorMatch::no_match();
+        assert!(!m.is_match());
+        assert_eq!(m.specificity(), None);
+    }
+
+    #[test]
+    fn variants_are_distinct() {
+        let a = SelectorMatch::matched(SelectorSpecificity::ZERO);
+        let b = SelectorMatch::no_match();
+        assert_ne!(a, b);
+    }
+}
