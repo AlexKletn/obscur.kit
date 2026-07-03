@@ -1,6 +1,40 @@
-//! SystemMenuRequest (skeleton stub for the spec-defined entity; not yet implemented).
+//! A request to show the OS system/window menu at a point (spec §6.4).
 
-/// Placeholder for the `SystemMenuRequest` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
-#[derive(Debug)]
-pub struct SystemMenuRequest;
+use obscur_geometry::Point;
+
+/// A request to pop the platform's system (window) menu at a point (spec §6.4).
+///
+/// The position is in window-local logical pixels — typically the cursor
+/// location of a right-click on a custom title bar. On platforms without a
+/// system menu this request is a no-op that the backend reports via a
+/// `WindowOperationResult`; that reporting is not modeled here.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SystemMenuRequest {
+    /// The window-local point at which to pop the system menu.
+    pub position: Point,
+}
+
+impl SystemMenuRequest {
+    /// Creates a request to show the system menu at `position`.
+    #[must_use]
+    pub const fn at(position: Point) -> Self {
+        Self { position }
+    }
+
+    /// Returns the window-local point at which to pop the menu.
+    #[must_use]
+    pub const fn position(&self) -> Point {
+        self.position
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn at_stores_position() {
+        let request = SystemMenuRequest::at(Point::new(12.0, 4.0));
+        assert_eq!(request.position(), Point::new(12.0, 4.0));
+    }
+}
