@@ -1,0 +1,11 @@
+[package]
+name = "obscur-theme-system"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true

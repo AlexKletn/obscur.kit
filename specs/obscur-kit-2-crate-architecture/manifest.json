@@ -1,0 +1,14 @@
+{
+  "title": "Obscur Kit 2 — Crate Architecture",
+  "status": "draft",
+  "language": "ru",
+  "generated": "2026-07-03",
+  "documents": [
+    "README.md",
+    "01-workspace-hexagonal-architecture.md",
+    "02-crate-catalog-and-dependencies.md",
+    "03-source-layout-by-crate.md",
+    "04-external-crates-recommendations.md",
+    "05-cargo-policies-and-implementation-order.md"
+  ]
+}

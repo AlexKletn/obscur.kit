@@ -1,0 +1,16 @@
+[package]
+name = "obscur-headless"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+obscur-identity = { workspace = true }
+obscur-task = { workspace = true }
+obscur-runtime = { workspace = true }

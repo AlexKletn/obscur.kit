@@ -1,0 +1,16 @@
+{
+  "title": "Obscur Kit 2 — Draft Specification Set",
+  "status": "architecture-draft",
+  "documents": [
+    "README.md",
+    "01-architecture-and-boundaries.md",
+    "02-components-tree-and-dsl.md",
+    "03-state-transactions-and-runtime.md",
+    "04-layout-css-and-motion.md",
+    "05-rendering-text-and-resources.md",
+    "06-platform-windows-and-services.md",
+    "07-accessibility-testing-and-diagnostics.md",
+    "08-plugin-system.md",
+    "09-roadmap-and-non-goals.md"
+  ]
+}
