@@ -1,6 +1,35 @@
-//! SolidBrush (skeleton stub for the spec-defined entity; not yet implemented).
+//! A flat, single-color brush.
 
-/// Placeholder for the `SolidBrush` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
-#[derive(Debug)]
-pub struct SolidBrush;
+use crate::color::Color;
+
+/// A brush that paints a shape with a single flat [`Color`] (spec §5.1).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SolidBrush {
+    /// The fill color.
+    pub color: Color,
+}
+
+impl SolidBrush {
+    /// Creates a solid brush that paints with `color`.
+    #[must_use]
+    pub const fn new(color: Color) -> Self {
+        Self { color }
+    }
+
+    /// Returns the brush's color.
+    #[must_use]
+    pub const fn color(self) -> Color {
+        self.color
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_stores_color() {
+        let b = SolidBrush::new(Color::WHITE);
+        assert_eq!(b.color(), Color::WHITE);
+    }
+}
