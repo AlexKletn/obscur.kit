@@ -108,6 +108,8 @@ pub trait WindowBackend {
     /// Creates a new window from `request`, minting and returning its
     /// [`WindowId`] (spec §6.1).
     ///
+    /// # Errors
+    ///
     /// Returns [`WindowError`] when creation cannot be satisfied; a backend that
     /// cannot create windows at all returns [`WindowError::Unsupported`] rather
     /// than panicking.
@@ -522,7 +524,7 @@ mod tests {
     fn window_error_displays_and_is_error() {
         let err = WindowError::InvalidRequest(Box::from("bad size"));
         assert_eq!(err.to_string(), "invalid window request: bad size");
-        let _as_error: &dyn std::error::Error = &err;
+        let _: &dyn std::error::Error = &err;
         assert_eq!(
             WindowError::Unsupported.to_string(),
             "window creation is unsupported"

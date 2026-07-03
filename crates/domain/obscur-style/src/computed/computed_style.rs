@@ -119,6 +119,15 @@ impl ComputedStyle {
     }
 }
 
+impl<'a> IntoIterator for &'a ComputedStyle {
+    type Item = (&'a PropertyId, &'a ComputedValue);
+    type IntoIter = Iter<'a, PropertyId, ComputedValue>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -37,10 +37,10 @@ impl StyleDiff {
     pub fn between(old: &ComputedStyle, new: &ComputedStyle) -> Self {
         // Union of property keys present in either style.
         let mut keys: HashSet<PropertyId> = HashSet::new();
-        for (property, _) in old.iter() {
+        for (property, _) in old {
             keys.insert(*property);
         }
-        for (property, _) in new.iter() {
+        for (property, _) in new {
             keys.insert(*property);
         }
 

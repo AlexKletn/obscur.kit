@@ -83,7 +83,6 @@ impl SemanticSnapshot {
 
     /// Iterates over every captured `(NodeId, &SemanticNode)` in deterministic
     /// ascending id order.
-    #[must_use]
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &SemanticNode)> {
         self.nodes.iter().map(|(id, node)| (*id, node))
     }

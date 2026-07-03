@@ -78,6 +78,11 @@ pub trait NetworkService {
     ///
     /// A service that performs no network access returns
     /// [`NetworkError::Unsupported`] rather than panicking.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`NetworkError`] when the fetch cannot be satisfied (denied,
+    /// timed out, unsupported, or a transport failure).
     fn fetch(&mut self, request: NetworkRequest) -> Result<NetworkResponse, NetworkError>;
 
     /// Fetches `request`, authenticating with `credential` (spec §5.15).
@@ -88,6 +93,10 @@ pub trait NetworkService {
     /// the actual `Authorization` header when it performs the fetch — the kit
     /// never holds the secret. An adapter may override this to thread the
     /// credential through its own authentication flow.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`NetworkError`] when the underlying fetch cannot be satisfied.
     fn fetch_with_credential(
         &mut self,
         request: NetworkRequest,
@@ -283,6 +292,6 @@ mod tests {
         assert!(NetworkError::Unsupported.is_unsupported());
         assert!(!NetworkError::Denied.is_unsupported());
 
-        let _as_error: &dyn std::error::Error = &NetworkError::Timeout;
+        let _: &dyn std::error::Error = &NetworkError::Timeout;
     }
 }

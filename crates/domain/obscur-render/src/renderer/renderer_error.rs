@@ -99,7 +99,7 @@ mod tests {
     #[test]
     fn is_error_trait_object() {
         let err = RendererError::OutOfMemory;
-        let _as_error: &dyn std::error::Error = &err;
+        let _: &dyn std::error::Error = &err;
     }
 
     #[test]

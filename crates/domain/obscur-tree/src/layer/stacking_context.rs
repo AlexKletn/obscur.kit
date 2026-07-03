@@ -87,7 +87,7 @@ mod tests {
 
     #[test]
     fn sorts_into_bottom_to_top_order() {
-        let mut v = vec![ctx(1, 10), ctx(2, -5), ctx(3, 0), ctx(4, 10)];
+        let mut v = [ctx(1, 10), ctx(2, -5), ctx(3, 0), ctx(4, 10)];
         v.sort_by(|a, b| a.paint_order(*b));
         let zs: Vec<i32> = v.iter().map(|c| c.z_index()).collect();
         assert_eq!(zs, vec![-5, 0, 10, 10]);

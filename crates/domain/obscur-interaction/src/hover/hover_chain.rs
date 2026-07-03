@@ -67,6 +67,15 @@ impl HoverChain {
     }
 }
 
+impl<'a> IntoIterator for &'a HoverChain {
+    type Item = &'a NodeId;
+    type IntoIter = Iter<'a, NodeId>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 impl Default for HoverChain {
     fn default() -> Self {
         Self::new()

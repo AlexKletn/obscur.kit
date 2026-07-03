@@ -39,6 +39,11 @@ pub trait Renderer {
     /// diagnostic) or a documented fallback `Ok` — **never a panic**. Device
     /// loss surfaces as `Err(`[`RendererError::DeviceLost`]`)` or
     /// [`PresentResult::DeviceLost`].
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`RendererError`] when the submission cannot be presented — for
+    /// example an unsupported effect or a lost device.
     fn render(
         &mut self,
         submission: &FrameSubmission,

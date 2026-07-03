@@ -66,6 +66,13 @@ impl DataRepresentation {
     pub fn len(&self) -> Option<usize> {
         self.inline.as_ref().map(|bytes| bytes.len())
     }
+
+    /// Returns whether this representation is eagerly present but carries no
+    /// bytes; a lazy representation is not considered empty (spec §6.20).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == Some(0)
+    }
 }
 
 #[cfg(test)]

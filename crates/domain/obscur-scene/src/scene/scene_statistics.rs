@@ -9,6 +9,9 @@ use crate::command::{DisplayList, PaintCommand};
 /// [`DisplayList`] (how many commands, draws, layers, and clips it contains)
 /// and never bear on rendering correctness. A renderer must not depend on them;
 /// they exist purely for observability.
+// The shared `_count` postfix is intentional: every field is a diagnostic
+// tally, and the postfix documents that uniformly (spec §7.9).
+#[allow(clippy::struct_field_names)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SceneStatistics {
     command_count: usize,

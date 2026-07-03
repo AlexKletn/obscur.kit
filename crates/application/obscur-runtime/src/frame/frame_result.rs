@@ -32,6 +32,9 @@ impl FrameResult {
     /// * `restyled` — at least one node resolved a computed style.
     /// * `relaid_out` — at least one node was arranged into a box.
     /// * `composed` — a scene was composed and published as `snapshot`.
+    // The four phase flags are the spec-mandated per-phase outcome of a frame;
+    // they are distinct booleans by design, not a flags struct.
+    #[allow(clippy::fn_params_excessive_bools)]
     #[must_use]
     pub const fn new(
         id: FrameId,

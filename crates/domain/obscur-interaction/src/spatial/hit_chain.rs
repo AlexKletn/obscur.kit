@@ -86,6 +86,15 @@ impl HitChain {
     }
 }
 
+impl<'a> IntoIterator for &'a HitChain {
+    type Item = &'a HitTest;
+    type IntoIter = Iter<'a, HitTest>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 impl Default for HitChain {
     fn default() -> Self {
         Self::new()

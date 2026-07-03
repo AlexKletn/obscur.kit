@@ -52,11 +52,11 @@ impl SchedulerPriority {
         match reason {
             FrameReason::Input => Self::Input,
             FrameReason::UiCommit => Self::Commit,
-            FrameReason::Animation => Self::CurrentFrame,
-            // A window/surface change drives layout and paint for the frame.
-            FrameReason::WindowChange => Self::CurrentFrame,
-            // An external driver requests the current frame's render.
-            FrameReason::ExternalRender => Self::CurrentFrame,
+            // Animation, a window/surface change, and an external render request
+            // all drive layout and paint for the current frame.
+            FrameReason::Animation
+            | FrameReason::WindowChange
+            | FrameReason::ExternalRender => Self::CurrentFrame,
             FrameReason::ResourceCompletion => Self::ResourceCompletion,
             FrameReason::DiagnosticsCapture => Self::Diagnostics,
         }

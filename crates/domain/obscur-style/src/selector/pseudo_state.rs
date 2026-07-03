@@ -140,6 +140,6 @@ mod tests {
             assert!(!acc.contains(flag), "flag bit overlapped a previous one");
             acc = acc.insert(flag);
         }
-        assert_eq!(acc.bits().count_ones(), all.len() as u32);
+        assert_eq!(acc.bits().count_ones() as usize, all.len());
     }
 }

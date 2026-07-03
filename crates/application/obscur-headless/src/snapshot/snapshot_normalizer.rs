@@ -69,7 +69,6 @@ impl SnapshotNormalizer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use obscur_geometry::Size;
     use obscur_identity::ComponentId;
     use obscur_style::cascade::ResolvedDeclarations;
     use obscur_style::property::{Length, PropertyId, PropertyValue, StyleColor};

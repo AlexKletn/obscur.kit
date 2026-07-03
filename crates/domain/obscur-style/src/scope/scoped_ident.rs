@@ -65,11 +65,12 @@ mod tests {
 
     #[test]
     fn equal_only_when_both_match() {
+        use std::collections::HashSet;
+
         let a = ScopedIdent::new(ScopeId::from_raw(1), InternedSymbol::from_raw(1));
         let b = ScopedIdent::new(ScopeId::from_raw(1), InternedSymbol::from_raw(1));
         assert_eq!(a, b);
 
-        use std::collections::HashSet;
         let mut set = HashSet::new();
         set.insert(a);
         assert!(set.contains(&b));

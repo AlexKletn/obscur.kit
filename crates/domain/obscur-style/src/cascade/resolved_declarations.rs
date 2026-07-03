@@ -69,6 +69,15 @@ impl ResolvedDeclarations {
     }
 }
 
+impl<'a> IntoIterator for &'a ResolvedDeclarations {
+    type Item = (&'a PropertyId, &'a PropertyValue);
+    type IntoIter = Iter<'a, PropertyId, PropertyValue>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

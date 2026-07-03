@@ -87,7 +87,7 @@ impl Reconciler {
     /// Reconciles `desired` into the children of `parent`, appending ops to
     /// `plan`. Recurses into each element child. A no-op if `parent` is stale.
     fn reconcile_into(
-        &self,
+        self,
         tree: &mut RetainedTree,
         parent: NodeId,
         desired: &[ViewNode],
@@ -275,7 +275,7 @@ mod tests {
     fn parents_and_keys_are_set_on_children() {
         let (mut tree, root) = tree_with_root();
         let fragment = ViewFragment::from_nodes(vec![keyed_el(1, "a")]);
-        Reconciler::new().reconcile(&mut tree, root, &fragment);
+        let _ = Reconciler::new().reconcile(&mut tree, root, &fragment);
         let child = child_ids(&tree, root)[0];
         let node = tree.get(child).expect("live");
         assert_eq!(node.logical_parent(), LogicalParent::of(root));
@@ -294,7 +294,7 @@ mod tests {
             keyed_el(2, "b"),
             keyed_el(3, "c"),
         ]);
-        recon.reconcile(&mut tree, root, &first);
+        let _ = recon.reconcile(&mut tree, root, &first);
         let ids_before = child_ids(&tree, root);
         assert_eq!(ids_before.len(), 3);
         let (a, b, c) = (ids_before[0], ids_before[1], ids_before[2]);
@@ -328,7 +328,7 @@ mod tests {
         let (mut tree, root) = tree_with_root();
         let recon = Reconciler::new();
         let fragment = ViewFragment::from_nodes(vec![keyed_el(1, "a"), keyed_el(2, "b")]);
-        recon.reconcile(&mut tree, root, &fragment);
+        let _ = recon.reconcile(&mut tree, root, &fragment);
         let ids = child_ids(&tree, root);
         let plan = recon.reconcile(&mut tree, root, &fragment);
         assert_eq!(child_ids(&tree, root), ids);
@@ -347,7 +347,7 @@ mod tests {
                 .with_children(ViewFragment::from_nodes(vec![ViewNode::text("deep")])),
             keyed_el(2, "b"),
         ]);
-        recon.reconcile(&mut tree, root, &with_subtree);
+        let _ = recon.reconcile(&mut tree, root, &with_subtree);
         let ids = child_ids(&tree, root);
         let a = ids[0];
         let grandchild = child_ids(&tree, a)[0];
@@ -377,7 +377,7 @@ mod tests {
     fn incompatible_child_is_replaced_not_mutated() {
         let (mut tree, root) = tree_with_root();
         let recon = Reconciler::new();
-        recon.reconcile(
+        let _ = recon.reconcile(
             &mut tree,
             root,
             &ViewFragment::from_nodes(vec![keyed_el(1, "a")]),
@@ -401,7 +401,7 @@ mod tests {
     fn changed_text_content_is_updated_in_place() {
         let (mut tree, root) = tree_with_root();
         let recon = Reconciler::new();
-        recon.reconcile(
+        let _ = recon.reconcile(
             &mut tree,
             root,
             &ViewFragment::from_nodes(vec![ViewNode::text("before").with_key(ViewKey::from("t"))]),

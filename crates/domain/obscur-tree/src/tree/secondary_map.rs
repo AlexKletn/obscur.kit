@@ -71,7 +71,6 @@ impl<V> SecondaryMap<V> {
     }
 
     /// Iterates over every `(NodeId, &V)` pair, in unspecified order.
-    #[must_use]
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &V)> {
         self.entries.iter().map(|(id, value)| (*id, value))
     }

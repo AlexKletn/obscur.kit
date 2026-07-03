@@ -52,10 +52,14 @@ pub trait DocumentService {
     /// Reads the full byte contents of the document behind `handle`
     /// (spec §6.10).
     ///
+    /// # Errors
+    ///
     /// Returns [`DocumentError::NotFound`] when the token resolves to nothing.
     fn read_bytes(&self, handle: &DocumentHandle) -> Result<Arc<[u8]>, DocumentError>;
 
     /// Writes `bytes` to the document behind `handle` (spec §6.10).
+    ///
+    /// # Errors
     ///
     /// Must return [`DocumentError::PermissionDenied`] when the handle is not
     /// writable ([`DocumentHandle::can_write`]).
@@ -67,10 +71,16 @@ pub trait DocumentService {
 
     /// Enumerates the documents contained in `dir` (spec §6.10 enumerate).
     ///
+    /// # Errors
+    ///
     /// Returns [`DocumentError::NotFound`] when the directory token is unknown.
     fn list(&self, dir: &DirectoryHandle) -> Result<Vec<DocumentHandle>, DocumentError>;
 
     /// Returns the metadata for the document behind `handle` (spec §6.10).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DocumentError::NotFound`] when the token resolves to nothing.
     fn metadata(&self, handle: &DocumentHandle) -> Result<DocumentMetadata, DocumentError>;
 }
 
@@ -246,6 +256,6 @@ mod tests {
             DocumentError::Io("disk full".into()).to_string(),
             "document i/o error: disk full"
         );
-        let _as_error: &dyn std::error::Error = &DocumentError::NotFound;
+        let _: &dyn std::error::Error = &DocumentError::NotFound;
     }
 }

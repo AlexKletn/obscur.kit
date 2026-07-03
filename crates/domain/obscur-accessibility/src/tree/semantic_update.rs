@@ -34,8 +34,10 @@ impl SemanticUpdate {
     #[must_use]
     pub const fn affected(&self) -> Option<NodeId> {
         match self {
-            Self::NodeAdded(id) | Self::NodeRemoved(id) | Self::NodeChanged(id) => Some(*id),
-            Self::SubtreeChanged(id) => Some(*id),
+            Self::NodeAdded(id)
+            | Self::NodeRemoved(id)
+            | Self::NodeChanged(id)
+            | Self::SubtreeChanged(id) => Some(*id),
             Self::RootChanged(id) | Self::FocusChanged(id) => *id,
         }
     }

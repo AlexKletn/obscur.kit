@@ -55,8 +55,7 @@ impl ClipShape {
     #[must_use]
     pub fn bounds(&self) -> Option<Rect> {
         match self {
-            Self::Rect(rect) => Some(*rect),
-            Self::RoundedRect { rect, .. } => Some(*rect),
+            Self::Rect(rect) | Self::RoundedRect { rect, .. } => Some(*rect),
             Self::Path(path) => path.bounds(),
         }
     }

@@ -92,10 +92,10 @@ mod tests {
     fn linear_chain(tree: &mut RetainedTree, n: usize) -> Vec<NodeId> {
         let ids: Vec<NodeId> = (0..n).map(|_| tree.alloc(NodeKind::Root)).collect();
         for pair in ids.windows(2) {
-            if let [parent, child] = pair {
-                if let Some(node) = tree.get_mut(*parent) {
-                    node.push_child(*child);
-                }
+            if let [parent, child] = pair
+                && let Some(node) = tree.get_mut(*parent)
+            {
+                node.push_child(*child);
             }
         }
         ids

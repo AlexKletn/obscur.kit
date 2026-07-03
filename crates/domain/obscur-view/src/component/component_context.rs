@@ -117,7 +117,6 @@ mod tests {
         assert!(!ctx.needs_update());
         ctx.request_update();
         assert!(ctx.needs_update());
-        drop(ctx);
         // The flag is owned outside the context, so the runtime can observe it.
         assert!(flag);
     }

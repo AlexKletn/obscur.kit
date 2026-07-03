@@ -136,6 +136,15 @@ impl StyleInvalidation {
     }
 }
 
+impl<'a> IntoIterator for &'a StyleInvalidation {
+    type Item = (&'a NodeId, &'a StyleInvalidationReason);
+    type IntoIter = Iter<'a, NodeId, StyleInvalidationReason>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

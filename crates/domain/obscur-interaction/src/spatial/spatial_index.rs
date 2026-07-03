@@ -117,7 +117,7 @@ impl SpatialIndex {
         // Topmost-first: higher z_order wins; ties broken by NodeId ascending.
         // The source iteration is already NodeId-ascending, so a stable sort by
         // descending z_order preserves that as the tie-break.
-        hits.sort_by(|a, b| b.z_order().cmp(&a.z_order()));
+        hits.sort_by_key(|hit| std::cmp::Reverse(hit.z_order()));
         hits
     }
 

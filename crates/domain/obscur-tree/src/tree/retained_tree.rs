@@ -224,7 +224,6 @@ impl RetainedTree {
     }
 
     /// Iterates over every live `(NodeId, &RetainedNode)` in slot order.
-    #[must_use]
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &RetainedNode)> {
         self.slots
             .iter()

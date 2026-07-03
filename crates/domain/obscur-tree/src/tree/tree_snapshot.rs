@@ -84,7 +84,6 @@ impl TreeSnapshot {
 
     /// Iterates over every captured `(NodeId, &RetainedNode)`, in unspecified
     /// order.
-    #[must_use]
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &RetainedNode)> {
         self.nodes.iter().map(|(id, node)| (*id, node))
     }

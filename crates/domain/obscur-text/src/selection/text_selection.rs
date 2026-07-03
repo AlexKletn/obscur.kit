@@ -123,6 +123,12 @@ impl TextSelection {
         self.end() - self.start()
     }
 
+    /// Returns whether the selection is empty (a collapsed caret).
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Returns the [`Caret`] at the focus, carrying the selection's affinity.
     #[must_use]
     pub const fn focus_caret(&self) -> Caret {

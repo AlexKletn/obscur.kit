@@ -150,6 +150,11 @@ impl TreeTransaction {
     /// and deterministic for the create-then-arrange batches this primitive is
     /// built for. Application additionally clamps every index, so an index the
     /// model does not reject can never cause a panic.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`TxError`] when a change references a stale or undefined node,
+    /// or supplies a child index outside the projected range.
     pub fn validate(&self, tree: &RetainedTree) -> Result<(), TxError> {
         let mut creation_count: u32 = 0;
         // Projected child count per referenced node, populated lazily.
@@ -222,6 +227,11 @@ impl TreeTransaction {
     ///
     /// Because application runs only after successful validation, and validated
     /// tree operations do not fail, the apply phase is atomic in practice.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`TxError`] if validation of the staged change set fails; in
+    /// that case the tree is left unchanged.
     pub fn commit(self, tree: &mut RetainedTree) -> Result<TreeCommit, TxError> {
         self.validate(tree)?;
 
@@ -467,7 +477,7 @@ mod tests {
 
         let mut tx = TreeTransaction::new();
         let parent = tx.create_node(element(1), StagedRef::existing(root), 0);
-        let child_a = tx.create_node(element(2), parent, 0);
+        let _child_a = tx.create_node(element(2), parent, 0);
         let _child_b = tx.create_node(element(3), parent, 1);
         tx.set_root(parent);
 
@@ -489,7 +499,7 @@ mod tests {
         );
         // Parents were wired on the created nodes.
         assert_eq!(
-            tree.get(child_a_id).map(|n| n.logical_parent()),
+            tree.get(child_a_id).map(crate::node::RetainedNode::logical_parent),
             Some(LogicalParent::of(parent_id))
         );
         assert_eq!(commit.new_root(), Some(parent_id));
@@ -520,9 +530,9 @@ mod tests {
     fn commit_moves_and_sets_text() {
         let (mut tree, root) = tree_with_root();
         let mut tx = TreeTransaction::new();
-        let a = tx.create_node(element(1), StagedRef::existing(root), 0);
+        let _a = tx.create_node(element(1), StagedRef::existing(root), 0);
         let _b = tx.create_node(element(2), StagedRef::existing(root), 1);
-        let t = tx.create_node(
+        let _t = tx.create_node(
             NodeKind::Text {
                 content: "old".into(),
             },
