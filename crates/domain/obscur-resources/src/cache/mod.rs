@@ -1,7 +1,7 @@
 mod cache_budget;
 pub use cache_budget::CacheBudget;
 mod cache_entry;
-pub use cache_entry::CacheEntry;
+pub use cache_entry::{CacheEntry, VisibilityPriority};
 mod cache_key;
 pub use cache_key::CacheKey;
 mod cache_statistics;
