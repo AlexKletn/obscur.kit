@@ -2,9 +2,11 @@
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-mod handle;
+pub mod handle;
 
-pub use handle::ResourceHandle;
+pub use handle::{
+    FontHandle, ImageHandle, ResourceHandle, ResourceKind, ShaderHandle, StylesheetHandle,
+};
 
 pub mod cache;
 pub mod hub;
