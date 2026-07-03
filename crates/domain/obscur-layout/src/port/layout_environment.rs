@@ -1,4 +1,4 @@
-//! LayoutEnvironment: the ambient context a measurement happens in.
+//! `LayoutEnvironment`: the ambient context a measurement happens in.
 
 use obscur_geometry::{ScaleFactor, Size};
 

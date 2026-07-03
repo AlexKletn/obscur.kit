@@ -9,4 +9,3 @@ pub use capability_scope::CapabilityScope;
 pub use capability_snapshot::CapabilitySnapshot;
 
 mod capability_constraint;
-pub use capability_constraint::CapabilityConstraint;

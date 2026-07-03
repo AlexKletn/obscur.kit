@@ -2,7 +2,7 @@
 //!
 //! [`PropertyId`] is a *typed* enum, not a string: the cascade and computed-value
 //! machinery dispatch on the variant, never on a property name. Names are kept
-//! only as stable `&'static str`s for diagnostics and DevTools.
+//! only as stable `&'static str`s for diagnostics and `DevTools`.
 //!
 //! The set of variants here is a deliberate Phase-1 starter set. The full CSS
 //! longhand catalogue grows in this enum over time; adding a longhand means
@@ -37,7 +37,7 @@ pub enum PropertyId {
 impl PropertyId {
     /// Returns the property's canonical CSS name as a stable string.
     ///
-    /// This is intended for diagnostics and DevTools only; it is never used for
+    /// This is intended for diagnostics and `DevTools` only; it is never used for
     /// dispatch (that is what the enum variant is for).
     #[must_use]
     pub const fn name(self) -> &'static str {

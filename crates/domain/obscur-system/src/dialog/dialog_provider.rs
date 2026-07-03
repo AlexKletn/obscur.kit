@@ -66,7 +66,7 @@ pub trait DialogProvider {
 pub struct NullDialogProvider;
 
 impl DialogProvider for NullDialogProvider {
-    fn origin(&self) -> &str {
+    fn origin(&self) -> &'static str {
         "null"
     }
 
@@ -107,7 +107,7 @@ impl ScriptedDialogProvider {
 }
 
 impl DialogProvider for ScriptedDialogProvider {
-    fn origin(&self) -> &str {
+    fn origin(&self) -> &'static str {
         "scripted"
     }
 

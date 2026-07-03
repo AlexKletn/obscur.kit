@@ -1,4 +1,4 @@
-//! Stable DevTools DTO/protocol.
+//! Stable `DevTools` DTO/protocol.
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 

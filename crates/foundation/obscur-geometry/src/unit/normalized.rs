@@ -3,4 +3,4 @@
 /// Placeholder for the `Normalized` entity. See the Obscur Kit 2 specs for its
 /// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
-pub struct Normalized;
+pub(crate) struct Normalized;

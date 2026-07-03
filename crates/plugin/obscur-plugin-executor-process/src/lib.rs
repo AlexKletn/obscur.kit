@@ -1,4 +1,4 @@
-//! Process/IPC PluginExecutor adapter.
+//! Process/IPC `PluginExecutor` adapter.
 
 pub mod executor;
 pub mod transport;

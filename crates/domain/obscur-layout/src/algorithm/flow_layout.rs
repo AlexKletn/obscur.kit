@@ -1,4 +1,4 @@
-//! FlowLayout: normal-flow (block) layout for the `Block` formatting context.
+//! `FlowLayout`: normal-flow (block) layout for the `Block` formatting context.
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 

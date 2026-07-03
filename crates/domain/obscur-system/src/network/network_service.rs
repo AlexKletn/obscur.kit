@@ -10,7 +10,7 @@
 
 use obscur_capability::SupportLevel;
 
-use crate::network::{CredentialHandle, HttpMethod, NetworkRequest, NetworkResponse};
+use crate::network::{CredentialHandle, NetworkRequest, NetworkResponse};
 
 /// Why a [`NetworkService`] fetch failed (spec §5.15).
 ///
@@ -195,6 +195,7 @@ impl NetworkService for StubNetworkService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::network::HttpMethod;
 
     /// Compile-time proof the port is object-safe (spec §5.15 replaceable port).
     #[test]

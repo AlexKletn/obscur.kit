@@ -6,7 +6,7 @@ use super::{FillRule, PathSegment};
 
 /// The Bézier arc approximation constant (`4/3 * (sqrt(2) - 1)`), used to place
 /// cubic control points that closely approximate a quarter-circle.
-const KAPPA: f32 = 0.552_284_75;
+const KAPPA: f32 = 0.552_284_8;
 
 /// A vector outline (spec §5.1): an ordered sequence of [`PathSegment`]s plus a
 /// [`FillRule`] describing how the interior is filled.

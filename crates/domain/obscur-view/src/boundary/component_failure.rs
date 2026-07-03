@@ -13,7 +13,7 @@ use crate::lifecycle::LifecycleState;
 /// reconciliation, or a local lifecycle hook — carrying the
 /// [`LifecycleState`] the failure happened in, the retry attempt that produced
 /// it, and a [`Diagnostic`] (subsystem [`DiagnosticSubsystem::View`]) describing
-/// it for diagnostics and DevTools.
+/// it for diagnostics and `DevTools`.
 #[derive(Debug, Clone)]
 pub struct ComponentFailure {
     /// The lifecycle phase the failure occurred in.

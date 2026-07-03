@@ -1,4 +1,4 @@
-//! ChildMeasurer: the callback a layout algorithm uses to size a child.
+//! `ChildMeasurer`: the callback a layout algorithm uses to size a child.
 
 use obscur_geometry::BoxConstraints;
 use obscur_geometry::Size;

@@ -9,7 +9,7 @@
 /// cannot reproduce it, consumers fall back to a safe sRGB approximation.
 ///
 /// This enum intentionally lists only the spaces needed by the current model.
-/// HDR and additional spaces (e.g. Rec. 2020, ACEScg) are deferred to a later
+/// HDR and additional spaces (e.g. Rec. 2020, `ACEScg`) are deferred to a later
 /// step and will be added as new variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ColorSpace {

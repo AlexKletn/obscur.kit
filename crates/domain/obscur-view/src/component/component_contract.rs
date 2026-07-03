@@ -24,7 +24,7 @@ pub struct ComponentContract {
     /// Stable component identity.
     pub id: ComponentId,
     /// Optional stable, interned name for the component (for diagnostics and
-    /// DevTools).
+    /// `DevTools`).
     pub name: Option<InternedSymbol>,
     /// The props this component accepts, including default/required metadata.
     pub props: Vec<PropContract>,

@@ -7,4 +7,3 @@ pub use physical_px::PhysicalPx;
 pub use scale_factor::ScaleFactor;
 
 mod normalized;
-pub use normalized::Normalized;

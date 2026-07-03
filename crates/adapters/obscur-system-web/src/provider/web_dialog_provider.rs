@@ -1,4 +1,4 @@
-//! WebDialogProvider (skeleton stub for the spec-defined entity; not yet implemented).
+//! `WebDialogProvider` (skeleton stub for the spec-defined entity; not yet implemented).
 
 /// Placeholder for the `WebDialogProvider` entity. See the Obscur Kit 2 specs for its
 /// contract; this stub exists to materialise the target source layout.

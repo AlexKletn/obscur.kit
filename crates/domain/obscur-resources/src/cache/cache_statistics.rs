@@ -1,10 +1,10 @@
-//! DevTools metrics for one cache (spec §5.19 metrics, correctness transparency).
+//! `DevTools` metrics for one cache (spec §5.19 metrics, correctness transparency).
 
-/// Running metrics for one runtime cache (spec §5.19 *DevTools metrics; correctness
+/// Running metrics for one runtime cache (spec §5.19 *`DevTools` metrics; correctness
 /// transparency*).
 ///
 /// Counts hits, misses, evictions, and insertions, and tracks the live entry
-/// count and total bytes. These figures surface a cache's behaviour to DevTools
+/// count and total bytes. These figures surface a cache's behaviour to `DevTools`
 /// and make its correctness transparent — for example, an unexpectedly low
 /// [`hit_rate`](CacheStatistics::hit_rate) or a runaway eviction count is visible
 /// rather than hidden.

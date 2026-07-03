@@ -1,4 +1,4 @@
-//! GridLayout: a uniform fixed-column grid formatting context.
+//! `GridLayout`: a uniform fixed-column grid formatting context.
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 

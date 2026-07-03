@@ -1,4 +1,4 @@
-//! DockingLayout: dock children to the container edges (DockPanel style).
+//! `DockingLayout`: dock children to the container edges (`DockPanel` style).
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 

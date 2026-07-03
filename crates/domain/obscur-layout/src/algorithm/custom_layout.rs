@@ -1,4 +1,4 @@
-//! CustomLayout: the labeled extension-point formatting context.
+//! `CustomLayout`: the labeled extension-point formatting context.
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 

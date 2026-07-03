@@ -6,7 +6,7 @@
 ///
 /// The four face buttons use compass-style names — [`South`](Self::South),
 /// [`East`](Self::East), [`West`](Self::West), [`North`](Self::North) — which
-/// map to A/B/X/Y (Xbox) or Cross/Circle/Square/Triangle (PlayStation) without
+/// map to A/B/X/Y (Xbox) or Cross/Circle/Square/Triangle (`PlayStation`) without
 /// baking a vendor layout into the domain model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GamepadButton {

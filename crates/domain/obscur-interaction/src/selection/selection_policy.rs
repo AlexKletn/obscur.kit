@@ -112,11 +112,10 @@ impl SelectionPolicy {
     pub fn apply_range(&self, selection: &mut Selection, range: &[NodeId]) {
         if self.mode.allows_multiple() {
             selection.set_range(range);
-        } else if self.mode.is_enabled() {
-            if let Some(&last) = range.last() {
+        } else if self.mode.is_enabled()
+            && let Some(&last) = range.last() {
                 selection.select(last);
             }
-        }
     }
 }
 

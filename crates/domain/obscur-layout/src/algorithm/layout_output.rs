@@ -1,4 +1,4 @@
-//! LayoutOutput: the result of laying out one node.
+//! `LayoutOutput`: the result of laying out one node.
 
 use obscur_geometry::Size;
 

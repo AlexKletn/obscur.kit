@@ -7,4 +7,3 @@ pub use deadline::Deadline;
 pub use instant::Instant;
 
 mod duration;
-pub use duration::Duration;

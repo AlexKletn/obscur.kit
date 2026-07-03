@@ -1,4 +1,4 @@
-//! FixedChildMeasurer: a deterministic [`ChildMeasurer`] for tests.
+//! `FixedChildMeasurer`: a deterministic [`ChildMeasurer`] for tests.
 
 use obscur_geometry::{BoxConstraints, Size};
 

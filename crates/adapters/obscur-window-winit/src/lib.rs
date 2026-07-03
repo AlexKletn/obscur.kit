@@ -1,4 +1,4 @@
-//! Winit WindowBackend adapter.
+//! Winit `WindowBackend` adapter.
 
 pub mod backend;
 pub mod conversion;

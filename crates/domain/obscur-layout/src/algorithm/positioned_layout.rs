@@ -1,4 +1,4 @@
-//! PositionedLayout: absolute positioning of children within a container.
+//! `PositionedLayout`: absolute positioning of children within a container.
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 

@@ -11,6 +11,4 @@ pub use rect::Rect;
 pub use size::Size;
 
 mod edges;
-pub use edges::Edges;
 mod vector;
-pub use vector::Vector;

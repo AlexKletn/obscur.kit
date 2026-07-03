@@ -1,4 +1,4 @@
-//! IntrinsicMeasure: the narrow port through which layout measures content.
+//! `IntrinsicMeasure`: the narrow port through which layout measures content.
 
 use obscur_geometry::{BoxConstraints, Size};
 use obscur_identity::NodeId;

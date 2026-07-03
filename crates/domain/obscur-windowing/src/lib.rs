@@ -1,4 +1,4 @@
-//! Window and display model with a WindowBackend port.
+//! Window and display model with a `WindowBackend` port.
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 

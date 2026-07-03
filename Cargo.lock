@@ -5,6 +5,10 @@ version = 4
 [[package]]
 name = "obscur-accessibility"
 version = "0.0.0"
+dependencies = [
+ "obscur-geometry",
+ "obscur-identity",
+]
 
 [[package]]
 name = "obscur-accessibility-accesskit"
@@ -25,6 +29,10 @@ version = "0.0.0"
 [[package]]
 name = "obscur-data-transfer"
 version = "0.0.0"
+dependencies = [
+ "obscur-geometry",
+ "obscur-identity",
+]
 
 [[package]]
 name = "obscur-devtools"
@@ -71,6 +79,10 @@ version = "0.0.0"
 [[package]]
 name = "obscur-interaction"
 version = "0.0.0"
+dependencies = [
+ "obscur-geometry",
+ "obscur-identity",
+]
 
 [[package]]
 name = "obscur-kit"
@@ -87,6 +99,10 @@ dependencies = [
 [[package]]
 name = "obscur-motion"
 version = "0.0.0"
+dependencies = [
+ "obscur-geometry",
+ "obscur-identity",
+]
 
 [[package]]
 name = "obscur-okui-compiler"
@@ -147,6 +163,12 @@ version = "0.0.0"
 [[package]]
 name = "obscur-render"
 version = "0.0.0"
+dependencies = [
+ "obscur-capability",
+ "obscur-geometry",
+ "obscur-identity",
+ "obscur-scene",
+]
 
 [[package]]
 name = "obscur-render-cpu"
@@ -164,6 +186,7 @@ version = "0.0.0"
 name = "obscur-resources"
 version = "0.0.0"
 dependencies = [
+ "obscur-geometry",
  "obscur-identity",
 ]
 
@@ -205,6 +228,11 @@ dependencies = [
 [[package]]
 name = "obscur-system"
 version = "0.0.0"
+dependencies = [
+ "obscur-capability",
+ "obscur-geometry",
+ "obscur-identity",
+]
 
 [[package]]
 name = "obscur-system-linux"
@@ -241,6 +269,9 @@ version = "0.0.0"
 [[package]]
 name = "obscur-text"
 version = "0.0.0"
+dependencies = [
+ "obscur-geometry",
+]
 
 [[package]]
 name = "obscur-theme-system"
@@ -282,6 +313,11 @@ version = "0.0.0"
 [[package]]
 name = "obscur-windowing"
 version = "0.0.0"
+dependencies = [
+ "obscur-capability",
+ "obscur-geometry",
+ "obscur-identity",
+]
 
 [[package]]
 name = "xtask"

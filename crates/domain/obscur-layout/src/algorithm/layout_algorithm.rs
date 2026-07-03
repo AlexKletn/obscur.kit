@@ -1,4 +1,4 @@
-//! LayoutAlgorithm: the trait every formatting context implements.
+//! `LayoutAlgorithm`: the trait every formatting context implements.
 
 use obscur_geometry::BoxConstraints;
 

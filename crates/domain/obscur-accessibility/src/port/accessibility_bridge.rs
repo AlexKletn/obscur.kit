@@ -149,7 +149,7 @@ mod tests {
 
     #[test]
     fn accessibility_bridge_is_object_safe() {
-        let _: Box<dyn AccessibilityBridge> = Box::new(NullAccessibilityBridge::default());
+        let _: Box<dyn AccessibilityBridge> = Box::new(NullAccessibilityBridge);
     }
 
     #[test]

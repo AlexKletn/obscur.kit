@@ -1,4 +1,4 @@
-//! ConstraintLayout: a minimal constraint / overlay formatting context.
+//! `ConstraintLayout`: a minimal constraint / overlay formatting context.
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 

@@ -121,16 +121,14 @@ impl CacheBudget {
         if !self.enabled {
             return false;
         }
-        if let Some(max) = self.max_bytes {
-            if current_bytes.saturating_add(incoming_bytes) > max {
+        if let Some(max) = self.max_bytes
+            && current_bytes.saturating_add(incoming_bytes) > max {
                 return false;
             }
-        }
-        if let Some(max) = self.max_entries {
-            if current_entries.saturating_add(1) > max {
+        if let Some(max) = self.max_entries
+            && current_entries.saturating_add(1) > max {
                 return false;
             }
-        }
         true
     }
 
@@ -142,16 +140,14 @@ impl CacheBudget {
     /// simply never admits — so this reports only the size limits.
     #[must_use]
     pub const fn exceeds(&self, current_bytes: u64, current_entries: usize) -> bool {
-        if let Some(max) = self.max_bytes {
-            if current_bytes > max {
+        if let Some(max) = self.max_bytes
+            && current_bytes > max {
                 return true;
             }
-        }
-        if let Some(max) = self.max_entries {
-            if current_entries > max {
+        if let Some(max) = self.max_entries
+            && current_entries > max {
                 return true;
             }
-        }
         false
     }
 }

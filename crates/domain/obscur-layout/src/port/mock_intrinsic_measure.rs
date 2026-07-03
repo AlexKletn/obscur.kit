@@ -1,4 +1,4 @@
-//! MockIntrinsicMeasure: deterministic stand-in intrinsic measurer for Phase 1.
+//! `MockIntrinsicMeasure`: deterministic stand-in intrinsic measurer for Phase 1.
 
 use std::collections::HashMap;
 

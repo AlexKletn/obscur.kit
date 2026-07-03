@@ -1,8 +1,8 @@
-//! Per-scene diagnostic counters for DevTools and telemetry.
+//! Per-scene diagnostic counters for `DevTools` and telemetry.
 
 use crate::command::{DisplayList, PaintCommand};
 
-/// Per-scene counters surfaced to DevTools and performance telemetry
+/// Per-scene counters surfaced to `DevTools` and performance telemetry
 /// (spec §7.9).
 ///
 /// These are **diagnostic metrics only**: they describe the shape of a
