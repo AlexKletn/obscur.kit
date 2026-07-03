@@ -1,5 +1,5 @@
 mod display;
-pub use display::Display;
+pub use display::{Display, DisplayId};
 mod display_color_capability;
 pub use display_color_capability::DisplayColorCapability;
 mod display_event;
