@@ -1,12 +1,12 @@
 mod font_attributes;
-pub use font_attributes::FontAttributes;
+pub use font_attributes::{FontAttributes, FontStretch};
 mod font_face;
-pub use font_face::FontFace;
+pub use font_face::{FontFace, FontMetrics};
 mod font_fallback;
 pub use font_fallback::FontFallback;
 mod font_family;
-pub use font_family::FontFamily;
+pub use font_family::{FontFamily, GenericFamily};
 mod font_provider;
-pub use font_provider::FontProvider;
+pub use font_provider::{FontProvider, MockFontProvider};
 mod font_source;
 pub use font_source::FontSource;
