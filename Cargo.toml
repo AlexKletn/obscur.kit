@@ -47,6 +47,17 @@ obscur-system = { path = "crates/domain/obscur-system" }
 # application
 obscur-runtime = { path = "crates/application/obscur-runtime" }
 obscur-headless = { path = "crates/application/obscur-headless" }
+# adapters (optional, wired by the facade behind features)
+obscur-resource-fs = { path = "crates/adapters/obscur-resource-fs" }
+obscur-cache-fs = { path = "crates/adapters/obscur-cache-fs" }
+obscur-task-smol = { path = "crates/adapters/obscur-task-smol" }
+obscur-task-tokio = { path = "crates/adapters/obscur-task-tokio" }
+obscur-render-cpu = { path = "crates/adapters/obscur-render-cpu" }
+obscur-render-vello = { path = "crates/adapters/obscur-render-vello" }
+obscur-window-winit = { path = "crates/adapters/obscur-window-winit" }
+obscur-accessibility-accesskit = { path = "crates/adapters/obscur-accessibility-accesskit" }
+obscur-system-linux = { path = "crates/adapters/obscur-system-linux" }
+obscur-system-web = { path = "crates/adapters/obscur-system-web" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

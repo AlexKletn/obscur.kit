@@ -9,3 +9,70 @@ publish = false
 
 [lints]
 workspace = true
+
+[features]
+# The portable default adapter set: works on any target with no display/GPU
+# (software renderer + smol executor + filesystem resources).
+default = ["resource-fs", "cache-fs", "task-smol", "render-cpu"]
+# Convenience: every optional adapter (needs a display/GPU/AT at runtime).
+full = [
+    "resource-fs",
+    "cache-fs",
+    "task-smol",
+    "task-tokio",
+    "render-cpu",
+    "render-vello",
+    "window-winit",
+    "accesskit",
+]
+resource-fs = ["dep:obscur-resource-fs"]
+cache-fs = ["dep:obscur-cache-fs"]
+task-smol = ["dep:obscur-task-smol"]
+task-tokio = ["dep:obscur-task-tokio"]
+render-cpu = ["dep:obscur-render-cpu"]
+render-vello = ["dep:obscur-render-vello"]
+window-winit = ["dep:obscur-window-winit"]
+accesskit = ["dep:obscur-accessibility-accesskit"]
+
+[dependencies]
+# foundation
+obscur-identity = { workspace = true }
+obscur-geometry = { workspace = true }
+obscur-capability = { workspace = true }
+obscur-diagnostics = { workspace = true }
+obscur-task = { workspace = true }
+# domain
+obscur-view = { workspace = true }
+obscur-tree = { workspace = true }
+obscur-style = { workspace = true }
+obscur-layout = { workspace = true }
+obscur-scene = { workspace = true }
+obscur-text = { workspace = true }
+obscur-motion = { workspace = true }
+obscur-render = { workspace = true }
+obscur-windowing = { workspace = true }
+obscur-resources = { workspace = true }
+obscur-routing = { workspace = true }
+obscur-accessibility = { workspace = true }
+obscur-data-transfer = { workspace = true }
+obscur-system = { workspace = true }
+obscur-interaction = { workspace = true }
+# application
+obscur-runtime = { workspace = true }
+obscur-headless = { workspace = true }
+# optional adapters (behind features)
+obscur-resource-fs = { workspace = true, optional = true }
+obscur-cache-fs = { workspace = true, optional = true }
+obscur-task-smol = { workspace = true, optional = true }
+obscur-task-tokio = { workspace = true, optional = true }
+obscur-render-cpu = { workspace = true, optional = true }
+obscur-render-vello = { workspace = true, optional = true }
+obscur-window-winit = { workspace = true, optional = true }
+obscur-accessibility-accesskit = { workspace = true, optional = true }
+
+# The platform system provider is selected automatically by target.
+[target.'cfg(target_os = "linux")'.dependencies]
+obscur-system-linux = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+obscur-system-web = { workspace = true }

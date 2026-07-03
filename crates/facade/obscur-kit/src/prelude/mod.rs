@@ -1,2 +1,3 @@
+//! Prelude module.
 mod prelude;
-pub use prelude::Prelude;
+pub use prelude::*;
