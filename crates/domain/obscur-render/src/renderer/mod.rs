@@ -1,7 +1,7 @@
 mod renderer;
 mod renderer_id;
 
-pub use renderer::Renderer;
+pub use renderer::{HeadlessRenderer, Renderer};
 pub use renderer_id::RendererId;
 
 mod renderer_capabilities;

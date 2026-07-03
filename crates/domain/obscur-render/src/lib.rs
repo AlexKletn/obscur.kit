@@ -2,9 +2,9 @@
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-mod renderer;
+pub mod renderer;
 
-pub use renderer::{Renderer, RendererId};
+pub use renderer::{HeadlessRenderer, Renderer, RendererCapabilities, RendererError, RendererId};
 
 pub mod extension;
 pub mod frame;
