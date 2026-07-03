@@ -1,10 +1,10 @@
 mod intersection_observer;
-pub use intersection_observer::IntersectionObserver;
+pub use intersection_observer::{IntersectionChange, IntersectionObserver};
 mod layout_observer;
-pub use layout_observer::LayoutObserver;
+pub use layout_observer::{LayoutChange, LayoutObserver};
 mod resize_observer;
-pub use resize_observer::ResizeObserver;
+pub use resize_observer::{ResizeChange, ResizeObserver};
 mod transform_observer;
-pub use transform_observer::TransformObserver;
+pub use transform_observer::{TransformChange, TransformObserver};
 mod visibility_observer;
-pub use visibility_observer::VisibilityObserver;
+pub use visibility_observer::{VisibilityChange, VisibilityObserver};
