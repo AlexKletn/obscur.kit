@@ -1,3 +1,4 @@
+//! Chrome module.
 mod chrome_mode;
 pub use chrome_mode::ChromeMode;
 mod drag_region;

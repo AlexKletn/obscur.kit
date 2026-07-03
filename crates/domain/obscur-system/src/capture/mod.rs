@@ -1,3 +1,4 @@
+//! Capture module.
 mod capture_provider;
 pub use capture_provider::{CaptureProvider, NullCaptureProvider, StubCaptureProvider};
 mod capture_request;

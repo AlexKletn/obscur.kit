@@ -1,3 +1,4 @@
+//! Selection module.
 mod caret;
 pub use caret::Caret;
 mod caret_affinity;

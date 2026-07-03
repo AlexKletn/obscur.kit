@@ -1,3 +1,4 @@
+//! Key module.
 mod interned_symbol;
 mod stable_key;
 

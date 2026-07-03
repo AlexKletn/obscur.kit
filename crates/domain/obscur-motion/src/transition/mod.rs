@@ -1,3 +1,4 @@
+//! Transition module.
 mod layout_transition;
 pub use layout_transition::LayoutTransition;
 mod shared_element_transition;

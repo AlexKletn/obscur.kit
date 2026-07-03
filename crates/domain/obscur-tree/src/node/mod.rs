@@ -1,3 +1,4 @@
+//! Node module.
 mod retained_node;
 
 pub use retained_node::RetainedNode;

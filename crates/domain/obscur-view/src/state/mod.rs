@@ -1,3 +1,4 @@
+//! State module.
 mod local_state;
 pub use local_state::LocalState;
 mod read_signal;

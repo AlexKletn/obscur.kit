@@ -1,3 +1,4 @@
+//! Shell module.
 mod shell_provider;
 pub use shell_provider::{NullShellProvider, RecordingShellProvider, ShellProvider};
 mod shell_result;

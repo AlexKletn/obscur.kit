@@ -1,3 +1,4 @@
+//! Scheduler module.
 mod backpressure_policy;
 pub use backpressure_policy::{BackpressureDecision, BackpressurePolicy};
 mod frame_scheduler;

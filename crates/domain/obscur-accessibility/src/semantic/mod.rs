@@ -1,3 +1,4 @@
+//! Semantic module.
 mod semantic_action;
 pub use semantic_action::SemanticAction;
 mod semantic_node;

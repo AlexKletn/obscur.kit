@@ -1,3 +1,4 @@
+//! Pointer module.
 mod pointer_buttons;
 pub use pointer_buttons::{PointerButton, PointerButtons};
 mod pointer_capture;

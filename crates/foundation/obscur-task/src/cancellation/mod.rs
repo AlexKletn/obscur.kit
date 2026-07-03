@@ -1,3 +1,4 @@
+//! Cancellation module.
 mod cancellation_reason;
 mod cancellation_source;
 mod cancellation_token;

@@ -1,3 +1,4 @@
+//! Scene module.
 mod scene;
 pub use scene::Scene;
 mod scene_generation;

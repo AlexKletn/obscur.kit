@@ -1,3 +1,4 @@
+//! Handle module.
 mod font_handle;
 pub use font_handle::FontHandle;
 mod image_handle;

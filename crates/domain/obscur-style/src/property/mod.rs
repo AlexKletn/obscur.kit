@@ -1,3 +1,4 @@
+//! Property module.
 mod custom_property;
 pub use custom_property::CustomProperty;
 mod inheritance;

@@ -1,3 +1,4 @@
+//! Diagnostic module.
 mod diagnostic;
 mod diagnostic_code;
 mod diagnostic_context;

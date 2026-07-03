@@ -1,3 +1,4 @@
+//! Host module.
 mod headless_host;
 
 pub use headless_host::HeadlessHost;

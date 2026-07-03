@@ -92,12 +92,11 @@ impl SceneCoordinator {
 
             if let Some(color) = background_color_of(computed, node) {
                 // Skip fully transparent backgrounds: they paint nothing.
-                if color.a > 0.0 {
-                    if let Some(layout_box) = boxes.get(&node) {
+                if color.a > 0.0
+                    && let Some(layout_box) = boxes.get(&node) {
                         builder
                             .fill_rect(layout_box.bounds, Brush::solid(scene_color_from(color)));
                     }
-                }
             }
 
             if let Some(retained) = tree.get(node) {

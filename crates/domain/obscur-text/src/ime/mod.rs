@@ -1,3 +1,4 @@
+//! Ime module.
 mod composition;
 pub use composition::{Composition, CompositionState};
 mod composition_event;

@@ -1,3 +1,4 @@
+//! Generation module.
 mod generation;
 mod version_stamp;
 

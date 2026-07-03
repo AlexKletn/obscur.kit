@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn notification_provider_is_object_safe() {
-        let _: Box<dyn NotificationProvider> = Box::new(NullNotificationProvider::default());
+        let _: Box<dyn NotificationProvider> = Box::new(NullNotificationProvider);
     }
 
     #[test]
@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn null_provider_presents_nothing() {
-        let mut provider = NullNotificationProvider::default();
+        let mut provider = NullNotificationProvider;
         assert_eq!(provider.permission(), SupportLevel::Unavailable);
         assert_eq!(
             provider.post(Notification::new("t", "b")),

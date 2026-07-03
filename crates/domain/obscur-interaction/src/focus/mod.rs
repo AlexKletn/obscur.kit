@@ -1,3 +1,4 @@
+//! Focus module.
 mod focus_node;
 pub use focus_node::FocusNode;
 mod focus_request;

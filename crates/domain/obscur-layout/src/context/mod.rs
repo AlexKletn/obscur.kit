@@ -1,3 +1,4 @@
+//! Context module.
 mod layout_containment;
 pub use layout_containment::LayoutContainment;
 mod layout_context;

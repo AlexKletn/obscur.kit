@@ -1,3 +1,4 @@
+//! Transfer module.
 mod transfer_error;
 pub use transfer_error::TransferError;
 mod transfer_limit;

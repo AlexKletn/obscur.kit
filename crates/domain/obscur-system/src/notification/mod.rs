@@ -1,3 +1,4 @@
+//! Notification module.
 mod notification;
 pub use notification::Notification;
 mod notification_action;

@@ -1,3 +1,4 @@
+//! Extension module.
 mod custom_pass;
 pub use custom_pass::{CustomPass, PassStage};
 mod render_extension;

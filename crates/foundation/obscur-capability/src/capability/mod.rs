@@ -1,3 +1,4 @@
+//! Capability module.
 mod capability;
 mod capability_id;
 mod capability_scope;

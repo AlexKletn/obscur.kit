@@ -1,3 +1,4 @@
+//! Subscription module.
 mod diagnostic_filter;
 
 pub use diagnostic_filter::DiagnosticFilter;

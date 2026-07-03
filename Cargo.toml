@@ -52,3 +52,18 @@ module_name_repetitions = "allow"
 too_many_lines = "allow"
 # Spec §3.3 mandates same-name entity files (e.g. diagnostic/diagnostic.rs).
 module_inception = "allow"
+# Curated pedantic exceptions — these fire heavily and by design in this codebase:
+# Geometry/motion/style compare exact f32 values on purpose (equality of scale
+# factors, interpolation endpoints, is_noop checks), and tests assert exact,
+# representable values.
+float_cmp = "allow"
+# Flags ordinary capitalised prose (API names, acronyms) in doc comments; low
+# signal, high volume across the spec-derived docs.
+doc_markdown = "allow"
+# Deliberate near-name pairs (anchor/author, along/across, leading/trailing).
+similar_names = "allow"
+# usize->f32 for small bounded counts (grid columns, item indices) is intentional.
+cast_precision_loss = "allow"
+# Several value objects are spec-mandated boolean bundles (window/input/command
+# state, privacy policy); a bitflag rewrite would obscure the 1:1 spec mapping.
+struct_excessive_bools = "allow"

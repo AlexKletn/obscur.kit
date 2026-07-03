@@ -1,3 +1,4 @@
+//! Selector module.
 mod pseudo_state;
 pub use pseudo_state::PseudoState;
 mod selector_id;

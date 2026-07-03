@@ -1,3 +1,4 @@
+//! Selection module.
 mod selection;
 pub use selection::Selection;
 mod selection_anchor;

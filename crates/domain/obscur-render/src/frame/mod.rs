@@ -1,3 +1,4 @@
+//! Frame module.
 mod device_loss;
 pub use device_loss::{DeviceLoss, DeviceLossReason};
 mod frame_submission;

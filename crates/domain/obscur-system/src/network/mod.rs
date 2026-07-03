@@ -1,3 +1,4 @@
+//! Network module.
 mod credential_handle;
 pub use credential_handle::CredentialHandle;
 mod network_request;

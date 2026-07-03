@@ -1,3 +1,4 @@
+//! Replay module.
 mod event_recording;
 pub use event_recording::EventRecording;
 mod replay_result;

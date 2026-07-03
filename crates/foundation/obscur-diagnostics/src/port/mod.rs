@@ -1,3 +1,4 @@
+//! Port module.
 mod diagnostic_sink;
 
 pub use diagnostic_sink::DiagnosticSink;

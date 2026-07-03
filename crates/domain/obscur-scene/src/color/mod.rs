@@ -1,3 +1,4 @@
+//! Color module.
 mod color;
 
 pub use color::Color;

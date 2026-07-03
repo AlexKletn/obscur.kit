@@ -180,14 +180,13 @@ impl TreeTransaction {
                     if !tree.contains(*target) {
                         return Err(TxError::StaleNode(*target));
                     }
-                    if let Some(count) = Self::live_parent_child_count(tree, *target) {
-                        if *index >= count {
+                    if let Some(count) = Self::live_parent_child_count(tree, *target)
+                        && *index >= count {
                             return Err(TxError::IndexOutOfRange {
                                 index: *index,
                                 child_count: count,
                             });
                         }
-                    }
                 }
                 TreeChange::SetText { target, .. } => match tree.get(*target) {
                     None => return Err(TxError::StaleNode(*target)),
@@ -258,13 +257,11 @@ impl TreeTransaction {
                 }
                 TreeChange::RemoveSubtree { target } => {
                     // Detach from the current parent so no dangling link remains.
-                    if let Some(node) = tree.get(target) {
-                        if let Some(parent_id) = node.logical_parent().parent() {
-                            if let Some(parent_node) = tree.get_mut(parent_id) {
+                    if let Some(node) = tree.get(target)
+                        && let Some(parent_id) = node.logical_parent().parent()
+                            && let Some(parent_node) = tree.get_mut(parent_id) {
                                 parent_node.remove_child(target);
                             }
-                        }
-                    }
                     // Remove leaves first (reverse of pre-order).
                     let ids = Subtree::new(target).descendants(tree);
                     for id in ids.into_iter().rev() {
@@ -276,15 +273,12 @@ impl TreeTransaction {
                 TreeChange::MoveChild { target, index } => {
                     if let Some(parent_id) =
                         tree.get(target).and_then(|n| n.logical_parent().parent())
-                    {
-                        if let Some(parent_node) = tree.get_mut(parent_id) {
-                            if parent_node.remove_child(target) {
+                        && let Some(parent_node) = tree.get_mut(parent_id)
+                            && parent_node.remove_child(target) {
                                 let at = index.min(parent_node.children.len());
                                 parent_node.children.insert(at, target);
                                 moved.push(target);
                             }
-                        }
-                    }
                 }
                 TreeChange::SetText { target, content } => {
                     if let Some(node) = tree.get_mut(target) {

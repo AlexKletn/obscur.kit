@@ -1,3 +1,4 @@
+//! History module.
 mod history_provider;
 pub use history_provider::{HistoryProvider, MemoryHistory};
 mod navigation_direction;

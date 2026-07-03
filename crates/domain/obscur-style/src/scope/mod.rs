@@ -1,3 +1,4 @@
+//! Scope module.
 mod exported_style_part;
 pub use exported_style_part::ExportedStylePart;
 mod module_scope;

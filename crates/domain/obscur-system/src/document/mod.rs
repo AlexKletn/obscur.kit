@@ -1,3 +1,4 @@
+//! Document module.
 mod directory_handle;
 pub use directory_handle::DirectoryHandle;
 mod document_handle;

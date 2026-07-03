@@ -1,3 +1,4 @@
+//! Reconciliation module.
 mod child_matcher;
 pub use child_matcher::ChildMatcher;
 mod child_matching;

@@ -1,3 +1,4 @@
+//! Orchestration module.
 mod layout_coordinator;
 pub use layout_coordinator::{LayoutBoxes, LayoutCoordinator, LayoutStyles};
 mod motion_coordinator;

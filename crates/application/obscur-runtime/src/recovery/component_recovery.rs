@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn disabled_boundary_propagates_but_still_records() {
-        let recovery = ComponentRecovery::default();
+        let recovery = ComponentRecovery;
         let mut boundary = ErrorBoundary::new(ErrorBoundaryPolicy::disabled());
         assert_eq!(recovery.recover(&mut boundary, failure(0)), RecoveryResult::Propagated);
         // Recorded so diagnostics still sees it, even though it propagates.

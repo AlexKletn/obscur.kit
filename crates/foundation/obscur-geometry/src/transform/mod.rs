@@ -1,3 +1,4 @@
+//! Transform module.
 mod affine_transform;
 
 pub use affine_transform::AffineTransform;

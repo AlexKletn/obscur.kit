@@ -1,3 +1,4 @@
+//! Id module.
 mod component_id;
 mod correlation_id;
 mod namespace_id;

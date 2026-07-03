@@ -200,7 +200,7 @@ mod tests {
     /// Compile-time proof the port is object-safe (spec §5.15 replaceable port).
     #[test]
     fn network_service_is_object_safe() {
-        let _: Box<dyn NetworkService> = Box::new(NullNetworkService::default());
+        let _: Box<dyn NetworkService> = Box::new(NullNetworkService);
     }
 
     #[test]

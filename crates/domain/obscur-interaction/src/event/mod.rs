@@ -1,3 +1,4 @@
+//! Event module.
 mod dispatch_result;
 pub use dispatch_result::DispatchResult;
 mod event_dispatcher;

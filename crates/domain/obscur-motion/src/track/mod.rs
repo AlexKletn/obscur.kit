@@ -1,3 +1,4 @@
+//! Track module.
 mod keyframe_track;
 pub use keyframe_track::{Keyframe, KeyframeTrack};
 mod motion_track;

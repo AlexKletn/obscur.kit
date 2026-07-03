@@ -1,3 +1,4 @@
+//! Component module.
 mod component_contract;
 
 pub use component_contract::ComponentContract;

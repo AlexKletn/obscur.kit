@@ -1,3 +1,4 @@
+//! Transaction module.
 mod provisional_transaction;
 pub use provisional_transaction::ProvisionalTransaction;
 mod transaction_commit;

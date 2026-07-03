@@ -1,3 +1,4 @@
+//! Renderer module.
 mod renderer;
 mod renderer_id;
 

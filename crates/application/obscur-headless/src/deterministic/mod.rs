@@ -1,3 +1,4 @@
+//! Deterministic module.
 mod deterministic_clock;
 
 pub use deterministic_clock::DeterministicClock;

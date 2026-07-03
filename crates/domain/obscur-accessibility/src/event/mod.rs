@@ -1,3 +1,4 @@
+//! Event module.
 mod accessibility_action;
 pub use accessibility_action::AccessibilityAction;
 mod accessibility_focus;

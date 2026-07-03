@@ -1,3 +1,4 @@
+//! Drag module.
 mod drag_autoscroll;
 pub use drag_autoscroll::DragAutoscroll;
 mod drag_effect;

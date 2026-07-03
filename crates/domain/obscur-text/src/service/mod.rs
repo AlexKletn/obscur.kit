@@ -1,3 +1,4 @@
+//! Service module.
 mod language_service_request;
 pub use language_service_request::{LanguageServiceRequest, ServiceKind};
 mod text_diagnostic;

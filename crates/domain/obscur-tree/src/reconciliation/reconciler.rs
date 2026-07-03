@@ -115,11 +115,10 @@ impl Reconciler {
             let id = match decision {
                 IdentityMatch::Reuse(id) => {
                     // Text content is the only in-place content update we apply.
-                    if let ViewNode::Text { content, .. } = node {
-                        if apply_text_content(tree, id, content) {
+                    if let ViewNode::Text { content, .. } = node
+                        && apply_text_content(tree, id, content) {
                             plan.push(ReconciliationOp::Update { id });
                         }
-                    }
                     reused_order.push(id);
                     id
                 }

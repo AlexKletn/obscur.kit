@@ -1,3 +1,4 @@
+//! Span module.
 mod text_range;
 pub use text_range::TextRange;
 mod text_span;

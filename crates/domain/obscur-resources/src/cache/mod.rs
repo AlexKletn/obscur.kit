@@ -1,3 +1,4 @@
+//! Cache module.
 mod cache_budget;
 pub use cache_budget::CacheBudget;
 mod cache_entry;

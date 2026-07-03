@@ -1,3 +1,4 @@
+//! Layer module.
 mod composition_mode;
 pub use composition_mode::CompositionMode;
 mod layer_effect;

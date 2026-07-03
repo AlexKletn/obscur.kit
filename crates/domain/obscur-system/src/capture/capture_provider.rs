@@ -102,12 +102,12 @@ mod tests {
 
     #[test]
     fn capture_provider_is_object_safe() {
-        let _: Box<dyn CaptureProvider> = Box::new(NullCaptureProvider::default());
+        let _: Box<dyn CaptureProvider> = Box::new(NullCaptureProvider);
     }
 
     #[test]
     fn null_provider_captures_nothing() {
-        let mut provider = NullCaptureProvider::default();
+        let mut provider = NullCaptureProvider;
         let source = CaptureSource::Surface;
         assert!(!provider.can_capture(&source));
         assert_eq!(

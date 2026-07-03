@@ -95,12 +95,12 @@ mod tests {
 
     #[test]
     fn shell_provider_is_object_safe() {
-        let _: Box<dyn ShellProvider> = Box::new(NullShellProvider::default());
+        let _: Box<dyn ShellProvider> = Box::new(NullShellProvider);
     }
 
     #[test]
     fn null_provider_opens_nothing() {
-        let mut provider = NullShellProvider::default();
+        let mut provider = NullShellProvider;
         let target = ShellTarget::uri("https://example.com");
         assert!(!provider.can_open(&target));
         assert_eq!(provider.open(target), ShellResult::Unsupported);

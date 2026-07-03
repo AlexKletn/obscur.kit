@@ -1,3 +1,4 @@
+//! Invalidation module.
 mod cache_entry;
 pub use cache_entry::CacheEntry;
 mod layout_cache;

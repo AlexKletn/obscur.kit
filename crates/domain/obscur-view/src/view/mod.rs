@@ -1,3 +1,4 @@
+//! View module.
 mod view;
 pub use view::View;
 mod view_event_binding;

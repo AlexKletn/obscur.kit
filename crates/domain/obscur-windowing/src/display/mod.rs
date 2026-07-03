@@ -1,3 +1,4 @@
+//! Display module.
 mod display;
 pub use display::{Display, DisplayId};
 mod display_color_capability;

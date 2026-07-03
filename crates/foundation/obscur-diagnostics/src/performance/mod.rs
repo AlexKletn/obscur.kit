@@ -1,3 +1,4 @@
+//! Performance module.
 mod performance_budget;
 mod performance_span;
 

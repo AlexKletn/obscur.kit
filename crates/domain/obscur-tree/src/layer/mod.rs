@@ -1,3 +1,4 @@
+//! Layer module.
 mod layer;
 pub use layer::Layer;
 mod layer_id;

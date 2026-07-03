@@ -1,3 +1,4 @@
+//! Lifecycle module.
 mod lifecycle_state;
 pub use lifecycle_state::LifecycleState;
 mod mount_context;

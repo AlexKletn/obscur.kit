@@ -1,3 +1,4 @@
+//! Timeline module.
 mod timeline;
 pub use timeline::{PlaybackDirection, RepeatCount, Timeline};
 mod timeline_id;

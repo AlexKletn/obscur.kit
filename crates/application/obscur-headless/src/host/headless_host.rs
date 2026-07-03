@@ -2,7 +2,6 @@
 
 use std::fmt;
 
-use obscur_geometry::Size;
 use obscur_identity::{RuntimeId, WindowId};
 use obscur_runtime::frame::{FrameContext, FrameId, FramePipeline, FrameReason, FrameResult};
 use obscur_runtime::orchestration::StyleInputs;
@@ -201,7 +200,7 @@ impl fmt::Debug for HeadlessHost {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use obscur_geometry::ScaleFactor;
+    use obscur_geometry::{ScaleFactor, Size};
     use obscur_identity::ComponentId;
     use obscur_task::Clock;
     use obscur_view::view::{ViewFragment, ViewNode};

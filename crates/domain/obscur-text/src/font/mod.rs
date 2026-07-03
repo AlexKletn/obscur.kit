@@ -1,3 +1,4 @@
+//! Font module.
 mod font_attributes;
 pub use font_attributes::{FontAttributes, FontStretch};
 mod font_face;

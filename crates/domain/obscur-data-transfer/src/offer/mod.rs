@@ -1,3 +1,4 @@
+//! Offer module.
 mod data_offer;
 pub use data_offer::DataOffer;
 mod data_representation;

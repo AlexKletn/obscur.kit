@@ -1,3 +1,4 @@
+//! Clipboard module.
 mod clipboard_provider;
 pub use clipboard_provider::{ClipboardProvider, MemoryClipboard};
 mod clipboard_request;

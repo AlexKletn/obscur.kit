@@ -1,3 +1,4 @@
+//! Boundary module.
 mod component_failure;
 pub use component_failure::ComponentFailure;
 mod error_boundary;

@@ -126,12 +126,12 @@ mod tests {
 
     #[test]
     fn dialog_provider_is_object_safe() {
-        let _: Box<dyn DialogProvider> = Box::new(NullDialogProvider::default());
+        let _: Box<dyn DialogProvider> = Box::new(NullDialogProvider);
     }
 
     #[test]
     fn null_provider_is_honestly_unsupported() {
-        let mut provider = NullDialogProvider::default();
+        let mut provider = NullDialogProvider;
         assert_eq!(provider.origin(), "null");
         assert_eq!(
             provider.present(DialogRequest::open_file()),

@@ -1,3 +1,4 @@
+//! Time module.
 mod clock;
 mod deadline;
 mod instant;

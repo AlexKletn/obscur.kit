@@ -1,3 +1,4 @@
+//! Paint module.
 mod blend_mode;
 pub use blend_mode::BlendMode;
 mod brush;

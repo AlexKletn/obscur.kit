@@ -1,3 +1,4 @@
+//! Snapshot module.
 mod pipeline_snapshot;
 pub use pipeline_snapshot::PipelineSnapshot;
 mod normalized_node;

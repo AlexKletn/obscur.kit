@@ -1,3 +1,4 @@
+//! Task module.
 mod task_id;
 mod task_priority;
 mod task_scope;

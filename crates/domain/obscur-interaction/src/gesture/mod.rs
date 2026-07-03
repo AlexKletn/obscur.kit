@@ -1,3 +1,4 @@
+//! Gesture module.
 mod gesture_arena;
 pub use gesture_arena::GestureArena;
 mod gesture_contender;

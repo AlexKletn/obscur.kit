@@ -1,3 +1,4 @@
+//! Presentation module.
 mod fullscreen_mode;
 pub use fullscreen_mode::FullscreenMode;
 mod presentation_mode;

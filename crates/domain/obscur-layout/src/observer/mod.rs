@@ -1,3 +1,4 @@
+//! Observer module.
 mod intersection_observer;
 pub use intersection_observer::{IntersectionChange, IntersectionObserver};
 mod layout_observer;

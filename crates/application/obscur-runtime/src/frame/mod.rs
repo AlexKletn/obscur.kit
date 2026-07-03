@@ -1,3 +1,4 @@
+//! Frame module.
 mod frame_context;
 pub use frame_context::FrameContext;
 mod frame_id;

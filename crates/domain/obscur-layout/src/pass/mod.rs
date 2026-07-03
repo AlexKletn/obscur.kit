@@ -1,3 +1,4 @@
+//! Pass module.
 mod arrange_pass;
 pub use arrange_pass::ArrangePass;
 mod layout_pass_result;

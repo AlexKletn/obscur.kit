@@ -1,3 +1,4 @@
+//! Tree module.
 mod retained_tree;
 pub use retained_tree::RetainedTree;
 mod secondary_map;

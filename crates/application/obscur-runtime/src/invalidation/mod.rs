@@ -1,3 +1,4 @@
+//! Invalidation module.
 mod invalidation;
 pub use invalidation::Invalidation;
 mod invalidation_kind;

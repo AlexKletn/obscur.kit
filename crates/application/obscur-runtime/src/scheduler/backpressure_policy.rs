@@ -90,15 +90,14 @@ impl BackpressurePolicy {
         if already_queued {
             return BackpressureDecision::Coalesce;
         }
-        if let Some(max) = self.max_pending {
-            if queue_len >= max {
+        if let Some(max) = self.max_pending
+            && queue_len >= max {
                 return if self.skip_stale {
                     BackpressureDecision::DropStale
                 } else {
                     BackpressureDecision::Reject
                 };
             }
-        }
         BackpressureDecision::Admit
     }
 }

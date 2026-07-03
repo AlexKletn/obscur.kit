@@ -1,3 +1,4 @@
+//! Space module.
 mod local_space;
 pub use local_space::LocalSpace;
 mod parent_space;

@@ -1,3 +1,4 @@
+//! Algorithm module.
 mod child_measurer;
 pub use child_measurer::ChildMeasurer;
 mod constraint_layout;

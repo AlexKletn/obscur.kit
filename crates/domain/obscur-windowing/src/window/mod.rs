@@ -1,3 +1,4 @@
+//! Window module.
 mod window;
 pub use window::Window;
 mod window_constraints;

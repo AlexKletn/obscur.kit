@@ -1,3 +1,4 @@
+//! Primitive module.
 mod corner_radii;
 mod insets;
 mod point;

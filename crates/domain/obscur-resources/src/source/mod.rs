@@ -1,3 +1,4 @@
+//! Source module.
 mod document_source;
 pub use document_source::DocumentSource;
 mod embedded_source;

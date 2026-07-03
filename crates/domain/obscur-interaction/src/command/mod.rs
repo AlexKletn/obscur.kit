@@ -1,3 +1,4 @@
+//! Command module.
 mod command;
 pub use command::Command;
 mod command_router;

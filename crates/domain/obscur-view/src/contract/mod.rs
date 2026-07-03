@@ -1,3 +1,4 @@
+//! Contract module.
 mod capability_contract;
 pub use capability_contract::CapabilityContract;
 mod capability_requirement;

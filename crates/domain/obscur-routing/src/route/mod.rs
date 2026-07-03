@@ -1,3 +1,4 @@
+//! Route module.
 mod route;
 pub use route::Route;
 mod route_match;

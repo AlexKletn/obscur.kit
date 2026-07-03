@@ -1,3 +1,4 @@
+//! Layout module.
 mod line_break;
 pub use line_break::{BreakKind, LineBreak};
 mod text_alignment;

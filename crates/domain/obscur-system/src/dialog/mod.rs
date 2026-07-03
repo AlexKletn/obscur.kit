@@ -1,3 +1,4 @@
+//! Dialog module.
 mod dialog_provider;
 pub use dialog_provider::{DialogProvider, NullDialogProvider, ScriptedDialogProvider};
 mod dialog_request;

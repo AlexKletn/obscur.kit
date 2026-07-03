@@ -127,11 +127,10 @@ impl InvalidationRouter {
         }
 
         if let Some(node) = inv.node() {
-            if kind.needs_restyle() {
-                if let Some(reason) = style_reason(inv.reason()) {
+            if kind.needs_restyle()
+                && let Some(reason) = style_reason(inv.reason()) {
                     style.invalidate(node, reason);
                 }
-            }
             if kind.needs_relayout() {
                 layout.invalidate(node, layout_reason(inv.reason()));
             }

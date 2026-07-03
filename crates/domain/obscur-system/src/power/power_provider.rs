@@ -91,12 +91,12 @@ mod tests {
 
     #[test]
     fn power_provider_is_object_safe() {
-        let _: Box<dyn PowerProvider> = Box::new(NullPowerProvider::default());
+        let _: Box<dyn PowerProvider> = Box::new(NullPowerProvider);
     }
 
     #[test]
     fn null_provider_is_unavailable_and_baseline() {
-        let provider = NullPowerProvider::default();
+        let provider = NullPowerProvider;
         assert_eq!(provider.availability(), SupportLevel::Unavailable);
         assert_eq!(provider.profile(), PowerProfile::default());
     }

@@ -3,4 +3,4 @@
 /// Placeholder for the `RuntimeHandle` entity. See the Obscur Kit 2 specs for its
 /// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
-pub struct RuntimeHandle;
+pub(crate) struct RuntimeHandle;

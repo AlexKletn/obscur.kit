@@ -1,3 +1,4 @@
+//! Spatial module.
 mod hit_chain;
 pub use hit_chain::HitChain;
 mod hit_test;

@@ -1,3 +1,4 @@
+//! Path module.
 mod fill_rule;
 pub use fill_rule::FillRule;
 mod path;

@@ -96,35 +96,32 @@ impl ChildMatcher {
         let mut cursor: usize = 0;
 
         for node in desired {
-            let decision = match node.key().map(ViewKey::stable_key) {
-                Some(key) => match key_index.get(key) {
-                    Some(&(id, kind)) if !used.contains(&id) && compatible(node, kind) => {
-                        used.insert(id);
-                        IdentityMatch::Reuse(id)
+            let decision = if let Some(key) = node.key().map(ViewKey::stable_key) { match key_index.get(key) {
+                Some(&(id, kind)) if !used.contains(&id) && compatible(node, kind) => {
+                    used.insert(id);
+                    IdentityMatch::Reuse(id)
+                }
+                _ => IdentityMatch::Create,
+            } } else {
+                // Forward scan for the next unused compatible unkeyed child.
+                let mut found: Option<usize> = None;
+                let mut i = cursor;
+                while i < unkeyed.len() {
+                    let (eid, ekind) = unkeyed[i];
+                    if !used.contains(&eid) && compatible(node, ekind) {
+                        found = Some(i);
+                        break;
                     }
-                    _ => IdentityMatch::Create,
-                },
-                None => {
-                    // Forward scan for the next unused compatible unkeyed child.
-                    let mut found: Option<usize> = None;
-                    let mut i = cursor;
-                    while i < unkeyed.len() {
-                        let (eid, ekind) = unkeyed[i];
-                        if !used.contains(&eid) && compatible(node, ekind) {
-                            found = Some(i);
-                            break;
-                        }
-                        i += 1;
+                    i += 1;
+                }
+                match found {
+                    Some(i) => {
+                        let (eid, _) = unkeyed[i];
+                        used.insert(eid);
+                        cursor = i + 1;
+                        IdentityMatch::Reuse(eid)
                     }
-                    match found {
-                        Some(i) => {
-                            let (eid, _) = unkeyed[i];
-                            used.insert(eid);
-                            cursor = i + 1;
-                            IdentityMatch::Reuse(eid)
-                        }
-                        None => IdentityMatch::Create,
-                    }
+                    None => IdentityMatch::Create,
                 }
             };
             matches.push(decision);

@@ -1,3 +1,4 @@
+//! Shaping module.
 mod glyph_run;
 pub use glyph_run::GlyphRun;
 mod shaped_glyph;

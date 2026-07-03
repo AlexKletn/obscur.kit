@@ -1,3 +1,4 @@
+//! Portal module.
 mod portal;
 pub use portal::Portal;
 mod portal_target;

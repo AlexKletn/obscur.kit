@@ -1,3 +1,4 @@
+//! Target module.
 mod bitmap_target;
 pub use bitmap_target::BitmapTarget;
 mod render_target;

@@ -1,3 +1,4 @@
+//! Permission module.
 mod permission_duration;
 mod permission_state;
 

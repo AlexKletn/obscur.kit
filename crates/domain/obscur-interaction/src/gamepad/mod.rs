@@ -1,3 +1,4 @@
+//! Gamepad module.
 mod gamepad_button;
 pub use gamepad_button::GamepadButton;
 mod gamepad_event;
