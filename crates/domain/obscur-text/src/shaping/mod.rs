@@ -7,4 +7,4 @@ pub use shaping_request::ShapingRequest;
 mod text_direction;
 pub use text_direction::TextDirection;
 mod text_shaper;
-pub use text_shaper::TextShaper;
+pub use text_shaper::{MockTextShaper, TextShaper};
