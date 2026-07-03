@@ -10,5 +10,7 @@ mod component_factory;
 pub use component_factory::ComponentFactory;
 mod component_instance;
 pub use component_instance::ComponentInstance;
+mod instance_id;
+pub use instance_id::InstanceId;
 mod component_registry;
 pub use component_registry::ComponentRegistry;
