@@ -1,5 +1,5 @@
 mod layout_coordinator;
-pub use layout_coordinator::LayoutCoordinator;
+pub use layout_coordinator::{LayoutBoxes, LayoutCoordinator, LayoutStyles};
 mod motion_coordinator;
 pub use motion_coordinator::MotionCoordinator;
 mod render_coordinator;
