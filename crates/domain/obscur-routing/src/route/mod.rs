@@ -5,6 +5,6 @@ pub use route_match::RouteMatch;
 mod route_params;
 pub use route_params::RouteParams;
 mod route_pattern;
-pub use route_pattern::RoutePattern;
+pub use route_pattern::{PatternSegment, RoutePattern};
 mod route_state;
 pub use route_state::RouteState;
