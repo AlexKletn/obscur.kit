@@ -11,6 +11,7 @@ publish = false
 workspace = true
 
 [dependencies]
+obscur-capability = { workspace = true }
 obscur-identity = { workspace = true }
 obscur-geometry = { workspace = true }
 obscur-windowing = { workspace = true }
