@@ -1,7 +1,7 @@
 mod dispatch_result;
 pub use dispatch_result::DispatchResult;
 mod event_dispatcher;
-pub use event_dispatcher::EventDispatcher;
+pub use event_dispatcher::{DispatchStep, EventDispatcher};
 mod event_origin;
 pub use event_origin::EventOrigin;
 mod event_phase;
