@@ -5,7 +5,7 @@ pub use constraint_layout::ConstraintLayout;
 mod custom_layout;
 pub use custom_layout::CustomLayout;
 mod docking_layout;
-pub use docking_layout::DockingLayout;
+pub use docking_layout::{DockSide, DockingLayout};
 mod fixed_child_measurer;
 pub use fixed_child_measurer::FixedChildMeasurer;
 mod flex_layout;
