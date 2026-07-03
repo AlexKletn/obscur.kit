@@ -1,3 +1,5 @@
+mod cache_entry;
+pub use cache_entry::CacheEntry;
 mod style_cache;
 pub use style_cache::StyleCache;
 mod style_dependency;
