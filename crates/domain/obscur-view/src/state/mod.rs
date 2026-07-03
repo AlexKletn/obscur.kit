@@ -4,5 +4,7 @@ mod read_signal;
 pub use read_signal::ReadSignal;
 mod state_generation;
 pub use state_generation::StateGeneration;
+mod subscription;
+pub use subscription::{Subscription, SubscriptionId};
 mod subscription_scope;
 pub use subscription_scope::SubscriptionScope;
