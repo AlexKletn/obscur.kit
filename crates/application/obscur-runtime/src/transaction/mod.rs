@@ -2,6 +2,8 @@ mod provisional_transaction;
 pub use provisional_transaction::ProvisionalTransaction;
 mod transaction_commit;
 pub use transaction_commit::TransactionCommit;
+mod transaction_error;
+pub use transaction_error::TransactionError;
 mod transaction_validator;
 pub use transaction_validator::TransactionValidator;
 mod ui_operation;

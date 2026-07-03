@@ -169,7 +169,15 @@ version = "0.0.0"
 name = "obscur-runtime"
 version = "0.0.0"
 dependencies = [
+ "obscur-diagnostics",
+ "obscur-geometry",
  "obscur-identity",
+ "obscur-layout",
+ "obscur-scene",
+ "obscur-style",
+ "obscur-task",
+ "obscur-tree",
+ "obscur-view",
 ]
 
 [[package]]
