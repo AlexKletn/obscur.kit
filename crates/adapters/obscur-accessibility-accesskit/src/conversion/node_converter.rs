@@ -1,6 +1,222 @@
-//! NodeConverter (skeleton stub for the spec-defined entity; not yet implemented).
+//! Builds an AccessKit [`Node`] from a domain [`SemanticNode`] (§7.1).
 
-/// Placeholder for the `NodeConverter` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
-#[derive(Debug)]
-pub struct NodeConverter;
+use accesskit::{Invalid, Node, NodeId, Rect, Toggled};
+use obscur_accessibility::semantic::{SemanticNode, SemanticValue};
+use obscur_identity::NodeId as DomainNodeId;
+
+use super::{ActionConverter, RoleConverter};
+
+/// Builds an AccessKit [`Node`] from a domain [`SemanticNode`] and its child
+/// ids (spec §7.1, §2.7).
+///
+/// The converter composes a [`RoleConverter`] and an [`ActionConverter`], both
+/// stateless, and projects a semantic node's role, accessible name and
+/// description, state flags, value, supported actions, on-screen bounds, and
+/// children onto the corresponding AccessKit properties. Because AccessKit
+/// 0.17 builds nodes directly (there is no separate builder type), the returned
+/// [`Node`] is ready to place into a [`accesskit::TreeUpdate`].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct NodeConverter {
+    role: RoleConverter,
+    action: ActionConverter,
+}
+
+impl NodeConverter {
+    /// Creates a converter with the stateless role and action converters.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            role: RoleConverter::new(),
+            action: ActionConverter::new(),
+        }
+    }
+
+    /// Maps a domain [`NodeId`](DomainNodeId) to its AccessKit [`NodeId`],
+    /// preserving the raw handle value so the two trees share identities.
+    #[must_use]
+    pub const fn node_id(&self, id: DomainNodeId) -> NodeId {
+        NodeId(id.raw())
+    }
+
+    /// Builds an AccessKit [`Node`] for `node`, attaching `children` (already
+    /// mapped to domain ids) as its child list.
+    ///
+    /// State maps as follows: `disabled` → [`Node::set_disabled`], an ignored
+    /// node (decorative or hidden) → [`Node::set_hidden`], `selected` →
+    /// [`Node::set_selected`], `required` → [`Node::set_required`], `readonly`
+    /// → [`Node::set_read_only`], `busy` → [`Node::set_busy`], `invalid` →
+    /// [`Node::set_invalid`], a `checked` tri-state → [`Node::set_toggled`],
+    /// and an `expanded` tri-state → [`Node::set_expanded`]. A
+    /// [`SemanticValue::Text`] becomes the AccessKit `value` string; a
+    /// [`SemanticValue::Number`] becomes the numeric value plus its bounds.
+    #[must_use]
+    pub fn convert(&self, node: &SemanticNode, children: &[DomainNodeId]) -> Node {
+        let mut out = Node::new(self.role.convert(node.role()));
+
+        if let Some(name) = node.name() {
+            out.set_label(name);
+        }
+        if let Some(description) = node.description() {
+            out.set_description(description);
+        }
+
+        let state = node.state();
+        if state.disabled {
+            out.set_disabled();
+        }
+        if node.is_ignored() {
+            out.set_hidden();
+        }
+        if state.selected {
+            out.set_selected(true);
+        }
+        if state.required {
+            out.set_required();
+        }
+        if state.readonly {
+            out.set_read_only();
+        }
+        if state.busy {
+            out.set_busy();
+        }
+        if state.invalid {
+            out.set_invalid(Invalid::True);
+        }
+        if let Some(checked) = state.checked {
+            out.set_toggled(if checked { Toggled::True } else { Toggled::False });
+        }
+        if let Some(expanded) = state.expanded {
+            out.set_expanded(expanded);
+        }
+
+        match node.value() {
+            SemanticValue::None | SemanticValue::Bool(_) => {}
+            SemanticValue::Text(text) => out.set_value(text.clone()),
+            SemanticValue::Number { value, min, max } => {
+                out.set_numeric_value(f64::from(*value));
+                out.set_min_numeric_value(f64::from(*min));
+                out.set_max_numeric_value(f64::from(*max));
+            }
+        }
+
+        for action in node.actions() {
+            if let Some(mapped) = self.action.to_accesskit(*action) {
+                out.add_action(mapped);
+            }
+        }
+
+        if let Some(bounds) = node.bounds() {
+            let x0 = f64::from(bounds.origin.x);
+            let y0 = f64::from(bounds.origin.y);
+            out.set_bounds(Rect::new(x0, y0, f64::from(bounds.right()), f64::from(bounds.bottom())));
+        }
+
+        if !children.is_empty() {
+            let ids: Vec<NodeId> = children.iter().map(|id| self.node_id(*id)).collect();
+            out.set_children(ids);
+        }
+
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use accesskit::{Action, Role};
+    use obscur_accessibility::semantic::{SemanticAction, SemanticRole, SemanticState};
+    use obscur_geometry::{Point, Rect as DomainRect, Size};
+
+    fn button(name: &str) -> SemanticNode {
+        SemanticNode::new(DomainNodeId::from_raw(1), SemanticRole::Button).with_name(name)
+    }
+
+    #[test]
+    fn button_with_name_maps_role_and_label() {
+        let node = button("OK").with_action(SemanticAction::Activate);
+        let out = NodeConverter::new().convert(&node, &[]);
+        assert_eq!(out.role(), Role::Button);
+        assert_eq!(out.label(), Some("OK"));
+        assert!(out.supports_action(Action::Click));
+    }
+
+    #[test]
+    fn disabled_node_sets_disabled_flag() {
+        let node = button("OK").with_state(SemanticState::new().disabled(true));
+        let out = NodeConverter::new().convert(&node, &[]);
+        assert!(out.is_disabled());
+    }
+
+    #[test]
+    fn checked_checkbox_sets_toggled() {
+        let node = SemanticNode::new(DomainNodeId::from_raw(2), SemanticRole::Checkbox)
+            .with_state(SemanticState::new().with_checked(Some(true)));
+        let out = NodeConverter::new().convert(&node, &[]);
+        assert_eq!(out.role(), Role::CheckBox);
+        assert_eq!(out.toggled(), Some(Toggled::True));
+    }
+
+    #[test]
+    fn unchecked_checkbox_sets_toggled_false() {
+        let node = SemanticNode::new(DomainNodeId::from_raw(2), SemanticRole::Checkbox)
+            .with_state(SemanticState::new().with_checked(Some(false)));
+        let out = NodeConverter::new().convert(&node, &[]);
+        assert_eq!(out.toggled(), Some(Toggled::False));
+    }
+
+    #[test]
+    fn hidden_node_sets_hidden() {
+        let node = button("x").with_state(SemanticState::new().hidden(true));
+        let out = NodeConverter::new().convert(&node, &[]);
+        assert!(out.is_hidden());
+    }
+
+    #[test]
+    fn number_value_sets_numeric_and_bounds() {
+        let node = SemanticNode::new(DomainNodeId::from_raw(3), SemanticRole::Slider)
+            .with_value(SemanticValue::number(5.0, 0.0, 10.0));
+        let out = NodeConverter::new().convert(&node, &[]);
+        assert_eq!(out.numeric_value(), Some(5.0));
+        assert_eq!(out.min_numeric_value(), Some(0.0));
+        assert_eq!(out.max_numeric_value(), Some(10.0));
+    }
+
+    #[test]
+    fn text_value_sets_value_string() {
+        let node = SemanticNode::new(DomainNodeId::from_raw(4), SemanticRole::TextInput)
+            .with_value(SemanticValue::text("hi"));
+        let out = NodeConverter::new().convert(&node, &[]);
+        assert_eq!(out.value(), Some("hi"));
+    }
+
+    #[test]
+    fn bounds_map_to_edges() {
+        let node = button("b").with_bounds(DomainRect::new(
+            Point { x: 1.0, y: 2.0 },
+            Size {
+                width: 3.0,
+                height: 4.0,
+            },
+        ));
+        let out = NodeConverter::new().convert(&node, &[]);
+        let rect = out.bounds().expect("bounds set");
+        assert_eq!(rect.x0, 1.0);
+        assert_eq!(rect.y0, 2.0);
+        assert_eq!(rect.x1, 4.0);
+        assert_eq!(rect.y1, 6.0);
+    }
+
+    #[test]
+    fn children_are_attached() {
+        let node = SemanticNode::new(DomainNodeId::from_raw(1), SemanticRole::List);
+        let out = NodeConverter::new()
+            .convert(&node, &[DomainNodeId::from_raw(2), DomainNodeId::from_raw(3)]);
+        assert_eq!(out.children(), &[NodeId(2), NodeId(3)]);
+    }
+
+    #[test]
+    fn node_id_preserves_raw() {
+        let c = NodeConverter::new();
+        assert_eq!(c.node_id(DomainNodeId::from_raw(42)), NodeId(42));
+    }
+}

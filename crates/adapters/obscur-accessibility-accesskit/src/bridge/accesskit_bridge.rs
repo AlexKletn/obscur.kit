@@ -1,6 +1,238 @@
-//! AccesskitBridge (skeleton stub for the spec-defined entity; not yet implemented).
+//! The host-driven AccessKit implementation of `AccessibilityBridge` (§7.1).
 
-/// Placeholder for the `AccesskitBridge` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
-#[derive(Debug)]
-pub struct AccesskitBridge;
+use accesskit::TreeUpdate;
+use obscur_accessibility::event::{AccessibilityAction, AccessibilityFocus};
+use obscur_accessibility::port::AccessibilityBridge;
+use obscur_accessibility::tree::{SemanticSnapshot, SemanticUpdate};
+use obscur_identity::NodeId;
+
+use crate::conversion::TreeUpdateConverter;
+
+/// A host-driven [`AccessibilityBridge`] backed by AccessKit (spec §7.1, §2.7).
+///
+/// This adapter **converts** the domain semantic tree into AccessKit types and
+/// **stores** the latest [`TreeUpdate`]; it does not own a platform accessibility
+/// connection itself. The platform push lives in the host: an `accesskit_winit`
+/// or `accesskit_unix` adapter belongs to the windowing host, which feeds this
+/// bridge's [`last_tree_update`](Self::last_tree_update) into that platform
+/// adapter and, in the opposite direction, converts each inbound
+/// [`accesskit::ActionRequest`] (via
+/// [`ActionConverter::from_accesskit`](crate::conversion::ActionConverter::from_accesskit))
+/// into an [`AccessibilityAction`] it enqueues with [`push_action`](Self::push_action).
+/// Keeping the platform loop in the host preserves the adapter layering
+/// (`adapter → foundation + domain port + external implementation`) and keeps
+/// this crate free of any OS or event-loop dependency.
+///
+/// The determinism boundary of spec §7.1 lives in the conversion: identical
+/// snapshots always produce identical [`TreeUpdate`]s regardless of platform.
+#[derive(Debug, Default)]
+pub struct AccessKitBridge {
+    converter: TreeUpdateConverter,
+    last_update: Option<TreeUpdate>,
+    pending_actions: Vec<AccessibilityAction>,
+    announcements: Vec<(Box<str>, bool)>,
+    focus_target: Option<NodeId>,
+    dirty: bool,
+}
+
+impl AccessKitBridge {
+    /// Creates an empty bridge with no stored update, focus, or queued work.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns the latest converted [`TreeUpdate`], which the host feeds to its
+    /// platform AccessKit adapter, or [`None`] if none has been produced yet.
+    ///
+    /// A push whose snapshot had no root produces no update (the conversion's
+    /// [`MissingRoot`](crate::error::AccessKitBridgeError::MissingRoot) is
+    /// swallowed here); the previous update, if any, is retained.
+    #[must_use]
+    pub const fn last_tree_update(&self) -> Option<&TreeUpdate> {
+        self.last_update.as_ref()
+    }
+
+    /// Returns whether an incremental [`apply_update`](Self::apply_update)
+    /// arrived since the last full push.
+    ///
+    /// This adapter does not synthesise incremental AccessKit updates; a dirty
+    /// bridge signals the host to re-push a fresh [`SemanticSnapshot`] through
+    /// [`update_tree`](Self::update_tree), which clears the flag.
+    #[must_use]
+    pub const fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    /// Enqueues an inbound assistive-technology `action` for the domain to
+    /// drain via [`poll_actions`](AccessibilityBridge::poll_actions).
+    ///
+    /// The host calls this after translating a platform
+    /// [`accesskit::ActionRequest`] into a domain [`AccessibilityAction`].
+    pub fn push_action(&mut self, action: AccessibilityAction) {
+        self.pending_actions.push(action);
+    }
+
+    /// Drains and returns the buffered live-region announcements in arrival
+    /// order, each paired with its `assertive` flag.
+    ///
+    /// The host consumes these and raises the corresponding AccessKit live
+    /// events on the platform.
+    #[must_use]
+    pub fn take_announcements(&mut self) -> Vec<(Box<str>, bool)> {
+        std::mem::take(&mut self.announcements)
+    }
+}
+
+impl AccessibilityBridge for AccessKitBridge {
+    fn update_tree(&mut self, snapshot: &SemanticSnapshot) {
+        // A rootless snapshot cannot form an AccessKit tree; swallow the
+        // `MissingRoot` error and keep the previous update rather than panic.
+        if let Ok(update) = self
+            .converter
+            .convert_with_focus(snapshot, self.focus_target)
+        {
+            self.last_update = Some(update);
+            self.dirty = false;
+        }
+    }
+
+    fn apply_update(&mut self, _update: &SemanticUpdate) {
+        // The adapter does not build partial AccessKit updates; it marks itself
+        // dirty so the host re-pushes a full snapshot on the next frame.
+        self.dirty = true;
+    }
+
+    fn set_focus(&mut self, focus: &AccessibilityFocus) {
+        self.focus_target = focus.focused();
+        // Reflect focus into the pending update immediately so a host that reads
+        // `last_tree_update` before the next push sees the new focus. AccessKit
+        // requires `focus` to name a real node, so a cleared focus falls back to
+        // the tree root.
+        if let Some(update) = self.last_update.as_mut() {
+            let node = self.converter.node_converter();
+            update.focus = match focus.focused() {
+                Some(id) => node.node_id(id),
+                None => update.tree.as_ref().map_or(update.focus, |tree| tree.root),
+            };
+        }
+    }
+
+    fn announce(&mut self, message: &str, assertive: bool) {
+        self.announcements.push((Box::from(message), assertive));
+    }
+
+    fn poll_actions(&mut self) -> Vec<AccessibilityAction> {
+        std::mem::take(&mut self.pending_actions)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use accesskit::NodeId as AkNodeId;
+    use obscur_accessibility::semantic::{SemanticAction, SemanticNode, SemanticRole};
+    use obscur_accessibility::tree::SemanticTree;
+
+    fn snapshot() -> SemanticSnapshot {
+        let mut tree = SemanticTree::new();
+        tree.insert(
+            SemanticNode::new(NodeId::from_raw(1), SemanticRole::Group),
+            None,
+        );
+        tree.insert(
+            SemanticNode::new(NodeId::from_raw(2), SemanticRole::Button).with_name("OK"),
+            Some(NodeId::from_raw(1)),
+        );
+        tree.set_root(NodeId::from_raw(1));
+        SemanticSnapshot::from_tree(&tree)
+    }
+
+    #[test]
+    fn update_tree_stores_last_update() {
+        let mut bridge = AccessKitBridge::new();
+        assert!(bridge.last_tree_update().is_none());
+        bridge.update_tree(&snapshot());
+        let update = bridge.last_tree_update().expect("stored");
+        assert_eq!(update.nodes.len(), 2);
+        assert_eq!(update.focus, AkNodeId(1));
+    }
+
+    #[test]
+    fn rootless_snapshot_leaves_last_update_none() {
+        let mut tree = SemanticTree::new();
+        tree.insert(
+            SemanticNode::new(NodeId::from_raw(1), SemanticRole::Group),
+            None,
+        );
+        let mut bridge = AccessKitBridge::new();
+        bridge.update_tree(&SemanticSnapshot::from_tree(&tree));
+        assert!(bridge.last_tree_update().is_none());
+    }
+
+    #[test]
+    fn poll_actions_drains_pushed_actions() {
+        let mut bridge = AccessKitBridge::new();
+        bridge.push_action(AccessibilityAction::new(
+            NodeId::from_raw(2),
+            SemanticAction::Activate,
+        ));
+        let drained = bridge.poll_actions();
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].target(), NodeId::from_raw(2));
+        assert!(bridge.poll_actions().is_empty());
+    }
+
+    #[test]
+    fn announce_buffers_until_taken() {
+        let mut bridge = AccessKitBridge::new();
+        bridge.announce("saved", false);
+        bridge.announce("error", true);
+        let taken = bridge.take_announcements();
+        assert_eq!(taken.len(), 2);
+        assert_eq!(taken[0], (Box::from("saved"), false));
+        assert_eq!(taken[1], (Box::from("error"), true));
+        assert!(bridge.take_announcements().is_empty());
+    }
+
+    #[test]
+    fn apply_update_marks_dirty_and_push_clears_it() {
+        let mut bridge = AccessKitBridge::new();
+        bridge.update_tree(&snapshot());
+        assert!(!bridge.is_dirty());
+        bridge.apply_update(&SemanticUpdate::NodeChanged(NodeId::from_raw(2)));
+        assert!(bridge.is_dirty());
+        bridge.update_tree(&snapshot());
+        assert!(!bridge.is_dirty());
+    }
+
+    #[test]
+    fn set_focus_updates_stored_focus() {
+        let mut bridge = AccessKitBridge::new();
+        bridge.update_tree(&snapshot());
+        bridge.set_focus(&AccessibilityFocus::moved_to(NodeId::from_raw(2), None));
+        assert_eq!(bridge.last_tree_update().expect("stored").focus, AkNodeId(2));
+    }
+
+    #[test]
+    fn set_focus_persists_across_next_push() {
+        let mut bridge = AccessKitBridge::new();
+        bridge.set_focus(&AccessibilityFocus::moved_to(NodeId::from_raw(2), None));
+        bridge.update_tree(&snapshot());
+        assert_eq!(bridge.last_tree_update().expect("stored").focus, AkNodeId(2));
+    }
+
+    #[test]
+    fn cleared_focus_falls_back_to_root() {
+        let mut bridge = AccessKitBridge::new();
+        bridge.update_tree(&snapshot());
+        bridge.set_focus(&AccessibilityFocus::moved_to(NodeId::from_raw(2), None));
+        bridge.set_focus(&AccessibilityFocus::cleared(Some(NodeId::from_raw(2))));
+        assert_eq!(bridge.last_tree_update().expect("stored").focus, AkNodeId(1));
+    }
+
+    #[test]
+    fn is_object_safe() {
+        let _: Box<dyn AccessibilityBridge> = Box::new(AccessKitBridge::new());
+    }
+}
