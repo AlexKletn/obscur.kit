@@ -1,4 +1,4 @@
-//! Default theme package: tokens, presets and assets.
+//! Default theme package: tokens, presets and assets (spec §2.6).
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
