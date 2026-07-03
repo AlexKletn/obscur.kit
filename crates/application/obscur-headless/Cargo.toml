@@ -12,5 +12,11 @@ workspace = true
 
 [dependencies]
 obscur-identity = { workspace = true }
+obscur-geometry = { workspace = true }
 obscur-task = { workspace = true }
+obscur-view = { workspace = true }
+obscur-tree = { workspace = true }
+obscur-style = { workspace = true }
+obscur-layout = { workspace = true }
+obscur-scene = { workspace = true }
 obscur-runtime = { workspace = true }
