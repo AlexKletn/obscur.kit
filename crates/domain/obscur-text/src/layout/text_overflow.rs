@@ -1,6 +1,47 @@
-//! TextOverflow (skeleton stub for the spec-defined entity; not yet implemented).
+//! What happens to text that does not fit its available width (spec §5.10).
 
-/// Placeholder for the `TextOverflow` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
-#[derive(Debug)]
-pub struct TextOverflow;
+/// How a line that overflows its available width is handled (spec §5.10).
+///
+/// This is a *policy* — the layout records the intent, and a downstream painter
+/// (an adapter) enforces it when rasterising. [`Visible`](Self::Visible) lets the
+/// overflow spill past the edge, [`Clip`](Self::Clip) hard-cuts it at the
+/// boundary, and [`Ellipsis`](Self::Ellipsis) replaces the trailing overflow with
+/// an ellipsis. `Clip` and `Ellipsis` both truncate, which callers test with
+/// [`is_truncating`](Self::is_truncating).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TextOverflow {
+    /// Let overflowing text spill visibly past the available width.
+    Visible,
+    /// Hard-clip overflowing text at the boundary. The default.
+    #[default]
+    Clip,
+    /// Truncate overflowing text and mark the cut with an ellipsis.
+    Ellipsis,
+}
+
+impl TextOverflow {
+    /// Returns whether this policy truncates overflowing text — true for
+    /// [`Clip`](Self::Clip) and [`Ellipsis`](Self::Ellipsis), false for
+    /// [`Visible`](Self::Visible) (spec §5.10).
+    #[must_use]
+    pub const fn is_truncating(&self) -> bool {
+        matches!(self, Self::Clip | Self::Ellipsis)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_is_clip() {
+        assert_eq!(TextOverflow::default(), TextOverflow::Clip);
+    }
+
+    #[test]
+    fn is_truncating_covers_clip_and_ellipsis() {
+        assert!(!TextOverflow::Visible.is_truncating());
+        assert!(TextOverflow::Clip.is_truncating());
+        assert!(TextOverflow::Ellipsis.is_truncating());
+    }
+}

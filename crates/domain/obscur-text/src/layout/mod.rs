@@ -1,5 +1,5 @@
 mod line_break;
-pub use line_break::LineBreak;
+pub use line_break::{BreakKind, LineBreak};
 mod text_alignment;
 pub use text_alignment::TextAlignment;
 mod text_hit_test;
