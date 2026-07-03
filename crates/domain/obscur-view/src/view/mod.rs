@@ -10,3 +10,5 @@ mod view_node;
 pub use view_node::ViewNode;
 mod view_property;
 pub use view_property::ViewProperty;
+mod view_value;
+pub use view_value::ViewValue;
