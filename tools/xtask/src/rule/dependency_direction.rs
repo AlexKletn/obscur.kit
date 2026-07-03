@@ -9,12 +9,16 @@ const RULE: &str = "dependency-direction";
 
 const PURE_DIRS: &[&str] = &["crates/foundation", "crates/domain", "crates/application"];
 
-// External implementation crates that must stay behind adapters.
+// Platform/GPU/IO implementation crates that must stay behind adapters (spec
+// §5.6). NOTE: `taffy` is deliberately NOT here — it is a pure-Rust layout
+// ALGORITHM library, and spec §3.6 mandates its integration live *inside*
+// `obscur-layout` (`algorithm/taffy/`) with `taffy::Style`/`taffy::NodeId` kept
+// out of the public API. It is a domain algorithm dependency, not a platform
+// adapter.
 const BANNED_DEPS: &[&str] = &[
     "winit",
     "wgpu",
     "vello",
-    "taffy",
     "parley",
     "accesskit",
     "wasmtime",
