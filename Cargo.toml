@@ -36,6 +36,14 @@ obscur-layout = { path = "crates/domain/obscur-layout" }
 obscur-resources = { path = "crates/domain/obscur-resources" }
 obscur-scene = { path = "crates/domain/obscur-scene" }
 obscur-render = { path = "crates/domain/obscur-render" }
+obscur-windowing = { path = "crates/domain/obscur-windowing" }
+obscur-text = { path = "crates/domain/obscur-text" }
+obscur-motion = { path = "crates/domain/obscur-motion" }
+obscur-interaction = { path = "crates/domain/obscur-interaction" }
+obscur-routing = { path = "crates/domain/obscur-routing" }
+obscur-accessibility = { path = "crates/domain/obscur-accessibility" }
+obscur-data-transfer = { path = "crates/domain/obscur-data-transfer" }
+obscur-system = { path = "crates/domain/obscur-system" }
 # application
 obscur-runtime = { path = "crates/application/obscur-runtime" }
 obscur-headless = { path = "crates/application/obscur-headless" }
