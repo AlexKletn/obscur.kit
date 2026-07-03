@@ -7,5 +7,9 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[dependencies]
+obscur-resources = { workspace = true }
+obscur-identity = { workspace = true }
+
 [lints]
 workspace = true
