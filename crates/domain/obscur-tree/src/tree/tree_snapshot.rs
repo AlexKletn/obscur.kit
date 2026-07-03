@@ -20,7 +20,7 @@ use super::RetainedTree;
 /// live tree advances its version on every structural mutation, a consumer can
 /// compare [`version`](Self::version) against the live tree's current version to
 /// decide whether its snapshot is out of date.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TreeSnapshot {
     /// Owned copies of the live node records, keyed by their stable `NodeId`.
     nodes: HashMap<NodeId, RetainedNode>,
