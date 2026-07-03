@@ -7,5 +7,12 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[dependencies]
+obscur-render = { workspace = true }
+obscur-scene = { workspace = true }
+obscur-geometry = { workspace = true }
+obscur-capability = { workspace = true }
+tiny-skia = "0.11"
+
 [lints]
 workspace = true
