@@ -242,6 +242,8 @@ version = "0.0.0"
 name = "obscur-view"
 version = "0.0.0"
 dependencies = [
+ "obscur-capability",
+ "obscur-diagnostics",
  "obscur-identity",
 ]
 
