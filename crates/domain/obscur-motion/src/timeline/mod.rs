@@ -1,5 +1,5 @@
 mod timeline;
-pub use timeline::Timeline;
+pub use timeline::{PlaybackDirection, RepeatCount, Timeline};
 mod timeline_id;
 pub use timeline_id::TimelineId;
 mod timeline_position;
