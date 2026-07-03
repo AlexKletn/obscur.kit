@@ -1,6 +1,110 @@
-//! TreeChangeSet (skeleton stub for the spec-defined entity; not yet implemented).
+//! `TreeChangeSet`: the ordered batch of staged tree changes.
 
-/// Placeholder for the `TreeChangeSet` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
-#[derive(Debug)]
-pub struct TreeChangeSet;
+use super::TreeChange;
+
+/// An ordered, staged batch of [`TreeChange`]s.
+///
+/// This is pure data: it never touches a tree. It is the payload a
+/// [`TreeTransaction`](super::TreeTransaction) accumulates while it is being
+/// built, and — later, as a planned integration — the shape the reconciler will
+/// emit instead of mutating the tree directly.
+///
+/// Alongside the change list it tracks how many
+/// [`CreateNode`](TreeChange::CreateNode) operations have been staged, so the
+/// transaction can hand out stable [`StagedRef::New`](super::StagedRef::New)
+/// indices in stage order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TreeChangeSet {
+    /// The staged operations, in application order.
+    changes: Vec<TreeChange>,
+    /// Number of [`CreateNode`](TreeChange::CreateNode) ops staged so far.
+    creations: u32,
+}
+
+impl TreeChangeSet {
+    /// Creates an empty change set.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Appends a change, keeping the creation counter in sync.
+    ///
+    /// Internal append path used by [`TreeTransaction`](super::TreeTransaction);
+    /// callers stage changes through the transaction's typed methods rather
+    /// than pushing raw [`TreeChange`]s here.
+    pub(crate) fn push(&mut self, change: TreeChange) {
+        if matches!(change, TreeChange::CreateNode { .. }) {
+            self.creations = self.creations.saturating_add(1);
+        }
+        self.changes.push(change);
+    }
+
+    /// Returns the staged changes in application order.
+    #[must_use]
+    pub fn changes(&self) -> &[TreeChange] {
+        &self.changes
+    }
+
+    /// Returns an iterator over the staged changes in application order.
+    pub fn iter(&self) -> impl Iterator<Item = &TreeChange> {
+        self.changes.iter()
+    }
+
+    /// Returns the number of staged changes.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.changes.len()
+    }
+
+    /// Returns `true` if no changes have been staged.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.changes.is_empty()
+    }
+
+    /// Returns the number of [`CreateNode`](TreeChange::CreateNode) operations
+    /// staged, i.e. the number of distinct
+    /// [`StagedRef::New`](super::StagedRef::New) indices in use.
+    #[must_use]
+    pub fn creation_count(&self) -> u32 {
+        self.creations
+    }
+
+    /// Consumes the set, yielding the owned change list for application.
+    pub(crate) fn into_changes(self) -> Vec<TreeChange> {
+        self.changes
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::node::NodeKind;
+    use crate::transaction::StagedRef;
+    use obscur_identity::NodeId;
+
+    #[test]
+    fn empty_by_default() {
+        let set = TreeChangeSet::new();
+        assert!(set.is_empty());
+        assert_eq!(set.len(), 0);
+        assert_eq!(set.creation_count(), 0);
+    }
+
+    #[test]
+    fn push_tracks_creations_only() {
+        let mut set = TreeChangeSet::new();
+        set.push(TreeChange::CreateNode {
+            kind: NodeKind::Root,
+            parent: StagedRef::Existing(NodeId::from_raw(1)),
+            index: 0,
+        });
+        set.push(TreeChange::RemoveSubtree {
+            target: NodeId::from_raw(2),
+        });
+        assert_eq!(set.len(), 2);
+        assert_eq!(set.creation_count(), 1);
+        assert_eq!(set.iter().count(), 2);
+    }
+}
