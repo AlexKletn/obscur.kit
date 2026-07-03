@@ -1,6 +1,109 @@
-//! ResourceVersion (skeleton stub for the spec-defined entity; not yet implemented).
+//! Monotonic version of a resource's content (spec §5.15 versioning).
 
-/// Placeholder for the `ResourceVersion` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
-#[derive(Debug)]
-pub struct ResourceVersion;
+use obscur_identity::VersionStamp;
+
+/// The monotonically increasing version of a resource's content (spec §5.15).
+///
+/// Every time a resource is (re)loaded, its version advances. Versioning enables
+/// hot reload and **stale-job rejection**: a load job carries the version it was
+/// issued for, and when it completes the [`crate::hub`] compares that version
+/// against the resource's current version. A job whose version is older than the
+/// resource's current version is rejected as stale, so a superseded reload can
+/// never overwrite a newer result.
+///
+/// This composes [`VersionStamp`] rather than reimplementing it. Version `0` is
+/// reserved to mean *unversioned*; the first real version is
+/// [`ResourceVersion::initial`], which starts at `1`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ResourceVersion {
+    /// The underlying version stamp.
+    pub stamp: VersionStamp,
+}
+
+impl ResourceVersion {
+    /// The initial version for a freshly tracked resource: raw `1`.
+    ///
+    /// Raw `0` is reserved to denote an *unversioned* stamp, so real content
+    /// versions begin at `1`.
+    #[must_use]
+    pub const fn initial() -> Self {
+        Self {
+            stamp: VersionStamp::from_raw(1),
+        }
+    }
+
+    /// Returns the next version, advancing the content version by one (spec
+    /// §5.15). Used when a resource is reloaded.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        Self {
+            stamp: self.stamp.bump(),
+        }
+    }
+
+    /// Returns the underlying [`VersionStamp`].
+    #[must_use]
+    pub const fn stamp(self) -> VersionStamp {
+        self.stamp
+    }
+
+    /// Returns whether this version is strictly newer than `other` (spec §5.15
+    /// stale-job rejection: a job older than the current version is rejected).
+    #[must_use]
+    pub fn is_newer_than(self, other: Self) -> bool {
+        self.stamp > other.stamp
+    }
+}
+
+impl Default for ResourceVersion {
+    /// The default version is [`ResourceVersion::initial`].
+    fn default() -> Self {
+        Self::initial()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn initial_starts_at_one() {
+        assert_eq!(ResourceVersion::initial().stamp().raw(), 1);
+        assert_eq!(ResourceVersion::default(), ResourceVersion::initial());
+    }
+
+    #[test]
+    fn next_advances_by_one() {
+        let v = ResourceVersion::initial();
+        assert_eq!(v.next().stamp().raw(), 2);
+        assert_eq!(v.next().next().stamp().raw(), 3);
+    }
+
+    #[test]
+    fn ordering_is_monotonic() {
+        let v1 = ResourceVersion::initial();
+        let v2 = v1.next();
+        assert!(v1 < v2);
+        assert!(v2 > v1);
+    }
+
+    #[test]
+    fn is_newer_than_compares_versions() {
+        let old = ResourceVersion::initial();
+        let new = old.next();
+        assert!(new.is_newer_than(old));
+        assert!(!old.is_newer_than(new));
+        assert!(!old.is_newer_than(old));
+    }
+
+    #[test]
+    fn stale_job_rejection() {
+        // A resource is now at its third version.
+        let current = ResourceVersion::initial().next().next();
+        // A job issued for the first version completes late; it is stale.
+        let stale_job = ResourceVersion::initial();
+        assert!(!stale_job.is_newer_than(current));
+        // A job for a version at least as new supersedes.
+        assert!(current.next().is_newer_than(current));
+    }
+}
