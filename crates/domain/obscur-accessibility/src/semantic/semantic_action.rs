@@ -1,6 +1,73 @@
-//! SemanticAction (skeleton stub for the spec-defined entity; not yet implemented).
+//! An action an accessibility node supports or can receive (spec §7.1).
 
-/// Placeholder for the `SemanticAction` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
-#[derive(Debug)]
-pub struct SemanticAction;
+/// An accessibility action a node supports or can receive (spec §7.1 actions).
+///
+/// Accessibility actions enter the same command/event model as ordinary input:
+/// an assistive technology requesting one produces the same kind of command an
+/// ordinary pointer or key press would. This enumerates the common cross-platform
+/// set that platform adapters map onto native action APIs.
+///
+/// [`is_value_change`](Self::is_value_change) groups the actions that mutate a
+/// node's value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum SemanticAction {
+    /// Activate the node (click or press). The default.
+    #[default]
+    Activate,
+    /// Give the node keyboard focus.
+    Focus,
+    /// Increase the node's value by one step.
+    Increment,
+    /// Decrease the node's value by one step.
+    Decrement,
+    /// Expand the node to reveal its content.
+    Expand,
+    /// Collapse the node to hide its content.
+    Collapse,
+    /// Scroll the node into the visible viewport.
+    ScrollIntoView,
+    /// Dismiss the node (e.g. close a dialog or tooltip).
+    Dismiss,
+    /// Show the node's context menu.
+    ShowContextMenu,
+    /// Set the node's value directly.
+    SetValue,
+    /// Select the node within its container.
+    Select,
+    /// Copy the node's content to the clipboard.
+    Copy,
+    /// Paste clipboard content into the node.
+    Paste,
+    /// Cut the node's content to the clipboard.
+    Cut,
+}
+
+impl SemanticAction {
+    /// Returns whether this action mutates the node's value (spec §7.1):
+    /// [`Increment`](Self::Increment), [`Decrement`](Self::Decrement), and
+    /// [`SetValue`](Self::SetValue).
+    #[must_use]
+    pub const fn is_value_change(&self) -> bool {
+        matches!(self, Self::Increment | Self::Decrement | Self::SetValue)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_is_activate() {
+        assert_eq!(SemanticAction::default(), SemanticAction::Activate);
+    }
+
+    #[test]
+    fn value_change_actions() {
+        assert!(SemanticAction::Increment.is_value_change());
+        assert!(SemanticAction::Decrement.is_value_change());
+        assert!(SemanticAction::SetValue.is_value_change());
+        assert!(!SemanticAction::Activate.is_value_change());
+        assert!(!SemanticAction::Focus.is_value_change());
+        assert!(!SemanticAction::Copy.is_value_change());
+    }
+}
