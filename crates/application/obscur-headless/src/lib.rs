@@ -2,8 +2,8 @@
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-mod deterministic;
-mod host;
+pub mod deterministic;
+pub mod host;
 
 pub use deterministic::DeterministicClock;
 pub use host::HeadlessHost;
