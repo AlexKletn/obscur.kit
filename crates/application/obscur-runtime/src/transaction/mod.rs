@@ -1,6 +1,8 @@
 //! Transaction module.
 mod provisional_transaction;
 pub use provisional_transaction::ProvisionalTransaction;
+mod reconcile_enactor;
+pub use reconcile_enactor::ReconcileEnactor;
 mod transaction_commit;
 pub use transaction_commit::TransactionCommit;
 mod transaction_error;

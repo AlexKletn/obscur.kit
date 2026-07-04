@@ -31,6 +31,7 @@ use crate::orchestration::{
     StyleMatchingCoordinator,
 };
 use crate::scheduler::{BackpressureDecision, FrameScheduler};
+use crate::transaction::ReconcileEnactor;
 
 /// The embeddable UI runtime: the application-core **integrator** the catalog
 /// mandates (spec §1.4, §3.4–§3.7).
@@ -74,6 +75,13 @@ pub struct UiRuntime {
     scene: Scene,
     /// Turns the desired view tree into retained-tree structure.
     reconciler: Reconciler,
+    /// Enacts each frame's root reconcile through the atomic transaction commit
+    /// boundary (spec §3.2): it stages the reconcile as a validated
+    /// [`UiTransaction`](crate::transaction::UiTransaction), commits it, and
+    /// advances the commit [`VersionStamp`](obscur_identity::VersionStamp) when
+    /// the tree actually changed — so the live tree mutation flows through the
+    /// transaction layer rather than calling `reconcile_root` directly.
+    enactor: ReconcileEnactor,
     /// Matches authored stylesheets (pseudo-state aware) into cascade inputs.
     matcher: StyleMatchingCoordinator,
     /// Resolves computed styles over the retained tree.
@@ -150,6 +158,7 @@ impl UiRuntime {
             tree: RetainedTree::new(),
             scene: Scene::new(),
             reconciler: Reconciler::new(),
+            enactor: ReconcileEnactor::new(),
             matcher: StyleMatchingCoordinator::new(),
             style: StyleCoordinator::new(),
             layout: LayoutCoordinator::new(),
@@ -261,8 +270,19 @@ impl UiRuntime {
         // 1. Reconcile the desired view into the retained tree (structural
         //    reasons only; input/animation/window frames leave structure alone,
         //    for which reconcile would be an idempotent no-op).
+        //
+        //    The mutation flows through the transaction commit boundary (spec
+        //    §3.2): the enactor stages the reconcile as a validated
+        //    `UiTransaction`, commits it atomically, and advances the commit
+        //    version when the tree actually changed. `reconciled` is derived from
+        //    whether the commit carried any operation — identical to the previous
+        //    `!plan.is_empty()`.
         let reconciled = if plan.reconcile() {
-            !self.reconciler.reconcile_root(&mut self.tree, desired).is_empty()
+            let commit = self
+                .enactor
+                .commit_root(&self.reconciler, &mut self.tree, desired)
+                .expect("a root reconcile is a single, structurally-valid ReplaceRoot");
+            !commit.is_empty()
         } else {
             false
         };
@@ -766,6 +786,21 @@ impl UiRuntime {
         &self.tree
     }
 
+    /// Returns the version stamped at the most recent frame that committed a real
+    /// tree change through the transaction boundary (spec §3.2).
+    ///
+    /// It advances by one each time a frame's reconcile actually mutates the
+    /// retained tree and is unchanged by an idempotent (no-op) reconcile or a
+    /// frame that skips the reconcile phase — so a host can observe that the live
+    /// tree mutation went through a validated, atomic [`UiTransaction`] commit
+    /// rather than a bare `reconcile_root`.
+    ///
+    /// [`UiTransaction`]: crate::transaction::UiTransaction
+    #[must_use]
+    pub fn commit_version(&self) -> obscur_identity::VersionStamp {
+        self.enactor.version()
+    }
+
     /// Builds the semantic accessibility tree from the live retained tree
     /// (spec §7.1).
     ///
@@ -976,6 +1011,44 @@ mod tests {
         let first_commands: Vec<_> = first.snapshot().display_list().commands().to_vec();
         let second_commands: Vec<_> = second.snapshot().display_list().commands().to_vec();
         assert_eq!(first_commands, second_commands);
+    }
+
+    #[test]
+    fn tree_change_commits_through_the_transaction_boundary() {
+        // S2: the live frame's tree mutation flows through the atomic transaction
+        // commit boundary (spec §3.2), observable via the commit version stamp —
+        // while the produced frame output stays identical.
+        use obscur_identity::VersionStamp;
+
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let view = counter_view();
+        let sheet = counter_stylesheet();
+        let sheets = std::slice::from_ref(&sheet);
+
+        // No frame has committed yet.
+        assert_eq!(runtime.commit_version(), VersionStamp::from_raw(0));
+
+        // First frame populates the tree: the reconcile is committed, so the
+        // version stamp advances — proving the mutation went through the commit.
+        let first = runtime.render_now(&view, sheets);
+        assert!(first.reconciled());
+        assert_eq!(runtime.commit_version(), VersionStamp::from_raw(1));
+
+        // A second frame over the same view is an idempotent reconcile: it commits
+        // empty and does not advance the version, yet still produces the exact same
+        // display list as the first frame (behavior is unchanged by the boundary).
+        let second = runtime.render_now(&view, sheets);
+        assert_eq!(
+            runtime.commit_version(),
+            VersionStamp::from_raw(1),
+            "an idempotent reconcile does not advance the commit version"
+        );
+        let first_commands: Vec<_> = first.snapshot().display_list().commands().to_vec();
+        let second_commands: Vec<_> = second.snapshot().display_list().commands().to_vec();
+        assert_eq!(
+            first_commands, second_commands,
+            "the committed path yields the same display list as before"
+        );
     }
 
     #[test]

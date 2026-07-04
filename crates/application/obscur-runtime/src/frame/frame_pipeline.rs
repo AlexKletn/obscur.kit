@@ -10,6 +10,7 @@ use crate::orchestration::{
     root_font_size, LayoutCoordinator, SceneCoordinator, StyleCoordinator, StyleInputs,
     StyleMatchingCoordinator,
 };
+use crate::transaction::ReconcileEnactor;
 
 use super::{FrameContext, FrameResult};
 
@@ -93,9 +94,9 @@ impl FramePipeline {
         desired: &View,
         inputs: &StyleInputs,
     ) -> FrameResult {
-        // 1. Reconcile: update the retained tree from the desired tree.
-        let plan = self.reconciler.reconcile_root(tree, desired);
-        let reconciled = !plan.is_empty();
+        // 1. Reconcile: update the retained tree through the transaction commit
+        //    boundary (spec §3.2) rather than mutating it directly.
+        let reconciled = self.commit_reconcile(tree, desired);
 
         // 2-4. Style over caller-supplied inputs, layout, and compose.
         self.finish_frame(tree, scene, ctx, reconciled, inputs)
@@ -126,9 +127,9 @@ impl FramePipeline {
         desired: &View,
         sheets: &[Stylesheet],
     ) -> FrameResult {
-        // 1. Reconcile: update the retained tree from the desired tree.
-        let plan = self.reconciler.reconcile_root(tree, desired);
-        let reconciled = !plan.is_empty();
+        // 1. Reconcile: update the retained tree through the transaction commit
+        //    boundary (spec §3.2) rather than mutating it directly.
+        let reconciled = self.commit_reconcile(tree, desired);
 
         // 2. Match: build cascade inputs from the sheets against the fresh tree,
         //    gating `@media`/`@container` rules by this frame's viewport (§4.13).
@@ -138,6 +139,28 @@ impl FramePipeline {
 
         // 3-5. Style over the matched inputs, layout, and compose.
         self.finish_frame(tree, scene, ctx, reconciled, &inputs)
+    }
+
+    /// Reconciles `tree` toward `desired` **through** the atomic transaction
+    /// commit boundary (spec §3.2) and returns whether the tree changed.
+    ///
+    /// This is the single per-frame tree-mutation point. Rather than calling
+    /// [`Reconciler::reconcile_root`] directly, it hands the reconcile to a
+    /// [`ReconcileEnactor`], which stages it as a validated
+    /// [`UiTransaction`](crate::transaction::UiTransaction), commits it
+    /// atomically, and (on a real change) advances the commit version — with the
+    /// reconcile itself as the commit's effect. The retained tree and every
+    /// downstream result are therefore **identical** to the previous direct call;
+    /// only the commit path differs.
+    ///
+    /// The pipeline holds no cross-frame state, so the enactor is constructed per
+    /// call; the runtime ([`UiRuntime`](crate::UiRuntime)) owns a
+    /// persistent enactor whose version advances across frames.
+    fn commit_reconcile(&self, tree: &mut RetainedTree, desired: &View) -> bool {
+        let commit = ReconcileEnactor::new()
+            .commit_root(&self.reconciler, tree, desired)
+            .expect("a root reconcile is a single, structurally-valid ReplaceRoot");
+        !commit.is_empty()
     }
 
     /// Runs the shared style → layout → compose tail of a frame over an
