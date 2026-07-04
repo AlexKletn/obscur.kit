@@ -11,6 +11,7 @@ use obscur_interaction::spatial::{HitTest, SpatialIndex};
 use obscur_motion::scheduler::MotionScheduler;
 use obscur_motion::timeline::{Timeline, TimelineId};
 use obscur_motion::track::KeyframeTrack;
+use obscur_motion::transition::TransitionInterruption;
 use obscur_scene::scene::{Scene, SceneSnapshot};
 use obscur_style::computed::ComputedValue;
 use obscur_style::matching::{MediaEnvironment, Stylesheet};
@@ -265,17 +266,34 @@ impl UiRuntime {
     }
 
     /// Starts an animation of `property` on `node`, sampling `track` over
-    /// `duration` logical seconds and lowering samples per `kind`; returns the
-    /// [`TimelineId`] driving it (spec §4.17).
+    /// `duration` logical seconds and lowering samples per `kind`, reconciling any
+    /// in-flight animation of the same target per `interruption`; returns the
+    /// [`TimelineId`] that drives the resulting motion (spec §4.17
+    /// "interruption / reversal / blend").
     ///
     /// A fresh, already-*started* [`Timeline`] is registered with the owned
     /// [`MotionScheduler`] and a matching [`AnimationBinding`] is recorded, so the
     /// next frame's overlay pass samples the track at the timeline's progress and
-    /// writes the result onto `node`'s computed style before layout/paint. Any
-    /// prior binding for the **same** `node`+`property` is replaced (and its
-    /// timeline removed), so re-animating a target supersedes the old motion
-    /// rather than fighting it. A [`FrameReason::Animation`] frame is requested so
-    /// the animation actually reaches paint.
+    /// writes the result onto `node`'s computed style before layout/paint.
+    ///
+    /// When a prior binding for the **same** `node`+`property` is still present,
+    /// the [`TransitionInterruption`] policy — not a blind remove — decides what
+    /// happens (§4.17):
+    ///
+    /// - [`Blend`](TransitionInterruption::Blend) (the default): the new track is
+    ///   re-based to begin at the element's **current sampled value**, so the
+    ///   redirect is seamless with no visible snap.
+    /// - [`Reverse`](TransitionInterruption::Reverse): the new track plays from the
+    ///   current value back toward the interrupted transition's origin.
+    /// - [`Restart`](TransitionInterruption::Restart): the incoming track runs from
+    ///   its authored start (the element may visibly jump).
+    /// - [`Ignore`](TransitionInterruption::Ignore): the in-flight animation is
+    ///   kept and the incoming request dropped; the existing [`TimelineId`] is
+    ///   returned and no new frame is scheduled.
+    ///
+    /// For every case except [`Ignore`](TransitionInterruption::Ignore) the prior
+    /// timeline is removed, a new one is started, and a [`FrameReason::Animation`]
+    /// frame is requested so the animation reaches paint.
     pub fn animate(
         &mut self,
         node: NodeId,
@@ -283,7 +301,43 @@ impl UiRuntime {
         track: KeyframeTrack,
         duration: f32,
         kind: AnimatedKind,
+        interruption: TransitionInterruption,
     ) -> TimelineId {
+        // Resolve the track to actually run against any animation already in
+        // flight for this exact target (spec §4.17 interruption).
+        let existing = self
+            .animations
+            .iter()
+            .position(|binding| binding.node() == node && binding.property() == property);
+
+        let resolved_track = if let Some(index) = existing {
+            let prior = &self.animations[index];
+            // The current on-screen value: the prior track sampled at its
+            // timeline's progress (a finished/pruned timeline holds t == 1.0).
+            let progress = self
+                .motion
+                .active()
+                .get(prior.timeline())
+                .map_or(1.0, Timeline::progress);
+            let current = MotionCoordinator::sample_keyframes(prior.track(), progress);
+            let origin = MotionCoordinator::sample_keyframes(prior.track(), 0.0);
+            match (current, origin) {
+                // Apply the interruption policy from the prior track's sampled
+                // values. `None` means `Ignore` — keep the in-flight animation.
+                (Some(current), Some(origin)) => {
+                    match interruption.resolve_track(&track, current, origin) {
+                        Some(resolved) => resolved,
+                        None => return prior.timeline(),
+                    }
+                }
+                // A degenerate (empty) prior track cannot be sampled; fall back to
+                // the incoming track verbatim.
+                _ => track,
+            }
+        } else {
+            track
+        };
+
         // Supersede any existing animation of the same target: pull its timeline
         // out of the scheduler, then drop its binding.
         while let Some(index) = self
@@ -302,7 +356,7 @@ impl UiRuntime {
         timeline.start();
         self.motion.register(timeline);
         self.animations
-            .push(AnimationBinding::new(id, node, property, track, kind));
+            .push(AnimationBinding::new(id, node, property, resolved_track, kind));
 
         self.request_frame(FrameReason::Animation);
         id
@@ -1229,6 +1283,7 @@ mod tests {
             scalar_track(0.0, 100.0),
             1.0,
             AnimatedKind::LengthPx,
+            TransitionInterruption::Blend,
         );
         assert_eq!(runtime.active_animations(), 1, "one running animation");
 
@@ -1281,6 +1336,7 @@ mod tests {
             scalar_track(0.0, 100.0),
             1.0,
             AnimatedKind::LengthPx,
+            TransitionInterruption::Blend,
         );
         assert!(
             runtime.has_pending_frame(),
@@ -1300,6 +1356,7 @@ mod tests {
             scalar_track(0.0, 1.0),
             1.0,
             AnimatedKind::Number,
+            TransitionInterruption::Blend,
         );
 
         let mut computed = ComputedStyles::new();
@@ -1335,6 +1392,7 @@ mod tests {
             scalar_track(0.0, 100.0),
             1.0,
             AnimatedKind::LengthPx,
+            TransitionInterruption::Blend,
         );
         // No entry for `node`: the overlay must not panic or insert one.
         let mut computed = ComputedStyles::new();
@@ -1360,6 +1418,7 @@ mod tests {
             scalar_track(0.0, 100.0),
             1.0,
             AnimatedKind::LengthPx,
+            TransitionInterruption::Blend,
         );
         assert_eq!(runtime.active_animations(), 1);
         // One advance past the duration finishes and prunes the timeline.
@@ -1381,6 +1440,7 @@ mod tests {
             scalar_track(0.0, 100.0),
             1.0,
             AnimatedKind::LengthPx,
+            TransitionInterruption::Blend,
         );
         let second = runtime.animate(
             node,
@@ -1388,9 +1448,150 @@ mod tests {
             scalar_track(0.0, 200.0),
             1.0,
             AnimatedKind::LengthPx,
+            TransitionInterruption::Blend,
         );
         assert_ne!(first, second, "each animation mints a fresh timeline id");
         // The old timeline was removed; only the new one is active.
         assert_eq!(runtime.active_animations(), 1);
+    }
+
+    // ---- Audit V3: transition interruption policy on re-animate (§4.17) ----
+
+    /// Reads the overlaid opacity for `node` after applying the motion overlay to
+    /// a fresh computed-style map holding just that node.
+    fn overlaid_opacity(runtime: &mut UiRuntime, node: NodeId) -> f32 {
+        let mut computed = ComputedStyles::new();
+        computed.insert(node, ComputedStyle::new());
+        runtime.apply_motion_overlay(&mut computed);
+        computed
+            .get(&node)
+            .and_then(ComputedStyle::opacity)
+            .expect("opacity overlaid")
+    }
+
+    #[test]
+    fn blend_reanimate_starts_from_the_current_sampled_value() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let node = NodeId::from_raw(11);
+        // Animate opacity 0 -> 1, then interrupt halfway (current ~= 0.5).
+        runtime.animate(
+            node,
+            PropertyId::Opacity,
+            scalar_track(0.0, 1.0),
+            1.0,
+            AnimatedKind::Number,
+            TransitionInterruption::Blend,
+        );
+        runtime.advance_motion(0.5);
+        assert!((overlaid_opacity(&mut runtime, node) - 0.5).abs() < 1e-6);
+
+        // Re-animate toward a *new* target 0 -> 1 with the default Blend policy.
+        runtime.animate(
+            node,
+            PropertyId::Opacity,
+            scalar_track(0.0, 1.0),
+            1.0,
+            AnimatedKind::Number,
+            TransitionInterruption::Blend,
+        );
+        // At t = 0 of the new timeline the overlay must read the *current* value
+        // (~0.5) — a seamless blend — NOT the track's original start (0.0) and
+        // NOT a snap to the target.
+        let start = overlaid_opacity(&mut runtime, node);
+        assert!(
+            (start - 0.5).abs() < 1e-6,
+            "Blend re-animate starts from the current sampled value, got {start}"
+        );
+        assert_eq!(runtime.active_animations(), 1, "one running animation");
+    }
+
+    #[test]
+    fn restart_reanimate_starts_from_the_new_track_start() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let node = NodeId::from_raw(12);
+        // Start at 0.2 -> 1.0; halfway the current value is ~0.6.
+        runtime.animate(
+            node,
+            PropertyId::Opacity,
+            scalar_track(0.2, 1.0),
+            1.0,
+            AnimatedKind::Number,
+            TransitionInterruption::Blend,
+        );
+        runtime.advance_motion(0.5);
+        assert!((overlaid_opacity(&mut runtime, node) - 0.6).abs() < 1e-6);
+
+        // Restart from a fresh 0 -> 1 track: t = 0 must read the track start (0),
+        // deliberately snapping away from the current 0.6.
+        runtime.animate(
+            node,
+            PropertyId::Opacity,
+            scalar_track(0.0, 1.0),
+            1.0,
+            AnimatedKind::Number,
+            TransitionInterruption::Restart,
+        );
+        let start = overlaid_opacity(&mut runtime, node);
+        assert!(
+            start.abs() < 1e-6,
+            "Restart re-animate starts from the new track's start, got {start}"
+        );
+    }
+
+    #[test]
+    fn ignore_reanimate_keeps_the_existing_timeline() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let node = NodeId::from_raw(13);
+        let first = runtime.animate(
+            node,
+            PropertyId::Width,
+            scalar_track(0.0, 100.0),
+            1.0,
+            AnimatedKind::LengthPx,
+            TransitionInterruption::Blend,
+        );
+        // An Ignore re-animate drops the incoming request and keeps the running
+        // timeline: the same id comes back and nothing new is registered.
+        let again = runtime.animate(
+            node,
+            PropertyId::Width,
+            scalar_track(0.0, 200.0),
+            1.0,
+            AnimatedKind::LengthPx,
+            TransitionInterruption::Ignore,
+        );
+        assert_eq!(first, again, "Ignore keeps the existing timeline id");
+        assert_eq!(runtime.active_animations(), 1);
+    }
+
+    #[test]
+    fn reverse_reanimate_plays_back_toward_the_origin() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let node = NodeId::from_raw(14);
+        // Opacity 0 -> 1, interrupted at ~0.5.
+        runtime.animate(
+            node,
+            PropertyId::Opacity,
+            scalar_track(0.0, 1.0),
+            1.0,
+            AnimatedKind::Number,
+            TransitionInterruption::Blend,
+        );
+        runtime.advance_motion(0.5);
+
+        // Reverse: the new track runs from the current value (~0.5) back to the
+        // prior origin (0). At t = 0 it holds the current value (no jump)...
+        runtime.animate(
+            node,
+            PropertyId::Opacity,
+            scalar_track(0.0, 1.0),
+            1.0,
+            AnimatedKind::Number,
+            TransitionInterruption::Reverse,
+        );
+        assert!((overlaid_opacity(&mut runtime, node) - 0.5).abs() < 1e-6);
+        // ...and after finishing it settles back at the origin (0).
+        runtime.advance_motion(1.0);
+        assert!(overlaid_opacity(&mut runtime, node).abs() < 1e-6);
     }
 }

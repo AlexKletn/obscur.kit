@@ -94,6 +94,39 @@ impl KeyframeTrack {
         Self { keyframes }
     }
 
+    /// Creates a two-stop linear track running `start` (offset `0`) to `end`
+    /// (offset `1`) — the minimal track between two endpoint values (spec §4.17).
+    ///
+    /// Used to build interruption redirects, e.g. a
+    /// [`Reverse`](crate::transition::TransitionInterruption::Reverse) that plays
+    /// the element's current value back toward the interrupted transition's
+    /// origin.
+    #[must_use]
+    pub fn from_endpoints(start: MotionValue, end: MotionValue) -> Self {
+        Self {
+            keyframes: vec![Keyframe::new(0.0, start), Keyframe::new(1.0, end)],
+        }
+    }
+
+    /// Returns a copy of this track whose first (lowest-offset) keyframe holds
+    /// `start`, leaving every other keyframe — offsets, easings and later values
+    /// — untouched (spec §4.17 "interruption / blend").
+    ///
+    /// This is the primitive a
+    /// [`Blend`](crate::transition::TransitionInterruption::Blend) interruption
+    /// uses: an incoming transition is re-based so it *begins* at the element's
+    /// current mid-animation value instead of the track's authored start,
+    /// producing a seamless redirect with no visible jump. An empty track is
+    /// returned unchanged.
+    #[must_use]
+    pub fn with_start_value(&self, start: MotionValue) -> Self {
+        let mut keyframes = self.keyframes.clone();
+        if let Some(first) = keyframes.first_mut() {
+            *first = Keyframe::new(first.offset, start).with_easing(first.easing);
+        }
+        Self { keyframes }
+    }
+
     /// Inserts `keyframe`, keeping the list sorted by offset.
     ///
     /// A keyframe with an offset equal to existing ones is inserted after them,
@@ -263,5 +296,35 @@ mod tests {
     fn is_object_safe() {
         let track: Box<dyn MotionTrack> = Box::new(KeyframeTrack::new());
         assert_eq!(track.sample(0.5), MotionValue::scalar(0.0));
+    }
+
+    #[test]
+    fn from_endpoints_is_a_linear_two_stop_track() {
+        let track = KeyframeTrack::from_endpoints(MotionValue::scalar(20.0), MotionValue::scalar(80.0));
+        assert_eq!(track.len(), 2);
+        assert_eq!(track.sample(0.0), MotionValue::scalar(20.0));
+        assert_eq!(track.sample(0.5), MotionValue::scalar(50.0));
+        assert_eq!(track.sample(1.0), MotionValue::scalar(80.0));
+    }
+
+    #[test]
+    fn with_start_value_rebases_the_first_keyframe_only() {
+        let base = KeyframeTrack::from_keyframes(vec![
+            Keyframe::new(0.0, MotionValue::scalar(0.0)).with_easing(Easing::EaseIn),
+            Keyframe::new(1.0, MotionValue::scalar(100.0)),
+        ]);
+        let rebased = base.with_start_value(MotionValue::scalar(40.0));
+        // The start value moved to 40; the target (100) and easing are preserved.
+        assert_eq!(rebased.sample(0.0), MotionValue::scalar(40.0));
+        assert_eq!(rebased.sample(1.0), MotionValue::scalar(100.0));
+        assert_eq!(rebased.keyframes()[0].easing(), Easing::EaseIn);
+        // The original is untouched.
+        assert_eq!(base.sample(0.0), MotionValue::scalar(0.0));
+    }
+
+    #[test]
+    fn with_start_value_on_empty_track_is_empty() {
+        let rebased = KeyframeTrack::new().with_start_value(MotionValue::scalar(5.0));
+        assert!(rebased.is_empty());
     }
 }
