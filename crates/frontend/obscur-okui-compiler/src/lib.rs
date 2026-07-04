@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+pub mod compile;
 pub mod lowering;
 pub mod resolution;
 pub mod symbol;

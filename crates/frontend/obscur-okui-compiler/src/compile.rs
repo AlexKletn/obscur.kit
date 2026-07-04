@@ -1,0 +1,478 @@
+//! The top-level `.okui` compilation orchestrator: sequences resolution,
+//! validation and lowering over one parsed document into UI IR (spec §2.9–§2.15).
+//!
+//! The individual passes ([`NameResolver`](crate::resolution::NameResolver),
+//! the validators in [`crate::validation`], [`UiIrLowering`]) remain usable
+//! standalone; [`Compiler`] merely runs them in order, accumulating every
+//! pass's diagnostics into one list rather than bailing on the first failure.
+
+use std::collections::HashMap;
+
+use obscur_capability::CapabilityId;
+use obscur_okui_syntax::ast::{Document, Element};
+use obscur_ui_ir::document::UiIrDocument;
+use obscur_ui_ir::source::SourceMap;
+
+use crate::lowering::{LoweringError, UiIrLowering};
+use crate::resolution::{NameResolver, ResolutionError};
+use crate::symbol::{Symbol, SymbolTable};
+use crate::typing::TypeError;
+use crate::validation::{
+    CapabilityValidator, ComponentContract, ContractValidator, ExpressionValidator,
+    ValidationDiagnostic,
+};
+
+/// A lookup from component/tag name to its [`ComponentContract`], so the
+/// [`ContractValidator`] can find the allowed surface of each element instance
+/// (spec §2.13).
+///
+/// A contract is keyed by its [`component`](ComponentContract::component) name.
+/// An element whose tag has no registered contract is left unchecked (the
+/// registry does not constrain it).
+#[derive(Debug, Clone, Default)]
+pub struct ContractRegistry {
+    contracts: HashMap<Box<str>, ComponentContract>,
+}
+
+impl ContractRegistry {
+    /// Creates an empty registry.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Registers `contract` (keyed by its component name) and returns the
+    /// registry (fluent).
+    #[must_use]
+    pub fn with(mut self, contract: ComponentContract) -> Self {
+        self.register(contract);
+        self
+    }
+
+    /// Registers `contract`, returning the contract it displaced for the same
+    /// component name, if any.
+    pub fn register(&mut self, contract: ComponentContract) -> Option<ComponentContract> {
+        self.contracts.insert(contract.component().into(), contract)
+    }
+
+    /// Returns the contract registered for `component`, if any.
+    #[must_use]
+    pub fn get(&self, component: &str) -> Option<&ComponentContract> {
+        self.contracts.get(component)
+    }
+
+    /// Returns the number of registered contracts.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.contracts.len()
+    }
+
+    /// Returns whether no contracts are registered.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.contracts.is_empty()
+    }
+}
+
+/// A single diagnostic produced by the compilation pipeline: the sum of every
+/// pass's error type, so callers see one uniform stream (spec §2.9–§2.15).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompileDiagnostic {
+    /// Name resolution failed for a reference or declaration (§2.10, §2.11).
+    Resolution(ResolutionError),
+    /// A type check failed (§2.9). Reserved for the future whole-document type
+    /// pass; the orchestrator does not emit it yet (see [`Compiler::compile`]).
+    Type(TypeError),
+    /// A static validation rule was violated — an expression, capability or
+    /// contract check (§2.10, §2.13).
+    Validation(ValidationDiagnostic),
+    /// Lowering to UI IR failed (§2.15).
+    Lowering(LoweringError),
+}
+
+impl std::fmt::Display for CompileDiagnostic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Resolution(error) => write!(f, "{error}"),
+            Self::Type(error) => write!(f, "{error}"),
+            Self::Validation(diagnostic) => {
+                write!(
+                    f,
+                    "{} at offset {}",
+                    diagnostic.message(),
+                    diagnostic.offset()
+                )
+            }
+            Self::Lowering(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for CompileDiagnostic {}
+
+impl From<ResolutionError> for CompileDiagnostic {
+    fn from(error: ResolutionError) -> Self {
+        Self::Resolution(error)
+    }
+}
+
+impl From<TypeError> for CompileDiagnostic {
+    fn from(error: TypeError) -> Self {
+        Self::Type(error)
+    }
+}
+
+impl From<ValidationDiagnostic> for CompileDiagnostic {
+    fn from(diagnostic: ValidationDiagnostic) -> Self {
+        Self::Validation(diagnostic)
+    }
+}
+
+impl From<LoweringError> for CompileDiagnostic {
+    fn from(error: LoweringError) -> Self {
+        Self::Lowering(error)
+    }
+}
+
+/// The outcome of compiling a `.okui` document (spec §2.15).
+///
+/// # Policy
+///
+/// Every pass's diagnostics are accumulated (the pipeline never bails on the
+/// first error), so `diagnostics` may hold several independent failures. The
+/// `document` is `Some` when lowering could produce UI IR and `None` when a hard
+/// lowering error (an empty document or a tagless element) prevented it — even
+/// then, all earlier diagnostics are still reported. `source_map` is the lowered
+/// document's map, or empty when no document was produced.
+#[derive(Debug, Clone)]
+pub struct CompileResult {
+    document: Option<UiIrDocument>,
+    diagnostics: Vec<CompileDiagnostic>,
+    source_map: SourceMap,
+}
+
+impl CompileResult {
+    /// Returns the lowered UI IR document, if one was produced.
+    #[must_use]
+    pub fn document(&self) -> Option<&UiIrDocument> {
+        self.document.as_ref()
+    }
+
+    /// Returns the accumulated diagnostics from every pass.
+    #[must_use]
+    pub fn diagnostics(&self) -> &[CompileDiagnostic] {
+        &self.diagnostics
+    }
+
+    /// Returns the source map linking IR node ids back to source spans.
+    #[must_use]
+    pub fn source_map(&self) -> &SourceMap {
+        &self.source_map
+    }
+
+    /// Returns whether any pass reported a diagnostic.
+    #[must_use]
+    pub fn has_errors(&self) -> bool {
+        !self.diagnostics.is_empty()
+    }
+
+    /// Consumes the result, returning just the lowered document, if any.
+    #[must_use]
+    pub fn into_document(self) -> Option<UiIrDocument> {
+        self.document
+    }
+}
+
+/// Runs the full `.okui` compilation pipeline over one parsed document,
+/// producing UI IR and a unified diagnostic stream (spec §2.9–§2.15).
+///
+/// The compiler is configured fluently with the component contracts
+/// ([`with_registry`](Self::with_registry)), the granted capabilities
+/// ([`granting`](Self::granting)) and the props/state symbols in scope
+/// ([`defining`](Self::defining)) before [`compile`](Self::compile) is called.
+#[derive(Debug, Clone, Default)]
+pub struct Compiler {
+    source_name: Box<str>,
+    registry: ContractRegistry,
+    granted: Vec<CapabilityId>,
+    symbols: Vec<Symbol>,
+}
+
+impl Compiler {
+    /// Creates a compiler whose lowered source map records spans under
+    /// `source_name` (the logical `.okui` source identifier).
+    #[must_use]
+    pub fn new(source_name: impl Into<Box<str>>) -> Self {
+        Self {
+            source_name: source_name.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Sets the contract registry the [`ContractValidator`] consults (fluent).
+    #[must_use]
+    pub fn with_registry(mut self, registry: ContractRegistry) -> Self {
+        self.registry = registry;
+        self
+    }
+
+    /// Grants `capability` to the document being compiled (fluent), so a
+    /// matching `requires="…"` declaration is satisfied.
+    #[must_use]
+    pub fn granting(mut self, capability: CapabilityId) -> Self {
+        self.granted.push(capability);
+        self
+    }
+
+    /// Defines `symbol` (a prop or state binding) in the document's root scope so
+    /// its expressions may reference it (fluent).
+    #[must_use]
+    pub fn defining(mut self, symbol: Symbol) -> Self {
+        self.symbols.push(symbol);
+        self
+    }
+
+    /// Compiles `document`, running each pass in order and accumulating every
+    /// diagnostic into the returned [`CompileResult`] (spec §2.15).
+    ///
+    /// # Pipeline
+    ///
+    /// 1. **Name resolution** — every reference is resolved against a symbol
+    ///    table seeded with the [`defining`](Self::defining) symbols.
+    /// 2. **Type checking** — no whole-document pass exists yet: the type layer
+    ///    is a per-expression vocabulary/algebra pending an expression AST
+    ///    (§2.9/§2.10), so nothing is emitted here. The
+    ///    [`Type`](CompileDiagnostic::Type) variant reserves its place in the
+    ///    diagnostic sum for when that pass lands.
+    /// 3. **Validation** — expression restrictions (§2.10), capability grants
+    ///    (§2.13) and, for every element whose tag has a registered contract,
+    ///    the contract surface (required props, unknown attributes/events,
+    ///    allowed children — §2.13).
+    /// 4. **Lowering** — the document is lowered to a [`UiIrDocument`]; on a hard
+    ///    lowering error the document is `None` but all earlier diagnostics are
+    ///    still returned.
+    #[must_use]
+    pub fn compile(&self, document: &Document) -> CompileResult {
+        let mut diagnostics = Vec::new();
+
+        // 1. Name resolution against the seeded symbol table.
+        let mut table = SymbolTable::new();
+        for symbol in &self.symbols {
+            table.define(symbol.clone());
+        }
+        for error in NameResolver::new().resolve(document, &mut table) {
+            diagnostics.push(CompileDiagnostic::Resolution(error));
+        }
+
+        // 2. Type checking has no whole-document pass yet (see the doc comment).
+
+        // 3. Validation: expressions, capabilities, then contracts.
+        for diagnostic in ExpressionValidator::new().validate_document(document) {
+            diagnostics.push(CompileDiagnostic::Validation(diagnostic));
+        }
+        let capability_validator = CapabilityValidator::new(self.granted.iter().cloned());
+        for diagnostic in capability_validator.validate(document) {
+            diagnostics.push(CompileDiagnostic::Validation(diagnostic));
+        }
+        let contract_validator = ContractValidator::new();
+        for element in document.elements() {
+            self.validate_contracts(&element, &contract_validator, &mut diagnostics);
+        }
+
+        // 4. Lowering to UI IR.
+        match UiIrLowering::new(self.source_name.clone()).lower(document) {
+            Ok(document) => {
+                let source_map = document.source_map().clone();
+                CompileResult {
+                    document: Some(document),
+                    diagnostics,
+                    source_map,
+                }
+            }
+            Err(error) => {
+                diagnostics.push(CompileDiagnostic::Lowering(error));
+                CompileResult {
+                    document: None,
+                    diagnostics,
+                    source_map: SourceMap::new(),
+                }
+            }
+        }
+    }
+
+    /// Validates `element` (and its element-shaped descendants) against any
+    /// contract registered for its tag, recursively.
+    fn validate_contracts(
+        &self,
+        element: &Element,
+        validator: &ContractValidator,
+        diagnostics: &mut Vec<CompileDiagnostic>,
+    ) {
+        if let Some(tag) = element.tag_name()
+            && let Some(contract) = self.registry.get(&tag)
+        {
+            for diagnostic in validator.validate_element(element, contract) {
+                diagnostics.push(CompileDiagnostic::Validation(diagnostic));
+            }
+        }
+        for child in element.children() {
+            if let Some(child_element) = Element::cast(child) {
+                self.validate_contracts(&child_element, validator, diagnostics);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use obscur_okui_syntax::ast::Document;
+    use obscur_okui_syntax::parser::Parser;
+
+    fn document(src: &str) -> Document {
+        Document::cast(Parser::new().parse(src).tree().root().clone()).expect("Document")
+    }
+
+    fn button_registry() -> ContractRegistry {
+        ContractRegistry::new().with(
+            ComponentContract::new("Button")
+                .requiring_prop("label")
+                .allowing_event("click"),
+        )
+    }
+
+    #[test]
+    fn registry_registers_and_looks_up_contracts() {
+        let registry = button_registry();
+        assert!(!registry.is_empty());
+        assert_eq!(registry.len(), 1);
+        assert!(registry.get("Button").is_some());
+        assert!(registry.get("Missing").is_none());
+    }
+
+    #[test]
+    fn valid_document_compiles_with_document_and_no_errors() {
+        let doc = document("<Button label=\"Save\" on:click=submit/>");
+        let result = Compiler::new("app.okui")
+            .with_registry(button_registry())
+            .compile(&doc);
+        assert!(!result.has_errors(), "diagnostics: {:?}", result.diagnostics());
+        let ir = result.document().expect("a lowered document");
+        assert_eq!(ir.root().tag(), "Button");
+        assert!(!result.source_map().is_empty());
+        assert!(result.source_map().get(ir.root().id()).is_some());
+    }
+
+    #[test]
+    fn typoed_attribute_is_reported_as_unknown_attribute() {
+        let doc = document("<Button label=\"Save\" colr=\"red\"/>");
+        let result = Compiler::new("app.okui")
+            .with_registry(button_registry())
+            .compile(&doc);
+        assert!(result.has_errors());
+        assert!(
+            result.diagnostics().iter().any(|d| matches!(
+                d,
+                CompileDiagnostic::Validation(v)
+                    if v.message() == "unknown attribute 'colr' on component 'Button'"
+            )),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
+    }
+
+    #[test]
+    fn typoed_event_is_reported_as_unknown_event() {
+        let doc = document("<Button label=\"Save\" on:clik=submit/>");
+        let result = Compiler::new("app.okui")
+            .with_registry(button_registry())
+            .compile(&doc);
+        assert!(result.has_errors());
+        assert!(
+            result.diagnostics().iter().any(|d| matches!(
+                d,
+                CompileDiagnostic::Validation(v)
+                    if v.message() == "unknown event 'clik' on component 'Button'"
+            )),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
+    }
+
+    #[test]
+    fn missing_required_prop_is_reported() {
+        let doc = document("<Button on:click=submit/>");
+        let result = Compiler::new("app.okui")
+            .with_registry(button_registry())
+            .compile(&doc);
+        assert!(result.diagnostics().iter().any(|d| matches!(
+            d,
+            CompileDiagnostic::Validation(v)
+                if v.message() == "component 'Button' requires prop 'label'"
+        )));
+    }
+
+    #[test]
+    fn diagnostics_from_multiple_passes_accumulate() {
+        // An unknown reference (resolution) AND an unknown attribute (contract)
+        // are reported together, not one-at-a-time.
+        let doc = document("<Button label=\"Save\" bogus={missing}/>");
+        let result = Compiler::new("app.okui")
+            .with_registry(button_registry())
+            .compile(&doc);
+        let has_resolution = result
+            .diagnostics()
+            .iter()
+            .any(|d| matches!(d, CompileDiagnostic::Resolution(_)));
+        let has_unknown_attr = result.diagnostics().iter().any(|d| matches!(
+            d,
+            CompileDiagnostic::Validation(v)
+                if v.message() == "unknown attribute 'bogus' on component 'Button'"
+        ));
+        assert!(has_resolution, "diagnostics: {:?}", result.diagnostics());
+        assert!(has_unknown_attr, "diagnostics: {:?}", result.diagnostics());
+        assert!(result.diagnostics().len() >= 2);
+    }
+
+    #[test]
+    fn seeded_symbol_resolves_dynamic_attribute() {
+        let registry = ContractRegistry::new()
+            .with(ComponentContract::new("Text").allowing_prop("value"));
+        let doc = document("<Text value={count}/>");
+        let result = Compiler::new("app.okui")
+            .with_registry(registry)
+            .defining(Symbol::prop("count"))
+            .compile(&doc);
+        assert!(!result.has_errors(), "diagnostics: {:?}", result.diagnostics());
+        assert!(result.document().is_some());
+    }
+
+    #[test]
+    fn granted_capability_satisfies_requirement() {
+        let doc = document("<Cam requires=\"camera\"/>");
+        let result = Compiler::new("app.okui")
+            .granting(CapabilityId::new("camera"))
+            .compile(&doc);
+        assert!(!result.has_errors(), "diagnostics: {:?}", result.diagnostics());
+    }
+
+    #[test]
+    fn empty_document_yields_no_document_but_a_lowering_diagnostic() {
+        let doc = document("");
+        let result = Compiler::new("app.okui").compile(&doc);
+        assert!(result.document().is_none());
+        assert!(result.has_errors());
+        assert!(
+            result
+                .diagnostics()
+                .iter()
+                .any(|d| matches!(d, CompileDiagnostic::Lowering(LoweringError::EmptyDocument)))
+        );
+    }
+
+    #[test]
+    fn compile_diagnostic_display_delegates() {
+        let diag = CompileDiagnostic::Lowering(LoweringError::EmptyDocument);
+        assert_eq!(diag.to_string(), "cannot lower an empty document");
+    }
+}
