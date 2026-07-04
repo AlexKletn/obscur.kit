@@ -23,7 +23,7 @@ use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
 
-use super::{KeyDispatch, PointerDispatch, SemanticTreeBuilder};
+use super::{FramePlan, KeyDispatch, PointerDispatch, SemanticTreeBuilder};
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::orchestration::{
     root_font_size, AnimatedKind, AnimationBinding, ComputedStyles, LayoutBoxes, LayoutCoordinator,
@@ -90,6 +90,11 @@ pub struct UiRuntime {
     boxes: LayoutBoxes,
     /// The cascade inputs computed for the last produced frame.
     inputs: StyleInputs,
+    /// The computed styles resolved for the last produced frame, retained so a
+    /// frame that skips the style phase (e.g. an idle diagnostics capture, or a
+    /// future paint-only class) can reuse them instead of re-resolving (§3.4
+    /// phase 5 incremental recalculation).
+    computed: ComputedStyles,
     /// The z-order-aware hit-test index, rebuilt from `boxes` after each frame.
     spatial: SpatialIndex,
     /// The nodes currently under the pointer, topmost-first (hover target at
@@ -153,6 +158,7 @@ impl UiRuntime {
             pseudo: PseudoStates::new(),
             boxes: LayoutBoxes::new(),
             inputs: StyleInputs::new(),
+            computed: ComputedStyles::new(),
             spatial: SpatialIndex::new(),
             hover: HoverChain::new(),
             focused: None,
@@ -220,62 +226,109 @@ impl UiRuntime {
     }
 
     /// Runs the deterministic core over the runtime-owned state, retaining the
-    /// laid-out boxes and cascade inputs, and advancing the frame counter.
+    /// laid-out boxes, computed styles and cascade inputs, and advancing the
+    /// frame counter.
     ///
-    /// Mirrors [`FramePipeline::run_matched`](crate::frame::FramePipeline::run_matched)
-    /// stage-for-stage, differing only in that it (a) sources cascade inputs
+    /// Unlike [`FramePipeline::run_matched`](crate::frame::FramePipeline::run_matched),
+    /// which re-runs reconcile → match → style → layout → compose every call,
+    /// this classifies the frame's [`FrameReason`] into a [`FramePlan`] (spec
+    /// §3.4 phase 5) and **skips phases whose inputs are unchanged**, reusing the
+    /// previous frame's retained output. It still (a) sources cascade inputs
     /// through the **pseudo-state-aware** matcher and (b) *keeps* the layout
-    /// boxes instead of discarding them.
+    /// boxes for hit-testing.
+    ///
+    /// The classification is conservative: the first frame (empty tree) and any
+    /// structural reason run every phase, and a phase that cannot be proven
+    /// unnecessary is run. The concrete wins are that a hover/focus (`Input`) or
+    /// motion (`Animation`) frame does **not** re-reconcile, and an idle
+    /// diagnostics capture recalculates nothing and simply re-presents the
+    /// retained scene.
     fn run_frame(&mut self, ctx: FrameContext, desired: &View, sheets: &[Stylesheet]) -> FrameResult {
-        // 1. Reconcile the desired view into the retained tree.
-        let plan = self.reconciler.reconcile_root(&mut self.tree, desired);
-        let reconciled = !plan.is_empty();
+        // Phase 5 (§3.4): classify what this frame must recalculate. The first
+        // frame over an empty tree is always full so every retained output
+        // exists before later frames can reuse it.
+        let first_frame = self.tree.root().is_none();
+        let plan = FramePlan::for_frame(ctx.reason(), first_frame);
 
-        // 2. Match authored sheets against the fresh tree, honouring live
-        //    interaction state so `:hover`/`:focus` participate and gating
-        //    `@media`/`@container` rules by this frame's viewport (§4.13).
-        let environment =
-            MediaEnvironment::viewport(ctx.viewport().width, ctx.viewport().height);
-        let inputs = self.matcher.build_inputs_with_pseudo_env(
-            &self.tree,
-            sheets,
-            &self.pseudo,
-            &environment,
-        );
+        // An idle frame (e.g. a diagnostics capture) recalculates nothing: it
+        // re-presents the retained scene without touching tree, styles or boxes.
+        if plan.is_idle() {
+            let snapshot = self.scene.snapshot();
+            self.next_frame = self.next_frame.next();
+            return FrameResult::new(ctx.id(), snapshot, false, false, false, true);
+        }
 
-        // 3. Style: resolve computed styles over the retained tree.
-        let mut computed = self.style.resolve(&self.tree, &inputs);
-        let restyled = !computed.is_empty();
+        // 1. Reconcile the desired view into the retained tree (structural
+        //    reasons only; input/animation/window frames leave structure alone,
+        //    for which reconcile would be an idempotent no-op).
+        let reconciled = if plan.reconcile() {
+            !self.reconciler.reconcile_root(&mut self.tree, desired).is_empty()
+        } else {
+            false
+        };
 
-        // 3b. Motion: overlay every active animation's sampled value onto the
-        //     computed style *before* layout/paint, so an animated width visibly
-        //     changes this frame's layout box and fill (spec §4.17 style →
-        //     motion → paint). This runs for both `render_now` and
-        //     `run_due_frame` because both route through here.
-        self.apply_motion_overlay(&mut computed);
+        // 2-3. Match + style: rebuild cascade inputs and resolve computed styles.
+        //    When the style phase is skipped, reuse the retained computed styles
+        //    so a downstream layout/compose still has values to work from.
+        let (computed, restyled) = if plan.style() {
+            // Match authored sheets against the tree, honouring live interaction
+            // state so `:hover`/`:focus` participate and gating `@media`/
+            // `@container` rules by this frame's viewport (§4.13).
+            let environment =
+                MediaEnvironment::viewport(ctx.viewport().width, ctx.viewport().height);
+            let inputs = self.matcher.build_inputs_with_pseudo_env(
+                &self.tree,
+                sheets,
+                &self.pseudo,
+                &environment,
+            );
+            let mut computed = self.style.resolve(&self.tree, &inputs);
+            // 3b. Motion: overlay every active animation's sampled value onto the
+            //     computed style *before* layout/paint (spec §4.17 style →
+            //     motion → paint).
+            self.apply_motion_overlay(&mut computed);
+            let restyled = !computed.is_empty();
+            self.inputs = inputs;
+            (computed, restyled)
+        } else {
+            // Reuse the retained computed styles; re-apply the motion overlay so
+            // a motion-only frame still advances its animated values.
+            let mut computed = self.computed.clone();
+            self.apply_motion_overlay(&mut computed);
+            (computed, false)
+        };
 
         // 4. Layout: map to layout styles, arrange, and retain the boxes.
         //    The document root's `font-size` supplies the `rem` base; the
-        //    viewport supplies `vw`/`vh` (spec §4.5).
-        let root_font = root_font_size(&computed, self.tree.root());
-        let layout_styles = self
-            .layout
-            .layout_styles_from(&computed, ctx.viewport(), root_font);
-        let boxes = self.layout.layout(&self.tree, &layout_styles, ctx.viewport());
-        let relaid_out = !boxes.is_empty();
+        //    viewport supplies `vw`/`vh` (spec §4.5). When skipped, the retained
+        //    boxes and hit-test index carry over unchanged.
+        let relaid_out = if plan.layout() {
+            let root_font = root_font_size(&computed, self.tree.root());
+            let layout_styles = self
+                .layout
+                .layout_styles_from(&computed, ctx.viewport(), root_font);
+            let boxes = self.layout.layout(&self.tree, &layout_styles, ctx.viewport());
+            let relaid_out = !boxes.is_empty();
+            self.boxes = boxes;
+            // Rebuild the hit-test index from the freshly laid-out boxes so the
+            // next pointer event tests against this frame's geometry.
+            self.rebuild_spatial_index();
+            relaid_out
+        } else {
+            false
+        };
 
         // 5. Compose: build the display list, install it, publish a snapshot.
-        let display_list = self.scene_composer.compose(&self.tree, &computed, &boxes);
-        self.scene.set_root(display_list);
+        //    When skipped, the retained scene's current snapshot is republished.
+        if plan.compose() {
+            let display_list = self.scene_composer.compose(&self.tree, &computed, &self.boxes);
+            self.scene.set_root(display_list);
+        }
         let snapshot = self.scene.snapshot();
 
-        // Retain cross-frame state for hit-testing and diagnostics.
-        self.boxes = boxes;
-        self.inputs = inputs;
-        // Rebuild the hit-test index from the freshly laid-out boxes so the next
-        // pointer event tests against this frame's geometry (both `render_now`
-        // and `run_due_frame` route through here, so both stay consistent).
-        self.rebuild_spatial_index();
+        // Retain the computed styles for a later frame that skips the style
+        // phase, then advance the frame counter.
+        self.computed = computed;
         self.next_frame = self.next_frame.next();
 
         FrameResult::new(ctx.id(), snapshot, reconciled, restyled, relaid_out, true)
@@ -1843,5 +1896,99 @@ mod tests {
         // ...and after finishing it settles back at the origin (0).
         runtime.advance_motion(1.0);
         assert!(overlaid_opacity(&mut runtime, node).abs() < 1e-6);
+    }
+
+    // ---- Audit S1: invalidation classification gates frame phases (§3.4 p5) ----
+
+    #[test]
+    fn first_frame_runs_all_phases_even_when_the_reason_is_input() {
+        // Classification: the first frame over an empty tree is full regardless
+        // of reason, so the tree, styles, boxes and scene all exist.
+        assert_eq!(FramePlan::for_frame(FrameReason::Input, true), FramePlan::full());
+
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let view = counter_view();
+        let sheet = counter_stylesheet();
+        let sheets = std::slice::from_ref(&sheet);
+
+        // The very first frame is requested as `Input` yet must reconcile, style,
+        // lay out and compose — otherwise the tree would never be built.
+        runtime.request_frame(FrameReason::Input);
+        let first = runtime
+            .run_due_frame(&view, sheets)
+            .expect("the requested first frame is due");
+        assert!(first.reconciled(), "the first frame populates the tree");
+        assert!(first.restyled(), "the first frame resolves styles");
+        assert!(first.relaid_out(), "the first frame arranges boxes");
+        assert!(
+            !first.snapshot().display_list().is_empty(),
+            "the first frame composes the matched background"
+        );
+        assert!(!runtime.layout_boxes().is_empty(), "boxes are retained");
+    }
+
+    #[test]
+    fn input_frame_skips_reconcile_yet_restyles_and_composes() {
+        // Classification: an Input frame over a built tree does NOT reconcile,
+        // but does restyle/relayout/recompose (pseudo-state changed).
+        let plan = FramePlan::for_frame(FrameReason::Input, false);
+        assert!(!plan.reconcile(), "hover/focus does not re-reconcile");
+        assert!(plan.style() && plan.layout() && plan.compose());
+
+        // End-to-end: a hover-only Input frame paints the `:hover` rule (proving
+        // style + compose ran) while its FrameResult reports no reconciliation.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+
+        let cold = runtime.render_now(&panel_view(), sheets); // full first frame
+        let cold_fills = cold.snapshot().display_list().len();
+
+        // Point at b → schedules an Input frame; run it.
+        runtime.handle_pointer(mouse(PointerEventKind::Move, 50.0, 75.0));
+        let hot = runtime
+            .run_due_frame(&panel_view(), sheets)
+            .expect("the input-requested frame is due");
+
+        assert!(
+            !hot.reconciled(),
+            "the input frame skipped reconciliation (no structural change)"
+        );
+        assert!(hot.restyled(), "the input frame restyled for the new hover");
+        assert!(
+            hot.snapshot().display_list().len() > cold_fills,
+            ":hover reached paint, so style + compose ran on the input frame"
+        );
+    }
+
+    #[test]
+    fn diagnostics_capture_frame_is_idle_and_reuses_the_retained_scene() {
+        // Classification: a diagnostics capture recalculates nothing.
+        assert!(FramePlan::for_frame(FrameReason::DiagnosticsCapture, false).is_idle());
+
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let view = counter_view();
+        let sheet = counter_stylesheet();
+        let sheets = std::slice::from_ref(&sheet);
+
+        // Build a real scene first.
+        let base = runtime.render_now(&view, sheets);
+        let base_commands: Vec<_> = base.snapshot().display_list().commands().to_vec();
+        assert!(!base_commands.is_empty());
+
+        // A diagnostics-capture frame does no phase work: it re-presents the
+        // retained scene verbatim and reports every phase flag false.
+        runtime.request_frame(FrameReason::DiagnosticsCapture);
+        let capture = runtime
+            .run_due_frame(&view, sheets)
+            .expect("the capture frame is due");
+        assert!(!capture.reconciled());
+        assert!(!capture.restyled());
+        assert!(!capture.relaid_out());
+        let capture_commands: Vec<_> = capture.snapshot().display_list().commands().to_vec();
+        assert_eq!(
+            capture_commands, base_commands,
+            "an idle capture re-presents the retained scene unchanged"
+        );
     }
 }

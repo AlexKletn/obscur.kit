@@ -15,6 +15,10 @@ mod semantic_builder;
 
 pub use semantic_builder::SemanticTreeBuilder;
 
+mod frame_plan;
+
+pub(crate) use frame_plan::FramePlan;
+
 mod runtime_config;
 mod runtime_event;
 mod runtime_handle;
