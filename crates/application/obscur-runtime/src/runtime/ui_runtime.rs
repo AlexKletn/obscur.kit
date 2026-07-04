@@ -6,7 +6,7 @@ use obscur_accessibility::port::AccessibilityBridge;
 use obscur_accessibility::tree::{SemanticSnapshot, SemanticTree};
 use obscur_geometry::Size;
 use obscur_identity::{NodeId, RuntimeId};
-use obscur_interaction::command::PhysicalKey;
+use obscur_interaction::command::{CommandRouter, KeyEvent, Modifiers, Shortcut};
 use obscur_interaction::hover::{HoverChain, HoverTransition};
 use obscur_interaction::pointer::{PointerEvent, PointerEventKind};
 use obscur_interaction::spatial::{HitTest, SpatialIndex};
@@ -23,7 +23,7 @@ use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
 
-use super::{PointerDispatch, SemanticTreeBuilder};
+use super::{KeyDispatch, PointerDispatch, SemanticTreeBuilder};
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::orchestration::{
     root_font_size, AnimatedKind, AnimationBinding, ComputedStyles, LayoutBoxes, LayoutCoordinator,
@@ -103,6 +103,13 @@ pub struct UiRuntime {
     /// does not yet do, so a plain `Option<NodeId>` is the simpler correct model
     /// for pointer-press focus (documented fallback).
     focused: Option<NodeId>,
+    /// The shortcut→command-id binding table keyboard input resolves against
+    /// (spec §6.7). Populated by [`bind_command`](Self::bind_command); consulted
+    /// by [`handle_key`](Self::handle_key) on each key press.
+    commands: CommandRouter,
+    /// The modifier keys currently held, folded from physical modifier-key
+    /// press/release transitions so shortcut matching sees the live chord.
+    modifiers: Modifiers,
     /// The id assigned to the next produced frame.
     next_frame: FrameId,
     /// The viewport frames are laid out under.
@@ -149,6 +156,8 @@ impl UiRuntime {
             spatial: SpatialIndex::new(),
             hover: HoverChain::new(),
             focused: None,
+            commands: CommandRouter::new(),
+            modifiers: Modifiers::new(),
             next_frame: FrameId::FIRST,
             viewport,
             motion: MotionScheduler::new(),
@@ -605,21 +614,85 @@ impl UiRuntime {
         }
     }
 
-    /// Routes a physical key event to the currently focused node and schedules a
-    /// frame.
+    /// Binds `shortcut` to `command_id` in the runtime's command router, so a
+    /// matching key press at [`handle_key`](Self::handle_key) resolves to that
+    /// command (spec §6.7).
     ///
-    /// This is intentionally minimal: it resolves the routing *target* (the
-    /// focused node) and requests a frame so any focus-driven visual can update,
-    /// but it does **not** yet translate the key into a command or run any
-    /// handler — there are no component handlers in this runtime. Full command
-    /// routing (shortcut matching, capture/bubble dispatch) is a later Phase 3
-    /// step. Returns the node the event was routed to, if any.
-    pub fn handle_key(&mut self, _key: PhysicalKey, _pressed: bool) -> Option<NodeId> {
-        let target = self.focused;
-        if target.is_some() {
-            self.request_frame(FrameReason::Input);
+    /// Registration order is priority: an earlier binding shadows a later one
+    /// with the same shortcut (see [`CommandRouter::bind`]). Binding does not
+    /// itself schedule a frame.
+    pub fn bind_command(&mut self, shortcut: Shortcut, command_id: impl Into<Box<str>>) {
+        self.commands.bind(shortcut, command_id);
+    }
+
+    /// Returns the shortcut→command-id binding table keyboard input resolves
+    /// against.
+    #[must_use]
+    pub const fn command_router(&self) -> &CommandRouter {
+        &self.commands
+    }
+
+    /// Returns the modifier keys currently held (folded from physical modifier
+    /// key transitions seen by [`handle_key`](Self::handle_key)).
+    #[must_use]
+    pub const fn held_modifiers(&self) -> Modifiers {
+        self.modifiers
+    }
+
+    /// Routes a keyboard [`KeyEvent`] to the currently focused node, resolves it
+    /// against the bound command shortcuts, and schedules a frame — the keyboard
+    /// analogue of [`handle_pointer`](Self::handle_pointer) (spec §6.7, §3.10).
+    ///
+    /// The flow mirrors the pointer path:
+    ///
+    /// 1. **Modifier tracking** — a physical modifier key
+    ///    (`Shift`/`Control`/`Alt`/`Meta`) folds into the runtime's held
+    ///    [`Modifiers`] set (a press adds, a release removes) so a later shortcut
+    ///    sees the live chord. Modifier keys still route like any other key.
+    /// 2. **Route** — the event is aimed at the [`focused`](Self::focused) node.
+    ///    With nothing focused the key routes nowhere: the method is a no-op that
+    ///    returns [`KeyDispatch::unhandled`] and schedules no frame.
+    /// 3. **Resolve** — on a **press**, the event's layout-dependent
+    ///    [`LogicalKey`](obscur_interaction::command::LogicalKey) plus the held
+    ///    modifiers are looked up in the [`CommandRouter`]; a match yields the
+    ///    bound command id. A release, an event with no logical key, or an
+    ///    unbound chord resolves to no command.
+    /// 4. **Schedule** — because the key reached a focused node, a
+    ///    [`FrameReason::Input`] frame is requested so any focus/command-driven
+    ///    visual reaches paint on the next `run_due_frame`/`render_now`.
+    ///
+    /// Returns a [`KeyDispatch`] describing the routed target and any resolved
+    /// command.
+    pub fn handle_key(&mut self, event: KeyEvent) -> KeyDispatch {
+        // 1. Fold a physical modifier transition into the held modifier set.
+        if let Some(modifier) = event.physical().modifier() {
+            self.modifiers = if event.pressed() {
+                self.modifiers.with(modifier)
+            } else {
+                self.modifiers.without(modifier)
+            };
         }
-        target
+
+        // 2. Route to the focused node; with no focus the key goes nowhere.
+        let Some(target) = self.focused else {
+            return KeyDispatch::unhandled();
+        };
+
+        // 3. Resolve a bound command from the produced logical key + modifiers,
+        //    but only on a press (a release never triggers a shortcut).
+        let command = if event.pressed() {
+            event
+                .logical()
+                .and_then(|key| self.commands.resolve(key, self.modifiers))
+                .map(Box::<str>::from)
+        } else {
+            None
+        };
+
+        // 4. The key reached a focused node: schedule a restyle for the next
+        //    frame, mirroring the pointer path's request on a change.
+        self.request_frame(FrameReason::Input);
+        KeyDispatch::new(Some(target), command)
     }
 
     /// Returns the node currently under the pointer (the hover target), if any.
@@ -1023,7 +1096,9 @@ mod tests {
     // ---- Phase 3 step 2: input dispatch (hit-test → hover/focus → pseudo) ----
 
     use obscur_geometry::Point;
-    use obscur_interaction::command::PhysicalKey;
+    use obscur_interaction::command::{
+        KeyEvent, LogicalKey, Modifier, PhysicalKey, Shortcut,
+    };
     use obscur_interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind, PointerId};
     use obscur_style::selector::PseudoClassSelector;
 
@@ -1283,6 +1358,10 @@ mod tests {
         assert_eq!(runtime.focused(), None);
     }
 
+    fn key_a() -> KeyEvent {
+        KeyEvent::press(PhysicalKey::KeyA, Some(LogicalKey::character('a')))
+    }
+
     #[test]
     fn handle_key_routes_to_focused_node() {
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
@@ -1292,14 +1371,100 @@ mod tests {
         let (_panel, a, _b) = panel_nodes(&runtime);
 
         // With nothing focused, a key routes nowhere and schedules no frame.
-        assert_eq!(runtime.handle_key(PhysicalKey::KeyA, true), None);
+        let unfocused = runtime.handle_key(key_a());
+        assert_eq!(unfocused.target(), None);
+        assert!(!unfocused.is_handled());
         assert!(!runtime.has_pending_frame());
 
         // Focus a via a press, drain its frame, then a key routes to a.
         runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
         let _ = runtime.run_due_frame(&panel_view(), sheets);
-        assert_eq!(runtime.handle_key(PhysicalKey::KeyA, true), Some(a));
+        let dispatch = runtime.handle_key(key_a());
+        assert_eq!(dispatch.target(), Some(a));
+        assert!(dispatch.is_handled());
+        // No shortcut bound, so nothing resolves to a command.
+        assert_eq!(dispatch.command(), None);
         assert!(runtime.has_pending_frame());
+    }
+
+    #[test]
+    fn handle_key_resolves_a_bound_command_at_the_focused_node() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&panel_view(), sheets);
+        let (_panel, a, _b) = panel_nodes(&runtime);
+
+        // Ctrl+S → "file.save".
+        runtime.bind_command(
+            Shortcut::new(LogicalKey::character('s')).with(Modifier::Ctrl),
+            "file.save",
+        );
+
+        // Focus a, then hold Ctrl and press S.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let _ = runtime.run_due_frame(&panel_view(), sheets);
+
+        // A physical Ctrl press folds into the held modifier set (no logical key).
+        let ctrl = runtime.handle_key(KeyEvent::press(PhysicalKey::ControlLeft, None));
+        assert_eq!(ctrl.target(), Some(a));
+        assert_eq!(ctrl.command(), None, "a bare modifier resolves no command");
+
+        // Now Ctrl is held: S resolves to the bound command at the focused node.
+        let save = runtime.handle_key(KeyEvent::press(
+            PhysicalKey::KeyS,
+            Some(LogicalKey::character('s')),
+        ));
+        assert_eq!(save.target(), Some(a));
+        assert_eq!(save.command(), Some("file.save"));
+        assert!(save.resolved_command());
+
+        // Releasing Ctrl clears the modifier: S alone no longer resolves.
+        let _ = runtime.handle_key(KeyEvent::release(PhysicalKey::ControlLeft, None));
+        let bare_s = runtime.handle_key(KeyEvent::press(
+            PhysicalKey::KeyS,
+            Some(LogicalKey::character('s')),
+        ));
+        assert_eq!(bare_s.command(), None);
+    }
+
+    #[test]
+    fn handle_key_without_focus_is_a_noop() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&panel_view(), sheets);
+        runtime.bind_command(Shortcut::new(LogicalKey::character('a')), "noop");
+
+        // Nothing focused: even a bound key resolves to nothing and schedules
+        // no frame — the runtime state is unchanged.
+        let dispatch = runtime.handle_key(key_a());
+        assert_eq!(dispatch, KeyDispatch::unhandled());
+        assert!(!dispatch.is_handled());
+        assert_eq!(dispatch.command(), None);
+        assert!(!runtime.has_pending_frame());
+    }
+
+    #[test]
+    fn handle_key_is_deterministic() {
+        let build = || {
+            let mut runtime = UiRuntime::new(runtime_id(), viewport());
+            let sheet = interaction_sheet();
+            let sheets = std::slice::from_ref(&sheet);
+            let _ = runtime.render_now(&panel_view(), sheets);
+            runtime.bind_command(
+                Shortcut::new(LogicalKey::character('s')).with(Modifier::Ctrl),
+                "file.save",
+            );
+            runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+            let _ = runtime.run_due_frame(&panel_view(), sheets);
+            runtime.handle_key(KeyEvent::press(PhysicalKey::ControlLeft, None));
+            runtime.handle_key(KeyEvent::press(
+                PhysicalKey::KeyS,
+                Some(LogicalKey::character('s')),
+            ))
+        };
+        assert_eq!(build(), build());
     }
 
     // ---- Phase 4 final step: motion orchestration (style → motion → paint) ----

@@ -5,6 +5,8 @@ mod command_router;
 pub use command_router::CommandRouter;
 mod command_state;
 pub use command_state::CommandState;
+mod key_event;
+pub use key_event::KeyEvent;
 mod logical_key;
 pub use logical_key::{LogicalKey, NamedKey};
 mod physical_key;

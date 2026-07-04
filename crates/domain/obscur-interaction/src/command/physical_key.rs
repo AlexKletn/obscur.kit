@@ -1,5 +1,7 @@
 //! The [`PhysicalKey`] layout-independent key position (spec §6.7).
 
+use crate::command::Modifier;
+
 /// A layout-independent physical key position (spec §6.7).
 ///
 /// A physical key names a scan position on the keyboard, independent of the
@@ -175,6 +177,27 @@ impl PhysicalKey {
         )
     }
 
+    /// Returns the [`Modifier`] this key contributes when it is a left/right
+    /// modifier key, or `None` for a non-modifier key.
+    ///
+    /// The left and right members of each pair collapse to the same logical
+    /// [`Modifier`]: `ShiftLeft`/`ShiftRight` → [`Modifier::Shift`],
+    /// `ControlLeft`/`ControlRight` → [`Modifier::Ctrl`],
+    /// `AltLeft`/`AltRight` → [`Modifier::Alt`], and
+    /// `MetaLeft`/`MetaRight` → [`Modifier::Meta`]. This lets a keyboard input
+    /// step fold physical modifier presses into a [`Modifiers`](crate::command::Modifiers)
+    /// set for shortcut matching.
+    #[must_use]
+    pub const fn modifier(&self) -> Option<Modifier> {
+        match self {
+            Self::ShiftLeft | Self::ShiftRight => Some(Modifier::Shift),
+            Self::ControlLeft | Self::ControlRight => Some(Modifier::Ctrl),
+            Self::AltLeft | Self::AltRight => Some(Modifier::Alt),
+            Self::MetaLeft | Self::MetaRight => Some(Modifier::Meta),
+            _ => None,
+        }
+    }
+
     /// Returns whether this is one of the four arrow keys.
     #[must_use]
     pub const fn is_arrow(&self) -> bool {
@@ -206,6 +229,21 @@ mod tests {
         assert!(!PhysicalKey::KeyW.is_modifier());
         assert!(!PhysicalKey::Space.is_modifier());
         assert!(!PhysicalKey::ArrowUp.is_modifier());
+    }
+
+    #[test]
+    fn modifier_folds_left_and_right_pairs() {
+        assert_eq!(PhysicalKey::ShiftLeft.modifier(), Some(Modifier::Shift));
+        assert_eq!(PhysicalKey::ShiftRight.modifier(), Some(Modifier::Shift));
+        assert_eq!(PhysicalKey::ControlLeft.modifier(), Some(Modifier::Ctrl));
+        assert_eq!(PhysicalKey::ControlRight.modifier(), Some(Modifier::Ctrl));
+        assert_eq!(PhysicalKey::AltLeft.modifier(), Some(Modifier::Alt));
+        assert_eq!(PhysicalKey::AltRight.modifier(), Some(Modifier::Alt));
+        assert_eq!(PhysicalKey::MetaLeft.modifier(), Some(Modifier::Meta));
+        assert_eq!(PhysicalKey::MetaRight.modifier(), Some(Modifier::Meta));
+        // A non-modifier key contributes nothing.
+        assert_eq!(PhysicalKey::KeyA.modifier(), None);
+        assert_eq!(PhysicalKey::Enter.modifier(), None);
     }
 
     #[test]

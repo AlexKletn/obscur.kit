@@ -93,6 +93,7 @@ use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
 use obscur_kit::geometry::{Point, Size};
 use obscur_kit::identity::{InternedSymbol, RuntimeId};
+use obscur_kit::interaction::command::KeyEvent;
 use obscur_kit::interaction::pointer::{PointerDevice, PointerEvent, PointerId};
 use obscur_kit::primitives::{Container, Text};
 use obscur_kit::render::frame::{FrameSubmission, RenderFrame};
@@ -103,11 +104,12 @@ use obscur_kit::runtime::frame::FrameReason;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewNode, ViewProperty, ViewValue};
 use obscur_kit::widgets::button::Button;
-use obscur_kit::window_winit::conversion::PointerConverter;
+use obscur_kit::window_winit::conversion::{KeyboardConverter, PointerConverter};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::keyboard::PhysicalKey as WinitPhysicalKey;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 /// Commands the two buttons fire when activated (interned symbol handles).
@@ -415,6 +417,28 @@ impl ApplicationHandler for WindowedCounter {
                 let down = self.pointer_button_event(state);
                 self.runtime.handle_pointer(down);
                 self.handle_click();
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                // Feed the *real* domain keyboard path, mirroring `CursorMoved`
+                // above: winit → `KeyboardConverter` → `handle_key` → focused
+                // node → command resolution. The converter splits the winit
+                // `KeyEvent` into its layout-independent physical key and its
+                // layout-dependent logical key; only a modeled physical position
+                // produces a domain event (media/IME keys convert to `None`).
+                if let WinitPhysicalKey::Code(code) = event.physical_key {
+                    if let Some(physical) = KeyboardConverter::physical_key(code) {
+                        let logical = KeyboardConverter::logical_key(&event.logical_key);
+                        let pressed = event.state == ElementState::Pressed;
+                        let dispatch =
+                            self.runtime.handle_key(KeyEvent::new(physical, logical, pressed));
+                        if let Some(command) = dispatch.command() {
+                            println!("[key] resolved command: {command}");
+                        }
+                        if let Some(window) = self.window.as_ref() {
+                            window.request_redraw();
+                        }
+                    }
+                }
             }
             WindowEvent::RedrawRequested => self.render_frame(),
             WindowEvent::CloseRequested => event_loop.exit(),

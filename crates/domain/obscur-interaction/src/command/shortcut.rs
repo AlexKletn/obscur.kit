@@ -62,6 +62,12 @@ impl Modifiers {
         Self(self.0 | modifier.mask())
     }
 
+    /// Returns this set with `modifier` removed (a no-op when it was absent).
+    #[must_use]
+    pub const fn without(self, modifier: Modifier) -> Self {
+        Self(self.0 & !modifier.mask())
+    }
+
     /// Returns whether `modifier` is present in this set.
     #[must_use]
     pub const fn contains(&self, modifier: Modifier) -> bool {
@@ -167,6 +173,17 @@ mod tests {
         assert!(m.contains(Modifier::Shift));
         assert!(!m.contains(Modifier::Alt));
         assert_eq!(m.bits(), Modifiers::CTRL | Modifiers::SHIFT);
+    }
+
+    #[test]
+    fn without_removes_a_held_modifier_and_is_idempotent() {
+        let m = Modifiers::new().with(Modifier::Ctrl).with(Modifier::Shift);
+        let dropped = m.without(Modifier::Ctrl);
+        assert!(!dropped.contains(Modifier::Ctrl));
+        assert!(dropped.contains(Modifier::Shift));
+        // Removing an absent modifier is a no-op.
+        assert_eq!(dropped.without(Modifier::Ctrl), dropped);
+        assert!(Modifiers::new().without(Modifier::Alt).is_empty());
     }
 
     #[test]

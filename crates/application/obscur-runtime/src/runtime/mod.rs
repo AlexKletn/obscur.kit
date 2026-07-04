@@ -7,6 +7,10 @@ mod pointer_dispatch;
 
 pub use pointer_dispatch::PointerDispatch;
 
+mod key_dispatch;
+
+pub use key_dispatch::KeyDispatch;
+
 mod semantic_builder;
 
 pub use semantic_builder::SemanticTreeBuilder;
