@@ -1,6 +1,129 @@
-//! `ExpressionLowering` (skeleton stub for the spec-defined entity; not yet implemented).
+//! `ExpressionLowering`: lowers a `.okui` `{expr}` interpolation into a
+//! [`UiIrExpression`] (spec §2.10).
 
-/// Placeholder for the `ExpressionLowering` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
-#[derive(Debug)]
+use std::str::FromStr;
+
+use obscur_okui_syntax::ast::Expression;
+use obscur_ui_ir::document::{UiIrExpression, UiIrValue};
+
+/// Lowers a `.okui` AST [`Expression`] (raw interpolation text) into a
+/// [`UiIrExpression`] (spec §2.10).
+///
+/// # Classification
+///
+/// This is a **minimal literal-vs-binding classifier**, not a full expression
+/// parser. The trimmed expression text is matched, in order, against:
+///
+/// - `true` / `false` → a boolean [`literal`](UiIrExpression::literal);
+/// - an integer (`[+-]?[0-9]+`) → an integer literal;
+/// - a decimal containing a `.` → a float literal;
+/// - a double-quoted `"…"` string → a text literal (quotes stripped);
+/// - `null`, `none` or empty text → a [`Null`](UiIrValue::Null) literal;
+/// - anything else (an identifier or dotted path such as `user.name`) → a
+///   [`binding`](UiIrExpression::binding).
+///
+/// Parsing arbitrary operators or producing [`Call`](UiIrExpression::Call)
+/// nodes is future work; such input falls through to a binding on its raw text.
+#[derive(Debug, Clone, Default)]
 pub struct ExpressionLowering;
+
+impl ExpressionLowering {
+    /// Creates an expression lowering pass.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
+
+    /// Lowers the AST `expr`'s inner text into a [`UiIrExpression`].
+    #[must_use]
+    pub fn lower(&self, expr: &Expression) -> UiIrExpression {
+        self.lower_text(&expr.text())
+    }
+
+    /// Lowers a raw expression string into a [`UiIrExpression`], classifying it
+    /// per the [type docs](ExpressionLowering).
+    #[must_use]
+    pub fn lower_text(&self, text: &str) -> UiIrExpression {
+        let trimmed = text.trim();
+
+        match trimmed {
+            "true" => return UiIrExpression::literal(UiIrValue::Bool(true)),
+            "false" => return UiIrExpression::literal(UiIrValue::Bool(false)),
+            "" | "null" | "none" => return UiIrExpression::literal(UiIrValue::Null),
+            _ => {}
+        }
+
+        // A double-quoted string literal → text (quotes stripped).
+        if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
+            let inner = &trimmed[1..trimmed.len() - 1];
+            return UiIrExpression::literal(UiIrValue::Text(inner.into()));
+        }
+
+        // An integer literal. On overflow/parse failure, fall through.
+        if let Ok(value) = i64::from_str(trimmed) {
+            return UiIrExpression::literal(UiIrValue::Int(value));
+        }
+
+        // A float literal: must contain a `.` so bare identifiers and the
+        // `inf`/`nan` words that `f64::from_str` also accepts do not match.
+        if trimmed.contains('.')
+            && let Ok(value) = f64::from_str(trimmed)
+        {
+            return UiIrExpression::literal(UiIrValue::Float(value));
+        }
+
+        // Anything else is treated as a binding path into component state/props.
+        UiIrExpression::binding(trimmed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lower(text: &str) -> UiIrExpression {
+        ExpressionLowering::new().lower_text(text)
+    }
+
+    #[test]
+    fn true_becomes_bool_literal() {
+        assert_eq!(lower("true"), UiIrExpression::bool(true));
+        assert_eq!(lower(" false "), UiIrExpression::bool(false));
+    }
+
+    #[test]
+    fn integer_becomes_int_literal() {
+        assert_eq!(lower("42"), UiIrExpression::int(42));
+        assert_eq!(lower("-7"), UiIrExpression::int(-7));
+    }
+
+    #[test]
+    fn decimal_becomes_float_literal() {
+        assert_eq!(
+            lower("1.5"),
+            UiIrExpression::literal(UiIrValue::Float(1.5))
+        );
+    }
+
+    #[test]
+    fn quoted_string_becomes_text_literal() {
+        assert_eq!(lower("\"hi\""), UiIrExpression::text("hi"));
+    }
+
+    #[test]
+    fn dotted_path_becomes_binding() {
+        assert_eq!(lower("user.name"), UiIrExpression::binding("user.name"));
+    }
+
+    #[test]
+    fn empty_and_null_become_null_literal() {
+        assert_eq!(lower(""), UiIrExpression::literal(UiIrValue::Null));
+        assert_eq!(lower("null"), UiIrExpression::literal(UiIrValue::Null));
+        assert_eq!(lower("none"), UiIrExpression::literal(UiIrValue::Null));
+    }
+
+    #[test]
+    fn bare_identifier_becomes_binding() {
+        assert_eq!(lower("count"), UiIrExpression::binding("count"));
+    }
+}
