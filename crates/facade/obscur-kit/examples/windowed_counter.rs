@@ -39,6 +39,15 @@
 //! reconciled tree, so the committed display list carries a real fill — that
 //! fill is what is rasterized and presented.
 //!
+//! # Text
+//!
+//! The counter's labels ("Count: N", "-", "+") are real text. Fonts are a host
+//! resource (like the GPU device): `resumed` loads a system font off disk and
+//! hands its bytes to [`VelloRenderer::set_font`], and the adapter then shapes
+//! each `DrawText` run into glyphs that Vello rasterizes into the same
+//! offscreen texture the blit path presents. With no font found, the shapes
+//! still paint and only the glyphs are skipped.
+//!
 //! # Environment note
 //!
 //! This example cannot run in the headless dev/CI environment (no display, no
@@ -223,8 +232,17 @@ impl ApplicationHandler for WindowedCounter {
                 vello_surface.configure(&device);
                 match VelloDevice::new(device.clone(), queue) {
                     Ok(vello_device) => {
-                        let renderer =
+                        let mut renderer =
                             VelloRenderer::new(RendererId::from_raw(1)).with_device(vello_device);
+                        // Text is a host resource (like the GPU device): load a
+                        // system font and hand its bytes to the renderer so the
+                        // counter's labels ("Count: N", "-", "+") rasterize into
+                        // real glyphs. With no font found, text is skipped.
+                        if let Some(bytes) = load_system_font() {
+                            renderer.set_font(bytes);
+                        } else {
+                            eprintln!("no system font found; text will not render");
+                        }
                         self.surface = Some(vello_surface);
                         self.device = Some(device);
                         self.renderer = Some(renderer);
@@ -330,15 +348,44 @@ fn init_gpu(
     Ok((surface, config, device, queue))
 }
 
+/// Loads a system font's raw bytes for the renderer's text path.
+///
+/// The toolkit never bundles a font (fonts are a host resource, like the GPU
+/// device), so the example reads one from a small list of well-known locations
+/// across Linux/macOS/Windows and returns the bytes of the first that exists.
+/// Returns `None` when none are present, in which case text simply does not
+/// render.
+fn load_system_font() -> Option<Vec<u8>> {
+    const CANDIDATES: &[&str] = &[
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/Hack-Regular.ttf",
+        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/TTF/Arimo-Regular.ttf",
+        "/System/Library/Fonts/Helvetica.ttc",
+        "C:\\Windows\\Fonts\\arial.ttf",
+    ];
+    CANDIDATES.iter().find_map(|p| std::fs::read(p).ok())
+}
+
 /// The authored stylesheet: one rule per class, each painting a background +
 /// size. Layout is flow (vertical stacking) — `display` is not yet mapped and
 /// the property set has no margin/align — so the bars stack top-to-bottom
 /// inside the dark `.counter` panel.
+///
+/// Text color defaults to white in the scene coordinator, and `color` does not
+/// reliably inherit to the child text node in the current cascade, so rather
+/// than author a per-label text color every bar is given a dark-enough
+/// background for white glyphs to read: `.label` is a dark slate, and the red
+/// `.decrement` / green `.increment` buttons already carry white text well.
 fn counter_stylesheet() -> Stylesheet {
     let css = "\
 .counter   { background-color: #1e2636; width: 100%; height: 100%; }\n\
 .bar       { width: 100%; }\n\
-.label     { background-color: #3a4560; height: 50%; }\n\
+.label     { background-color: #2b3348; height: 50%; }\n\
 .decrement { background-color: #d9534f; height: 25%; }\n\
 .increment { background-color: #5cb85c; height: 25%; }\n\
 ";

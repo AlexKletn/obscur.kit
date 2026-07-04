@@ -5,6 +5,8 @@ use obscur_render::frame::{FrameSubmission, PresentResult};
 use obscur_render::renderer::{Renderer, RendererCapabilities, RendererError, RendererId};
 use obscur_render::target::RenderTarget;
 
+use vello::peniko::{Blob, FontData};
+
 use crate::conversion::SceneConverter;
 use crate::error::VelloRenderError;
 use crate::renderer::{VelloDevice, VelloFrame, VelloSurface};
@@ -74,6 +76,19 @@ impl VelloRenderer {
     /// Attaches (or replaces) the host-provided [`VelloDevice`].
     pub fn set_device(&mut self, device: VelloDevice) {
         self.device = Some(device);
+    }
+
+    /// Attaches (or replaces) the host-provided font used to render text runs.
+    ///
+    /// Fonts are a host resource, mirroring the host-provides-device pattern:
+    /// the adapter never bundles one, so the host reads a font file and hands
+    /// the raw bytes here. The bytes are wrapped in a peniko [`FontData`] (font
+    /// index 0) and forwarded to the scene converter, which shapes
+    /// [`DrawText`](obscur_scene::command::PaintCommand::DrawText) runs against
+    /// it. Until this is called, text runs are skipped.
+    pub fn set_font(&mut self, font_bytes: Vec<u8>) {
+        let font = FontData::new(Blob::from(font_bytes), 0);
+        self.scene_converter.set_font(font);
     }
 
     /// Whether a GPU device is attached and rendering can submit work.

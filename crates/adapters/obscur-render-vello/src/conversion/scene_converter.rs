@@ -10,9 +10,11 @@
 use obscur_scene::clip::Clip;
 use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::layer::{CompositionMode, SceneLayer};
-use obscur_scene::paint::{BlendMode, Paint};
+use obscur_scene::paint::{BlendMode, Brush, Paint};
+use skrifa::instance::{LocationRef, Size};
+use skrifa::{FontRef, MetadataProvider};
 use vello::kurbo::{Affine, Rect as KurboRect};
-use vello::peniko;
+use vello::peniko::{self, FontData};
 use vello::Scene;
 
 use super::brush_converter::BrushConverter;
@@ -51,15 +53,30 @@ const UNBOUNDED_HALF_EXTENT: f64 = 1.0e9;
 /// shape. The layer transform and additional effects (e.g. blur) are **not**
 /// applied here; they are the renderer sub-step's concern. Paint order and
 /// nesting — the properties the determinism boundary requires — are preserved.
-#[derive(Debug, Default, Clone, Copy)]
+///
+/// # Text
+///
+/// [`PaintCommand::DrawText`] is rasterized into real glyphs, but only once a
+/// host has supplied a font via [`Self::set_font`]. Fonts are a host resource
+/// (the adapter never bundles one, mirroring the host-provides-device pattern),
+/// so with no font set the converter degrades gracefully and simply skips text
+/// runs. Glyph mapping (charmap) and advances come from `skrifa`; the glyphs are
+/// handed to Vello's own glyph pipeline for rasterization (spec §5.2).
+#[derive(Debug, Default, Clone)]
 pub struct SceneConverter {
     path: PathConverter,
     brush: BrushConverter,
     clip: ClipConverter,
+    /// Host-provided font used to shape [`PaintCommand::DrawText`] runs. `None`
+    /// until [`Self::set_font`] is called; text is skipped while absent.
+    font: Option<FontData>,
 }
 
 impl SceneConverter {
     /// Creates a scene converter with freshly constructed leaf converters.
+    ///
+    /// No font is attached; call [`Self::set_font`] before text runs will
+    /// render.
     #[must_use]
     pub fn new() -> Self {
         let color = ColorConverter::new();
@@ -68,7 +85,16 @@ impl SceneConverter {
             path,
             brush: BrushConverter::new(color),
             clip: ClipConverter::new(path),
+            font: None,
         }
+    }
+
+    /// Attaches (or replaces) the host-provided [`FontData`] used to shape text.
+    ///
+    /// The font is a host resource; the adapter never fabricates one. Until a
+    /// font is set, [`PaintCommand::DrawText`] commands are silently skipped.
+    pub fn set_font(&mut self, font: FontData) {
+        self.font = Some(font);
     }
 
     /// Converts an obscur-scene [`DisplayList`] into a [`vello::Scene`].
@@ -98,9 +124,12 @@ impl SceneConverter {
                         depth -= 1;
                     }
                 }
-                // Text-run glyph rasterization is added in a later step; ignore
-                // for now so the display list still converts.
-                PaintCommand::DrawText { .. } => {}
+                PaintCommand::DrawText {
+                    origin,
+                    text,
+                    font_size,
+                    brush,
+                } => self.draw_text(&mut scene, *origin, text, *font_size, brush),
             }
         }
 
@@ -112,8 +141,70 @@ impl SceneConverter {
         scene
     }
 
+    /// Rasterizes a single text run into glyphs at `origin`.
+    ///
+    /// Characters are mapped to glyph ids through the font's character map and
+    /// laid out left-to-right using per-glyph advance widths (both from
+    /// `skrifa`); the run's baseline sits one em below the top-left `origin` (an
+    /// approximation adequate for the counter labels this step targets).
+    /// Characters with no glyph in the font are skipped, and a glyph with no
+    /// advance contributes zero to the pen. The assembled glyphs are drawn with
+    /// Vello's glyph pipeline, brushed with the command's own [`Brush`].
+    ///
+    /// Degrades gracefully: with no host font set, or if the font bytes fail to
+    /// parse, the run is skipped rather than erroring.
+    fn draw_text(
+        &self,
+        scene: &mut Scene,
+        origin: obscur_geometry::Point,
+        text: &str,
+        font_size: f32,
+        brush: &Brush,
+    ) {
+        // No host font → no text (documented graceful degradation).
+        let Some(font) = self.font.as_ref() else {
+            return;
+        };
+        // Reparse the font bytes for skrifa's charmap/metrics. On a malformed
+        // font, skip this run rather than panic.
+        let Ok(font_ref) = FontRef::new(font.data.data()) else {
+            return;
+        };
+
+        let charmap = font_ref.charmap();
+        let metrics = font_ref.glyph_metrics(Size::new(font_size), LocationRef::default());
+        // Top-left origin → baseline approximately one em down.
+        let baseline_y = origin.y + font_size;
+        let mut pen_x = origin.x;
+        let glyphs: Vec<vello::Glyph> = text
+            .chars()
+            .filter_map(|ch| {
+                let gid = charmap.map(ch)?;
+                let glyph = vello::Glyph {
+                    id: gid.to_u32(),
+                    x: pen_x,
+                    y: baseline_y,
+                };
+                pen_x += metrics.advance_width(gid).unwrap_or(0.0);
+                Some(glyph)
+            })
+            .collect();
+        if glyphs.is_empty() {
+            return;
+        }
+
+        // Reuse the same Brush→peniko path fills use, so a `Brush::solid(color)`
+        // becomes the glyph brush (gradients carry over too).
+        let peniko_brush = self.brush.convert(brush);
+        scene
+            .draw_glyphs(font)
+            .font_size(font_size)
+            .brush(&peniko_brush)
+            .draw(peniko::Fill::NonZero, glyphs.into_iter());
+    }
+
     /// Fills or strokes a single path.
-    fn draw_path(self, scene: &mut Scene, path: &obscur_scene::path::Path, paint: &Paint) {
+    fn draw_path(&self, scene: &mut Scene, path: &obscur_scene::path::Path, paint: &Paint) {
         let bez = self.path.convert(path);
         let brush = self.brush.convert(paint.brush());
         match paint {
@@ -129,7 +220,7 @@ impl SceneConverter {
     }
 
     /// Pushes a clip as a neutral-blend layer bounded by the clip's shape.
-    fn push_clip(self, scene: &mut Scene, clip: &Clip) {
+    fn push_clip(&self, scene: &mut Scene, clip: &Clip) {
         let shape = self.clip.shape(clip);
         scene.push_layer(
             peniko::Fill::NonZero,
@@ -141,7 +232,7 @@ impl SceneConverter {
     }
 
     /// Pushes a compositing layer with its opacity, blend, and clip shape.
-    fn push_layer(self, scene: &mut Scene, layer: &SceneLayer) {
+    fn push_layer(&self, scene: &mut Scene, layer: &SceneLayer) {
         let blend = peniko::BlendMode::new(mix(layer.blend_mode()), compose(layer.composition()));
         let alpha = layer.opacity();
         if let Some(clip @ Clip::Shape(_)) = layer.clip() {
@@ -284,6 +375,20 @@ mod tests {
         assert!(!list.is_balanced());
         let scene = SceneConverter::new().convert(&list);
         assert!(!scene.encoding().is_empty());
+    }
+
+    #[test]
+    fn draw_text_without_font_is_skipped() {
+        // With no host font set, a text run degrades gracefully: it neither
+        // panics nor encodes anything.
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawText {
+            origin: Point::new(0.0, 0.0),
+            text: "Count: 0".into(),
+            font_size: 16.0,
+            brush: Brush::solid(Color::WHITE),
+        }]);
+        let scene = SceneConverter::new().convert(&list);
+        assert!(scene.encoding().is_empty());
     }
 
     #[test]
