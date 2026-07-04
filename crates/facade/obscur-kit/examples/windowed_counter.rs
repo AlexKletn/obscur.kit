@@ -4,8 +4,9 @@
 //! *real* platform backends the `full` feature set unlocks — winit 0.30 for the
 //! window and event loop, and Vello/wgpu 29 for the GPU renderer — and drives
 //! them through the toolkit's public umbrella crate only (`obscur_kit::*`). It
-//! opens a genuine OS window and **presents the painted counter on-screen** each
-//! frame, running until the window is closed.
+//! opens a genuine OS window and **presents the painted counter on-screen**,
+//! redrawing on input and resize, running until the window is closed. Clicking
+//! the red bar decrements the counter and the green bar increments it.
 //!
 //! Run it on a real machine (a display + a GPU adapter are required):
 //! `cargo run -p obscur-kit --example windowed_counter --features full`
@@ -52,7 +53,7 @@
 //!
 //! This example cannot run in the headless dev/CI environment (no display, no
 //! GPU adapter), so it is only ever *compiled* there. On a real machine it opens
-//! a window and continuously presents the painted counter until closed.
+//! a window, presents the painted counter, and responds to clicks until closed.
 #![forbid(unsafe_code)]
 
 use std::sync::Arc;
@@ -74,7 +75,7 @@ use obscur_kit::view::view::{CLASS, View, ViewNode, ViewProperty, ViewValue};
 use obscur_kit::widgets::button::Button;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowAttributes, WindowId};
 
@@ -106,6 +107,9 @@ struct WindowedCounter {
     increment: Button,
     /// The current counter value shown by the label.
     count: i64,
+    /// Last known cursor position in physical pixels, tracked for hit-testing
+    /// clicks against the stacked bars.
+    cursor: (f64, f64),
 }
 
 impl WindowedCounter {
@@ -123,6 +127,36 @@ impl WindowedCounter {
             decrement: Button::new("-", CMD_DECREMENT),
             increment: Button::new("+", CMD_INCREMENT),
             count: 0,
+            cursor: (0.0, 0.0),
+        }
+    }
+
+    /// Maps a click at the tracked cursor position onto a bar and updates the
+    /// counter: the lower `.increment` quarter of the window increments, the
+    /// `.decrement` quarter above it decrements, and the top `.label` half is
+    /// inert. Region boundaries mirror the `counter_stylesheet` percentages.
+    fn handle_click(&mut self) {
+        let Some(height) = self.surface.as_ref().map(|s| f64::from(s.config().height)) else {
+            return;
+        };
+        let y = self.cursor.1;
+        if y >= 0.75 * height {
+            self.increment.press();
+            if self.increment.release() {
+                self.count += 1;
+            }
+            println!("[+] clicked -> count = {}", self.count);
+        } else if y >= 0.5 * height {
+            self.decrement.press();
+            if self.decrement.release() {
+                self.count -= 1;
+            }
+            println!("[-] clicked -> count = {}", self.count);
+        } else {
+            return; // Click landed on the label bar: nothing to do.
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
         }
     }
 
@@ -142,21 +176,14 @@ impl WindowedCounter {
     /// Renders one frame: advance UI state, build the view, drive the pipeline,
     /// package the scene, and present it on-screen via the Vello surface path.
     fn render_frame(&mut self) {
-        // Nothing to draw until the window, surface, and renderer all exist.
-        let (Some(window), Some(surface), Some(renderer)) =
-            (self.window.as_ref(), self.surface.as_ref(), self.renderer.as_mut())
+        // Nothing to draw until the surface and renderer exist.
+        let (Some(surface), Some(renderer)) = (self.surface.as_ref(), self.renderer.as_mut())
         else {
             return;
         };
 
-        // --- Stage 1: advance UI state via the button's headless machine. -----
-        // A full press + release on an enabled button reports activation.
-        self.increment.press();
-        if self.increment.release() {
-            self.count += 1;
-        }
-
-        // --- Stage 2: build the counter view from the components tier. --------
+        // --- Stage 1: build the counter view from the components tier. --------
+        // UI state changes on user input (see `handle_click`), not per frame.
         let view = build_counter_view(self.count, &self.decrement, &self.increment);
 
         // --- Stage 3: drive the real pipeline and read the committed scene. ---
@@ -195,9 +222,8 @@ impl WindowedCounter {
             }
         }
 
-        // Keep the counter animating: ask for another frame so the window is a
-        // genuine, continuously-redrawing surface until the user closes it.
-        window.request_redraw();
+        // Redraw on demand only (input / resize): the window is idle when
+        // nothing changes rather than spinning the GPU.
     }
 }
 
@@ -291,6 +317,14 @@ impl ApplicationHandler for WindowedCounter {
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor = (position.x, position.y);
+            }
+            WindowEvent::MouseInput { state, button, .. }
+                if state == ElementState::Pressed && button == MouseButton::Left =>
+            {
+                self.handle_click();
             }
             WindowEvent::RedrawRequested => self.render_frame(),
             WindowEvent::CloseRequested => event_loop.exit(),
