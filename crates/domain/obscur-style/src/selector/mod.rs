@@ -1,9 +1,23 @@
 //! Selector module.
+mod complex_selector;
+pub use complex_selector::{Combinator, ComplexSelector};
+mod compound_selector;
+pub use compound_selector::CompoundSelector;
+mod match_element;
+pub use match_element::MatchElement;
+mod pseudo_class_selector;
+pub use pseudo_class_selector::{AnB, PseudoClassSelector};
 mod pseudo_state;
 pub use pseudo_state::PseudoState;
 mod selector_id;
 pub use selector_id::SelectorId;
+mod selector_list;
+pub use selector_list::SelectorList;
 mod selector_match;
 pub use selector_match::SelectorMatch;
+mod selector_matcher;
+pub use selector_matcher::SelectorMatcher;
 mod selector_specificity;
 pub use selector_specificity::SelectorSpecificity;
+mod simple_selector;
+pub use simple_selector::{AttrMatch, AttributeSelector, SimpleSelector};
