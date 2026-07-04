@@ -19,6 +19,10 @@ mod frame_plan;
 
 pub(crate) use frame_plan::FramePlan;
 
+mod frame_budget;
+
+pub use frame_budget::FrameBudget;
+
 mod runtime_config;
 mod runtime_event;
 mod runtime_handle;

@@ -4,7 +4,7 @@
 
 mod runtime;
 
-pub use runtime::{KeyDispatch, PointerDispatch, SemanticTreeBuilder, UiRuntime};
+pub use runtime::{FrameBudget, KeyDispatch, PointerDispatch, SemanticTreeBuilder, UiRuntime};
 
 pub mod frame;
 pub mod invalidation;

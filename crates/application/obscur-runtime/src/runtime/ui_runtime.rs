@@ -5,6 +5,10 @@ use std::fmt;
 
 use obscur_accessibility::port::AccessibilityBridge;
 use obscur_accessibility::tree::{SemanticSnapshot, SemanticTree};
+use obscur_diagnostics::{
+    BudgetViolation, DiagnosticSubsystem, NullTelemetrySink, PerformanceCounter, PerformanceSpan,
+    TelemetrySink,
+};
 use obscur_geometry::Size;
 use obscur_identity::{NodeId, RuntimeId};
 use obscur_interaction::command::{CommandRouter, KeyEvent, Modifiers, Shortcut};
@@ -25,7 +29,7 @@ use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
 
-use super::{FramePlan, KeyDispatch, PointerDispatch, SemanticTreeBuilder};
+use super::{FrameBudget, FramePlan, KeyDispatch, PointerDispatch, SemanticTreeBuilder};
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::orchestration::{
     root_font_size, AnimatedKind, AnimationBinding, ComputedStyles, CssMotionRules, LayoutBoxes,
@@ -160,6 +164,19 @@ pub struct UiRuntime {
     /// started for, so a matching element registers its keyframe timeline once
     /// rather than re-registering it every style frame.
     css_animations_started: HashSet<(NodeId, PropertyId)>,
+    /// The performance-telemetry destination each frame's phases record into
+    /// (spec §7.9). Defaults to a [`NullTelemetrySink`], so an unconfigured
+    /// (production) runtime pays ~zero cost: every `record_*` call is a no-op.
+    /// A host installs a real sink via
+    /// [`set_telemetry_sink`](Self::set_telemetry_sink) to observe spans,
+    /// counters and budget violations.
+    telemetry: Box<dyn TelemetrySink>,
+    /// The per-phase cost budgets checked after each frame phase (spec §7.9).
+    /// Unbounded by default, so no [`BudgetViolation`] is produced until a host
+    /// installs one via [`set_frame_budget`](Self::set_frame_budget). A phase
+    /// whose reported count exceeds its bound records a violation into
+    /// `telemetry` — a diagnostic, never a crash.
+    budget: FrameBudget,
 }
 
 impl UiRuntime {
@@ -198,7 +215,39 @@ impl UiRuntime {
             css_motion: CssMotionRules::new(),
             transition_targets: HashMap::new(),
             css_animations_started: HashSet::new(),
+            telemetry: Box::new(NullTelemetrySink),
+            budget: FrameBudget::unbounded(),
         }
+    }
+
+    /// Installs the performance-telemetry `sink` each frame's phases record into
+    /// (spec §7.9), replacing any previously installed sink.
+    ///
+    /// Until a sink is installed the runtime records into a
+    /// [`NullTelemetrySink`] — telemetry is *produced* every frame but discarded,
+    /// so deep tracing stays opt-in and production overhead is negligible. A host
+    /// or DevTools backend installs a real
+    /// [`TelemetrySink`](obscur_diagnostics::TelemetrySink) (e.g. a
+    /// [`CollectingTelemetrySink`](obscur_diagnostics::CollectingTelemetrySink))
+    /// to receive per-phase spans/counters and budget violations as frames run.
+    pub fn set_telemetry_sink(&mut self, sink: Box<dyn TelemetrySink>) {
+        self.telemetry = sink;
+    }
+
+    /// Installs the per-phase cost [`FrameBudget`] checked after each frame phase
+    /// (spec §7.9), replacing any previously installed budget.
+    ///
+    /// A phase whose deterministic cost count exceeds its bound records a
+    /// [`BudgetViolation`] into the installed telemetry sink on the next frame —
+    /// a warning-level diagnostic, not a crash.
+    pub fn set_frame_budget(&mut self, budget: FrameBudget) {
+        self.budget = budget;
+    }
+
+    /// Returns the per-phase cost budget checked after each frame phase.
+    #[must_use]
+    pub fn frame_budget(&self) -> FrameBudget {
+        self.budget
     }
 
     /// Installs the CSS-authored motion (`transition`/`@keyframes`) the runtime
@@ -297,10 +346,21 @@ impl UiRuntime {
         let first_frame = self.tree.root().is_none();
         let plan = FramePlan::for_frame(ctx.reason(), first_frame);
 
+        // Open the frame telemetry span (spec §7.9). A `NullTelemetrySink`
+        // (the default) makes this and every per-phase record below a no-op, so
+        // an unconfigured runtime pays essentially nothing.
+        self.telemetry
+            .record_span(&PerformanceSpan::new("frame", DiagnosticSubsystem::Runtime));
+
         // An idle frame (e.g. a diagnostics capture) recalculates nothing: it
         // re-presents the retained scene without touching tree, styles or boxes.
         if plan.is_idle() {
             let snapshot = self.scene.snapshot();
+            // Record that this frame ran zero phases so an observer still sees it.
+            self.telemetry.record_counter(&PerformanceCounter::new(
+                DiagnosticSubsystem::Runtime,
+                "frame.phases_run",
+            ));
             self.next_frame = self.next_frame.next();
             return FrameResult::new(ctx.id(), snapshot, false, false, false, true);
         }
@@ -320,7 +380,19 @@ impl UiRuntime {
                 .enactor
                 .commit_root(&self.reconciler, &mut self.tree, desired)
                 .expect("a root reconcile is a single, structurally-valid ReplaceRoot");
-            !commit.is_empty()
+            let changed = !commit.is_empty();
+            // Telemetry: mark the reconcile phase and count the resulting nodes,
+            // budgeting the retained-tree size (spec §7.9).
+            let nodes = self.tree.len() as u64;
+            record_phase(
+                &mut *self.telemetry,
+                "reconcile",
+                DiagnosticSubsystem::Tree,
+                "reconcile.nodes",
+                nodes,
+                self.budget.check_reconcile(nodes),
+            );
+            changed
         } else {
             false
         };
@@ -352,6 +424,16 @@ impl UiRuntime {
             self.apply_motion_overlay(&mut computed);
             let restyled = !computed.is_empty();
             self.inputs = inputs;
+            // Telemetry: mark the style phase and count resolved styles (§7.9).
+            let count = computed.len() as u64;
+            record_phase(
+                &mut *self.telemetry,
+                "style",
+                DiagnosticSubsystem::Style,
+                "style.resolved",
+                count,
+                self.budget.check_style(count),
+            );
             (computed, restyled)
         } else {
             // Reuse the retained computed styles; re-apply the motion overlay so
@@ -376,6 +458,16 @@ impl UiRuntime {
             // Rebuild the hit-test index from the freshly laid-out boxes so the
             // next pointer event tests against this frame's geometry.
             self.rebuild_spatial_index();
+            // Telemetry: mark the layout phase and count arranged boxes (§7.9).
+            let count = self.boxes.len() as u64;
+            record_phase(
+                &mut *self.telemetry,
+                "layout",
+                DiagnosticSubsystem::Layout,
+                "layout.boxes",
+                count,
+                self.budget.check_layout(count),
+            );
             relaid_out
         } else {
             false
@@ -385,9 +477,29 @@ impl UiRuntime {
         //    When skipped, the retained scene's current snapshot is republished.
         if plan.compose() {
             let display_list = self.scene_composer.compose(&self.tree, &computed, &self.boxes);
+            // Telemetry: mark the compose phase and count paint commands (§7.9).
+            let count = display_list.len() as u64;
+            record_phase(
+                &mut *self.telemetry,
+                "compose",
+                DiagnosticSubsystem::Render,
+                "compose.commands",
+                count,
+                self.budget.check_compose(count),
+            );
             self.scene.set_root(display_list);
         }
         let snapshot = self.scene.snapshot();
+
+        // Close the frame span with a counter of how many phases actually ran,
+        // so an observer can attribute work to this frame (spec §7.9).
+        let phases_run = u64::from(plan.reconcile())
+            + u64::from(plan.style())
+            + u64::from(plan.layout())
+            + u64::from(plan.compose());
+        let mut phases = PerformanceCounter::new(DiagnosticSubsystem::Runtime, "frame.phases_run");
+        phases.add(phases_run);
+        self.telemetry.record_counter(&phases);
 
         // Retain the computed styles for a later frame that skips the style
         // phase, then advance the frame counter.
@@ -1073,6 +1185,31 @@ struct AnimationStart {
     kind: AnimatedKind,
 }
 
+/// Records one frame phase's telemetry into `sink` (spec §7.9): a
+/// [`PerformanceSpan`] marker for the phase, a [`PerformanceCounter`] carrying
+/// the phase's deterministic cost `metric`, and — when the phase's optional
+/// budget was exceeded — the resulting [`BudgetViolation`].
+///
+/// Taking `&mut dyn TelemetrySink` (rather than `&mut self`) keeps the borrow
+/// disjoint from the caller's other `self` fields, and makes every call a no-op
+/// under the default [`NullTelemetrySink`].
+fn record_phase(
+    sink: &mut dyn TelemetrySink,
+    name: &'static str,
+    subsystem: DiagnosticSubsystem,
+    label: &'static str,
+    metric: u64,
+    violation: Option<BudgetViolation>,
+) {
+    sink.record_span(&PerformanceSpan::new(name, subsystem));
+    let mut counter = PerformanceCounter::new(subsystem, label);
+    counter.add(metric);
+    sink.record_counter(&counter);
+    if let Some(violation) = violation {
+        sink.record_violation(&violation);
+    }
+}
+
 /// Returns how a scalar animates into `property`'s computed value, or [`None`]
 /// for a property the motion overlay cannot express as a scalar.
 ///
@@ -1610,6 +1747,196 @@ mod tests {
         assert!(rendered.contains("UiRuntime"));
         assert!(rendered.contains("next_frame"));
         assert!(rendered.contains("pending_frames"));
+    }
+
+    // ---- §7.9 (audit S3): frame-phase telemetry through a TelemetrySink -------
+
+    use obscur_diagnostics::{CollectingTelemetrySink, DiagnosticSeverity};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// A telemetry sink that shares a [`CollectingTelemetrySink`] behind an
+    /// `Rc<RefCell<_>>`, so a test can install it into the runtime (which takes
+    /// ownership of a `Box<dyn TelemetrySink>`) and still read what was recorded
+    /// afterwards.
+    #[derive(Clone, Default)]
+    struct SharedSink(Rc<RefCell<CollectingTelemetrySink>>);
+
+    impl TelemetrySink for SharedSink {
+        fn record_span(&mut self, span: &PerformanceSpan) {
+            self.0.borrow_mut().record_span(span);
+        }
+        fn record_counter(&mut self, counter: &PerformanceCounter) {
+            self.0.borrow_mut().record_counter(counter);
+        }
+        fn record_violation(&mut self, violation: &obscur_diagnostics::BudgetViolation) {
+            self.0.borrow_mut().record_violation(violation);
+        }
+    }
+
+    #[test]
+    fn a_frame_records_every_phase_span_and_counter_into_the_sink() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let shared = SharedSink::default();
+        runtime.set_telemetry_sink(Box::new(shared.clone()));
+
+        let view = counter_view();
+        let sheet = counter_stylesheet();
+        let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+
+        let sink = shared.0.borrow();
+        // Every phase of a full frame recorded its span, in pipeline order.
+        let span_names: Vec<&str> = sink.spans.iter().map(|s| s.name).collect();
+        assert_eq!(
+            span_names,
+            vec!["frame", "reconcile", "style", "layout", "compose"]
+        );
+        // Each phase recorded a cost counter, plus the closing phases_run tally.
+        let counter_labels: Vec<&str> =
+            sink.counters.iter().map(PerformanceCounter::label).collect();
+        assert_eq!(
+            counter_labels,
+            vec![
+                "reconcile.nodes",
+                "style.resolved",
+                "layout.boxes",
+                "compose.commands",
+                "frame.phases_run",
+            ]
+        );
+        // The full frame ran all four phases and produced real work.
+        let phases_run = sink
+            .counters
+            .iter()
+            .find(|c| c.label() == "frame.phases_run")
+            .expect("phases_run counter");
+        assert_eq!(phases_run.value(), 4);
+        assert_eq!(phases_run.subsystem(), DiagnosticSubsystem::Runtime);
+        let commands = sink
+            .counters
+            .iter()
+            .find(|c| c.label() == "compose.commands")
+            .expect("compose counter");
+        assert!(commands.value() > 0, "the matched fill produced a command");
+        // No budget configured => no violations.
+        assert!(sink.violations.is_empty());
+    }
+
+    #[test]
+    fn multiple_frames_accumulate_telemetry() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let shared = SharedSink::default();
+        runtime.set_telemetry_sink(Box::new(shared.clone()));
+
+        let view = counter_view();
+        let sheet = counter_stylesheet();
+        let sheets = std::slice::from_ref(&sheet);
+        for _ in 0..3 {
+            let _ = runtime.render_now(&view, sheets);
+        }
+
+        let sink = shared.0.borrow();
+        // Three full frames, each opening a "frame" span.
+        let frame_spans = sink.spans.iter().filter(|s| s.name == "frame").count();
+        assert_eq!(frame_spans, 3);
+        assert_eq!(sink.spans.len(), 3 * 5, "5 spans per full frame");
+    }
+
+    #[test]
+    fn an_exceeded_budget_records_a_violation_that_becomes_a_warning_diagnostic() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let shared = SharedSink::default();
+        runtime.set_telemetry_sink(Box::new(shared.clone()));
+        // Bound the reconcile phase to zero nodes: any populated tree exceeds it.
+        runtime.set_frame_budget(FrameBudget::unbounded().with_reconcile_nodes(0));
+        assert_eq!(
+            runtime.frame_budget(),
+            FrameBudget::unbounded().with_reconcile_nodes(0)
+        );
+
+        let view = counter_view();
+        let sheet = counter_stylesheet();
+        let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+
+        let sink = shared.0.borrow();
+        assert_eq!(sink.violations.len(), 1, "one reconcile budget violation");
+        let violation = &sink.violations[0];
+        assert_eq!(violation.subsystem(), DiagnosticSubsystem::Tree);
+        // The violation flows into the diagnostics channel as a warning, not a
+        // crash (spec §7.9).
+        let diagnostic = violation.to_diagnostic();
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Warning);
+        assert_eq!(diagnostic.subsystem, DiagnosticSubsystem::Tree);
+    }
+
+    #[test]
+    fn a_generous_budget_records_no_violation() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let shared = SharedSink::default();
+        runtime.set_telemetry_sink(Box::new(shared.clone()));
+        runtime.set_frame_budget(
+            FrameBudget::unbounded()
+                .with_reconcile_nodes(1_000)
+                .with_style_nodes(1_000)
+                .with_layout_boxes(1_000)
+                .with_compose_commands(1_000),
+        );
+
+        let view = counter_view();
+        let sheet = counter_stylesheet();
+        let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+
+        assert!(shared.0.borrow().violations.is_empty());
+    }
+
+    #[test]
+    fn the_default_null_sink_records_nothing_yet_the_frame_still_runs() {
+        // No sink installed => the default NullTelemetrySink. The frame must still
+        // produce correct output; telemetry is simply discarded (spec §7.9:
+        // lightweight counters are opt-in).
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let view = counter_view();
+        let sheet = counter_stylesheet();
+        let result = runtime.render_now(&view, std::slice::from_ref(&sheet));
+        assert!(result.reconciled());
+        assert!(result.is_balanced());
+        assert!(!result.snapshot().display_list().is_empty());
+
+        // Swapping in a collecting sink only after the frame proves the default
+        // path recorded nowhere observable: the fresh sink is empty until the
+        // next frame runs.
+        let shared = SharedSink::default();
+        runtime.set_telemetry_sink(Box::new(shared.clone()));
+        assert!(shared.0.borrow().spans.is_empty());
+        assert!(shared.0.borrow().counters.is_empty());
+    }
+
+    #[test]
+    fn an_idle_frame_records_a_zero_phase_frame() {
+        // A diagnostics-capture (idle) frame runs no phases but still marks the
+        // frame with a phases_run == 0 counter.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let view = counter_view();
+        let sheet = counter_stylesheet();
+        let sheets = std::slice::from_ref(&sheet);
+        // First a full frame so the tree exists (an idle frame requires a
+        // populated tree; the first frame is always full).
+        let _ = runtime.render_now(&view, sheets);
+
+        let shared = SharedSink::default();
+        runtime.set_telemetry_sink(Box::new(shared.clone()));
+        runtime.request_frame(FrameReason::DiagnosticsCapture);
+        let idle = runtime
+            .run_due_frame(&view, sheets)
+            .expect("a requested capture is due");
+        assert!(!idle.reconciled() && !idle.restyled() && !idle.relaid_out());
+
+        let sink = shared.0.borrow();
+        let span_names: Vec<&str> = sink.spans.iter().map(|s| s.name).collect();
+        assert_eq!(span_names, vec!["frame"], "idle frame opens only the span");
+        assert_eq!(sink.counters.len(), 1);
+        assert_eq!(sink.counters[0].label(), "frame.phases_run");
+        assert_eq!(sink.counters[0].value(), 0);
     }
 
     // ---- Phase 3 step 2: input dispatch (hit-test → hover/focus → pseudo) ----
