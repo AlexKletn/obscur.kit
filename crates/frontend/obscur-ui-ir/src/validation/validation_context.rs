@@ -1,6 +1,112 @@
-//! `ValidationContext` (skeleton stub for the spec-defined entity; not yet implemented).
+//! `ValidationContext`: mutable state threaded through a validation pass
+//! (spec §2.5 validation).
 
-/// Placeholder for the `ValidationContext` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
-#[derive(Debug)]
-pub struct ValidationContext;
+use std::collections::BTreeSet;
+
+use obscur_capability::CapabilityId;
+
+/// The mutable bookkeeping threaded through a single validation pass
+/// (spec §2.5).
+///
+/// A context tracks the two pieces of cross-node state a walk needs: the set of
+/// node ids [`record_id`](ValidationContext::record_id) has already seen (so
+/// duplicates can be detected), and the set of capability ids the host grants.
+/// When the granted set is empty the validator does not enforce capabilities —
+/// [`checks_capabilities`](ValidationContext::checks_capabilities) reports that.
+#[derive(Debug, Clone, Default)]
+pub struct ValidationContext {
+    seen_ids: BTreeSet<u64>,
+    available_capabilities: BTreeSet<Box<str>>,
+}
+
+impl ValidationContext {
+    /// Creates an empty context: no ids seen and no capabilities granted (so
+    /// capability checking is off).
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates a context whose granted capability set is populated from `caps`.
+    #[must_use]
+    pub fn with_capabilities(caps: impl IntoIterator<Item = CapabilityId>) -> Self {
+        Self {
+            seen_ids: BTreeSet::new(),
+            available_capabilities: caps
+                .into_iter()
+                .map(|cap| Box::from(cap.as_str()))
+                .collect(),
+        }
+    }
+
+    /// Records that node `id` was encountered.
+    ///
+    /// Returns `false` if the id was **already** present — i.e. this is a
+    /// duplicate — and `true` if it was newly inserted.
+    pub fn record_id(&mut self, id: u64) -> bool {
+        self.seen_ids.insert(id)
+    }
+
+    /// Returns whether capability `id` is in the granted set.
+    #[must_use]
+    pub fn has_capability(&self, id: &str) -> bool {
+        self.available_capabilities.contains(id)
+    }
+
+    /// Returns whether capability checking is active — i.e. the granted set is
+    /// non-empty.
+    #[must_use]
+    pub fn checks_capabilities(&self) -> bool {
+        !self.available_capabilities.is_empty()
+    }
+
+    /// Clears the seen-id bookkeeping so the context can drive a fresh walk.
+    /// The granted capability set is preserved.
+    pub fn reset(&mut self) {
+        self.seen_ids.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_id_detects_duplicates() {
+        let mut ctx = ValidationContext::new();
+        assert!(ctx.record_id(1));
+        assert!(ctx.record_id(2));
+        // Re-inserting an existing id reports a duplicate.
+        assert!(!ctx.record_id(1));
+    }
+
+    #[test]
+    fn new_context_checks_no_capabilities() {
+        let ctx = ValidationContext::new();
+        assert!(!ctx.checks_capabilities());
+        assert!(!ctx.has_capability("fs.read"));
+    }
+
+    #[test]
+    fn with_capabilities_populates_granted_set() {
+        let ctx = ValidationContext::with_capabilities([
+            CapabilityId::new("fs.read"),
+            CapabilityId::new("net.fetch"),
+        ]);
+        assert!(ctx.checks_capabilities());
+        assert!(ctx.has_capability("fs.read"));
+        assert!(ctx.has_capability("net.fetch"));
+        assert!(!ctx.has_capability("clipboard.write"));
+    }
+
+    #[test]
+    fn reset_clears_ids_but_keeps_capabilities() {
+        let mut ctx = ValidationContext::with_capabilities([CapabilityId::new("fs.read")]);
+        assert!(ctx.record_id(1));
+        ctx.reset();
+        // Id 1 is fresh again after reset.
+        assert!(ctx.record_id(1));
+        // Capabilities survive the reset.
+        assert!(ctx.has_capability("fs.read"));
+    }
+}
