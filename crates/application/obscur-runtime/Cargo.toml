@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 obscur-identity = { workspace = true }
+obscur-accessibility = { workspace = true }
 obscur-geometry = { workspace = true }
 obscur-diagnostics = { workspace = true }
 obscur-task = { workspace = true }

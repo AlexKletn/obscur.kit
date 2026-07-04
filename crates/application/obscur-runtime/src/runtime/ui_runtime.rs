@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use obscur_accessibility::port::AccessibilityBridge;
+use obscur_accessibility::tree::{SemanticSnapshot, SemanticTree};
 use obscur_geometry::Size;
 use obscur_identity::{NodeId, RuntimeId};
 use obscur_interaction::command::PhysicalKey;
@@ -21,7 +23,7 @@ use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
 
-use super::PointerDispatch;
+use super::{PointerDispatch, SemanticTreeBuilder};
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::orchestration::{
     root_font_size, AnimatedKind, AnimationBinding, ComputedStyles, LayoutBoxes, LayoutCoordinator,
@@ -638,6 +640,36 @@ impl UiRuntime {
         &self.tree
     }
 
+    /// Builds the semantic accessibility tree from the live retained tree
+    /// (spec §7.1).
+    ///
+    /// This is the missing link §7.1 mandates — "accessibility uses a semantic
+    /// tree linked to the retained UI tree". Each retained node becomes a
+    /// [`SemanticNode`](obscur_accessibility::semantic::SemanticNode) keyed by the
+    /// same [`NodeId`], with its role/name/state derived from the node's kind,
+    /// CSS type/local name, text content, and flags; the runtime's current
+    /// [`focused`](Self::focused) node is reflected as the focused semantic node.
+    /// The retained tree is left untouched.
+    #[must_use]
+    pub fn semantic_tree(&self) -> SemanticTree {
+        SemanticTreeBuilder::build(&self.tree, self.focused)
+    }
+
+    /// Captures the semantic accessibility tree as an immutable, versioned
+    /// [`SemanticSnapshot`] — the hand-off a platform
+    /// [`AccessibilityBridge`] consumes (spec §7.1).
+    #[must_use]
+    pub fn semantic_snapshot(&self) -> SemanticSnapshot {
+        SemanticTreeBuilder::snapshot(&self.tree, self.focused)
+    }
+
+    /// Pushes the current semantic snapshot to a platform
+    /// [`AccessibilityBridge`], feeding the retained tree's accessibility
+    /// projection into UI Automation / AX / AT-SPI / web a11y (spec §7.1).
+    pub fn push_accessibility(&self, bridge: &mut dyn AccessibilityBridge) {
+        bridge.update_tree(&self.semantic_snapshot());
+    }
+
     /// Returns the mutable scene's current state (as a shared reference).
     #[must_use]
     pub fn scene(&self) -> &Scene {
@@ -929,6 +961,54 @@ mod tests {
         assert_eq!(runtime.viewport(), viewport());
         runtime.set_viewport(Size::new(640.0, 480.0));
         assert_eq!(runtime.viewport(), Size::new(640.0, 480.0));
+    }
+
+    #[test]
+    fn semantic_snapshot_reflects_the_live_rendered_tree() {
+        use obscur_accessibility::semantic::SemanticRole;
+        use obscur_view::view::TYPE;
+
+        // A `button` element (CSS type) carrying a "Save" text child.
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(20))
+                .with_prop(ViewProperty::new(TYPE, ViewValue::Text("button".into())))
+                .with_children(ViewFragment::from_nodes(vec![ViewNode::text("Save")])),
+        ]));
+
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let _ = runtime.render_now(&view, &[]);
+
+        let snapshot = runtime.semantic_snapshot();
+        // root + button element + text child.
+        assert_eq!(snapshot.len(), 3);
+        let root = runtime.tree().root().expect("root after a frame");
+        assert_eq!(snapshot.root(), Some(root));
+
+        let button = runtime.tree().get(root).unwrap().children()[0];
+        let button_node = snapshot.get(button).expect("button in the snapshot");
+        assert_eq!(button_node.role(), SemanticRole::Button);
+        assert_eq!(button_node.name(), Some("Save"));
+
+        // The text child maps to a static-text node named by its content.
+        let text_child = runtime.tree().get(button).unwrap().children()[0];
+        let text_node = snapshot.get(text_child).expect("text in the snapshot");
+        assert_eq!(text_node.role(), SemanticRole::Text);
+        assert_eq!(text_node.name(), Some("Save"));
+
+        // Determinism: the same live tree yields an equal snapshot.
+        assert_eq!(runtime.semantic_snapshot(), snapshot);
+    }
+
+    #[test]
+    fn push_accessibility_feeds_the_bridge() {
+        use obscur_accessibility::port::RecordingAccessibilityBridge;
+
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let _ = runtime.render_now(&counter_view(), &[]);
+
+        let mut bridge = RecordingAccessibilityBridge::new();
+        runtime.push_accessibility(&mut bridge);
+        assert_eq!(bridge.tree_updates, 1, "the snapshot reached the bridge");
     }
 
     #[test]

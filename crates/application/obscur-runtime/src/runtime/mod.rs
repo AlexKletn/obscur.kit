@@ -7,6 +7,10 @@ mod pointer_dispatch;
 
 pub use pointer_dispatch::PointerDispatch;
 
+mod semantic_builder;
+
+pub use semantic_builder::SemanticTreeBuilder;
+
 mod runtime_config;
 mod runtime_event;
 mod runtime_handle;

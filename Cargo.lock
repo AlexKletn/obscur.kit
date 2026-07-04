@@ -1645,6 +1645,7 @@ version = "0.0.0"
 name = "obscur-runtime"
 version = "0.0.0"
 dependencies = [
+ "obscur-accessibility",
  "obscur-diagnostics",
  "obscur-geometry",
  "obscur-identity",
