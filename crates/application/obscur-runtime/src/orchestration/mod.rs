@@ -1,4 +1,6 @@
 //! Orchestration module.
+mod animation_binding;
+pub use animation_binding::{AnimatedKind, AnimationBinding};
 mod layout_coordinator;
 pub use layout_coordinator::{LayoutBoxes, LayoutCoordinator, LayoutStyles};
 mod motion_coordinator;

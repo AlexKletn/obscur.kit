@@ -1643,6 +1643,7 @@ dependencies = [
  "obscur-identity",
  "obscur-interaction",
  "obscur-layout",
+ "obscur-motion",
  "obscur-scene",
  "obscur-style",
  "obscur-task",

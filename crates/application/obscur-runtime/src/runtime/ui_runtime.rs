@@ -8,8 +8,13 @@ use obscur_interaction::command::PhysicalKey;
 use obscur_interaction::hover::{HoverChain, HoverTransition};
 use obscur_interaction::pointer::{PointerEvent, PointerEventKind};
 use obscur_interaction::spatial::{HitTest, SpatialIndex};
+use obscur_motion::scheduler::MotionScheduler;
+use obscur_motion::timeline::{Timeline, TimelineId};
+use obscur_motion::track::KeyframeTrack;
 use obscur_scene::scene::{Scene, SceneSnapshot};
+use obscur_style::computed::ComputedValue;
 use obscur_style::matching::Stylesheet;
+use obscur_style::property::PropertyId;
 use obscur_style::selector::PseudoState;
 use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
@@ -18,7 +23,8 @@ use obscur_view::view::View;
 use super::PointerDispatch;
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::orchestration::{
-    LayoutBoxes, LayoutCoordinator, PseudoStates, SceneCoordinator, StyleCoordinator, StyleInputs,
+    AnimatedKind, AnimationBinding, ComputedStyles, LayoutBoxes, LayoutCoordinator,
+    MotionCoordinator, PseudoStates, SceneCoordinator, StyleCoordinator, StyleInputs,
     StyleMatchingCoordinator,
 };
 use crate::scheduler::{BackpressureDecision, FrameScheduler};
@@ -98,6 +104,22 @@ pub struct UiRuntime {
     next_frame: FrameId,
     /// The viewport frames are laid out under.
     viewport: Size,
+    /// The domain motion scheduler owning every active timeline (spec §4.17).
+    ///
+    /// The runtime *owns* the scheduler and its timelines; each frame it samples
+    /// the active timelines and overlays the result onto computed style before
+    /// layout and paint, closing the style → motion → paint pipeline.
+    motion: MotionScheduler,
+    /// The animation binding registry: which timeline animates what
+    /// (node/property/track/kind), parallel to the timelines in `motion`.
+    ///
+    /// A binding is retained after its timeline finishes so the settled endpoint
+    /// value keeps being overlaid (the animation *holds* its final value); a new
+    /// [`animate`](Self::animate) for the same node+property supersedes it.
+    animations: Vec<AnimationBinding>,
+    /// The id minted for the next timeline started by
+    /// [`animate`](Self::animate); monotonically increasing so ids are unique.
+    next_timeline: TimelineId,
 }
 
 impl UiRuntime {
@@ -126,6 +148,9 @@ impl UiRuntime {
             focused: None,
             next_frame: FrameId::FIRST,
             viewport,
+            motion: MotionScheduler::new(),
+            animations: Vec::new(),
+            next_timeline: TimelineId::from_raw(0),
         }
     }
 
@@ -201,8 +226,15 @@ impl UiRuntime {
             .build_inputs_with_pseudo(&self.tree, sheets, &self.pseudo);
 
         // 3. Style: resolve computed styles over the retained tree.
-        let computed = self.style.resolve(&self.tree, &inputs);
+        let mut computed = self.style.resolve(&self.tree, &inputs);
         let restyled = !computed.is_empty();
+
+        // 3b. Motion: overlay every active animation's sampled value onto the
+        //     computed style *before* layout/paint, so an animated width visibly
+        //     changes this frame's layout box and fill (spec §4.17 style →
+        //     motion → paint). This runs for both `render_now` and
+        //     `run_due_frame` because both route through here.
+        self.apply_motion_overlay(&mut computed);
 
         // 4. Layout: map to layout styles, arrange, and retain the boxes.
         let layout_styles = self.layout.layout_styles_from(&computed);
@@ -224,6 +256,120 @@ impl UiRuntime {
         self.next_frame = self.next_frame.next();
 
         FrameResult::new(ctx.id(), snapshot, reconciled, restyled, relaid_out, true)
+    }
+
+    /// Starts an animation of `property` on `node`, sampling `track` over
+    /// `duration` logical seconds and lowering samples per `kind`; returns the
+    /// [`TimelineId`] driving it (spec §4.17).
+    ///
+    /// A fresh, already-*started* [`Timeline`] is registered with the owned
+    /// [`MotionScheduler`] and a matching [`AnimationBinding`] is recorded, so the
+    /// next frame's overlay pass samples the track at the timeline's progress and
+    /// writes the result onto `node`'s computed style before layout/paint. Any
+    /// prior binding for the **same** `node`+`property` is replaced (and its
+    /// timeline removed), so re-animating a target supersedes the old motion
+    /// rather than fighting it. A [`FrameReason::Animation`] frame is requested so
+    /// the animation actually reaches paint.
+    pub fn animate(
+        &mut self,
+        node: NodeId,
+        property: PropertyId,
+        track: KeyframeTrack,
+        duration: f32,
+        kind: AnimatedKind,
+    ) -> TimelineId {
+        // Supersede any existing animation of the same target: pull its timeline
+        // out of the scheduler, then drop its binding.
+        while let Some(index) = self
+            .animations
+            .iter()
+            .position(|binding| binding.node() == node && binding.property() == property)
+        {
+            let stale = self.animations.remove(index);
+            self.motion.remove(stale.timeline());
+        }
+
+        let id = self.next_timeline;
+        self.next_timeline = TimelineId::from_raw(id.raw().saturating_add(1));
+
+        let mut timeline = Timeline::new(id, duration);
+        timeline.start();
+        self.motion.register(timeline);
+        self.animations
+            .push(AnimationBinding::new(id, node, property, track, kind));
+
+        self.request_frame(FrameReason::Animation);
+        id
+    }
+
+    /// Advances every active timeline by `delta` logical seconds and, while any
+    /// motion remains, requests an [`FrameReason::Animation`] frame so the
+    /// animation keeps reaching paint (spec §4.17 "active animations keep
+    /// requesting frames").
+    ///
+    /// With no animations this is a no-op: the scheduler is empty, nothing
+    /// advances, and no frame is requested. A finished timeline is pruned from the
+    /// scheduler by [`MotionScheduler::advance`]; its binding is retained so the
+    /// overlay keeps applying the settled endpoint value (the animation *holds*
+    /// its final value) until superseded.
+    pub fn advance_motion(&mut self, delta: f32) {
+        self.motion.advance(delta);
+        if self.motion.needs_frame() {
+            self.request_frame(FrameReason::Animation);
+        }
+    }
+
+    /// Returns the number of **running** animations — the count of active
+    /// timelines still driving motion.
+    ///
+    /// This falls to zero once every timeline finishes (the scheduler prunes
+    /// finished timelines), even though bindings may linger to hold their final
+    /// value. It is the signal a host uses to decide whether to keep ticking
+    /// [`advance_motion`](Self::advance_motion).
+    #[must_use]
+    pub fn active_animations(&self) -> usize {
+        self.motion.active_count()
+    }
+
+    /// Overlays every animation binding's sampled value onto `computed` before
+    /// layout and paint (spec §4.17 style → motion → paint).
+    ///
+    /// For each binding: if its timeline is still active in the scheduler the
+    /// track is sampled at that timeline's progress; if the timeline has finished
+    /// (and was pruned) the track is sampled at its endpoint `t == 1.0`, so the
+    /// settled value keeps being applied. The sampled scalar is lowered to a
+    /// [`PropertyValue`] per the binding's [`AnimatedKind`], wrapped as a
+    /// [`ComputedValue`], and written onto the target node's [`ComputedStyle`]. A
+    /// node with no computed entry (e.g. `display: none`) is skipped, and a
+    /// non-scalar sample or an empty track contributes nothing.
+    ///
+    /// [`PropertyValue`]: obscur_style::property::PropertyValue
+    /// [`ComputedStyle`]: obscur_style::computed::ComputedStyle
+    fn apply_motion_overlay(&mut self, computed: &mut ComputedStyles) {
+        for binding in &self.animations {
+            // Read progress from the scheduler; a finished (pruned) timeline holds
+            // its endpoint at t == 1.0.
+            let progress = self
+                .motion
+                .active()
+                .get(binding.timeline())
+                .map_or(1.0, Timeline::progress);
+
+            let Some(sampled) = MotionCoordinator::sample_keyframes(binding.track(), progress)
+            else {
+                continue;
+            };
+            let Some(scalar) = sampled.as_scalar() else {
+                continue;
+            };
+            let property_value = binding.kind().to_property_value(scalar);
+            let Some(value) = ComputedValue::from_concrete(property_value) else {
+                continue;
+            };
+            if let Some(style) = computed.get_mut(&binding.node()) {
+                style.set(binding.property(), value);
+            }
+        }
     }
 
     /// Rebuilds the spatial hit-test index from the retained [`LayoutBoxes`].
@@ -1009,5 +1155,236 @@ mod tests {
         let _ = runtime.run_due_frame(&panel_view(), sheets);
         assert_eq!(runtime.handle_key(PhysicalKey::KeyA, true), Some(a));
         assert!(runtime.has_pending_frame());
+    }
+
+    // ---- Phase 4 final step: motion orchestration (style → motion → paint) ----
+
+    use obscur_motion::track::Keyframe;
+    use obscur_motion::value::MotionValue;
+    use obscur_style::computed::ComputedStyle;
+
+    /// A linear keyframe track from `from` to `to` over the full `[0, 1]` range.
+    fn scalar_track(from: f32, to: f32) -> KeyframeTrack {
+        KeyframeTrack::from_keyframes(vec![
+            Keyframe::new(0.0, MotionValue::scalar(from)),
+            Keyframe::new(1.0, MotionValue::scalar(to)),
+        ])
+    }
+
+    /// `.counter { height: 50px; background-color: red }` — height and paint but
+    /// **no width**, so the node's width is driven purely by the animation.
+    fn heightonly_stylesheet() -> Stylesheet {
+        let selectors = SelectorList::new(vec![ComplexSelector::new(
+            CompoundSelector::new(vec![SimpleSelector::Class("counter".into())]),
+            Vec::new(),
+        )]);
+        Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![StyleRule::new(
+                selectors,
+                vec![
+                    BlockDeclaration::normal(
+                        PropertyId::BackgroundColor,
+                        PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
+                    ),
+                    BlockDeclaration::normal(
+                        PropertyId::Height,
+                        PropertyValue::Length(Length::px(50.0)),
+                    ),
+                ],
+            )],
+        )
+    }
+
+    fn box_width(runtime: &UiRuntime, node: NodeId) -> f32 {
+        runtime
+            .layout_boxes()
+            .get(&node)
+            .expect("the animated node has a box")
+            .size()
+            .width
+    }
+
+    #[test]
+    fn animated_width_flows_through_style_motion_layout_paint() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = heightonly_stylesheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let view = counter_view();
+
+        // First frame populates the tree so the node id exists.
+        let _ = runtime.render_now(&view, sheets);
+        let node = counter_child(&runtime);
+
+        // Animate width 0px -> 100px over one logical second.
+        runtime.animate(
+            node,
+            PropertyId::Width,
+            scalar_track(0.0, 100.0),
+            1.0,
+            AnimatedKind::LengthPx,
+        );
+        assert_eq!(runtime.active_animations(), 1, "one running animation");
+
+        // t = 0: width starts near 0.
+        let _ = runtime.render_now(&view, sheets);
+        assert!(box_width(&runtime, node) < 0.5, "width starts at ~0");
+
+        // t = 0.5: width is ~50 — the animated value reached the layout box.
+        runtime.advance_motion(0.5);
+        let _ = runtime.render_now(&view, sheets);
+        assert!(
+            (box_width(&runtime, node) - 50.0).abs() < 0.5,
+            "width is ~50 halfway through the animation"
+        );
+
+        // t = 1.0: width is ~100 and the timeline finishes/deactivates.
+        runtime.advance_motion(0.5);
+        let _ = runtime.render_now(&view, sheets);
+        assert!(
+            (box_width(&runtime, node) - 100.0).abs() < 0.5,
+            "width is ~100 at the end of the animation"
+        );
+        assert_eq!(
+            runtime.active_animations(),
+            0,
+            "the finished timeline deactivated"
+        );
+
+        // A further advance holds 100 (the binding keeps applying the endpoint).
+        runtime.advance_motion(0.5);
+        let _ = runtime.render_now(&view, sheets);
+        assert!(
+            (box_width(&runtime, node) - 100.0).abs() < 0.5,
+            "the settled animation holds its final value"
+        );
+        assert_eq!(runtime.active_animations(), 0);
+    }
+
+    #[test]
+    fn animate_requests_an_animation_frame() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = heightonly_stylesheet();
+        let _ = runtime.render_now(&counter_view(), std::slice::from_ref(&sheet));
+        let node = counter_child(&runtime);
+        assert!(!runtime.has_pending_frame());
+
+        runtime.animate(
+            node,
+            PropertyId::Width,
+            scalar_track(0.0, 100.0),
+            1.0,
+            AnimatedKind::LengthPx,
+        );
+        assert!(
+            runtime.has_pending_frame(),
+            "starting an animation schedules a frame"
+        );
+    }
+
+    #[test]
+    fn opacity_number_overlay_progresses_the_computed_value() {
+        // The `Number` kind writes a bare number onto the computed style. Drive
+        // the private overlay directly and read the resulting computed opacity.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let node = NodeId::from_raw(1);
+        runtime.animate(
+            node,
+            PropertyId::Opacity,
+            scalar_track(0.0, 1.0),
+            1.0,
+            AnimatedKind::Number,
+        );
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(node, ComputedStyle::new());
+
+        // t = 0 -> opacity 0.
+        runtime.apply_motion_overlay(&mut computed);
+        assert_eq!(computed.get(&node).and_then(ComputedStyle::opacity), Some(0.0));
+
+        // t = 0.5 -> opacity ~0.5.
+        runtime.advance_motion(0.5);
+        runtime.apply_motion_overlay(&mut computed);
+        let mid = computed
+            .get(&node)
+            .and_then(ComputedStyle::opacity)
+            .expect("opacity is set");
+        assert!((mid - 0.5).abs() < 1e-6, "opacity progressed to ~0.5");
+
+        // t = 1 -> opacity 1 and the animation deactivates.
+        runtime.advance_motion(0.5);
+        runtime.apply_motion_overlay(&mut computed);
+        assert_eq!(computed.get(&node).and_then(ComputedStyle::opacity), Some(1.0));
+        assert_eq!(runtime.active_animations(), 0);
+    }
+
+    #[test]
+    fn overlay_skips_nodes_without_a_computed_entry() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let node = NodeId::from_raw(7);
+        runtime.animate(
+            node,
+            PropertyId::Width,
+            scalar_track(0.0, 100.0),
+            1.0,
+            AnimatedKind::LengthPx,
+        );
+        // No entry for `node`: the overlay must not panic or insert one.
+        let mut computed = ComputedStyles::new();
+        runtime.apply_motion_overlay(&mut computed);
+        assert!(computed.is_empty());
+    }
+
+    #[test]
+    fn advance_motion_with_no_animations_is_a_noop() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.advance_motion(1.0);
+        assert_eq!(runtime.active_animations(), 0);
+        assert!(!runtime.has_pending_frame(), "no motion requested no frame");
+    }
+
+    #[test]
+    fn finished_animation_is_removed_from_the_scheduler() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let node = NodeId::from_raw(3);
+        runtime.animate(
+            node,
+            PropertyId::Width,
+            scalar_track(0.0, 100.0),
+            1.0,
+            AnimatedKind::LengthPx,
+        );
+        assert_eq!(runtime.active_animations(), 1);
+        // One advance past the duration finishes and prunes the timeline.
+        runtime.advance_motion(2.0);
+        assert_eq!(
+            runtime.active_animations(),
+            0,
+            "a finished timeline is pruned from the scheduler"
+        );
+    }
+
+    #[test]
+    fn re_animating_a_target_supersedes_the_previous_timeline() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let node = NodeId::from_raw(9);
+        let first = runtime.animate(
+            node,
+            PropertyId::Width,
+            scalar_track(0.0, 100.0),
+            1.0,
+            AnimatedKind::LengthPx,
+        );
+        let second = runtime.animate(
+            node,
+            PropertyId::Width,
+            scalar_track(0.0, 200.0),
+            1.0,
+            AnimatedKind::LengthPx,
+        );
+        assert_ne!(first, second, "each animation mints a fresh timeline id");
+        // The old timeline was removed; only the new one is active.
+        assert_eq!(runtime.active_animations(), 1);
     }
 }
