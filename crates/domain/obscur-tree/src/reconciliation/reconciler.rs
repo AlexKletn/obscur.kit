@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use obscur_identity::{NodeId, StableKey};
-use obscur_view::view::{View, ViewFragment, ViewNode};
+use obscur_view::view::{StyleAttributes, View, ViewFragment, ViewNode, ViewProperty};
 
 use crate::node::{LogicalParent, NodeKind, VisualParent};
 use crate::tree::{RetainedTree, Subtree};
@@ -20,9 +20,10 @@ use super::{ChildMatcher, IdentityMatch, ReconciliationOp, ReconciliationPlan};
 /// is compatible with an existing one (matching by key across reorders, per spec
 /// §2.11), and mints a fresh id only when it must.
 ///
-/// Only **structure**, **identity**, and **text content** are reconciled here.
-/// Element props and events flow to style/components downstream and are *not*
-/// stored on the retained node by this crate.
+/// Only **structure**, **identity**, **text content**, and the CSS-relevant
+/// **style attributes** (local name, id, class list) are reconciled here. The
+/// remaining element props and events flow to style/components downstream and
+/// are *not* stored on the retained node by this crate.
 ///
 /// Every pass returns a [`ReconciliationPlan`] describing what it did. The engine
 /// is deterministic and panic-free, and is defensive about stale ids.
@@ -114,16 +115,31 @@ impl Reconciler {
         for (index, (node, decision)) in desired.iter().zip(matches).enumerate() {
             let id = match decision {
                 IdentityMatch::Reuse(id) => {
-                    // Text content is the only in-place content update we apply.
-                    if let ViewNode::Text { content, .. } = node
-                        && apply_text_content(tree, id, content) {
-                            plan.push(ReconciliationOp::Update { id });
+                    // In-place content updates: text content for text nodes, and
+                    // the CSS-relevant style attributes for elements (props can
+                    // change between renders). Each variant yields at most one
+                    // Update op, so there is no duplicate-Update concern.
+                    match node {
+                        ViewNode::Text { content, .. } => {
+                            if apply_text_content(tree, id, content) {
+                                plan.push(ReconciliationOp::Update { id });
+                            }
                         }
+                        ViewNode::Element { props, .. } => {
+                            if apply_attributes(tree, id, props) {
+                                plan.push(ReconciliationOp::Update { id });
+                            }
+                        }
+                    }
                     reused_order.push(id);
                     id
                 }
                 IdentityMatch::Create => {
                     let id = tree.alloc(node_kind_of(node));
+                    // Newly created element nodes carry their style attributes.
+                    if let ViewNode::Element { props, .. } = node {
+                        apply_attributes(tree, id, props);
+                    }
                     plan.push(ReconciliationOp::Insert { id, parent, index });
                     id
                 }
@@ -221,6 +237,21 @@ fn apply_text_content(tree: &mut RetainedTree, id: NodeId, content: &str) -> boo
         };
     }
     changed
+}
+
+/// Refreshes a node's CSS-relevant style attributes from a desired element's
+/// props, returning `true` if they actually changed. A no-op (returning
+/// `false`) if `id` is stale or the extracted attributes equal the current ones.
+fn apply_attributes(tree: &mut RetainedTree, id: NodeId, props: &[ViewProperty]) -> bool {
+    let attributes = StyleAttributes::extract(props);
+    let Some(node) = tree.get_mut(id) else {
+        return false;
+    };
+    if node.attributes() == &attributes {
+        return false;
+    }
+    node.set_attributes(attributes);
+    true
 }
 
 #[cfg(test)]
@@ -419,6 +450,101 @@ mod tests {
         assert!(plan.iter().any(|op| op.is_update()));
         assert!(!plan.iter().any(|op| op.is_insert()));
         assert!(!plan.iter().any(|op| op.is_remove()));
+    }
+
+    #[test]
+    fn element_carries_style_attributes_after_reconcile() {
+        use obscur_view::view::{CLASS, ID, TYPE, ViewProperty, ViewValue};
+
+        let (mut tree, root) = tree_with_root();
+        let styled = el(1)
+            .with_prop(ViewProperty::new(TYPE, ViewValue::Text("container".into())))
+            .with_prop(ViewProperty::new(ID, ViewValue::Text("main".into())))
+            .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter primary".into())));
+        let _ = Reconciler::new().reconcile(
+            &mut tree,
+            root,
+            &ViewFragment::from_nodes(vec![styled]),
+        );
+        let id = child_ids(&tree, root)[0];
+        let attrs = tree.get(id).expect("live").attributes();
+        assert_eq!(attrs.local_name(), Some("container"));
+        assert_eq!(attrs.id(), Some("main"));
+        let classes: Vec<&str> = attrs.classes().iter().map(AsRef::as_ref).collect();
+        assert_eq!(classes, ["counter", "primary"]);
+    }
+
+    #[test]
+    fn text_and_bare_element_carry_empty_attributes() {
+        let (mut tree, root) = tree_with_root();
+        let _ = Reconciler::new().reconcile(
+            &mut tree,
+            root,
+            &ViewFragment::from_nodes(vec![el(1), ViewNode::text("hi")]),
+        );
+        let ids = child_ids(&tree, root);
+        assert!(tree.get(ids[0]).expect("live").attributes().is_empty());
+        assert!(tree.get(ids[1]).expect("live").attributes().is_empty());
+    }
+
+    #[test]
+    fn changed_style_attributes_are_updated_in_place() {
+        use obscur_view::view::{CLASS, ViewProperty, ViewValue};
+
+        let (mut tree, root) = tree_with_root();
+        let recon = Reconciler::new();
+        let with_class = |class: &str| {
+            keyed_el(1, "e")
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
+        };
+
+        let _ = recon.reconcile(
+            &mut tree,
+            root,
+            &ViewFragment::from_nodes(vec![with_class("counter")]),
+        );
+        let id = child_ids(&tree, root)[0];
+        assert!(tree.get(id).expect("live").attributes().has_class("counter"));
+
+        // Changing the class props updates the retained attributes and emits one
+        // Update op.
+        let plan = recon.reconcile(
+            &mut tree,
+            root,
+            &ViewFragment::from_nodes(vec![with_class("primary")]),
+        );
+        assert_eq!(child_ids(&tree, root)[0], id);
+        let attrs = tree.get(id).expect("live").attributes();
+        assert!(attrs.has_class("primary"));
+        assert!(!attrs.has_class("counter"));
+        assert!(plan.iter().any(|op| op.is_update()));
+        assert!(!plan.iter().any(|op| op.is_insert()));
+        assert!(!plan.iter().any(|op| op.is_remove()));
+    }
+
+    #[test]
+    fn identical_style_attributes_yield_no_update() {
+        use obscur_view::view::{CLASS, ViewProperty, ViewValue};
+
+        let (mut tree, root) = tree_with_root();
+        let recon = Reconciler::new();
+        let styled = || {
+            keyed_el(1, "e")
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter primary".into())))
+        };
+        let fragment = ViewFragment::from_nodes(vec![styled()]);
+        let _ = recon.reconcile(&mut tree, root, &fragment);
+        // Re-reconcile with identical props: no spurious change is reported.
+        let plan = recon.reconcile(
+            &mut tree,
+            root,
+            &ViewFragment::from_nodes(vec![styled()]),
+        );
+        assert!(
+            plan.is_empty(),
+            "identical props must not report a change, got {:?}",
+            plan.ops()
+        );
     }
 
     #[test]

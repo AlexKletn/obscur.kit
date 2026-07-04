@@ -1,6 +1,7 @@
 //! A retained tree node — the anchor of UI identity.
 
 use obscur_identity::{NodeId, StableKey};
+use obscur_view::view::StyleAttributes;
 
 use super::{LogicalParent, NodeFlags, NodeGeneration, NodeKind, VisualParent};
 
@@ -33,6 +34,10 @@ pub struct RetainedNode {
     pub children: Vec<NodeId>,
     /// Explicit reconciliation key, if the desired node carried one.
     pub key: Option<StableKey>,
+    /// CSS-relevant identity (local name, id, class list) for element nodes,
+    /// extracted from the desired node's props during reconciliation. Empty for
+    /// non-element nodes and elements that carry no style attributes.
+    pub attributes: StyleAttributes,
 }
 
 impl RetainedNode {
@@ -49,6 +54,7 @@ impl RetainedNode {
             visual_parent: VisualParent::root(),
             children: Vec::new(),
             key: None,
+            attributes: StyleAttributes::new(),
         }
     }
 
@@ -94,6 +100,13 @@ impl RetainedNode {
         self.key.as_ref()
     }
 
+    /// Returns this node's CSS-relevant style attributes (local name, id,
+    /// classes). Empty for non-element nodes.
+    #[must_use]
+    pub const fn attributes(&self) -> &StyleAttributes {
+        &self.attributes
+    }
+
     /// Advances the generation, marking the arena slot as reused for a new
     /// occupant so that stale references can be detected.
     pub fn bump_generation(&mut self) {
@@ -115,6 +128,12 @@ impl RetainedNode {
     /// Sets or clears the explicit reconciliation key.
     pub fn set_key(&mut self, key: Option<StableKey>) {
         self.key = key;
+    }
+
+    /// Sets this node's CSS-relevant style attributes, replacing any previous
+    /// value.
+    pub fn set_attributes(&mut self, attributes: StyleAttributes) {
+        self.attributes = attributes;
     }
 
     /// Returns the ordered child links.
@@ -236,5 +255,29 @@ mod tests {
         assert_eq!(n.key(), Some(&StableKey::Index(5)));
         n.set_key(None);
         assert_eq!(n.key(), None);
+    }
+
+    #[test]
+    fn new_starts_with_empty_attributes() {
+        let n = element(1);
+        assert!(n.attributes().is_empty());
+    }
+
+    #[test]
+    fn set_attributes_roundtrips() {
+        use obscur_view::view::{CLASS, ID, StyleAttributes, ViewProperty, ViewValue};
+
+        let mut n = element(1);
+        let attrs = StyleAttributes::extract(&[
+            ViewProperty::new(ID, ViewValue::Text("main".into())),
+            ViewProperty::new(CLASS, ViewValue::Text("counter primary".into())),
+        ]);
+        n.set_attributes(attrs.clone());
+        assert_eq!(n.attributes(), &attrs);
+        assert_eq!(n.attributes().id(), Some("main"));
+        assert!(n.attributes().has_class("counter"));
+
+        n.set_attributes(StyleAttributes::new());
+        assert!(n.attributes().is_empty());
     }
 }
