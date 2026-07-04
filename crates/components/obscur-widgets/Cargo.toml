@@ -16,5 +16,6 @@ obscur-geometry = { workspace = true }
 obscur-view = { workspace = true }
 obscur-primitives = { workspace = true }
 obscur-interaction = { workspace = true }
+obscur-layout = { workspace = true }
 obscur-accessibility = { workspace = true }
 obscur-text = { workspace = true }
