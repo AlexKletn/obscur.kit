@@ -27,6 +27,7 @@ use obscur_style::property::{
 };
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
+use super::calc_lowering::lower_math_function;
 use super::stylesheet_compiler::CssSymbolInterner;
 
 /// The result of lowering one [`ParsedDeclaration`].
@@ -393,21 +394,47 @@ fn lower_keyword(keyword: &str, interner: &mut CssSymbolInterner) -> PropertyVal
     PropertyValue::Keyword(interner.intern(keyword))
 }
 
-/// Lowers a dimension, accepting `px` (absolute) and `%` (percentage); any other
-/// unit is outside the domain's [`Length`] model and yields [`None`].
-fn lower_dimension(value: f64, unit: &str) -> Option<PropertyValue> {
+/// Lowers a dimension into a [`Length`] term, accepting `px` (absolute), `%`
+/// (percentage), the font-relative units (`em` / `rem`) and the viewport units
+/// (`vw` / `vh` / `vmin` / `vmax`). Any other unit is outside the domain's
+/// [`Length`] model and yields [`None`].
+///
+/// The relative units carry their coefficient symbolically; they resolve to
+/// concrete pixels at the layout/compute step against a `LengthContext`
+/// (spec §4.5).
+pub(crate) fn dimension_length(value: f64, unit: &str) -> Option<Length> {
+    let n = narrow_f32(value);
     if unit.eq_ignore_ascii_case("px") {
-        Some(PropertyValue::Length(Length::px(narrow_f32(value))))
+        Some(Length::px(n))
     } else if unit == "%" {
-        Some(PropertyValue::Length(Length::Percent(narrow_f32(value))))
+        Some(Length::Percent(n))
+    } else if unit.eq_ignore_ascii_case("em") {
+        Some(Length::Em(n))
+    } else if unit.eq_ignore_ascii_case("rem") {
+        Some(Length::Rem(n))
+    } else if unit.eq_ignore_ascii_case("vw") {
+        Some(Length::Vw(n))
+    } else if unit.eq_ignore_ascii_case("vh") {
+        Some(Length::Vh(n))
+    } else if unit.eq_ignore_ascii_case("vmin") {
+        Some(Length::Vmin(n))
+    } else if unit.eq_ignore_ascii_case("vmax") {
+        Some(Length::Vmax(n))
     } else {
         None
     }
 }
 
-/// Lowers a function value: `var(--name)` to a [`PropertyValue::CustomRef`] and
-/// `rgb()`/`rgba()` to a colour; other functions (for example `calc()`) are not
-/// modelled and yield [`None`].
+/// Lowers a dimension into a [`PropertyValue::Length`], via [`dimension_length`].
+fn lower_dimension(value: f64, unit: &str) -> Option<PropertyValue> {
+    dimension_length(value, unit).map(PropertyValue::Length)
+}
+
+/// Lowers a function value: `var(--name)` to a [`PropertyValue::CustomRef`],
+/// `rgb()`/`rgba()` to a colour, and `calc()`/`min()`/`max()`/`clamp()` (and a
+/// bare parenthesised group) to a [`PropertyValue::Calc`] symbolic length
+/// expression (spec §4.13). Any other function is not modelled and yields
+/// [`None`].
 fn lower_function(
     name: &str,
     args: &[ParsedValue],
@@ -424,7 +451,7 @@ fn lower_function(
     if name.eq_ignore_ascii_case("rgb") || name.eq_ignore_ascii_case("rgba") {
         return parse_rgb(args).map(PropertyValue::Color);
     }
-    None
+    lower_math_function(name, args).map(PropertyValue::Calc)
 }
 
 /// Parses `rgb()`/`rgba()` arguments into a [`StyleColor`].
@@ -736,21 +763,63 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_unit_reports_unit_kind() {
-        let (result, _) = compile("width: 3em");
-        let CompiledDeclaration::Unsupported(feature) = result else {
-            panic!("expected unsupported");
+    fn lowers_relative_and_viewport_units() {
+        use obscur_style::property::LengthContext;
+        // font 16, root 20, viewport 800x600.
+        let ctx = LengthContext::new(16.0, 20.0, 800.0, 600.0);
+        let px = |text: &str| match value_of(text) {
+            PropertyValue::Length(length) => length.resolve_px(&ctx),
+            other => panic!("expected length, got {other:?}"),
         };
-        assert_eq!(feature.kind(), UnsupportedFeatureKind::Unit);
+        assert_eq!(px("width: 3em"), Some(48.0));
+        assert_eq!(px("width: 2rem"), Some(40.0));
+        assert_eq!(px("width: 5vw"), Some(40.0));
+        assert_eq!(px("width: 10vh"), Some(60.0));
+        assert_eq!(px("width: 10vmin"), Some(60.0));
+        assert_eq!(px("width: 10vmax"), Some(80.0));
     }
 
     #[test]
-    fn unsupported_function_reports_function_kind() {
-        let (result, _) = compile("width: calc(100% - 20px)");
-        let CompiledDeclaration::Unsupported(feature) = result else {
-            panic!("expected unsupported");
+    fn lowers_calc_to_a_resolvable_expression() {
+        use obscur_style::property::LengthContext;
+        let ctx = LengthContext::new(16.0, 20.0, 800.0, 600.0);
+        let PropertyValue::Calc(expr) = value_of("width: calc(10px + 2em)") else {
+            panic!("expected calc");
         };
-        assert_eq!(feature.kind(), UnsupportedFeatureKind::Function);
+        // 10 + 2*16 = 42.
+        assert_eq!(expr.resolve(&ctx), Some(42.0));
+    }
+
+    #[test]
+    fn lowers_clamp_to_a_resolvable_expression() {
+        use obscur_style::property::LengthContext;
+        let ctx = LengthContext::new(16.0, 20.0, 800.0, 600.0);
+        let PropertyValue::Calc(expr) = value_of("width: clamp(10px, 5vw, 100px)") else {
+            panic!("expected calc");
+        };
+        // 5vw = 40, within [10, 100].
+        assert_eq!(expr.resolve(&ctx), Some(40.0));
+    }
+
+    #[test]
+    fn math_functions_and_relative_units_are_not_unsupported() {
+        // The regression guard for audit V4: none of these fire an
+        // unsupported-feature diagnostic any longer.
+        for text in [
+            "width: 3em",
+            "width: 2rem",
+            "width: 5vw",
+            "width: calc(100% - 20px)",
+            "width: min(10px, 5vw)",
+            "width: max(10px, 5vw)",
+            "width: clamp(10px, 5vw, 100px)",
+        ] {
+            let (result, _) = compile(text);
+            assert!(
+                matches!(result, CompiledDeclaration::Standard(_)),
+                "{text} should lower to a standard declaration, got {result:?}"
+            );
+        }
     }
 
     #[test]

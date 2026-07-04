@@ -11,10 +11,14 @@ use obscur_layout::model::{
     AlignItems, Dimension, FlexDirection, JustifyContent, LayoutBox, LayoutDisplay, LayoutStyle,
 };
 use obscur_style::computed::{ComputedStyle, ComputedValue};
-use obscur_style::property::{layout_keyword, Length, PropertyId, PropertyValue};
+use obscur_style::property::{layout_keyword, Length, LengthContext, PropertyId, PropertyValue};
 use obscur_tree::tree::RetainedTree;
 
 use super::ComputedStyles;
+
+/// The initial `font-size` (spec / CSS default), used as the `em`/`rem` base
+/// when a node (or the document root) has no computed `font-size`.
+const DEFAULT_FONT_SIZE: f32 = 16.0;
 
 /// The absolute [`LayoutBox`] of every node the coordinator arranged, keyed by
 /// [`NodeId`].
@@ -76,11 +80,22 @@ impl LayoutCoordinator {
     /// Each node's [`ComputedStyle`] is mapped independently via
     /// [`layout_style_from`]; nodes absent from `computed` simply produce no
     /// entry in the result.
+    ///
+    /// `viewport` and `root_font_size` supply the resolution context for
+    /// relative and viewport-relative units and `calc()` expressions (spec
+    /// §4.5): `vw`/`vh`/`vmin`/`vmax` resolve against `viewport`, `rem` against
+    /// `root_font_size`, and `em` against each node's own computed `font-size`.
+    /// Compute `root_font_size` with [`root_font_size`] from the tree root.
     #[must_use]
-    pub fn layout_styles_from(&self, computed: &ComputedStyles) -> LayoutStyles {
+    pub fn layout_styles_from(
+        &self,
+        computed: &ComputedStyles,
+        viewport: Size,
+        root_font_size: f32,
+    ) -> LayoutStyles {
         computed
             .iter()
-            .map(|(&node, style)| (node, layout_style_from(style)))
+            .map(|(&node, style)| (node, layout_style_from(style, viewport, root_font_size)))
             .collect()
     }
 
@@ -161,22 +176,24 @@ impl LayoutCoordinator {
 ///   reserved `JUSTIFY_*` handles (default `FlexStart`).
 /// * `align_items` ← [`PropertyId::AlignItems`] keyword against the reserved
 ///   `ALIGN_*` handles (default `Stretch`).
-fn layout_style_from(computed: &ComputedStyle) -> LayoutStyle {
+fn layout_style_from(computed: &ComputedStyle, viewport: Size, root_font_size: f32) -> LayoutStyle {
     let default = LayoutStyle::default();
+    let ctx = length_context(computed, viewport, root_font_size);
     LayoutStyle {
         display: display_of(computed),
-        width: dimension_of(computed, PropertyId::Width),
-        height: dimension_of(computed, PropertyId::Height),
-        min_width: dimension_of(computed, PropertyId::MinWidth),
-        min_height: dimension_of(computed, PropertyId::MinHeight),
-        max_width: dimension_of(computed, PropertyId::MaxWidth),
-        max_height: dimension_of(computed, PropertyId::MaxHeight),
+        width: dimension_of(computed, PropertyId::Width, &ctx),
+        height: dimension_of(computed, PropertyId::Height, &ctx),
+        min_width: dimension_of(computed, PropertyId::MinWidth, &ctx),
+        min_height: dimension_of(computed, PropertyId::MinHeight, &ctx),
+        max_width: dimension_of(computed, PropertyId::MaxWidth, &ctx),
+        max_height: dimension_of(computed, PropertyId::MaxHeight, &ctx),
         margin: insets_of(
             computed,
             PropertyId::MarginTop,
             PropertyId::MarginRight,
             PropertyId::MarginBottom,
             PropertyId::MarginLeft,
+            &ctx,
         ),
         padding: insets_of(
             computed,
@@ -184,37 +201,93 @@ fn layout_style_from(computed: &ComputedStyle) -> LayoutStyle {
             PropertyId::PaddingRight,
             PropertyId::PaddingBottom,
             PropertyId::PaddingLeft,
+            &ctx,
         ),
         // No CSS border-width property is modelled yet; keep the zero default.
         border: default.border,
         flex_direction: flex_direction_of(computed),
         justify_content: justify_content_of(computed),
         align_items: align_items_of(computed),
-        gap: length_px_of(computed, PropertyId::Gap),
+        gap: length_px_of(computed, PropertyId::Gap, &ctx),
         flex_grow: number_of(computed, PropertyId::FlexGrow, default.flex_grow),
         flex_shrink: number_of(computed, PropertyId::FlexShrink, default.flex_shrink),
-        flex_basis: dimension_of(computed, PropertyId::FlexBasis),
+        flex_basis: dimension_of(computed, PropertyId::FlexBasis, &ctx),
     }
 }
 
+/// The document root's computed `font-size` in logical pixels, for `rem`.
+///
+/// Reads the root node's `font-size` (`Length::Px`), defaulting to
+/// [`DEFAULT_FONT_SIZE`] when the root is absent or its `font-size` is not an
+/// absolute pixel length. `font-size` itself expressed in relative units is not
+/// resolved here (a later extension); the initial `16px` is used instead.
+#[must_use]
+pub fn root_font_size(computed: &ComputedStyles, root: Option<NodeId>) -> f32 {
+    root.and_then(|node| computed.get(&node))
+        .map_or(DEFAULT_FONT_SIZE, font_size_px)
+}
+
+/// The [`LengthContext`] for one node: its own `font-size` for `em`, the
+/// document `root_font_size` for `rem`, and the `viewport` for `vw`/`vh`.
+///
+/// The percentage basis is left unknown: a bare `%` is resolved later by layout
+/// against the containing block, and a `%` term inside `calc()` therefore does
+/// not fold here (that value falls back to `auto`/`0`, still without an
+/// unsupported-feature diagnostic).
+fn length_context(computed: &ComputedStyle, viewport: Size, root_font_size: f32) -> LengthContext {
+    LengthContext::new(
+        font_size_px(computed),
+        root_font_size,
+        viewport.width,
+        viewport.height,
+    )
+}
+
+/// One node's computed `font-size` in logical pixels, defaulting to
+/// [`DEFAULT_FONT_SIZE`] when absent or not an absolute pixel length.
+fn font_size_px(computed: &ComputedStyle) -> f32 {
+    computed
+        .get(PropertyId::FontSize)
+        .and_then(ComputedValue::as_length)
+        .and_then(Length::as_px)
+        .map_or(DEFAULT_FONT_SIZE, |px| px.0)
+}
+
 /// Resolves one length-valued property into a [`Dimension`], defaulting to
-/// [`Dimension::Auto`] when the property is absent or not a length.
-fn dimension_of(computed: &ComputedStyle, property: PropertyId) -> Dimension {
-    match computed.get(property).and_then(ComputedValue::as_length) {
-        Some(Length::Px(px)) => Dimension::Px(px.0),
-        Some(Length::Percent(percent)) => Dimension::Percent(percent),
-        Some(Length::Auto) | None => Dimension::Auto,
+/// [`Dimension::Auto`] when the property is absent or cannot be resolved.
+///
+/// Absolute pixels and bare percentages pass through directly (percentages stay
+/// symbolic for layout to resolve against the containing block); relative and
+/// viewport units and `calc()` expressions are folded to pixels against `ctx`.
+fn dimension_of(computed: &ComputedStyle, property: PropertyId, ctx: &LengthContext) -> Dimension {
+    match computed.get(property).map(ComputedValue::value) {
+        Some(&PropertyValue::Length(length)) => match length {
+            Length::Px(px) => Dimension::Px(px.0),
+            Length::Percent(percent) => Dimension::Percent(percent),
+            Length::Auto => Dimension::Auto,
+            relative => relative
+                .resolve_px(ctx)
+                .map_or(Dimension::Auto, Dimension::Px),
+        },
+        Some(PropertyValue::Calc(expr)) => expr.resolve(ctx).map_or(Dimension::Auto, Dimension::Px),
+        _ => Dimension::Auto,
     }
 }
 
 /// Resolves one length-valued property into a pixel value, defaulting to `0.0`.
 ///
-/// Layout insets and `gap` are pixel-only, so a `Percent` or `Auto` length (or
-/// an absent/non-length property) contributes `0.0`.
-fn length_px_of(computed: &ComputedStyle, property: PropertyId) -> f32 {
-    match computed.get(property).and_then(ComputedValue::as_length) {
-        Some(Length::Px(px)) => px.0,
-        Some(Length::Percent(_) | Length::Auto) | None => 0.0,
+/// Layout insets and `gap` are pixel-only, so a bare `Percent` or `Auto` length
+/// (or an absent/non-length property) contributes `0.0`; relative/viewport units
+/// and `calc()` are folded to pixels against `ctx`.
+fn length_px_of(computed: &ComputedStyle, property: PropertyId, ctx: &LengthContext) -> f32 {
+    match computed.get(property).map(ComputedValue::value) {
+        Some(&PropertyValue::Length(length)) => match length {
+            Length::Px(px) => px.0,
+            Length::Percent(_) | Length::Auto => 0.0,
+            relative => relative.resolve_px(ctx).unwrap_or(0.0),
+        },
+        Some(PropertyValue::Calc(expr)) => expr.resolve(ctx).unwrap_or(0.0),
+        _ => 0.0,
     }
 }
 
@@ -225,12 +298,13 @@ fn insets_of(
     right: PropertyId,
     bottom: PropertyId,
     left: PropertyId,
+    ctx: &LengthContext,
 ) -> Insets {
     Insets {
-        top: length_px_of(computed, top),
-        right: length_px_of(computed, right),
-        bottom: length_px_of(computed, bottom),
-        left: length_px_of(computed, left),
+        top: length_px_of(computed, top, ctx),
+        right: length_px_of(computed, right, ctx),
+        bottom: length_px_of(computed, bottom, ctx),
+        left: length_px_of(computed, left, ctx),
     }
 }
 
@@ -478,6 +552,11 @@ mod tests {
     use obscur_identity::ComponentId;
     use obscur_tree::node::{LogicalParent, NodeKind};
 
+    /// A default resolution viewport for the mapping tests.
+    const TEST_VIEWPORT: Size = Size::new(800.0, 600.0);
+    /// A default root font size for the mapping tests.
+    const TEST_ROOT_FONT: f32 = 16.0;
+
     /// Builds a `LayoutStyle` with an explicit block size.
     fn block(width: f32, height: f32) -> LayoutStyle {
         LayoutStyle::default()
@@ -514,7 +593,7 @@ mod tests {
     fn mapping_reads_width_and_defaults_display_to_block() {
         let mut computed = ComputedStyle::new();
         computed.set(PropertyId::Width, ComputedValue::length(Length::px(120.0)));
-        let style = layout_style_from(&computed);
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
         assert_eq!(style.width, Dimension::Px(120.0));
         // Height absent -> Auto.
         assert_eq!(style.height, Dimension::Auto);
@@ -530,9 +609,55 @@ mod tests {
             ComputedValue::length(Length::Percent(50.0)),
         );
         computed.set(PropertyId::Height, ComputedValue::length(Length::Auto));
-        let style = layout_style_from(&computed);
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
         assert_eq!(style.width, Dimension::Percent(50.0));
         assert_eq!(style.height, Dimension::Auto);
+    }
+
+    #[test]
+    fn mapping_resolves_relative_units_against_context() {
+        use obscur_style::property::LengthExpr;
+        let mut computed = ComputedStyle::new();
+        // font-size 16px -> em resolves against it; viewport 800x600 -> vw/vh.
+        computed.set(PropertyId::FontSize, ComputedValue::length(Length::px(16.0)));
+        computed.set(PropertyId::Width, ComputedValue::length(Length::Em(3.0)));
+        computed.set(PropertyId::Height, ComputedValue::length(Length::Vw(5.0)));
+        // rem uses the document root font size (20), not the node font size.
+        computed.set(PropertyId::MinWidth, ComputedValue::length(Length::Rem(2.0)));
+        // calc(10px + 2em) = 42.
+        computed.set(
+            PropertyId::MaxWidth,
+            ComputedValue::calc(LengthExpr::Sum(
+                Box::new(LengthExpr::Leaf(Length::px(10.0))),
+                Box::new(LengthExpr::Leaf(Length::Em(2.0))),
+            )),
+        );
+        let style = layout_style_from(&computed, TEST_VIEWPORT, 20.0);
+        assert_eq!(style.width, Dimension::Px(48.0)); // 3em
+        assert_eq!(style.height, Dimension::Px(40.0)); // 5vw of 800
+        assert_eq!(style.min_width, Dimension::Px(40.0)); // 2rem of 20
+        assert_eq!(style.max_width, Dimension::Px(42.0)); // calc(10px + 2em)
+    }
+
+    #[test]
+    fn mapping_resolves_relative_gap_to_pixels() {
+        let mut computed = ComputedStyle::new();
+        computed.set(PropertyId::FontSize, ComputedValue::length(Length::px(10.0)));
+        computed.set(PropertyId::Gap, ComputedValue::length(Length::Em(2.0)));
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        assert_eq!(style.gap, 20.0); // 2em of 10px
+    }
+
+    #[test]
+    fn root_font_size_reads_root_node_defaulting_to_sixteen() {
+        let mut computed = ComputedStyles::new();
+        let mut root = ComputedStyle::new();
+        root.set(PropertyId::FontSize, ComputedValue::length(Length::px(24.0)));
+        computed.insert(NodeId::from_raw(1), root);
+        assert_eq!(root_font_size(&computed, Some(NodeId::from_raw(1))), 24.0);
+        // Absent root or missing font-size falls back to the initial 16px.
+        assert_eq!(root_font_size(&computed, Some(NodeId::from_raw(9))), 16.0);
+        assert_eq!(root_font_size(&computed, None), 16.0);
     }
 
     #[test]
@@ -544,7 +669,7 @@ mod tests {
         computed.insert(NodeId::from_raw(1), a);
         computed.insert(NodeId::from_raw(2), ComputedStyle::new());
 
-        let styles = coordinator.layout_styles_from(&computed);
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
         assert_eq!(styles.len(), 2);
         assert_eq!(
             styles.get(&NodeId::from_raw(1)).map(|s| s.width),
@@ -728,7 +853,7 @@ mod tests {
             ComputedValue::length(Length::px(50.0)),
         );
 
-        let style = layout_style_from(&computed);
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
 
         assert_eq!(style.display, LayoutDisplay::Flex);
         assert_eq!(
@@ -769,7 +894,7 @@ mod tests {
             PropertyId::Display,
             ComputedValue::keyword(layout_keyword::DISPLAY_GRID),
         );
-        let style = layout_style_from(&computed);
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
         assert_eq!(style.display, LayoutDisplay::Grid);
         assert!(algorithm_for(LayoutDisplay::Grid).is_some());
     }
@@ -781,7 +906,7 @@ mod tests {
             PropertyId::Display,
             ComputedValue::keyword(layout_keyword::DISPLAY_NONE),
         );
-        assert_eq!(layout_style_from(&computed).display, LayoutDisplay::None);
+        assert_eq!(layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT).display, LayoutDisplay::None);
     }
 
     #[test]
@@ -822,7 +947,7 @@ mod tests {
         }
 
         let coordinator = LayoutCoordinator::new();
-        let styles = coordinator.layout_styles_from(&computed);
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
         // Sanity: the bridge produced a flex container.
         assert_eq!(styles[&root].display, LayoutDisplay::Flex);
 

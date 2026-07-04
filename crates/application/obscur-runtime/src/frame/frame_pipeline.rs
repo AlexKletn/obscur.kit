@@ -7,7 +7,8 @@ use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
 
 use crate::orchestration::{
-    LayoutCoordinator, SceneCoordinator, StyleCoordinator, StyleInputs, StyleMatchingCoordinator,
+    root_font_size, LayoutCoordinator, SceneCoordinator, StyleCoordinator, StyleInputs,
+    StyleMatchingCoordinator,
 };
 
 use super::{FrameContext, FrameResult};
@@ -158,8 +159,12 @@ impl FramePipeline {
         let computed = self.style.resolve(tree, inputs);
         let restyled = !computed.is_empty();
 
-        // Layout: map styles into layout styles and arrange the tree.
-        let layout_styles = self.layout.layout_styles_from(&computed);
+        // Layout: map styles into layout styles and arrange the tree. The root
+        // `font-size` supplies the `rem` base; the viewport supplies `vw`/`vh`.
+        let root_font = root_font_size(&computed, tree.root());
+        let layout_styles = self
+            .layout
+            .layout_styles_from(&computed, ctx.viewport(), root_font);
         let boxes = self.layout.layout(tree, &layout_styles, ctx.viewport());
         let relaid_out = !boxes.is_empty();
 

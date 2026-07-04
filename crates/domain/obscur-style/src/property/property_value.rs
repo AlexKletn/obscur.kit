@@ -13,10 +13,14 @@
 //!   (`var(--name)`), which is substituted during custom-property resolution
 //!   (§4.14) before computed-value resolution runs.
 //!
-//! `calc()` / `min()` / `max()` / `clamp()` are **not** modelled yet; they are a
-//! later extension that will add a variant here.
+//! `calc()` / `min()` / `max()` / `clamp()` and relative/viewport units are
+//! modelled: a plain relative unit is a [`PropertyValue::Length`] carrying the
+//! relevant [`Length`] variant, and a math function is a
+//! [`PropertyValue::Calc`] holding a symbolic [`LengthExpr`]. Both resolve to
+//! concrete pixels at the layout/compute step against a
+//! [`LengthContext`](crate::property::LengthContext) (spec §4.5, §4.13).
 
-use crate::property::{Length, StyleColor};
+use crate::property::{Length, LengthExpr, StyleColor};
 use obscur_identity::InternedSymbol;
 
 /// A typed CSS property value.
@@ -32,6 +36,10 @@ pub enum PropertyValue {
     Keyword(InternedSymbol),
     /// A length value (see [`Length`]).
     Length(Length),
+    /// A symbolic `calc()` / `min()` / `max()` / `clamp()` length expression
+    /// (see [`LengthExpr`]), resolved to concrete pixels at the layout/compute
+    /// step against a [`LengthContext`](crate::property::LengthContext).
+    Calc(LengthExpr),
     /// A bare number (for example the value of `opacity`).
     Number(f32),
     /// A color value (see [`StyleColor`]).
@@ -65,6 +73,15 @@ impl PropertyValue {
     pub const fn as_length(&self) -> Option<Length> {
         match self {
             Self::Length(length) => Some(*length),
+            _ => None,
+        }
+    }
+
+    /// Returns the length expression if this value is a [`PropertyValue::Calc`].
+    #[must_use]
+    pub const fn as_calc(&self) -> Option<&LengthExpr> {
+        match self {
+            Self::Calc(expr) => Some(expr),
             _ => None,
         }
     }

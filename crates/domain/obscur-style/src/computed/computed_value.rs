@@ -8,7 +8,7 @@
 //! resolution. Only concrete leaf values (keyword / length / number / color)
 //! remain.
 
-use crate::property::{Length, PropertyValue, StyleColor};
+use crate::property::{Length, LengthExpr, PropertyValue, StyleColor};
 use obscur_identity::InternedSymbol;
 
 /// A fully-resolved, concrete computed value for a single property.
@@ -39,6 +39,7 @@ impl ComputedValue {
         match value {
             PropertyValue::Keyword(_)
             | PropertyValue::Length(_)
+            | PropertyValue::Calc(_)
             | PropertyValue::Number(_)
             | PropertyValue::Color(_) => Some(Self(value)),
             PropertyValue::CustomRef(_)
@@ -58,6 +59,12 @@ impl ComputedValue {
     #[must_use]
     pub const fn length(length: Length) -> Self {
         Self(PropertyValue::Length(length))
+    }
+
+    /// Constructs a computed `calc()` / `min()` / `max()` / `clamp()` value.
+    #[must_use]
+    pub const fn calc(expr: LengthExpr) -> Self {
+        Self(PropertyValue::Calc(expr))
     }
 
     /// Constructs a computed bare-number value (for example `opacity`).
@@ -88,6 +95,13 @@ impl ComputedValue {
     #[must_use]
     pub const fn as_length(&self) -> Option<Length> {
         self.0.as_length()
+    }
+
+    /// Returns the length expression if this computed value is a `calc()` /
+    /// `min()` / `max()` / `clamp()`.
+    #[must_use]
+    pub const fn as_calc(&self) -> Option<&LengthExpr> {
+        self.0.as_calc()
     }
 }
 

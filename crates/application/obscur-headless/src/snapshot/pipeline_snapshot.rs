@@ -2,7 +2,8 @@
 
 use obscur_geometry::Size;
 use obscur_runtime::orchestration::{
-    ComputedStyles, LayoutBoxes, LayoutCoordinator, SceneCoordinator, StyleCoordinator, StyleInputs,
+    ComputedStyles, LayoutBoxes, LayoutCoordinator, SceneCoordinator, StyleCoordinator,
+    StyleInputs, root_font_size,
 };
 use obscur_scene::scene::{Scene, SceneSnapshot};
 use obscur_tree::tree::{RetainedTree, TreeSnapshot};
@@ -85,7 +86,8 @@ impl PipelineSnapshot {
         let computed = style.resolve(tree, inputs);
 
         let layout = LayoutCoordinator::new();
-        let layout_styles = layout.layout_styles_from(&computed);
+        let root_font = root_font_size(&computed, tree.root());
+        let layout_styles = layout.layout_styles_from(&computed, viewport, root_font);
         let boxes = layout.layout(tree, &layout_styles, viewport);
 
         let scene_coordinator = SceneCoordinator::new();

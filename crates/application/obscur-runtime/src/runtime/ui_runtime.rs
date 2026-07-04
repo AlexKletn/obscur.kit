@@ -24,7 +24,7 @@ use obscur_view::view::View;
 use super::PointerDispatch;
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::orchestration::{
-    AnimatedKind, AnimationBinding, ComputedStyles, LayoutBoxes, LayoutCoordinator,
+    root_font_size, AnimatedKind, AnimationBinding, ComputedStyles, LayoutBoxes, LayoutCoordinator,
     MotionCoordinator, PseudoStates, SceneCoordinator, StyleCoordinator, StyleInputs,
     StyleMatchingCoordinator,
 };
@@ -244,7 +244,12 @@ impl UiRuntime {
         self.apply_motion_overlay(&mut computed);
 
         // 4. Layout: map to layout styles, arrange, and retain the boxes.
-        let layout_styles = self.layout.layout_styles_from(&computed);
+        //    The document root's `font-size` supplies the `rem` base; the
+        //    viewport supplies `vw`/`vh` (spec §4.5).
+        let root_font = root_font_size(&computed, self.tree.root());
+        let layout_styles = self
+            .layout
+            .layout_styles_from(&computed, ctx.viewport(), root_font);
         let boxes = self.layout.layout(&self.tree, &layout_styles, ctx.viewport());
         let relaid_out = !boxes.is_empty();
 
