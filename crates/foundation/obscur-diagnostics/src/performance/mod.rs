@@ -7,3 +7,6 @@ pub use performance_span::PerformanceSpan;
 
 mod budget_violation;
 mod performance_counter;
+
+pub use budget_violation::BudgetViolation;
+pub use performance_counter::PerformanceCounter;

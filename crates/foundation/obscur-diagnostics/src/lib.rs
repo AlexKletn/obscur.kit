@@ -11,6 +11,11 @@ pub use diagnostic::{
     Diagnostic, DiagnosticCode, DiagnosticContext, DiagnosticSeverity, DiagnosticSubsystem,
     RecoveryAction,
 };
-pub use performance::{PerformanceBudget, PerformanceSpan};
-pub use port::DiagnosticSink;
-pub use subscription::DiagnosticFilter;
+pub use performance::{
+    BudgetViolation, PerformanceBudget, PerformanceCounter, PerformanceSpan,
+};
+pub use port::{CollectingTelemetrySink, DiagnosticSink, NullTelemetrySink, TelemetrySink};
+pub use subscription::{
+    ChannelSink, DiagnosticBufferPolicy, DiagnosticChannel, DiagnosticFilter,
+    DiagnosticSubscription, OverflowStrategy, SubscriptionId,
+};
