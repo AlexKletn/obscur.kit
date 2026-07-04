@@ -1377,6 +1377,13 @@ version = "0.0.0"
 [[package]]
 name = "obscur-css"
 version = "0.0.0"
+dependencies = [
+ "obscur-geometry",
+ "obscur-identity",
+ "obscur-motion",
+ "obscur-scene",
+ "obscur-style",
+]
 
 [[package]]
 name = "obscur-data-transfer"
