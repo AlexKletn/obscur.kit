@@ -49,11 +49,11 @@ use obscur_kit::widgets::button::Button;
 const STYLESHEET: &str = "\
 @import \"reset.css\";\n\
 :root { --accent: #3366ff; }\n\
-.counter   { display: flex; opacity: 0.9; background-color: #1e2636; width: 468px; height: 228px; }\n\
-.label     { background-color: #3a4560; width: 300px; height: 56px; }\n\
-.btn       { width: 300px; height: 56px; }\n\
-.decrement { background-color: #d9534f; }\n\
-.increment { background-color: #5cb85c; }\n\
+.counter   { display: flex; opacity: 0.9; background-color: #1e2636; width: 100%; height: 100%; }\n\
+.bar       { width: 100%; }\n\
+.label     { background-color: #3a4560; height: 50%; }\n\
+.decrement { background-color: #d9534f; height: 25%; }\n\
+.increment { background-color: #5cb85c; height: 25%; }\n\
 .counter .value { color: var(--accent); }\n\
 button:hover { background-color: #224488; }\n\
 button { float: left; }\n\
@@ -210,9 +210,9 @@ fn compile_stylesheet() -> CompiledStylesheet {
 fn build_counter_view(count: i64, decrement: &Button, increment: &Button) -> View {
     // Each child is wrapped in a container carrying a class the stylesheet
     // paints; the `.counter` panel stacks them (flow layout, top-to-bottom).
-    let label = tagged("label", vec![Text::new(format!("Count: {count}")).into_view_node()]);
-    let minus = tagged("btn decrement", button_nodes(decrement));
-    let plus = tagged("btn increment", button_nodes(increment));
+    let label = tagged("bar label", vec![Text::new(format!("Count: {count}")).into_view_node()]);
+    let minus = tagged("bar decrement", button_nodes(decrement));
+    let plus = tagged("bar increment", button_nodes(increment));
     let container = Container::new()
         .child(label)
         .child(minus)
