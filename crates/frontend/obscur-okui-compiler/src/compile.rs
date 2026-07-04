@@ -19,7 +19,7 @@ use crate::symbol::{Symbol, SymbolTable};
 use crate::typing::TypeError;
 use crate::validation::{
     CapabilityValidator, ComponentContract, ContractValidator, ExpressionValidator,
-    ValidationDiagnostic,
+    ValidationDiagnostic, builtin_contracts,
 };
 
 /// A lookup from component/tag name to its [`ComponentContract`], so the
@@ -39,6 +39,23 @@ impl ContractRegistry {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Creates a registry pre-populated with the contracts for every built-in
+    /// view primitive (spec §2.6, §2.13), so a default compile enforces their
+    /// attribute/event surface without the caller registering anything.
+    ///
+    /// This is the registry [`Compiler::new`] installs by default; see
+    /// [`builtin_contracts`](crate::validation::builtin_contracts) for the
+    /// covered primitives and why their surface is defined here rather than
+    /// imported from `obscur-view`/`obscur-primitives`.
+    #[must_use]
+    pub fn builtins() -> Self {
+        let mut registry = Self::new();
+        for contract in builtin_contracts() {
+            registry.register(contract);
+        }
+        registry
     }
 
     /// Registers `contract` (keyed by its component name) and returns the
@@ -201,10 +218,16 @@ pub struct Compiler {
 impl Compiler {
     /// Creates a compiler whose lowered source map records spans under
     /// `source_name` (the logical `.okui` source identifier).
+    ///
+    /// The contract registry is seeded with the built-in primitive contracts
+    /// ([`ContractRegistry::builtins`]) so a default compile already rejects
+    /// unknown attributes/events on the built-in primitives (spec §2.13);
+    /// [`with_registry`](Self::with_registry) replaces it wholesale.
     #[must_use]
     pub fn new(source_name: impl Into<Box<str>>) -> Self {
         Self {
             source_name: source_name.into(),
+            registry: ContractRegistry::builtins(),
             ..Self::default()
         }
     }
@@ -474,5 +497,74 @@ mod tests {
     fn compile_diagnostic_display_delegates() {
         let diag = CompileDiagnostic::Lowering(LoweringError::EmptyDocument);
         assert_eq!(diag.to_string(), "cannot lower an empty document");
+    }
+
+    // --- audit V5: the default compile path enforces the built-in contracts ---
+
+    #[test]
+    fn default_registry_is_populated_with_builtins() {
+        // A default compiler carries a non-empty registry; the empty parallel
+        // registry that made §2.13 inert is gone.
+        let registry = ContractRegistry::builtins();
+        assert!(!registry.is_empty());
+        assert!(registry.get("Image").is_some());
+        assert!(registry.get("Canvas").is_some());
+        assert_eq!(Compiler::new("app.okui").registry.len(), registry.len());
+    }
+
+    #[test]
+    fn default_compile_rejects_unknown_attribute_on_builtin() {
+        // No `with_registry`: the built-in `Image` contract is consulted by
+        // default and its unknown attribute fails a real compile.
+        let doc = document("<Image src=\"logo.png\" widht=\"10\"/>");
+        let result = Compiler::new("app.okui").compile(&doc);
+        assert!(
+            result.diagnostics().iter().any(|d| matches!(
+                d,
+                CompileDiagnostic::Validation(v)
+                    if v.message() == "unknown attribute 'widht' on component 'Image'"
+            )),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
+    }
+
+    #[test]
+    fn default_compile_reports_missing_required_prop_on_builtin() {
+        let doc = document("<Image alt=\"logo\"/>");
+        let result = Compiler::new("app.okui").compile(&doc);
+        assert!(
+            result.diagnostics().iter().any(|d| matches!(
+                d,
+                CompileDiagnostic::Validation(v)
+                    if v.message() == "component 'Image' requires prop 'src'"
+            )),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
+    }
+
+    #[test]
+    fn default_compile_accepts_valid_builtin_usage() {
+        let doc = document("<Image src=\"logo.png\" alt=\"logo\"/>");
+        let result = Compiler::new("app.okui").compile(&doc);
+        assert!(
+            !result.has_errors(),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
+        assert!(result.document().is_some());
+    }
+
+    #[test]
+    fn default_compile_leaves_unknown_tags_permissive() {
+        // A tag with no built-in contract stays unchecked (existing policy).
+        let doc = document("<CustomThing whatever=\"1\"/>");
+        let result = Compiler::new("app.okui").compile(&doc);
+        assert!(
+            !result.has_errors(),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
     }
 }
