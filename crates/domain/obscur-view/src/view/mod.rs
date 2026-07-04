@@ -9,6 +9,8 @@ mod view_key;
 pub use view_key::ViewKey;
 mod view_node;
 pub use view_node::ViewNode;
+mod style_attribute;
+pub use style_attribute::{CLASS, ID, StyleAttributes, TYPE};
 mod view_property;
 pub use view_property::ViewProperty;
 mod view_value;
