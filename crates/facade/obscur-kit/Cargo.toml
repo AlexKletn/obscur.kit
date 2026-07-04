@@ -86,3 +86,15 @@ obscur-system-linux = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 obscur-system-web = { workspace = true }
+
+# Real platform backends for the `windowed_counter` example only. Versions match
+# the adapters the `full` feature re-exports (obscur-window-winit pins winit
+# 0.30; obscur-render-vello pins wgpu 29).
+[dev-dependencies]
+winit = "0.30"
+wgpu = "29"
+pollster = "0.4"
+
+[[example]]
+name = "windowed_counter"
+required-features = ["full"]
