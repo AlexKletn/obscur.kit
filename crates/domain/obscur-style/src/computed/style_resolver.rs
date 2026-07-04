@@ -79,6 +79,10 @@ impl StyleResolver {
     /// return [`None`]: their initial keyword is an interned symbol that Phase 1
     /// cannot mint, so the property is left unresolved instead (see the module
     /// docs).
+    // Several arms share a body (`Some(number(1.0))`, `None`) but are grouped by
+    // CSS meaning with distinct explanatory comments; merging them would obscure
+    // why each property is unresolved or shares an initial.
+    #[allow(clippy::match_same_arms)]
     #[must_use]
     pub fn initial_value(self, property: PropertyId) -> Option<ComputedValue> {
         match property {
@@ -86,8 +90,34 @@ impl StyleResolver {
             PropertyId::BackgroundColor => Some(ComputedValue::color(StyleColor::TRANSPARENT)),
             PropertyId::Opacity => Some(ComputedValue::number(1.0)),
             PropertyId::Width | PropertyId::Height => Some(ComputedValue::length(Length::Auto)),
+            // Box-model spacing: initial `0`.
+            PropertyId::MarginTop
+            | PropertyId::MarginRight
+            | PropertyId::MarginBottom
+            | PropertyId::MarginLeft
+            | PropertyId::PaddingTop
+            | PropertyId::PaddingRight
+            | PropertyId::PaddingBottom
+            | PropertyId::PaddingLeft
+            | PropertyId::Gap => Some(ComputedValue::length(Length::px(0.0))),
+            // Sizing minimums and `flex-basis`: initial `auto`.
+            PropertyId::MinWidth | PropertyId::MinHeight | PropertyId::FlexBasis => {
+                Some(ComputedValue::length(Length::Auto))
+            }
+            // `max-width` / `max-height` initial is `none`, which `Length` cannot
+            // yet represent; left unresolved until a `none` length lands.
+            PropertyId::MaxWidth | PropertyId::MaxHeight => None,
+            // Flex factors: `flex-grow` initial `0`, `flex-shrink` initial `1`.
+            PropertyId::FlexGrow => Some(ComputedValue::number(0.0)),
+            PropertyId::FlexShrink => Some(ComputedValue::number(1.0)),
+            // `font-size` initial is `medium` (~16px logical).
+            PropertyId::FontSize => Some(ComputedValue::length(Length::px(16.0))),
             // Keyword initials need the interner; deferred to a later phase.
-            PropertyId::Display | PropertyId::Visibility => None,
+            PropertyId::Display
+            | PropertyId::Visibility
+            | PropertyId::FlexDirection
+            | PropertyId::JustifyContent
+            | PropertyId::AlignItems => None,
         }
     }
 
