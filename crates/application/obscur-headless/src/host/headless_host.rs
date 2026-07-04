@@ -6,6 +6,7 @@ use obscur_identity::{RuntimeId, WindowId};
 use obscur_runtime::frame::{FrameContext, FrameId, FramePipeline, FrameReason, FrameResult};
 use obscur_runtime::orchestration::StyleInputs;
 use obscur_scene::scene::{Scene, SceneSnapshot};
+use obscur_style::matching::Stylesheet;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
 
@@ -111,6 +112,28 @@ impl HeadlessHost {
         let result = self
             .pipeline
             .run(&mut self.tree, &mut self.scene, ctx, desired, inputs);
+        self.next_frame = self.next_frame.next();
+        result
+    }
+
+    /// Renders one deterministic frame that **matches authored stylesheets**
+    /// against the reconciled tree, and returns its [`FrameResult`].
+    ///
+    /// This is the styled counterpart of [`render`](Self::render): instead of
+    /// taking pre-cascaded [`StyleInputs`], it hands `sheets` to the pipeline's
+    /// [`run_matched`](FramePipeline::run_matched), which matches and cascades
+    /// them against the just-reconciled tree so authored CSS reaches paint. It
+    /// builds the same [`FrameContext`] for the next [`FrameId`], advances the
+    /// frame counter identically, and never panics.
+    ///
+    /// `sheets` must be ordered by ascending cascade origin (system-default
+    /// first, inline last). An empty `sheets` slice matches nothing and is
+    /// equivalent to [`render`](Self::render) with empty inputs.
+    pub fn render_styled(&mut self, desired: &View, sheets: &[Stylesheet]) -> FrameResult {
+        let ctx = FrameContext::new(self.next_frame, FrameReason::UiCommit, self.config.viewport());
+        let result =
+            self.pipeline
+                .run_matched(&mut self.tree, &mut self.scene, ctx, desired, sheets);
         self.next_frame = self.next_frame.next();
         result
     }
@@ -302,6 +325,94 @@ mod tests {
         assert_eq!(host.executor().pending(), 1);
         host.run_tasks();
         assert_eq!(host.executor().pending(), 0);
+    }
+
+    /// A view whose single top-level element carries the `counter` class.
+    fn counter_view() -> View {
+        use obscur_view::view::{CLASS, ViewProperty, ViewValue};
+        View::from_fragment(ViewFragment::from_nodes(vec![ViewNode::element(
+            ComponentId::from_raw(10),
+        )
+        .with_prop(ViewProperty::new(
+            CLASS,
+            ViewValue::Text("counter".into()),
+        ))]))
+    }
+
+    /// `.counter { background-color: red; width: 100px; height: 50px }`.
+    fn counter_stylesheet() -> Stylesheet {
+        use obscur_style::cascade::CascadeOrigin;
+        use obscur_style::matching::{BlockDeclaration, StyleRule};
+        use obscur_style::property::{Length, PropertyId, PropertyValue, StyleColor};
+        use obscur_style::selector::{
+            ComplexSelector, CompoundSelector, SelectorList, SimpleSelector,
+        };
+
+        let selectors = SelectorList::new(vec![ComplexSelector::new(
+            CompoundSelector::new(vec![SimpleSelector::Class("counter".into())]),
+            Vec::new(),
+        )]);
+        Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![StyleRule::new(
+                selectors,
+                vec![
+                    BlockDeclaration::normal(
+                        PropertyId::BackgroundColor,
+                        PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
+                    ),
+                    BlockDeclaration::normal(
+                        PropertyId::Width,
+                        PropertyValue::Length(Length::px(100.0)),
+                    ),
+                    BlockDeclaration::normal(
+                        PropertyId::Height,
+                        PropertyValue::Length(Length::px(50.0)),
+                    ),
+                ],
+            )],
+        )
+    }
+
+    #[test]
+    fn render_styled_paints_matched_background() {
+        // Acceptance: authored CSS reaches paint through the host. A matched
+        // `.counter` element produces a non-empty display list; no stylesheet
+        // produces an empty one.
+        let mut host = HeadlessHost::new(runtime_id());
+        let view = counter_view();
+        let sheet = counter_stylesheet();
+
+        let styled = host.render_styled(&view, std::slice::from_ref(&sheet));
+        assert!(styled.reconciled());
+        assert!(styled.restyled(), "the matched node resolved styles");
+        assert!(styled.relaid_out(), "the sized node arranged a box");
+        assert!(
+            !styled.snapshot().display_list().is_empty(),
+            "matched background produced a non-empty display list"
+        );
+        assert!(styled.is_balanced());
+        assert_eq!(styled.id(), FrameId::FIRST);
+
+        // A second host with no stylesheet: empty display list.
+        let mut bare = HeadlessHost::new(runtime_id());
+        let unstyled = bare.render_styled(&view, &[]);
+        assert!(
+            unstyled.snapshot().display_list().is_empty(),
+            "no stylesheet means no fill"
+        );
+    }
+
+    #[test]
+    fn render_styled_advances_frame_ids() {
+        let mut host = HeadlessHost::new(runtime_id());
+        let view = counter_view();
+        let sheet = counter_stylesheet();
+
+        let first = host.render_styled(&view, std::slice::from_ref(&sheet));
+        let second = host.render_styled(&view, std::slice::from_ref(&sheet));
+        assert_eq!(first.id(), FrameId::FIRST);
+        assert_eq!(second.id(), FrameId::FIRST.next());
     }
 
     #[test]

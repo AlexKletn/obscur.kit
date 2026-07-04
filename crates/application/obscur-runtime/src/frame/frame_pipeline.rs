@@ -1,11 +1,14 @@
 //! The synchronous, deterministic frame driver: [`FramePipeline`].
 
 use obscur_scene::scene::Scene;
+use obscur_style::matching::Stylesheet;
 use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
 
-use crate::orchestration::{LayoutCoordinator, SceneCoordinator, StyleCoordinator, StyleInputs};
+use crate::orchestration::{
+    LayoutCoordinator, SceneCoordinator, StyleCoordinator, StyleInputs, StyleMatchingCoordinator,
+};
 
 use super::{FrameContext, FrameResult};
 
@@ -93,16 +96,71 @@ impl FramePipeline {
         let plan = self.reconciler.reconcile_root(tree, desired);
         let reconciled = !plan.is_empty();
 
-        // 2. Style: resolve computed styles over the retained tree.
+        // 2-4. Style over caller-supplied inputs, layout, and compose.
+        self.finish_frame(tree, scene, ctx, reconciled, inputs)
+    }
+
+    /// Runs one synchronous frame that **matches authored stylesheets** against
+    /// the reconciled tree instead of taking pre-cascaded [`StyleInputs`].
+    ///
+    /// This is the integrating path that lets authored CSS reach paint. It runs
+    /// the same phases as [`run`](Self::run) with one change to the style stage:
+    ///
+    /// 1. **Reconcile** — identical to [`run`](Self::run).
+    /// 2. **Match** — the [`StyleMatchingCoordinator`] matches `sheets` against
+    ///    the just-reconciled tree, cascading each element's winning per-property
+    ///    values into the [`StyleInputs`] that [`run`](Self::run) would otherwise
+    ///    receive from the caller.
+    /// 3. **Style / Layout / Compose** — identical to [`run`](Self::run).
+    ///
+    /// `sheets` must be ordered by ascending cascade origin (system-default
+    /// first, inline last). With an empty `sheets` slice no rule matches, the
+    /// inputs are empty, and the result matches `run` with empty inputs.
+    #[must_use]
+    pub fn run_matched(
+        &self,
+        tree: &mut RetainedTree,
+        scene: &mut Scene,
+        ctx: FrameContext,
+        desired: &View,
+        sheets: &[Stylesheet],
+    ) -> FrameResult {
+        // 1. Reconcile: update the retained tree from the desired tree.
+        let plan = self.reconciler.reconcile_root(tree, desired);
+        let reconciled = !plan.is_empty();
+
+        // 2. Match: build cascade inputs from the sheets against the fresh tree.
+        let inputs = StyleMatchingCoordinator::new().build_inputs(tree, sheets);
+
+        // 3-5. Style over the matched inputs, layout, and compose.
+        self.finish_frame(tree, scene, ctx, reconciled, &inputs)
+    }
+
+    /// Runs the shared style → layout → compose tail of a frame over an
+    /// already-reconciled `tree` and a resolved set of `inputs`, publishing the
+    /// snapshot and returning the [`FrameResult`].
+    ///
+    /// Both [`run`](Self::run) and [`run_matched`](Self::run_matched) call this
+    /// after their reconcile step so the deterministic core stays identical; the
+    /// two entry points differ only in how they obtain `inputs`.
+    fn finish_frame(
+        &self,
+        tree: &mut RetainedTree,
+        scene: &mut Scene,
+        ctx: FrameContext,
+        reconciled: bool,
+        inputs: &StyleInputs,
+    ) -> FrameResult {
+        // Style: resolve computed styles over the retained tree.
         let computed = self.style.resolve(tree, inputs);
         let restyled = !computed.is_empty();
 
-        // 3. Layout: map styles into layout styles and arrange the tree.
+        // Layout: map styles into layout styles and arrange the tree.
         let layout_styles = self.layout.layout_styles_from(&computed);
         let boxes = self.layout.layout(tree, &layout_styles, ctx.viewport());
         let relaid_out = !boxes.is_empty();
 
-        // 4. Compose: build the display list, install it, and publish a snapshot.
+        // Compose: build the display list, install it, and publish a snapshot.
         let display_list = self.scene.compose(tree, &computed, &boxes);
         scene.set_root(display_list);
         let snapshot = scene.snapshot();
@@ -226,5 +284,108 @@ mod tests {
         let list: &DisplayList = styled.snapshot().display_list();
         assert!(!list.is_empty(), "styled child produced a background fill");
         assert!(styled.is_balanced());
+    }
+
+    /// A view whose single top-level element carries the `counter` class.
+    fn counter_view() -> View {
+        use obscur_view::view::{CLASS, ViewProperty, ViewValue};
+        View::from_fragment(ViewFragment::from_nodes(vec![ViewNode::element(
+            ComponentId::from_raw(10),
+        )
+        .with_prop(ViewProperty::new(
+            CLASS,
+            ViewValue::Text("counter".into()),
+        ))]))
+    }
+
+    /// A stylesheet: `.counter { background-color: red; width: 100px; height: 50px }`.
+    fn counter_stylesheet() -> obscur_style::matching::Stylesheet {
+        use obscur_style::cascade::CascadeOrigin;
+        use obscur_style::matching::{BlockDeclaration, StyleRule, Stylesheet};
+        use obscur_style::selector::{
+            ComplexSelector, CompoundSelector, SelectorList, SimpleSelector,
+        };
+
+        let selectors = SelectorList::new(vec![ComplexSelector::new(
+            CompoundSelector::new(vec![SimpleSelector::Class("counter".into())]),
+            Vec::new(),
+        )]);
+        Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![StyleRule::new(
+                selectors,
+                vec![
+                    BlockDeclaration::normal(
+                        PropertyId::BackgroundColor,
+                        PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
+                    ),
+                    BlockDeclaration::normal(PropertyId::Width, PropertyValue::Length(Length::px(100.0))),
+                    BlockDeclaration::normal(PropertyId::Height, PropertyValue::Length(Length::px(50.0))),
+                ],
+            )],
+        )
+    }
+
+    #[test]
+    fn run_matched_paints_matched_background() {
+        // The whole point of the feature: authored CSS reaches paint. Matching a
+        // `.counter { background-color … }` stylesheet against a `.counter`
+        // element must yield a NON-EMPTY display list, whereas no stylesheet
+        // yields an empty one.
+        let pipeline = FramePipeline::new();
+        let view = counter_view();
+        let sheet = counter_stylesheet();
+
+        // With the stylesheet: the matched element paints a background fill.
+        let mut tree = RetainedTree::new();
+        let mut scene = Scene::new();
+        let styled = pipeline.run_matched(
+            &mut tree,
+            &mut scene,
+            ctx(0),
+            &view,
+            std::slice::from_ref(&sheet),
+        );
+        assert!(styled.reconciled());
+        assert!(styled.restyled(), "the matched node resolved styles");
+        assert!(styled.relaid_out(), "the sized node arranged a box");
+        let styled_list: &DisplayList = styled.snapshot().display_list();
+        assert!(
+            !styled_list.is_empty(),
+            "matched background produced a non-empty display list"
+        );
+        assert!(styled.is_balanced());
+        let fill_count = styled_list.commands().len();
+        assert!(fill_count >= 1, "at least one paint command was emitted");
+
+        // Without any stylesheet: nothing matches, the display list is empty.
+        let mut bare_tree = RetainedTree::new();
+        let mut bare_scene = Scene::new();
+        let bare = pipeline.run_matched(&mut bare_tree, &mut bare_scene, ctx(0), &view, &[]);
+        assert!(
+            bare.snapshot().display_list().is_empty(),
+            "no stylesheet means no fill"
+        );
+    }
+
+    #[test]
+    fn run_matched_matches_run_with_equivalent_inputs() {
+        // run_matched with empty sheets is behaviourally identical to run with
+        // empty inputs: same reconcile, same empty style, same composition.
+        let pipeline = FramePipeline::new();
+        let view = sample_view();
+
+        let mut a_tree = RetainedTree::new();
+        let mut a_scene = Scene::new();
+        let via_run = pipeline.run(&mut a_tree, &mut a_scene, ctx(0), &view, &StyleInputs::new());
+
+        let mut b_tree = RetainedTree::new();
+        let mut b_scene = Scene::new();
+        let via_matched = pipeline.run_matched(&mut b_tree, &mut b_scene, ctx(0), &view, &[]);
+
+        let run_commands: Vec<_> = via_run.snapshot().display_list().commands().to_vec();
+        let matched_commands: Vec<_> = via_matched.snapshot().display_list().commands().to_vec();
+        assert_eq!(run_commands, matched_commands);
+        assert_eq!(via_run.reconciled(), via_matched.reconciled());
     }
 }
