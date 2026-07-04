@@ -48,10 +48,15 @@ obscur-system = { path = "crates/domain/obscur-system" }
 obscur-runtime = { path = "crates/application/obscur-runtime" }
 obscur-headless = { path = "crates/application/obscur-headless" }
 # components
+obscur-theme-system = { path = "crates/components/obscur-theme-system" }
 obscur-primitives = { path = "crates/components/obscur-primitives" }
+obscur-widgets = { path = "crates/components/obscur-widgets" }
 # frontend
 obscur-ui-ir = { path = "crates/frontend/obscur-ui-ir" }
 obscur-okui-syntax = { path = "crates/frontend/obscur-okui-syntax" }
+obscur-okui-compiler = { path = "crates/frontend/obscur-okui-compiler" }
+obscur-css = { path = "crates/frontend/obscur-css" }
+obscur-ui-macros = { path = "crates/frontend/obscur-ui-macros" }
 # proc-macro toolchain (obscur-ui-macros expansion logic)
 proc-macro2 = "1"
 quote = "1"

@@ -51,6 +51,18 @@ pub use obscur_windowing as windowing;
 pub use obscur_headless as headless;
 pub use obscur_runtime as runtime;
 
+// --- components (built-in element/widget tier) ---
+pub use obscur_primitives as primitives;
+pub use obscur_theme_system as theme_system;
+pub use obscur_widgets as widgets;
+
+// --- frontends (UI authoring: CSS, UI IR, DSL macros, .okui) ---
+pub use obscur_css as css;
+pub use obscur_okui_compiler as okui_compiler;
+pub use obscur_okui_syntax as okui_syntax;
+pub use obscur_ui_ir as ui_ir;
+pub use obscur_ui_macros as ui_macros;
+
 // --- optional adapters (feature-gated) ---
 #[cfg(feature = "accesskit")]
 pub use obscur_accessibility_accesskit as accesskit_bridge;

@@ -60,6 +60,16 @@ obscur-interaction = { workspace = true }
 # application
 obscur-runtime = { workspace = true }
 obscur-headless = { workspace = true }
+# components
+obscur-theme-system = { workspace = true }
+obscur-primitives = { workspace = true }
+obscur-widgets = { workspace = true }
+# frontends (UI authoring surfaces)
+obscur-ui-ir = { workspace = true }
+obscur-okui-syntax = { workspace = true }
+obscur-okui-compiler = { workspace = true }
+obscur-css = { workspace = true }
+obscur-ui-macros = { workspace = true }
 # optional adapters (behind features)
 obscur-resource-fs = { workspace = true, optional = true }
 obscur-cache-fs = { workspace = true, optional = true }
