@@ -10,9 +10,13 @@
 //! [`Declaration`]: obscur_style::cascade::Declaration
 
 use crate::error::{UnsupportedCssFeature, UnsupportedFeatureKind};
-use crate::parser::{ParsedComplexSelector, ParsedCompoundSelector, ParsedSelectorList, SimpleSelector};
+use crate::parser::{
+    AttrOp, Combinator, ParsedComplexSelector, ParsedCompoundSelector, ParsedSelectorList,
+    SimpleSelector,
+};
 use crate::source::SourceSpan;
 
+use obscur_style::selector as style;
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
 /// A compiled selector: its cascade [`SelectorId`] and its specificity.
@@ -85,6 +89,153 @@ impl SelectorCompiler {
             .map(|selector| self.compile(selector, unsupported))
             .collect()
     }
+
+    /// Lowers a parsed selector list into the `obscur-style` selector model the
+    /// runtime matcher consumes (§4.13).
+    ///
+    /// This is a pure, id-free structural translation: the parsed AST maps 1:1
+    /// onto [`style::SelectorList`], preserving source order. Excluded
+    /// dynamic-state pseudo-classes are *not* filtered here (that diagnostic is
+    /// raised by [`compile`](Self::compile)); they lower to
+    /// [`style::PseudoClassSelector::Other`], which the matcher treats as
+    /// matching nothing.
+    #[must_use]
+    pub fn lower_list(list: &ParsedSelectorList) -> style::SelectorList {
+        style::SelectorList::new(list.0.iter().map(Self::lower_complex).collect())
+    }
+
+    /// Lowers one parsed complex selector, mapping the head and each
+    /// combinator-linked tail compound left-to-right.
+    #[must_use]
+    pub fn lower_complex(selector: &ParsedComplexSelector) -> style::ComplexSelector {
+        let head = Self::lower_compound(&selector.head);
+        let tail = selector
+            .tail
+            .iter()
+            .map(|(combinator, compound)| {
+                (lower_combinator(*combinator), Self::lower_compound(compound))
+            })
+            .collect();
+        style::ComplexSelector::new(head, tail)
+    }
+
+    /// Lowers one parsed compound selector into its run of simple selectors.
+    #[must_use]
+    pub fn lower_compound(compound: &ParsedCompoundSelector) -> style::CompoundSelector {
+        style::CompoundSelector::new(compound.parts.iter().map(lower_simple).collect())
+    }
+}
+
+/// Maps a parser combinator onto its `obscur-style` counterpart (1:1 by name).
+const fn lower_combinator(combinator: Combinator) -> style::Combinator {
+    match combinator {
+        Combinator::Descendant => style::Combinator::Descendant,
+        Combinator::Child => style::Combinator::Child,
+        Combinator::NextSibling => style::Combinator::NextSibling,
+        Combinator::SubsequentSibling => style::Combinator::SubsequentSibling,
+    }
+}
+
+/// Lowers one parsed simple selector into the `obscur-style` model.
+///
+/// Type/universal/class/id/pseudo-element map directly; attribute and
+/// pseudo-class selectors delegate to [`lower_attr_op`]/[`lower_pseudo_class`].
+fn lower_simple(simple: &SimpleSelector) -> style::SimpleSelector {
+    match simple {
+        SimpleSelector::Type(name) => style::SimpleSelector::Type(name.clone()),
+        SimpleSelector::Universal => style::SimpleSelector::Universal,
+        SimpleSelector::Class(name) => style::SimpleSelector::Class(name.clone()),
+        SimpleSelector::Id(name) => style::SimpleSelector::Id(name.clone()),
+        SimpleSelector::PseudoElement(name) => style::SimpleSelector::PseudoElement(name.clone()),
+        SimpleSelector::Attribute { name, op, value } => {
+            // A missing operator or operand is a bare presence test (`[a]`).
+            let matcher = match (op, value.as_deref()) {
+                (Some(op), Some(operand)) => Some(lower_attr_op(*op, operand)),
+                _ => None,
+            };
+            style::SimpleSelector::Attribute(style::AttributeSelector {
+                name: name.clone(),
+                matcher,
+            })
+        }
+        SimpleSelector::PseudoClass { name, arg } => {
+            style::SimpleSelector::PseudoClass(lower_pseudo_class(name, arg.as_deref()))
+        }
+    }
+}
+
+/// Pairs an attribute operator with its operand to build an [`style::AttrMatch`].
+fn lower_attr_op(op: AttrOp, operand: &str) -> style::AttrMatch {
+    match op {
+        AttrOp::Exact => style::AttrMatch::Exact(operand.into()),
+        AttrOp::Includes => style::AttrMatch::Includes(operand.into()),
+        AttrOp::DashMatch => style::AttrMatch::DashMatch(operand.into()),
+        AttrOp::Prefix => style::AttrMatch::Prefix(operand.into()),
+        AttrOp::Suffix => style::AttrMatch::Suffix(operand.into()),
+        AttrOp::Substring => style::AttrMatch::Substring(operand.into()),
+    }
+}
+
+/// Lowers a pseudo-class name (and optional functional argument) into the
+/// `obscur-style` [`style::PseudoClassSelector`].
+///
+/// The name is matched case-insensitively. Functional `:nth-*` forms parse their
+/// argument via [`parse_anb`]; any name the model does not know is preserved as
+/// [`style::PseudoClassSelector::Other`] (which matches nothing).
+fn lower_pseudo_class(name: &str, arg: Option<&str>) -> style::PseudoClassSelector {
+    use style::PseudoClassSelector as P;
+    match name.to_ascii_lowercase().as_str() {
+        "hover" => P::Hover,
+        "focus" => P::Focus,
+        "focus-visible" => P::FocusVisible,
+        "focus-within" => P::FocusWithin,
+        "active" => P::Active,
+        "disabled" => P::Disabled,
+        "enabled" => P::Enabled,
+        "checked" => P::Checked,
+        "first-child" => P::FirstChild,
+        "last-child" => P::LastChild,
+        "only-child" => P::OnlyChild,
+        "root" => P::Root,
+        "empty" => P::Empty,
+        "nth-child" => P::NthChild(parse_anb(arg.unwrap_or_default())),
+        "nth-last-child" => P::NthLastChild(parse_anb(arg.unwrap_or_default())),
+        "nth-of-type" => P::NthOfType(parse_anb(arg.unwrap_or_default())),
+        "nth-last-of-type" => P::NthLastOfType(parse_anb(arg.unwrap_or_default())),
+        _ => P::Other(name.into()),
+    }
+}
+
+/// Parses an `An+B` micro-syntax argument into an [`style::AnB`].
+///
+/// Handles the keywords `odd` (`2n+1`) and `even` (`2n`), a bare integer `k`
+/// (`0n+k`), and the general `An±B` grammar including the omitted-coefficient
+/// forms `n` (`1n+0`) and `-n+B` (`-1n+B`). Whitespace inside the argument is
+/// ignored. Anything unparseable degrades to `0n+0`, which matches no index.
+fn parse_anb(arg: &str) -> style::AnB {
+    let compact: String = arg.chars().filter(|c| !c.is_whitespace()).collect();
+    let lower = compact.to_ascii_lowercase();
+    if lower == "odd" {
+        return style::AnB::new(2, 1);
+    }
+    if lower == "even" {
+        return style::AnB::new(2, 0);
+    }
+    if let Some(index) = lower.find('n') {
+        let a = match &lower[..index] {
+            "" | "+" => 1,
+            "-" => -1,
+            other => other.parse::<i32>().unwrap_or(0),
+        };
+        let rest = &lower[index + 1..];
+        let b = if rest.is_empty() {
+            0
+        } else {
+            rest.strip_prefix('+').unwrap_or(rest).parse::<i32>().unwrap_or(0)
+        };
+        return style::AnB::new(a, b);
+    }
+    style::AnB::new(0, lower.parse::<i32>().unwrap_or(0))
 }
 
 /// Sums the specificity contributions of one compound selector's parts.
@@ -250,5 +401,139 @@ mod tests {
         let mut unsupported = Vec::new();
         let _ = compiler.compile(&selector("nav > a:visited"), &mut unsupported);
         assert_eq!(unsupported.len(), 1);
+    }
+
+    /// Lowers `text` (a single complex selector) and returns its subject
+    /// compound's simple selectors.
+    fn lower_subject_simples(text: &str) -> Vec<style::SimpleSelector> {
+        SelectorCompiler::lower_complex(&selector(text))
+            .subject()
+            .simples()
+            .to_vec()
+    }
+
+    #[test]
+    fn lowers_type_universal_class_id() {
+        assert_eq!(
+            lower_subject_simples("div"),
+            vec![style::SimpleSelector::Type("div".into())]
+        );
+        assert_eq!(lower_subject_simples("*"), vec![style::SimpleSelector::Universal]);
+        assert_eq!(
+            lower_subject_simples(".a"),
+            vec![style::SimpleSelector::Class("a".into())]
+        );
+        assert_eq!(
+            lower_subject_simples("#b"),
+            vec![style::SimpleSelector::Id("b".into())]
+        );
+    }
+
+    #[test]
+    fn lowers_attribute_presence() {
+        assert_eq!(
+            lower_subject_simples("[data-x]"),
+            vec![style::SimpleSelector::Attribute(style::AttributeSelector {
+                name: "data-x".into(),
+                matcher: None,
+            })]
+        );
+    }
+
+    #[test]
+    fn lowers_every_attribute_operator() {
+        let cases = [
+            ("[type=\"text\"]", style::AttrMatch::Exact("text".into())),
+            ("[a~=\"x\"]", style::AttrMatch::Includes("x".into())),
+            ("[a|=\"x\"]", style::AttrMatch::DashMatch("x".into())),
+            ("[a^=\"x\"]", style::AttrMatch::Prefix("x".into())),
+            ("[a$=\"x\"]", style::AttrMatch::Suffix("x".into())),
+            ("[a*=\"x\"]", style::AttrMatch::Substring("x".into())),
+        ];
+        for (text, expected) in cases {
+            let simples = lower_subject_simples(text);
+            let style::SimpleSelector::Attribute(attr) = &simples[0] else {
+                panic!("expected attribute selector for {text}");
+            };
+            assert_eq!(attr.matcher, Some(expected), "for {text}");
+        }
+    }
+
+    #[test]
+    fn lowers_state_pseudo_class() {
+        assert_eq!(
+            lower_subject_simples(":hover"),
+            vec![style::SimpleSelector::PseudoClass(
+                style::PseudoClassSelector::Hover
+            )]
+        );
+    }
+
+    #[test]
+    fn lowers_nth_child_and_keywords() {
+        let anb = |text: &str| {
+            let simples = lower_subject_simples(text);
+            match &simples[0] {
+                style::SimpleSelector::PseudoClass(style::PseudoClassSelector::NthChild(anb)) => *anb,
+                other => panic!("expected nth-child, got {other:?}"),
+            }
+        };
+        assert_eq!(anb(":nth-child(2n+1)"), style::AnB::new(2, 1));
+        assert_eq!(anb(":nth-child(odd)"), style::AnB::new(2, 1));
+        assert_eq!(anb(":nth-child(even)"), style::AnB::new(2, 0));
+        assert_eq!(anb(":nth-child(3)"), style::AnB::new(0, 3));
+    }
+
+    #[test]
+    fn unknown_pseudo_class_lowers_to_other() {
+        assert_eq!(
+            lower_subject_simples(":unknown"),
+            vec![style::SimpleSelector::PseudoClass(
+                style::PseudoClassSelector::Other("unknown".into())
+            )]
+        );
+    }
+
+    #[test]
+    fn lowers_combinators() {
+        assert_eq!(
+            SelectorCompiler::lower_complex(&selector("a b")).tail()[0].0,
+            style::Combinator::Descendant
+        );
+        assert_eq!(
+            SelectorCompiler::lower_complex(&selector("a > b")).tail()[0].0,
+            style::Combinator::Child
+        );
+        assert_eq!(
+            SelectorCompiler::lower_complex(&selector("a + b")).tail()[0].0,
+            style::Combinator::NextSibling
+        );
+        assert_eq!(
+            SelectorCompiler::lower_complex(&selector("a ~ b")).tail()[0].0,
+            style::Combinator::SubsequentSibling
+        );
+    }
+
+    #[test]
+    fn lower_list_preserves_order_and_count() {
+        let src = CssSource::anonymous(".a, #b, div");
+        let list = SelectorParser::new().parse(&src).unwrap();
+        let lowered = SelectorCompiler::lower_list(&list);
+        assert_eq!(lowered.selectors().len(), 3);
+        assert_eq!(
+            lowered.selectors()[0].subject().simples(),
+            &[style::SimpleSelector::Class("a".into())]
+        );
+    }
+
+    #[test]
+    fn parse_anb_grammar() {
+        assert_eq!(parse_anb("2n+1"), style::AnB::new(2, 1));
+        assert_eq!(parse_anb("odd"), style::AnB::new(2, 1));
+        assert_eq!(parse_anb("even"), style::AnB::new(2, 0));
+        assert_eq!(parse_anb("3"), style::AnB::new(0, 3));
+        assert_eq!(parse_anb("-n+3"), style::AnB::new(-1, 3));
+        assert_eq!(parse_anb("n"), style::AnB::new(1, 0));
+        assert_eq!(parse_anb("2n - 1"), style::AnB::new(2, -1));
     }
 }

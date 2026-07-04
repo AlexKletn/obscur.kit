@@ -21,7 +21,9 @@ use crate::parser::{
 
 use obscur_identity::InternedSymbol;
 use obscur_style::cascade::{CascadeOrigin, Declaration};
+use obscur_style::matching::{BlockDeclaration, StyleRule, Stylesheet};
 use obscur_style::property::CustomProperty;
+use obscur_style::selector::SelectorSpecificity;
 
 use super::keyframe_compiler::{CompiledKeyframes, KeyframeCompiler};
 use super::property_compiler::{CompiledDeclaration, PropertyCompiler};
@@ -116,6 +118,21 @@ pub struct CompiledStylesheet {
     pub transitions: Vec<CompiledTransition>,
     /// The interner backing every [`InternedSymbol`] in this stylesheet.
     pub symbols: CssSymbolInterner,
+    /// The runtime-matchable stylesheet: every style rule lowered into the
+    /// `obscur-style` selector + [`BlockDeclaration`] model the
+    /// [`StyleMatcher`](obscur_style::matching::StyleMatcher) consumes (§4.13).
+    ///
+    /// This is an *additional* output alongside [`declarations`](Self::declarations)
+    /// (which pre-resolve the cascade context per selector): here each rule keeps
+    /// its authored selector list and block, and the matcher supplies specificity,
+    /// origin and source order at match time. Only standard longhand declarations
+    /// enter a block; custom properties and unsupported declarations are recorded
+    /// on the other fields, not here. Style rules nested inside `@media` /
+    /// `@container` groups are lowered **unconditionally** (their condition is
+    /// ignored for matching purposes for now) so that no authored rule is dropped
+    /// from the matchable set; conditional gating remains modelled separately by
+    /// [`conditional_groups`](Self::conditional_groups).
+    pub matchable: Stylesheet,
     /// Recognised-but-unsupported features (from parsing and compiling).
     pub unsupported: Vec<UnsupportedCssFeature>,
     /// Syntax errors carried forward from parsing.
@@ -131,6 +148,7 @@ struct Accumulator {
     conditional_groups: Vec<CompiledConditionalGroup>,
     keyframes: Vec<CompiledKeyframes>,
     transitions: Vec<CompiledTransition>,
+    matchable_rules: Vec<StyleRule>,
     unsupported: Vec<UnsupportedCssFeature>,
 }
 
@@ -184,6 +202,8 @@ impl StylesheetCompiler {
         let mut unsupported = sheet.unsupported.clone();
         unsupported.append(&mut acc.unsupported);
 
+        let matchable = Stylesheet::new(self.origin, acc.matchable_rules);
+
         CompiledStylesheet {
             declarations: acc.declarations,
             custom_properties: acc.custom_properties,
@@ -191,6 +211,7 @@ impl StylesheetCompiler {
             keyframes: acc.keyframes,
             transitions: acc.transitions,
             symbols: self.interner,
+            matchable,
             unsupported,
             errors: sheet.errors.clone(),
         }
@@ -258,6 +279,42 @@ impl StylesheetCompiler {
                 acc.transitions.append(&mut compiled);
             }
         }
+        let rule = self.lower_matchable_rule(style);
+        acc.matchable_rules.push(rule);
+    }
+
+    /// Builds the runtime-matchable [`StyleRule`] for a parsed style rule: the
+    /// lowered selector list paired with a block of authored [`BlockDeclaration`]s.
+    ///
+    /// The block is built once per rule (it is selector-independent). Motion
+    /// declarations are routed away as they are elsewhere, and only standard
+    /// longhands become block declarations; custom properties and unsupported
+    /// values are handled by the flat cascade path (their diagnostics are raised
+    /// there, so they are silently skipped here to avoid double reporting).
+    fn lower_matchable_rule(&mut self, style: &ParsedStyleRule) -> StyleRule {
+        let mut block = Vec::new();
+        for decl in &style.declarations {
+            if is_motion_decl(&decl.name) {
+                continue;
+            }
+            // The cascade context is irrelevant to a block declaration; the
+            // matcher supplies specificity/origin/order at match time.
+            if let CompiledDeclaration::Standard(declaration) = self.properties.compile(
+                decl,
+                SelectorSpecificity::ZERO,
+                self.origin,
+                0,
+                None,
+                &mut self.interner,
+            ) {
+                block.push(BlockDeclaration::new(
+                    declaration.property(),
+                    declaration.value().clone(),
+                    declaration.important(),
+                ));
+            }
+        }
+        StyleRule::new(SelectorCompiler::lower_list(&style.selectors), block)
     }
 }
 
@@ -274,6 +331,9 @@ fn lift_group(condition: CompiledCondition, mut inner: Accumulator, acc: &mut Ac
     acc.keyframes.append(&mut inner.keyframes);
     acc.conditional_groups.append(&mut inner.conditional_groups);
     acc.unsupported.append(&mut inner.unsupported);
+    // Matchable rules rise unconditionally to the enclosing sheet (their gating
+    // condition is not modelled in the matchable set — see `CompiledStylesheet::matchable`).
+    acc.matchable_rules.append(&mut inner.matchable_rules);
     acc.conditional_groups.push(CompiledConditionalGroup {
         condition,
         declarations: inner.declarations,
@@ -447,6 +507,77 @@ mod tests {
     fn excluded_pseudo_class_is_reported() {
         let sheet = compile("a:visited { color: black }");
         assert!(sheet.unsupported.iter().any(|f| f.name() == ":visited"));
+    }
+
+    #[test]
+    fn matchable_holds_one_rule_per_style_rule() {
+        let sheet = compile(".counter { background-color: #ff0000 } #main .value { color: #00ff00 }");
+        let rules = sheet.matchable.rules();
+        assert_eq!(rules.len(), 2);
+        assert_eq!(sheet.matchable.origin(), CascadeOrigin::GlobalApp);
+    }
+
+    #[test]
+    fn matchable_first_rule_lowers_class_and_block() {
+        use obscur_style::selector::SimpleSelector;
+        let sheet = compile(".counter { background-color: #ff0000 } #main .value { color: #00ff00 }");
+        let first = &sheet.matchable.rules()[0];
+        // Selector `.counter` lowers to a single class simple selector.
+        let selectors = first.selectors().selectors();
+        assert_eq!(selectors.len(), 1);
+        assert_eq!(
+            selectors[0].subject().simples(),
+            &[SimpleSelector::Class("counter".into())]
+        );
+        // Its block is one `background-color: #ff0000` declaration.
+        assert_eq!(first.block().len(), 1);
+        assert_eq!(first.block()[0].property(), PropertyId::BackgroundColor);
+        assert_eq!(
+            *first.block()[0].value(),
+            PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0))
+        );
+    }
+
+    #[test]
+    fn matchable_second_rule_lowers_descendant_combinator() {
+        use obscur_style::selector::{Combinator, SimpleSelector};
+        let sheet = compile("#main .value { color: #00ff00 }");
+        let complex = &sheet.matchable.rules()[0].selectors().selectors()[0];
+        assert_eq!(
+            complex.head().simples(),
+            &[SimpleSelector::Id("main".into())]
+        );
+        assert_eq!(complex.tail().len(), 1);
+        assert_eq!(complex.tail()[0].0, Combinator::Descendant);
+    }
+
+    #[test]
+    fn matchable_skips_custom_and_unsupported_from_blocks() {
+        // `--brand` (custom) and `margin` (unsupported) must not enter the block;
+        // only the standard `color` declaration does.
+        let sheet = compile("a { --brand: #fff; margin: 1px; color: black }");
+        let block = sheet.matchable.rules()[0].block();
+        assert_eq!(block.len(), 1);
+        assert_eq!(block[0].property(), PropertyId::Color);
+    }
+
+    #[test]
+    fn matchable_includes_conditional_group_rules_unconditionally() {
+        let sheet = compile("a { color: black } @media screen { p { width: 10px } }");
+        // Both the top-level `a` rule and the nested `p` rule are matchable.
+        assert_eq!(sheet.matchable.rules().len(), 2);
+        // The conditional group output is preserved untouched.
+        assert_eq!(sheet.conditional_groups.len(), 1);
+    }
+
+    #[test]
+    fn matchable_carries_configured_origin() {
+        let src = CssSource::anonymous("a { color: black }");
+        let parsed = crate::parser::StylesheetParser::new(&src).parse();
+        let sheet = StylesheetCompiler::new()
+            .with_origin(CascadeOrigin::Theme)
+            .compile(&parsed);
+        assert_eq!(sheet.matchable.origin(), CascadeOrigin::Theme);
     }
 
     #[test]
