@@ -47,6 +47,8 @@ obscur-system = { path = "crates/domain/obscur-system" }
 # application
 obscur-runtime = { path = "crates/application/obscur-runtime" }
 obscur-headless = { path = "crates/application/obscur-headless" }
+# components
+obscur-primitives = { path = "crates/components/obscur-primitives" }
 # adapters (optional, wired by the facade behind features)
 obscur-resource-fs = { path = "crates/adapters/obscur-resource-fs" }
 obscur-cache-fs = { path = "crates/adapters/obscur-cache-fs" }

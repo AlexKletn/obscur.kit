@@ -1546,6 +1546,15 @@ version = "0.0.0"
 [[package]]
 name = "obscur-primitives"
 version = "0.0.0"
+dependencies = [
+ "obscur-geometry",
+ "obscur-identity",
+ "obscur-layout",
+ "obscur-resources",
+ "obscur-scene",
+ "obscur-text",
+ "obscur-view",
+]
 
 [[package]]
 name = "obscur-render"
@@ -1704,6 +1713,10 @@ dependencies = [
 [[package]]
 name = "obscur-theme-system"
 version = "0.0.0"
+dependencies = [
+ "obscur-geometry",
+ "obscur-scene",
+]
 
 [[package]]
 name = "obscur-tree"
@@ -1733,6 +1746,15 @@ dependencies = [
 [[package]]
 name = "obscur-widgets"
 version = "0.0.0"
+dependencies = [
+ "obscur-accessibility",
+ "obscur-geometry",
+ "obscur-identity",
+ "obscur-interaction",
+ "obscur-primitives",
+ "obscur-text",
+ "obscur-view",
+]
 
 [[package]]
 name = "obscur-window-winit"

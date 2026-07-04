@@ -1,6 +1,271 @@
-//! Checkbox (skeleton stub for the spec-defined entity; not yet implemented).
+//! `Checkbox`: a headless tri-state checkbox control (spec §2.6).
 
-/// Placeholder for the `Checkbox` entity. See the Obscur Kit 2 specs for its
-/// contract; this stub exists to materialise the target source layout.
-#[derive(Debug)]
-pub struct Checkbox;
+use obscur_accessibility::semantic::SemanticRole;
+use obscur_identity::{ComponentId, InternedSymbol};
+use obscur_primitives::Text;
+use obscur_view::view::{View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue};
+
+/// A headless tri-state checkbox control (spec §2.6).
+///
+/// `Checkbox` owns its `checked` state as an [`Option<bool>`]: `Some(true)` is
+/// checked, `Some(false)` is unchecked, and `None` is the *mixed* /
+/// indeterminate state a parent can hold while its descendants disagree. It
+/// bakes in **no** visual theme — [`view`](Self::view) derives a
+/// [`SemanticRole::Checkbox`] element whose checked state is encoded as a
+/// tri-state integer property (see [`view`](Self::view)) plus a change event
+/// bound to `command` and a single [`Text`] label child, rendered by the style
+/// layer keyed on [`COMPONENT_ID`](Self::COMPONENT_ID).
+///
+/// The state machine is [`toggle`](Self::toggle): disabled is a no-op, `None`
+/// (mixed) advances to `Some(true)`, and a definite value flips.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Checkbox {
+    label: Box<str>,
+    command: InternedSymbol,
+    checked: Option<bool>,
+    disabled: bool,
+}
+
+impl Checkbox {
+    /// Stable component id for the checkbox widget (see [`Button::COMPONENT_ID`]
+    /// for the shared `0x00D0_00NN` scheme).
+    ///
+    /// [`Button::COMPONENT_ID`]: crate::button::Button::COMPONENT_ID
+    pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0003);
+
+    /// Interned name of the semantic-role property (`role`); shares the
+    /// `0x00D1_NNXX` scheme with `NN = 03` (checkbox): role=`00`, disabled=`01`,
+    /// checked=`02`.
+    const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0300);
+    /// Interned name of the `disabled` state property.
+    const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0301);
+    /// Interned name of the tri-state `checked` property (see [`view`](Self::view)).
+    const PROP_CHECKED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0302);
+
+    /// Interned name of the change event a checkbox reports when toggled.
+    const EVENT_CHANGE: InternedSymbol = InternedSymbol::from_raw(0x00D2_0003);
+
+    /// Creates an enabled, *unchecked* (`Some(false)`) checkbox showing `label`
+    /// that fires `command` on change.
+    #[must_use]
+    pub fn new(label: impl Into<Box<str>>, command: InternedSymbol) -> Self {
+        Self {
+            label: label.into(),
+            command,
+            checked: Some(false),
+            disabled: false,
+        }
+    }
+
+    /// Creates an enabled *indeterminate* (`None`, mixed) checkbox showing
+    /// `label` that fires `command` on change.
+    #[must_use]
+    pub fn indeterminate(label: impl Into<Box<str>>, command: InternedSymbol) -> Self {
+        Self {
+            label: label.into(),
+            command,
+            checked: None,
+            disabled: false,
+        }
+    }
+
+    /// Sets the definite checked state, returning the updated checkbox (fluent).
+    #[must_use]
+    pub fn checked(mut self, checked: bool) -> Self {
+        self.checked = Some(checked);
+        self
+    }
+
+    /// Sets the disabled state, returning the updated checkbox (fluent).
+    #[must_use]
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    /// Advances the tri-state: a no-op while disabled; `None` (mixed) resolves
+    /// to `Some(true)`; a definite value flips.
+    pub fn toggle(&mut self) {
+        if self.disabled {
+            return;
+        }
+        self.checked = match self.checked {
+            None => Some(true),
+            Some(value) => Some(!value),
+        };
+    }
+
+    /// Returns whether the checkbox is definitely checked (`Some(true)`).
+    #[must_use]
+    pub const fn is_checked(&self) -> bool {
+        matches!(self.checked, Some(true))
+    }
+
+    /// Returns whether the checkbox is in the mixed / indeterminate state.
+    #[must_use]
+    pub const fn is_indeterminate(&self) -> bool {
+        self.checked.is_none()
+    }
+
+    /// Returns the raw tri-state checked value.
+    #[must_use]
+    pub const fn checked_state(&self) -> Option<bool> {
+        self.checked
+    }
+
+    /// Sets the definite checked state in place.
+    pub fn set_checked(&mut self, checked: bool) {
+        self.checked = Some(checked);
+    }
+
+    /// Returns the command fired when the checkbox changes.
+    #[must_use]
+    pub const fn command(&self) -> InternedSymbol {
+        self.command
+    }
+
+    /// Returns the checkbox label.
+    #[must_use]
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// Returns whether the checkbox is disabled.
+    #[must_use]
+    pub const fn is_disabled(&self) -> bool {
+        self.disabled
+    }
+
+    /// Sets the disabled state in place.
+    pub fn set_disabled(&mut self, disabled: bool) {
+        self.disabled = disabled;
+    }
+
+    /// Returns the accessible role of this control.
+    #[must_use]
+    pub const fn semantic_role(&self) -> SemanticRole {
+        SemanticRole::Checkbox
+    }
+
+    /// Derives the semantic view: a [`COMPONENT_ID`] element carrying the role
+    /// and disabled state, the tri-state checked value as an integer property
+    /// (`-1` = mixed/`None`, `0` = unchecked, `1` = checked), a change event
+    /// bound to `command`, and the label as a single [`Text`] child.
+    ///
+    /// [`COMPONENT_ID`]: Self::COMPONENT_ID
+    #[must_use]
+    pub fn view(&self) -> View {
+        let checked = match self.checked {
+            None => -1,
+            Some(false) => 0,
+            Some(true) => 1,
+        };
+        let node = ViewNode::element(Self::COMPONENT_ID)
+            .with_prop(ViewProperty::new(
+                Self::PROP_ROLE,
+                ViewValue::from("checkbox"),
+            ))
+            .with_prop(ViewProperty::new(
+                Self::PROP_DISABLED,
+                ViewValue::Bool(self.disabled),
+            ))
+            .with_prop(ViewProperty::new(
+                Self::PROP_CHECKED,
+                ViewValue::Int(checked),
+            ))
+            .with_event(ViewEventBinding::new(Self::EVENT_CHANGE, self.command))
+            .with_children(ViewFragment::from_nodes(vec![
+                Text::new(self.label.clone()).into_view_node(),
+            ]));
+        View::single(node)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cmd() -> InternedSymbol {
+        InternedSymbol::from_raw(0x1234)
+    }
+
+    #[test]
+    fn toggle_flips_definite_state() {
+        let mut c = Checkbox::new("A", cmd());
+        assert!(!c.is_checked());
+        c.toggle();
+        assert!(c.is_checked());
+        c.toggle();
+        assert!(!c.is_checked());
+    }
+
+    #[test]
+    fn indeterminate_toggles_to_checked() {
+        let mut c = Checkbox::indeterminate("A", cmd());
+        assert!(c.is_indeterminate());
+        c.toggle();
+        assert!(c.is_checked());
+        assert!(!c.is_indeterminate());
+    }
+
+    #[test]
+    fn disabled_toggle_is_noop() {
+        let mut c = Checkbox::new("A", cmd()).disabled(true);
+        c.toggle();
+        assert!(!c.is_checked());
+        assert_eq!(c.checked_state(), Some(false));
+    }
+
+    #[test]
+    fn is_checked_reflects_state() {
+        assert!(Checkbox::new("A", cmd()).checked(true).is_checked());
+        assert!(!Checkbox::new("A", cmd()).checked(false).is_checked());
+        assert!(!Checkbox::indeterminate("A", cmd()).is_checked());
+    }
+
+    #[test]
+    fn semantic_role_is_checkbox() {
+        assert_eq!(
+            Checkbox::new("A", cmd()).semantic_role(),
+            SemanticRole::Checkbox
+        );
+    }
+
+    #[test]
+    fn view_encodes_tri_state_checked_prop() {
+        let mixed = Checkbox::indeterminate("A", cmd());
+        let view = mixed.view();
+        match &view.root().nodes()[0] {
+            ViewNode::Element {
+                component,
+                props,
+                events,
+                children,
+                ..
+            } => {
+                assert_eq!(*component, Checkbox::COMPONENT_ID);
+                let checked = props
+                    .iter()
+                    .find(|p| p.name() == Checkbox::PROP_CHECKED)
+                    .expect("checked prop present");
+                assert_eq!(*checked.value(), ViewValue::Int(-1));
+                assert_eq!(events[0].command(), cmd());
+                assert_eq!(children.len(), 1);
+            }
+            ViewNode::Text { .. } => panic!("expected element root"),
+        }
+
+        // A definite checked value encodes to 1.
+        let on = Checkbox::new("A", cmd()).checked(true).view();
+        match &on.root().nodes()[0] {
+            ViewNode::Element { props, .. } => {
+                let checked = props
+                    .iter()
+                    .find(|p| p.name() == Checkbox::PROP_CHECKED)
+                    .expect("checked prop present");
+                assert_eq!(*checked.value(), ViewValue::Int(1));
+            }
+            ViewNode::Text { .. } => panic!("expected element root"),
+        }
+    }
+}
