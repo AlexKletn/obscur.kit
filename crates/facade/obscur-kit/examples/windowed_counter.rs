@@ -5,8 +5,10 @@
 //! window and event loop, and Vello/wgpu 29 for the GPU renderer — and drives
 //! them through the toolkit's public umbrella crate only (`obscur_kit::*`). It
 //! opens a genuine OS window and **presents the painted counter on-screen**,
-//! redrawing on input and resize, running until the window is closed. Clicking
-//! the red bar decrements the counter and the green bar increments it.
+//! redrawing on input and resize, running until the window is closed. Moving the
+//! pointer over a bar lights its `:hover` style through the real input path, and
+//! clicking the lower red bar decrements the counter while the green bar
+//! increments it.
 //!
 //! Run it on a real machine (a display + a GPU adapter are required):
 //! `cargo run -p obscur-kit --example windowed_counter --features full`
@@ -25,10 +27,13 @@
 //!    Queue`, with the device/queue handed to `VelloDevice::new` so the adapter
 //!    never owns the async `request_adapter` path (spec §2.7). The surface is
 //!    wrapped in a `VelloSurface` that owns the swapchain lifecycle.
-//! 3. **Frame driver** — the deterministic [`HeadlessHost`] runs the real
-//!    pipeline (reconcile → style → layout → scene) and exposes the committed
-//!    scene as a `SceneSnapshot`. There is no separate "windowed" host; reusing
-//!    the headless host as the frame driver is intended.
+//! 3. **Frame driver** — the embeddable [`UiRuntime`] runs the real,
+//!    *scheduler-gated* pipeline (reconcile → pseudo-aware match → style → layout
+//!    → scene) and exposes the committed scene as a `SceneSnapshot`. Input,
+//!    resize, and the counter's value each `request_frame` a reason;
+//!    [`UiRuntime::run_due_frame`] then produces at most one frame per redraw
+//!    when something is actually due, and the runtime retains the last frame's
+//!    layout boxes so its hit-test index can map a pointer back to a node.
 //! 4. **Present** — the snapshot is packaged as a `RenderFrame` +
 //!    `FrameSubmission` and submitted to `VelloRenderer::present_to_surface`,
 //!    which rasterizes the scene into an offscreen Vello texture and then blits
@@ -36,9 +41,32 @@
 //!    render-to-surface helper; offscreen-render + blit is the documented
 //!    pattern). The counter is therefore genuinely visible on-screen.
 //!
-//! `render_styled` matches the compiled `.counter` stylesheet against the
-//! reconciled tree, so the committed display list carries a real fill — that
-//! fill is what is rasterized and presented.
+//! The runtime's pseudo-aware matcher matches the compiled `.counter` /
+//! `.bar` / `:hover` stylesheet against the reconciled tree, so the committed
+//! display list carries a real fill — that fill is what is rasterized and
+//! presented.
+//!
+//! # Input
+//!
+//! Pointer input flows through the **real domain path**, not a geometric hack:
+//! winit → [`PointerConverter`] → [`UiRuntime::handle_pointer`] → hit-test →
+//! hover/focus → `:hover`/`:focus` restyle. Concretely:
+//!
+//! - `CursorMoved` is converted by [`PointerConverter::moved`] into a domain
+//!   [`Move`](obscur_kit::interaction::pointer::PointerEventKind::Move) event and
+//!   dispatched; the runtime hit-tests it against the retained layout boxes,
+//!   updates the hover chain, and (on a change) schedules an `Input` frame — so
+//!   hovering a bar visibly swaps to its lighter `:hover` background.
+//! - `MouseInput` (left press) builds a
+//!   [`Down`](obscur_kit::interaction::pointer::PointerEventKind::Down) event —
+//!   assembled directly with [`PointerConverter::kind`] mapping the winit state,
+//!   since the converter has no public builder for a button transition *at a
+//!   position* — and dispatches it to drive focus.
+//!
+//! The counter *value* is still changed geometrically (the node→"which button"
+//! mapping needs component instances this example does not carry), so a left
+//! press on the lower `.decrement`/`.increment` region also nudges `count`; the
+//! hover/focus **visuals** are what the real input path now drives.
 //!
 //! # Text
 //!
@@ -58,21 +86,22 @@
 
 use std::sync::Arc;
 
-use obscur_kit::bootstrap::KitBootstrap;
 use obscur_kit::css::compiler::StylesheetCompiler;
 use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
-use obscur_kit::geometry::Size;
-use obscur_kit::headless::HeadlessHost;
-use obscur_kit::headless::host::HeadlessConfig;
+use obscur_kit::geometry::{Point, Size};
 use obscur_kit::identity::{InternedSymbol, RuntimeId};
+use obscur_kit::interaction::pointer::{PointerDevice, PointerEvent, PointerId};
 use obscur_kit::primitives::{Container, Text};
 use obscur_kit::render::frame::{FrameSubmission, RenderFrame};
 use obscur_kit::render::renderer::RendererId;
 use obscur_kit::render_vello::renderer::{VelloDevice, VelloRenderer, VelloSurface};
+use obscur_kit::runtime::UiRuntime;
+use obscur_kit::runtime::frame::FrameReason;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewNode, ViewProperty, ViewValue};
 use obscur_kit::widgets::button::Button;
+use obscur_kit::window_winit::conversion::PointerConverter;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, MouseButton, WindowEvent};
@@ -84,7 +113,8 @@ const CMD_DECREMENT: InternedSymbol = InternedSymbol::from_raw(0x1001);
 const CMD_INCREMENT: InternedSymbol = InternedSymbol::from_raw(0x1002);
 
 /// The winit application: it owns the window, the GPU-backed renderer, the
-/// swapchain surface, the deterministic frame driver, and the counter UI state.
+/// swapchain surface, the embeddable [`UiRuntime`] frame driver, and the counter
+/// UI state.
 struct WindowedCounter {
     /// The live winit window (an [`Arc`] so wgpu can build a `Surface<'static>`
     /// from it), created lazily in [`ApplicationHandler::resumed`].
@@ -96,8 +126,10 @@ struct WindowedCounter {
     device: Option<wgpu::Device>,
     /// The Vello/wgpu renderer, attached once the GPU device is created.
     renderer: Option<VelloRenderer>,
-    /// The deterministic host that runs the real pipeline each frame.
-    host: HeadlessHost,
+    /// The embeddable runtime that owns the retained tree, scene, scheduler, and
+    /// live interaction (hover/focus) state, and runs the real pipeline when a
+    /// frame is due. Pointer input is dispatched into it via `handle_pointer`.
+    runtime: UiRuntime,
     /// The compiled stylesheet matched against the tree each frame so the
     /// `.counter` container paints a real fill.
     style_sheet: Stylesheet,
@@ -113,16 +145,18 @@ struct WindowedCounter {
 }
 
 impl WindowedCounter {
-    /// Builds the application with a booted [`HeadlessHost`] and the two-button
+    /// Builds the application with a fresh [`UiRuntime`] and the two-button
     /// counter UI, but no window, surface, or GPU device yet (those are created
-    /// on `resumed`).
+    /// on `resumed`). The runtime starts at a placeholder viewport matching the
+    /// initial window size; [`sync_viewport`](Self::sync_viewport) sets the real
+    /// physical extent once the surface exists.
     fn new() -> Self {
         Self {
             window: None,
             surface: None,
             device: None,
             renderer: None,
-            host: KitBootstrap::new().with_runtime_id(1).headless_host(),
+            runtime: UiRuntime::new(RuntimeId::from_raw(1), Size::new(480.0, 240.0)),
             style_sheet: counter_stylesheet(),
             decrement: Button::new("-", CMD_DECREMENT),
             increment: Button::new("+", CMD_INCREMENT),
@@ -155,46 +189,73 @@ impl WindowedCounter {
         } else {
             return; // Click landed on the label bar: nothing to do.
         }
+        // The counter value changed: commit a fresh frame through the runtime so
+        // the new label is reconciled, styled, laid out, and painted on the next
+        // redraw. (A press that doesn't move focus schedules no frame on its own,
+        // so this explicit request is what carries the new value to paint.)
+        self.runtime.request_frame(FrameReason::UiCommit);
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
     }
 
-    /// Rebuilds the frame driver so its layout viewport matches the swapchain's
-    /// physical extent. The scene is rasterized 1:1 into the surface, so laying
-    /// out under a different (default 800x600) viewport would leave the content
-    /// in a corner. Called after the surface is created and on every resize.
-    fn sync_host_viewport(&mut self) {
+    /// Assembles a domain button [`PointerEvent`] at the tracked cursor.
+    ///
+    /// [`PointerConverter`] only exposes public builders for `Move`/`Enter`/
+    /// `Leave` (a button transition *at a position* is the backend's job), so the
+    /// button event is constructed directly — reusing [`PointerConverter::kind`]
+    /// to map the winit [`ElementState`] to the domain event kind. The
+    /// `CursorMoved` path below uses the converter's `moved` builder end-to-end.
+    #[allow(clippy::cast_possible_truncation)]
+    fn pointer_button_event(&self, state: ElementState) -> PointerEvent {
+        PointerEvent::new(
+            PointerId::MOUSE,
+            PointerDevice::Mouse,
+            PointerConverter::kind(state),
+            Point::new(self.cursor.0 as f32, self.cursor.1 as f32),
+        )
+    }
+
+    /// Points the runtime's layout viewport at the swapchain's physical extent.
+    /// The scene is rasterized 1:1 into the surface, so laying out under a
+    /// different viewport would leave the content in a corner. Called after the
+    /// surface is created and on every resize. Unlike the old host, the runtime
+    /// carries retained state, so this just updates the viewport in place (no
+    /// rebuild); the caller requests a frame to actually re-lay-out.
+    fn sync_viewport(&mut self) {
         if let Some(surface) = self.surface.as_ref() {
             let config = surface.config();
             let viewport = Size::new(config.width as f32, config.height as f32);
-            self.host = HeadlessHost::with_config(
-                RuntimeId::from_raw(1),
-                HeadlessConfig::with_viewport(viewport),
-            );
+            self.runtime.set_viewport(viewport);
         }
     }
 
-    /// Renders one frame: advance UI state, build the view, drive the pipeline,
-    /// package the scene, and present it on-screen via the Vello surface path.
+    /// Renders one frame: rebuild the view, run a scheduler-gated frame through
+    /// the runtime, read the committed scene, package it, and present it
+    /// on-screen via the Vello surface path.
     fn render_frame(&mut self) {
-        // Nothing to draw until the surface and renderer exist.
+        // --- Stage 1: rebuild the counter view from the current state. --------
+        // `run_due_frame` needs a `&View`; the state (`count`, button state)
+        // changes on user input, so rebuild it each redraw. Building it first
+        // ends the `&self.decrement`/`&self.increment` borrows before the runtime
+        // is mutated below.
+        let view = build_counter_view(self.count, &self.decrement, &self.increment);
+        let sheets = std::slice::from_ref(&self.style_sheet);
+
+        // --- Stage 2: run a frame only if one is due (§3.5). ------------------
+        // First paint, input (hover/focus), resize, and counter changes each
+        // `request_frame` a reason; `run_due_frame` produces at most one frame
+        // per redraw and returns `None` when nothing is pending. We still present
+        // the (unchanged) snapshot on a `None` so a bare `RedrawRequested` — e.g.
+        // an OS expose — repaints the last committed scene rather than a blank.
+        let produced = self.runtime.run_due_frame(&view, sheets);
+        let snapshot = self.runtime.snapshot();
+
+        // Nothing to present until the surface and renderer exist.
         let (Some(surface), Some(renderer)) = (self.surface.as_ref(), self.renderer.as_mut())
         else {
             return;
         };
-
-        // --- Stage 1: build the counter view from the components tier. --------
-        // UI state changes on user input (see `handle_click`), not per frame.
-        let view = build_counter_view(self.count, &self.decrement, &self.increment);
-
-        // --- Stage 3: drive the real pipeline and read the committed scene. ---
-        // `render_styled` matches the stylesheet against the reconciled tree, so
-        // the `.counter` rule paints the container.
-        let frame = self
-            .host
-            .render_styled(&view, std::slice::from_ref(&self.style_sheet));
-        let snapshot = self.host.snapshot();
 
         // --- Stage 4: package the snapshot into a submission for the port. ----
         // The physical viewport is the surface's configured swapchain extent.
@@ -209,12 +270,18 @@ impl WindowedCounter {
 
         // --- Stage 5: present on-screen (offscreen render + blit-to-surface). -
         match renderer.present_to_surface(&submission, surface) {
-            Ok(result) => println!(
-                "frame {}: pipeline id={} composed={} | vello -> {result:?} (presented)",
-                renderer.frames_rendered(),
-                frame.id().raw(),
-                frame.composed(),
-            ),
+            Ok(result) => {
+                // `produced` distinguishes a freshly run frame from a re-present
+                // of the last committed scene (scheduler had nothing due).
+                let frame_note = produced.as_ref().map_or_else(
+                    || "re-present (no new frame)".to_owned(),
+                    |f| format!("frame id={} composed={}", f.id().raw(), f.composed()),
+                );
+                println!(
+                    "present {}: {frame_note} | vello -> {result:?} (presented)",
+                    renderer.frames_rendered(),
+                );
+            }
             Err(error) => {
                 eprintln!("present failed: {error:?}");
                 // A lost/outdated swapchain is recoverable: reconfigure and skip
@@ -278,9 +345,11 @@ impl ApplicationHandler for WindowedCounter {
                         self.renderer = Some(renderer);
                         self.window = Some(window);
                         // Lay out at the surface's physical extent, not the
-                        // default viewport, so the scene fills the window.
-                        self.sync_host_viewport();
-                        // Kick off the first frame.
+                        // placeholder viewport, so the scene fills the window.
+                        self.sync_viewport();
+                        // Schedule the first frame so the initial `run_due_frame`
+                        // has something due, then ask winit to redraw.
+                        self.runtime.request_frame(FrameReason::UiCommit);
                         if let Some(window) = self.window.as_ref() {
                             window.request_redraw();
                         }
@@ -315,18 +384,34 @@ impl ApplicationHandler for WindowedCounter {
                     surface.resize(device, new_size.width, new_size.height);
                 }
                 // Keep the layout viewport in step with the new extent (the
-                // surface/device borrows above have ended).
-                self.sync_host_viewport();
+                // surface/device borrows above have ended) and schedule a frame
+                // so the next redraw re-lays-out under it.
+                self.sync_viewport();
+                self.runtime.request_frame(FrameReason::WindowChange);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
+                // Track the raw position for the geometric click regions, then
+                // feed the *real* domain path: winit → `PointerConverter::moved`
+                // → `handle_pointer` → hit-test → hover → `:hover` restyle. A
+                // hover change schedules an `Input` frame inside the runtime; we
+                // still ask winit to redraw so that frame is actually drained.
                 self.cursor = (position.x, position.y);
+                let moved = PointerConverter::new().moved(PointerId::MOUSE, position);
+                self.runtime.handle_pointer(moved);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
             WindowEvent::MouseInput { state, button, .. }
                 if state == ElementState::Pressed && button == MouseButton::Left =>
             {
+                // Dispatch a domain `Down` at the cursor to drive focus through
+                // the runtime, then keep the geometric counter update.
+                let down = self.pointer_button_event(state);
+                self.runtime.handle_pointer(down);
                 self.handle_click();
             }
             WindowEvent::RedrawRequested => self.render_frame(),
@@ -419,12 +504,17 @@ fn load_system_font() -> Option<Vec<u8>> {
 /// background for white glyphs to read: `.label` is a dark slate, and the red
 /// `.decrement` / green `.increment` buttons already carry white text well.
 fn counter_stylesheet() -> Stylesheet {
+    // The `:hover` rules are what prove the domain input path drives styling:
+    // they only take effect because `handle_pointer` records HOVER on the
+    // hovered node's pseudo-state, which the runtime's matcher then honours.
     let css = "\
-.counter   { background-color: #1e2636; width: 100%; height: 100%; }\n\
-.bar       { width: 100%; }\n\
-.label     { background-color: #2b3348; height: 50%; }\n\
-.decrement { background-color: #d9534f; height: 25%; }\n\
-.increment { background-color: #5cb85c; height: 25%; }\n\
+.counter         { background-color: #1e2636; width: 100%; height: 100%; }\n\
+.bar             { width: 100%; }\n\
+.label           { background-color: #2b3348; height: 50%; }\n\
+.decrement       { background-color: #d9534f; height: 25%; }\n\
+.increment       { background-color: #5cb85c; height: 25%; }\n\
+.decrement:hover { background-color: #ef7b77; }\n\
+.increment:hover { background-color: #7fd39b; }\n\
 ";
     let parsed = StylesheetParser::new(&CssSource::anonymous(css)).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
