@@ -7,5 +7,17 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[lib]
+name = "obscur_okui_lsp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "obscur-okui-lsp"
+path = "src/main.rs"
+
+[dependencies]
+obscur-okui-syntax.workspace = true
+obscur-okui-compiler.workspace = true
+
 [lints]
 workspace = true
