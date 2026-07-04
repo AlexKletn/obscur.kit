@@ -158,12 +158,7 @@ mod tests {
         let attributes = FontAttributes::new().with_weight(FontWeight::BOLD);
         let source = FontSource::system("Inter-Bold");
         let metrics = FontMetrics::new(1000, 800.0, -200.0, 0.0);
-        let face = FontFace::new(
-            family.clone(),
-            attributes,
-            source.clone(),
-            metrics,
-        );
+        let face = FontFace::new(family.clone(), attributes, source.clone(), metrics);
         assert_eq!(face.family(), &family);
         assert_eq!(face.attributes(), &attributes);
         assert_eq!(face.source(), &source);

@@ -48,10 +48,7 @@ impl DisplayConverter {
         }
 
         let position = monitor.position();
-        let bounds = Rect::new(
-            Point::new(position.x as f32, position.y as f32),
-            resolution,
-        );
+        let bounds = Rect::new(Point::new(position.x as f32, position.y as f32), resolution);
 
         let mut display = Display::new(id, mode)
             .with_scale_factor(ScaleFactor::new(monitor.scale_factor() as f32))

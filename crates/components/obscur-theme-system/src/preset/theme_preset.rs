@@ -136,9 +136,18 @@ impl ThemePreset {
     #[must_use]
     pub fn light() -> Self {
         Self::new("Light", ThemeMode::Light)
-            .with(ThemeToken::color("color.background", Color::rgb(0.98, 0.98, 0.98)))
-            .with(ThemeToken::color("color.foreground", Color::rgb(0.1, 0.1, 0.1)))
-            .with(ThemeToken::color("color.primary", Color::rgb(0.2, 0.45, 0.9)))
+            .with(ThemeToken::color(
+                "color.background",
+                Color::rgb(0.98, 0.98, 0.98),
+            ))
+            .with(ThemeToken::color(
+                "color.foreground",
+                Color::rgb(0.1, 0.1, 0.1),
+            ))
+            .with(ThemeToken::color(
+                "color.primary",
+                Color::rgb(0.2, 0.45, 0.9),
+            ))
             .with(ThemeToken::length("space.sm", 4.0))
             .with(ThemeToken::length("space.md", 8.0))
             .with(ThemeToken::length("space.lg", 16.0))
@@ -150,9 +159,18 @@ impl ThemePreset {
     #[must_use]
     pub fn dark() -> Self {
         Self::new("Dark", ThemeMode::Dark)
-            .with(ThemeToken::color("color.background", Color::rgb(0.11, 0.11, 0.12)))
-            .with(ThemeToken::color("color.foreground", Color::rgb(0.92, 0.92, 0.92)))
-            .with(ThemeToken::color("color.primary", Color::rgb(0.4, 0.65, 1.0)))
+            .with(ThemeToken::color(
+                "color.background",
+                Color::rgb(0.11, 0.11, 0.12),
+            ))
+            .with(ThemeToken::color(
+                "color.foreground",
+                Color::rgb(0.92, 0.92, 0.92),
+            ))
+            .with(ThemeToken::color(
+                "color.primary",
+                Color::rgb(0.4, 0.65, 1.0),
+            ))
             .with(ThemeToken::length("space.sm", 4.0))
             .with(ThemeToken::length("space.md", 8.0))
             .with(ThemeToken::length("space.lg", 16.0))
@@ -166,7 +184,10 @@ impl ThemePreset {
         Self::new("High Contrast", ThemeMode::HighContrast)
             .with(ThemeToken::color("color.background", Color::BLACK))
             .with(ThemeToken::color("color.foreground", Color::WHITE))
-            .with(ThemeToken::color("color.primary", Color::rgb(1.0, 0.85, 0.0)))
+            .with(ThemeToken::color(
+                "color.primary",
+                Color::rgb(1.0, 0.85, 0.0),
+            ))
             .with(ThemeToken::length("space.sm", 4.0))
             .with(ThemeToken::length("space.md", 8.0))
             .with(ThemeToken::length("space.lg", 16.0))
@@ -191,7 +212,10 @@ mod tests {
         let mut preset = ThemePreset::new("Custom", ThemeMode::Light);
         assert!(preset.is_empty());
 
-        preset.insert(ThemeToken::color("color.primary", Color::rgb(0.2, 0.4, 0.8)));
+        preset.insert(ThemeToken::color(
+            "color.primary",
+            Color::rgb(0.2, 0.4, 0.8),
+        ));
         preset.insert(ThemeToken::length("space.md", 8.0));
 
         assert!(!preset.is_empty());
@@ -199,12 +223,18 @@ mod tests {
         assert!(preset.contains("color.primary"));
         assert!(!preset.contains("color.missing"));
 
-        assert_eq!(preset.color("color.primary"), Some(Color::rgb(0.2, 0.4, 0.8)));
+        assert_eq!(
+            preset.color("color.primary"),
+            Some(Color::rgb(0.2, 0.4, 0.8))
+        );
         assert_eq!(preset.length("space.md"), Some(8.0));
         // Typed resolve rejects a mismatched kind.
         assert_eq!(preset.color("space.md"), None);
         assert_eq!(preset.length("color.primary"), None);
-        assert_eq!(preset.get("color.primary"), Some(&TokenValue::Color(Color::rgb(0.2, 0.4, 0.8))));
+        assert_eq!(
+            preset.get("color.primary"),
+            Some(&TokenValue::Color(Color::rgb(0.2, 0.4, 0.8)))
+        );
         assert_eq!(preset.get("absent"), None);
     }
 
@@ -230,7 +260,11 @@ mod tests {
 
     #[test]
     fn builtin_presets_expose_core_tokens() {
-        for preset in [ThemePreset::light(), ThemePreset::dark(), ThemePreset::high_contrast()] {
+        for preset in [
+            ThemePreset::light(),
+            ThemePreset::dark(),
+            ThemePreset::high_contrast(),
+        ] {
             assert!(preset.color("color.background").is_some());
             assert!(preset.color("color.foreground").is_some());
             assert_eq!(preset.length("space.md"), Some(8.0));

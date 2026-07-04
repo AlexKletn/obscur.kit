@@ -238,7 +238,8 @@ mod tests {
             .with_display(LayoutDisplay::Flex)
             .with_width(Dimension::Px(300.0))
             .with_height(Dimension::Px(50.0));
-        view.insert_container(root, &container_style, &[a, b]).unwrap();
+        view.insert_container(root, &container_style, &[a, b])
+            .unwrap();
 
         view.compute(root, Size::new(300.0, 50.0)).unwrap();
 

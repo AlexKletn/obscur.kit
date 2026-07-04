@@ -112,11 +112,11 @@ mod tests {
         let target = ShellTarget::uri("https://example.com");
         assert!(provider.can_open(&target));
         assert_eq!(provider.open(target.clone()), ShellResult::Opened);
-        assert_eq!(provider.open(ShellTarget::document("doc")), ShellResult::Opened);
-
         assert_eq!(
-            provider.opened(),
-            &[target, ShellTarget::document("doc")]
+            provider.open(ShellTarget::document("doc")),
+            ShellResult::Opened
         );
+
+        assert_eq!(provider.opened(), &[target, ShellTarget::document("doc")]);
     }
 }

@@ -153,7 +153,10 @@ mod tests {
             DocumentPermission::read_only(),
         )
         .with_path_hint("/home/user/file.txt");
-        assert_eq!(target_arg(&ShellTarget::file(hinted)), "/home/user/file.txt");
+        assert_eq!(
+            target_arg(&ShellTarget::file(hinted)),
+            "/home/user/file.txt"
+        );
 
         let no_hint = DocumentHandle::new(
             "tok-only",

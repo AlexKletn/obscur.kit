@@ -124,7 +124,12 @@ impl UndoUnit {
     #[must_use]
     pub fn invert(&self) -> UndoUnit {
         UndoUnit {
-            edits: self.edits.iter().rev().map(EditTransaction::invert).collect(),
+            edits: self
+                .edits
+                .iter()
+                .rev()
+                .map(EditTransaction::invert)
+                .collect(),
             kind: self.kind,
         }
     }
@@ -197,8 +202,12 @@ mod tests {
         // Atomic kinds never coalesce, even with themselves.
         let c = UndoUnit::single(edit(0, "", "x"), UndoKind::Composition);
         assert!(!c.can_coalesce_with(UndoKind::Composition));
-        assert!(!UndoUnit::single(edit(0, "", "x"), UndoKind::Paste).can_coalesce_with(UndoKind::Paste));
-        assert!(!UndoUnit::single(edit(0, "", "x"), UndoKind::Other).can_coalesce_with(UndoKind::Other));
+        assert!(
+            !UndoUnit::single(edit(0, "", "x"), UndoKind::Paste).can_coalesce_with(UndoKind::Paste)
+        );
+        assert!(
+            !UndoUnit::single(edit(0, "", "x"), UndoKind::Other).can_coalesce_with(UndoKind::Other)
+        );
     }
 
     #[test]

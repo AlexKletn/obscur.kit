@@ -73,7 +73,10 @@ mod tests {
 
     #[test]
     fn structural_and_content_causes_map_to_their_kinds() {
-        assert_eq!(InvalidationReason::TreeChanged.kind(), InvalidationKind::Tree);
+        assert_eq!(
+            InvalidationReason::TreeChanged.kind(),
+            InvalidationKind::Tree
+        );
         assert_eq!(
             InvalidationReason::ContentChanged.kind(),
             InvalidationKind::Text

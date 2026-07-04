@@ -91,7 +91,13 @@ mod tests {
         source_order: u32,
     ) -> Declaration {
         Declaration::new(
-            property, value, important, origin, specificity, source_order, None,
+            property,
+            value,
+            important,
+            origin,
+            specificity,
+            source_order,
+            None,
         )
     }
 
@@ -116,7 +122,10 @@ mod tests {
             0,
         )];
         let resolved = Cascade::new().resolve(&decls);
-        assert_eq!(resolved.get(PropertyId::Color), Some(&PropertyValue::Number(1.0)));
+        assert_eq!(
+            resolved.get(PropertyId::Color),
+            Some(&PropertyValue::Number(1.0))
+        );
     }
 
     #[test]
@@ -150,8 +159,14 @@ mod tests {
             ),
         ];
         let resolved = Cascade::new().resolve(&decls);
-        assert_eq!(resolved.get(PropertyId::Color), Some(&PropertyValue::Number(2.0)));
-        assert_eq!(resolved.get(PropertyId::Width), Some(&PropertyValue::Number(3.0)));
+        assert_eq!(
+            resolved.get(PropertyId::Color),
+            Some(&PropertyValue::Number(2.0))
+        );
+        assert_eq!(
+            resolved.get(PropertyId::Width),
+            Some(&PropertyValue::Number(3.0))
+        );
         assert_eq!(resolved.len(), 2);
     }
 
@@ -176,7 +191,10 @@ mod tests {
             ),
         ];
         let resolved = Cascade::new().resolve(&decls);
-        assert_eq!(resolved.get(PropertyId::Color), Some(&PropertyValue::Number(2.0)));
+        assert_eq!(
+            resolved.get(PropertyId::Color),
+            Some(&PropertyValue::Number(2.0))
+        );
     }
 
     #[test]
@@ -202,7 +220,10 @@ mod tests {
             ),
         ];
         let resolved = Cascade::new().resolve(&decls);
-        assert_eq!(resolved.get(PropertyId::Color), Some(&PropertyValue::Number(2.0)));
+        assert_eq!(
+            resolved.get(PropertyId::Color),
+            Some(&PropertyValue::Number(2.0))
+        );
     }
 
     #[test]
@@ -226,6 +247,9 @@ mod tests {
             ),
         ];
         let resolved = Cascade::new().resolve(&decls);
-        assert_eq!(resolved.get(PropertyId::Color), Some(&PropertyValue::Number(2.0)));
+        assert_eq!(
+            resolved.get(PropertyId::Color),
+            Some(&PropertyValue::Number(2.0))
+        );
     }
 }

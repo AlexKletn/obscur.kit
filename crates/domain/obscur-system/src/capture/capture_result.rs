@@ -108,10 +108,7 @@ mod tests {
     #[test]
     fn image_only_for_captured() {
         let image = CapturedImage::new(Size::new(1.0, 1.0), "rgba8");
-        assert_eq!(
-            CaptureResult::Captured(image.clone()).image(),
-            Some(&image)
-        );
+        assert_eq!(CaptureResult::Captured(image.clone()).image(), Some(&image));
         assert_eq!(CaptureResult::Denied.image(), None);
         assert_eq!(CaptureResult::Failed(Box::from("x")).image(), None);
     }

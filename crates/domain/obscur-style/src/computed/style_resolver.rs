@@ -240,14 +240,19 @@ mod tests {
     fn inherit_takes_parent_computed_value() {
         let resolver = StyleResolver::new();
         let mut parent = ComputedStyle::new();
-        parent.set(PropertyId::Color, ComputedValue::color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
+        parent.set(
+            PropertyId::Color,
+            ComputedValue::color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
+        );
 
         let mut cascaded = ResolvedDeclarations::new();
         cascaded.insert(PropertyId::Color, PropertyValue::Inherit);
 
         let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent));
         assert_eq!(
-            computed.get(PropertyId::Color).and_then(ComputedValue::as_color),
+            computed
+                .get(PropertyId::Color)
+                .and_then(ComputedValue::as_color),
             Some(StyleColor::rgba(1.0, 0.0, 0.0, 1.0))
         );
     }
@@ -260,7 +265,9 @@ mod tests {
 
         let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
         assert_eq!(
-            computed.get(PropertyId::Color).and_then(ComputedValue::as_color),
+            computed
+                .get(PropertyId::Color)
+                .and_then(ComputedValue::as_color),
             Some(StyleColor::BLACK)
         );
     }
@@ -269,7 +276,10 @@ mod tests {
     fn unset_on_inherited_property_inherits() {
         let resolver = StyleResolver::new();
         let mut parent = ComputedStyle::new();
-        parent.set(PropertyId::Color, ComputedValue::color(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
+        parent.set(
+            PropertyId::Color,
+            ComputedValue::color(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)),
+        );
 
         // `color` inherits by default, so `unset` inherits the parent's value.
         let mut cascaded = ResolvedDeclarations::new();
@@ -277,7 +287,9 @@ mod tests {
 
         let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent));
         assert_eq!(
-            computed.get(PropertyId::Color).and_then(ComputedValue::as_color),
+            computed
+                .get(PropertyId::Color)
+                .and_then(ComputedValue::as_color),
             Some(StyleColor::rgba(0.0, 1.0, 0.0, 1.0))
         );
     }
@@ -350,7 +362,9 @@ mod tests {
 
         let computed = resolver.resolve(&cascaded, &custom, None);
         assert_eq!(
-            computed.get(PropertyId::Color).and_then(ComputedValue::as_color),
+            computed
+                .get(PropertyId::Color)
+                .and_then(ComputedValue::as_color),
             Some(StyleColor::BLACK)
         );
     }
@@ -359,7 +373,10 @@ mod tests {
     fn default_inheritance_of_unspecified_property() {
         let resolver = StyleResolver::new();
         let mut parent = ComputedStyle::new();
-        parent.set(PropertyId::Color, ComputedValue::color(StyleColor::rgba(0.1, 0.2, 0.3, 1.0)));
+        parent.set(
+            PropertyId::Color,
+            ComputedValue::color(StyleColor::rgba(0.1, 0.2, 0.3, 1.0)),
+        );
         parent.set(PropertyId::Opacity, ComputedValue::number(0.4));
 
         // Nothing cascaded on the child.
@@ -368,7 +385,9 @@ mod tests {
 
         // `color` inherits by default -> parent's value.
         assert_eq!(
-            computed.get(PropertyId::Color).and_then(ComputedValue::as_color),
+            computed
+                .get(PropertyId::Color)
+                .and_then(ComputedValue::as_color),
             Some(StyleColor::rgba(0.1, 0.2, 0.3, 1.0))
         );
         // `opacity` does not inherit -> its initial value (1.0), not parent's 0.4.
@@ -388,8 +407,14 @@ mod tests {
         custom.insert(a, PropertyValue::Number(9.0));
 
         let computed = resolver.resolve(&ResolvedDeclarations::new(), &custom, Some(&parent));
-        assert_eq!(computed.custom_property(a), Some(&PropertyValue::Number(9.0)));
-        assert_eq!(computed.custom_property(b), Some(&PropertyValue::Number(2.0)));
+        assert_eq!(
+            computed.custom_property(a),
+            Some(&PropertyValue::Number(9.0))
+        );
+        assert_eq!(
+            computed.custom_property(b),
+            Some(&PropertyValue::Number(2.0))
+        );
     }
 
     #[test]

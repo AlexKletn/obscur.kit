@@ -145,7 +145,10 @@ fn matches_attribute<E: MatchElement>(attr: &AttributeSelector, element: &E) -> 
         None => true,
         Some(AttrMatch::Exact(operand)) => value == &**operand,
         Some(AttrMatch::Includes(operand)) => {
-            !operand.is_empty() && value.split_ascii_whitespace().any(|token| token == &**operand)
+            !operand.is_empty()
+                && value
+                    .split_ascii_whitespace()
+                    .any(|token| token == &**operand)
         }
         Some(AttrMatch::DashMatch(operand)) => {
             value == &**operand
@@ -189,7 +192,9 @@ fn matches_pseudo_class<E: MatchElement>(pseudo: &PseudoClassSelector, element: 
             let from_back = element.sibling_count() - element.index_among_siblings();
             anb.matches_index(one_based(from_back))
         }
-        PseudoClassSelector::NthOfType(anb) => anb.matches_index(one_based(element.nth_of_type_index())),
+        PseudoClassSelector::NthOfType(anb) => {
+            anb.matches_index(one_based(element.nth_of_type_index()))
+        }
         PseudoClassSelector::NthLastOfType(anb) => {
             anb.matches_index(one_based(element.nth_last_of_type_index()))
         }
@@ -307,7 +312,8 @@ mod tests {
         fn previous_sibling_element(&self) -> Option<Self> {
             let siblings = self.siblings();
             let pos = siblings.iter().position(|&i| i == self.idx)?;
-            pos.checked_sub(1).map(|prev| self.arena.get(siblings[prev]))
+            pos.checked_sub(1)
+                .map(|prev| self.arena.get(siblings[prev]))
         }
 
         fn index_among_siblings(&self) -> usize {
@@ -388,8 +394,14 @@ mod tests {
         let mut arena = Arena::default();
         let root = arena.add(Node::new("DIV"), None);
         let el = arena.get(root);
-        assert!(SelectorMatcher::matches_compound(&compound(vec![type_sel("div")]), &el));
-        assert!(!SelectorMatcher::matches_compound(&compound(vec![type_sel("span")]), &el));
+        assert!(SelectorMatcher::matches_compound(
+            &compound(vec![type_sel("div")]),
+            &el
+        ));
+        assert!(!SelectorMatcher::matches_compound(
+            &compound(vec![type_sel("span")]),
+            &el
+        ));
     }
 
     #[test]
@@ -411,10 +423,22 @@ mod tests {
         node.classes = vec!["foo".to_owned()];
         let root = arena.add(node, None);
         let el = arena.get(root);
-        assert!(SelectorMatcher::matches_compound(&compound(vec![class_sel("foo")]), &el));
-        assert!(!SelectorMatcher::matches_compound(&compound(vec![class_sel("nope")]), &el));
-        assert!(SelectorMatcher::matches_compound(&compound(vec![id_sel("bar")]), &el));
-        assert!(!SelectorMatcher::matches_compound(&compound(vec![id_sel("baz")]), &el));
+        assert!(SelectorMatcher::matches_compound(
+            &compound(vec![class_sel("foo")]),
+            &el
+        ));
+        assert!(!SelectorMatcher::matches_compound(
+            &compound(vec![class_sel("nope")]),
+            &el
+        ));
+        assert!(SelectorMatcher::matches_compound(
+            &compound(vec![id_sel("bar")]),
+            &el
+        ));
+        assert!(!SelectorMatcher::matches_compound(
+            &compound(vec![id_sel("baz")]),
+            &el
+        ));
     }
 
     #[test]
@@ -454,8 +478,14 @@ mod tests {
     fn attribute_presence() {
         let arena = node_with_attr("data-x", "y");
         let el = arena.get(0);
-        assert!(SelectorMatcher::matches_compound(&compound(vec![attr("data-x", None)]), &el));
-        assert!(!SelectorMatcher::matches_compound(&compound(vec![attr("data-z", None)]), &el));
+        assert!(SelectorMatcher::matches_compound(
+            &compound(vec![attr("data-x", None)]),
+            &el
+        ));
+        assert!(!SelectorMatcher::matches_compound(
+            &compound(vec![attr("data-z", None)]),
+            &el
+        ));
     }
 
     #[test]
@@ -477,11 +507,17 @@ mod tests {
         let arena = node_with_attr("class-like", "a b c");
         let el = arena.get(0);
         assert!(SelectorMatcher::matches_compound(
-            &compound(vec![attr("class-like", Some(AttrMatch::Includes("b".into())))]),
+            &compound(vec![attr(
+                "class-like",
+                Some(AttrMatch::Includes("b".into()))
+            )]),
             &el
         ));
         assert!(!SelectorMatcher::matches_compound(
-            &compound(vec![attr("class-like", Some(AttrMatch::Includes("d".into())))]),
+            &compound(vec![attr(
+                "class-like",
+                Some(AttrMatch::Includes("d".into()))
+            )]),
             &el
         ));
         // A substring that is not a whole whitespace-separated token misses.
@@ -522,7 +558,10 @@ mod tests {
         let arena = node_with_attr("href", "https://example.com/page");
         let el = arena.get(0);
         assert!(SelectorMatcher::matches_compound(
-            &compound(vec![attr("href", Some(AttrMatch::Prefix("https://".into())))]),
+            &compound(vec![attr(
+                "href",
+                Some(AttrMatch::Prefix("https://".into()))
+            )]),
             &el
         ));
         assert!(SelectorMatcher::matches_compound(
@@ -530,7 +569,10 @@ mod tests {
             &el
         ));
         assert!(SelectorMatcher::matches_compound(
-            &compound(vec![attr("href", Some(AttrMatch::Substring("example".into())))]),
+            &compound(vec![attr(
+                "href",
+                Some(AttrMatch::Substring("example".into()))
+            )]),
             &el
         ));
         assert!(!SelectorMatcher::matches_compound(
@@ -544,11 +586,17 @@ mod tests {
         let arena = node_with_attr("x", "value");
         let el = arena.get(0);
         assert!(!SelectorMatcher::matches_compound(
-            &compound(vec![attr("x", Some(AttrMatch::Prefix(String::new().into())))]),
+            &compound(vec![attr(
+                "x",
+                Some(AttrMatch::Prefix(String::new().into()))
+            )]),
             &el
         ));
         assert!(!SelectorMatcher::matches_compound(
-            &compound(vec![attr("x", Some(AttrMatch::Includes(String::new().into())))]),
+            &compound(vec![attr(
+                "x",
+                Some(AttrMatch::Includes(String::new().into()))
+            )]),
             &el
         ));
     }
@@ -645,8 +693,12 @@ mod tests {
         node.state = PseudoState::HOVER;
         let idx = arena.add(node, None);
         let el = arena.get(idx);
-        let hover = compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::Hover)]);
-        let focus = compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::Focus)]);
+        let hover = compound(vec![SimpleSelector::PseudoClass(
+            PseudoClassSelector::Hover,
+        )]);
+        let focus = compound(vec![SimpleSelector::PseudoClass(
+            PseudoClassSelector::Focus,
+        )]);
         assert!(SelectorMatcher::matches_compound(&hover, &el));
         assert!(!SelectorMatcher::matches_compound(&focus, &el));
     }
@@ -658,14 +710,28 @@ mod tests {
         let mut disabled_node = Node::new("input");
         disabled_node.state = PseudoState::DISABLED;
         let disabled = arena.add(disabled_node, None);
-        let enabled_sel =
-            compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::Enabled)]);
-        let disabled_sel =
-            compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::Disabled)]);
-        assert!(SelectorMatcher::matches_compound(&enabled_sel, &arena.get(enabled)));
-        assert!(!SelectorMatcher::matches_compound(&disabled_sel, &arena.get(enabled)));
-        assert!(!SelectorMatcher::matches_compound(&enabled_sel, &arena.get(disabled)));
-        assert!(SelectorMatcher::matches_compound(&disabled_sel, &arena.get(disabled)));
+        let enabled_sel = compound(vec![SimpleSelector::PseudoClass(
+            PseudoClassSelector::Enabled,
+        )]);
+        let disabled_sel = compound(vec![SimpleSelector::PseudoClass(
+            PseudoClassSelector::Disabled,
+        )]);
+        assert!(SelectorMatcher::matches_compound(
+            &enabled_sel,
+            &arena.get(enabled)
+        ));
+        assert!(!SelectorMatcher::matches_compound(
+            &disabled_sel,
+            &arena.get(enabled)
+        ));
+        assert!(!SelectorMatcher::matches_compound(
+            &enabled_sel,
+            &arena.get(disabled)
+        ));
+        assert!(SelectorMatcher::matches_compound(
+            &disabled_sel,
+            &arena.get(disabled)
+        ));
     }
 
     // ---- structural pseudo-classes ----------------------------------------
@@ -673,8 +739,12 @@ mod tests {
     #[test]
     fn first_last_only_child() {
         let (arena, [a, _, c]) = siblings();
-        let first = compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::FirstChild)]);
-        let last = compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::LastChild)]);
+        let first = compound(vec![SimpleSelector::PseudoClass(
+            PseudoClassSelector::FirstChild,
+        )]);
+        let last = compound(vec![SimpleSelector::PseudoClass(
+            PseudoClassSelector::LastChild,
+        )]);
         assert!(SelectorMatcher::matches_compound(&first, &arena.get(a)));
         assert!(!SelectorMatcher::matches_compound(&first, &arena.get(c)));
         assert!(SelectorMatcher::matches_compound(&last, &arena.get(c)));
@@ -684,9 +754,13 @@ mod tests {
         let mut solo_arena = Arena::default();
         let parent = solo_arena.add(Node::new("ul"), None);
         let only = solo_arena.add(Node::new("li"), Some(parent));
-        let only_sel =
-            compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::OnlyChild)]);
-        assert!(SelectorMatcher::matches_compound(&only_sel, &solo_arena.get(only)));
+        let only_sel = compound(vec![SimpleSelector::PseudoClass(
+            PseudoClassSelector::OnlyChild,
+        )]);
+        assert!(SelectorMatcher::matches_compound(
+            &only_sel,
+            &solo_arena.get(only)
+        ));
         assert!(!SelectorMatcher::matches_compound(&only_sel, &arena.get(a)));
     }
 
@@ -696,28 +770,44 @@ mod tests {
         let root = arena.add(Node::new("html"), None);
         let child = arena.add(Node::new("body"), Some(root));
         let root_sel = compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::Root)]);
-        let empty_sel = compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::Empty)]);
-        assert!(SelectorMatcher::matches_compound(&root_sel, &arena.get(root)));
-        assert!(!SelectorMatcher::matches_compound(&root_sel, &arena.get(child)));
+        let empty_sel = compound(vec![SimpleSelector::PseudoClass(
+            PseudoClassSelector::Empty,
+        )]);
+        assert!(SelectorMatcher::matches_compound(
+            &root_sel,
+            &arena.get(root)
+        ));
+        assert!(!SelectorMatcher::matches_compound(
+            &root_sel,
+            &arena.get(child)
+        ));
         // root has a child -> not empty; child has none -> empty.
-        assert!(!SelectorMatcher::matches_compound(&empty_sel, &arena.get(root)));
-        assert!(SelectorMatcher::matches_compound(&empty_sel, &arena.get(child)));
+        assert!(!SelectorMatcher::matches_compound(
+            &empty_sel,
+            &arena.get(root)
+        ));
+        assert!(SelectorMatcher::matches_compound(
+            &empty_sel,
+            &arena.get(child)
+        ));
     }
 
     /// Parent with `n` `li` children; returns arena + child indices.
     fn many_children(n: usize) -> (Arena, Vec<usize>) {
         let mut arena = Arena::default();
         let parent = arena.add(Node::new("ul"), None);
-        let kids = (0..n).map(|_| arena.add(Node::new("li"), Some(parent))).collect();
+        let kids = (0..n)
+            .map(|_| arena.add(Node::new("li"), Some(parent)))
+            .collect();
         (arena, kids)
     }
 
     #[test]
     fn nth_child_odd_via_two_n_plus_one() {
         let (arena, kids) = many_children(5);
-        let odd = compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::NthChild(
-            AnB::new(2, 1),
-        ))]);
+        let odd = compound(vec![SimpleSelector::PseudoClass(
+            PseudoClassSelector::NthChild(AnB::new(2, 1)),
+        )]);
         // 1-based positions 1,3,5 (indices 0,2,4) match.
         for (pos, &kid) in kids.iter().enumerate() {
             let expected = pos % 2 == 0;
@@ -733,9 +823,9 @@ mod tests {
     #[test]
     fn nth_child_constant_selects_one() {
         let (arena, kids) = many_children(5);
-        let third = compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::NthChild(
-            AnB::new(0, 3),
-        ))]);
+        let third = compound(vec![SimpleSelector::PseudoClass(
+            PseudoClassSelector::NthChild(AnB::new(0, 3)),
+        )]);
         for (pos, &kid) in kids.iter().enumerate() {
             assert_eq!(
                 SelectorMatcher::matches_compound(&third, &arena.get(kid)),
@@ -751,8 +841,14 @@ mod tests {
         let last = compound(vec![SimpleSelector::PseudoClass(
             PseudoClassSelector::NthLastChild(AnB::new(0, 1)),
         )]);
-        assert!(SelectorMatcher::matches_compound(&last, &arena.get(kids[3])));
-        assert!(!SelectorMatcher::matches_compound(&last, &arena.get(kids[0])));
+        assert!(SelectorMatcher::matches_compound(
+            &last,
+            &arena.get(kids[3])
+        ));
+        assert!(!SelectorMatcher::matches_compound(
+            &last,
+            &arena.get(kids[0])
+        ));
     }
 
     #[test]
@@ -771,18 +867,24 @@ mod tests {
             SimpleSelector::PseudoClass(PseudoClassSelector::NthOfType(AnB::new(0, 2))),
         ]);
         // 3rd child (index 2) is the 2nd `a`.
-        assert!(SelectorMatcher::matches_compound(&second_a, &arena.get(kids[2])));
+        assert!(SelectorMatcher::matches_compound(
+            &second_a,
+            &arena.get(kids[2])
+        ));
         // 1st child (index 0) is the 1st `a`, not the 2nd.
-        assert!(!SelectorMatcher::matches_compound(&second_a, &arena.get(kids[0])));
+        assert!(!SelectorMatcher::matches_compound(
+            &second_a,
+            &arena.get(kids[0])
+        ));
     }
 
     #[test]
     fn other_pseudo_class_never_matches() {
         let mut arena = Arena::default();
         let idx = arena.add(Node::new("div"), None);
-        let sel = compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::Other(
-            "visited".into(),
-        ))]);
+        let sel = compound(vec![SimpleSelector::PseudoClass(
+            PseudoClassSelector::Other("visited".into()),
+        )]);
         assert!(!SelectorMatcher::matches_compound(&sel, &arena.get(idx)));
     }
 

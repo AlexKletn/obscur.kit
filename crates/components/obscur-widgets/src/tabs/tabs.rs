@@ -167,8 +167,14 @@ impl Tabs {
             })
             .collect();
         let node = ViewNode::element(Self::COMPONENT_ID)
-            .with_prop(ViewProperty::new(Self::PROP_ROLE, ViewValue::from("tablist")))
-            .with_prop(ViewProperty::new(Self::PROP_ACTIVE, ViewValue::Int(active_prop)))
+            .with_prop(ViewProperty::new(
+                Self::PROP_ROLE,
+                ViewValue::from("tablist"),
+            ))
+            .with_prop(ViewProperty::new(
+                Self::PROP_ACTIVE,
+                ViewValue::Int(active_prop),
+            ))
             .with_children(ViewFragment::from_nodes(children));
         View::single(node)
     }

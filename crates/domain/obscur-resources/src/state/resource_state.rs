@@ -139,7 +139,9 @@ mod tests {
         assert_eq!(ResourceState::pending(), ResourceState::Pending);
         assert_eq!(
             ResourceState::loading(Some(0.5)),
-            ResourceState::Loading { progress: Some(0.5) }
+            ResourceState::Loading {
+                progress: Some(0.5)
+            }
         );
         assert!(matches!(ready_state(), ResourceState::Ready { .. }));
         assert!(matches!(failed_state(), ResourceState::Failed { .. }));
@@ -172,7 +174,9 @@ mod tests {
     #[test]
     fn metadata_only_for_ready() {
         assert_eq!(
-            ready_state().metadata().and_then(ResourceMetadata::byte_size),
+            ready_state()
+                .metadata()
+                .and_then(ResourceMetadata::byte_size),
             Some(64)
         );
         assert!(ResourceState::pending().metadata().is_none());

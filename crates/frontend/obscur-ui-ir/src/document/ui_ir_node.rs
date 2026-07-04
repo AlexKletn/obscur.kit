@@ -268,9 +268,8 @@ mod tests {
 
     #[test]
     fn find_hits_and_misses() {
-        let tree = UiIrNode::element(1, "div").with_child(
-            UiIrNode::element(2, "span").with_child(UiIrNode::text(3, "deep")),
-        );
+        let tree = UiIrNode::element(1, "div")
+            .with_child(UiIrNode::element(2, "span").with_child(UiIrNode::text(3, "deep")));
         assert_eq!(tree.find(1).map(UiIrNode::id), Some(1));
         assert_eq!(tree.find(3).map(UiIrNode::id), Some(3));
         assert!(tree.find(99).is_none());
@@ -279,9 +278,11 @@ mod tests {
     #[test]
     fn is_leaf_reports_no_children() {
         assert!(UiIrNode::text(1, "x").is_leaf());
-        assert!(!UiIrNode::element(1, "div")
-            .with_child(UiIrNode::text(2, "y"))
-            .is_leaf());
+        assert!(
+            !UiIrNode::element(1, "div")
+                .with_child(UiIrNode::text(2, "y"))
+                .is_leaf()
+        );
     }
 
     #[test]

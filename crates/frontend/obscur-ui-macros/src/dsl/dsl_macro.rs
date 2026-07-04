@@ -431,32 +431,46 @@ mod tests {
     use quote::quote;
 
     fn expand(input: TokenStream) -> String {
-        DslMacro::expand(input).expect("expansion should succeed").to_string()
+        DslMacro::expand(input)
+            .expect("expansion should succeed")
+            .to_string()
     }
 
     #[test]
     fn self_closing_element_emits_single_element_node() {
         let out = expand(quote! { <div/> });
-        assert!(out.contains(r#"UiIrNode :: element (0u64 , "div")"#), "{out}");
+        assert!(
+            out.contains(r#"UiIrNode :: element (0u64 , "div")"#),
+            "{out}"
+        );
         assert!(out.contains("UiIrDocument :: new"), "{out}");
     }
 
     #[test]
     fn uppercase_tag_is_a_component() {
         let out = expand(quote! { <Button/> });
-        assert!(out.contains(r#"UiIrNode :: component (0u64 , "Button")"#), "{out}");
+        assert!(
+            out.contains(r#"UiIrNode :: component (0u64 , "Button")"#),
+            "{out}"
+        );
     }
 
     #[test]
     fn lowercase_tag_is_an_element() {
         let out = expand(quote! { <container/> });
-        assert!(out.contains(r#"UiIrNode :: element (0u64 , "container")"#), "{out}");
+        assert!(
+            out.contains(r#"UiIrNode :: element (0u64 , "container")"#),
+            "{out}"
+        );
     }
 
     #[test]
     fn string_property_emits_text_property() {
         let out = expand(quote! { <div id="x"/> });
-        assert!(out.contains(r#"UiIrProperty :: text ("id" , "x")"#), "{out}");
+        assert!(
+            out.contains(r#"UiIrProperty :: text ("id" , "x")"#),
+            "{out}"
+        );
     }
 
     #[test]
@@ -492,13 +506,19 @@ mod tests {
     #[test]
     fn binding_property_uses_normalised_dotted_path() {
         let out = expand(quote! { <div title={user.name}/> });
-        assert!(out.contains(r#"UiIrProperty :: binding ("title" , "user.name")"#), "{out}");
+        assert!(
+            out.contains(r#"UiIrProperty :: binding ("title" , "user.name")"#),
+            "{out}"
+        );
     }
 
     #[test]
     fn single_ident_binding_property() {
         let out = expand(quote! { <div value={count}/> });
-        assert!(out.contains(r#"UiIrProperty :: binding ("value" , "count")"#), "{out}");
+        assert!(
+            out.contains(r#"UiIrProperty :: binding ("value" , "count")"#),
+            "{out}"
+        );
     }
 
     #[test]
@@ -510,14 +530,20 @@ mod tests {
     #[test]
     fn text_child_emits_text_node_with_next_id() {
         let out = expand(quote! { <div>"hi"</div> });
-        assert!(out.contains(r#"UiIrNode :: element (0u64 , "div")"#), "{out}");
+        assert!(
+            out.contains(r#"UiIrNode :: element (0u64 , "div")"#),
+            "{out}"
+        );
         assert!(out.contains(r#"UiIrNode :: text (1u64 , "hi")"#), "{out}");
     }
 
     #[test]
     fn interpolation_child_lowers_to_text_binding_path() {
         let out = expand(quote! { <div>{user.name}</div> });
-        assert!(out.contains(r#"UiIrNode :: text (1u64 , "user.name")"#), "{out}");
+        assert!(
+            out.contains(r#"UiIrNode :: text (1u64 , "user.name")"#),
+            "{out}"
+        );
     }
 
     #[test]
@@ -528,10 +554,19 @@ mod tests {
                 <span>"b"</span>
             </div>
         });
-        assert!(out.contains(r#"UiIrNode :: element (0u64 , "div")"#), "{out}");
-        assert!(out.contains(r#"UiIrNode :: element (1u64 , "span")"#), "{out}");
+        assert!(
+            out.contains(r#"UiIrNode :: element (0u64 , "div")"#),
+            "{out}"
+        );
+        assert!(
+            out.contains(r#"UiIrNode :: element (1u64 , "span")"#),
+            "{out}"
+        );
         assert!(out.contains(r#"UiIrNode :: text (2u64 , "a")"#), "{out}");
-        assert!(out.contains(r#"UiIrNode :: element (3u64 , "span")"#), "{out}");
+        assert!(
+            out.contains(r#"UiIrNode :: element (3u64 , "span")"#),
+            "{out}"
+        );
         assert!(out.contains(r#"UiIrNode :: text (4u64 , "b")"#), "{out}");
     }
 
@@ -539,8 +574,14 @@ mod tests {
     fn multiple_roots_are_wrapped_in_a_fragment() {
         let out = expand(quote! { <div/><span/> });
         assert!(out.contains(r"UiIrNode :: fragment (0u64)"), "{out}");
-        assert!(out.contains(r#"UiIrNode :: element (1u64 , "div")"#), "{out}");
-        assert!(out.contains(r#"UiIrNode :: element (2u64 , "span")"#), "{out}");
+        assert!(
+            out.contains(r#"UiIrNode :: element (1u64 , "div")"#),
+            "{out}"
+        );
+        assert!(
+            out.contains(r#"UiIrNode :: element (2u64 , "span")"#),
+            "{out}"
+        );
     }
 
     #[test]
@@ -548,9 +589,18 @@ mod tests {
         let out = expand(quote! {
             <Button label="OK" on:click={on_ok}>"OK"</Button>
         });
-        assert!(out.contains(r#"UiIrNode :: component (0u64 , "Button")"#), "{out}");
-        assert!(out.contains(r#"UiIrProperty :: text ("label" , "OK")"#), "{out}");
-        assert!(out.contains(r#"UiIrEvent :: new ("click" , "on_ok")"#), "{out}");
+        assert!(
+            out.contains(r#"UiIrNode :: component (0u64 , "Button")"#),
+            "{out}"
+        );
+        assert!(
+            out.contains(r#"UiIrProperty :: text ("label" , "OK")"#),
+            "{out}"
+        );
+        assert!(
+            out.contains(r#"UiIrEvent :: new ("click" , "on_ok")"#),
+            "{out}"
+        );
         assert!(out.contains(r#"UiIrNode :: text (1u64 , "OK")"#), "{out}");
     }
 

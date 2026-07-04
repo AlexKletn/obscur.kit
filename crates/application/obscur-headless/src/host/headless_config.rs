@@ -97,9 +97,8 @@ mod tests {
 
     #[test]
     fn with_scale_replaces_scale_only() {
-        let config = HeadlessConfig::with_viewport(Size::new(100.0, 200.0)).with_scale(
-            ScaleFactor::new(3.0),
-        );
+        let config = HeadlessConfig::with_viewport(Size::new(100.0, 200.0))
+            .with_scale(ScaleFactor::new(3.0));
         assert_eq!(config.viewport(), Size::new(100.0, 200.0));
         assert_eq!(config.scale().get(), 3.0);
     }

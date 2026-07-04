@@ -340,8 +340,7 @@ mod tests {
 
     #[test]
     fn preemption_does_not_count_without_pending_background() {
-        let mut scheduler =
-            FrameScheduler::new().with_starvation_guard(StarvationGuard::new(1));
+        let mut scheduler = FrameScheduler::new().with_starvation_guard(StarvationGuard::new(1));
         scheduler.request_reason(FrameReason::Input);
         assert!(scheduler.next_frame().is_some());
         // No background pending, so no preemption was recorded.
@@ -363,7 +362,10 @@ mod tests {
         let mut scheduler = FrameScheduler::new();
         assert_eq!(scheduler.peek(), None);
         scheduler.request_reason(FrameReason::UiCommit);
-        assert_eq!(scheduler.peek(), Some(FrameRequest::new(FrameReason::UiCommit)));
+        assert_eq!(
+            scheduler.peek(),
+            Some(FrameRequest::new(FrameReason::UiCommit))
+        );
         assert_eq!(scheduler.pending_count(), 1);
         assert_eq!(scheduler.backpressure(), &BackpressurePolicy::unbounded());
     }
@@ -374,6 +376,9 @@ mod tests {
         assert!(!default.has_pending());
         assert!(!default.is_background_pending());
         assert_eq!(default.backpressure(), &BackpressurePolicy::unbounded());
-        assert_eq!(default.starvation().threshold(), StarvationGuard::DEFAULT_THRESHOLD);
+        assert_eq!(
+            default.starvation().threshold(),
+            StarvationGuard::DEFAULT_THRESHOLD
+        );
     }
 }

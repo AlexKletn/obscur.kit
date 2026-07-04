@@ -164,10 +164,8 @@ mod tests {
     /// Creates a fresh, empty temp directory unique to this process and test.
     fn unique_temp_dir() -> PathBuf {
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "obscur-resource-fs-{}-{n}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("obscur-resource-fs-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("create temp dir");
         dir
     }

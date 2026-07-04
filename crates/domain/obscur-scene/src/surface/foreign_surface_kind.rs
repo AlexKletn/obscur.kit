@@ -26,7 +26,10 @@ mod tests {
     #[test]
     fn variants_are_distinct() {
         assert_ne!(ForeignSurfaceKind::Video, ForeignSurfaceKind::WebView);
-        assert_ne!(ForeignSurfaceKind::Camera, ForeignSurfaceKind::NativeControl);
+        assert_ne!(
+            ForeignSurfaceKind::Camera,
+            ForeignSurfaceKind::NativeControl
+        );
         assert_ne!(ForeignSurfaceKind::ExternalGpu, ForeignSurfaceKind::Video);
     }
 

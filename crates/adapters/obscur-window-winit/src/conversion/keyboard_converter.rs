@@ -195,7 +195,10 @@ mod tests {
     #[test]
     fn unmodeled_physical_key_is_none() {
         // A media/browser key outside the modeled subset.
-        assert_eq!(KeyboardConverter::physical_key(KeyCode::MediaPlayPause), None);
+        assert_eq!(
+            KeyboardConverter::physical_key(KeyCode::MediaPlayPause),
+            None
+        );
     }
 
     #[test]

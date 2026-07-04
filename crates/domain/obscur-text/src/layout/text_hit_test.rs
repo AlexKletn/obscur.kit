@@ -144,7 +144,9 @@ impl TextHitTest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::font::{FontAttributes, FontFace, FontFamily, FontMetrics, FontSource, GenericFamily};
+    use crate::font::{
+        FontAttributes, FontFace, FontFamily, FontMetrics, FontSource, GenericFamily,
+    };
     use crate::layout::{TextAlignment, TextOverflow};
     use crate::shaping::{GlyphRun, MockTextShaper, ShapingRequest, TextShaper};
 

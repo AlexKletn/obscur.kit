@@ -423,8 +423,14 @@ mod tests {
 
     #[test]
     fn parses_class_and_id() {
-        assert_eq!(one(".btn").head.parts, vec![SimpleSelector::Class("btn".into())]);
-        assert_eq!(one("#main").head.parts, vec![SimpleSelector::Id("main".into())]);
+        assert_eq!(
+            one(".btn").head.parts,
+            vec![SimpleSelector::Class("btn".into())]
+        );
+        assert_eq!(
+            one("#main").head.parts,
+            vec![SimpleSelector::Id("main".into())]
+        );
     }
 
     #[test]
@@ -528,7 +534,10 @@ mod tests {
     #[test]
     fn parses_pseudo_element() {
         let c = one("::before");
-        assert_eq!(c.head.parts, vec![SimpleSelector::PseudoElement("before".into())]);
+        assert_eq!(
+            c.head.parts,
+            vec![SimpleSelector::PseudoElement("before".into())]
+        );
     }
 
     #[test]
@@ -551,16 +560,25 @@ mod tests {
 
     #[test]
     fn empty_selector_is_error() {
-        assert_eq!(parse("").unwrap_err().kind(), CssParseErrorKind::InvalidSelector);
+        assert_eq!(
+            parse("").unwrap_err().kind(),
+            CssParseErrorKind::InvalidSelector
+        );
     }
 
     #[test]
     fn dangling_class_is_error() {
-        assert_eq!(parse(".").unwrap_err().kind(), CssParseErrorKind::InvalidSelector);
+        assert_eq!(
+            parse(".").unwrap_err().kind(),
+            CssParseErrorKind::InvalidSelector
+        );
     }
 
     #[test]
     fn unterminated_attribute_is_error() {
-        assert_eq!(parse("[a").unwrap_err().kind(), CssParseErrorKind::InvalidSelector);
+        assert_eq!(
+            parse("[a").unwrap_err().kind(),
+            CssParseErrorKind::InvalidSelector
+        );
     }
 }

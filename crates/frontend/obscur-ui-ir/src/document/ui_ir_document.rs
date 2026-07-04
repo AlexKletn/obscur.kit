@@ -142,8 +142,7 @@ mod tests {
 
     #[test]
     fn with_version_overrides_default() {
-        let doc = UiIrDocument::new(UiIrNode::fragment(1))
-            .with_version(UiIrVersion::new(2, 3));
+        let doc = UiIrDocument::new(UiIrNode::fragment(1)).with_version(UiIrVersion::new(2, 3));
         assert_eq!(doc.version(), UiIrVersion::new(2, 3));
     }
 

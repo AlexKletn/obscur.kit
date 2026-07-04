@@ -159,14 +159,19 @@ mod tests {
     }
 
     fn focusable(raw: u64, tab_index: i32) -> FocusNode {
-        FocusNode::new(node(raw)).focusable(true).with_tab_index(tab_index)
+        FocusNode::new(node(raw))
+            .focusable(true)
+            .with_tab_index(tab_index)
     }
 
     #[test]
     fn node_request_focuses_focusable() {
         let mut tree = FocusTree::new();
         tree.register(focusable(1, 0));
-        assert_eq!(tree.apply(FocusRequest::node(node(1))), FocusResult::Focused(node(1)));
+        assert_eq!(
+            tree.apply(FocusRequest::node(node(1))),
+            FocusResult::Focused(node(1))
+        );
         assert_eq!(tree.focused(), Some(node(1)));
     }
 
@@ -184,7 +189,10 @@ mod tests {
     #[test]
     fn node_request_no_target_when_unregistered() {
         let mut tree = FocusTree::new();
-        assert_eq!(tree.apply(FocusRequest::node(node(9))), FocusResult::NoTarget);
+        assert_eq!(
+            tree.apply(FocusRequest::node(node(9))),
+            FocusResult::NoTarget
+        );
     }
 
     #[test]
@@ -215,13 +223,31 @@ mod tests {
         tree.register(focusable(2, 0));
         tree.register(focusable(3, 0));
 
-        assert_eq!(tree.apply(FocusRequest::first()), FocusResult::Focused(node(1)));
-        assert_eq!(tree.apply(FocusRequest::next()), FocusResult::Focused(node(2)));
-        assert_eq!(tree.apply(FocusRequest::next()), FocusResult::Focused(node(3)));
+        assert_eq!(
+            tree.apply(FocusRequest::first()),
+            FocusResult::Focused(node(1))
+        );
+        assert_eq!(
+            tree.apply(FocusRequest::next()),
+            FocusResult::Focused(node(2))
+        );
+        assert_eq!(
+            tree.apply(FocusRequest::next()),
+            FocusResult::Focused(node(3))
+        );
         // Wraps around at the end.
-        assert_eq!(tree.apply(FocusRequest::next()), FocusResult::Focused(node(1)));
-        assert_eq!(tree.apply(FocusRequest::last()), FocusResult::Focused(node(3)));
-        assert_eq!(tree.apply(FocusRequest::previous()), FocusResult::Focused(node(2)));
+        assert_eq!(
+            tree.apply(FocusRequest::next()),
+            FocusResult::Focused(node(1))
+        );
+        assert_eq!(
+            tree.apply(FocusRequest::last()),
+            FocusResult::Focused(node(3))
+        );
+        assert_eq!(
+            tree.apply(FocusRequest::previous()),
+            FocusResult::Focused(node(2))
+        );
     }
 
     #[test]

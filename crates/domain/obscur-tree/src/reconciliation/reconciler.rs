@@ -269,7 +269,9 @@ mod tests {
     }
 
     fn child_ids(tree: &RetainedTree, parent: NodeId) -> Vec<NodeId> {
-        tree.get(parent).map(|n| n.children().to_vec()).unwrap_or_default()
+        tree.get(parent)
+            .map(|n| n.children().to_vec())
+            .unwrap_or_default()
     }
 
     /// Builds a tree with a root node and returns it plus the root id.
@@ -320,22 +322,16 @@ mod tests {
         let recon = Reconciler::new();
 
         // Initial keyed list a, b, c.
-        let first = ViewFragment::from_nodes(vec![
-            keyed_el(1, "a"),
-            keyed_el(2, "b"),
-            keyed_el(3, "c"),
-        ]);
+        let first =
+            ViewFragment::from_nodes(vec![keyed_el(1, "a"), keyed_el(2, "b"), keyed_el(3, "c")]);
         let _ = recon.reconcile(&mut tree, root, &first);
         let ids_before = child_ids(&tree, root);
         assert_eq!(ids_before.len(), 3);
         let (a, b, c) = (ids_before[0], ids_before[1], ids_before[2]);
 
         // Reorder to c, a, b — same keys, different order.
-        let reordered = ViewFragment::from_nodes(vec![
-            keyed_el(3, "c"),
-            keyed_el(1, "a"),
-            keyed_el(2, "b"),
-        ]);
+        let reordered =
+            ViewFragment::from_nodes(vec![keyed_el(3, "c"), keyed_el(1, "a"), keyed_el(2, "b")]);
         let plan = recon.reconcile(&mut tree, root, &reordered);
 
         // Identity is preserved: the very same ids, now in the desired order.
@@ -363,7 +359,11 @@ mod tests {
         let ids = child_ids(&tree, root);
         let plan = recon.reconcile(&mut tree, root, &fragment);
         assert_eq!(child_ids(&tree, root), ids);
-        assert!(plan.is_empty(), "unchanged pass must be a no-op, got {:?}", plan.ops());
+        assert!(
+            plan.is_empty(),
+            "unchanged pass must be a no-op, got {:?}",
+            plan.ops()
+        );
     }
 
     #[test]
@@ -460,12 +460,12 @@ mod tests {
         let styled = el(1)
             .with_prop(ViewProperty::new(TYPE, ViewValue::Text("container".into())))
             .with_prop(ViewProperty::new(ID, ViewValue::Text("main".into())))
-            .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter primary".into())));
-        let _ = Reconciler::new().reconcile(
-            &mut tree,
-            root,
-            &ViewFragment::from_nodes(vec![styled]),
-        );
+            .with_prop(ViewProperty::new(
+                CLASS,
+                ViewValue::Text("counter primary".into()),
+            ));
+        let _ =
+            Reconciler::new().reconcile(&mut tree, root, &ViewFragment::from_nodes(vec![styled]));
         let id = child_ids(&tree, root)[0];
         let attrs = tree.get(id).expect("live").attributes();
         assert_eq!(attrs.local_name(), Some("container"));
@@ -494,8 +494,7 @@ mod tests {
         let (mut tree, root) = tree_with_root();
         let recon = Reconciler::new();
         let with_class = |class: &str| {
-            keyed_el(1, "e")
-                .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
+            keyed_el(1, "e").with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
         };
 
         let _ = recon.reconcile(
@@ -504,7 +503,12 @@ mod tests {
             &ViewFragment::from_nodes(vec![with_class("counter")]),
         );
         let id = child_ids(&tree, root)[0];
-        assert!(tree.get(id).expect("live").attributes().has_class("counter"));
+        assert!(
+            tree.get(id)
+                .expect("live")
+                .attributes()
+                .has_class("counter")
+        );
 
         // Changing the class props updates the retained attributes and emits one
         // Update op.
@@ -529,17 +533,15 @@ mod tests {
         let (mut tree, root) = tree_with_root();
         let recon = Reconciler::new();
         let styled = || {
-            keyed_el(1, "e")
-                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter primary".into())))
+            keyed_el(1, "e").with_prop(ViewProperty::new(
+                CLASS,
+                ViewValue::Text("counter primary".into()),
+            ))
         };
         let fragment = ViewFragment::from_nodes(vec![styled()]);
         let _ = recon.reconcile(&mut tree, root, &fragment);
         // Re-reconcile with identical props: no spurious change is reported.
-        let plan = recon.reconcile(
-            &mut tree,
-            root,
-            &ViewFragment::from_nodes(vec![styled()]),
-        );
+        let plan = recon.reconcile(&mut tree, root, &ViewFragment::from_nodes(vec![styled()]));
         assert!(
             plan.is_empty(),
             "identical props must not report a change, got {:?}",
@@ -552,11 +554,8 @@ mod tests {
         let mut tree = RetainedTree::new();
         let ghost = tree.alloc(NodeKind::Root);
         tree.remove(ghost);
-        let plan = Reconciler::new().reconcile(
-            &mut tree,
-            ghost,
-            &ViewFragment::from_nodes(vec![el(1)]),
-        );
+        let plan =
+            Reconciler::new().reconcile(&mut tree, ghost, &ViewFragment::from_nodes(vec![el(1)]));
         assert!(plan.is_empty());
     }
 }

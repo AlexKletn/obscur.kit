@@ -142,8 +142,7 @@ mod tests {
         assert!(!independent.should_remeasure(true, None));
 
         let mut dependent = ctx();
-        *dependent.dependency_mut() =
-            LayoutDependency::new().with_constraints_affect_size(true);
+        *dependent.dependency_mut() = LayoutDependency::new().with_constraints_affect_size(true);
         assert!(dependent.should_remeasure(true, None));
         assert!(!dependent.should_remeasure(false, None));
     }

@@ -43,7 +43,13 @@ impl TextLine {
     /// advances, and [`x_offset`](Self::x_offset) starts at `0` — set it with
     /// [`with_x_offset`](Self::with_x_offset) once alignment is resolved.
     #[must_use]
-    pub fn new(runs: Vec<GlyphRun>, range: TextRange, top: f32, height: f32, baseline: f32) -> Self {
+    pub fn new(
+        runs: Vec<GlyphRun>,
+        range: TextRange,
+        top: f32,
+        height: f32,
+        baseline: f32,
+    ) -> Self {
         let width = runs.iter().map(GlyphRun::advance).sum();
         Self {
             runs,
@@ -138,7 +144,12 @@ mod tests {
             .iter()
             .map(|&(cluster, adv)| ShapedGlyph::new(1, cluster, adv))
             .collect();
-        GlyphRun::new(glyphs, TextDirection::LeftToRight, 10.0, TextRange::new(0, 3))
+        GlyphRun::new(
+            glyphs,
+            TextDirection::LeftToRight,
+            10.0,
+            TextRange::new(0, 3),
+        )
     }
 
     #[test]

@@ -91,7 +91,11 @@ impl std::fmt::Display for ResolutionError {
                 )
             }
             ResolutionErrorKind::MissingLoopKey => {
-                write!(f, "loop is missing a `key` attribute at offset {}", self.offset)
+                write!(
+                    f,
+                    "loop is missing a `key` attribute at offset {}",
+                    self.offset
+                )
             }
         }
     }

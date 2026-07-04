@@ -102,7 +102,10 @@ mod tests {
     #[test]
     fn default_has_small_budget() {
         let recovery = SubsystemRecovery::default();
-        assert_eq!(recovery.max_retries(), SubsystemRecovery::DEFAULT_MAX_RETRIES);
+        assert_eq!(
+            recovery.max_retries(),
+            SubsystemRecovery::DEFAULT_MAX_RETRIES
+        );
         // With a budget of 1, attempt 0 retries and attempt 1 degrades.
         assert_eq!(
             recovery.recover(DiagnosticSubsystem::Layout, 0),

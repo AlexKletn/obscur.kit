@@ -226,7 +226,9 @@ impl TextLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::font::{FontAttributes, FontFace, FontFamily, FontMetrics, FontSource, GenericFamily};
+    use crate::font::{
+        FontAttributes, FontFace, FontFamily, FontMetrics, FontSource, GenericFamily,
+    };
     use crate::shaping::{MockTextShaper, ShapingRequest, TextShaper};
 
     fn mono_face() -> FontFace {

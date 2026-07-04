@@ -107,26 +107,32 @@ mod tests {
     #[test]
     fn mutating_commands() {
         assert!(EditCommand::insert("x").is_mutating());
-        assert!(EditCommand::Delete {
-            unit: DeletionUnit::Grapheme,
-            direction: EditDirection::Backward,
-        }
-        .is_mutating());
-        assert!(EditCommand::Replace {
-            range: TextRange::new(0, 2),
-            text: "z".into(),
-        }
-        .is_mutating());
+        assert!(
+            EditCommand::Delete {
+                unit: DeletionUnit::Grapheme,
+                direction: EditDirection::Backward,
+            }
+            .is_mutating()
+        );
+        assert!(
+            EditCommand::Replace {
+                range: TextRange::new(0, 2),
+                text: "z".into(),
+            }
+            .is_mutating()
+        );
     }
 
     #[test]
     fn non_mutating_commands() {
-        assert!(!EditCommand::Move {
-            unit: NavigationUnit::Word,
-            direction: EditDirection::Forward,
-            extend: true,
-        }
-        .is_mutating());
+        assert!(
+            !EditCommand::Move {
+                unit: NavigationUnit::Word,
+                direction: EditDirection::Forward,
+                extend: true,
+            }
+            .is_mutating()
+        );
         assert!(!EditCommand::SelectAll.is_mutating());
         assert!(!EditCommand::SetSelection(TextSelection::caret(3)).is_mutating());
     }

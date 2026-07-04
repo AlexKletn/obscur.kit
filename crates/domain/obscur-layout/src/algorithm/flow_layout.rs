@@ -130,7 +130,10 @@ mod tests {
 
     #[test]
     fn gap_separates_children() {
-        let style = LayoutStyle { gap: 8.0, ..LayoutStyle::default() };
+        let style = LayoutStyle {
+            gap: 8.0,
+            ..LayoutStyle::default()
+        };
         let children = [child(1), child(2)];
         let mut measurer =
             FixedChildMeasurer::new(vec![Size::new(100.0, 20.0), Size::new(100.0, 30.0)]);

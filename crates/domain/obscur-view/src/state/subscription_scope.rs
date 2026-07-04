@@ -103,7 +103,12 @@ mod tests {
         let b = scope.subscribe(StateGeneration::INITIAL);
         assert_ne!(a, b);
         assert_eq!(scope.len(), 2);
-        assert_eq!(scope.get(a).map(super::super::subscription::Subscription::id), Some(a));
+        assert_eq!(
+            scope
+                .get(a)
+                .map(super::super::subscription::Subscription::id),
+            Some(a)
+        );
     }
 
     #[test]

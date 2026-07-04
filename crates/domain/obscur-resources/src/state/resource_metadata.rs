@@ -96,9 +96,7 @@ impl ResourceMetadata {
     #[must_use]
     pub fn aspect_ratio(&self) -> Option<f32> {
         match self.intrinsic_size {
-            Some(size) if size.width > 0.0 && size.height > 0.0 => {
-                Some(size.width / size.height)
-            }
+            Some(size) if size.width > 0.0 && size.height > 0.0 => Some(size.width / size.height),
             _ => None,
         }
     }

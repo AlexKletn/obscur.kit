@@ -79,7 +79,10 @@ mod tests {
     fn kind_names() {
         let id = NodeId::from_raw(1);
         assert_eq!(SemanticRelation::LabelledBy(id).kind_name(), "labelled_by");
-        assert_eq!(SemanticRelation::DescribedBy(id).kind_name(), "described_by");
+        assert_eq!(
+            SemanticRelation::DescribedBy(id).kind_name(),
+            "described_by"
+        );
         assert_eq!(SemanticRelation::Controls(id).kind_name(), "controls");
         assert_eq!(SemanticRelation::Owns(id).kind_name(), "owns");
         assert_eq!(SemanticRelation::FlowsTo(id).kind_name(), "flows_to");

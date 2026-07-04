@@ -131,8 +131,7 @@ mod tests {
         // Not permitted → first permitted.
         assert_eq!(target.effect_for(DragEffect::Link), DragEffect::Copy);
         // Link-only target with a rejected preference.
-        let link_only =
-            DropTarget::new(NodeId::from_raw(2)).with_effects(vec![DragEffect::Link]);
+        let link_only = DropTarget::new(NodeId::from_raw(2)).with_effects(vec![DragEffect::Link]);
         assert_eq!(link_only.effect_for(DragEffect::Copy), DragEffect::Link);
     }
 }

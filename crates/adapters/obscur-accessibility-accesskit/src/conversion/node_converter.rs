@@ -83,7 +83,11 @@ impl NodeConverter {
             out.set_invalid(Invalid::True);
         }
         if let Some(checked) = state.checked {
-            out.set_toggled(if checked { Toggled::True } else { Toggled::False });
+            out.set_toggled(if checked {
+                Toggled::True
+            } else {
+                Toggled::False
+            });
         }
         if let Some(expanded) = state.expanded {
             out.set_expanded(expanded);
@@ -108,7 +112,12 @@ impl NodeConverter {
         if let Some(bounds) = node.bounds() {
             let x0 = f64::from(bounds.origin.x);
             let y0 = f64::from(bounds.origin.y);
-            out.set_bounds(Rect::new(x0, y0, f64::from(bounds.right()), f64::from(bounds.bottom())));
+            out.set_bounds(Rect::new(
+                x0,
+                y0,
+                f64::from(bounds.right()),
+                f64::from(bounds.bottom()),
+            ));
         }
 
         if !children.is_empty() {
@@ -209,8 +218,10 @@ mod tests {
     #[test]
     fn children_are_attached() {
         let node = SemanticNode::new(DomainNodeId::from_raw(1), SemanticRole::List);
-        let out = NodeConverter::new()
-            .convert(&node, &[DomainNodeId::from_raw(2), DomainNodeId::from_raw(3)]);
+        let out = NodeConverter::new().convert(
+            &node,
+            &[DomainNodeId::from_raw(2), DomainNodeId::from_raw(3)],
+        );
         assert_eq!(out.children(), &[NodeId(2), NodeId(3)]);
     }
 

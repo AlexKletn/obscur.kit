@@ -25,8 +25,8 @@ impl UiIrVersionRange {
         // `UiIrVersion` derives `Ord`, but trait methods are not usable in
         // `const fn`, so compare components directly. Clamp `max` up to `min`
         // when the input is inverted.
-        let inverted = min.major() > max.major()
-            || (min.major() == max.major() && min.minor() > max.minor());
+        let inverted =
+            min.major() > max.major() || (min.major() == max.major() && min.minor() > max.minor());
         let max = if inverted { min } else { max };
         Self { min, max }
     }

@@ -257,14 +257,20 @@ mod tests {
     fn dock_changes_side() {
         let mut d = sample();
         assert!(d.dock("out", DockSide::Right));
-        assert_eq!(d.panel_by_id("out").map(DockPanel::side), Some(DockSide::Right));
+        assert_eq!(
+            d.panel_by_id("out").map(DockPanel::side),
+            Some(DockSide::Right)
+        );
         assert!(!d.dock("missing", DockSide::Top));
     }
 
     #[test]
     fn panel_lookup() {
         let d = sample();
-        assert_eq!(d.panel_by_id("nav").map(DockPanel::title), Some("Navigator"));
+        assert_eq!(
+            d.panel_by_id("nav").map(DockPanel::title),
+            Some("Navigator")
+        );
         assert!(d.panel_by_id("nope").is_none());
     }
 

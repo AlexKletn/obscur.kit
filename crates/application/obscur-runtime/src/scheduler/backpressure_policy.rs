@@ -91,13 +91,14 @@ impl BackpressurePolicy {
             return BackpressureDecision::Coalesce;
         }
         if let Some(max) = self.max_pending
-            && queue_len >= max {
-                return if self.skip_stale {
-                    BackpressureDecision::DropStale
-                } else {
-                    BackpressureDecision::Reject
-                };
-            }
+            && queue_len >= max
+        {
+            return if self.skip_stale {
+                BackpressureDecision::DropStale
+            } else {
+                BackpressureDecision::Reject
+            };
+        }
         BackpressureDecision::Admit
     }
 }
@@ -123,7 +124,10 @@ mod tests {
 
     #[test]
     fn default_matches_unbounded() {
-        assert_eq!(BackpressurePolicy::default(), BackpressurePolicy::unbounded());
+        assert_eq!(
+            BackpressurePolicy::default(),
+            BackpressurePolicy::unbounded()
+        );
     }
 
     #[test]

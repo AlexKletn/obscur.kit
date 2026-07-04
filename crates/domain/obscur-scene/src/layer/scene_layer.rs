@@ -187,16 +187,20 @@ mod tests {
 
     #[test]
     fn blend_mode_makes_non_trivial() {
-        assert!(!SceneLayer::new()
-            .with_blend_mode(BlendMode::Multiply)
-            .is_trivial());
+        assert!(
+            !SceneLayer::new()
+                .with_blend_mode(BlendMode::Multiply)
+                .is_trivial()
+        );
     }
 
     #[test]
     fn composition_makes_non_trivial() {
-        assert!(!SceneLayer::new()
-            .with_composition(CompositionMode::Clear)
-            .is_trivial());
+        assert!(
+            !SceneLayer::new()
+                .with_composition(CompositionMode::Clear)
+                .is_trivial()
+        );
     }
 
     #[test]

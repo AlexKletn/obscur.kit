@@ -95,8 +95,8 @@ mod tests {
 
     #[test]
     fn with_internal_attaches_typed_path() {
-        let payload = TransferPayload::new(DataOffer::text("hi"))
-            .with_internal("app/node", "{\"id\":7}");
+        let payload =
+            TransferPayload::new(DataOffer::text("hi")).with_internal("app/node", "{\"id\":7}");
         assert!(payload.has_internal());
         assert_eq!(payload.internal_type(), Some("app/node"));
         assert_eq!(payload.internal_data(), Some("{\"id\":7}"));
@@ -113,8 +113,10 @@ mod tests {
     fn is_empty_only_when_offer_empty_and_no_internal() {
         assert!(TransferPayload::new(DataOffer::new()).is_empty());
         assert!(!TransferPayload::new(DataOffer::text("x")).is_empty());
-        assert!(!TransferPayload::new(DataOffer::new())
-            .with_internal("t", "d")
-            .is_empty());
+        assert!(
+            !TransferPayload::new(DataOffer::new())
+                .with_internal("t", "d")
+                .is_empty()
+        );
     }
 }

@@ -179,8 +179,8 @@ mod tests {
 
     #[test]
     fn run_blocking_enqueues_and_run_executes_it() {
-        use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
 
         let executor = DeterministicExecutor::new();
         // The port requires `Send` jobs, so capture a `Send`-able flag.

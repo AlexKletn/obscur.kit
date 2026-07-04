@@ -168,8 +168,10 @@ impl WindowedCounter {
         if let Some(surface) = self.surface.as_ref() {
             let config = surface.config();
             let viewport = Size::new(config.width as f32, config.height as f32);
-            self.host =
-                HeadlessHost::with_config(RuntimeId::from_raw(1), HeadlessConfig::with_viewport(viewport));
+            self.host = HeadlessHost::with_config(
+                RuntimeId::from_raw(1),
+                HeadlessConfig::with_viewport(viewport),
+            );
         }
     }
 
@@ -198,7 +200,10 @@ impl WindowedCounter {
         // The physical viewport is the surface's configured swapchain extent.
         // u32 -> f32 for window extents is intentional and lossless in practice
         // (cast_precision_loss is allowed workspace-wide).
-        let physical_size = Size::new(surface.config().width as f32, surface.config().height as f32);
+        let physical_size = Size::new(
+            surface.config().width as f32,
+            surface.config().height as f32,
+        );
         let render_frame = RenderFrame::new(snapshot, physical_size);
         let submission = FrameSubmission::new(render_frame);
 
@@ -214,8 +219,7 @@ impl WindowedCounter {
                 eprintln!("present failed: {error:?}");
                 // A lost/outdated swapchain is recoverable: reconfigure and skip
                 // this frame. The next redraw acquires a fresh texture.
-                if let (Some(surface), Some(device)) =
-                    (self.surface.as_ref(), self.device.as_ref())
+                if let (Some(surface), Some(device)) = (self.surface.as_ref(), self.device.as_ref())
                 {
                     surface.configure(device);
                 }
@@ -306,8 +310,7 @@ impl ApplicationHandler for WindowedCounter {
     ) {
         match event {
             WindowEvent::Resized(new_size) => {
-                if let (Some(surface), Some(device)) =
-                    (self.surface.as_mut(), self.device.as_ref())
+                if let (Some(surface), Some(device)) = (self.surface.as_mut(), self.device.as_ref())
                 {
                     surface.resize(device, new_size.width, new_size.height);
                 }
@@ -439,7 +442,10 @@ fn tagged(class: &str, children: Vec<ViewNode>) -> ViewNode {
 /// Builds the counter UI: a dark `.counter` panel stacking a label bar and the
 /// two buttons, each wrapped so it carries a class the stylesheet paints.
 fn build_counter_view(count: i64, decrement: &Button, increment: &Button) -> View {
-    let label = tagged("bar label", vec![Text::new(format!("Count: {count}")).into_view_node()]);
+    let label = tagged(
+        "bar label",
+        vec![Text::new(format!("Count: {count}")).into_view_node()],
+    );
     let minus = tagged("bar decrement", button_nodes(decrement));
     let plus = tagged("bar increment", button_nodes(increment));
     let container = Container::new()

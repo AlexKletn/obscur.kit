@@ -62,11 +62,9 @@ impl PropertyId {
             // Text-affecting properties inherit by default.
             Self::Color | Self::Visibility => Inheritance::Inherited,
             // Box / paint properties reset on each element.
-            Self::BackgroundColor
-            | Self::Opacity
-            | Self::Width
-            | Self::Height
-            | Self::Display => Inheritance::NotInherited,
+            Self::BackgroundColor | Self::Opacity | Self::Width | Self::Height | Self::Display => {
+                Inheritance::NotInherited
+            }
         }
     }
 }
@@ -87,7 +85,11 @@ mod tests {
         assert!(PropertyId::Color.default_inheritance().is_inherited());
         assert!(PropertyId::Visibility.default_inheritance().is_inherited());
         assert!(!PropertyId::Opacity.default_inheritance().is_inherited());
-        assert!(!PropertyId::BackgroundColor.default_inheritance().is_inherited());
+        assert!(
+            !PropertyId::BackgroundColor
+                .default_inheritance()
+                .is_inherited()
+        );
         assert!(!PropertyId::Display.default_inheritance().is_inherited());
     }
 

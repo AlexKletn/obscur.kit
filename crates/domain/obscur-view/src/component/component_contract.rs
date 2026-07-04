@@ -164,7 +164,9 @@ mod tests {
                 ChildContract::Any,
             ))
             .with_style_part(StylePartContract::stateless(InternedSymbol::from_raw(6)))
-            .with_capability(CapabilityContract::required(CapabilityId::new("clipboard.read")))
+            .with_capability(CapabilityContract::required(CapabilityId::new(
+                "clipboard.read",
+            )))
             .allowing_children(ChildContract::Any)
             .with_subsystem(DiagnosticSubsystem::Tree);
 

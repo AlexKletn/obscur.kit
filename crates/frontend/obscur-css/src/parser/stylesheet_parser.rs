@@ -804,7 +804,10 @@ impl Builder<'_> {
                 }
             }
         }
-        Some(ParsedRule::Keyframes(ParsedKeyframesRule { name, keyframes }))
+        Some(ParsedRule::Keyframes(ParsedKeyframesRule {
+            name,
+            keyframes,
+        }))
     }
 
     /// Parses a single keyframe (`0%, 50% { … }`).
@@ -1048,7 +1051,10 @@ mod tests {
 
     #[test]
     fn tokenizes_at_keyword_and_hash() {
-        assert_eq!(kinds("@media"), vec![CssTokenKind::AtKeyword("media".into())]);
+        assert_eq!(
+            kinds("@media"),
+            vec![CssTokenKind::AtKeyword("media".into())]
+        );
         assert_eq!(kinds("#id"), vec![CssTokenKind::Hash("id".into())]);
         assert_eq!(kinds("#ff0000"), vec![CssTokenKind::Hash("ff0000".into())]);
     }
@@ -1204,7 +1210,12 @@ mod tests {
         let sheet = StylesheetParser::new(&src).parse();
         assert_eq!(sheet.unsupported.len(), 1);
         assert_eq!(sheet.unsupported[0].name(), "@import");
-        assert!(sheet.rules.iter().any(|r| matches!(r, ParsedRule::Style(_))));
+        assert!(
+            sheet
+                .rules
+                .iter()
+                .any(|r| matches!(r, ParsedRule::Style(_)))
+        );
     }
 
     #[test]
@@ -1219,8 +1230,7 @@ mod tests {
 
     #[test]
     fn parses_keyframes() {
-        let src =
-            CssSource::anonymous("@keyframes spin { from { opacity: 0 } to { opacity: 1 } }");
+        let src = CssSource::anonymous("@keyframes spin { from { opacity: 0 } to { opacity: 1 } }");
         let sheet = StylesheetParser::new(&src).parse();
         let ParsedRule::Keyframes(rule) = &sheet.rules[0] else {
             panic!("expected keyframes rule");

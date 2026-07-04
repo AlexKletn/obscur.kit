@@ -96,13 +96,15 @@ impl ChildMatcher {
         let mut cursor: usize = 0;
 
         for node in desired {
-            let decision = if let Some(key) = node.key().map(ViewKey::stable_key) { match key_index.get(key) {
-                Some(&(id, kind)) if !used.contains(&id) && compatible(node, kind) => {
-                    used.insert(id);
-                    IdentityMatch::Reuse(id)
+            let decision = if let Some(key) = node.key().map(ViewKey::stable_key) {
+                match key_index.get(key) {
+                    Some(&(id, kind)) if !used.contains(&id) && compatible(node, kind) => {
+                        used.insert(id);
+                        IdentityMatch::Reuse(id)
+                    }
+                    _ => IdentityMatch::Create,
                 }
-                _ => IdentityMatch::Create,
-            } } else {
+            } else {
                 // Forward scan for the next unused compatible unkeyed child.
                 let mut found: Option<usize> = None;
                 let mut i = cursor;
@@ -142,9 +144,12 @@ impl ChildMatcher {
 /// same variant, and the same component for elements.
 fn compatible(desired: &ViewNode, kind: &NodeKind) -> bool {
     match (desired, kind) {
-        (ViewNode::Element { component, .. }, NodeKind::Element { component: existing }) => {
-            component == existing
-        }
+        (
+            ViewNode::Element { component, .. },
+            NodeKind::Element {
+                component: existing,
+            },
+        ) => component == existing,
         (ViewNode::Text { .. }, NodeKind::Text { .. }) => true,
         _ => false,
     }
@@ -204,7 +209,9 @@ mod tests {
     fn incompatible_keyed_match_is_replace() {
         let mut tree = RetainedTree::new();
         // Existing 'a' is a text node; desired 'a' is an element -> replace.
-        let a = tree.alloc(NodeKind::Text { content: "x".into() });
+        let a = tree.alloc(NodeKind::Text {
+            content: "x".into(),
+        });
         if let Some(n) = tree.get_mut(a) {
             n.set_key(Some(StableKey::from("a")));
         }
@@ -218,7 +225,9 @@ mod tests {
     fn unkeyed_matches_positionally_and_skips_incompatible() {
         let mut tree = RetainedTree::new();
         let e1 = tree.alloc(el_kind(1));
-        let t = tree.alloc(NodeKind::Text { content: "t".into() });
+        let t = tree.alloc(NodeKind::Text {
+            content: "t".into(),
+        });
         // desired: [text, element(1)] against existing [element(1), text]
         let desired = vec![ViewNode::text("t"), el_node(1)];
         let matching = ChildMatcher::new().match_children(&tree, &[e1, t], &desired);

@@ -129,8 +129,14 @@ mod tests {
 
     #[test]
     fn state_pseudo_classes_map_to_bits() {
-        assert_eq!(PseudoClassSelector::Hover.required_state(), Some(PseudoState::HOVER));
-        assert_eq!(PseudoClassSelector::Focus.required_state(), Some(PseudoState::FOCUS));
+        assert_eq!(
+            PseudoClassSelector::Hover.required_state(),
+            Some(PseudoState::HOVER)
+        );
+        assert_eq!(
+            PseudoClassSelector::Focus.required_state(),
+            Some(PseudoState::FOCUS)
+        );
         assert_eq!(
             PseudoClassSelector::Checked.required_state(),
             Some(PseudoState::CHECKED)
@@ -142,7 +148,10 @@ mod tests {
         assert_eq!(PseudoClassSelector::FirstChild.required_state(), None);
         assert_eq!(PseudoClassSelector::Root.required_state(), None);
         assert_eq!(PseudoClassSelector::Enabled.required_state(), None);
-        assert_eq!(PseudoClassSelector::NthChild(AnB::new(2, 1)).required_state(), None);
+        assert_eq!(
+            PseudoClassSelector::NthChild(AnB::new(2, 1)).required_state(),
+            None
+        );
     }
 
     #[test]

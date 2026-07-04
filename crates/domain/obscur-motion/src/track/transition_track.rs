@@ -116,8 +116,10 @@ mod tests {
 
     #[test]
     fn is_object_safe() {
-        let track: Box<dyn MotionTrack> =
-            Box::new(TransitionTrack::new(MotionValue::scalar(0.0), MotionValue::scalar(1.0)));
+        let track: Box<dyn MotionTrack> = Box::new(TransitionTrack::new(
+            MotionValue::scalar(0.0),
+            MotionValue::scalar(1.0),
+        ));
         assert_eq!(track.sample(1.0), MotionValue::scalar(1.0));
     }
 }

@@ -98,7 +98,9 @@ mod tests {
     #[test]
     fn inherited_properties_cross_boundary() {
         assert!(StyleScope::property_crosses_boundary(PropertyId::Color));
-        assert!(StyleScope::property_crosses_boundary(PropertyId::Visibility));
+        assert!(StyleScope::property_crosses_boundary(
+            PropertyId::Visibility
+        ));
     }
 
     #[test]

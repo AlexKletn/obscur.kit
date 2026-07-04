@@ -33,7 +33,12 @@ impl TypeError {
     /// Creates a type error of `kind` with the `expected` and `found` types at
     /// byte `offset`.
     #[must_use]
-    pub const fn new(kind: TypeErrorKind, expected: ValueType, found: ValueType, offset: u32) -> Self {
+    pub const fn new(
+        kind: TypeErrorKind,
+        expected: ValueType,
+        found: ValueType,
+        offset: u32,
+    ) -> Self {
         Self {
             kind,
             expected,
@@ -123,7 +128,10 @@ mod tests {
     #[test]
     fn not_boolean_display_and_expected_is_bool() {
         let err = TypeError::not_boolean(ValueType::Int, 9);
-        assert_eq!(err.to_string(), "condition is not boolean: found Int at byte 9");
+        assert_eq!(
+            err.to_string(),
+            "condition is not boolean: found Int at byte 9"
+        );
         assert_eq!(err.expected(), &ValueType::Bool);
     }
 
@@ -139,6 +147,9 @@ mod tests {
     #[test]
     fn usable_as_std_error() {
         let err: &dyn std::error::Error = &TypeError::mismatch(ValueType::Bool, ValueType::Int, 0);
-        assert_eq!(err.to_string(), "type mismatch: expected Bool, found Int at byte 0");
+        assert_eq!(
+            err.to_string(),
+            "type mismatch: expected Bool, found Int at byte 0"
+        );
     }
 }

@@ -158,14 +158,16 @@ mod tests {
 
     #[test]
     fn is_noop_detects_unchanged_text() {
-        assert!(EditTransaction::new(
-            TextRange::new(1, 2),
-            "a",
-            "a",
-            TextSelection::caret(1),
-            TextSelection::caret(2),
-        )
-        .is_noop());
+        assert!(
+            EditTransaction::new(
+                TextRange::new(1, 2),
+                "a",
+                "a",
+                TextSelection::caret(1),
+                TextSelection::caret(2),
+            )
+            .is_noop()
+        );
         assert!(!sample().is_noop());
     }
 }

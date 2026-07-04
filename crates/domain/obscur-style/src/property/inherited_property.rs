@@ -33,7 +33,10 @@ mod tests {
 
     #[test]
     fn classifies_inherited_property() {
-        assert_eq!(InheritedProperty::of(PropertyId::Color), Inheritance::Inherited);
+        assert_eq!(
+            InheritedProperty::of(PropertyId::Color),
+            Inheritance::Inherited
+        );
     }
 
     #[test]

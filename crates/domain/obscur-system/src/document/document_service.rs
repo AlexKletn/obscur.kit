@@ -63,11 +63,7 @@ pub trait DocumentService {
     ///
     /// Must return [`DocumentError::PermissionDenied`] when the handle is not
     /// writable ([`DocumentHandle::can_write`]).
-    fn write_bytes(
-        &mut self,
-        handle: &DocumentHandle,
-        bytes: &[u8],
-    ) -> Result<(), DocumentError>;
+    fn write_bytes(&mut self, handle: &DocumentHandle, bytes: &[u8]) -> Result<(), DocumentError>;
 
     /// Enumerates the documents contained in `dir` (spec §6.10 enumerate).
     ///
@@ -125,11 +121,7 @@ impl DocumentService for MemoryDocumentService {
             .ok_or(DocumentError::NotFound)
     }
 
-    fn write_bytes(
-        &mut self,
-        handle: &DocumentHandle,
-        bytes: &[u8],
-    ) -> Result<(), DocumentError> {
+    fn write_bytes(&mut self, handle: &DocumentHandle, bytes: &[u8]) -> Result<(), DocumentError> {
         if !handle.can_write() {
             return Err(DocumentError::PermissionDenied);
         }
@@ -238,7 +230,10 @@ mod tests {
     fn metadata_returns_handle_metadata() {
         let svc = MemoryDocumentService::new();
         let handle = writable_handle("doc-3");
-        assert_eq!(svc.metadata(&handle).unwrap(), DocumentMetadata::new("doc-3"));
+        assert_eq!(
+            svc.metadata(&handle).unwrap(),
+            DocumentMetadata::new("doc-3")
+        );
     }
 
     #[test]

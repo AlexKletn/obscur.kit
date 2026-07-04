@@ -134,7 +134,7 @@ impl AccessibilityBridge for RecordingAccessibilityBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantic::{SemanticAction, SemanticRole, SemanticNode};
+    use crate::semantic::{SemanticAction, SemanticNode, SemanticRole};
     use crate::tree::SemanticTree;
     use obscur_identity::NodeId;
 

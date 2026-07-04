@@ -107,9 +107,7 @@ impl LayoutStyle {
 #[cfg(test)]
 mod tests {
     use super::LayoutStyle;
-    use crate::model::{
-        AlignItems, Dimension, FlexDirection, JustifyContent, LayoutDisplay,
-    };
+    use crate::model::{AlignItems, Dimension, FlexDirection, JustifyContent, LayoutDisplay};
     use obscur_geometry::Insets;
 
     #[test]

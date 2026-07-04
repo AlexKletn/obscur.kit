@@ -96,8 +96,7 @@ mod tests {
 
     #[test]
     fn with_extend_overrides() {
-        let g = ConicGradient::new(Point::ORIGIN, 1.5, stops())
-            .with_extend(ExtendMode::Repeat);
+        let g = ConicGradient::new(Point::ORIGIN, 1.5, stops()).with_extend(ExtendMode::Repeat);
         assert_eq!(g.extend(), ExtendMode::Repeat);
     }
 }

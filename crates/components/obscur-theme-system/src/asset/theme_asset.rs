@@ -46,7 +46,11 @@ pub struct ThemeAsset {
 impl ThemeAsset {
     /// Creates an asset whose bytes are embedded directly in the theme.
     #[must_use]
-    pub fn embedded(name: impl Into<Box<str>>, kind: AssetKind, bytes: impl Into<Arc<[u8]>>) -> Self {
+    pub fn embedded(
+        name: impl Into<Box<str>>,
+        kind: AssetKind,
+        bytes: impl Into<Arc<[u8]>>,
+    ) -> Self {
         Self {
             name: name.into(),
             kind,
@@ -109,7 +113,10 @@ mod tests {
         assert_eq!(asset.kind(), AssetKind::Font);
         assert!(asset.is_embedded());
         assert_eq!(asset.bytes(), Some(&[1u8, 2, 3][..]));
-        assert_eq!(asset.source(), &AssetSource::Embedded(Arc::from(vec![1u8, 2, 3])));
+        assert_eq!(
+            asset.source(),
+            &AssetSource::Embedded(Arc::from(vec![1u8, 2, 3]))
+        );
     }
 
     #[test]
@@ -118,12 +125,19 @@ mod tests {
         assert_eq!(asset.kind(), AssetKind::Icon);
         assert!(!asset.is_embedded());
         assert_eq!(asset.bytes(), None);
-        assert_eq!(asset.source(), &AssetSource::Path(Box::from("icons/close.svg")));
+        assert_eq!(
+            asset.source(),
+            &AssetSource::Path(Box::from("icons/close.svg"))
+        );
     }
 
     #[test]
     fn embedded_from_slice() {
-        let asset = ThemeAsset::embedded("style.main", AssetKind::Stylesheet, Arc::<[u8]>::from(&b"body{}"[..]));
+        let asset = ThemeAsset::embedded(
+            "style.main",
+            AssetKind::Stylesheet,
+            Arc::<[u8]>::from(&b"body{}"[..]),
+        );
         assert!(asset.is_embedded());
         assert_eq!(asset.bytes(), Some(&b"body{}"[..]));
     }

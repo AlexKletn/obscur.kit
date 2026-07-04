@@ -209,11 +209,7 @@ impl WindowBackend for WinitWindowBackend {
         WindowOperationResult::Unsupported
     }
 
-    fn set_presentation(
-        &mut self,
-        id: WindowId,
-        mode: &PresentationMode,
-    ) -> WindowOperationResult {
+    fn set_presentation(&mut self, id: WindowId, mode: &PresentationMode) -> WindowOperationResult {
         // Fullscreen is real: the handler applies borderless fullscreen via the
         // window's state. Exclusive/kiosk forms degrade to borderless, which is
         // reflected honestly by supports(ExclusiveFullscreen)/supports(Kiosk).
@@ -264,9 +260,9 @@ impl WindowBackend for WinitWindowBackend {
             // Wayland hides global screen coordinates; reported honestly.
             WindowFeature::GlobalDisplayCoordinates => SupportLevel::Limited,
             // No kiosk lock-down, system menu, or sleep inhibition is wired up.
-            WindowFeature::Kiosk
-            | WindowFeature::SystemMenu
-            | WindowFeature::SleepInhibition => SupportLevel::Unavailable,
+            WindowFeature::Kiosk | WindowFeature::SystemMenu | WindowFeature::SleepInhibition => {
+                SupportLevel::Unavailable
+            }
         }
     }
 
@@ -295,7 +291,9 @@ mod tests {
     fn create_returns_incrementing_ids_and_retains_records() {
         let mut backend = backend();
         let first = backend
-            .create_window(CreateWindow::new(WindowProperties::default().with_title("Main")))
+            .create_window(CreateWindow::new(
+                WindowProperties::default().with_title("Main"),
+            ))
             .expect("create always succeeds (deferred)");
         let second = backend
             .create_window(CreateWindow::new(WindowProperties::default()))
@@ -340,13 +338,18 @@ mod tests {
     fn update_mutates_the_record_and_queues_a_push() {
         let mut backend = backend();
         let id = backend
-            .create_window(CreateWindow::new(WindowProperties::default().with_title("Old")))
+            .create_window(CreateWindow::new(
+                WindowProperties::default().with_title("Old"),
+            ))
             .unwrap();
 
         let delta = UpdateWindow::new(id)
             .set_title("New")
             .set_size(Size::new(320.0, 240.0));
-        assert_eq!(backend.update_window(&delta), WindowOperationResult::native());
+        assert_eq!(
+            backend.update_window(&delta),
+            WindowOperationResult::native()
+        );
 
         let record = backend.window(id).expect("record retained");
         assert_eq!(&*record.properties().title, "New");

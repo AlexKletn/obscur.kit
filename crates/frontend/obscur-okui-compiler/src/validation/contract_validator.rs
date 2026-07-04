@@ -184,7 +184,10 @@ mod tests {
         let element = first_element("<Tabs/>");
         let diagnostics = validator.validate_element(&element, &contract);
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].message(), "component 'Tabs' requires prop 'selected'");
+        assert_eq!(
+            diagnostics[0].message(),
+            "component 'Tabs' requires prop 'selected'"
+        );
     }
 
     #[test]
@@ -194,7 +197,10 @@ mod tests {
         let element = first_element("<Tabs><Panel/></Tabs>");
         let diagnostics = validator.validate_element(&element, &contract);
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].message(), "'Panel' is not an allowed child of 'Tabs'");
+        assert_eq!(
+            diagnostics[0].message(),
+            "'Panel' is not an allowed child of 'Tabs'"
+        );
     }
 
     #[test]

@@ -102,7 +102,12 @@ mod tests {
             ShapedGlyph::new(2, 1, 6.0),
             ShapedGlyph::new(3, 2, 6.0),
         ];
-        GlyphRun::new(glyphs, TextDirection::LeftToRight, 10.0, TextRange::new(0, 3))
+        GlyphRun::new(
+            glyphs,
+            TextDirection::LeftToRight,
+            10.0,
+            TextRange::new(0, 3),
+        )
     }
 
     #[test]

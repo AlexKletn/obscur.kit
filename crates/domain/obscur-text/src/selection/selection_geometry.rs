@@ -121,8 +121,8 @@ mod tests {
     fn bounds_unions_across_multiple_rects() {
         // A two-line selection: a wide first line and an offset second line.
         let geo = SelectionGeometry::from_rects(vec![
-            rect(20.0, 0.0, 40.0, 12.0),  // right edge 60, bottom 12
-            rect(0.0, 12.0, 30.0, 12.0),  // left edge 0, bottom 24
+            rect(20.0, 0.0, 40.0, 12.0), // right edge 60, bottom 12
+            rect(0.0, 12.0, 30.0, 12.0), // left edge 0, bottom 24
         ]);
         let bounds = geo.bounds().unwrap();
         assert_eq!(bounds.origin, Point::new(0.0, 0.0));

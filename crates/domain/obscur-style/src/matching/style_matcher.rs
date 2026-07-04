@@ -376,9 +376,18 @@ mod tests {
         let element = FakeElement::new("div").with_class("box");
         let resolved = StyleMatcher::new().match_single(&sheet, &element);
         assert_eq!(resolved.len(), 3);
-        assert_eq!(resolved.get(PropertyId::Width), Some(&PropertyValue::Number(100.0)));
-        assert_eq!(resolved.get(PropertyId::Height), Some(&PropertyValue::Number(50.0)));
-        assert_eq!(resolved.get(PropertyId::Opacity), Some(&PropertyValue::Number(0.5)));
+        assert_eq!(
+            resolved.get(PropertyId::Width),
+            Some(&PropertyValue::Number(100.0))
+        );
+        assert_eq!(
+            resolved.get(PropertyId::Height),
+            Some(&PropertyValue::Number(50.0))
+        );
+        assert_eq!(
+            resolved.get(PropertyId::Opacity),
+            Some(&PropertyValue::Number(0.5))
+        );
     }
 
     #[test]

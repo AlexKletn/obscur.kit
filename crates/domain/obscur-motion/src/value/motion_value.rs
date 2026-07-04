@@ -178,7 +178,10 @@ mod tests {
     fn interpolate_checked_some_on_match() {
         let a = MotionValue::scalar(0.0);
         let b = MotionValue::scalar(10.0);
-        assert_eq!(a.interpolate_checked(&b, 0.5), Some(MotionValue::scalar(5.0)));
+        assert_eq!(
+            a.interpolate_checked(&b, 0.5),
+            Some(MotionValue::scalar(5.0))
+        );
 
         let pa = MotionValue::point(Point::new(0.0, 0.0));
         let pb = MotionValue::point(Point::new(4.0, 8.0));

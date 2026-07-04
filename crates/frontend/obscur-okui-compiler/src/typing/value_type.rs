@@ -139,7 +139,10 @@ mod tests {
 
     #[test]
     fn constructors_wrap_element_types() {
-        assert_eq!(ValueType::list(ValueType::Int), ValueType::List(Box::new(ValueType::Int)));
+        assert_eq!(
+            ValueType::list(ValueType::Int),
+            ValueType::List(Box::new(ValueType::Int))
+        );
         assert_eq!(
             ValueType::optional(ValueType::Text),
             ValueType::Optional(Box::new(ValueType::Text))
@@ -163,8 +166,14 @@ mod tests {
 
     #[test]
     fn inner_returns_element_of_list_and_optional() {
-        assert_eq!(ValueType::list(ValueType::Int).inner(), Some(&ValueType::Int));
-        assert_eq!(ValueType::optional(ValueType::Text).inner(), Some(&ValueType::Text));
+        assert_eq!(
+            ValueType::list(ValueType::Int).inner(),
+            Some(&ValueType::Int)
+        );
+        assert_eq!(
+            ValueType::optional(ValueType::Text).inner(),
+            Some(&ValueType::Text)
+        );
         assert_eq!(ValueType::Int.inner(), None);
     }
 
@@ -202,14 +211,20 @@ mod tests {
 
     #[test]
     fn list_covaries_over_int_to_float() {
-        assert!(ValueType::list(ValueType::Int).is_assignable_to(&ValueType::list(ValueType::Float)));
-        assert!(!ValueType::list(ValueType::Float).is_assignable_to(&ValueType::list(ValueType::Int)));
+        assert!(
+            ValueType::list(ValueType::Int).is_assignable_to(&ValueType::list(ValueType::Float))
+        );
+        assert!(
+            !ValueType::list(ValueType::Float).is_assignable_to(&ValueType::list(ValueType::Int))
+        );
     }
 
     #[test]
     fn optional_covaries_over_its_wrapped_type() {
-        assert!(ValueType::optional(ValueType::Int)
-            .is_assignable_to(&ValueType::optional(ValueType::Float)));
+        assert!(
+            ValueType::optional(ValueType::Int)
+                .is_assignable_to(&ValueType::optional(ValueType::Float))
+        );
     }
 
     #[test]

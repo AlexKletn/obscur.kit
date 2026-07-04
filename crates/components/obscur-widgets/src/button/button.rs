@@ -127,7 +127,10 @@ impl Button {
     #[must_use]
     pub fn view(&self) -> View {
         let node = ViewNode::element(Self::COMPONENT_ID)
-            .with_prop(ViewProperty::new(Self::PROP_ROLE, ViewValue::from("button")))
+            .with_prop(ViewProperty::new(
+                Self::PROP_ROLE,
+                ViewValue::from("button"),
+            ))
             .with_prop(ViewProperty::new(
                 Self::PROP_DISABLED,
                 ViewValue::Bool(self.disabled),
@@ -207,8 +210,10 @@ mod tests {
                 ..
             } => {
                 assert_eq!(*component, Button::COMPONENT_ID);
-                assert!(props.iter().any(|p| p.name() == Button::PROP_PRESSED
-                    && *p.value() == ViewValue::Bool(false)));
+                assert!(
+                    props.iter().any(|p| p.name() == Button::PROP_PRESSED
+                        && *p.value() == ViewValue::Bool(false))
+                );
                 assert_eq!(events.len(), 1);
                 assert_eq!(events[0].command(), cmd());
                 assert_eq!(children.len(), 1);

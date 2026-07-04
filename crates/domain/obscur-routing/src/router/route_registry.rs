@@ -93,10 +93,14 @@ mod tests {
         let registry = RouteRegistry::new()
             .with_route(RoutePattern::parse("/users/:id"), "specific")
             .with_route(RoutePattern::parse("/*rest"), "catch-all");
-        let (_, target) = registry.resolve(&Route::parse("/users/1")).expect("resolves");
+        let (_, target) = registry
+            .resolve(&Route::parse("/users/1"))
+            .expect("resolves");
         assert_eq!(target, "specific");
         // A path only the wildcard matches falls through to the catch-all.
-        let (_, target) = registry.resolve(&Route::parse("/other/x")).expect("resolves");
+        let (_, target) = registry
+            .resolve(&Route::parse("/other/x"))
+            .expect("resolves");
         assert_eq!(target, "catch-all");
     }
 

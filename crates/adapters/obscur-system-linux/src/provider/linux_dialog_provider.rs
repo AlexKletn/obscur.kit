@@ -103,10 +103,9 @@ impl DialogProvider for LinuxDialogProvider {
                 }
             }
             DialogRequest::SaveFile { .. } => match parse_paths(&stdout).into_iter().next() {
-                Some(path) if output.status.success() => DialogResult::Saved(handle_from_path(
-                    &path,
-                    DocumentPermission::read_write(),
-                )),
+                Some(path) if output.status.success() => {
+                    DialogResult::Saved(handle_from_path(&path, DocumentPermission::read_write()))
+                }
                 _ => DialogResult::Dismissed,
             },
             DialogRequest::PickFolder => match parse_paths(&stdout).into_iter().next() {
@@ -283,7 +282,10 @@ mod tests {
 
     #[test]
     fn build_args_open_file_single_and_multiple() {
-        assert_eq!(build_args(&DialogRequest::open_file()), ["--file-selection"]);
+        assert_eq!(
+            build_args(&DialogRequest::open_file()),
+            ["--file-selection"]
+        );
         assert_eq!(
             build_args(&DialogRequest::open_files()),
             ["--file-selection", "--multiple"]

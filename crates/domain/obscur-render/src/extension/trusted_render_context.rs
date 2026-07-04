@@ -122,11 +122,15 @@ mod tests {
 
     #[test]
     fn allow_flags_confer_trust() {
-        assert!(TrustedRenderContext::new()
-            .allow_custom_shaders(true)
-            .is_trusted());
-        assert!(TrustedRenderContext::new()
-            .allow_gpu_resources(true)
-            .is_trusted());
+        assert!(
+            TrustedRenderContext::new()
+                .allow_custom_shaders(true)
+                .is_trusted()
+        );
+        assert!(
+            TrustedRenderContext::new()
+                .allow_gpu_resources(true)
+                .is_trusted()
+        );
     }
 }

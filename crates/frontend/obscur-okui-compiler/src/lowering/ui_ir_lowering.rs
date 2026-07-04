@@ -4,7 +4,9 @@
 use obscur_capability::CapabilityId;
 use obscur_okui_syntax::ast::{Attribute, Document, Element, Expression};
 use obscur_okui_syntax::syntax::{SyntaxKind, SyntaxNode};
-use obscur_ui_ir::document::{UiIrDocument, UiIrEvent, UiIrExpression, UiIrNode, UiIrProperty, UiIrValue};
+use obscur_ui_ir::document::{
+    UiIrDocument, UiIrEvent, UiIrExpression, UiIrNode, UiIrProperty, UiIrValue,
+};
 use obscur_ui_ir::version::UiIrVersion;
 
 use crate::lowering::{ExpressionLowering, SourceMapBuilder};
@@ -275,8 +277,7 @@ mod tests {
 
     #[test]
     fn lowers_component_with_property_event_and_text_child() {
-        let doc = lower("<Button label=\"Save\" on:click=submit>Hi</Button>")
-            .expect("lowers");
+        let doc = lower("<Button label=\"Save\" on:click=submit>Hi</Button>").expect("lowers");
         let root = doc.root();
         assert_eq!(root.kind(), UiIrNodeKind::Component);
         assert_eq!(root.tag(), "Button");
@@ -317,10 +318,11 @@ mod tests {
         let root = doc.root();
         assert_eq!(root.kind(), UiIrNodeKind::Fragment);
         assert_eq!(root.children().len(), 2);
-        assert!(root
-            .children()
-            .iter()
-            .all(|c| c.kind() == UiIrNodeKind::Component));
+        assert!(
+            root.children()
+                .iter()
+                .all(|c| c.kind() == UiIrNodeKind::Component)
+        );
     }
 
     #[test]
@@ -335,7 +337,10 @@ mod tests {
         let child = &doc.root().children()[0];
         assert_eq!(child.kind(), UiIrNodeKind::Element);
         assert_eq!(child.tag(), "Expression");
-        assert_eq!(child.property("value"), Some(&UiIrExpression::binding("count")));
+        assert_eq!(
+            child.property("value"),
+            Some(&UiIrExpression::binding("count"))
+        );
     }
 
     #[test]

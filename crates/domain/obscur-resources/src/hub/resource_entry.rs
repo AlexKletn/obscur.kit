@@ -147,7 +147,12 @@ mod tests {
     fn entry() -> ResourceEntry {
         let handle = ResourceHandle::new(ResourceId::from_raw(1), ResourceKind::Image);
         let source = ResourceSource::memory(MemorySource::new(vec![1u8, 2, 3]));
-        ResourceEntry::new(handle, source, ResourceKind::Image, ResourceNamespace::DEFAULT)
+        ResourceEntry::new(
+            handle,
+            source,
+            ResourceKind::Image,
+            ResourceNamespace::DEFAULT,
+        )
     }
 
     #[test]

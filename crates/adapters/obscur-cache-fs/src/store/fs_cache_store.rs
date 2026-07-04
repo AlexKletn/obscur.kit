@@ -344,7 +344,10 @@ mod tests {
 
         store.clear();
         assert_eq!(store.len(), 0);
-        assert!(dir.join("stray.txt").exists(), "clear left foreign file alone");
+        assert!(
+            dir.join("stray.txt").exists(),
+            "clear left foreign file alone"
+        );
 
         cleanup(&dir);
     }

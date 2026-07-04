@@ -215,9 +215,7 @@ impl Path {
             }
         }
 
-        bounds.map(|(min, max)| {
-            Rect::new(min, Size::new(max.x - min.x, max.y - min.y))
-        })
+        bounds.map(|(min, max)| Rect::new(min, Size::new(max.x - min.x, max.y - min.y)))
     }
 }
 
@@ -262,7 +260,10 @@ mod tests {
         let r = Rect::new(Point::new(1.0, 2.0), Size::new(4.0, 6.0));
         let path = Path::rect(r);
         assert_eq!(path.len(), 5);
-        assert_eq!(path.segments()[0], PathSegment::MoveTo(Point::new(1.0, 2.0)));
+        assert_eq!(
+            path.segments()[0],
+            PathSegment::MoveTo(Point::new(1.0, 2.0))
+        );
         assert_eq!(path.segments()[4], PathSegment::Close);
         assert_eq!(path.bounds(), Some(r));
     }

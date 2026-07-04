@@ -98,8 +98,7 @@ mod tests {
 
     #[test]
     fn with_extend_overrides() {
-        let g = RadialGradient::new(Point::ORIGIN, 10.0, stops())
-            .with_extend(ExtendMode::Reflect);
+        let g = RadialGradient::new(Point::ORIGIN, 10.0, stops()).with_extend(ExtendMode::Reflect);
         assert_eq!(g.extend(), ExtendMode::Reflect);
     }
 }

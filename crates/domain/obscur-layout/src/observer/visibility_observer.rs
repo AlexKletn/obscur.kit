@@ -106,7 +106,10 @@ mod tests {
         let node = NodeId::from_raw(1);
         let mut obs = VisibilityObserver::new(node);
         let b = box_at(0.0, 0.0, 10.0, 10.0);
-        assert_eq!(obs.observe(b, None), Some(VisibilityChange::new(node, true)));
+        assert_eq!(
+            obs.observe(b, None),
+            Some(VisibilityChange::new(node, true))
+        );
     }
 
     #[test]
@@ -114,7 +117,10 @@ mod tests {
         let node = NodeId::from_raw(2);
         let mut obs = VisibilityObserver::new(node);
         let b = box_at(0.0, 0.0, 0.0, 10.0);
-        assert_eq!(obs.observe(b, None), Some(VisibilityChange::new(node, false)));
+        assert_eq!(
+            obs.observe(b, None),
+            Some(VisibilityChange::new(node, false))
+        );
     }
 
     #[test]

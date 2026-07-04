@@ -99,10 +99,7 @@ mod tests {
 
     #[test]
     fn decimal_becomes_float_literal() {
-        assert_eq!(
-            lower("1.5"),
-            UiIrExpression::literal(UiIrValue::Float(1.5))
-        );
+        assert_eq!(lower("1.5"), UiIrExpression::literal(UiIrValue::Float(1.5)));
     }
 
     #[test]

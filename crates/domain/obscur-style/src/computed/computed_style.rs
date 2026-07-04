@@ -169,7 +169,10 @@ mod tests {
         let mut style = ComputedStyle::new();
         let name = InternedSymbol::from_raw(9);
         style.set_custom_property(name, PropertyValue::Number(2.0));
-        assert_eq!(style.custom_property(name), Some(&PropertyValue::Number(2.0)));
+        assert_eq!(
+            style.custom_property(name),
+            Some(&PropertyValue::Number(2.0))
+        );
         assert_eq!(style.custom_properties().count(), 1);
     }
 }

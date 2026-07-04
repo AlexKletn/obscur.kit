@@ -140,14 +140,14 @@ impl MockTextServiceProvider {
     #[must_use]
     pub fn with_word(mut self, word: impl Into<Box<str>>) -> Self {
         let word = word.into();
-        self.known.insert(word.to_ascii_lowercase().into_boxed_str());
+        self.known
+            .insert(word.to_ascii_lowercase().into_boxed_str());
         self
     }
 
     /// Returns whether `token` is in the dictionary, ignoring ASCII case.
     fn is_known(&self, token: &str) -> bool {
-        self.known
-            .contains(token.to_ascii_lowercase().as_str())
+        self.known.contains(token.to_ascii_lowercase().as_str())
     }
 }
 

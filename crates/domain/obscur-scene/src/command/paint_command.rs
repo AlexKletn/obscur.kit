@@ -112,9 +112,15 @@ mod tests {
             paint: Paint::solid_fill(Color::WHITE),
         };
         assert_eq!(draw.nesting_delta(), 0);
-        assert_eq!(PaintCommand::PushClip(Clip::rect(Rect::default())).nesting_delta(), 1);
+        assert_eq!(
+            PaintCommand::PushClip(Clip::rect(Rect::default())).nesting_delta(),
+            1
+        );
         assert_eq!(PaintCommand::PopClip.nesting_delta(), -1);
-        assert_eq!(PaintCommand::PushLayer(SceneLayer::new()).nesting_delta(), 1);
+        assert_eq!(
+            PaintCommand::PushLayer(SceneLayer::new()).nesting_delta(),
+            1
+        );
         assert_eq!(PaintCommand::PopLayer.nesting_delta(), -1);
     }
 

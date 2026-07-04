@@ -94,7 +94,10 @@ mod tests {
     fn between_interpolates_matching_variants() {
         let result =
             InterpolationResult::between(MotionValue::scalar(0.0), MotionValue::scalar(10.0), 0.5);
-        assert_eq!(result, InterpolationResult::interpolated(MotionValue::scalar(5.0)));
+        assert_eq!(
+            result,
+            InterpolationResult::interpolated(MotionValue::scalar(5.0))
+        );
         assert!(result.is_interpolated());
         assert!(!result.is_incompatible());
         assert_eq!(result.value(), Some(MotionValue::scalar(5.0)));

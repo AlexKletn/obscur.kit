@@ -196,15 +196,21 @@ mod tests {
 
     #[test]
     fn serious_thermal_constrains() {
-        assert!(PowerProfile::new()
-            .with_thermal(ThermalState::Serious)
-            .is_constrained());
-        assert!(PowerProfile::new()
-            .with_thermal(ThermalState::Critical)
-            .is_constrained());
-        assert!(!PowerProfile::new()
-            .with_thermal(ThermalState::Fair)
-            .is_constrained());
+        assert!(
+            PowerProfile::new()
+                .with_thermal(ThermalState::Serious)
+                .is_constrained()
+        );
+        assert!(
+            PowerProfile::new()
+                .with_thermal(ThermalState::Critical)
+                .is_constrained()
+        );
+        assert!(
+            !PowerProfile::new()
+                .with_thermal(ThermalState::Fair)
+                .is_constrained()
+        );
     }
 
     #[test]

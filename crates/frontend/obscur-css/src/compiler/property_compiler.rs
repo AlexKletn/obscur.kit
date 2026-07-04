@@ -124,7 +124,8 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::Display,
         PropertyId::Visibility,
     ];
-    ALL.into_iter().find(|id| name.eq_ignore_ascii_case(id.name()))
+    ALL.into_iter()
+        .find(|id| name.eq_ignore_ascii_case(id.name()))
 }
 
 /// Narrows a parser `f64` into the `f32` the style/motion domains use.
@@ -261,11 +262,17 @@ fn parse_hex_color(hex: &str) -> Option<StyleColor> {
     if hex.is_empty() || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
-    let pair = |slice: &str| u8::from_str_radix(slice, 16).ok().map(|v| f32::from(v) / 255.0);
+    let pair = |slice: &str| {
+        u8::from_str_radix(slice, 16)
+            .ok()
+            .map(|v| f32::from(v) / 255.0)
+    };
     let single = |byte: u8| {
         let doubled = [byte, byte];
         let text = std::str::from_utf8(&doubled).ok()?;
-        u8::from_str_radix(text, 16).ok().map(|v| f32::from(v) / 255.0)
+        u8::from_str_radix(text, 16)
+            .ok()
+            .map(|v| f32::from(v) / 255.0)
     };
     let bytes = hex.as_bytes();
     match hex.len() {
@@ -366,7 +373,10 @@ mod tests {
 
     #[test]
     fn lowers_named_and_hex_colors() {
-        assert_eq!(value_of("color: black"), PropertyValue::Color(StyleColor::BLACK));
+        assert_eq!(
+            value_of("color: black"),
+            PropertyValue::Color(StyleColor::BLACK)
+        );
         assert_eq!(
             value_of("color: transparent"),
             PropertyValue::Color(StyleColor::TRANSPARENT)
@@ -407,8 +417,14 @@ mod tests {
 
     #[test]
     fn lowers_px_length_and_percentage() {
-        assert_eq!(value_of("width: 10px"), PropertyValue::Length(Length::px(10.0)));
-        assert_eq!(value_of("width: 50%"), PropertyValue::Length(Length::Percent(50.0)));
+        assert_eq!(
+            value_of("width: 10px"),
+            PropertyValue::Length(Length::px(10.0))
+        );
+        assert_eq!(
+            value_of("width: 50%"),
+            PropertyValue::Length(Length::Percent(50.0))
+        );
     }
 
     #[test]

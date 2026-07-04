@@ -182,8 +182,15 @@ mod tests {
 
     #[test]
     fn threshold_is_clamped() {
-        assert!((IntersectionObserver::new(NodeId::from_raw(1), 5.0).threshold() - 1.0).abs() < 1e-6);
-        assert!(IntersectionObserver::new(NodeId::from_raw(1), -2.0).threshold().abs() < 1e-6);
+        assert!(
+            (IntersectionObserver::new(NodeId::from_raw(1), 5.0).threshold() - 1.0).abs() < 1e-6
+        );
+        assert!(
+            IntersectionObserver::new(NodeId::from_raw(1), -2.0)
+                .threshold()
+                .abs()
+                < 1e-6
+        );
     }
 
     #[test]

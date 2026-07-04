@@ -70,9 +70,7 @@ impl ClipboardResult {
             Self::Read(_) | Self::Written | Self::Cleared => None,
             Self::Empty => Some(TransferError::Empty),
             Self::Denied => Some(TransferError::PermissionDenied),
-            Self::Unsupported => {
-                Some(TransferError::Unsupported(Box::from("clipboard operation")))
-            }
+            Self::Unsupported => Some(TransferError::Unsupported(Box::from("clipboard operation"))),
         }
     }
 }
@@ -101,7 +99,10 @@ mod tests {
 
     #[test]
     fn into_error_maps_non_success_variants() {
-        assert_eq!(ClipboardResult::Empty.into_error(), Some(TransferError::Empty));
+        assert_eq!(
+            ClipboardResult::Empty.into_error(),
+            Some(TransferError::Empty)
+        );
         assert_eq!(
             ClipboardResult::Denied.into_error(),
             Some(TransferError::PermissionDenied)
@@ -114,7 +115,10 @@ mod tests {
 
     #[test]
     fn into_error_is_none_for_success() {
-        assert_eq!(ClipboardResult::Read(DataOffer::text("x")).into_error(), None);
+        assert_eq!(
+            ClipboardResult::Read(DataOffer::text("x")).into_error(),
+            None
+        );
         assert_eq!(ClipboardResult::Written.into_error(), None);
         assert_eq!(ClipboardResult::Cleared.into_error(), None);
     }

@@ -55,10 +55,7 @@ impl ComponentRegistry {
     /// Returns [`RegistryError::DuplicateComponent`] (carrying the offending
     /// [`ComponentId`]) if a registration with the same id already exists; the
     /// existing entry is left untouched. This never panics.
-    pub fn register(
-        &mut self,
-        registration: ComponentRegistration,
-    ) -> Result<(), RegistryError> {
+    pub fn register(&mut self, registration: ComponentRegistration) -> Result<(), RegistryError> {
         let id = registration.id();
         if self.entries.contains_key(&id) {
             return Err(RegistryError::DuplicateComponent(id));
@@ -166,7 +163,8 @@ mod tests {
         assert_eq!(reg.len(), 1);
         assert!(reg.contains(ComponentId::from_raw(7)));
         assert_eq!(
-            reg.get(ComponentId::from_raw(7)).map(ComponentRegistration::id),
+            reg.get(ComponentId::from_raw(7))
+                .map(ComponentRegistration::id),
             Some(ComponentId::from_raw(7))
         );
         assert_eq!(
@@ -201,8 +199,9 @@ mod tests {
     #[test]
     fn create_instance_for_unregistered_id_is_none() {
         let reg = ComponentRegistry::new();
-        assert!(reg
-            .create_instance(ComponentId::from_raw(99), InstanceId::from_raw(1))
-            .is_none());
+        assert!(
+            reg.create_instance(ComponentId::from_raw(99), InstanceId::from_raw(1))
+                .is_none()
+        );
     }
 }

@@ -121,7 +121,7 @@ fn scan_string(chars: &[(usize, char)], i: usize) -> usize {
     let mut j = i + 1;
     while j < n {
         match chars[j].1 {
-            '\\' => j += 2, // skip the backslash and the escaped char
+            '\\' => j += 2,      // skip the backslash and the escaped char
             '"' => return j + 1, // consume the closing quote
             _ => j += 1,
         }

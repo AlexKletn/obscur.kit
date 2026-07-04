@@ -113,7 +113,10 @@ impl SelectorCompiler {
             .tail
             .iter()
             .map(|(combinator, compound)| {
-                (lower_combinator(*combinator), Self::lower_compound(compound))
+                (
+                    lower_combinator(*combinator),
+                    Self::lower_compound(compound),
+                )
             })
             .collect();
         style::ComplexSelector::new(head, tail)
@@ -231,7 +234,10 @@ fn parse_anb(arg: &str) -> style::AnB {
         let b = if rest.is_empty() {
             0
         } else {
-            rest.strip_prefix('+').unwrap_or(rest).parse::<i32>().unwrap_or(0)
+            rest.strip_prefix('+')
+                .unwrap_or(rest)
+                .parse::<i32>()
+                .unwrap_or(0)
         };
         return style::AnB::new(a, b);
     }
@@ -258,7 +264,10 @@ fn compound_specificity(compound: &ParsedCompoundSelector) -> SelectorSpecificit
 
 /// Records the excluded dynamic-state pseudo-classes (`:link`, `:visited`,
 /// `:target`) found anywhere in the complex selector (§4.13).
-fn collect_excluded(selector: &ParsedComplexSelector, unsupported: &mut Vec<UnsupportedCssFeature>) {
+fn collect_excluded(
+    selector: &ParsedComplexSelector,
+    unsupported: &mut Vec<UnsupportedCssFeature>,
+) {
     let compounds = std::iter::once(&selector.head).chain(selector.tail.iter().map(|(_, c)| c));
     for compound in compounds {
         for part in &compound.parts {
@@ -311,7 +320,10 @@ mod tests {
     #[test]
     fn class_and_attribute_and_pseudo_class_specificity() {
         assert_eq!(specificity(".btn"), SelectorSpecificity::new(0, 1, 0));
-        assert_eq!(specificity("[type=text]"), SelectorSpecificity::new(0, 1, 0));
+        assert_eq!(
+            specificity("[type=text]"),
+            SelectorSpecificity::new(0, 1, 0)
+        );
         assert_eq!(specificity(":hover"), SelectorSpecificity::new(0, 1, 0));
     }
 
@@ -329,7 +341,10 @@ mod tests {
     #[test]
     fn compound_selector_sums_parts() {
         // div.a#b:hover -> 1 id, 1 class + 1 pseudo-class, 1 type.
-        assert_eq!(specificity("div.a#b:hover"), SelectorSpecificity::new(1, 2, 1));
+        assert_eq!(
+            specificity("div.a#b:hover"),
+            SelectorSpecificity::new(1, 2, 1)
+        );
     }
 
     #[test]
@@ -418,7 +433,10 @@ mod tests {
             lower_subject_simples("div"),
             vec![style::SimpleSelector::Type("div".into())]
         );
-        assert_eq!(lower_subject_simples("*"), vec![style::SimpleSelector::Universal]);
+        assert_eq!(
+            lower_subject_simples("*"),
+            vec![style::SimpleSelector::Universal]
+        );
         assert_eq!(
             lower_subject_simples(".a"),
             vec![style::SimpleSelector::Class("a".into())]
@@ -474,7 +492,9 @@ mod tests {
         let anb = |text: &str| {
             let simples = lower_subject_simples(text);
             match &simples[0] {
-                style::SimpleSelector::PseudoClass(style::PseudoClassSelector::NthChild(anb)) => *anb,
+                style::SimpleSelector::PseudoClass(style::PseudoClassSelector::NthChild(anb)) => {
+                    *anb
+                }
                 other => panic!("expected nth-child, got {other:?}"),
             }
         };

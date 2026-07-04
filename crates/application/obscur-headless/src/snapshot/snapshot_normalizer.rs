@@ -50,7 +50,9 @@ impl SnapshotNormalizer {
         let nodes: Vec<NormalizedNode> = ids
             .into_iter()
             .map(|id| {
-                let opacity = computed.get(&id).and_then(obscur_style::computed::ComputedStyle::opacity);
+                let opacity = computed
+                    .get(&id)
+                    .and_then(obscur_style::computed::ComputedStyle::opacity);
                 let layout_bounds = layout.get(&id).map(|layout_box| layout_box.bounds);
                 NormalizedNode::new(id, opacity, layout_bounds)
             })

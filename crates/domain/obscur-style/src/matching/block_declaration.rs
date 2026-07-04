@@ -73,7 +73,8 @@ mod tests {
 
     #[test]
     fn normal_sets_normal_flag() {
-        let decl = BlockDeclaration::normal(PropertyId::Color, PropertyValue::Color(StyleColor::BLACK));
+        let decl =
+            BlockDeclaration::normal(PropertyId::Color, PropertyValue::Color(StyleColor::BLACK));
         assert_eq!(decl.property(), PropertyId::Color);
         assert_eq!(*decl.value(), PropertyValue::Color(StyleColor::BLACK));
         assert_eq!(decl.important_flag(), ImportantFlag::Normal);

@@ -267,8 +267,11 @@ impl Timeline {
     /// iteration counter and state are left unchanged.
     pub fn seek(&mut self, progress: f32) {
         let progress = progress.clamp(0.0, 1.0);
-        self.position =
-            TimelinePosition::new(progress * self.duration, progress, self.position.iteration());
+        self.position = TimelinePosition::new(
+            progress * self.duration,
+            progress,
+            self.position.iteration(),
+        );
     }
 
     /// Returns the position at the start of an iteration in the current
@@ -523,7 +526,9 @@ mod tests {
     #[test]
     fn identical_deltas_are_deterministic() {
         let deltas = [0.1, 0.37, 0.02, 0.9, 1.5, 0.25];
-        let mut a = timeline().with_repeat(RepeatCount::Finite(3)).alternating(true);
+        let mut a = timeline()
+            .with_repeat(RepeatCount::Finite(3))
+            .alternating(true);
         let mut b = a.clone();
         a.start();
         b.start();

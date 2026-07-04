@@ -152,6 +152,9 @@ mod tests {
         let el = first_element("<T x={a.b}/>");
         let x = el.attribute("x").expect("x attribute");
         assert!(x.is_dynamic());
-        assert_eq!(x.value_expression().map(|e| e.text()).as_deref(), Some("a.b"));
+        assert_eq!(
+            x.value_expression().map(|e| e.text()).as_deref(),
+            Some("a.b")
+        );
     }
 }

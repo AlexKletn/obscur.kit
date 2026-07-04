@@ -13,9 +13,9 @@ use obscur_scene::layer::{CompositionMode, SceneLayer};
 use obscur_scene::paint::{BlendMode, Brush, Paint};
 use skrifa::instance::{LocationRef, Size};
 use skrifa::{FontRef, MetadataProvider};
+use vello::Scene;
 use vello::kurbo::{Affine, Rect as KurboRect};
 use vello::peniko::{self, FontData};
-use vello::Scene;
 
 use super::brush_converter::BrushConverter;
 use super::clip_converter::ClipConverter;
@@ -237,7 +237,13 @@ impl SceneConverter {
         let alpha = layer.opacity();
         if let Some(clip @ Clip::Shape(_)) = layer.clip() {
             let shape = self.clip.shape(clip);
-            scene.push_layer(peniko::Fill::NonZero, blend, alpha, Affine::IDENTITY, &shape);
+            scene.push_layer(
+                peniko::Fill::NonZero,
+                blend,
+                alpha,
+                Affine::IDENTITY,
+                &shape,
+            );
         } else {
             let unbounded = KurboRect::new(
                 -UNBOUNDED_HALF_EXTENT,

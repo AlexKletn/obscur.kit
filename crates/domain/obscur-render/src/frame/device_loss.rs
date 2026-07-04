@@ -113,8 +113,8 @@ mod tests {
 
     #[test]
     fn with_detail_attaches_message() {
-        let loss = DeviceLoss::recoverable(DeviceLossReason::Timeout)
-            .with_detail("gpu hung for 2s");
+        let loss =
+            DeviceLoss::recoverable(DeviceLossReason::Timeout).with_detail("gpu hung for 2s");
         assert_eq!(loss.detail(), Some("gpu hung for 2s"));
         assert!(loss.is_recoverable());
     }

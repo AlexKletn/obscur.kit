@@ -131,10 +131,7 @@ impl LayoutAlgorithm for DockingLayout {
                     };
                     let measured = measurer.measure_child(index, cc);
                     let band = measured.height.min(remaining.size.height);
-                    let arranged = (
-                        remaining.origin,
-                        Size::new(remaining.size.width, band),
-                    );
+                    let arranged = (remaining.origin, Size::new(remaining.size.width, band));
                     remaining.origin.y += band;
                     remaining.size.height = (remaining.size.height - band).max(0.0);
                     arranged
@@ -160,10 +157,7 @@ impl LayoutAlgorithm for DockingLayout {
                     };
                     let measured = measurer.measure_child(index, cc);
                     let band = measured.width.min(remaining.size.width);
-                    let arranged = (
-                        remaining.origin,
-                        Size::new(band, remaining.size.height),
-                    );
+                    let arranged = (remaining.origin, Size::new(band, remaining.size.height));
                     remaining.origin.x += band;
                     remaining.size.width = (remaining.size.width - band).max(0.0);
                     arranged
@@ -219,8 +213,7 @@ mod tests {
         let style = LayoutStyle::default();
         let children = [child(1), child(2)];
         // Top child measures 40 tall; fill child gets whatever it's handed.
-        let mut measurer =
-            FixedChildMeasurer::new(vec![Size::new(0.0, 40.0), Size::new(0.0, 0.0)]);
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 40.0), Size::new(0.0, 0.0)]);
         let dock = DockingLayout::new().with_sides(vec![DockSide::Top, DockSide::Fill]);
         let out = dock.layout(
             &style,
@@ -243,8 +236,7 @@ mod tests {
     fn left_then_fill_docks_column_and_remainder() {
         let style = LayoutStyle::default();
         let children = [child(1), child(2)];
-        let mut measurer =
-            FixedChildMeasurer::new(vec![Size::new(30.0, 0.0), Size::new(0.0, 0.0)]);
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(30.0, 0.0), Size::new(0.0, 0.0)]);
         let dock = DockingLayout::new().with_sides(vec![DockSide::Left, DockSide::Fill]);
         let out = dock.layout(
             &style,

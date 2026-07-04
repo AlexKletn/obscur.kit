@@ -54,7 +54,10 @@ mod tests {
 
     #[test]
     fn default_is_blend() {
-        assert_eq!(TransitionInterruption::default(), TransitionInterruption::Blend);
+        assert_eq!(
+            TransitionInterruption::default(),
+            TransitionInterruption::Blend
+        );
     }
 
     #[test]

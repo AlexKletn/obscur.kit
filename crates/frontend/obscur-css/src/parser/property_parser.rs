@@ -83,7 +83,10 @@ impl PropertyParser {
         idx = skip_ws(tokens, idx + 1);
 
         // Colon.
-        if !matches!(tokens.get(idx).map(CssToken::kind), Some(CssTokenKind::Colon)) {
+        if !matches!(
+            tokens.get(idx).map(CssToken::kind),
+            Some(CssTokenKind::Colon)
+        ) {
             return Err(CssParseError::new(
                 CssParseErrorKind::ExpectedColon,
                 "expected ':' after property name",
@@ -226,17 +229,26 @@ mod tests {
 
     #[test]
     fn missing_colon_is_error() {
-        assert_eq!(parse("color red").unwrap_err().kind(), CssParseErrorKind::ExpectedColon);
+        assert_eq!(
+            parse("color red").unwrap_err().kind(),
+            CssParseErrorKind::ExpectedColon
+        );
     }
 
     #[test]
     fn missing_value_is_error() {
-        assert_eq!(parse("color:").unwrap_err().kind(), CssParseErrorKind::InvalidValue);
+        assert_eq!(
+            parse("color:").unwrap_err().kind(),
+            CssParseErrorKind::InvalidValue
+        );
     }
 
     #[test]
     fn missing_name_is_error() {
-        assert_eq!(parse(": red").unwrap_err().kind(), CssParseErrorKind::UnexpectedToken);
+        assert_eq!(
+            parse(": red").unwrap_err().kind(),
+            CssParseErrorKind::UnexpectedToken
+        );
     }
 
     #[test]

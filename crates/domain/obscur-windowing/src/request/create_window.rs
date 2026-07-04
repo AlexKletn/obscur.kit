@@ -98,8 +98,8 @@ mod tests {
     #[test]
     fn builders_set_fields() {
         let constraints = WindowConstraints::with_max(Size::new(400.0, 300.0));
-        let relation = WindowRelation::owned_by(WindowId::from_raw(9))
-            .with_modality(Modality::WindowModal);
+        let relation =
+            WindowRelation::owned_by(WindowId::from_raw(9)).with_modality(Modality::WindowModal);
         let req = CreateWindow::new(WindowProperties::default())
             .with_constraints(constraints)
             .with_relation(relation);

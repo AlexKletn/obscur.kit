@@ -112,10 +112,14 @@ mod tests {
     #[test]
     fn recoverability_follows_variant() {
         // Device loss follows the loss flag.
-        assert!(RendererError::DeviceLost(DeviceLoss::recoverable(DeviceLossReason::Reset))
-            .is_recoverable());
-        assert!(!RendererError::DeviceLost(DeviceLoss::fatal(DeviceLossReason::Removed))
-            .is_recoverable());
+        assert!(
+            RendererError::DeviceLost(DeviceLoss::recoverable(DeviceLossReason::Reset))
+                .is_recoverable()
+        );
+        assert!(
+            !RendererError::DeviceLost(DeviceLoss::fatal(DeviceLossReason::Removed))
+                .is_recoverable()
+        );
         // Unsupported effect is a fallback signal: always recoverable.
         assert!(RendererError::UnsupportedEffect("shadow".into()).is_recoverable());
         // The rest are terminal.

@@ -181,11 +181,7 @@ fn style_of(styles: &LayoutStyles, node: NodeId) -> LayoutStyle {
 ///
 /// A node absent from the tree contributes no children. Each child's style is
 /// resolved via [`style_of`] so the algorithm sees a complete descriptor.
-fn children_of(
-    tree: &RetainedTree,
-    styles: &LayoutStyles,
-    node: NodeId,
-) -> Vec<LayoutChild> {
+fn children_of(tree: &RetainedTree, styles: &LayoutStyles, node: NodeId) -> Vec<LayoutChild> {
     tree.get(node).map_or_else(Vec::new, |n| {
         n.children()
             .iter()
@@ -368,10 +364,7 @@ mod tests {
     #[test]
     fn mapping_reads_width_and_defaults_display_to_block() {
         let mut computed = ComputedStyle::new();
-        computed.set(
-            PropertyId::Width,
-            ComputedValue::length(Length::px(120.0)),
-        );
+        computed.set(PropertyId::Width, ComputedValue::length(Length::px(120.0)));
         let style = layout_style_from(&computed);
         assert_eq!(style.width, Dimension::Px(120.0));
         // Height absent -> Auto.

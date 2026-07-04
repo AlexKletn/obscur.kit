@@ -128,9 +128,10 @@ impl InvalidationRouter {
 
         if let Some(node) = inv.node() {
             if kind.needs_restyle()
-                && let Some(reason) = style_reason(inv.reason()) {
-                    style.invalidate(node, reason);
-                }
+                && let Some(reason) = style_reason(inv.reason())
+            {
+                style.invalidate(node, reason);
+            }
             if kind.needs_relayout() {
                 layout.invalidate(node, layout_reason(inv.reason()));
             }
@@ -236,7 +237,10 @@ mod tests {
         assert!(router.needs_layout());
         // TreeChanged has no single-node style reason mapping.
         assert!(!style.is_invalidated(n));
-        assert_eq!(layout.reason(n), Some(LayoutInvalidationReason::TreeChanged));
+        assert_eq!(
+            layout.reason(n),
+            Some(LayoutInvalidationReason::TreeChanged)
+        );
     }
 
     #[test]

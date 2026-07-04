@@ -150,17 +150,12 @@ mod tests {
         children.insert(root, vec![child]);
         children.insert(child, vec![grandchild]);
 
-        let order = StyleCoordinator::preorder(root, |id| {
-            children.get(&id).cloned().unwrap_or_default()
-        });
+        let order =
+            StyleCoordinator::preorder(root, |id| children.get(&id).cloned().unwrap_or_default());
 
         assert_eq!(
             order,
-            vec![
-                (root, None),
-                (child, Some(root)),
-                (grandchild, Some(child)),
-            ]
+            vec![(root, None), (child, Some(root)), (grandchild, Some(child)),]
         );
     }
 
@@ -172,9 +167,8 @@ mod tests {
         children.insert(root, vec![a, b]);
         children.insert(a, vec![a1]);
 
-        let order = StyleCoordinator::preorder(root, |id| {
-            children.get(&id).cloned().unwrap_or_default()
-        });
+        let order =
+            StyleCoordinator::preorder(root, |id| children.get(&id).cloned().unwrap_or_default());
 
         // Every parent appears before each of its children.
         let position = |target: NodeId| order.iter().position(|&(n, _)| n == target);
@@ -194,9 +188,8 @@ mod tests {
         children.insert(root, vec![child]);
         children.insert(child, vec![root]);
 
-        let order = StyleCoordinator::preorder(root, |id| {
-            children.get(&id).cloned().unwrap_or_default()
-        });
+        let order =
+            StyleCoordinator::preorder(root, |id| children.get(&id).cloned().unwrap_or_default());
 
         // Terminates and emits each node exactly once, parent-first.
         assert_eq!(order, vec![(root, None), (child, Some(root))]);
@@ -206,11 +199,7 @@ mod tests {
     fn inheritance_flows_down_parent_first() {
         // root -> child -> grandchild; `color` inherits by default.
         let (root, child, grandchild) = (node(1), node(2), node(3));
-        let order = vec![
-            (root, None),
-            (child, Some(root)),
-            (grandchild, Some(child)),
-        ];
+        let order = vec![(root, None), (child, Some(root)), (grandchild, Some(child))];
 
         let red = StyleColor::rgba(1.0, 0.0, 0.0, 1.0);
         let mut root_decls = ResolvedDeclarations::new();
@@ -242,6 +231,9 @@ mod tests {
         // Both nodes are resolved; the child gets defaults/inheritance.
         assert!(styles.contains_key(&child));
         // `opacity` is not inherited and defaults to its initial value 1.0.
-        assert_eq!(styles.get(&child).and_then(ComputedStyle::opacity), Some(1.0));
+        assert_eq!(
+            styles.get(&child).and_then(ComputedStyle::opacity),
+            Some(1.0)
+        );
     }
 }

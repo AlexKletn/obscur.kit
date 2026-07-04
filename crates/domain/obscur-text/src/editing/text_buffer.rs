@@ -249,10 +249,9 @@ impl TextBuffer {
             EditTransaction::new(range, removed, new_text, selection_before, selection_after);
 
         let coalesce = kind.is_coalescing()
-            && self
-                .undo
-                .last()
-                .is_some_and(|unit| unit.can_coalesce_with(kind) && Self::is_contiguous(unit, &edit, kind));
+            && self.undo.last().is_some_and(|unit| {
+                unit.can_coalesce_with(kind) && Self::is_contiguous(unit, &edit, kind)
+            });
 
         if coalesce {
             // `coalesce` implies the stack is non-empty.
@@ -294,7 +293,8 @@ impl TextBuffer {
     fn apply_edits_raw(&mut self, edits: &[EditTransaction]) {
         for edit in edits {
             let range = edit.range();
-            self.text.replace_range(range.start..range.end, edit.inserted());
+            self.text
+                .replace_range(range.start..range.end, edit.inserted());
         }
     }
 
@@ -319,12 +319,12 @@ impl TextBuffer {
                 EditDirection::Forward => self.next_word(offset),
             },
             // No layout: Line/Paragraph collapse to logical line boundaries.
-            NavigationUnit::Line
-            | NavigationUnit::Paragraph
-            | NavigationUnit::LineBoundary => match direction {
-                EditDirection::Backward => self.line_start(offset),
-                EditDirection::Forward => self.line_end(offset),
-            },
+            NavigationUnit::Line | NavigationUnit::Paragraph | NavigationUnit::LineBoundary => {
+                match direction {
+                    EditDirection::Backward => self.line_start(offset),
+                    EditDirection::Forward => self.line_end(offset),
+                }
+            }
             NavigationUnit::Document => match direction {
                 EditDirection::Backward => 0,
                 EditDirection::Forward => self.text.len(),
@@ -679,7 +679,11 @@ mod tests {
     fn move_without_extend_collapses() {
         let mut b = TextBuffer::from_text("hello");
         b.set_selection(TextSelection::new(0, 5));
-        b.apply(mov(NavigationUnit::Grapheme, EditDirection::Backward, false));
+        b.apply(mov(
+            NavigationUnit::Grapheme,
+            EditDirection::Backward,
+            false,
+        ));
         // Focus was 5, moves to 4, collapses.
         assert_eq!(b.selection(), TextSelection::caret(4));
         // Move does not touch history.

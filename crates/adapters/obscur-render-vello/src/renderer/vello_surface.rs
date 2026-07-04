@@ -66,21 +66,21 @@ impl VelloSurface {
         match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture)
             | wgpu::CurrentSurfaceTexture::Suboptimal(texture) => Ok(texture),
-            wgpu::CurrentSurfaceTexture::Timeout => {
-                Err(VelloRenderError::SurfaceLost("surface acquire timed out".into()))
-            }
+            wgpu::CurrentSurfaceTexture::Timeout => Err(VelloRenderError::SurfaceLost(
+                "surface acquire timed out".into(),
+            )),
             wgpu::CurrentSurfaceTexture::Occluded => {
                 Err(VelloRenderError::SurfaceLost("surface occluded".into()))
             }
-            wgpu::CurrentSurfaceTexture::Outdated => {
-                Err(VelloRenderError::SurfaceLost("surface configuration outdated".into()))
-            }
+            wgpu::CurrentSurfaceTexture::Outdated => Err(VelloRenderError::SurfaceLost(
+                "surface configuration outdated".into(),
+            )),
             wgpu::CurrentSurfaceTexture::Lost => {
                 Err(VelloRenderError::SurfaceLost("surface lost".into()))
             }
-            wgpu::CurrentSurfaceTexture::Validation => {
-                Err(VelloRenderError::SurfaceLost("surface validation error".into()))
-            }
+            wgpu::CurrentSurfaceTexture::Validation => Err(VelloRenderError::SurfaceLost(
+                "surface validation error".into(),
+            )),
         }
     }
 }

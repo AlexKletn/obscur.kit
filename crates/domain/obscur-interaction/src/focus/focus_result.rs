@@ -61,7 +61,10 @@ mod tests {
     #[test]
     fn focused_node_for_focused_and_unchanged() {
         assert_eq!(FocusResult::Focused(node(2)).focused_node(), Some(node(2)));
-        assert_eq!(FocusResult::Unchanged(node(3)).focused_node(), Some(node(3)));
+        assert_eq!(
+            FocusResult::Unchanged(node(3)).focused_node(),
+            Some(node(3))
+        );
         assert_eq!(FocusResult::Cleared.focused_node(), None);
         assert_eq!(FocusResult::Rejected(node(4)).focused_node(), None);
         assert_eq!(FocusResult::NoTarget.focused_node(), None);

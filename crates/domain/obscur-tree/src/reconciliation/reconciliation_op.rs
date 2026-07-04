@@ -90,7 +90,11 @@ mod tests {
         let id = NodeId::from_raw(1);
         let parent = NodeId::from_raw(2);
 
-        let insert = ReconciliationOp::Insert { id, parent, index: 0 };
+        let insert = ReconciliationOp::Insert {
+            id,
+            parent,
+            index: 0,
+        };
         assert!(insert.is_insert());
         assert_eq!(insert.id(), id);
 

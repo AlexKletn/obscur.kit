@@ -158,7 +158,9 @@ mod tests {
     #[test]
     fn read_with_non_matching_mime_is_empty() {
         let mut clipboard = MemoryClipboard::new();
-        clipboard.execute(ClipboardRequest::copy(TransferPayload::new(DataOffer::text("hi"))));
+        clipboard.execute(ClipboardRequest::copy(TransferPayload::new(
+            DataOffer::text("hi"),
+        )));
         assert_eq!(
             clipboard.execute(ClipboardRequest::read(vec![MimeType::image_png()])),
             ClipboardResult::Empty
@@ -173,7 +175,9 @@ mod tests {
     #[test]
     fn clear_empties_so_subsequent_read_is_empty() {
         let mut clipboard = MemoryClipboard::new();
-        clipboard.execute(ClipboardRequest::copy(TransferPayload::new(DataOffer::text("hi"))));
+        clipboard.execute(ClipboardRequest::copy(TransferPayload::new(
+            DataOffer::text("hi"),
+        )));
         assert_eq!(
             clipboard.execute(ClipboardRequest::clear()),
             ClipboardResult::Cleared

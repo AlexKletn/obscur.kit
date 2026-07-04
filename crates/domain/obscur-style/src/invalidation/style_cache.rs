@@ -168,9 +168,17 @@ mod tests {
         let mut cache = StyleCache::new();
         cache.insert(node(1), VersionStamp::from_raw(5), style_with_opacity(0.5));
         // A newer requested version does not match the stored one.
-        assert!(cache.get_versioned(node(1), VersionStamp::from_raw(6)).is_none());
+        assert!(
+            cache
+                .get_versioned(node(1), VersionStamp::from_raw(6))
+                .is_none()
+        );
         // An older one misses too.
-        assert!(cache.get_versioned(node(1), VersionStamp::from_raw(4)).is_none());
+        assert!(
+            cache
+                .get_versioned(node(1), VersionStamp::from_raw(4))
+                .is_none()
+        );
         // The unversioned accessor still hits.
         assert!(cache.get(node(1)).is_some());
     }
@@ -183,7 +191,11 @@ mod tests {
         assert!(cache.is_empty());
         assert!(!cache.contains(node(1)));
         assert!(cache.get(node(1)).is_none());
-        assert!(cache.get_versioned(node(1), VersionStamp::from_raw(1)).is_none());
+        assert!(
+            cache
+                .get_versioned(node(1), VersionStamp::from_raw(1))
+                .is_none()
+        );
     }
 
     #[test]

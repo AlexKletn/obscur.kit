@@ -58,7 +58,10 @@ mod tests {
 
     #[test]
     fn accessors_expose_parts() {
-        let matches = vec![IdentityMatch::Create, IdentityMatch::Reuse(NodeId::from_raw(1))];
+        let matches = vec![
+            IdentityMatch::Create,
+            IdentityMatch::Reuse(NodeId::from_raw(1)),
+        ];
         let removed = vec![NodeId::from_raw(2)];
         let matching = ChildMatching::new(matches.clone(), removed.clone());
         assert_eq!(matching.matches(), matches.as_slice());

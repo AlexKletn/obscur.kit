@@ -81,6 +81,10 @@ mod tests {
         let ev = CompositionEvent::Commit(Box::from("final"));
         assert_eq!(ev.committed_text(), Some("final"));
         assert!(CompositionEvent::Start.committed_text().is_none());
-        assert!(CompositionEvent::Update(Preedit::new("x")).committed_text().is_none());
+        assert!(
+            CompositionEvent::Update(Preedit::new("x"))
+                .committed_text()
+                .is_none()
+        );
     }
 }

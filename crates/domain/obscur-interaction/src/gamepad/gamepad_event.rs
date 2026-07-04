@@ -169,14 +169,14 @@ mod tests {
 
     #[test]
     fn button_reports_button_for_button_events() {
-        let down = GamepadEvent::new(
-            pad(),
-            GamepadEventKind::ButtonDown(GamepadButton::South),
-        );
+        let down = GamepadEvent::new(pad(), GamepadEventKind::ButtonDown(GamepadButton::South));
         let up = GamepadEvent::new(pad(), GamepadEventKind::ButtonUp(GamepadButton::North));
         assert_eq!(down.button(), Some(GamepadButton::South));
         assert_eq!(up.button(), Some(GamepadButton::North));
-        assert_eq!(down.kind(), GamepadEventKind::ButtonDown(GamepadButton::South));
+        assert_eq!(
+            down.kind(),
+            GamepadEventKind::ButtonDown(GamepadButton::South)
+        );
     }
 
     #[test]
@@ -201,10 +201,9 @@ mod tests {
     fn is_connection_change_for_connect_disconnect() {
         assert!(GamepadEvent::new(pad(), GamepadEventKind::Connected).is_connection_change());
         assert!(GamepadEvent::new(pad(), GamepadEventKind::Disconnected).is_connection_change());
-        assert!(!GamepadEvent::new(
-            pad(),
-            GamepadEventKind::ButtonDown(GamepadButton::South)
-        )
-        .is_connection_change());
+        assert!(
+            !GamepadEvent::new(pad(), GamepadEventKind::ButtonDown(GamepadButton::South))
+                .is_connection_change()
+        );
     }
 }

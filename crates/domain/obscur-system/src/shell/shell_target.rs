@@ -141,10 +141,7 @@ mod tests {
 
     #[test]
     fn as_uri_returns_only_for_uri_targets() {
-        assert_eq!(
-            ShellTarget::uri("https://x").as_uri(),
-            Some("https://x")
-        );
+        assert_eq!(ShellTarget::uri("https://x").as_uri(), Some("https://x"));
         assert_eq!(ShellTarget::document("d").as_uri(), None);
         assert_eq!(ShellTarget::file(handle()).as_uri(), None);
     }

@@ -224,8 +224,10 @@ mod tests {
 
     #[test]
     fn stub_routes_return_canned_response() {
-        let mut service = StubNetworkService::new()
-            .route("https://example.com/a", NetworkResponse::new(200, &b"A"[..]));
+        let mut service = StubNetworkService::new().route(
+            "https://example.com/a",
+            NetworkResponse::new(200, &b"A"[..]),
+        );
         let response = service
             .fetch(NetworkRequest::get("https://example.com/a"))
             .expect("routed url");
@@ -236,8 +238,7 @@ mod tests {
 
     #[test]
     fn stub_records_requests() {
-        let mut service = StubNetworkService::new()
-            .route("u", NetworkResponse::new(200, &b""[..]));
+        let mut service = StubNetworkService::new().route("u", NetworkResponse::new(200, &b""[..]));
         let _ = service.fetch(NetworkRequest::get("u"));
         let _ = service.fetch(NetworkRequest::post("u", &b"body"[..]));
         assert_eq!(service.requests().len(), 2);
@@ -258,8 +259,8 @@ mod tests {
 
     #[test]
     fn fetch_with_credential_delegates_to_fetch() {
-        let mut service = StubNetworkService::new()
-            .route("u", NetworkResponse::new(200, &b"ok"[..]));
+        let mut service =
+            StubNetworkService::new().route("u", NetworkResponse::new(200, &b"ok"[..]));
         let credential = CredentialHandle::bearer("host-ref");
         let response = service
             .fetch_with_credential(NetworkRequest::get("u"), &credential)

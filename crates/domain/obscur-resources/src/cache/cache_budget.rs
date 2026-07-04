@@ -122,13 +122,15 @@ impl CacheBudget {
             return false;
         }
         if let Some(max) = self.max_bytes
-            && current_bytes.saturating_add(incoming_bytes) > max {
-                return false;
-            }
+            && current_bytes.saturating_add(incoming_bytes) > max
+        {
+            return false;
+        }
         if let Some(max) = self.max_entries
-            && current_entries.saturating_add(1) > max {
-                return false;
-            }
+            && current_entries.saturating_add(1) > max
+        {
+            return false;
+        }
         true
     }
 
@@ -141,13 +143,15 @@ impl CacheBudget {
     #[must_use]
     pub const fn exceeds(&self, current_bytes: u64, current_entries: usize) -> bool {
         if let Some(max) = self.max_bytes
-            && current_bytes > max {
-                return true;
-            }
+            && current_bytes > max
+        {
+            return true;
+        }
         if let Some(max) = self.max_entries
-            && current_entries > max {
-                return true;
-            }
+            && current_entries > max
+        {
+            return true;
+        }
         false
     }
 }

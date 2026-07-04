@@ -278,7 +278,10 @@ impl Menu {
             .collect();
         let node = ViewNode::element(Self::COMPONENT_ID)
             .with_prop(ViewProperty::new(Self::PROP_ROLE, ViewValue::from("menu")))
-            .with_prop(ViewProperty::new(Self::PROP_OPEN, ViewValue::Bool(self.open)))
+            .with_prop(ViewProperty::new(
+                Self::PROP_OPEN,
+                ViewValue::Bool(self.open),
+            ))
             .with_prop(ViewProperty::new(
                 Self::PROP_HIGHLIGHTED,
                 ViewValue::Int(highlighted),

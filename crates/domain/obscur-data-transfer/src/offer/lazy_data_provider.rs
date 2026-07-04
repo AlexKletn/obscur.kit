@@ -75,10 +75,7 @@ impl LazyDataProvider for StaticDataProvider {
     }
 
     fn available_mimes(&self) -> Vec<MimeType> {
-        self.entries
-            .iter()
-            .map(|(mime, _)| mime.clone())
-            .collect()
+        self.entries.iter().map(|(mime, _)| mime.clone()).collect()
     }
 }
 

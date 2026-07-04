@@ -90,7 +90,11 @@ impl TypeChecker {
         if value.is_assignable_to(target) {
             Ok(())
         } else {
-            Err(TypeError::mismatch(target.clone(), value.value_type().clone(), offset))
+            Err(TypeError::mismatch(
+                target.clone(),
+                value.value_type().clone(),
+                offset,
+            ))
         }
     }
 

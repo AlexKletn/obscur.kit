@@ -206,10 +206,12 @@ mod tests {
     #[test]
     fn is_actionable_requires_focusable_not_disabled() {
         assert!(SemanticState::new().focusable(true).is_actionable());
-        assert!(!SemanticState::new()
-            .focusable(true)
-            .disabled(true)
-            .is_actionable());
+        assert!(
+            !SemanticState::new()
+                .focusable(true)
+                .disabled(true)
+                .is_actionable()
+        );
         assert!(!SemanticState::new().is_actionable());
     }
 

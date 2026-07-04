@@ -206,7 +206,10 @@ mod tests {
         assert_eq!(one("transition: width 1s ease-in").easing, Easing::EaseIn);
         assert_eq!(one("transition: width 1s ease-out").easing, Easing::EaseOut);
         assert_eq!(one("transition: width 1s ease").easing, Easing::EaseInOut);
-        assert_eq!(one("transition: width 1s ease-in-out").easing, Easing::EaseInOut);
+        assert_eq!(
+            one("transition: width 1s ease-in-out").easing,
+            Easing::EaseInOut
+        );
     }
 
     #[test]

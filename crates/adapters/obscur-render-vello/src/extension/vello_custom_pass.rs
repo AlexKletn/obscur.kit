@@ -93,9 +93,6 @@ mod tests {
     fn equality_considers_name_and_device_requirement() {
         assert_eq!(VelloCustomPass::new("a"), VelloCustomPass::new("a"));
         assert_ne!(VelloCustomPass::new("a"), VelloCustomPass::new("b"));
-        assert_ne!(
-            VelloCustomPass::new("a"),
-            VelloCustomPass::device_free("a")
-        );
+        assert_ne!(VelloCustomPass::new("a"), VelloCustomPass::device_free("a"));
     }
 }

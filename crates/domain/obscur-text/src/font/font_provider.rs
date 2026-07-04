@@ -155,9 +155,11 @@ mod tests {
     #[test]
     fn resolve_unknown_family_is_none() {
         let provider = MockFontProvider::new();
-        assert!(provider
-            .resolve(&FontFamily::named("Ghost"), &FontAttributes::new())
-            .is_none());
+        assert!(
+            provider
+                .resolve(&FontFamily::named("Ghost"), &FontAttributes::new())
+                .is_none()
+        );
     }
 
     #[test]

@@ -74,12 +74,7 @@ impl IntrinsicMeasure for MockIntrinsicMeasure {
     /// Returns the node's natural size (registered or default) clamped into
     /// `constraints` via [`BoxConstraints::constrain`]. The environment is
     /// unused: the mock's sizes are fixed regardless of scale or viewport.
-    fn measure(
-        &self,
-        node: NodeId,
-        constraints: BoxConstraints,
-        _env: &LayoutEnvironment,
-    ) -> Size {
+    fn measure(&self, node: NodeId, constraints: BoxConstraints, _env: &LayoutEnvironment) -> Size {
         constraints.constrain(self.natural_size(node))
     }
 
@@ -128,10 +123,7 @@ mod tests {
         let node = NodeId::from_raw(42);
         mock.set(node, Size::new(50.0, 20.0));
         let unbounded = BoxConstraints::loose(Size::new(1000.0, 1000.0));
-        assert_eq!(
-            mock.measure(node, unbounded, &env()),
-            Size::new(50.0, 20.0)
-        );
+        assert_eq!(mock.measure(node, unbounded, &env()), Size::new(50.0, 20.0));
     }
 
     #[test]

@@ -64,8 +64,14 @@ mod tests {
 
     #[test]
     fn opposite_flips_each_direction() {
-        assert_eq!(NavigationDirection::Up.opposite(), NavigationDirection::Down);
-        assert_eq!(NavigationDirection::Down.opposite(), NavigationDirection::Up);
+        assert_eq!(
+            NavigationDirection::Up.opposite(),
+            NavigationDirection::Down
+        );
+        assert_eq!(
+            NavigationDirection::Down.opposite(),
+            NavigationDirection::Up
+        );
         assert_eq!(
             NavigationDirection::Left.opposite(),
             NavigationDirection::Right

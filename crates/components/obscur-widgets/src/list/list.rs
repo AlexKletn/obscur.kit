@@ -200,7 +200,10 @@ impl List {
             .collect();
         let node = ViewNode::element(Self::COMPONENT_ID)
             .with_prop(ViewProperty::new(Self::PROP_ROLE, ViewValue::from("list")))
-            .with_prop(ViewProperty::new(Self::PROP_MULTI, ViewValue::Bool(self.multi)))
+            .with_prop(ViewProperty::new(
+                Self::PROP_MULTI,
+                ViewValue::Bool(self.multi),
+            ))
             .with_children(ViewFragment::from_nodes(children));
         View::single(node)
     }

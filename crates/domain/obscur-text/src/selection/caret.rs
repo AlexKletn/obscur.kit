@@ -86,7 +86,10 @@ mod tests {
             caret.with_affinity(CaretAffinity::Upstream),
             Caret::new(5, CaretAffinity::Upstream)
         );
-        assert_eq!(caret.with_offset(9), Caret::new(9, CaretAffinity::Downstream));
+        assert_eq!(
+            caret.with_offset(9),
+            Caret::new(9, CaretAffinity::Downstream)
+        );
     }
 
     #[test]
@@ -97,10 +100,7 @@ mod tests {
         // Underflow saturates to zero, affinity unchanged.
         assert_eq!(caret.shifted(-10), Caret::new(0, CaretAffinity::Upstream));
         // Overflow saturates to usize::MAX.
-        assert_eq!(
-            Caret::at(usize::MAX - 1).shifted(5),
-            Caret::at(usize::MAX)
-        );
+        assert_eq!(Caret::at(usize::MAX - 1).shifted(5), Caret::at(usize::MAX));
     }
 
     #[test]

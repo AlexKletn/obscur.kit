@@ -94,9 +94,6 @@ mod tests {
         let instance = factory.create_instance(InstanceId::from_raw(1));
         assert_eq!(instance.id(), InstanceId::from_raw(1));
         assert_eq!(instance.component_id(), ComponentId::from_raw(3));
-        assert_eq!(
-            instance.state(),
-            crate::lifecycle::LifecycleState::Created
-        );
+        assert_eq!(instance.state(), crate::lifecycle::LifecycleState::Created);
     }
 }

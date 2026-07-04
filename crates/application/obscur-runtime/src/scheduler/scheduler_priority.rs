@@ -54,9 +54,9 @@ impl SchedulerPriority {
             FrameReason::UiCommit => Self::Commit,
             // Animation, a window/surface change, and an external render request
             // all drive layout and paint for the current frame.
-            FrameReason::Animation
-            | FrameReason::WindowChange
-            | FrameReason::ExternalRender => Self::CurrentFrame,
+            FrameReason::Animation | FrameReason::WindowChange | FrameReason::ExternalRender => {
+                Self::CurrentFrame
+            }
             FrameReason::ResourceCompletion => Self::ResourceCompletion,
             FrameReason::DiagnosticsCapture => Self::Diagnostics,
         }

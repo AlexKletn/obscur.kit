@@ -126,12 +126,16 @@ mod tests {
 
     #[test]
     fn is_silent_for_zero_intensity_or_duration() {
-        assert!(HapticRequest::new(HapticPattern::Click)
-            .with_intensity(0.0)
-            .is_silent());
-        assert!(HapticRequest::new(HapticPattern::Click)
-            .with_duration(0)
-            .is_silent());
+        assert!(
+            HapticRequest::new(HapticPattern::Click)
+                .with_intensity(0.0)
+                .is_silent()
+        );
+        assert!(
+            HapticRequest::new(HapticPattern::Click)
+                .with_duration(0)
+                .is_silent()
+        );
         assert!(!HapticRequest::new(HapticPattern::Click).is_silent());
     }
 }

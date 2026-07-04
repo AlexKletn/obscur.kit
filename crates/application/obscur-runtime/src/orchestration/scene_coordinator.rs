@@ -104,10 +104,10 @@ impl SceneCoordinator {
             if let Some(color) = background_color_of(computed, node) {
                 // Skip fully transparent backgrounds: they paint nothing.
                 if color.a > 0.0
-                    && let Some(layout_box) = boxes.get(&node) {
-                        builder
-                            .fill_rect(layout_box.bounds, Brush::solid(scene_color_from(color)));
-                    }
+                    && let Some(layout_box) = boxes.get(&node)
+                {
+                    builder.fill_rect(layout_box.bounds, Brush::solid(scene_color_from(color)));
+                }
             }
 
             if let Some(retained) = tree.get(node) {
@@ -241,10 +241,7 @@ mod tests {
     /// Builds a `ComputedStyle` carrying a single `background-color`.
     fn with_background(color: StyleColor) -> ComputedStyle {
         let mut style = ComputedStyle::new();
-        style.set(
-            PropertyId::BackgroundColor,
-            ComputedValue::color(color),
-        );
+        style.set(PropertyId::BackgroundColor, ComputedValue::color(color));
         style
     }
 
@@ -315,8 +312,14 @@ mod tests {
             })
             .collect();
         assert_eq!(rects.len(), 2);
-        assert_eq!(rects[0], Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 100.0)));
-        assert_eq!(rects[1], Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 50.0)));
+        assert_eq!(
+            rects[0],
+            Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 100.0))
+        );
+        assert_eq!(
+            rects[1],
+            Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 50.0))
+        );
     }
 
     #[test]

@@ -115,7 +115,9 @@ impl ResourceCompiler for NullCompiler {
         _kind: ResourceKind,
         _decoded: &DecodedResource,
     ) -> Result<CompiledResource, ResourceError> {
-        Err(ResourceError::CompileFailed("no compiler registered".into()))
+        Err(ResourceError::CompileFailed(
+            "no compiler registered".into(),
+        ))
     }
 }
 
@@ -160,7 +162,9 @@ mod tests {
         let compiler = NullCompiler::new();
         assert_eq!(
             compiler.compile(ResourceKind::Image, &sample_decoded()),
-            Err(ResourceError::CompileFailed("no compiler registered".into()))
+            Err(ResourceError::CompileFailed(
+                "no compiler registered".into()
+            ))
         );
     }
 

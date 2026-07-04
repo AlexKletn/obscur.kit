@@ -175,7 +175,10 @@ mod tests {
         let mut old = ComputedStyle::new();
         old.set(PropertyId::Color, ComputedValue::color(StyleColor::BLACK));
         let mut new = ComputedStyle::new();
-        new.set(PropertyId::Color, ComputedValue::color(StyleColor::TRANSPARENT));
+        new.set(
+            PropertyId::Color,
+            ComputedValue::color(StyleColor::TRANSPARENT),
+        );
         StyleDiff::between(&old, &new)
     }
 
@@ -218,7 +221,10 @@ mod tests {
     #[test]
     fn non_inheriting_node_not_affected_by_inherited_change() {
         let dep = StyleDependency::new().with_inherits_from_parent(false);
-        assert_eq!(dep.affected_by_parent_change(&diff_changing_inherited()), None);
+        assert_eq!(
+            dep.affected_by_parent_change(&diff_changing_inherited()),
+            None
+        );
     }
 
     #[test]
@@ -245,7 +251,10 @@ mod tests {
         old.set(PropertyId::Color, ComputedValue::color(StyleColor::BLACK));
         old.set_custom_property(name, PropertyValue::Number(1.0));
         let mut new = ComputedStyle::new();
-        new.set(PropertyId::Color, ComputedValue::color(StyleColor::TRANSPARENT));
+        new.set(
+            PropertyId::Color,
+            ComputedValue::color(StyleColor::TRANSPARENT),
+        );
         new.set_custom_property(name, PropertyValue::Number(2.0));
         let diff = StyleDiff::between(&old, &new);
 

@@ -87,7 +87,10 @@ mod tests {
     #[test]
     fn to_accesskit_maps_supported_actions() {
         let c = ActionConverter::new();
-        assert_eq!(c.to_accesskit(SemanticAction::Activate), Some(Action::Click));
+        assert_eq!(
+            c.to_accesskit(SemanticAction::Activate),
+            Some(Action::Click)
+        );
         assert_eq!(c.to_accesskit(SemanticAction::Focus), Some(Action::Focus));
         assert_eq!(
             c.to_accesskit(SemanticAction::Increment),

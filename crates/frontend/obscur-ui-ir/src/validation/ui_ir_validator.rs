@@ -105,7 +105,11 @@ mod tests {
             .with_child(UiIrNode::element(3, "span").with_child(UiIrNode::text(4, "world")));
         let doc = UiIrDocument::new(root);
         let result = UiIrValidator::new().validate(&doc);
-        assert!(result.is_valid(), "unexpected errors: {:?}", result.errors());
+        assert!(
+            result.is_valid(),
+            "unexpected errors: {:?}",
+            result.errors()
+        );
     }
 
     #[test]
@@ -114,9 +118,11 @@ mod tests {
         let doc = UiIrDocument::new(root);
         let result = UiIrValidator::new().validate(&doc);
         assert!(!result.is_valid());
-        assert!(result
-            .errors()
-            .contains(&UiIrValidationError::DuplicateNodeId(1)));
+        assert!(
+            result
+                .errors()
+                .contains(&UiIrValidationError::DuplicateNodeId(1))
+        );
     }
 
     #[test]
@@ -131,21 +137,26 @@ mod tests {
         let root = UiIrNode::text(1, "leaf").with_child(UiIrNode::text(2, "child"));
         let doc = UiIrDocument::new(root);
         let result = UiIrValidator::new().validate(&doc);
-        assert!(result
-            .errors()
-            .contains(&UiIrValidationError::TextNodeHasChildren(1)));
+        assert!(
+            result
+                .errors()
+                .contains(&UiIrValidationError::TextNodeHasChildren(1))
+        );
     }
 
     #[test]
     fn empty_binding_path_is_reported() {
-        let root =
-            UiIrNode::element(1, "div").with_property(UiIrProperty::binding("title", ""));
+        let root = UiIrNode::element(1, "div").with_property(UiIrProperty::binding("title", ""));
         let doc = UiIrDocument::new(root);
         let result = UiIrValidator::new().validate(&doc);
-        assert!(result.errors().contains(&UiIrValidationError::EmptyBindingPath {
-            node: 1,
-            property: "title".into(),
-        }));
+        assert!(
+            result
+                .errors()
+                .contains(&UiIrValidationError::EmptyBindingPath {
+                    node: 1,
+                    property: "title".into(),
+                })
+        );
     }
 
     #[test]
@@ -153,8 +164,10 @@ mod tests {
         use obscur_capability::CapabilityId;
         let doc = UiIrDocument::new(UiIrNode::element(1, "div")).requiring(CapabilityId::new(""));
         let result = UiIrValidator::new().validate(&doc);
-        assert!(result
-            .errors()
-            .contains(&UiIrValidationError::UndeclaredCapability(Box::from(""))));
+        assert!(
+            result
+                .errors()
+                .contains(&UiIrValidationError::UndeclaredCapability(Box::from("")))
+        );
     }
 }

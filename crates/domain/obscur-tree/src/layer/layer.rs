@@ -115,7 +115,11 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         let layer = Layer::new(LayerId::from_raw(1), root, 0);
         assert!(layer.establish(&mut tree));
-        assert!(tree.get(root).expect("root live").has_flags(NodeFlags::LAYER_ROOT));
+        assert!(
+            tree.get(root)
+                .expect("root live")
+                .has_flags(NodeFlags::LAYER_ROOT)
+        );
     }
 
     #[test]

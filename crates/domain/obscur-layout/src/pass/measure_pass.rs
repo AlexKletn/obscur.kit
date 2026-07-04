@@ -51,7 +51,10 @@ mod tests {
     #[test]
     fn constrain_clamps_desired_into_constraints() {
         let pass = MeasurePass::new(BoxConstraints::loose(Size::new(100.0, 50.0)));
-        assert_eq!(pass.constrain(Size::new(200.0, 30.0)), Size::new(100.0, 30.0));
+        assert_eq!(
+            pass.constrain(Size::new(200.0, 30.0)),
+            Size::new(100.0, 30.0)
+        );
     }
 
     #[test]

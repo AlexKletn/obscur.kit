@@ -289,7 +289,10 @@ mod tests {
         assert!(tree.remove(first).is_some());
         // Next alloc reuses the freed slot (same index, higher generation).
         let second = tree.alloc(element_kind(2));
-        assert_eq!(first.raw() & u64::from(u32::MAX), second.raw() & u64::from(u32::MAX));
+        assert_eq!(
+            first.raw() & u64::from(u32::MAX),
+            second.raw() & u64::from(u32::MAX)
+        );
         assert_ne!(first, second);
         // The stale id must not resolve to the new occupant.
         assert!(tree.get(first).is_none());
@@ -305,7 +308,10 @@ mod tests {
         let node = tree.get_mut(id).expect("live");
         node.push_child(NodeId::from_raw(999));
         assert_eq!(tree.version(), v);
-        assert_eq!(tree.get(id).expect("live").children(), &[NodeId::from_raw(999)]);
+        assert_eq!(
+            tree.get(id).expect("live").children(),
+            &[NodeId::from_raw(999)]
+        );
     }
 
     #[test]

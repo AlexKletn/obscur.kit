@@ -292,10 +292,12 @@ mod tests {
             Some(kids[1])
         );
 
-        assert!(container_node
-            .children()
-            .iter()
-            .all(|c| tree.get(*c).is_some()));
+        assert!(
+            container_node
+                .children()
+                .iter()
+                .all(|c| tree.get(*c).is_some())
+        );
         assert!(TreeElement::new(&tree, container_id).has_children());
         assert!(!first.has_children());
     }

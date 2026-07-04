@@ -130,8 +130,14 @@ impl Dialog {
             return View::empty();
         }
         let dialog_element = ViewNode::element(Self::COMPONENT_ID)
-            .with_prop(ViewProperty::new(Self::PROP_ROLE, ViewValue::from("dialog")))
-            .with_prop(ViewProperty::new(Self::PROP_MODAL, ViewValue::Bool(self.modal)))
+            .with_prop(ViewProperty::new(
+                Self::PROP_ROLE,
+                ViewValue::from("dialog"),
+            ))
+            .with_prop(ViewProperty::new(
+                Self::PROP_MODAL,
+                ViewValue::Bool(self.modal),
+            ))
             .with_prop(ViewProperty::new(
                 Self::PROP_TITLE,
                 ViewValue::Text(self.title.clone()),

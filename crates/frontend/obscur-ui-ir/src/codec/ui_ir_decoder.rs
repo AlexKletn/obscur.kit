@@ -24,9 +24,7 @@
 use obscur_capability::CapabilityId;
 
 use crate::codec::ui_ir_encoder::{FORMAT_VERSION, MAGIC};
-use crate::document::{
-    UiIrDocument, UiIrEvent, UiIrExpression, UiIrNode, UiIrProperty, UiIrValue,
-};
+use crate::document::{UiIrDocument, UiIrEvent, UiIrExpression, UiIrNode, UiIrProperty, UiIrValue};
 use crate::version::UiIrVersion;
 
 /// A fault encountered while decoding a UI IR byte stream (spec §2.5).
@@ -224,7 +222,10 @@ impl<'a> Cursor<'a> {
 
     /// Returns the next `n` bytes, advancing past them.
     fn take(&mut self, n: usize) -> Result<&'a [u8], UiIrDecodeError> {
-        let end = self.pos.checked_add(n).ok_or(UiIrDecodeError::UnexpectedEof)?;
+        let end = self
+            .pos
+            .checked_add(n)
+            .ok_or(UiIrDecodeError::UnexpectedEof)?;
         let slice = self
             .data
             .get(self.pos..end)
@@ -319,9 +320,10 @@ mod tests {
 
     #[test]
     fn float_value_round_trips_exactly() {
-        let doc = UiIrDocument::new(UiIrNode::element(1, "x").with_property(
-            UiIrProperty::new("f", UiIrExpression::literal(UiIrValue::Float(1.5))),
-        ));
+        let doc = UiIrDocument::new(UiIrNode::element(1, "x").with_property(UiIrProperty::new(
+            "f",
+            UiIrExpression::literal(UiIrValue::Float(1.5)),
+        )));
         let bytes = UiIrEncoder::new().encode(&doc);
         let back = UiIrDecoder::new().decode(&bytes).unwrap();
         assert_eq!(back, doc);

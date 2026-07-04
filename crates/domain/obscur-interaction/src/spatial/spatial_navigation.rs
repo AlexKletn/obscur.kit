@@ -172,10 +172,7 @@ mod tests {
     fn find_next_empty_is_none() {
         let nav = SpatialNavigation::new();
         let from = rect(0.0, 0.0, 10.0, 10.0);
-        assert_eq!(
-            nav.find_next(from, &[], NavigationDirection::Right),
-            None
-        );
+        assert_eq!(nav.find_next(from, &[], NavigationDirection::Right), None);
     }
 
     #[test]

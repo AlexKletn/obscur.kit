@@ -137,7 +137,10 @@ mod tests {
         table.push_scope();
         // Defined in the outer scope, visible from the inner one.
         assert!(table.is_defined("count"));
-        assert_eq!(table.lookup("count").map(Symbol::kind), Some(&SymbolKind::Prop));
+        assert_eq!(
+            table.lookup("count").map(Symbol::kind),
+            Some(&SymbolKind::Prop)
+        );
         // Inner-scope binding is not visible after popping back out.
         table.define(Symbol::loop_local("item"));
         assert!(table.is_defined("item"));

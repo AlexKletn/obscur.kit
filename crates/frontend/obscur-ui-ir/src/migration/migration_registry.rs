@@ -120,7 +120,7 @@ impl MigrationRegistry {
                     return Err(MigrationError::NoPath {
                         from: current,
                         to: target,
-                    })
+                    });
                 }
             }
         }

@@ -139,10 +139,10 @@ impl<'t> Inner<'t> {
     }
 
     fn err(&self, message: &str) -> CssParseError {
-        let span = self
-            .tokens
-            .get(self.pos)
-            .map_or_else(|| crate::source::SourceSpan::empty(self.eof), CssToken::span);
+        let span = self.tokens.get(self.pos).map_or_else(
+            || crate::source::SourceSpan::empty(self.eof),
+            CssToken::span,
+        );
         CssParseError::new(CssParseErrorKind::InvalidAtRule, message, span)
     }
 
@@ -317,7 +317,9 @@ impl<'t> Inner<'t> {
 
 /// Returns whether an identifier is a media-condition connector keyword.
 fn is_connector(id: &str) -> bool {
-    id.eq_ignore_ascii_case("and") || id.eq_ignore_ascii_case("or") || id.eq_ignore_ascii_case("not")
+    id.eq_ignore_ascii_case("and")
+        || id.eq_ignore_ascii_case("or")
+        || id.eq_ignore_ascii_case("not")
 }
 
 #[cfg(test)]
@@ -423,11 +425,17 @@ mod tests {
 
     #[test]
     fn missing_feature_name_errors() {
-        assert_eq!(parse("(: 600px)").unwrap_err().kind(), CssParseErrorKind::InvalidAtRule);
+        assert_eq!(
+            parse("(: 600px)").unwrap_err().kind(),
+            CssParseErrorKind::InvalidAtRule
+        );
     }
 
     #[test]
     fn unterminated_feature_errors() {
-        assert_eq!(parse("(min-width: 600px").unwrap_err().kind(), CssParseErrorKind::InvalidAtRule);
+        assert_eq!(
+            parse("(min-width: 600px").unwrap_err().kind(),
+            CssParseErrorKind::InvalidAtRule
+        );
     }
 }

@@ -194,7 +194,10 @@ mod tests {
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].node(), node(2)); // higher z_order first
         assert_eq!(hits[1].node(), node(1));
-        assert_eq!(idx.topmost_at(Point::new(5.0, 5.0)).unwrap().node(), node(2));
+        assert_eq!(
+            idx.topmost_at(Point::new(5.0, 5.0)).unwrap().node(),
+            node(2)
+        );
     }
 
     #[test]

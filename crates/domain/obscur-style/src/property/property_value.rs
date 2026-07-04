@@ -107,6 +107,9 @@ mod tests {
     #[test]
     fn custom_ref_carries_symbol() {
         let name = InternedSymbol::from_raw(42);
-        assert_eq!(PropertyValue::CustomRef(name), PropertyValue::CustomRef(name));
+        assert_eq!(
+            PropertyValue::CustomRef(name),
+            PropertyValue::CustomRef(name)
+        );
     }
 }

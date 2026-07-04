@@ -129,14 +129,7 @@ mod tests {
 
     #[test]
     fn is_balanced_delegates_to_snapshot() {
-        let result = FrameResult::new(
-            FrameId::FIRST,
-            empty_snapshot(),
-            false,
-            false,
-            false,
-            true,
-        );
+        let result = FrameResult::new(FrameId::FIRST, empty_snapshot(), false, false, false, true);
         // An empty display list is trivially balanced.
         assert_eq!(result.is_balanced(), result.snapshot().is_balanced());
         assert!(result.is_balanced());

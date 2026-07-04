@@ -70,9 +70,7 @@ mod tests {
     use obscur_style::cascade::CascadeOrigin;
     use obscur_style::matching::{BlockDeclaration, StyleRule};
     use obscur_style::property::{PropertyId, PropertyValue, StyleColor};
-    use obscur_style::selector::{
-        ComplexSelector, CompoundSelector, SelectorList, SimpleSelector,
-    };
+    use obscur_style::selector::{ComplexSelector, CompoundSelector, SelectorList, SimpleSelector};
     use obscur_tree::reconciliation::Reconciler;
     use obscur_view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
@@ -94,10 +92,7 @@ mod tests {
             CascadeOrigin::GlobalApp,
             vec![StyleRule::new(
                 class_selectors("counter"),
-                vec![BlockDeclaration::normal(
-                    PropertyId::BackgroundColor,
-                    red(),
-                )],
+                vec![BlockDeclaration::normal(PropertyId::BackgroundColor, red())],
             )],
         )
     }
@@ -110,22 +105,14 @@ mod tests {
 
     #[test]
     fn matches_class_and_records_background() {
-        let view = View::from_fragment(ViewFragment::from_nodes(vec![ViewNode::element(
-            ComponentId::from_raw(10),
-        )
-        .with_prop(ViewProperty::new(
-            CLASS,
-            ViewValue::Text("counter".into()),
-        ))]));
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(10))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into()))),
+        ]));
         let tree = reconcile(&view);
-        let child = tree
-            .get(tree.root().unwrap())
-            .unwrap()
-            .children()
-            .to_vec()[0];
+        let child = tree.get(tree.root().unwrap()).unwrap().children().to_vec()[0];
 
-        let inputs =
-            StyleMatchingCoordinator::new().match_single(&tree, &counter_sheet());
+        let inputs = StyleMatchingCoordinator::new().match_single(&tree, &counter_sheet());
 
         assert_eq!(
             inputs.cascaded_for(child).get(PropertyId::BackgroundColor),
@@ -137,22 +124,14 @@ mod tests {
     #[test]
     fn non_matching_node_gets_no_inputs() {
         // The element carries no `counter` class, so nothing matches.
-        let view = View::from_fragment(ViewFragment::from_nodes(vec![ViewNode::element(
-            ComponentId::from_raw(10),
-        )
-        .with_prop(ViewProperty::new(
-            CLASS,
-            ViewValue::Text("other".into()),
-        ))]));
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(10))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("other".into()))),
+        ]));
         let tree = reconcile(&view);
-        let child = tree
-            .get(tree.root().unwrap())
-            .unwrap()
-            .children()
-            .to_vec()[0];
+        let child = tree.get(tree.root().unwrap()).unwrap().children().to_vec()[0];
 
-        let inputs =
-            StyleMatchingCoordinator::new().match_single(&tree, &counter_sheet());
+        let inputs = StyleMatchingCoordinator::new().match_single(&tree, &counter_sheet());
         assert!(
             inputs.cascaded_for(child).is_empty(),
             "a non-matching node resolves to defaults"
@@ -161,19 +140,12 @@ mod tests {
 
     #[test]
     fn empty_sheets_produce_empty_inputs() {
-        let view = View::from_fragment(ViewFragment::from_nodes(vec![ViewNode::element(
-            ComponentId::from_raw(10),
-        )
-        .with_prop(ViewProperty::new(
-            CLASS,
-            ViewValue::Text("counter".into()),
-        ))]));
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(10))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into()))),
+        ]));
         let tree = reconcile(&view);
-        let child = tree
-            .get(tree.root().unwrap())
-            .unwrap()
-            .children()
-            .to_vec()[0];
+        let child = tree.get(tree.root().unwrap()).unwrap().children().to_vec()[0];
 
         let inputs = StyleMatchingCoordinator::new().build_inputs(&tree, &[]);
         assert!(inputs.cascaded_for(child).is_empty());

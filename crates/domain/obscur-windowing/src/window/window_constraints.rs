@@ -118,20 +118,16 @@ mod tests {
 
     #[test]
     fn passes_through_within_range() {
-        let c = WindowConstraints::new(
-            Some(Size::new(100.0, 100.0)),
-            Some(Size::new(800.0, 600.0)),
-        );
+        let c =
+            WindowConstraints::new(Some(Size::new(100.0, 100.0)), Some(Size::new(800.0, 600.0)));
         let s = Size::new(400.0, 300.0);
         assert_eq!(c.constrain(s), s);
     }
 
     #[test]
     fn min_wins_when_greater_than_max() {
-        let c = WindowConstraints::new(
-            Some(Size::new(500.0, 500.0)),
-            Some(Size::new(100.0, 100.0)),
-        );
+        let c =
+            WindowConstraints::new(Some(Size::new(500.0, 500.0)), Some(Size::new(100.0, 100.0)));
         // min (500) exceeds max (100); the minimum must win.
         assert_eq!(
             c.constrain(Size::new(300.0, 300.0)),

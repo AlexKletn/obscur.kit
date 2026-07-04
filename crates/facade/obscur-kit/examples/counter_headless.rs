@@ -78,8 +78,15 @@ fn main() {
     let mut count: i64 = 0;
 
     let view = build_counter_view(count, &decrement, &increment);
-    println!("[2] components: built counter view with {} top-level node(s)", view.root().len());
-    println!("    label='Count: {count}'  buttons=[\"{}\", \"{}\"]\n", decrement.label(), increment.label());
+    println!(
+        "[2] components: built counter view with {} top-level node(s)",
+        view.root().len()
+    );
+    println!(
+        "    label='Count: {count}'  buttons=[\"{}\", \"{}\"]\n",
+        decrement.label(),
+        increment.label()
+    );
 
     // --- Act 3: boot a deterministic host and render one real frame -------
     // The compiled stylesheet's `matchable` form is the list of (selector ->
@@ -95,7 +102,11 @@ fn main() {
     assert!(first.reconciled(), "first frame must reconcile the tree");
     assert!(first.composed(), "a scene is always composed");
     assert!(first.is_balanced(), "the display list must be balanced");
-    assert_eq!(first.id(), FrameId::FIRST, "the first frame is FrameId::FIRST");
+    assert_eq!(
+        first.id(),
+        FrameId::FIRST,
+        "the first frame is FrameId::FIRST"
+    );
 
     let first_commands = first.snapshot().display_list().commands().to_vec();
     // The `.counter { background-color; width; height }` rule matched the tagged
@@ -114,34 +125,49 @@ fn main() {
         first_commands, second_commands,
         "the same view + sheets must yield a byte-identical display list"
     );
-    assert_eq!(second.id(), FrameId::FIRST.next(), "frame ids advance monotonically");
+    assert_eq!(
+        second.id(),
+        FrameId::FIRST.next(),
+        "frame ids advance monotonically"
+    );
     println!(
         "[4] determinism: re-rendered identical view -> {} commands, byte-identical: {}",
         second_commands.len(),
         first_commands == second_commands
     );
-    println!("    frame id advanced {} -> {}\n", first.id().raw(), second.id().raw());
+    println!(
+        "    frame id advanced {} -> {}\n",
+        first.id().raw(),
+        second.id().raw()
+    );
 
     // --- Act 5: state change — drive the button, rebuild, render again -----
     // A full press/release cycle on an enabled button reports activation.
     increment.press();
     let activated = increment.release();
-    assert!(activated, "press + release on an enabled button activates it");
+    assert!(
+        activated,
+        "press + release on an enabled button activates it"
+    );
     count += 1;
 
     let updated_view = build_counter_view(count, &decrement, &increment);
     let third = host.render_styled(&updated_view, sheets);
-    assert!(third.composed(), "the post-change frame still composes a scene");
-    assert!(third.is_balanced(), "the post-change display list stays balanced");
+    assert!(
+        third.composed(),
+        "the post-change frame still composes a scene"
+    );
+    assert!(
+        third.is_balanced(),
+        "the post-change display list stays balanced"
+    );
     assert!(
         third.id() > second.id(),
         "a new render must advance the frame id"
     );
 
     let third_commands = third.snapshot().display_list().commands().to_vec();
-    println!(
-        "[5] state change: '+' activated ({activated}) -> count={count}, view rebuilt"
-    );
+    println!("[5] state change: '+' activated ({activated}) -> count={count}, view rebuilt");
     print_frame("    frame", &third, host.tree().len(), third_commands.len());
     println!(
         "    frame id advanced {} -> {} (state change drove a new frame)\n",
@@ -151,7 +177,10 @@ fn main() {
 
     // Keep the compiled stylesheet observably "used" past its summary so the
     // styling frontend is genuinely part of this run, not dead setup.
-    assert!(!compiled.declarations.is_empty(), "stylesheet produced declarations");
+    assert!(
+        !compiled.declarations.is_empty(),
+        "stylesheet produced declarations"
+    );
 
     println!("== all pipeline invariants held; exiting 0 ==");
 }
@@ -173,13 +202,22 @@ fn compile_stylesheet() -> CompiledStylesheet {
 
     // The stylesheet is syntactically clean, so parsing yields no errors, yet it
     // deliberately contains features the frontend does not support.
-    assert!(compiled.errors.is_empty(), "the authored CSS is syntactically valid");
+    assert!(
+        compiled.errors.is_empty(),
+        "the authored CSS is syntactically valid"
+    );
     assert!(
         !compiled.unsupported.is_empty(),
         "the @import / float features must surface as unsupported diagnostics"
     );
-    assert!(!compiled.custom_properties.is_empty(), "--accent is a custom property");
-    assert!(!compiled.keyframes.is_empty(), "@keyframes pulse compiles to a track set");
+    assert!(
+        !compiled.custom_properties.is_empty(),
+        "--accent is a custom property"
+    );
+    assert!(
+        !compiled.keyframes.is_empty(),
+        "@keyframes pulse compiles to a track set"
+    );
 
     println!(
         "[1] css frontend: {} rule declaration(s), {} custom prop(s), {} keyframe rule(s), \
@@ -191,7 +229,11 @@ fn compile_stylesheet() -> CompiledStylesheet {
         compiled.conditional_groups.len(),
     );
     // List the features that were recognised but not supported, by name.
-    let unsupported: Vec<&str> = compiled.unsupported.iter().map(UnsupportedCssFeature::name).collect();
+    let unsupported: Vec<&str> = compiled
+        .unsupported
+        .iter()
+        .map(UnsupportedCssFeature::name)
+        .collect();
     println!(
         "    unsupported (reported, not fatal): {} -> {:?}\n",
         compiled.unsupported.len(),
@@ -210,7 +252,10 @@ fn compile_stylesheet() -> CompiledStylesheet {
 fn build_counter_view(count: i64, decrement: &Button, increment: &Button) -> View {
     // Each child is wrapped in a container carrying a class the stylesheet
     // paints; the `.counter` panel stacks them (flow layout, top-to-bottom).
-    let label = tagged("bar label", vec![Text::new(format!("Count: {count}")).into_view_node()]);
+    let label = tagged(
+        "bar label",
+        vec![Text::new(format!("Count: {count}")).into_view_node()],
+    );
     let minus = tagged("bar decrement", button_nodes(decrement));
     let plus = tagged("bar increment", button_nodes(increment));
     let container = Container::new()

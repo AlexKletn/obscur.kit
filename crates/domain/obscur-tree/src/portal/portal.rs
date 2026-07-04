@@ -136,7 +136,12 @@ mod tests {
         let portal = Portal::new(ghost, PortalTarget::host(host));
         assert!(!portal.apply(&mut tree));
         // Host must not have been flagged by a failed apply.
-        assert!(!tree.get(host).expect("host live").has_flags(NodeFlags::PORTAL_HOST));
+        assert!(
+            !tree
+                .get(host)
+                .expect("host live")
+                .has_flags(NodeFlags::PORTAL_HOST)
+        );
     }
 
     #[test]
@@ -147,6 +152,11 @@ mod tests {
         let portal = Portal::new(source, PortalTarget::host(ghost));
         assert!(!portal.apply(&mut tree));
         // Source visual parent must be untouched (still root).
-        assert!(tree.get(source).expect("source live").visual_parent().is_root());
+        assert!(
+            tree.get(source)
+                .expect("source live")
+                .visual_parent()
+                .is_root()
+        );
     }
 }

@@ -168,11 +168,7 @@ impl Table {
     /// Returns `false` (leaving state untouched) when `column` is out of range or
     /// its column is not [`sortable`](Column::is_sortable).
     pub fn sort_by(&mut self, column: usize) -> bool {
-        if !self
-            .columns
-            .get(column)
-            .is_some_and(Column::is_sortable)
-        {
+        if !self.columns.get(column).is_some_and(Column::is_sortable) {
             return false;
         }
         let direction = match self.sort {
@@ -266,10 +262,7 @@ impl Table {
                 .iter()
                 .map(|cell| {
                     ViewNode::element(Self::TABLE_CELL_ID)
-                        .with_prop(ViewProperty::new(
-                            Self::PROP_ROLE,
-                            ViewValue::from("cell"),
-                        ))
+                        .with_prop(ViewProperty::new(Self::PROP_ROLE, ViewValue::from("cell")))
                         .with_children(ViewFragment::from_nodes(vec![
                             Text::new(cell.clone()).into_view_node(),
                         ]))
@@ -380,7 +373,9 @@ mod tests {
                 assert_eq!(*sort_col.value(), ViewValue::Int(-1));
                 // Header row has a cell per column, first carries the sortable flag.
                 match &children.nodes()[0] {
-                    ViewNode::Element { children: cells, .. } => {
+                    ViewNode::Element {
+                        children: cells, ..
+                    } => {
                         assert_eq!(cells.len(), 2);
                         match &cells.nodes()[0] {
                             ViewNode::Element { props, .. } => {

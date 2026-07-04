@@ -41,7 +41,10 @@ impl PresentResult {
     /// is terminal (spec §5.2).
     #[must_use]
     pub const fn is_recoverable(&self) -> bool {
-        matches!(self, Self::Presented { .. } | Self::Skipped | Self::DeviceLost)
+        matches!(
+            self,
+            Self::Presented { .. } | Self::Skipped | Self::DeviceLost
+        )
     }
 
     /// The failure reason when this outcome is [`PresentResult::Failed`], else
@@ -72,10 +75,12 @@ mod tests {
 
     #[test]
     fn is_recoverable_except_failed() {
-        assert!(PresentResult::Presented {
-            generation: SceneGeneration::FIRST,
-        }
-        .is_recoverable());
+        assert!(
+            PresentResult::Presented {
+                generation: SceneGeneration::FIRST,
+            }
+            .is_recoverable()
+        );
         assert!(PresentResult::Skipped.is_recoverable());
         assert!(PresentResult::DeviceLost.is_recoverable());
         // Failed is terminal.

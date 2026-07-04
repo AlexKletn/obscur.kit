@@ -91,7 +91,9 @@ mod tests {
 
     #[test]
     fn emits_alt_when_set() {
-        let node = Image::new("logo.png").with_alt("Company logo").into_view_node();
+        let node = Image::new("logo.png")
+            .with_alt("Company logo")
+            .into_view_node();
         if let ViewNode::Element { props, .. } = node {
             assert_eq!(props.len(), 2);
             assert_eq!(props[1].name(), Image::PROP_ALT);

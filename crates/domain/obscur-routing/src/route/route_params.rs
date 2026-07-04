@@ -1,7 +1,7 @@
 //! Typed parameters captured from a route pattern match (spec §6.13).
 
-use std::collections::btree_map;
 use std::collections::BTreeMap;
+use std::collections::btree_map;
 use std::str::FromStr;
 
 /// The named parameters captured when a [`RoutePattern`] matches a path

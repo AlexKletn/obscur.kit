@@ -164,6 +164,9 @@ mod tests {
 
     #[test]
     fn unterminated_condition_errors() {
-        assert_eq!(parse("(min-width: 400px").unwrap_err().kind(), CssParseErrorKind::InvalidAtRule);
+        assert_eq!(
+            parse("(min-width: 400px").unwrap_err().kind(),
+            CssParseErrorKind::InvalidAtRule
+        );
     }
 }

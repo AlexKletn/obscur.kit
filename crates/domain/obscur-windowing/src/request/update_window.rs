@@ -189,9 +189,7 @@ mod tests {
     #[test]
     fn any_setter_makes_non_empty() {
         assert!(!UpdateWindow::new(target()).set_resizable(false).is_empty());
-        assert!(!UpdateWindow::new(target())
-            .set_position(None)
-            .is_empty());
+        assert!(!UpdateWindow::new(target()).set_position(None).is_empty());
     }
 
     #[test]
@@ -219,7 +217,9 @@ mod tests {
     #[test]
     fn apply_title_is_written() {
         let mut props = WindowProperties::default().with_title("Old");
-        UpdateWindow::new(target()).set_title("New").apply(&mut props);
+        UpdateWindow::new(target())
+            .set_title("New")
+            .apply(&mut props);
         assert_eq!(&*props.title, "New");
     }
 
@@ -227,14 +227,18 @@ mod tests {
     fn position_outer_none_leaves_unchanged() {
         let mut props = WindowProperties::default().with_position(Point::new(7.0, 8.0));
         // No set_position call: outer None must leave the position alone.
-        UpdateWindow::new(target()).set_size(Size::new(10.0, 10.0)).apply(&mut props);
+        UpdateWindow::new(target())
+            .set_size(Size::new(10.0, 10.0))
+            .apply(&mut props);
         assert_eq!(props.position, Some(Point::new(7.0, 8.0)));
     }
 
     #[test]
     fn position_inner_none_clears_to_platform_chosen() {
         let mut props = WindowProperties::default().with_position(Point::new(7.0, 8.0));
-        UpdateWindow::new(target()).set_position(None).apply(&mut props);
+        UpdateWindow::new(target())
+            .set_position(None)
+            .apply(&mut props);
         assert_eq!(props.position, None);
     }
 

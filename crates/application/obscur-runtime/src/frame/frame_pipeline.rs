@@ -219,7 +219,10 @@ mod tests {
         assert!(first.reconciled(), "first frame populates the tree");
         assert!(first.restyled(), "nodes resolve computed styles");
         assert!(first.composed());
-        assert!(first.is_balanced(), "the published display list is balanced");
+        assert!(
+            first.is_balanced(),
+            "the published display list is balanced"
+        );
         let first_commands: Vec<_> = first.snapshot().display_list().commands().to_vec();
 
         // Second frame with the same inputs is idempotent and deterministic:
@@ -289,13 +292,10 @@ mod tests {
     /// A view whose single top-level element carries the `counter` class.
     fn counter_view() -> View {
         use obscur_view::view::{CLASS, ViewProperty, ViewValue};
-        View::from_fragment(ViewFragment::from_nodes(vec![ViewNode::element(
-            ComponentId::from_raw(10),
-        )
-        .with_prop(ViewProperty::new(
-            CLASS,
-            ViewValue::Text("counter".into()),
-        ))]))
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(10))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into()))),
+        ]))
     }
 
     /// A stylesheet: `.counter { background-color: red; width: 100px; height: 50px }`.
@@ -319,8 +319,14 @@ mod tests {
                         PropertyId::BackgroundColor,
                         PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
                     ),
-                    BlockDeclaration::normal(PropertyId::Width, PropertyValue::Length(Length::px(100.0))),
-                    BlockDeclaration::normal(PropertyId::Height, PropertyValue::Length(Length::px(50.0))),
+                    BlockDeclaration::normal(
+                        PropertyId::Width,
+                        PropertyValue::Length(Length::px(100.0)),
+                    ),
+                    BlockDeclaration::normal(
+                        PropertyId::Height,
+                        PropertyValue::Length(Length::px(50.0)),
+                    ),
                 ],
             )],
         )
@@ -377,7 +383,13 @@ mod tests {
 
         let mut a_tree = RetainedTree::new();
         let mut a_scene = Scene::new();
-        let via_run = pipeline.run(&mut a_tree, &mut a_scene, ctx(0), &view, &StyleInputs::new());
+        let via_run = pipeline.run(
+            &mut a_tree,
+            &mut a_scene,
+            ctx(0),
+            &view,
+            &StyleInputs::new(),
+        );
 
         let mut b_tree = RetainedTree::new();
         let mut b_scene = Scene::new();

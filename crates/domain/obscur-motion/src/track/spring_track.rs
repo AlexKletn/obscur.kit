@@ -113,8 +113,7 @@ impl SpringTrack {
             // Underdamped: oscillatory decay toward the target.
             let omega_d = omega0 * (1.0 - zeta * zeta).sqrt();
             (-zeta * omega0 * time).exp()
-                * ((omega_d * time).cos()
-                    + (zeta * omega0 / omega_d) * (omega_d * time).sin())
+                * ((omega_d * time).cos() + (zeta * omega0 / omega_d) * (omega_d * time).sin())
         } else {
             // Critically/overdamped: monotone decay toward the target.
             (-omega0 * time).exp() * (1.0 + omega0 * time)
@@ -200,8 +199,10 @@ mod tests {
 
     #[test]
     fn is_object_safe() {
-        let spring: Box<dyn MotionTrack> =
-            Box::new(SpringTrack::new(MotionValue::scalar(0.0), MotionValue::scalar(1.0)));
+        let spring: Box<dyn MotionTrack> = Box::new(SpringTrack::new(
+            MotionValue::scalar(0.0),
+            MotionValue::scalar(1.0),
+        ));
         assert_eq!(spring.sample(0.0), MotionValue::scalar(0.0));
     }
 }

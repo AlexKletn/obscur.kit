@@ -19,9 +19,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::WindowEvent as WinitWindowEvent;
 use winit::event_loop::ActiveEventLoop;
-use winit::window::{
-    WindowAttributes, WindowId as WinitWindowId, WindowLevel,
-};
+use winit::window::{WindowAttributes, WindowId as WinitWindowId, WindowLevel};
 
 use crate::conversion::WindowEventConverter;
 use crate::error::WinitBackendError;

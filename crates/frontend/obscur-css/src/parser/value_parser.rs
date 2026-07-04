@@ -210,7 +210,10 @@ mod tests {
 
     #[test]
     fn parses_keyword() {
-        assert_eq!(parse_str("flex").unwrap(), vec![ParsedValue::Keyword("flex".into())]);
+        assert_eq!(
+            parse_str("flex").unwrap(),
+            vec![ParsedValue::Keyword("flex".into())]
+        );
     }
 
     #[test]
@@ -227,12 +230,18 @@ mod tests {
 
     #[test]
     fn parses_percentage() {
-        assert_eq!(parse_str("50%").unwrap(), vec![ParsedValue::Percentage(50.0)]);
+        assert_eq!(
+            parse_str("50%").unwrap(),
+            vec![ParsedValue::Percentage(50.0)]
+        );
     }
 
     #[test]
     fn parses_hash_color() {
-        assert_eq!(parse_str("#ff0000").unwrap(), vec![ParsedValue::Hash("ff0000".into())]);
+        assert_eq!(
+            parse_str("#ff0000").unwrap(),
+            vec![ParsedValue::Hash("ff0000".into())]
+        );
     }
 
     #[test]
@@ -363,10 +372,13 @@ mod tests {
 
     #[test]
     fn negative_number_is_one_component() {
-        assert_eq!(parse_str("-5px").unwrap(), vec![ParsedValue::Dimension {
-            value: -5.0,
-            unit: "px".into()
-        }]);
+        assert_eq!(
+            parse_str("-5px").unwrap(),
+            vec![ParsedValue::Dimension {
+                value: -5.0,
+                unit: "px".into()
+            }]
+        );
     }
 
     #[test]

@@ -27,8 +27,7 @@ impl TabOrder {
     /// preserving input order within each group.
     #[must_use]
     pub fn compute(nodes: &[FocusNode]) -> Self {
-        let mut eligible: Vec<&FocusNode> =
-            nodes.iter().filter(|n| n.is_tab_focusable()).collect();
+        let mut eligible: Vec<&FocusNode> = nodes.iter().filter(|n| n.is_tab_focusable()).collect();
         // Stable sort: positive tab_index (group 0) ascending, then tab_index==0
         // (group 1). Equal keys retain their original relative order.
         eligible.sort_by_key(|n| {
@@ -137,7 +136,9 @@ mod tests {
     }
 
     fn focusable(raw: u64, tab_index: i32) -> FocusNode {
-        FocusNode::new(node(raw)).focusable(true).with_tab_index(tab_index)
+        FocusNode::new(node(raw))
+            .focusable(true)
+            .with_tab_index(tab_index)
     }
 
     #[test]

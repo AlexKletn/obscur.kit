@@ -51,7 +51,11 @@ mod tests {
 
     #[test]
     fn display_is_non_empty_for_each_variant() {
-        assert!(!TransactionError::ConflictingRootReplacement.to_string().is_empty());
+        assert!(
+            !TransactionError::ConflictingRootReplacement
+                .to_string()
+                .is_empty()
+        );
         let err = TransactionError::DuplicateNodeOperation(NodeId::from_raw(9));
         assert!(err.to_string().contains('9'));
     }

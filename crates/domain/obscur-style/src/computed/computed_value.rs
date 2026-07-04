@@ -132,6 +132,9 @@ mod tests {
             &PropertyValue::Number(0.5)
         );
         let sym = InternedSymbol::from_raw(7);
-        assert_eq!(ComputedValue::keyword(sym).value(), &PropertyValue::Keyword(sym));
+        assert_eq!(
+            ComputedValue::keyword(sym).value(),
+            &PropertyValue::Keyword(sym)
+        );
     }
 }

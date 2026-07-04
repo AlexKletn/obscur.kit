@@ -102,7 +102,8 @@ impl WinitWindow {
             WindowState::Minimized => self.window.set_minimized(true),
             WindowState::Maximized => self.window.set_maximized(true),
             WindowState::Fullscreen => {
-                self.window.set_fullscreen(Some(Fullscreen::Borderless(None)));
+                self.window
+                    .set_fullscreen(Some(Fullscreen::Borderless(None)));
             }
         }
     }

@@ -141,9 +141,6 @@ mod tests {
             SelectorTarget::node(NodeId::from_raw(1)),
             SelectorTarget::node(NodeId::from_raw(1)),
         );
-        assert_ne!(
-            SelectorTarget::test_id("a"),
-            SelectorTarget::test_id("b"),
-        );
+        assert_ne!(SelectorTarget::test_id("a"), SelectorTarget::test_id("b"),);
     }
 }

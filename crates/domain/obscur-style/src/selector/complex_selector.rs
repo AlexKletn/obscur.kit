@@ -68,9 +68,11 @@ impl ComplexSelector {
     /// compounds (combinators contribute nothing).
     #[must_use]
     pub fn specificity(&self) -> SelectorSpecificity {
-        self.tail.iter().fold(self.head.specificity(), |acc, (_, c)| {
-            acc.add(c.specificity())
-        })
+        self.tail
+            .iter()
+            .fold(self.head.specificity(), |acc, (_, c)| {
+                acc.add(c.specificity())
+            })
     }
 }
 
@@ -91,10 +93,8 @@ mod tests {
 
     #[test]
     fn subject_is_rightmost_compound() {
-        let sel = ComplexSelector::new(
-            compound("div"),
-            vec![(Combinator::Child, compound("span"))],
-        );
+        let sel =
+            ComplexSelector::new(compound("div"), vec![(Combinator::Child, compound("span"))]);
         assert_eq!(sel.subject(), &compound("span"));
         assert_eq!(sel.head(), &compound("div"));
         assert_eq!(sel.tail().len(), 1);

@@ -437,9 +437,7 @@ impl<'t> Walker<'t> {
     /// token, guaranteeing forward progress.
     fn parse_text_node(&mut self) {
         self.start(SyntaxKind::TextNode);
-        while !self.at_end()
-            && self.peek() != TokenKind::LAngle
-            && self.peek() != TokenKind::LBrace
+        while !self.at_end() && self.peek() != TokenKind::LAngle && self.peek() != TokenKind::LBrace
         {
             self.bump();
         }
@@ -523,10 +521,7 @@ mod tests {
     }
 
     /// Returns the immediate child nodes of the document root of `kind`.
-    fn root_nodes_of<'a>(
-        result: &'a ParseResult,
-        kind: SyntaxKind,
-    ) -> Vec<&'a SyntaxNode> {
+    fn root_nodes_of<'a>(result: &'a ParseResult, kind: SyntaxKind) -> Vec<&'a SyntaxNode> {
         result
             .tree()
             .root()
@@ -563,15 +558,22 @@ mod tests {
         // OpenTag holds the `Button` ident and an Attribute.
         let open = find_node(element, SyntaxKind::OpenTag).expect("OpenTag");
         assert!(open.tokens().any(|t| t.text() == "Button"));
-        assert!(open.child_nodes().any(|n| n.kind() == SyntaxKind::Attribute));
+        assert!(
+            open.child_nodes()
+                .any(|n| n.kind() == SyntaxKind::Attribute)
+        );
 
         // Element also has a TextNode and a CloseTag.
-        assert!(element
-            .child_nodes()
-            .any(|n| n.kind() == SyntaxKind::TextNode));
-        assert!(element
-            .child_nodes()
-            .any(|n| n.kind() == SyntaxKind::CloseTag));
+        assert!(
+            element
+                .child_nodes()
+                .any(|n| n.kind() == SyntaxKind::TextNode)
+        );
+        assert!(
+            element
+                .child_nodes()
+                .any(|n| n.kind() == SyntaxKind::CloseTag)
+        );
     }
 
     #[test]
@@ -623,30 +625,36 @@ mod tests {
         let src = "<Button>oops";
         let result = parse_lossless(src);
         assert!(!result.is_ok(), "expected a recorded error");
-        assert!(result
-            .errors()
-            .iter()
-            .any(|e| e.kind() == ParseErrorKind::ExpectedClose));
+        assert!(
+            result
+                .errors()
+                .iter()
+                .any(|e| e.kind() == ParseErrorKind::ExpectedClose)
+        );
     }
 
     #[test]
     fn mismatched_close_tag_is_reported_but_lossless() {
         let src = "<A>x</B>";
         let result = parse_lossless(src);
-        assert!(result
-            .errors()
-            .iter()
-            .any(|e| e.kind() == ParseErrorKind::MismatchedCloseTag));
+        assert!(
+            result
+                .errors()
+                .iter()
+                .any(|e| e.kind() == ParseErrorKind::MismatchedCloseTag)
+        );
     }
 
     #[test]
     fn unterminated_expression_is_reported_but_lossless() {
         let src = "<T>{count</T>";
         let result = parse_lossless(src);
-        assert!(result
-            .errors()
-            .iter()
-            .any(|e| e.kind() == ParseErrorKind::UnterminatedExpression));
+        assert!(
+            result
+                .errors()
+                .iter()
+                .any(|e| e.kind() == ParseErrorKind::UnterminatedExpression)
+        );
     }
 
     #[test]

@@ -180,7 +180,10 @@ mod tests {
 
         let note = Notification::new("Sync", "Done");
         assert_eq!(provider.post(note.clone()), NotificationResult::Delivered);
-        assert_eq!(provider.post(Notification::new("Two", "Body")), NotificationResult::Delivered);
+        assert_eq!(
+            provider.post(Notification::new("Two", "Body")),
+            NotificationResult::Delivered
+        );
         assert_eq!(provider.posted().len(), 2);
         assert_eq!(provider.posted()[0], note);
 

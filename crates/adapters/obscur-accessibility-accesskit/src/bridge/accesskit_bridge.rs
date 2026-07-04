@@ -211,7 +211,10 @@ mod tests {
         let mut bridge = AccessKitBridge::new();
         bridge.update_tree(&snapshot());
         bridge.set_focus(&AccessibilityFocus::moved_to(NodeId::from_raw(2), None));
-        assert_eq!(bridge.last_tree_update().expect("stored").focus, AkNodeId(2));
+        assert_eq!(
+            bridge.last_tree_update().expect("stored").focus,
+            AkNodeId(2)
+        );
     }
 
     #[test]
@@ -219,7 +222,10 @@ mod tests {
         let mut bridge = AccessKitBridge::new();
         bridge.set_focus(&AccessibilityFocus::moved_to(NodeId::from_raw(2), None));
         bridge.update_tree(&snapshot());
-        assert_eq!(bridge.last_tree_update().expect("stored").focus, AkNodeId(2));
+        assert_eq!(
+            bridge.last_tree_update().expect("stored").focus,
+            AkNodeId(2)
+        );
     }
 
     #[test]
@@ -228,7 +234,10 @@ mod tests {
         bridge.update_tree(&snapshot());
         bridge.set_focus(&AccessibilityFocus::moved_to(NodeId::from_raw(2), None));
         bridge.set_focus(&AccessibilityFocus::cleared(Some(NodeId::from_raw(2))));
-        assert_eq!(bridge.last_tree_update().expect("stored").focus, AkNodeId(1));
+        assert_eq!(
+            bridge.last_tree_update().expect("stored").focus,
+            AkNodeId(1)
+        );
     }
 
     #[test]

@@ -156,9 +156,18 @@ mod tests {
 
     #[test]
     fn progress_is_clamped() {
-        assert_eq!(Notification::new("t", "b").with_progress(1.5).progress(), Some(1.0));
-        assert_eq!(Notification::new("t", "b").with_progress(-0.5).progress(), Some(0.0));
-        assert_eq!(Notification::new("t", "b").with_progress(0.25).progress(), Some(0.25));
+        assert_eq!(
+            Notification::new("t", "b").with_progress(1.5).progress(),
+            Some(1.0)
+        );
+        assert_eq!(
+            Notification::new("t", "b").with_progress(-0.5).progress(),
+            Some(0.0)
+        );
+        assert_eq!(
+            Notification::new("t", "b").with_progress(0.25).progress(),
+            Some(0.25)
+        );
     }
 
     #[test]

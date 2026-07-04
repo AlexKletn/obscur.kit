@@ -84,7 +84,10 @@ mod tests {
     #[test]
     fn id_contributes_a() {
         let s = SimpleSelector::Id("main".into());
-        assert_eq!(s.specificity_contribution(), SelectorSpecificity::new(1, 0, 0));
+        assert_eq!(
+            s.specificity_contribution(),
+            SelectorSpecificity::new(1, 0, 0)
+        );
     }
 
     #[test]

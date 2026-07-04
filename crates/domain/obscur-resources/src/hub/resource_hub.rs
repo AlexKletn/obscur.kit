@@ -69,7 +69,10 @@ impl ResourceHub {
     /// inserts a new [`ResourceEntry`] (pending, initial version, reference count
     /// `1`), indexes it for future deduplication, and returns the new handle.
     pub fn request(&mut self, request: ResourceRequest) -> ResourceHandle {
-        if let Some(&id) = self.by_source.get(&(request.source().clone(), request.kind())) {
+        if let Some(&id) = self
+            .by_source
+            .get(&(request.source().clone(), request.kind()))
+        {
             // Deduplication: an equal source+kind already exists — share it.
             if let Some(entry) = self.entries.get_mut(&id) {
                 entry.retain();
@@ -219,7 +222,8 @@ impl ResourceHub {
     /// Removes an entry and its deduplication index by id.
     fn evict(&mut self, id: ResourceId) {
         if let Some(entry) = self.entries.remove(&id) {
-            self.by_source.remove(&(entry.source().clone(), entry.kind()));
+            self.by_source
+                .remove(&(entry.source().clone(), entry.kind()));
         }
     }
 

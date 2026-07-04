@@ -106,7 +106,12 @@ mod tests {
 
     #[test]
     fn is_actionable_requires_enabled_and_visible() {
-        assert!(CommandState::new().enabled(true).visible(true).is_actionable());
+        assert!(
+            CommandState::new()
+                .enabled(true)
+                .visible(true)
+                .is_actionable()
+        );
         assert!(!CommandState::new().enabled(false).is_actionable());
         assert!(!CommandState::new().visible(false).is_actionable());
         assert!(

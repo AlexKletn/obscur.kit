@@ -63,6 +63,9 @@ mod tests {
         use std::collections::HashMap;
         let mut m: HashMap<u8, LayoutInvalidationReason> = HashMap::new();
         m.insert(1, LayoutInvalidationReason::ConstraintsChanged);
-        assert_eq!(m.get(&1), Some(&LayoutInvalidationReason::ConstraintsChanged));
+        assert_eq!(
+            m.get(&1),
+            Some(&LayoutInvalidationReason::ConstraintsChanged)
+        );
     }
 }

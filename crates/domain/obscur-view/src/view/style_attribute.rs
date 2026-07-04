@@ -61,8 +61,7 @@ impl StyleAttributes {
             };
             match prop.name() {
                 CLASS => {
-                    attributes.classes =
-                        text.split_ascii_whitespace().map(Into::into).collect();
+                    attributes.classes = text.split_ascii_whitespace().map(Into::into).collect();
                 }
                 ID => attributes.id = Some(text.clone()),
                 TYPE => attributes.local_name = Some(text.clone()),
@@ -141,7 +140,10 @@ mod tests {
     fn ignores_non_text_and_unknown_symbols() {
         let props = [
             ViewProperty::new(CLASS, ViewValue::Int(7)),
-            ViewProperty::new(InternedSymbol::from_raw(0x00C1_0501), ViewValue::Text("w".into())),
+            ViewProperty::new(
+                InternedSymbol::from_raw(0x00C1_0501),
+                ViewValue::Text("w".into()),
+            ),
         ];
         let attrs = StyleAttributes::extract(&props);
         assert!(attrs.is_empty());

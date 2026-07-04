@@ -58,7 +58,11 @@ impl PointerConverter {
     /// Builds a [`PointerEventKind::Move`] event at `position` for pointer `id`
     /// (spec §4.7).
     #[must_use]
-    pub fn moved(&self, id: PointerId, position: winit::dpi::PhysicalPosition<f64>) -> PointerEvent {
+    pub fn moved(
+        &self,
+        id: PointerId,
+        position: winit::dpi::PhysicalPosition<f64>,
+    ) -> PointerEvent {
         self.event(id, PointerEventKind::Move, position)
     }
 

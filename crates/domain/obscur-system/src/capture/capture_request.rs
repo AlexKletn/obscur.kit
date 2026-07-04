@@ -119,7 +119,10 @@ mod tests {
             &CaptureSource::Node(NodeId::from_raw(2))
         );
         let r = rect(0.0, 0.0);
-        assert_eq!(CaptureRequest::region(r).source(), &CaptureSource::Region(r));
+        assert_eq!(
+            CaptureRequest::region(r).source(),
+            &CaptureSource::Region(r)
+        );
     }
 
     #[test]

@@ -129,7 +129,9 @@ mod tests {
     fn setters_update_fields() {
         let mut w = window();
         w.set_constraints(WindowConstraints::with_max(Size::new(400.0, 300.0)));
-        w.set_relation(WindowRelation::owned_by(WindowId::from_raw(9)).with_modality(Modality::WindowModal));
+        w.set_relation(
+            WindowRelation::owned_by(WindowId::from_raw(9)).with_modality(Modality::WindowModal),
+        );
         w.set_scale_factor(ScaleFactor::new(2.0));
 
         assert_eq!(w.relation().owner, Some(WindowId::from_raw(9)));

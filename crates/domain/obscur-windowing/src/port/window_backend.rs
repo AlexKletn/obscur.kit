@@ -160,11 +160,7 @@ pub trait WindowBackend {
     ///
     /// `regions` is borrowed because the caller retains ownership. Reports the
     /// honest [`WindowOperationResult`].
-    fn set_drag_regions(
-        &mut self,
-        id: WindowId,
-        regions: &[DragRegion],
-    ) -> WindowOperationResult;
+    fn set_drag_regions(&mut self, id: WindowId, regions: &[DragRegion]) -> WindowOperationResult;
 
     /// Declares the resize-handle regions of window `id` for custom chrome
     /// (spec §6.4).
@@ -194,11 +190,7 @@ pub trait WindowBackend {
     /// `mode` is borrowed because the caller may reuse it across windows.
     /// Reports the honest [`WindowOperationResult`], including the
     /// [`SupportLevel`] for an emulated or conditionally-supported mode.
-    fn set_presentation(
-        &mut self,
-        id: WindowId,
-        mode: &PresentationMode,
-    ) -> WindowOperationResult;
+    fn set_presentation(&mut self, id: WindowId, mode: &PresentationMode) -> WindowOperationResult;
 
     /// Requests inhibition of system sleep / screensaver per `request`
     /// (spec §6.5).
@@ -409,7 +401,10 @@ mod tests {
         let delta = UpdateWindow::new(id)
             .set_title("Renamed")
             .set_state(WindowState::Maximized);
-        assert_eq!(backend.update_window(&delta), WindowOperationResult::native());
+        assert_eq!(
+            backend.update_window(&delta),
+            WindowOperationResult::native()
+        );
         let window = backend.window(id).expect("still retained");
         assert_eq!(&*window.properties().title, "Renamed");
         assert_eq!(window.properties().state, WindowState::Maximized);

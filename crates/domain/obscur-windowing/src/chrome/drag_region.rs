@@ -99,7 +99,8 @@ mod tests {
 
     #[test]
     fn with_double_click_action_sets_it() {
-        let region = DragRegion::new(a_rect()).with_double_click_action(DoubleClickAction::Maximize);
+        let region =
+            DragRegion::new(a_rect()).with_double_click_action(DoubleClickAction::Maximize);
         assert_eq!(region.double_click_action(), DoubleClickAction::Maximize);
     }
 

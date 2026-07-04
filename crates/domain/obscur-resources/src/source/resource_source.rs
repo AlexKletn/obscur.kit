@@ -162,7 +162,9 @@ mod tests {
         assert!(ResourceSource::url("https://x").requires_host_loader());
         assert!(ResourceSource::document(DocumentSource::new("t")).requires_host_loader());
 
-        assert!(!ResourceSource::embedded(EmbeddedSource::new("a", vec![1u8])).requires_host_loader());
+        assert!(
+            !ResourceSource::embedded(EmbeddedSource::new("a", vec![1u8])).requires_host_loader()
+        );
         assert!(!ResourceSource::memory(MemorySource::new(vec![1u8])).requires_host_loader());
         assert!(!ResourceSource::generated(GeneratedSource::new("g", "s")).requires_host_loader());
         assert!(!ResourceSource::file("/p").requires_host_loader());

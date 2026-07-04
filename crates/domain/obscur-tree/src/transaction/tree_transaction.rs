@@ -67,8 +67,7 @@ impl TreeTransaction {
 
     /// Stages removal of `target` and its whole subtree.
     pub fn remove_subtree(&mut self, target: NodeId) {
-        self.change_set
-            .push(TreeChange::RemoveSubtree { target });
+        self.change_set.push(TreeChange::RemoveSubtree { target });
     }
 
     /// Stages repositioning of the existing child `target` to `index` within
@@ -186,12 +185,13 @@ impl TreeTransaction {
                         return Err(TxError::StaleNode(*target));
                     }
                     if let Some(count) = Self::live_parent_child_count(tree, *target)
-                        && *index >= count {
-                            return Err(TxError::IndexOutOfRange {
-                                index: *index,
-                                child_count: count,
-                            });
-                        }
+                        && *index >= count
+                    {
+                        return Err(TxError::IndexOutOfRange {
+                            index: *index,
+                            child_count: count,
+                        });
+                    }
                 }
                 TreeChange::SetText { target, .. } => match tree.get(*target) {
                     None => return Err(TxError::StaleNode(*target)),
@@ -269,9 +269,10 @@ impl TreeTransaction {
                     // Detach from the current parent so no dangling link remains.
                     if let Some(node) = tree.get(target)
                         && let Some(parent_id) = node.logical_parent().parent()
-                            && let Some(parent_node) = tree.get_mut(parent_id) {
-                                parent_node.remove_child(target);
-                            }
+                        && let Some(parent_node) = tree.get_mut(parent_id)
+                    {
+                        parent_node.remove_child(target);
+                    }
                     // Remove leaves first (reverse of pre-order).
                     let ids = Subtree::new(target).descendants(tree);
                     for id in ids.into_iter().rev() {
@@ -284,11 +285,12 @@ impl TreeTransaction {
                     if let Some(parent_id) =
                         tree.get(target).and_then(|n| n.logical_parent().parent())
                         && let Some(parent_node) = tree.get_mut(parent_id)
-                            && parent_node.remove_child(target) {
-                                let at = index.min(parent_node.children.len());
-                                parent_node.children.insert(at, target);
-                                moved.push(target);
-                            }
+                        && parent_node.remove_child(target)
+                    {
+                        let at = index.min(parent_node.children.len());
+                        parent_node.children.insert(at, target);
+                        moved.push(target);
+                    }
                 }
                 TreeChange::SetText { target, content } => {
                     if let Some(node) = tree.get_mut(target) {
@@ -499,7 +501,8 @@ mod tests {
         );
         // Parents were wired on the created nodes.
         assert_eq!(
-            tree.get(child_a_id).map(crate::node::RetainedNode::logical_parent),
+            tree.get(child_a_id)
+                .map(crate::node::RetainedNode::logical_parent),
             Some(LogicalParent::of(parent_id))
         );
         assert_eq!(commit.new_root(), Some(parent_id));

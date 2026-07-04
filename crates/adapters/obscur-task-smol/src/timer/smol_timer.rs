@@ -44,10 +44,7 @@ impl SmolTimer {
     /// Pass the executor of the [`SmolSpawner`](crate::spawner::SmolSpawner)
     /// driving this timer's tasks so scheduled wakes actually run.
     #[must_use]
-    pub fn new(
-        executor: Arc<Executor<'static>>,
-        wake: impl Fn() + Send + Sync + 'static,
-    ) -> Self {
+    pub fn new(executor: Arc<Executor<'static>>, wake: impl Fn() + Send + Sync + 'static) -> Self {
         Self {
             executor,
             wake: Arc::new(wake),

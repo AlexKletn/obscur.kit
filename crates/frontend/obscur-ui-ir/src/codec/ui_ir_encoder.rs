@@ -215,12 +215,9 @@ mod tests {
 
     #[test]
     fn encoding_is_deterministic() {
-        let doc = UiIrDocument::new(
-            UiIrNode::element(1, "div").with_property(crate::document::UiIrProperty::new(
-                "class",
-                UiIrExpression::text("card"),
-            )),
-        );
+        let doc = UiIrDocument::new(UiIrNode::element(1, "div").with_property(
+            crate::document::UiIrProperty::new("class", UiIrExpression::text("card")),
+        ));
         let encoder = UiIrEncoder::new();
         assert_eq!(encoder.encode(&doc), encoder.encode(&doc));
     }

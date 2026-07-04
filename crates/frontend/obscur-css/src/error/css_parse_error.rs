@@ -132,10 +132,7 @@ mod tests {
             "expected a color",
             SourceSpan::new(10, 15),
         );
-        assert_eq!(
-            err.to_string(),
-            "invalid value: expected a color at 10..15"
-        );
+        assert_eq!(err.to_string(), "invalid value: expected a color at 10..15");
     }
 
     #[test]

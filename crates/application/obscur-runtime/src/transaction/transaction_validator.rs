@@ -132,9 +132,6 @@ mod tests {
 
     #[test]
     fn empty_transaction_is_valid() {
-        assert_eq!(
-            TransactionValidator.validate(&UiTransaction::new()),
-            Ok(())
-        );
+        assert_eq!(TransactionValidator.validate(&UiTransaction::new()), Ok(()));
     }
 }

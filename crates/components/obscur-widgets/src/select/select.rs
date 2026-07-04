@@ -190,9 +190,7 @@ impl Select {
     /// [`COMPONENT_ID`]: Self::COMPONENT_ID
     #[must_use]
     pub fn view(&self) -> View {
-        let selected = self
-            .selected
-            .map_or(-1, |i| i64::try_from(i).unwrap_or(-1));
+        let selected = self.selected.map_or(-1, |i| i64::try_from(i).unwrap_or(-1));
         let children: Vec<ViewNode> = self
             .options
             .iter()
@@ -204,7 +202,10 @@ impl Select {
                 Self::PROP_DISABLED,
                 ViewValue::Bool(self.disabled),
             ))
-            .with_prop(ViewProperty::new(Self::PROP_OPEN, ViewValue::Bool(self.open)))
+            .with_prop(ViewProperty::new(
+                Self::PROP_OPEN,
+                ViewValue::Bool(self.open),
+            ))
             .with_prop(ViewProperty::new(
                 Self::PROP_SELECTED,
                 ViewValue::Int(selected),

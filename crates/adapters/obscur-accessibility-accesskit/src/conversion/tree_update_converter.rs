@@ -113,7 +113,10 @@ impl TreeUpdateConverter {
         let mut owned: BTreeSet<DomainNodeId> = BTreeSet::new();
 
         // Explicit ownership from `Owns` relations, in deterministic id order.
-        for (id, node) in snapshot.iter().filter(|(id, n)| !n.is_ignored() && *id != root) {
+        for (id, node) in snapshot
+            .iter()
+            .filter(|(id, n)| !n.is_ignored() && *id != root)
+        {
             for relation in node.relations() {
                 let SemanticRelation::Owns(target) = relation else {
                     continue;
@@ -151,7 +154,10 @@ mod tests {
     fn two_node_snapshot() -> SemanticSnapshot {
         let mut tree = SemanticTree::new();
         tree.insert(node(1, SemanticRole::Group), None);
-        tree.insert(node(2, SemanticRole::Button), Some(DomainNodeId::from_raw(1)));
+        tree.insert(
+            node(2, SemanticRole::Button),
+            Some(DomainNodeId::from_raw(1)),
+        );
         tree.set_root(DomainNodeId::from_raw(1));
         SemanticSnapshot::from_tree(&tree)
     }

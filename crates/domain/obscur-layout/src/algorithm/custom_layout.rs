@@ -118,7 +118,10 @@ mod tests {
 
     #[test]
     fn stacks_children_vertically_with_gap() {
-        let style = LayoutStyle { gap: 8.0, ..LayoutStyle::default() };
+        let style = LayoutStyle {
+            gap: 8.0,
+            ..LayoutStyle::default()
+        };
         let children = [child(1), child(2)];
         let mut measurer =
             FixedChildMeasurer::new(vec![Size::new(100.0, 20.0), Size::new(100.0, 30.0)]);

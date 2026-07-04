@@ -148,7 +148,10 @@ impl LayoutInvalidation {
         child_result: &PropagationResult,
     ) -> bool {
         if child_result.continues_upward() {
-            self.invalidate(parent_ctx.node(), LayoutInvalidationReason::ChildSizeChanged);
+            self.invalidate(
+                parent_ctx.node(),
+                LayoutInvalidationReason::ChildSizeChanged,
+            );
             true
         } else {
             false
@@ -221,8 +224,7 @@ mod tests {
         assert!(!inv.is_invalidated(NodeId::from_raw(10)));
 
         let mut dependent = ctx(11);
-        *dependent.dependency_mut() =
-            LayoutDependency::new().with_constraints_affect_size(true);
+        *dependent.dependency_mut() = LayoutDependency::new().with_constraints_affect_size(true);
         assert!(inv.note_constraints_changed(&dependent));
         assert_eq!(
             inv.reason(NodeId::from_raw(11)),

@@ -85,7 +85,10 @@ mod tests {
     fn documented_approximations() {
         let c = RoleConverter::new();
         assert_eq!(c.convert(SemanticRole::Text), Role::Label);
-        assert_eq!(c.convert(SemanticRole::ProgressBar), Role::ProgressIndicator);
+        assert_eq!(
+            c.convert(SemanticRole::ProgressBar),
+            Role::ProgressIndicator
+        );
         assert_eq!(c.convert(SemanticRole::Separator), Role::Splitter);
         assert_eq!(c.convert(SemanticRole::Unknown), Role::Unknown);
     }

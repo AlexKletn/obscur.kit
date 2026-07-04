@@ -37,8 +37,7 @@ impl GestureArena {
     /// Enters `contender` into the arena in the
     /// [`Possible`](RecognizerState::Possible) state.
     pub fn add(&mut self, contender: GestureContender) {
-        self.contenders
-            .push((contender, RecognizerState::Possible));
+        self.contenders.push((contender, RecognizerState::Possible));
     }
 
     /// Updates the tracked state of the contender for `recognizer` to `state`.
@@ -66,8 +65,7 @@ impl GestureArena {
                 let better = match best {
                     None => true,
                     Some((priority, id)) => {
-                        candidate.0 > priority
-                            || (candidate.0 == priority && candidate.1 < id)
+                        candidate.0 > priority || (candidate.0 == priority && candidate.1 < id)
                     }
                 };
                 if better {
@@ -79,10 +77,7 @@ impl GestureArena {
             return GestureResolution::Winner(id);
         }
         if !self.contenders.is_empty()
-            && self
-                .contenders
-                .iter()
-                .all(|(_, state)| state.is_terminal())
+            && self.contenders.iter().all(|(_, state)| state.is_terminal())
         {
             return GestureResolution::NoWinner;
         }
@@ -256,10 +251,12 @@ mod tests {
         arena.add(contender(1, 0));
         arena.add(contender(2, 0));
         assert_eq!(arena.sweep(), GestureResolution::Pending);
-        assert!(arena
-            .contenders()
-            .iter()
-            .all(|(_, s)| matches!(s, RecognizerState::Possible)));
+        assert!(
+            arena
+                .contenders()
+                .iter()
+                .all(|(_, s)| matches!(s, RecognizerState::Possible))
+        );
     }
 
     #[test]

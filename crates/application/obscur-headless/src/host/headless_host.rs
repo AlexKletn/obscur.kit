@@ -108,7 +108,11 @@ impl HeadlessHost {
     /// the same snapshot display list: reconciliation preserves identity, and
     /// every stage is deterministic.
     pub fn render(&mut self, desired: &View, inputs: &StyleInputs) -> FrameResult {
-        let ctx = FrameContext::new(self.next_frame, FrameReason::UiCommit, self.config.viewport());
+        let ctx = FrameContext::new(
+            self.next_frame,
+            FrameReason::UiCommit,
+            self.config.viewport(),
+        );
         let result = self
             .pipeline
             .run(&mut self.tree, &mut self.scene, ctx, desired, inputs);
@@ -130,7 +134,11 @@ impl HeadlessHost {
     /// first, inline last). An empty `sheets` slice matches nothing and is
     /// equivalent to [`render`](Self::render) with empty inputs.
     pub fn render_styled(&mut self, desired: &View, sheets: &[Stylesheet]) -> FrameResult {
-        let ctx = FrameContext::new(self.next_frame, FrameReason::UiCommit, self.config.viewport());
+        let ctx = FrameContext::new(
+            self.next_frame,
+            FrameReason::UiCommit,
+            self.config.viewport(),
+        );
         let result =
             self.pipeline
                 .run_matched(&mut self.tree, &mut self.scene, ctx, desired, sheets);
@@ -252,8 +260,8 @@ mod tests {
 
     #[test]
     fn with_config_sizes_window_to_config() {
-        let config =
-            HeadlessConfig::with_viewport(Size::new(320.0, 240.0)).with_scale(ScaleFactor::new(2.0));
+        let config = HeadlessConfig::with_viewport(Size::new(320.0, 240.0))
+            .with_scale(ScaleFactor::new(2.0));
         let host = HeadlessHost::with_config(runtime_id(), config);
         assert_eq!(host.window().size(), Size::new(320.0, 240.0));
         assert_eq!(host.window().scale().get(), 2.0);
@@ -330,13 +338,10 @@ mod tests {
     /// A view whose single top-level element carries the `counter` class.
     fn counter_view() -> View {
         use obscur_view::view::{CLASS, ViewProperty, ViewValue};
-        View::from_fragment(ViewFragment::from_nodes(vec![ViewNode::element(
-            ComponentId::from_raw(10),
-        )
-        .with_prop(ViewProperty::new(
-            CLASS,
-            ViewValue::Text("counter".into()),
-        ))]))
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(10))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into()))),
+        ]))
     }
 
     /// `.counter { background-color: red; width: 100px; height: 50px }`.

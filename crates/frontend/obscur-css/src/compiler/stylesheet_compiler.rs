@@ -511,7 +511,8 @@ mod tests {
 
     #[test]
     fn matchable_holds_one_rule_per_style_rule() {
-        let sheet = compile(".counter { background-color: #ff0000 } #main .value { color: #00ff00 }");
+        let sheet =
+            compile(".counter { background-color: #ff0000 } #main .value { color: #00ff00 }");
         let rules = sheet.matchable.rules();
         assert_eq!(rules.len(), 2);
         assert_eq!(sheet.matchable.origin(), CascadeOrigin::GlobalApp);
@@ -520,7 +521,8 @@ mod tests {
     #[test]
     fn matchable_first_rule_lowers_class_and_block() {
         use obscur_style::selector::SimpleSelector;
-        let sheet = compile(".counter { background-color: #ff0000 } #main .value { color: #00ff00 }");
+        let sheet =
+            compile(".counter { background-color: #ff0000 } #main .value { color: #00ff00 }");
         let first = &sheet.matchable.rules()[0];
         // Selector `.counter` lowers to a single class simple selector.
         let selectors = first.selectors().selectors();

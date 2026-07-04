@@ -28,10 +28,7 @@ impl Invalidation {
     /// `reason`, for changes not scoped to a single node.
     #[must_use]
     pub fn global(reason: InvalidationReason) -> Self {
-        Self {
-            node: None,
-            reason,
-        }
+        Self { node: None, reason }
     }
 
     /// Returns the node this invalidation applies to, or `None` for a global

@@ -78,8 +78,12 @@ mod tests {
     #[test]
     fn push_records_in_order() {
         let mut plan = ReconciliationPlan::new();
-        let a = ReconciliationOp::Remove { id: NodeId::from_raw(1) };
-        let b = ReconciliationOp::Update { id: NodeId::from_raw(2) };
+        let a = ReconciliationOp::Remove {
+            id: NodeId::from_raw(1),
+        };
+        let b = ReconciliationOp::Update {
+            id: NodeId::from_raw(2),
+        };
         plan.push(a);
         plan.push(b);
         assert_eq!(plan.len(), 2);

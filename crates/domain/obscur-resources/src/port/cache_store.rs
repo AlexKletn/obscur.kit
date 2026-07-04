@@ -208,6 +208,9 @@ mod tests {
         store.put(key(8), v2, Arc::from(&b"new"[..]));
         assert_eq!(store.len(), 1);
         assert_eq!(store.get(&key(8), v1), None);
-        assert_eq!(&*store.get(&key(8), v2).expect("newest version hits"), b"new");
+        assert_eq!(
+            &*store.get(&key(8), v2).expect("newest version hits"),
+            b"new"
+        );
     }
 }

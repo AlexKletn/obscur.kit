@@ -144,7 +144,8 @@ mod tests {
 
     #[test]
     fn interns_the_animation_name() {
-        let (compiled, interner) = keyframes("@keyframes spin { from { opacity: 0 } to { opacity: 1 } }");
+        let (compiled, interner) =
+            keyframes("@keyframes spin { from { opacity: 0 } to { opacity: 1 } }");
         assert_eq!(interner.resolve(compiled.name), Some("spin"));
     }
 
@@ -176,7 +177,8 @@ mod tests {
 
     #[test]
     fn px_lengths_lower_to_scalars() {
-        let (compiled, _) = keyframes("@keyframes grow { from { width: 0px } to { width: 100px } }");
+        let (compiled, _) =
+            keyframes("@keyframes grow { from { width: 0px } to { width: 100px } }");
         let track = track_for(&compiled, PropertyId::Width);
         assert_eq!(track.sample(0.0), MotionValue::scalar(0.0));
         assert_eq!(track.sample(1.0), MotionValue::scalar(100.0));
@@ -184,15 +186,17 @@ mod tests {
 
     #[test]
     fn one_track_per_property() {
-        let (compiled, _) =
-            keyframes("@keyframes multi { from { opacity: 0; width: 0px } to { opacity: 1; width: 10px } }");
+        let (compiled, _) = keyframes(
+            "@keyframes multi { from { opacity: 0; width: 0px } to { opacity: 1; width: 10px } }",
+        );
         assert_eq!(compiled.tracks.len(), 2);
     }
 
     #[test]
     fn shared_offset_across_grouped_selectors() {
         // `0%, 100%` applies the same keyframe at both ends.
-        let (compiled, _) = keyframes("@keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0 } }");
+        let (compiled, _) =
+            keyframes("@keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0 } }");
         let track = track_for(&compiled, PropertyId::Opacity);
         assert_eq!(track.len(), 3);
         assert_eq!(track.sample(0.0), MotionValue::scalar(1.0));
@@ -203,7 +207,8 @@ mod tests {
     #[test]
     fn non_animatable_values_are_skipped() {
         // `display: block` has no scalar motion value, so it produces no track.
-        let (compiled, _) = keyframes("@keyframes k { from { display: block } to { display: flex } }");
+        let (compiled, _) =
+            keyframes("@keyframes k { from { display: block } to { display: flex } }");
         assert!(compiled.tracks.is_empty());
     }
 
@@ -215,8 +220,9 @@ mod tests {
 
     #[test]
     fn keyframes_are_sorted_by_offset() {
-        let (compiled, _) =
-            keyframes("@keyframes k { 100% { opacity: 1 } 0% { opacity: 0 } 50% { opacity: 0.5 } }");
+        let (compiled, _) = keyframes(
+            "@keyframes k { 100% { opacity: 1 } 0% { opacity: 0 } 50% { opacity: 0.5 } }",
+        );
         let track = track_for(&compiled, PropertyId::Opacity);
         let offsets: Vec<f32> = track.keyframes().iter().map(Keyframe::offset).collect();
         assert_eq!(offsets, vec![0.0, 0.5, 1.0]);
