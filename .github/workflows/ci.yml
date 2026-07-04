@@ -1,0 +1,102 @@
+name: CI
+
+# Per-PR checks from spec §5.10 (CI matrix). The periodic-only jobs
+# (Miri, sanitizers, full fuzzing, GPU/OS matrix, WASM, MSRV, advisories) run on
+# a schedule to keep PR latency low.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    - cron: '0 4 * * 1' # Mondays 04:00 UTC — periodic matrix
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---- Per-PR checks -------------------------------------------------------
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    name: clippy (workspace, all-targets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # Warnings are already denied workspace-wide via [workspace.lints]; the
+      # intentional not-yet-implemented stubs are allowed there, so this stays green.
+      - run: cargo clippy --workspace --all-targets
+
+  test:
+    name: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  architecture:
+    name: architecture checks (xtask)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo run -p xtask -- check
+
+  features:
+    name: feature combinations (facade)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Portable default set, no-default, and the full native set must all build.
+      - run: cargo build -p obscur-kit
+      - run: cargo build -p obscur-kit --no-default-features
+      - run: cargo build -p obscur-kit --features full
+      # The windowed example is compile-only in CI (no display/GPU).
+      - run: cargo build -p obscur-kit --example windowed_counter --features full
+
+  # ---- Periodic-only jobs (spec §5.10 "периодически") ----------------------
+  advisories:
+    name: cargo-deny (advisories/licenses/bans)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+
+  msrv:
+    name: MSRV build (1.90)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.90.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace
+
+  wasm:
+    name: WASM build (system-web)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p obscur-system-web --target wasm32-unknown-unknown
