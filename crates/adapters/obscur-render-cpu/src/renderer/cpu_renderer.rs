@@ -232,6 +232,8 @@ impl Renderer for CpuRenderer {
                 // Layers are passthrough: children are drawn directly, without an
                 // offscreen compositing pass (documented future refinement).
                 PaintCommand::PushLayer(_) | PaintCommand::PopLayer => {}
+                // The CPU backend does not rasterize text runs yet (documented).
+                PaintCommand::DrawText { .. } => {}
             }
         }
 

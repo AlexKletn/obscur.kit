@@ -1,6 +1,6 @@
 //! An incremental builder for [`DisplayList`]s.
 
-use obscur_geometry::Rect;
+use obscur_geometry::{Point, Rect};
 
 use crate::clip::Clip;
 use crate::layer::SceneLayer;
@@ -59,6 +59,26 @@ impl DisplayListBuilder {
     /// filling it with `brush`. Returns `&mut Self` for chaining.
     pub fn fill_rect(&mut self, rect: Rect, brush: Brush) -> &mut Self {
         self.fill(Path::rect(rect), brush)
+    }
+
+    /// Appends a [`PaintCommand::DrawText`] drawing `text` at `origin` (its
+    /// top-left in absolute scene coordinates) at `font_size` pixels, painted
+    /// with `brush`. This is a leaf command; shaping is deferred to the renderer.
+    /// Returns `&mut Self` for chaining.
+    pub fn draw_text(
+        &mut self,
+        origin: Point,
+        text: impl Into<Box<str>>,
+        font_size: f32,
+        brush: Brush,
+    ) -> &mut Self {
+        self.commands.push(PaintCommand::DrawText {
+            origin,
+            text: text.into(),
+            font_size,
+            brush,
+        });
+        self
     }
 
     /// Appends a stroke: a [`PaintCommand::DrawPath`] with
@@ -223,5 +243,31 @@ mod tests {
             }
             other => panic!("expected DrawPath, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn draw_text_appends_a_leaf_text_command() {
+        let mut builder = DisplayListBuilder::new();
+        builder.draw_text(
+            Point::new(3.0, 7.0),
+            "hello",
+            18.0,
+            Brush::solid(Color::WHITE),
+        );
+
+        assert!(builder.is_balanced());
+        let list = builder.build();
+        assert_eq!(list.len(), 1);
+        assert_eq!(
+            list.commands()[0],
+            PaintCommand::DrawText {
+                origin: Point::new(3.0, 7.0),
+                text: "hello".into(),
+                font_size: 18.0,
+                brush: Brush::solid(Color::WHITE),
+            }
+        );
+        // A list containing DrawText is still balanced (it is a leaf).
+        assert!(list.is_balanced());
     }
 }

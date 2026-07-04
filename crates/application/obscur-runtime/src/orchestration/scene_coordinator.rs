@@ -13,6 +13,13 @@ use obscur_tree::tree::RetainedTree;
 
 use super::{ComputedStyles, LayoutBoxes};
 
+/// Default font size (in pixels) used to emit text runs.
+///
+/// The fixed [`PropertyId`] set carries no font-size property yet, so text runs
+/// are emitted at this default. When a font-size property is introduced this
+/// constant becomes the fallback and the computed value takes precedence.
+const DEFAULT_FONT_SIZE: f32 = 16.0;
+
 /// Orchestrates the scene phase: turns the styled + laid-out tree into a
 /// Scene/Paint [`DisplayList`] with a deterministic paint order (spec §5.1,
 /// §3.10, §3.4).
@@ -33,14 +40,18 @@ use super::{ComputedStyles, LayoutBoxes};
 ///
 /// # Phase-1 scope
 ///
-/// Phase 1 emits only **background fills**: a node whose computed
-/// `background-color` is present and not fully transparent fills its arranged
-/// layout rectangle. Opacity/clip layers, borders, text, and images are
-/// deferred to later phases (they will bracket the child fills with
-/// push/pop layer/clip pairs). Because Phase 1 emits only leaf
-/// [`fill_rect`](DisplayListBuilder::fill_rect) commands, the resulting
-/// [`DisplayList`] is always well-formed (balanced) and can be consumed by a
-/// renderer or `Scene` directly.
+/// The coordinator emits **background fills** and **text runs**: a node whose
+/// computed `background-color` is present and not fully transparent fills its
+/// arranged layout rectangle, and a text node with an arranged box emits a
+/// [`draw_text`](DisplayListBuilder::draw_text) run at that box's origin. Shaping
+/// is deferred to the renderer (the run carries the raw string); a font-size
+/// property does not exist yet, so runs use [`DEFAULT_FONT_SIZE`]. Opacity/clip
+/// layers, borders, and images are deferred to later phases (they will bracket
+/// the child fills with push/pop layer/clip pairs). Because only leaf
+/// [`fill_rect`](DisplayListBuilder::fill_rect) and
+/// [`draw_text`](DisplayListBuilder::draw_text) commands are emitted, the
+/// resulting [`DisplayList`] is always well-formed (balanced) and can be consumed
+/// by a renderer or `Scene` directly.
 ///
 /// The coordinator is a stateless zero-sized value; construct it with
 /// [`new`](Self::new) or [`Default`].
@@ -100,6 +111,23 @@ impl SceneCoordinator {
             }
 
             if let Some(retained) = tree.get(node) {
+                // Text nodes emit a text run at their arranged box origin. A node
+                // is either a text node or an element with a background, so this
+                // never double-emits with the background fill above. A text node
+                // may have a zero-size box; the run is still emitted (the renderer
+                // decides its extent). A text node with no arranged box is skipped.
+                if let Some(content) = retained.kind().text()
+                    && let Some(layout_box) = boxes.get(&node)
+                {
+                    let color = text_color_of(computed, node);
+                    builder.draw_text(
+                        layout_box.origin(),
+                        content,
+                        DEFAULT_FONT_SIZE,
+                        Brush::solid(color),
+                    );
+                }
+
                 for &child in retained.children().iter().rev() {
                     if !visited.contains(&child) {
                         stack.push(child);
@@ -121,6 +149,20 @@ fn background_color_of(computed: &ComputedStyles, node: NodeId) -> Option<StyleC
         .get(&node)
         .and_then(|style| style.get(PropertyId::BackgroundColor))
         .and_then(ComputedValue::as_color)
+}
+
+/// Reads a node's computed text `color` as a scene [`Color`], defaulting to
+/// [`Color::WHITE`] when absent.
+///
+/// Mirrors [`background_color_of`] but reads [`PropertyId::Color`]. When the node
+/// has no computed style, no `color` property, or a non-color value, the run
+/// falls back to opaque white (visible on the example's colored bars).
+fn text_color_of(computed: &ComputedStyles, node: NodeId) -> Color {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::Color))
+        .and_then(ComputedValue::as_color)
+        .map_or(Color::WHITE, scene_color_from)
 }
 
 /// Converts an authored style color into a scene paint color.
@@ -156,6 +198,44 @@ mod tests {
             node.set_logical_parent(LogicalParent::of(parent));
         }
         id
+    }
+
+    /// Allocates a text node carrying `content` under `parent`, wiring the child
+    /// link and the logical parent, and returns its id.
+    fn add_text_child(tree: &mut RetainedTree, parent: NodeId, content: &str) -> NodeId {
+        let id = tree.alloc(NodeKind::Text {
+            content: content.into(),
+        });
+        if let Some(node) = tree.get_mut(parent) {
+            node.push_child(id);
+        }
+        if let Some(node) = tree.get_mut(id) {
+            node.set_logical_parent(LogicalParent::of(parent));
+        }
+        id
+    }
+
+    /// Builds a `ComputedStyle` carrying a single text `color`.
+    fn with_color(color: StyleColor) -> ComputedStyle {
+        let mut style = ComputedStyle::new();
+        style.set(PropertyId::Color, ComputedValue::color(color));
+        style
+    }
+
+    /// Collects the `DrawText` runs (origin, text, brush) in a display list.
+    fn text_runs(list: &DisplayList) -> Vec<(Point, String, Brush)> {
+        list.commands()
+            .iter()
+            .filter_map(|c| match c {
+                PaintCommand::DrawText {
+                    origin,
+                    text,
+                    brush,
+                    ..
+                } => Some((*origin, text.to_string(), brush.clone())),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Builds a `ComputedStyle` carrying a single `background-color`.
@@ -273,6 +353,99 @@ mod tests {
 
         let coordinator = SceneCoordinator::new();
         let list = coordinator.compose(&tree, &computed, &boxes);
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn text_node_emits_run_at_box_origin_with_default_white() {
+        // root (bg) -> text child (no color set -> default white).
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "hello");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, with_background(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
+        // Text node has no computed color property.
+        computed.insert(text, ComputedStyle::new());
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 100.0, 100.0));
+        boxes.insert(text, box_at(5.0, 12.0, 40.0, 16.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+
+        // Background element still fills.
+        assert_eq!(fill_count(&list), 1);
+
+        let runs = text_runs(&list);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].0, Point::new(5.0, 12.0));
+        assert_eq!(runs[0].1, "hello");
+        assert_eq!(runs[0].2, Brush::solid(Color::WHITE));
+
+        // Leaf-only list stays balanced.
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn text_node_uses_its_computed_color() {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "tinted");
+
+        let color = StyleColor::rgba(0.1, 0.2, 0.3, 1.0);
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(text, with_color(color));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(text, box_at(1.0, 2.0, 10.0, 10.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+
+        let runs = text_runs(&list);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].2, Brush::solid(Color::rgba(0.1, 0.2, 0.3, 1.0)));
+    }
+
+    #[test]
+    fn zero_size_text_box_still_emits_a_run() {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "z");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(text, ComputedStyle::new());
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(text, box_at(3.0, 4.0, 0.0, 0.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+
+        let runs = text_runs(&list);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].0, Point::new(3.0, 4.0));
+        assert_eq!(runs[0].1, "z");
+    }
+
+    #[test]
+    fn text_node_without_a_box_emits_no_run() {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "orphan");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(text, ComputedStyle::new());
+
+        // No arranged box for the text node.
+        let boxes = LayoutBoxes::new();
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        assert!(text_runs(&list).is_empty());
         assert!(list.is_empty());
     }
 

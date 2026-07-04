@@ -98,6 +98,9 @@ impl SceneConverter {
                         depth -= 1;
                     }
                 }
+                // Text-run glyph rasterization is added in a later step; ignore
+                // for now so the display list still converts.
+                PaintCommand::DrawText { .. } => {}
             }
         }
 

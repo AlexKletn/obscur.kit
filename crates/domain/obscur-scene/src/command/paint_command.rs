@@ -35,6 +35,21 @@ pub enum PaintCommand {
         /// How the outline is painted (fill or stroke).
         paint: Paint,
     },
+    /// Draw a run of text. A LEAF command (no nesting effect). The origin is the
+    /// run's top-left in absolute scene coordinates; the renderer shapes the
+    /// string with its own font and places the baseline. Shaping is deliberately
+    /// deferred to the renderer in this first cut (a full pipeline would shape via
+    /// obscur-text and carry positioned glyphs).
+    DrawText {
+        /// Top-left origin of the run, in absolute scene coordinates.
+        origin: obscur_geometry::Point,
+        /// The run's text content.
+        text: Box<str>,
+        /// Font size in pixels.
+        font_size: f32,
+        /// The brush the glyphs are painted with.
+        brush: crate::paint::Brush,
+    },
     /// Push a clip onto the clip stack. Subsequent drawing is confined to the
     /// clip until the matching [`PaintCommand::PopClip`].
     PushClip(Clip),
@@ -74,7 +89,7 @@ impl PaintCommand {
         match self {
             Self::PushClip(_) | Self::PushLayer(_) => 1,
             Self::PopClip | Self::PopLayer => -1,
-            Self::DrawPath { .. } => 0,
+            Self::DrawPath { .. } | Self::DrawText { .. } => 0,
         }
     }
 }
@@ -116,5 +131,18 @@ mod tests {
         };
         assert!(!draw.is_push());
         assert!(!draw.is_pop());
+    }
+
+    #[test]
+    fn draw_text_is_a_leaf() {
+        let text = PaintCommand::DrawText {
+            origin: Point::new(2.0, 3.0),
+            text: "hi".into(),
+            font_size: 16.0,
+            brush: Brush::solid(Color::WHITE),
+        };
+        assert_eq!(text.nesting_delta(), 0);
+        assert!(!text.is_push());
+        assert!(!text.is_pop());
     }
 }
