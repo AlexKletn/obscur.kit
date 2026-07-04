@@ -1,6 +1,8 @@
 //! Orchestration module.
 mod animation_binding;
 pub use animation_binding::{AnimatedKind, AnimationBinding};
+mod css_motion_rules;
+pub use css_motion_rules::{CssKeyframeRule, CssMotionRules, CssTransitionRule};
 mod layout_coordinator;
 pub use layout_coordinator::{LayoutBoxes, LayoutCoordinator, LayoutStyles, root_font_size};
 mod motion_coordinator;

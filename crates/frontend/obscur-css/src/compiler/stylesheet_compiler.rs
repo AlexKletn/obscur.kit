@@ -23,10 +23,12 @@ use obscur_identity::InternedSymbol;
 use obscur_style::cascade::{CascadeOrigin, Declaration};
 use obscur_style::matching::{BlockDeclaration, RuleCondition, StyleRule, Stylesheet};
 use obscur_style::property::CustomProperty;
-use obscur_style::selector::SelectorSpecificity;
+use obscur_style::selector::{SelectorList, SelectorSpecificity};
 
+use super::animation_compiler::{AnimationCompiler, AnimationRef};
 use super::condition_lowering::lower_condition;
 use super::keyframe_compiler::{CompiledKeyframes, KeyframeCompiler};
+use super::motion_rule::{CompiledAnimation, CompiledMotionRule};
 use super::property_compiler::{CompiledDeclaration, PropertyCompiler};
 use super::selector_compiler::SelectorCompiler;
 use super::transition_compiler::{CompiledTransition, TransitionCompiler};
@@ -117,6 +119,17 @@ pub struct CompiledStylesheet {
     pub keyframes: Vec<CompiledKeyframes>,
     /// Top-level `transition` templates.
     pub transitions: Vec<CompiledTransition>,
+    /// Selector-associated motion: per style rule, the `transition` templates
+    /// and resolved `@keyframes` animations that rule declares, paired with the
+    /// selector list the runtime matches against the retained tree (§4.17).
+    ///
+    /// This is the wiring input the runtime consumes to drive CSS transitions and
+    /// animations: unlike the flat [`transitions`](Self::transitions) /
+    /// [`keyframes`](Self::keyframes) outputs, each entry keeps the association
+    /// between a selector and the motion it declares, so a transition fires only
+    /// on the nodes its rule matched and a `@keyframes` plays only on elements
+    /// that reference it via `animation`/`animation-name`.
+    pub motion_rules: Vec<CompiledMotionRule>,
     /// The interner backing every [`InternedSymbol`] in this stylesheet.
     pub symbols: CssSymbolInterner,
     /// The runtime-matchable stylesheet: every style rule lowered into the
@@ -152,7 +165,18 @@ struct Accumulator {
     keyframes: Vec<CompiledKeyframes>,
     transitions: Vec<CompiledTransition>,
     matchable_rules: Vec<StyleRule>,
+    motion_rules: Vec<PendingMotionRule>,
     unsupported: Vec<UnsupportedCssFeature>,
+}
+
+/// A style rule's motion before `@keyframes` names are resolved to tracks: the
+/// rule's selector list, its transition templates, and its (still-by-name)
+/// animation references. Resolved into a [`CompiledMotionRule`] in
+/// [`StylesheetCompiler::compile`], where every `@keyframes` rule is known.
+struct PendingMotionRule {
+    selectors: SelectorList,
+    transitions: Vec<CompiledTransition>,
+    animations: Vec<AnimationRef>,
 }
 
 /// Compiles a [`ParsedStylesheet`] into a [`CompiledStylesheet`] (§4.12).
@@ -169,6 +193,7 @@ pub struct StylesheetCompiler {
     properties: PropertyCompiler,
     keyframes: KeyframeCompiler,
     transitions: TransitionCompiler,
+    animations: AnimationCompiler,
     origin: CascadeOrigin,
     source_order: u32,
 }
@@ -183,6 +208,7 @@ impl StylesheetCompiler {
             properties: PropertyCompiler::new(),
             keyframes: KeyframeCompiler::new(),
             transitions: TransitionCompiler::new(),
+            animations: AnimationCompiler::new(),
             origin: CascadeOrigin::GlobalApp,
             source_order: 0,
         }
@@ -207,12 +233,22 @@ impl StylesheetCompiler {
 
         let matchable = Stylesheet::new(self.origin, acc.matchable_rules);
 
+        // Resolve each pending motion rule's `animation` references against the
+        // now-complete set of compiled `@keyframes` (a rule may reference a
+        // `@keyframes` defined later in the sheet).
+        let motion_rules = acc
+            .motion_rules
+            .into_iter()
+            .filter_map(|pending| resolve_motion_rule(pending, &acc.keyframes))
+            .collect();
+
         CompiledStylesheet {
             declarations: acc.declarations,
             custom_properties: acc.custom_properties,
             conditional_groups: acc.conditional_groups,
             keyframes: acc.keyframes,
             transitions: acc.transitions,
+            motion_rules,
             symbols: self.interner,
             matchable,
             unsupported,
@@ -280,12 +316,29 @@ impl StylesheetCompiler {
                 }
             }
         }
+        // Compile this rule's `transition` templates (once — they are
+        // selector-independent) and its `animation` references. They feed both
+        // the flat top-level outputs (backward-compatible) and the
+        // selector-associated `PendingMotionRule` the runtime drives.
+        let mut rule_transitions = Vec::new();
         for decl in &style.declarations {
             if is_transition_shorthand(&decl.name) {
                 let mut compiled = self.transitions.compile(decl, &mut acc.unsupported);
-                acc.transitions.append(&mut compiled);
+                rule_transitions.append(&mut compiled);
             }
         }
+        acc.transitions.extend(rule_transitions.iter().copied());
+        let animations = self
+            .animations
+            .compile(&style.declarations, &mut self.interner);
+        if !rule_transitions.is_empty() || !animations.is_empty() {
+            acc.motion_rules.push(PendingMotionRule {
+                selectors: SelectorCompiler::lower_list(&style.selectors),
+                transitions: rule_transitions,
+                animations,
+            });
+        }
+
         let rule = self.lower_matchable_rule(style);
         acc.matchable_rules.push(rule);
     }
@@ -349,6 +402,11 @@ impl Default for StylesheetCompiler {
 fn lift_group(condition: CompiledCondition, mut inner: Accumulator, acc: &mut Accumulator) {
     acc.keyframes.append(&mut inner.keyframes);
     acc.conditional_groups.append(&mut inner.conditional_groups);
+    // Motion rules nested inside a conditional group rise into the enclosing
+    // scope. Their group condition is not yet propagated to the runtime motion
+    // driver (a documented limitation): a transition/animation authored inside
+    // `@media`/`@container` currently drives regardless of the environment.
+    acc.motion_rules.append(&mut inner.motion_rules);
     acc.unsupported.append(&mut inner.unsupported);
     let lowered = lower_condition(&condition);
     for rule in inner.matchable_rules {
@@ -364,6 +422,41 @@ fn lift_group(condition: CompiledCondition, mut inner: Accumulator, acc: &mut Ac
         custom_properties: inner.custom_properties,
         transitions: inner.transitions,
     });
+}
+
+/// Resolves a [`PendingMotionRule`]'s `animation` references against the
+/// stylesheet's compiled `@keyframes`, producing a [`CompiledMotionRule`], or
+/// [`None`] when the rule ends up carrying no drivable motion.
+///
+/// Each [`AnimationRef`] is matched by interned name to a [`CompiledKeyframes`]
+/// (the names share one interner, so equal names intern equal); an unknown name
+/// resolves to nothing. A rule with neither transitions nor a resolvable
+/// animation is dropped.
+fn resolve_motion_rule(
+    pending: PendingMotionRule,
+    keyframes: &[CompiledKeyframes],
+) -> Option<CompiledMotionRule> {
+    let animations: Vec<CompiledAnimation> = pending
+        .animations
+        .iter()
+        .filter_map(|reference| {
+            keyframes
+                .iter()
+                .find(|compiled| compiled.name == reference.name)
+                .map(|compiled| CompiledAnimation {
+                    tracks: compiled.tracks.clone(),
+                    duration_secs: reference.duration_secs,
+                })
+        })
+        .collect();
+    if pending.transitions.is_empty() && animations.is_empty() {
+        return None;
+    }
+    Some(CompiledMotionRule {
+        selectors: pending.selectors,
+        transitions: pending.transitions,
+        animations,
+    })
 }
 
 /// Returns whether a declaration name is any `transition-*`/`animation-*`
@@ -488,6 +581,65 @@ mod tests {
     fn transition_is_compiled_once_per_rule_not_per_selector() {
         let sheet = compile("a, b { transition: opacity 0.3s }");
         assert_eq!(sheet.transitions.len(), 1);
+    }
+
+    #[test]
+    fn motion_rule_carries_transition_and_selector() {
+        use obscur_style::selector::SimpleSelector;
+        let sheet = compile(".box { transition: width 0.5s ease-out }");
+        assert_eq!(sheet.motion_rules.len(), 1);
+        let rule = &sheet.motion_rules[0];
+        assert_eq!(rule.transitions.len(), 1);
+        assert_eq!(rule.transitions[0].property, PropertyId::Width);
+        // The selector list is preserved so the runtime can match `.box`.
+        let selectors = rule.selectors.selectors();
+        assert_eq!(selectors.len(), 1);
+        assert_eq!(
+            selectors[0].subject().simples(),
+            &[SimpleSelector::Class("box".into())]
+        );
+        assert!(rule.animations.is_empty());
+    }
+
+    #[test]
+    fn motion_rule_resolves_animation_name_to_tracks() {
+        let sheet = compile(
+            "@keyframes fade { from { opacity: 0 } to { opacity: 1 } }\n\
+             .box { animation: fade 2s }",
+        );
+        assert_eq!(sheet.motion_rules.len(), 1);
+        let rule = &sheet.motion_rules[0];
+        assert_eq!(rule.animations.len(), 1);
+        assert_eq!(rule.animations[0].duration_secs, 2.0);
+        assert_eq!(rule.animations[0].tracks.len(), 1);
+        assert_eq!(rule.animations[0].tracks[0].0, PropertyId::Opacity);
+    }
+
+    #[test]
+    fn animation_name_resolves_even_when_keyframes_defined_after() {
+        // The rule references `spin` before it is declared; resolution is a
+        // post-pass over the full sheet, so the tracks still bind.
+        let sheet = compile(
+            ".box { animation-name: spin; animation-duration: 1s }\n\
+             @keyframes spin { from { width: 0px } to { width: 10px } }",
+        );
+        assert_eq!(sheet.motion_rules.len(), 1);
+        assert_eq!(sheet.motion_rules[0].animations.len(), 1);
+        assert_eq!(sheet.motion_rules[0].animations[0].duration_secs, 1.0);
+    }
+
+    #[test]
+    fn unknown_animation_name_produces_no_motion_rule() {
+        // `ghost` names no `@keyframes`, and there is no transition, so the rule
+        // carries no drivable motion and is dropped.
+        let sheet = compile(".box { animation: ghost 1s }");
+        assert!(sheet.motion_rules.is_empty());
+    }
+
+    #[test]
+    fn plain_rule_produces_no_motion_rule() {
+        let sheet = compile(".box { color: black }");
+        assert!(sheet.motion_rules.is_empty());
     }
 
     #[test]

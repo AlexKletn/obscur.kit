@@ -1,5 +1,6 @@
 //! The embeddable UI runtime and application-core integrator: [`UiRuntime`].
 
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use obscur_accessibility::port::AccessibilityBridge;
@@ -12,13 +13,14 @@ use obscur_interaction::pointer::{PointerEvent, PointerEventKind};
 use obscur_interaction::spatial::{HitTest, SpatialIndex};
 use obscur_motion::scheduler::MotionScheduler;
 use obscur_motion::timeline::{Timeline, TimelineId};
-use obscur_motion::track::KeyframeTrack;
+use obscur_motion::track::{Keyframe, KeyframeTrack};
 use obscur_motion::transition::TransitionInterruption;
+use obscur_motion::value::MotionValue;
 use obscur_scene::scene::{Scene, SceneSnapshot};
-use obscur_style::computed::ComputedValue;
+use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::matching::{MediaEnvironment, Stylesheet};
-use obscur_style::property::PropertyId;
-use obscur_style::selector::PseudoState;
+use obscur_style::property::{Length, PropertyId, PropertyValue};
+use obscur_style::selector::{PseudoState, SelectorMatcher};
 use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
@@ -26,9 +28,9 @@ use obscur_view::view::View;
 use super::{FramePlan, KeyDispatch, PointerDispatch, SemanticTreeBuilder};
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::orchestration::{
-    root_font_size, AnimatedKind, AnimationBinding, ComputedStyles, LayoutBoxes, LayoutCoordinator,
-    MotionCoordinator, PseudoStates, SceneCoordinator, StyleCoordinator, StyleInputs,
-    StyleMatchingCoordinator,
+    root_font_size, AnimatedKind, AnimationBinding, ComputedStyles, CssMotionRules, LayoutBoxes,
+    LayoutCoordinator, MotionCoordinator, PseudoStates, SceneCoordinator, StyleCoordinator,
+    StyleInputs, StyleMatchingCoordinator, TreeElement,
 };
 use crate::scheduler::{BackpressureDecision, FrameScheduler};
 use crate::transaction::ReconcileEnactor;
@@ -143,6 +145,21 @@ pub struct UiRuntime {
     /// The id minted for the next timeline started by
     /// [`animate`](Self::animate); monotonically increasing so ids are unique.
     next_timeline: TimelineId,
+    /// The CSS-authored transitions and `@keyframes` animations, keyed by
+    /// selector, that the runtime drives through the [`MotionScheduler`] each
+    /// style frame (spec §4.17). Empty until a host installs a compiled
+    /// stylesheet's motion via [`set_css_motion`](Self::set_css_motion).
+    css_motion: CssMotionRules,
+    /// The last computed value observed for each `(node, property)` a CSS
+    /// `transition` watches — the baseline a transition's change-detection
+    /// compares against. A transition starts only when the freshly resolved
+    /// value *differs* from this retained target (spec §4.17 "a transition starts
+    /// when the property changes").
+    transition_targets: HashMap<(NodeId, PropertyId), f32>,
+    /// The `(node, property)` pairs a CSS `@keyframes` animation has already been
+    /// started for, so a matching element registers its keyframe timeline once
+    /// rather than re-registering it every style frame.
+    css_animations_started: HashSet<(NodeId, PropertyId)>,
 }
 
 impl UiRuntime {
@@ -178,7 +195,28 @@ impl UiRuntime {
             motion: MotionScheduler::new(),
             animations: Vec::new(),
             next_timeline: TimelineId::from_raw(0),
+            css_motion: CssMotionRules::new(),
+            transition_targets: HashMap::new(),
+            css_animations_started: HashSet::new(),
         }
+    }
+
+    /// Installs the CSS-authored motion (`transition`/`@keyframes`) the runtime
+    /// drives, replacing any previously installed set (spec §4.17 S4).
+    ///
+    /// A host builds a [`CssMotionRules`] from a compiled stylesheet and calls
+    /// this once the stylesheet is (re)compiled. Each style frame the runtime
+    /// then matches these selector-bound rules against the retained tree and
+    /// registers the corresponding timelines with the
+    /// [`MotionScheduler`](obscur_motion::scheduler::MotionScheduler): a
+    /// `transition` fires when a matched element's watched property *changes*
+    /// value, and a `@keyframes` animation starts when an element first matches
+    /// the rule that references it. Installing a new set resets the per-node
+    /// change-detection baselines so the new sheet re-observes from scratch.
+    pub fn set_css_motion(&mut self, rules: CssMotionRules) {
+        self.css_motion = rules;
+        self.transition_targets.clear();
+        self.css_animations_started.clear();
     }
 
     /// Requests a frame for `reason`, returning the scheduler's admission
@@ -303,9 +341,14 @@ impl UiRuntime {
                 &environment,
             );
             let mut computed = self.style.resolve(&self.tree, &inputs);
+            // 3a. CSS motion: match selector-bound `transition`/`@keyframes`
+            //     rules against the tree over the *resolved* (pre-overlay) values,
+            //     starting a timeline for any transitioned property that changed
+            //     or any newly-matched animation (spec §4.17 S4).
+            self.drive_css_motion(&computed);
             // 3b. Motion: overlay every active animation's sampled value onto the
             //     computed style *before* layout/paint (spec §4.17 style →
-            //     motion → paint).
+            //     motion → paint). This now includes the CSS-started timelines.
             self.apply_motion_overlay(&mut computed);
             let restyled = !computed.is_empty();
             self.inputs = inputs;
@@ -518,6 +561,134 @@ impl UiRuntime {
             if let Some(style) = computed.get_mut(&binding.node()) {
                 style.set(binding.property(), value);
             }
+        }
+    }
+
+    /// Drives the installed CSS `transition`/`@keyframes` rules against the tree,
+    /// registering timelines with the [`MotionScheduler`] for any transitioned
+    /// property that changed value or any newly-matched animation (spec §4.17 S4).
+    ///
+    /// `computed` is this frame's *resolved* style, sampled **before** the motion
+    /// overlay, so a transition's change-detection compares the settled cascade
+    /// target — not a mid-animation value — against the retained
+    /// [`transition_targets`](Self::transition_targets) baseline. The pass runs in
+    /// two stages to keep the borrow of `self.css_motion` disjoint from the
+    /// `&mut self` [`animate`](Self::animate) calls: it first *collects* the
+    /// actions to take (matching each rule's selector against every element node
+    /// via [`SelectorMatcher`], honouring recorded pseudo-state), then *applies*
+    /// them — updating the baselines and starting the timelines.
+    fn drive_css_motion(&mut self, computed: &ComputedStyles) {
+        if self.css_motion.is_empty() {
+            return;
+        }
+
+        // Stage 1: collect. Pure reads of `self.css_motion`, `self.tree`,
+        // `self.pseudo`, and the change-detection baselines.
+        let mut target_updates: Vec<((NodeId, PropertyId), f32)> = Vec::new();
+        let mut transitions_to_start: Vec<TransitionStart> = Vec::new();
+        let mut animations_to_start: Vec<AnimationStart> = Vec::new();
+
+        for rule in self.css_motion.transitions() {
+            let Some(kind) = animated_kind_for(rule.property()) else {
+                continue;
+            };
+            for (id, node) in self.tree.iter() {
+                if !node.kind().is_element() {
+                    continue;
+                }
+                let element = TreeElement::with_pseudo(&self.tree, id, &self.pseudo);
+                if SelectorMatcher::matches_list(rule.selectors(), &element).is_none() {
+                    continue;
+                }
+                let Some(new_scalar) = computed
+                    .get(&id)
+                    .and_then(|style| scalar_of(style, rule.property(), kind))
+                else {
+                    continue;
+                };
+                let key = (id, rule.property());
+                match self.transition_targets.get(&key) {
+                    // A real change of a watched property: start a transition from
+                    // the previous target to the new one, unless the duration is
+                    // non-positive (then it would just snap).
+                    Some(&previous) if previous != new_scalar => {
+                        target_updates.push((key, new_scalar));
+                        if rule.duration_secs() > 0.0 {
+                            transitions_to_start.push(TransitionStart {
+                                node: id,
+                                property: rule.property(),
+                                from: previous,
+                                to: new_scalar,
+                                duration: rule.duration_secs(),
+                                easing: rule.easing(),
+                                kind,
+                            });
+                        }
+                    }
+                    // Unchanged: nothing to do.
+                    Some(_) => {}
+                    // First observation: record the baseline, do not animate.
+                    None => target_updates.push((key, new_scalar)),
+                }
+            }
+        }
+
+        for rule in self.css_motion.keyframes() {
+            for (id, node) in self.tree.iter() {
+                if !node.kind().is_element() {
+                    continue;
+                }
+                let element = TreeElement::with_pseudo(&self.tree, id, &self.pseudo);
+                if SelectorMatcher::matches_list(rule.selectors(), &element).is_none() {
+                    continue;
+                }
+                for (property, track) in rule.tracks() {
+                    let Some(kind) = animated_kind_for(*property) else {
+                        continue;
+                    };
+                    if self.css_animations_started.contains(&(id, *property)) {
+                        continue;
+                    }
+                    animations_to_start.push(AnimationStart {
+                        node: id,
+                        property: *property,
+                        track: track.clone(),
+                        duration: rule.duration_secs(),
+                        kind,
+                    });
+                }
+            }
+        }
+
+        // Stage 2: apply. Mutating `self` (baselines + `animate`).
+        for (key, value) in target_updates {
+            self.transition_targets.insert(key, value);
+        }
+        for start in transitions_to_start {
+            let track = KeyframeTrack::from_keyframes(vec![
+                Keyframe::new(0.0, MotionValue::scalar(start.from)).with_easing(start.easing),
+                Keyframe::new(1.0, MotionValue::scalar(start.to)),
+            ]);
+            self.animate(
+                start.node,
+                start.property,
+                track,
+                start.duration,
+                start.kind,
+                TransitionInterruption::Blend,
+            );
+        }
+        for start in animations_to_start {
+            self.css_animations_started
+                .insert((start.node, start.property));
+            self.animate(
+                start.node,
+                start.property,
+                start.track,
+                start.duration,
+                start.kind,
+                TransitionInterruption::Restart,
+            );
         }
     }
 
@@ -880,6 +1051,78 @@ impl UiRuntime {
     }
 }
 
+/// A pending CSS-transition start collected during
+/// [`UiRuntime::drive_css_motion`]'s read stage.
+struct TransitionStart {
+    node: NodeId,
+    property: PropertyId,
+    from: f32,
+    to: f32,
+    duration: f32,
+    easing: obscur_motion::track::Easing,
+    kind: AnimatedKind,
+}
+
+/// A pending CSS-`@keyframes` animation start collected during
+/// [`UiRuntime::drive_css_motion`]'s read stage.
+struct AnimationStart {
+    node: NodeId,
+    property: PropertyId,
+    track: KeyframeTrack,
+    duration: f32,
+    kind: AnimatedKind,
+}
+
+/// Returns how a scalar animates into `property`'s computed value, or [`None`]
+/// for a property the motion overlay cannot express as a scalar.
+///
+/// This mirrors [`AnimationBinding`]'s lowering: `opacity`/`flex-grow`/
+/// `flex-shrink` are bare numbers; box-model lengths are pixel lengths. A
+/// property outside this set (e.g. a colour or keyword) is not scalar-animatable
+/// here and drives no CSS transition/animation.
+fn animated_kind_for(property: PropertyId) -> Option<AnimatedKind> {
+    match property {
+        PropertyId::Opacity | PropertyId::FlexGrow | PropertyId::FlexShrink => {
+            Some(AnimatedKind::Number)
+        }
+        PropertyId::Width
+        | PropertyId::Height
+        | PropertyId::MinWidth
+        | PropertyId::MinHeight
+        | PropertyId::MaxWidth
+        | PropertyId::MaxHeight
+        | PropertyId::MarginTop
+        | PropertyId::MarginRight
+        | PropertyId::MarginBottom
+        | PropertyId::MarginLeft
+        | PropertyId::PaddingTop
+        | PropertyId::PaddingRight
+        | PropertyId::PaddingBottom
+        | PropertyId::PaddingLeft
+        | PropertyId::Gap
+        | PropertyId::FlexBasis
+        | PropertyId::FontSize => Some(AnimatedKind::LengthPx),
+        _ => None,
+    }
+}
+
+/// Extracts `property`'s computed value from `style` as the scalar `kind`
+/// animates, or [`None`] when the property is absent or not that scalar shape.
+///
+/// A [`AnimatedKind::Number`] reads a bare [`PropertyValue::Number`]; a
+/// [`AnimatedKind::LengthPx`] reads an absolute pixel length (a percentage or
+/// `auto` length has no fixed scalar and yields [`None`]).
+fn scalar_of(style: &ComputedStyle, property: PropertyId, kind: AnimatedKind) -> Option<f32> {
+    let value = style.get(property)?;
+    match kind {
+        AnimatedKind::Number => match value.value() {
+            PropertyValue::Number(n) => Some(*n),
+            _ => None,
+        },
+        AnimatedKind::LengthPx => value.as_length().and_then(Length::as_px).map(|px| px.0),
+    }
+}
+
 impl fmt::Debug for UiRuntime {
     /// Reports the stable identity fields — runtime id, viewport, next frame, and
     /// pending frame count — without touching the opaque tree, scene, or
@@ -1208,6 +1451,156 @@ mod tests {
         let mut bridge = RecordingAccessibilityBridge::new();
         runtime.push_accessibility(&mut bridge);
         assert_eq!(bridge.tree_updates, 1, "the snapshot reached the bridge");
+    }
+
+    // ---- §4.17 S4: CSS transitions / @keyframes driven through motion --------
+
+    use crate::orchestration::{CssKeyframeRule, CssMotionRules, CssTransitionRule};
+    use obscur_motion::track::Easing;
+
+    /// The selector list `.box`.
+    fn box_selectors() -> SelectorList {
+        SelectorList::new(vec![ComplexSelector::new(
+            CompoundSelector::new(vec![SimpleSelector::Class("box".into())]),
+            Vec::new(),
+        )])
+    }
+
+    /// A single `.box` element.
+    fn box_view() -> View {
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(10))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("box".into()))),
+        ]))
+    }
+
+    /// `.box { width: 100px; height: 50px } .box:hover { width: 200px }`.
+    fn box_hover_sheet() -> Stylesheet {
+        Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![
+                class_rule("box", size(100.0, 50.0)),
+                class_hover_rule(
+                    "box",
+                    vec![BlockDeclaration::normal(
+                        PropertyId::Width,
+                        PropertyValue::Length(Length::px(200.0)),
+                    )],
+                ),
+            ],
+        )
+    }
+
+    #[test]
+    fn css_transition_registers_and_interpolates_on_change() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let view = box_view();
+        let sheet = box_hover_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        runtime.set_css_motion(CssMotionRules::from_parts(
+            vec![CssTransitionRule::new(
+                box_selectors(),
+                PropertyId::Width,
+                1.0,
+                Easing::Linear,
+            )],
+            Vec::new(),
+        ));
+
+        // Frame 1 (no hover): the transition records its baseline (width 100) but
+        // starts nothing — no change yet.
+        let _ = runtime.render_now(&view, sheets);
+        let child = counter_child(&runtime);
+        assert_eq!(runtime.active_animations(), 0, "no change => no timeline");
+        assert_eq!(box_width(&runtime, child), 100.0);
+
+        // Hover changes the resolved width 100 -> 200: a transition timeline is
+        // registered, and at t == 0 the overlaid width is still the old value.
+        runtime.set_pseudo_state(child, PseudoState::HOVER);
+        let _ = runtime.render_now(&view, sheets);
+        assert_eq!(
+            runtime.active_animations(),
+            1,
+            "a changed transitioned property registers a running timeline"
+        );
+        assert_eq!(box_width(&runtime, child), 100.0, "starts from the old value");
+
+        // Advance halfway: the sampled width interpolates linearly to 150.
+        runtime.advance_motion(0.5);
+        let _ = runtime.render_now(&view, sheets);
+        assert_eq!(box_width(&runtime, child), 150.0, "interpolates old->new");
+        assert_eq!(runtime.active_animations(), 1, "still running at t = 0.5");
+
+        // Advance to the end: the timeline finishes and the width settles at 200.
+        runtime.advance_motion(0.5);
+        let _ = runtime.render_now(&view, sheets);
+        assert_eq!(box_width(&runtime, child), 200.0, "settles at the new value");
+        assert_eq!(runtime.active_animations(), 0, "finished timeline is pruned");
+    }
+
+    #[test]
+    fn css_transition_does_not_fire_without_a_change() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let view = box_view();
+        // Only the base rule: the width never changes across frames.
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![class_rule("box", size(100.0, 50.0))],
+        );
+        let sheets = std::slice::from_ref(&sheet);
+        runtime.set_css_motion(CssMotionRules::from_parts(
+            vec![CssTransitionRule::new(
+                box_selectors(),
+                PropertyId::Width,
+                1.0,
+                Easing::Linear,
+            )],
+            Vec::new(),
+        ));
+
+        let _ = runtime.render_now(&view, sheets);
+        let _ = runtime.render_now(&view, sheets);
+        assert_eq!(
+            runtime.active_animations(),
+            0,
+            "an unchanged property registers no timeline"
+        );
+    }
+
+    #[test]
+    fn css_keyframes_rule_registers_a_keyframe_timeline() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let view = box_view();
+        // The base rule sizes the box so it lays out; the animation targets opacity.
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![class_rule("box", size(100.0, 50.0))],
+        );
+        let sheets = std::slice::from_ref(&sheet);
+        let track = KeyframeTrack::from_keyframes(vec![
+            Keyframe::new(0.0, MotionValue::scalar(0.0)),
+            Keyframe::new(1.0, MotionValue::scalar(1.0)),
+        ]);
+        runtime.set_css_motion(CssMotionRules::from_parts(
+            Vec::new(),
+            vec![CssKeyframeRule::new(
+                box_selectors(),
+                vec![(PropertyId::Opacity, track)],
+                1.0,
+            )],
+        ));
+
+        // Matching `.box` registers the keyframe timeline once.
+        let _ = runtime.render_now(&view, sheets);
+        assert_eq!(
+            runtime.active_animations(),
+            1,
+            "an @keyframes-referencing rule registers a keyframe timeline"
+        );
+
+        // A second frame must not re-register it (started-set guards it).
+        let _ = runtime.render_now(&view, sheets);
+        assert_eq!(runtime.active_animations(), 1, "registered once, not per frame");
     }
 
     #[test]
