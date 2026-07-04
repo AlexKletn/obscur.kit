@@ -4,7 +4,7 @@
 
 mod runtime;
 
-pub use runtime::UiRuntime;
+pub use runtime::{PointerDispatch, UiRuntime};
 
 pub mod frame;
 pub mod invalidation;

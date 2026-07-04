@@ -3,6 +3,10 @@ mod ui_runtime;
 
 pub use ui_runtime::UiRuntime;
 
+mod pointer_dispatch;
+
+pub use pointer_dispatch::PointerDispatch;
+
 mod runtime_config;
 mod runtime_event;
 mod runtime_handle;

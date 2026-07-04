@@ -20,3 +20,4 @@ obscur-tree = { workspace = true }
 obscur-style = { workspace = true }
 obscur-layout = { workspace = true }
 obscur-scene = { workspace = true }
+obscur-interaction = { workspace = true }
