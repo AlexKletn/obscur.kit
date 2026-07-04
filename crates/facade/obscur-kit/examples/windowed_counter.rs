@@ -54,7 +54,8 @@ use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
 use obscur_kit::geometry::Size;
 use obscur_kit::headless::HeadlessHost;
-use obscur_kit::identity::InternedSymbol;
+use obscur_kit::headless::host::HeadlessConfig;
+use obscur_kit::identity::{InternedSymbol, RuntimeId};
 use obscur_kit::primitives::{Container, Text};
 use obscur_kit::render::frame::{FrameSubmission, RenderFrame};
 use obscur_kit::render::renderer::RendererId;
@@ -113,6 +114,19 @@ impl WindowedCounter {
             decrement: Button::new("-", CMD_DECREMENT),
             increment: Button::new("+", CMD_INCREMENT),
             count: 0,
+        }
+    }
+
+    /// Rebuilds the frame driver so its layout viewport matches the swapchain's
+    /// physical extent. The scene is rasterized 1:1 into the surface, so laying
+    /// out under a different (default 800x600) viewport would leave the content
+    /// in a corner. Called after the surface is created and on every resize.
+    fn sync_host_viewport(&mut self) {
+        if let Some(surface) = self.surface.as_ref() {
+            let config = surface.config();
+            let viewport = Size::new(config.width as f32, config.height as f32);
+            self.host =
+                HeadlessHost::with_config(RuntimeId::from_raw(1), HeadlessConfig::with_viewport(viewport));
         }
     }
 
@@ -215,6 +229,9 @@ impl ApplicationHandler for WindowedCounter {
                         self.device = Some(device);
                         self.renderer = Some(renderer);
                         self.window = Some(window);
+                        // Lay out at the surface's physical extent, not the
+                        // default viewport, so the scene fills the window.
+                        self.sync_host_viewport();
                         // Kick off the first frame.
                         if let Some(window) = self.window.as_ref() {
                             window.request_redraw();
@@ -249,9 +266,12 @@ impl ApplicationHandler for WindowedCounter {
                     (self.surface.as_mut(), self.device.as_ref())
                 {
                     surface.resize(device, new_size.width, new_size.height);
-                    if let Some(window) = self.window.as_ref() {
-                        window.request_redraw();
-                    }
+                }
+                // Keep the layout viewport in step with the new extent (the
+                // surface/device borrows above have ended).
+                self.sync_host_viewport();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
                 }
             }
             WindowEvent::RedrawRequested => self.render_frame(),
