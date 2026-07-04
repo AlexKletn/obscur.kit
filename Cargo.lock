@@ -1404,6 +1404,9 @@ version = "0.0.0"
 [[package]]
 name = "obscur-devtools-server"
 version = "0.0.0"
+dependencies = [
+ "obscur-devtools-protocol",
+]
 
 [[package]]
 name = "obscur-diagnostics"

@@ -51,6 +51,9 @@ obscur-headless = { path = "crates/application/obscur-headless" }
 obscur-theme-system = { path = "crates/components/obscur-theme-system" }
 obscur-primitives = { path = "crates/components/obscur-primitives" }
 obscur-widgets = { path = "crates/components/obscur-widgets" }
+# diagnostics
+obscur-devtools-protocol = { path = "crates/diagnostics/obscur-devtools-protocol" }
+obscur-devtools-server = { path = "crates/diagnostics/obscur-devtools-server" }
 # frontend
 obscur-ui-ir = { path = "crates/frontend/obscur-ui-ir" }
 obscur-okui-syntax = { path = "crates/frontend/obscur-okui-syntax" }
