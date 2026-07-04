@@ -2,9 +2,9 @@
 
 /// The formatting context / display mode of a layout node (spec §4.1).
 ///
-/// Phase-1 supports only the flow (`Block`) and `Flex` formatting contexts,
-/// plus `None` for nodes that are laid out away (generate no box). Additional
-/// contexts such as grid, table, or positioning are introduced in later phases.
+/// Supports the flow (`Block`), `Flex`, and `Grid` formatting contexts, plus
+/// `None` for nodes that are laid out away (generate no box). Additional
+/// contexts such as table or positioning are introduced in later phases.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LayoutDisplay {
     /// Normal flow: the node participates in block layout (the default).
@@ -12,6 +12,10 @@ pub enum LayoutDisplay {
     Block,
     /// Flex layout: the node establishes a flex formatting context.
     Flex,
+    /// Grid layout: the node establishes a grid formatting context (a uniform
+    /// fixed-column grid; see
+    /// [`GridLayout`](crate::algorithm::GridLayout)).
+    Grid,
     /// The node generates no box and is excluded from layout.
     None,
 }
@@ -38,5 +42,13 @@ mod tests {
         assert!(LayoutDisplay::None.is_none());
         assert!(!LayoutDisplay::Block.is_none());
         assert!(!LayoutDisplay::Flex.is_none());
+        assert!(!LayoutDisplay::Grid.is_none());
+    }
+
+    #[test]
+    fn grid_is_distinct_and_not_none() {
+        assert_ne!(LayoutDisplay::Grid, LayoutDisplay::Block);
+        assert_ne!(LayoutDisplay::Grid, LayoutDisplay::Flex);
+        assert!(!LayoutDisplay::Grid.is_none());
     }
 }

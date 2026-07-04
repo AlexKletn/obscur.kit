@@ -1641,6 +1641,7 @@ dependencies = [
  "obscur-diagnostics",
  "obscur-geometry",
  "obscur-identity",
+ "obscur-interaction",
  "obscur-layout",
  "obscur-scene",
  "obscur-style",

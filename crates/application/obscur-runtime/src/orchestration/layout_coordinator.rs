@@ -2,14 +2,16 @@
 
 use std::collections::HashMap;
 
-use obscur_geometry::{BoxConstraints, Point, Rect, Size};
-use obscur_identity::NodeId;
+use obscur_geometry::{BoxConstraints, Insets, Point, Rect, Size};
+use obscur_identity::{InternedSymbol, NodeId};
 use obscur_layout::algorithm::{
-    ChildMeasurer, FlexLayout, FlowLayout, LayoutAlgorithm, LayoutChild,
+    ChildMeasurer, FlexLayout, FlowLayout, GridLayout, LayoutAlgorithm, LayoutChild,
 };
-use obscur_layout::model::{Dimension, LayoutBox, LayoutDisplay, LayoutStyle};
+use obscur_layout::model::{
+    AlignItems, Dimension, FlexDirection, JustifyContent, LayoutBox, LayoutDisplay, LayoutStyle,
+};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
-use obscur_style::property::{Length, PropertyId};
+use obscur_style::property::{layout_keyword, Length, PropertyId, PropertyValue};
 use obscur_tree::tree::RetainedTree;
 
 use super::ComputedStyles;
@@ -125,27 +127,73 @@ impl LayoutCoordinator {
 
 /// Maps a single [`ComputedStyle`] into layout's own [`LayoutStyle`].
 ///
-/// * `width` / `height` — read `PropertyId::Width` / `PropertyId::Height` as a
-///   [`Length`] and map [`Length::Px`] → [`Dimension::Px`],
-///   [`Length::Percent`] → [`Dimension::Percent`], [`Length::Auto`] →
-///   [`Dimension::Auto`]; an absent property also maps to [`Dimension::Auto`].
-/// * All other fields come from [`LayoutStyle::default`].
+/// This is the full computed → layout bridge (spec §3.10, §4.2): every field of
+/// [`LayoutStyle`] is populated from the corresponding computed property so that
+/// flex/grid formatting, the box model, and the flex item/container knobs all
+/// engage directly from CSS. A property that is absent (or has the wrong value
+/// kind) falls back to the matching [`LayoutStyle::default`] value.
 ///
-/// # Display is not mapped (Phase 1 limitation)
+/// The mapping, field by field:
 ///
-/// The computed `display` property is a keyword backed by an interned symbol
-/// (`InternedSymbol`), and resolving that symbol back to a
-/// [`LayoutDisplay`] variant requires the string interner, which is not wired
-/// into the runtime in Phase 1. Consequently every node defaults to
-/// [`LayoutDisplay::Block`] here. Tests that need flex behaviour set
-/// [`LayoutStyle::display`] directly. Once the interner is available, this
-/// helper will resolve the keyword to the correct [`LayoutDisplay`].
+/// * `display` ← [`PropertyId::Display`] keyword. The computed value is a
+///   [`PropertyValue::Keyword`] backed by an [`InternedSymbol`]; it is compared
+///   against the reserved [`layout_keyword`] handles — `DISPLAY_FLEX` → `Flex`,
+///   `DISPLAY_GRID` → `Grid`, `DISPLAY_NONE` → `None`, everything else (including
+///   `DISPLAY_BLOCK` and an absent property) → `Block`. Because both the CSS
+///   compiler and this bridge use those reserved symbol values, the identities
+///   compare equal across crates without a shared interner.
+/// * `width` / `height` / `min_width` / `min_height` / `max_width` /
+///   `max_height` ← the matching `PropertyId::{Width, Height, MinWidth,
+///   MinHeight, MaxWidth, MaxHeight}` length, via [`dimension_of`]
+///   ([`Length::Px`] → [`Dimension::Px`], [`Length::Percent`] →
+///   [`Dimension::Percent`], [`Length::Auto`]/absent → [`Dimension::Auto`]).
+/// * `margin` / `padding` ← the four `*-top/right/bottom/left` longhands,
+///   resolved to pixel [`Insets`] via [`insets_of`]. Insets are pixel-only, so a
+///   `Percent`/`Auto` length contributes `0.0` on that edge. `border` stays at
+///   its zero default (no CSS border-width property is modelled yet).
+/// * `gap` ← [`PropertyId::Gap`] length in pixels (`Percent`/`Auto` → `0.0`).
+/// * `flex_grow` / `flex_shrink` ← `PropertyId::{FlexGrow, FlexShrink}` numbers,
+///   defaulting to the [`LayoutStyle::default`] values (`0.0` / `1.0`).
+/// * `flex_basis` ← [`PropertyId::FlexBasis`] via [`dimension_of`].
+/// * `flex_direction` ← [`PropertyId::FlexDirection`] keyword against the
+///   reserved `FLEX_*` handles (default `Row`).
+/// * `justify_content` ← [`PropertyId::JustifyContent`] keyword against the
+///   reserved `JUSTIFY_*` handles (default `FlexStart`).
+/// * `align_items` ← [`PropertyId::AlignItems`] keyword against the reserved
+///   `ALIGN_*` handles (default `Stretch`).
 fn layout_style_from(computed: &ComputedStyle) -> LayoutStyle {
+    let default = LayoutStyle::default();
     LayoutStyle {
-        display: LayoutDisplay::Block,
+        display: display_of(computed),
         width: dimension_of(computed, PropertyId::Width),
         height: dimension_of(computed, PropertyId::Height),
-        ..LayoutStyle::default()
+        min_width: dimension_of(computed, PropertyId::MinWidth),
+        min_height: dimension_of(computed, PropertyId::MinHeight),
+        max_width: dimension_of(computed, PropertyId::MaxWidth),
+        max_height: dimension_of(computed, PropertyId::MaxHeight),
+        margin: insets_of(
+            computed,
+            PropertyId::MarginTop,
+            PropertyId::MarginRight,
+            PropertyId::MarginBottom,
+            PropertyId::MarginLeft,
+        ),
+        padding: insets_of(
+            computed,
+            PropertyId::PaddingTop,
+            PropertyId::PaddingRight,
+            PropertyId::PaddingBottom,
+            PropertyId::PaddingLeft,
+        ),
+        // No CSS border-width property is modelled yet; keep the zero default.
+        border: default.border,
+        flex_direction: flex_direction_of(computed),
+        justify_content: justify_content_of(computed),
+        align_items: align_items_of(computed),
+        gap: length_px_of(computed, PropertyId::Gap),
+        flex_grow: number_of(computed, PropertyId::FlexGrow, default.flex_grow),
+        flex_shrink: number_of(computed, PropertyId::FlexShrink, default.flex_shrink),
+        flex_basis: dimension_of(computed, PropertyId::FlexBasis),
     }
 }
 
@@ -159,6 +207,102 @@ fn dimension_of(computed: &ComputedStyle, property: PropertyId) -> Dimension {
     }
 }
 
+/// Resolves one length-valued property into a pixel value, defaulting to `0.0`.
+///
+/// Layout insets and `gap` are pixel-only, so a `Percent` or `Auto` length (or
+/// an absent/non-length property) contributes `0.0`.
+fn length_px_of(computed: &ComputedStyle, property: PropertyId) -> f32 {
+    match computed.get(property).and_then(ComputedValue::as_length) {
+        Some(Length::Px(px)) => px.0,
+        Some(Length::Percent(_) | Length::Auto) | None => 0.0,
+    }
+}
+
+/// Builds pixel [`Insets`] from the four edge longhands (top/right/bottom/left).
+fn insets_of(
+    computed: &ComputedStyle,
+    top: PropertyId,
+    right: PropertyId,
+    bottom: PropertyId,
+    left: PropertyId,
+) -> Insets {
+    Insets {
+        top: length_px_of(computed, top),
+        right: length_px_of(computed, right),
+        bottom: length_px_of(computed, bottom),
+        left: length_px_of(computed, left),
+    }
+}
+
+/// Resolves one number-valued property, defaulting to `default` when the
+/// property is absent or not a bare number.
+fn number_of(computed: &ComputedStyle, property: PropertyId, default: f32) -> f32 {
+    match computed.get(property).map(ComputedValue::value) {
+        Some(&PropertyValue::Number(value)) => value,
+        _ => default,
+    }
+}
+
+/// Extracts the interned keyword symbol of a keyword-valued property, or [`None`]
+/// when the property is absent or is not a keyword.
+fn keyword_sym(computed: &ComputedStyle, property: PropertyId) -> Option<InternedSymbol> {
+    match computed.get(property).map(ComputedValue::value) {
+        Some(&PropertyValue::Keyword(sym)) => Some(sym),
+        _ => None,
+    }
+}
+
+/// Resolves the computed `display` keyword to a [`LayoutDisplay`].
+///
+/// Compares the interned symbol against the reserved [`layout_keyword`] handles;
+/// an absent or unrecognized value maps to [`LayoutDisplay::Block`] (which also
+/// covers `DISPLAY_BLOCK`).
+fn display_of(computed: &ComputedStyle) -> LayoutDisplay {
+    match keyword_sym(computed, PropertyId::Display) {
+        Some(sym) if sym == layout_keyword::DISPLAY_FLEX => LayoutDisplay::Flex,
+        Some(sym) if sym == layout_keyword::DISPLAY_GRID => LayoutDisplay::Grid,
+        Some(sym) if sym == layout_keyword::DISPLAY_NONE => LayoutDisplay::None,
+        _ => LayoutDisplay::Block,
+    }
+}
+
+/// Resolves the computed `flex-direction` keyword to a [`FlexDirection`],
+/// defaulting to [`FlexDirection::Row`].
+fn flex_direction_of(computed: &ComputedStyle) -> FlexDirection {
+    match keyword_sym(computed, PropertyId::FlexDirection) {
+        Some(sym) if sym == layout_keyword::FLEX_ROW_REVERSE => FlexDirection::RowReverse,
+        Some(sym) if sym == layout_keyword::FLEX_COLUMN => FlexDirection::Column,
+        Some(sym) if sym == layout_keyword::FLEX_COLUMN_REVERSE => FlexDirection::ColumnReverse,
+        _ => FlexDirection::Row,
+    }
+}
+
+/// Resolves the computed `justify-content` keyword to a [`JustifyContent`],
+/// defaulting to [`JustifyContent::FlexStart`].
+///
+/// Note: `space-evenly` has no reserved keyword handle yet, so it cannot be
+/// produced here; it falls through to the default.
+fn justify_content_of(computed: &ComputedStyle) -> JustifyContent {
+    match keyword_sym(computed, PropertyId::JustifyContent) {
+        Some(sym) if sym == layout_keyword::JUSTIFY_CENTER => JustifyContent::Center,
+        Some(sym) if sym == layout_keyword::JUSTIFY_END => JustifyContent::FlexEnd,
+        Some(sym) if sym == layout_keyword::JUSTIFY_SPACE_BETWEEN => JustifyContent::SpaceBetween,
+        Some(sym) if sym == layout_keyword::JUSTIFY_SPACE_AROUND => JustifyContent::SpaceAround,
+        _ => JustifyContent::FlexStart,
+    }
+}
+
+/// Resolves the computed `align-items` keyword to an [`AlignItems`], defaulting
+/// to [`AlignItems::Stretch`].
+fn align_items_of(computed: &ComputedStyle) -> AlignItems {
+    match keyword_sym(computed, PropertyId::AlignItems) {
+        Some(sym) if sym == layout_keyword::ALIGN_START => AlignItems::FlexStart,
+        Some(sym) if sym == layout_keyword::ALIGN_CENTER => AlignItems::Center,
+        Some(sym) if sym == layout_keyword::ALIGN_END => AlignItems::FlexEnd,
+        _ => AlignItems::Stretch,
+    }
+}
+
 /// Selects the [`LayoutAlgorithm`] for a `display` mode, or [`None`] when the
 /// node generates no box ([`LayoutDisplay::None`]).
 ///
@@ -168,6 +312,11 @@ fn algorithm_for(display: LayoutDisplay) -> Option<Box<dyn LayoutAlgorithm>> {
     match display {
         LayoutDisplay::Block => Some(Box::new(FlowLayout)),
         LayoutDisplay::Flex => Some(Box::new(FlexLayout)),
+        // The layout model carries no grid-template fields yet, so a grid
+        // container uses the default single implicit column (spec-faithful when
+        // `grid-template-columns` is unspecified). A later phase will thread the
+        // real track count once the model represents it.
+        LayoutDisplay::Grid => Some(Box::new(GridLayout::new(1))),
         LayoutDisplay::None => None,
     }
 }
@@ -505,6 +654,185 @@ mod tests {
         // Leaf absolute origin = root padding (10) + container padding (5) = 15.
         assert_eq!(boxes[&leaf].origin(), Point::new(15.0, 15.0));
         assert_eq!(boxes[&leaf].size(), Size::new(50.0, 50.0));
+    }
+
+    #[test]
+    fn mapping_populates_every_field_from_computed_style() {
+        let mut computed = ComputedStyle::new();
+        computed.set(
+            PropertyId::Display,
+            ComputedValue::keyword(layout_keyword::DISPLAY_FLEX),
+        );
+        // Box model.
+        computed.set(PropertyId::MarginTop, ComputedValue::length(Length::px(1.0)));
+        computed.set(
+            PropertyId::MarginRight,
+            ComputedValue::length(Length::px(2.0)),
+        );
+        computed.set(
+            PropertyId::MarginBottom,
+            ComputedValue::length(Length::px(3.0)),
+        );
+        computed.set(
+            PropertyId::MarginLeft,
+            ComputedValue::length(Length::px(4.0)),
+        );
+        computed.set(
+            PropertyId::PaddingTop,
+            ComputedValue::length(Length::px(5.0)),
+        );
+        computed.set(
+            PropertyId::PaddingRight,
+            ComputedValue::length(Length::px(6.0)),
+        );
+        computed.set(
+            PropertyId::PaddingBottom,
+            ComputedValue::length(Length::px(7.0)),
+        );
+        computed.set(
+            PropertyId::PaddingLeft,
+            ComputedValue::length(Length::px(8.0)),
+        );
+        // Sizing constraints.
+        computed.set(PropertyId::MinWidth, ComputedValue::length(Length::px(10.0)));
+        computed.set(
+            PropertyId::MinHeight,
+            ComputedValue::length(Length::px(11.0)),
+        );
+        computed.set(
+            PropertyId::MaxWidth,
+            ComputedValue::length(Length::Percent(80.0)),
+        );
+        computed.set(
+            PropertyId::MaxHeight,
+            ComputedValue::length(Length::px(13.0)),
+        );
+        // Flex container + item.
+        computed.set(PropertyId::Gap, ComputedValue::length(Length::px(9.0)));
+        computed.set(
+            PropertyId::FlexDirection,
+            ComputedValue::keyword(layout_keyword::FLEX_COLUMN),
+        );
+        computed.set(
+            PropertyId::JustifyContent,
+            ComputedValue::keyword(layout_keyword::JUSTIFY_CENTER),
+        );
+        computed.set(
+            PropertyId::AlignItems,
+            ComputedValue::keyword(layout_keyword::ALIGN_STRETCH),
+        );
+        computed.set(PropertyId::FlexGrow, ComputedValue::number(1.0));
+        computed.set(PropertyId::FlexShrink, ComputedValue::number(2.0));
+        computed.set(
+            PropertyId::FlexBasis,
+            ComputedValue::length(Length::px(50.0)),
+        );
+
+        let style = layout_style_from(&computed);
+
+        assert_eq!(style.display, LayoutDisplay::Flex);
+        assert_eq!(
+            style.margin,
+            Insets {
+                top: 1.0,
+                right: 2.0,
+                bottom: 3.0,
+                left: 4.0
+            }
+        );
+        assert_eq!(
+            style.padding,
+            Insets {
+                top: 5.0,
+                right: 6.0,
+                bottom: 7.0,
+                left: 8.0
+            }
+        );
+        assert_eq!(style.min_width, Dimension::Px(10.0));
+        assert_eq!(style.min_height, Dimension::Px(11.0));
+        assert_eq!(style.max_width, Dimension::Percent(80.0));
+        assert_eq!(style.max_height, Dimension::Px(13.0));
+        assert_eq!(style.gap, 9.0);
+        assert_eq!(style.flex_direction, FlexDirection::Column);
+        assert_eq!(style.justify_content, JustifyContent::Center);
+        assert_eq!(style.align_items, AlignItems::Stretch);
+        assert_eq!(style.flex_grow, 1.0);
+        assert_eq!(style.flex_shrink, 2.0);
+        assert_eq!(style.flex_basis, Dimension::Px(50.0));
+    }
+
+    #[test]
+    fn mapping_display_grid_maps_to_grid_and_has_algorithm() {
+        let mut computed = ComputedStyle::new();
+        computed.set(
+            PropertyId::Display,
+            ComputedValue::keyword(layout_keyword::DISPLAY_GRID),
+        );
+        let style = layout_style_from(&computed);
+        assert_eq!(style.display, LayoutDisplay::Grid);
+        assert!(algorithm_for(LayoutDisplay::Grid).is_some());
+    }
+
+    #[test]
+    fn mapping_display_none_maps_to_none() {
+        let mut computed = ComputedStyle::new();
+        computed.set(
+            PropertyId::Display,
+            ComputedValue::keyword(layout_keyword::DISPLAY_NONE),
+        );
+        assert_eq!(layout_style_from(&computed).display, LayoutDisplay::None);
+    }
+
+    #[test]
+    fn flex_engages_from_computed_style_end_to_end() {
+        // A container with `display: flex; flex-direction: row` and two children
+        // with `flex-basis: 50px` must lay the children out side by side once the
+        // display keyword is mapped from computed style. Before this bridge every
+        // node defaulted to Block and the children would have stacked.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let child_a = add_child(&mut tree, root, 40);
+        let child_b = add_child(&mut tree, root, 41);
+
+        let mut computed = ComputedStyles::new();
+
+        let mut root_style = ComputedStyle::new();
+        root_style.set(
+            PropertyId::Display,
+            ComputedValue::keyword(layout_keyword::DISPLAY_FLEX),
+        );
+        root_style.set(
+            PropertyId::FlexDirection,
+            ComputedValue::keyword(layout_keyword::FLEX_ROW),
+        );
+        root_style.set(PropertyId::Width, ComputedValue::length(Length::px(200.0)));
+        root_style.set(PropertyId::Height, ComputedValue::length(Length::px(100.0)));
+        computed.insert(root, root_style);
+
+        for &child in &[child_a, child_b] {
+            let mut item = ComputedStyle::new();
+            item.set(
+                PropertyId::FlexBasis,
+                ComputedValue::length(Length::px(50.0)),
+            );
+            item.set(PropertyId::Height, ComputedValue::length(Length::px(100.0)));
+            computed.insert(child, item);
+        }
+
+        let coordinator = LayoutCoordinator::new();
+        let styles = coordinator.layout_styles_from(&computed);
+        // Sanity: the bridge produced a flex container.
+        assert_eq!(styles[&root].display, LayoutDisplay::Flex);
+
+        let boxes = coordinator.layout(&tree, &styles, Size::new(200.0, 100.0));
+
+        // Children sit side by side along the row axis: distinct x offsets.
+        assert_eq!(boxes[&child_a].origin().x, 0.0);
+        assert_eq!(boxes[&child_b].origin().x, 50.0);
+        // Same y (a row, not a stack) — proving flex, not block, engaged.
+        assert_eq!(boxes[&child_a].origin().y, boxes[&child_b].origin().y);
     }
 
     #[test]

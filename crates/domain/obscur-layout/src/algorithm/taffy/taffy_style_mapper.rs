@@ -125,6 +125,7 @@ impl TaffyStyleMapper {
         match display {
             LayoutDisplay::Block => taffy::Display::Block,
             LayoutDisplay::Flex => taffy::Display::Flex,
+            LayoutDisplay::Grid => taffy::Display::Grid,
             LayoutDisplay::None => taffy::Display::None,
         }
     }
