@@ -6,6 +6,7 @@ use crate::clip::Clip;
 use crate::layer::SceneLayer;
 use crate::paint::{Brush, Paint, Stroke};
 use crate::path::Path;
+use crate::text::GlyphRun;
 
 use super::{DisplayList, PaintCommand};
 
@@ -61,23 +62,12 @@ impl DisplayListBuilder {
         self.fill(Path::rect(rect), brush)
     }
 
-    /// Appends a [`PaintCommand::DrawText`] drawing `text` at `origin` (its
-    /// top-left in absolute scene coordinates) at `font_size` pixels, painted
-    /// with `brush`. This is a leaf command; shaping is deferred to the renderer.
-    /// Returns `&mut Self` for chaining.
-    pub fn draw_text(
-        &mut self,
-        origin: Point,
-        text: impl Into<Box<str>>,
-        font_size: f32,
-        brush: Brush,
-    ) -> &mut Self {
-        self.commands.push(PaintCommand::DrawText {
-            origin,
-            text: text.into(),
-            font_size,
-            brush,
-        });
+    /// Appends a [`PaintCommand::DrawText`] drawing the pre-shaped `run` at
+    /// `origin` (its top-left in absolute scene coordinates), painted with
+    /// `brush`. This is a leaf command; the run's glyphs were shaped once in the
+    /// `obscur-text` domain. Returns `&mut Self` for chaining.
+    pub fn draw_text(&mut self, origin: Point, run: GlyphRun, brush: Brush) -> &mut Self {
+        self.commands.push(PaintCommand::DrawText { origin, run, brush });
         self
     }
 
@@ -247,13 +237,14 @@ mod tests {
 
     #[test]
     fn draw_text_appends_a_leaf_text_command() {
-        let mut builder = DisplayListBuilder::new();
-        builder.draw_text(
-            Point::new(3.0, 7.0),
-            "hello",
+        use crate::text::PositionedGlyph;
+        let run = GlyphRun::new(
+            vec![PositionedGlyph::new(u32::from('h'), 0, 0.0, 18.0, 10.8)],
             18.0,
-            Brush::solid(Color::WHITE),
+            "hello",
         );
+        let mut builder = DisplayListBuilder::new();
+        builder.draw_text(Point::new(3.0, 7.0), run.clone(), Brush::solid(Color::WHITE));
 
         assert!(builder.is_balanced());
         let list = builder.build();
@@ -262,8 +253,7 @@ mod tests {
             list.commands()[0],
             PaintCommand::DrawText {
                 origin: Point::new(3.0, 7.0),
-                text: "hello".into(),
-                font_size: 18.0,
+                run,
                 brush: Brush::solid(Color::WHITE),
             }
         );

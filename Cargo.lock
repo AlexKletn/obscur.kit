@@ -1654,6 +1654,7 @@ dependencies = [
  "obscur-scene",
  "obscur-style",
  "obscur-task",
+ "obscur-text",
  "obscur-tree",
  "obscur-view",
 ]

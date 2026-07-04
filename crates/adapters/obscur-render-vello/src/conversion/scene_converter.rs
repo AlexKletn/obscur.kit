@@ -11,7 +11,7 @@ use obscur_scene::clip::Clip;
 use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::layer::{CompositionMode, SceneLayer};
 use obscur_scene::paint::{BlendMode, Brush, Paint};
-use skrifa::instance::{LocationRef, Size};
+use obscur_scene::text::GlyphRun;
 use skrifa::{FontRef, MetadataProvider};
 use vello::Scene;
 use vello::kurbo::{Affine, Rect as KurboRect};
@@ -56,12 +56,16 @@ const UNBOUNDED_HALF_EXTENT: f64 = 1.0e9;
 ///
 /// # Text
 ///
-/// [`PaintCommand::DrawText`] is rasterized into real glyphs, but only once a
-/// host has supplied a font via [`Self::set_font`]. Fonts are a host resource
-/// (the adapter never bundles one, mirroring the host-provides-device pattern),
-/// so with no font set the converter degrades gracefully and simply skips text
-/// runs. Glyph mapping (charmap) and advances come from `skrifa`; the glyphs are
-/// handed to Vello's own glyph pipeline for rasterization (spec §5.2).
+/// [`PaintCommand::DrawText`] carries a pre-shaped
+/// [`GlyphRun`](obscur_scene::text::GlyphRun): text is shaped **once**, in the
+/// `obscur-text` domain, so this adapter never re-shapes — it consumes the run's
+/// glyph positions verbatim (the same run the software backend consumes, spec
+/// §5.2). Rasterizing to *real* outlines still needs a host font, supplied via
+/// [`Self::set_font`] (fonts are a host resource, mirroring host-provides-device);
+/// with no font set the converter degrades gracefully and skips text runs. Each
+/// glyph's domain identifier (the reference shaper emits the Unicode scalar) is
+/// resolved to this font's glyph index through its charmap and drawn at the
+/// domain-supplied position; Vello's glyph pipeline rasterizes it (spec §5.2).
 #[derive(Debug, Default, Clone)]
 pub struct SceneConverter {
     path: PathConverter,
@@ -124,12 +128,9 @@ impl SceneConverter {
                         depth -= 1;
                     }
                 }
-                PaintCommand::DrawText {
-                    origin,
-                    text,
-                    font_size,
-                    brush,
-                } => self.draw_text(&mut scene, *origin, text, *font_size, brush),
+                PaintCommand::DrawText { origin, run, brush } => {
+                    self.draw_text(&mut scene, *origin, run, brush);
+                }
             }
         }
 
@@ -141,15 +142,16 @@ impl SceneConverter {
         scene
     }
 
-    /// Rasterizes a single text run into glyphs at `origin`.
+    /// Rasterizes a single **pre-shaped** text run at `origin`.
     ///
-    /// Characters are mapped to glyph ids through the font's character map and
-    /// laid out left-to-right using per-glyph advance widths (both from
-    /// `skrifa`); the run's baseline sits one em below the top-left `origin` (an
-    /// approximation adequate for the counter labels this step targets).
-    /// Characters with no glyph in the font are skipped, and a glyph with no
-    /// advance contributes zero to the pen. The assembled glyphs are drawn with
-    /// Vello's glyph pipeline, brushed with the command's own [`Brush`].
+    /// The run was shaped once in the `obscur-text` domain, so this method does
+    /// not re-shape: it consumes each glyph's domain-supplied run-relative
+    /// position and places it at `origin + (x, y)`. Because the domain's abstract
+    /// font differs from the concrete host font, each glyph's domain identifier
+    /// (the reference shaper emits the Unicode scalar) is resolved to this font's
+    /// glyph index through its charmap; identifiers the font has no glyph for are
+    /// skipped. The assembled glyphs are drawn with Vello's glyph pipeline,
+    /// brushed with the command's own [`Brush`].
     ///
     /// Degrades gracefully: with no host font set, or if the font bytes fail to
     /// parse, the run is skipped rather than erroring.
@@ -157,36 +159,33 @@ impl SceneConverter {
         &self,
         scene: &mut Scene,
         origin: obscur_geometry::Point,
-        text: &str,
-        font_size: f32,
+        run: &GlyphRun,
         brush: &Brush,
     ) {
         // No host font → no text (documented graceful degradation).
         let Some(font) = self.font.as_ref() else {
             return;
         };
-        // Reparse the font bytes for skrifa's charmap/metrics. On a malformed
-        // font, skip this run rather than panic.
+        // Reparse the font bytes for skrifa's charmap. On a malformed font, skip
+        // this run rather than panic.
         let Ok(font_ref) = FontRef::new(font.data.data()) else {
             return;
         };
 
         let charmap = font_ref.charmap();
-        let metrics = font_ref.glyph_metrics(Size::new(font_size), LocationRef::default());
-        // Top-left origin → baseline approximately one em down.
-        let baseline_y = origin.y + font_size;
-        let mut pen_x = origin.x;
-        let glyphs: Vec<vello::Glyph> = text
-            .chars()
-            .filter_map(|ch| {
+        let glyphs: Vec<vello::Glyph> = run
+            .glyphs()
+            .iter()
+            .filter_map(|glyph| {
+                // Resolve the domain glyph id (a Unicode scalar) to this font's
+                // glyph index; positions come from the domain, never re-shaped.
+                let ch = char::from_u32(glyph.glyph_id())?;
                 let gid = charmap.map(ch)?;
-                let glyph = vello::Glyph {
+                Some(vello::Glyph {
                     id: gid.to_u32(),
-                    x: pen_x,
-                    y: baseline_y,
-                };
-                pen_x += metrics.advance_width(gid).unwrap_or(0.0);
-                Some(glyph)
+                    x: origin.x + glyph.x(),
+                    y: origin.y + glyph.y(),
+                })
             })
             .collect();
         if glyphs.is_empty() {
@@ -198,7 +197,7 @@ impl SceneConverter {
         let peniko_brush = self.brush.convert(brush);
         scene
             .draw_glyphs(font)
-            .font_size(font_size)
+            .font_size(run.font_size())
             .brush(&peniko_brush)
             .draw(peniko::Fill::NonZero, glyphs.into_iter());
     }
@@ -385,12 +384,17 @@ mod tests {
 
     #[test]
     fn draw_text_without_font_is_skipped() {
-        // With no host font set, a text run degrades gracefully: it neither
+        use obscur_scene::text::{GlyphRun, PositionedGlyph};
+        // With no host font set, a pre-shaped run degrades gracefully: it neither
         // panics nor encodes anything.
+        let run = GlyphRun::new(
+            vec![PositionedGlyph::new(u32::from('C'), 0, 0.0, 16.0, 9.6)],
+            16.0,
+            "Count: 0",
+        );
         let list = DisplayList::from_commands(vec![PaintCommand::DrawText {
             origin: Point::new(0.0, 0.0),
-            text: "Count: 0".into(),
-            font_size: 16.0,
+            run,
             brush: Brush::solid(Color::WHITE),
         }]);
         let scene = SceneConverter::new().convert(&list);

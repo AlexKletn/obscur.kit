@@ -7,8 +7,11 @@ use obscur_identity::NodeId;
 use obscur_scene::color::Color;
 use obscur_scene::command::{DisplayList, DisplayListBuilder};
 use obscur_scene::paint::Brush;
+use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::ComputedValue;
 use obscur_style::property::{PropertyId, StyleColor};
+use obscur_text::font::{FontAttributes, FontFace, FontFamily, FontMetrics, FontSource, GenericFamily};
+use obscur_text::shaping::{MockTextShaper, ShapingRequest, TextShaper};
 use obscur_tree::tree::RetainedTree;
 
 use super::{ComputedStyles, LayoutBoxes};
@@ -40,29 +43,83 @@ const DEFAULT_FONT_SIZE: f32 = 16.0;
 ///
 /// # Phase-1 scope
 ///
-/// The coordinator emits **background fills** and **text runs**: a node whose
-/// computed `background-color` is present and not fully transparent fills its
-/// arranged layout rectangle, and a text node with an arranged box emits a
-/// [`draw_text`](DisplayListBuilder::draw_text) run at that box's origin. Shaping
-/// is deferred to the renderer (the run carries the raw string); a font-size
-/// property does not exist yet, so runs use [`DEFAULT_FONT_SIZE`]. Opacity/clip
-/// layers, borders, and images are deferred to later phases (they will bracket
-/// the child fills with push/pop layer/clip pairs). Because only leaf
+/// The coordinator emits **background fills** and **shaped text runs**: a node
+/// whose computed `background-color` is present and not fully transparent fills
+/// its arranged layout rectangle, and a text node with an arranged box emits a
+/// [`draw_text`](DisplayListBuilder::draw_text) run at that box's origin.
+///
+/// Text is **shaped once, here in the pipeline**, through an `obscur-text`
+/// [`TextShaper`] port (the deterministic [`MockTextShaper`] by default): the
+/// coordinator turns the node's string into a [`GlyphRun`] of positioned glyphs
+/// and carries those glyphs in the [`DrawText`](obscur_scene::command::PaintCommand::DrawText)
+/// command, so every renderer consumes an identical run and only rasterization
+/// differs (spec §5.10, §5.2). A font-size property does not exist yet, so runs
+/// use [`DEFAULT_FONT_SIZE`]. Opacity/clip layers, borders, and images are
+/// deferred to later phases. Because only leaf
 /// [`fill_rect`](DisplayListBuilder::fill_rect) and
 /// [`draw_text`](DisplayListBuilder::draw_text) commands are emitted, the
 /// resulting [`DisplayList`] is always well-formed (balanced) and can be consumed
 /// by a renderer or `Scene` directly.
 ///
-/// The coordinator is a stateless zero-sized value; construct it with
+/// The coordinator owns its shaper and a default resolved face; construct it with
 /// [`new`](Self::new) or [`Default`].
-#[derive(Debug, Clone, Copy, Default)]
-pub struct SceneCoordinator;
+#[derive(Debug, Clone)]
+pub struct SceneCoordinator {
+    /// The shaper turning text-node strings into positioned glyphs. The default
+    /// [`MockTextShaper`] is deterministic: identical input yields identical
+    /// glyphs, which is what the cross-backend determinism boundary relies on.
+    shaper: MockTextShaper,
+    /// The resolved face requests are shaped against. The mock shaper is
+    /// font-agnostic (it needs no real metrics), so a generic monospace face
+    /// suffices as the default; a real pipeline would resolve this per node via a
+    /// `FontProvider`.
+    default_face: FontFace,
+}
 
 impl SceneCoordinator {
-    /// Creates a coordinator.
+    /// Creates a coordinator with the deterministic [`MockTextShaper`] and a
+    /// generic monospace default face.
     #[must_use]
-    pub const fn new() -> Self {
-        Self
+    pub fn new() -> Self {
+        Self {
+            shaper: MockTextShaper::new(),
+            default_face: FontFace::new(
+                FontFamily::generic(GenericFamily::Monospace),
+                FontAttributes::default(),
+                FontSource::system("mock"),
+                FontMetrics::new(1000, 800.0, -200.0, 0.0),
+            ),
+        }
+    }
+
+    /// Shapes `content` at [`DEFAULT_FONT_SIZE`] into a backend-independent
+    /// [`GlyphRun`] of positioned glyphs.
+    ///
+    /// Shaping runs **once**, here: the `obscur-text` shaper produces glyphs with
+    /// per-glyph advances, which this method lays out left-to-right into pen
+    /// positions relative to the run origin (the baseline sits [`DEFAULT_FONT_SIZE`]
+    /// below the top-left, matching the box's ascent). The resulting run is what
+    /// both the GPU and software backends consume verbatim.
+    fn shape_run(&self, content: &str) -> GlyphRun {
+        let request = ShapingRequest::new(content, self.default_face.clone(), DEFAULT_FONT_SIZE);
+        let shaped = self.shaper.shape(&request);
+        let mut pen_x = 0.0_f32;
+        let glyphs: Vec<PositionedGlyph> = shaped
+            .glyphs()
+            .iter()
+            .map(|glyph| {
+                let positioned = PositionedGlyph::new(
+                    glyph.glyph_id(),
+                    glyph.cluster(),
+                    pen_x + glyph.x_offset(),
+                    DEFAULT_FONT_SIZE + glyph.y_offset(),
+                    glyph.x_advance(),
+                );
+                pen_x += glyph.x_advance();
+                positioned
+            })
+            .collect();
+        GlyphRun::new(glyphs, DEFAULT_FONT_SIZE, content)
     }
 
     /// Composes a paint-ordered [`DisplayList`] of background fills from the
@@ -120,12 +177,8 @@ impl SceneCoordinator {
                     && let Some(layout_box) = boxes.get(&node)
                 {
                     let color = text_color_of(computed, node);
-                    builder.draw_text(
-                        layout_box.origin(),
-                        content,
-                        DEFAULT_FONT_SIZE,
-                        Brush::solid(color),
-                    );
+                    let run = self.shape_run(content);
+                    builder.draw_text(layout_box.origin(), run, Brush::solid(color));
                 }
 
                 for &child in retained.children().iter().rev() {
@@ -137,6 +190,12 @@ impl SceneCoordinator {
         }
 
         builder.build()
+    }
+}
+
+impl Default for SceneCoordinator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -222,17 +281,14 @@ mod tests {
         style
     }
 
-    /// Collects the `DrawText` runs (origin, text, brush) in a display list.
-    fn text_runs(list: &DisplayList) -> Vec<(Point, String, Brush)> {
+    /// Collects the `DrawText` runs (origin, glyph run, brush) in a display list.
+    fn text_runs(list: &DisplayList) -> Vec<(Point, GlyphRun, Brush)> {
         list.commands()
             .iter()
             .filter_map(|c| match c {
-                PaintCommand::DrawText {
-                    origin,
-                    text,
-                    brush,
-                    ..
-                } => Some((*origin, text.to_string(), brush.clone())),
+                PaintCommand::DrawText { origin, run, brush } => {
+                    Some((*origin, run.clone(), brush.clone()))
+                }
                 _ => None,
             })
             .collect()
@@ -384,11 +440,62 @@ mod tests {
         let runs = text_runs(&list);
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].0, Point::new(5.0, 12.0));
-        assert_eq!(runs[0].1, "hello");
+        // The run was shaped in the domain: five chars -> five positioned glyphs.
+        assert_eq!(runs[0].1.text(), "hello");
+        assert_eq!(runs[0].1.len(), 5);
         assert_eq!(runs[0].2, Brush::solid(Color::WHITE));
 
         // Leaf-only list stays balanced.
         assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn text_node_shapes_one_positioned_glyph_per_char_in_order() {
+        // A four-char run yields four glyphs, laid out left-to-right at the
+        // mock's fixed advance, on the baseline (DEFAULT_FONT_SIZE below origin).
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "abcd");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(text, ComputedStyle::new());
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(text, box_at(0.0, 0.0, 40.0, 16.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let runs = text_runs(&list);
+        assert_eq!(runs.len(), 1);
+        let run = &runs[0].1;
+        assert_eq!(run.len(), 4);
+        let advance = DEFAULT_FONT_SIZE * 0.6;
+        for (i, glyph) in run.glyphs().iter().enumerate() {
+            assert_eq!(glyph.glyph_id(), u32::from(['a', 'b', 'c', 'd'][i]));
+            assert_eq!(glyph.cluster(), i);
+            assert_eq!(glyph.x(), advance * i as f32);
+            assert_eq!(glyph.y(), DEFAULT_FONT_SIZE);
+            assert_eq!(glyph.advance(), advance);
+        }
+    }
+
+    #[test]
+    fn text_shaping_is_deterministic_across_composes() {
+        // The same input tree must produce byte-identical positioned glyphs on
+        // every compose (the property both backends' agreement rests on).
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "Count: 7");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(text, ComputedStyle::new());
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(text, box_at(2.0, 3.0, 80.0, 16.0));
+
+        let coordinator = SceneCoordinator::new();
+        let first = text_runs(&coordinator.compose(&tree, &computed, &boxes));
+        let second = text_runs(&coordinator.compose(&tree, &computed, &boxes));
+        assert_eq!(first, second);
     }
 
     #[test]
@@ -431,7 +538,8 @@ mod tests {
         let runs = text_runs(&list);
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].0, Point::new(3.0, 4.0));
-        assert_eq!(runs[0].1, "z");
+        assert_eq!(runs[0].1.text(), "z");
+        assert_eq!(runs[0].1.len(), 1);
     }
 
     #[test]

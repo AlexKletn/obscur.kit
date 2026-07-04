@@ -23,12 +23,21 @@
 //! - **Mask clips** (as opposed to geometric shape clips) inherit the current
 //!   effective clip, since coverage from separate source content is not
 //!   rasterized here.
+//! - **Text runs** ([`DrawText`]) consume the same pre-shaped
+//!   [`GlyphRun`](obscur_scene::text::GlyphRun) the GPU backend does — text is
+//!   shaped once in `obscur-text`, never here — so both backends agree on glyph
+//!   count and position (spec §5.2 determinism boundary). Lacking real glyph
+//!   outlines, this backend rasterizes each glyph as a solid coverage cell of the
+//!   glyph's advance width and the run's font size; whitespace glyphs draw
+//!   nothing. This is a documented approximation of the mark, not of its layout.
+//!
+//! [`DrawText`]: obscur_scene::command::PaintCommand::DrawText
 //!
 //! [`PushLayer`]: obscur_scene::command::PaintCommand::PushLayer
 //! [`PopLayer`]: obscur_scene::command::PaintCommand::PopLayer
 
 use obscur_capability::SupportLevel;
-use obscur_geometry::Size;
+use obscur_geometry::{Point, Size};
 use obscur_render::frame::{FrameSubmission, PresentResult};
 use obscur_render::target::RenderTarget;
 use obscur_render::{Renderer, RendererCapabilities, RendererError, RendererId};
@@ -37,6 +46,7 @@ use obscur_scene::color::Color;
 use obscur_scene::command::PaintCommand;
 use obscur_scene::paint::{Brush, Paint};
 use obscur_scene::path::{FillRule, Path, PathSegment};
+use obscur_scene::text::GlyphRun;
 
 use crate::error::CpuRenderError;
 
@@ -232,8 +242,10 @@ impl Renderer for CpuRenderer {
                 // Layers are passthrough: children are drawn directly, without an
                 // offscreen compositing pass (documented future refinement).
                 PaintCommand::PushLayer(_) | PaintCommand::PopLayer => {}
-                // The CPU backend does not rasterize text runs yet (documented).
-                PaintCommand::DrawText { .. } => {}
+                PaintCommand::DrawText { origin, run, brush } => {
+                    let clip = clip_stack.last().and_then(Option::as_ref);
+                    draw_text_run(&mut pixmap, *origin, run, brush, clip, identity);
+                }
             }
         }
 
@@ -371,6 +383,55 @@ fn build_clip_mask(
     }
 }
 
+/// Rasterizes a pre-shaped [`GlyphRun`] at `origin` as one solid coverage cell
+/// per visible glyph (spec §5.2 rasterization approximation).
+///
+/// The run's glyph positions are authoritative — shaping already ran in the
+/// domain, so this never re-shapes. Each glyph fills the box whose top-left is
+/// `origin + (glyph.x, glyph.y - font_size)` (the baseline sits `font_size` below
+/// the glyph's ascent) sized `advance × font_size`, honoring `clip`. Whitespace
+/// glyphs and non-positive cells draw nothing. With a stop-less gradient brush
+/// (no resolvable color) the whole run is skipped.
+fn draw_text_run(
+    pixmap: &mut tiny_skia::Pixmap,
+    origin: Point,
+    run: &GlyphRun,
+    brush: &Brush,
+    clip: Option<&tiny_skia::Mask>,
+    transform: tiny_skia::Transform,
+) {
+    let Some(color) = brush_color(brush) else {
+        return;
+    };
+    let Some(sk_paint) = solid_paint(color) else {
+        return;
+    };
+    let font_size = run.font_size();
+    for glyph in run.glyphs() {
+        // Skip whitespace: the mock shaper's glyph id is the Unicode scalar.
+        if char::from_u32(glyph.glyph_id()).is_none_or(char::is_whitespace) {
+            continue;
+        }
+        let width = glyph.advance();
+        if width <= 0.0 || font_size <= 0.0 {
+            continue;
+        }
+        let x = origin.x + glyph.x();
+        let top = origin.y + glyph.y() - font_size;
+        let Some(rect) = tiny_skia::Rect::from_xywh(x, top, width, font_size) else {
+            continue;
+        };
+        let sk_path = tiny_skia::PathBuilder::from_rect(rect);
+        pixmap.fill_path(
+            &sk_path,
+            &sk_paint,
+            tiny_skia::FillRule::Winding,
+            transform,
+            clip,
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -474,6 +535,73 @@ mod tests {
         assert_eq!(
             renderer.supports_effect("backdrop-filter"),
             SupportLevel::Unavailable
+        );
+    }
+
+    #[test]
+    fn draw_text_run_rasterizes_glyph_cells() {
+        use obscur_scene::text::{GlyphRun, PositionedGlyph};
+
+        // Two visible glyphs on the baseline at y=16 (font size 16), each 8px
+        // wide starting at x=2, y=2. Cells span rows 2..18, cols 2..10 / 10..18.
+        let run = GlyphRun::new(
+            vec![
+                PositionedGlyph::new(u32::from('a'), 0, 0.0, 16.0, 8.0),
+                PositionedGlyph::new(u32::from('b'), 1, 8.0, 16.0, 8.0),
+            ],
+            16.0,
+            "ab",
+        );
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawText {
+            origin: Point::new(2.0, 2.0),
+            run,
+            brush: Brush::solid(Color::rgba(1.0, 1.0, 1.0, 1.0)),
+        }]);
+        let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(9));
+        let frame = RenderFrame::new(snapshot, Size::new(32.0, 32.0));
+        let submission = FrameSubmission::new(frame);
+
+        let mut renderer = CpuRenderer::default();
+        renderer
+            .render(&submission, &bitmap_target(32.0, 32.0))
+            .expect("renders");
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+
+        // Text is no longer a no-op: a pixel inside the first glyph cell is opaque.
+        let inside = pixmap.pixel(5, 8).expect("pixel exists");
+        assert!(inside.alpha() > 200, "glyph cell painted: {}", inside.alpha());
+        // A pixel well outside any cell stays transparent.
+        assert_eq!(pixmap.pixel(28, 28).expect("pixel exists").alpha(), 0);
+    }
+
+    #[test]
+    fn draw_text_whitespace_glyphs_paint_nothing() {
+        use obscur_scene::text::{GlyphRun, PositionedGlyph};
+
+        // A single space glyph: it must contribute no coverage.
+        let run = GlyphRun::new(
+            vec![PositionedGlyph::new(u32::from(' '), 0, 0.0, 16.0, 8.0)],
+            16.0,
+            " ",
+        );
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawText {
+            origin: Point::new(0.0, 0.0),
+            run,
+            brush: Brush::solid(Color::WHITE),
+        }]);
+        let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(1));
+        let frame = RenderFrame::new(snapshot, Size::new(16.0, 16.0));
+        let submission = FrameSubmission::new(frame);
+
+        let mut renderer = CpuRenderer::default();
+        renderer
+            .render(&submission, &bitmap_target(16.0, 16.0))
+            .expect("renders");
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+        // Every pixel is transparent: a space drew nothing.
+        assert!(
+            pixmap.pixels().iter().all(|p| p.alpha() == 0),
+            "whitespace glyph must paint nothing"
         );
     }
 

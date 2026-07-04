@@ -70,12 +70,14 @@
 //!
 //! # Text
 //!
-//! The counter's labels ("Count: N", "-", "+") are real text. Fonts are a host
-//! resource (like the GPU device): `resumed` loads a system font off disk and
-//! hands its bytes to [`VelloRenderer::set_font`], and the adapter then shapes
-//! each `DrawText` run into glyphs that Vello rasterizes into the same
-//! offscreen texture the blit path presents. With no font found, the shapes
-//! still paint and only the glyphs are skipped.
+//! The counter's labels ("Count: N", "-", "+") are real text. Text is shaped
+//! once in the `obscur-text` domain, so each `DrawText` command already carries
+//! positioned glyphs. Fonts are a host resource (like the GPU device): `resumed`
+//! loads a system font off disk and hands its bytes to
+//! [`VelloRenderer::set_font`]; the adapter resolves the run's glyphs against
+//! that font and Vello rasterizes them into the same offscreen texture the blit
+//! path presents. With no font found, the shapes still paint and only the glyphs
+//! are skipped.
 //!
 //! # Environment note
 //!

@@ -13,3 +13,4 @@ pub mod paint;
 pub mod path;
 pub mod scene;
 pub mod surface;
+pub mod text;

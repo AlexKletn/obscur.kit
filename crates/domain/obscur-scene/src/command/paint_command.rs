@@ -35,18 +35,17 @@ pub enum PaintCommand {
         /// How the outline is painted (fill or stroke).
         paint: Paint,
     },
-    /// Draw a run of text. A LEAF command (no nesting effect). The origin is the
-    /// run's top-left in absolute scene coordinates; the renderer shapes the
-    /// string with its own font and places the baseline. Shaping is deliberately
-    /// deferred to the renderer in this first cut (a full pipeline would shape via
-    /// obscur-text and carry positioned glyphs).
+    /// Draw a run of pre-shaped text. A LEAF command (no nesting effect). The
+    /// `origin` is the run's top-left in absolute scene coordinates; `run` carries
+    /// the positioned glyphs produced **once** by the `obscur-text` domain, so
+    /// every renderer consumes an identical run and only rasterization differs
+    /// (spec §5.10, §5.2). Renderers map each glyph to an outline and draw it at
+    /// its run-relative position — they never re-shape.
     DrawText {
         /// Top-left origin of the run, in absolute scene coordinates.
         origin: obscur_geometry::Point,
-        /// The run's text content.
-        text: Box<str>,
-        /// Font size in pixels.
-        font_size: f32,
+        /// The shaped, positioned glyphs (with the font size and source text).
+        run: crate::text::GlyphRun,
         /// The brush the glyphs are painted with.
         brush: crate::paint::Brush,
     },
@@ -141,10 +140,15 @@ mod tests {
 
     #[test]
     fn draw_text_is_a_leaf() {
+        use crate::text::{GlyphRun, PositionedGlyph};
+        let run = GlyphRun::new(
+            vec![PositionedGlyph::new(u32::from('h'), 0, 0.0, 16.0, 9.6)],
+            16.0,
+            "hi",
+        );
         let text = PaintCommand::DrawText {
             origin: Point::new(2.0, 3.0),
-            text: "hi".into(),
-            font_size: 16.0,
+            run,
             brush: Brush::solid(Color::WHITE),
         };
         assert_eq!(text.nesting_delta(), 0);
