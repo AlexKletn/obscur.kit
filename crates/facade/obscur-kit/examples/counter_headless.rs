@@ -12,13 +12,16 @@
 //!    the CSS frontend (`source -> parse -> compile`), proving the frontend
 //!    composes and surfaces unsupported features as diagnostics rather than
 //!    crashing.
-//! 2. **Components tier** — build a "counter" UI (a container holding a text
-//!    label and two buttons) from the primitives + widgets tier.
+//! 2. **Components tier** — build a "counter" UI (a container tagged with the
+//!    `counter` class, holding a text label and two buttons) from the
+//!    primitives + widgets tier.
 //! 3. **Pipeline** — boot a deterministic [`HeadlessHost`] via `KitBootstrap`
-//!    and render one frame through `reconcile -> style -> layout -> scene`,
-//!    asserting the frame reconciled, composed, and is balanced.
-//! 4. **Determinism** — render the identical view + inputs again and assert the
-//!    display-list commands are byte-identical.
+//!    and render one frame with the compiled stylesheet through
+//!    `reconcile -> selector-match -> style -> layout -> scene`. The `.counter`
+//!    rule matches the tagged container, so the frame paints a real fill: the
+//!    display list is asserted non-empty.
+//! 4. **Determinism** — render the identical view + stylesheet again and assert
+//!    the display-list commands are byte-identical.
 //! 5. **State change** — drive a [`Button`]'s headless state machine (press +
 //!    release), rebuild the view, render again, and show the frame id advanced.
 //!
@@ -35,8 +38,7 @@ use obscur_kit::identity::InternedSymbol;
 use obscur_kit::prelude::*;
 use obscur_kit::primitives::{Container, Text};
 use obscur_kit::runtime::frame::FrameId;
-use obscur_kit::runtime::orchestration::StyleInputs;
-use obscur_kit::view::view::{ViewNode, View};
+use obscur_kit::view::view::{CLASS, View, ViewNode, ViewProperty, ViewValue};
 use obscur_kit::widgets::button::Button;
 
 /// A small authored stylesheet that exercises several CSS features at once:
@@ -47,7 +49,7 @@ use obscur_kit::widgets::button::Button;
 const STYLESHEET: &str = "\
 @import \"reset.css\";\n\
 :root { --accent: #3366ff; }\n\
-.counter { display: flex; opacity: 0.9; }\n\
+.counter { display: flex; opacity: 0.9; background-color: #3366ff; width: 240px; height: 80px; }\n\
 .counter .value { color: var(--accent); }\n\
 button:hover { background-color: #224488; }\n\
 button { float: left; }\n\
@@ -76,10 +78,14 @@ fn main() {
     println!("    label='Count: {count}'  buttons=[\"{}\", \"{}\"]\n", decrement.label(), increment.label());
 
     // --- Act 3: boot a deterministic host and render one real frame -------
+    // The compiled stylesheet's `matchable` form is the list of (selector ->
+    // declarations) rules the runtime matches against the reconciled tree;
+    // `render_styled` runs reconcile -> selector match -> style -> layout ->
+    // scene, so the `.counter` rule paints the tagged container.
     let mut host = KitBootstrap::new().with_runtime_id(1).headless_host();
-    let inputs = StyleInputs::new();
+    let sheets = std::slice::from_ref(&compiled.matchable);
 
-    let first = host.render(&view, &inputs);
+    let first = host.render_styled(&view, sheets);
     // The first frame must populate the tree, compose a scene, and produce a
     // well-formed (balanced) display list.
     assert!(first.reconciled(), "first frame must reconcile the tree");
@@ -88,15 +94,21 @@ fn main() {
     assert_eq!(first.id(), FrameId::FIRST, "the first frame is FrameId::FIRST");
 
     let first_commands = first.snapshot().display_list().commands().to_vec();
+    // The `.counter { background-color; width; height }` rule matched the tagged
+    // container and produced a real fill — the display list is non-empty.
+    assert!(
+        !first_commands.is_empty(),
+        "the matched .counter background must emit at least one paint command"
+    );
     print_frame("[3] frame", &first, host.tree().len(), first_commands.len());
     println!();
 
-    // --- Act 4: determinism — same view + inputs => identical display list -
-    let second = host.render(&view, &inputs);
+    // --- Act 4: determinism — same view + sheets => identical display list -
+    let second = host.render_styled(&view, sheets);
     let second_commands = second.snapshot().display_list().commands().to_vec();
     assert_eq!(
         first_commands, second_commands,
-        "the same view + inputs must yield a byte-identical display list"
+        "the same view + sheets must yield a byte-identical display list"
     );
     assert_eq!(second.id(), FrameId::FIRST.next(), "frame ids advance monotonically");
     println!(
@@ -114,7 +126,7 @@ fn main() {
     count += 1;
 
     let updated_view = build_counter_view(count, &decrement, &increment);
-    let third = host.render(&updated_view, &inputs);
+    let third = host.render_styled(&updated_view, sheets);
     assert!(third.composed(), "the post-change frame still composes a scene");
     assert!(third.is_balanced(), "the post-change display list stays balanced");
     assert!(
@@ -193,11 +205,14 @@ fn compile_stylesheet() -> CompiledStylesheet {
 /// fragment.
 fn build_counter_view(count: i64, decrement: &Button, increment: &Button) -> View {
     let label = Text::new(format!("Count: {count}")).into_view_node();
+    // Tag the container with the `counter` class so the authored `.counter`
+    // rule matches it during the selector-matching pass and paints it.
     let container = Container::new()
         .child(label)
         .with_children(button_nodes(decrement))
         .with_children(button_nodes(increment))
-        .into_view_node();
+        .into_view_node()
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into())));
     View::single(container)
 }
 
