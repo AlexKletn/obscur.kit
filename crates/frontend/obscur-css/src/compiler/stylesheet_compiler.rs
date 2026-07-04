@@ -257,7 +257,9 @@ impl StylesheetCompiler {
                 }
                 let order = self.source_order;
                 self.source_order += 1;
-                match self.properties.compile(
+                // `compile_all` expands `margin` / `padding` shorthands into
+                // their longhands; every other declaration yields one result.
+                for compiled in self.properties.compile_all(
                     decl,
                     selector.specificity,
                     self.origin,
@@ -265,11 +267,13 @@ impl StylesheetCompiler {
                     Some(selector.id),
                     &mut self.interner,
                 ) {
-                    CompiledDeclaration::Standard(declaration) => {
-                        acc.declarations.push(declaration);
+                    match compiled {
+                        CompiledDeclaration::Standard(declaration) => {
+                            acc.declarations.push(declaration);
+                        }
+                        CompiledDeclaration::Custom(custom) => acc.custom_properties.push(custom),
+                        CompiledDeclaration::Unsupported(feature) => acc.unsupported.push(feature),
                     }
-                    CompiledDeclaration::Custom(custom) => acc.custom_properties.push(custom),
-                    CompiledDeclaration::Unsupported(feature) => acc.unsupported.push(feature),
                 }
             }
         }
@@ -299,7 +303,9 @@ impl StylesheetCompiler {
             }
             // The cascade context is irrelevant to a block declaration; the
             // matcher supplies specificity/origin/order at match time.
-            if let CompiledDeclaration::Standard(declaration) = self.properties.compile(
+            // `compile_all` expands `margin` / `padding` shorthands so every
+            // authored longhand enters the block.
+            for compiled in self.properties.compile_all(
                 decl,
                 SelectorSpecificity::ZERO,
                 self.origin,
@@ -307,11 +313,13 @@ impl StylesheetCompiler {
                 None,
                 &mut self.interner,
             ) {
-                block.push(BlockDeclaration::new(
-                    declaration.property(),
-                    declaration.value().clone(),
-                    declaration.important(),
-                ));
+                if let CompiledDeclaration::Standard(declaration) = compiled {
+                    block.push(BlockDeclaration::new(
+                        declaration.property(),
+                        declaration.value().clone(),
+                        declaration.important(),
+                    ));
+                }
             }
         }
         StyleRule::new(SelectorCompiler::lower_list(&style.selectors), block)
@@ -439,7 +447,7 @@ mod tests {
 
     #[test]
     fn unsupported_property_is_recorded() {
-        let sheet = compile("a { margin: 1px }");
+        let sheet = compile("a { float: left }");
         assert!(sheet.declarations.is_empty());
         assert_eq!(sheet.unsupported.len(), 1);
     }
@@ -555,9 +563,9 @@ mod tests {
 
     #[test]
     fn matchable_skips_custom_and_unsupported_from_blocks() {
-        // `--brand` (custom) and `margin` (unsupported) must not enter the block;
+        // `--brand` (custom) and `float` (unsupported) must not enter the block;
         // only the standard `color` declaration does.
-        let sheet = compile("a { --brand: #fff; margin: 1px; color: black }");
+        let sheet = compile("a { --brand: #fff; float: left; color: black }");
         let block = sheet.matchable.rules()[0].block();
         assert_eq!(block.len(), 1);
         assert_eq!(block[0].property(), PropertyId::Color);
@@ -580,6 +588,51 @@ mod tests {
             .with_origin(CascadeOrigin::Theme)
             .compile(&parsed);
         assert_eq!(sheet.matchable.origin(), CascadeOrigin::Theme);
+    }
+
+    #[test]
+    fn matchable_lowers_box_and_flex_properties() {
+        use obscur_style::property::layout_keyword;
+        let sheet = compile(
+            ".row { display: flex; flex-direction: column; margin: 8px; gap: 4px; font-size: 14px }",
+        );
+        let block = sheet.matchable.rules()[0].block();
+        // display + flex-direction + 4 margin longhands + gap + font-size = 8.
+        assert_eq!(block.len(), 8);
+        // `display: flex` lowers to the reserved cross-crate keyword symbol.
+        let display = block
+            .iter()
+            .find(|b| b.property() == PropertyId::Display)
+            .unwrap();
+        assert_eq!(
+            *display.value(),
+            PropertyValue::Keyword(layout_keyword::DISPLAY_FLEX)
+        );
+        // `flex-direction: column` likewise.
+        let dir = block
+            .iter()
+            .find(|b| b.property() == PropertyId::FlexDirection)
+            .unwrap();
+        assert_eq!(
+            *dir.value(),
+            PropertyValue::Keyword(layout_keyword::FLEX_COLUMN)
+        );
+        // The `margin` shorthand expanded to four longhands in the flat cascade.
+        let margins = sheet
+            .declarations
+            .iter()
+            .filter(|d| {
+                matches!(
+                    d.property(),
+                    PropertyId::MarginTop
+                        | PropertyId::MarginRight
+                        | PropertyId::MarginBottom
+                        | PropertyId::MarginLeft
+                )
+            })
+            .count();
+        assert_eq!(margins, 4);
+        assert!(sheet.unsupported.is_empty());
     }
 
     #[test]

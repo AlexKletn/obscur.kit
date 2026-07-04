@@ -20,8 +20,11 @@
 use crate::error::{UnsupportedCssFeature, UnsupportedFeatureKind};
 use crate::parser::{ParsedDeclaration, ParsedValue};
 
+use obscur_identity::InternedSymbol;
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
-use obscur_style::property::{CustomProperty, Length, PropertyId, PropertyValue, StyleColor};
+use obscur_style::property::{
+    layout_keyword, CustomProperty, Length, PropertyId, PropertyValue, StyleColor,
+};
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
 use super::stylesheet_compiler::CssSymbolInterner;
@@ -83,7 +86,7 @@ impl PropertyCompiler {
                 decl.span,
             ));
         };
-        match lower_value(&decl.value, interner) {
+        match lower_for_property(property, &decl.value, interner) {
             Some(value) => {
                 let important = if decl.important {
                     ImportantFlag::Important
@@ -107,15 +110,150 @@ impl PropertyCompiler {
             )),
         }
     }
+
+    /// Lowers `decl` into one or more [`CompiledDeclaration`]s, expanding the
+    /// `margin` / `padding` box shorthands into their four longhands.
+    ///
+    /// Every non-shorthand declaration lowers to exactly one result (the single
+    /// [`compile`](Self::compile) call, wrapped in a one-element `Vec`). A
+    /// `margin` / `padding` shorthand expands into up to four
+    /// [`CompiledDeclaration::Standard`] longhands (the CSS 1/2/3/4-value forms);
+    /// an unparseable shorthand value yields a single
+    /// [`CompiledDeclaration::Unsupported`]. This is the entry point the
+    /// stylesheet compiler uses so shorthands flow into both the flat cascade and
+    /// the matchable block.
+    #[must_use]
+    pub fn compile_all(
+        &self,
+        decl: &ParsedDeclaration,
+        specificity: SelectorSpecificity,
+        origin: CascadeOrigin,
+        source_order: u32,
+        selector: Option<SelectorId>,
+        interner: &mut CssSymbolInterner,
+    ) -> Vec<CompiledDeclaration> {
+        if let Some(sides) = box_shorthand_sides(&decl.name) {
+            return expand_box_shorthand(
+                decl,
+                sides,
+                specificity,
+                origin,
+                source_order,
+                selector,
+                interner,
+            );
+        }
+        vec![self.compile(decl, specificity, origin, source_order, selector, interner)]
+    }
+}
+
+/// Returns the four longhand [`PropertyId`]s (in top/right/bottom/left order) a
+/// `margin` / `padding` shorthand expands into, or [`None`] for any other name.
+fn box_shorthand_sides(name: &str) -> Option<[PropertyId; 4]> {
+    if name.eq_ignore_ascii_case("margin") {
+        Some([
+            PropertyId::MarginTop,
+            PropertyId::MarginRight,
+            PropertyId::MarginBottom,
+            PropertyId::MarginLeft,
+        ])
+    } else if name.eq_ignore_ascii_case("padding") {
+        Some([
+            PropertyId::PaddingTop,
+            PropertyId::PaddingRight,
+            PropertyId::PaddingBottom,
+            PropertyId::PaddingLeft,
+        ])
+    } else {
+        None
+    }
+}
+
+/// Expands a `margin` / `padding` shorthand into its four longhand declarations.
+///
+/// The value list is lowered component-by-component into lengths (a unitless `0`
+/// is accepted as `0px`); the CSS 1/2/3/4-value edge-replication rules then fan
+/// the components out to the four sides. If any component is not a length, or the
+/// list is empty or longer than four components, the whole shorthand degrades to
+/// a single [`CompiledDeclaration::Unsupported`] rather than being dropped.
+fn expand_box_shorthand(
+    decl: &ParsedDeclaration,
+    sides: [PropertyId; 4],
+    specificity: SelectorSpecificity,
+    origin: CascadeOrigin,
+    source_order: u32,
+    selector: Option<SelectorId>,
+    interner: &mut CssSymbolInterner,
+) -> Vec<CompiledDeclaration> {
+    let unsupported = || {
+        vec![CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
+            value_unsupported_kind(&decl.value),
+            &*decl.name,
+            decl.span,
+        ))]
+    };
+    let mut components = Vec::new();
+    for value in &decl.value {
+        match box_side_length(value, interner) {
+            Some(length) => components.push(length),
+            None => return unsupported(),
+        }
+    }
+    let four = match components.as_slice() {
+        [a] => [a.clone(), a.clone(), a.clone(), a.clone()],
+        [a, b] => [a.clone(), b.clone(), a.clone(), b.clone()],
+        [a, b, c] => [a.clone(), b.clone(), c.clone(), b.clone()],
+        [a, b, c, d] => [a.clone(), b.clone(), c.clone(), d.clone()],
+        _ => return unsupported(),
+    };
+    let important = if decl.important {
+        ImportantFlag::Important
+    } else {
+        ImportantFlag::Normal
+    };
+    sides
+        .into_iter()
+        .zip(four)
+        .map(|(property, value)| {
+            CompiledDeclaration::Standard(Declaration::new(
+                property,
+                value,
+                important,
+                origin,
+                specificity,
+                source_order,
+                selector,
+            ))
+        })
+        .collect()
+}
+
+/// Lowers one component of a box shorthand to a [`PropertyValue::Length`].
+///
+/// Accepts the same lengths as the longhand path (`px`, `%`, `auto`) plus a
+/// unitless `0` (treated as `0px`); anything else yields [`None`].
+fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Option<PropertyValue> {
+    if let ParsedValue::Number(n) = value
+        && *n == 0.0
+    {
+        return Some(PropertyValue::Length(Length::px(0.0)));
+    }
+    match lower_component(value, interner) {
+        Some(length @ PropertyValue::Length(_)) => Some(length),
+        _ => None,
+    }
 }
 
 /// Resolves a CSS property name to its [`PropertyId`], case-insensitively.
 ///
-/// Returns [`None`] for any name outside the seven modelled longhands (custom
-/// properties are handled separately by their `--` prefix).
+/// Matches against every modelled *longhand*'s canonical [`PropertyId::name`].
+/// Returns [`None`] for any name outside that set — including the `margin` /
+/// `padding` shorthands, which are expanded to longhands by
+/// [`PropertyCompiler::compile_all`], and custom properties, which are handled
+/// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 7] = [
+    const ALL: [PropertyId; 27] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::Opacity,
@@ -123,6 +261,26 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::Height,
         PropertyId::Display,
         PropertyId::Visibility,
+        PropertyId::MarginTop,
+        PropertyId::MarginRight,
+        PropertyId::MarginBottom,
+        PropertyId::MarginLeft,
+        PropertyId::PaddingTop,
+        PropertyId::PaddingRight,
+        PropertyId::PaddingBottom,
+        PropertyId::PaddingLeft,
+        PropertyId::MinWidth,
+        PropertyId::MinHeight,
+        PropertyId::MaxWidth,
+        PropertyId::MaxHeight,
+        PropertyId::Gap,
+        PropertyId::FlexBasis,
+        PropertyId::FlexGrow,
+        PropertyId::FlexShrink,
+        PropertyId::FlexDirection,
+        PropertyId::JustifyContent,
+        PropertyId::AlignItems,
+        PropertyId::FontSize,
     ];
     ALL.into_iter()
         .find(|id| name.eq_ignore_ascii_case(id.name()))
@@ -139,11 +297,67 @@ pub(crate) fn narrow_f32(value: f64) -> f32 {
     value as f32
 }
 
+/// Lowers a value list for a specific property, applying property-aware rules.
+///
+/// The four closed-set layout-keyword properties (`display`, `flex-direction`,
+/// `justify-content`, `align-items`) resolve their keyword to the *reserved*
+/// cross-crate [`InternedSymbol`] from [`layout_keyword`] so the runtime layout
+/// bridge can compare keyword identities without sharing this crate's interner.
+/// CSS-wide keywords (`inherit` / `initial` / `unset`) still take priority, and
+/// a keyword outside the property's closed set falls back to the ordinary intern
+/// path so it round-trips rather than being dropped. Every other property uses
+/// the generic [`lower_value`] path unchanged.
+fn lower_for_property(
+    property: PropertyId,
+    values: &[ParsedValue],
+    interner: &mut CssSymbolInterner,
+) -> Option<PropertyValue> {
+    if let Some(mapper) = layout_keyword_mapper(property)
+        && let Some(ParsedValue::Keyword(keyword)) = values.first()
+    {
+        if let Some(wide) = css_wide_keyword(keyword) {
+            return Some(wide);
+        }
+        return Some(match mapper(keyword) {
+            Some(symbol) => PropertyValue::Keyword(symbol),
+            None => PropertyValue::Keyword(interner.intern(keyword)),
+        });
+    }
+    lower_value(values, interner)
+}
+
+/// Returns the keyword→reserved-symbol mapper for a closed-set layout property,
+/// or [`None`] for any property whose keywords are interned normally.
+fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<InternedSymbol>> {
+    match property {
+        PropertyId::Display => Some(layout_keyword::display_from_name),
+        PropertyId::FlexDirection => Some(layout_keyword::flex_direction_from_name),
+        PropertyId::JustifyContent => Some(layout_keyword::justify_content_from_name),
+        PropertyId::AlignItems => Some(layout_keyword::align_items_from_name),
+        _ => None,
+    }
+}
+
+/// Maps a CSS-wide keyword (`inherit` / `initial` / `unset`) to its
+/// [`PropertyValue`], case-insensitively; [`None`] for any other keyword.
+fn css_wide_keyword(keyword: &str) -> Option<PropertyValue> {
+    if keyword.eq_ignore_ascii_case("inherit") {
+        Some(PropertyValue::Inherit)
+    } else if keyword.eq_ignore_ascii_case("initial") {
+        Some(PropertyValue::Initial)
+    } else if keyword.eq_ignore_ascii_case("unset") {
+        Some(PropertyValue::Unset)
+    } else {
+        None
+    }
+}
+
 /// Lowers a component-value list into a single [`PropertyValue`].
 ///
-/// Only the first component is inspected: the modelled properties are all
-/// single-valued, and multi-component shorthands are out of the domain's value
-/// model. Returns [`None`] when the component cannot be lowered.
+/// Only the first component is inspected: the modelled single-valued properties
+/// take one component, and multi-component shorthands are handled separately by
+/// [`expand_box_shorthand`]. Returns [`None`] when the component cannot be
+/// lowered.
 fn lower_value(values: &[ParsedValue], interner: &mut CssSymbolInterner) -> Option<PropertyValue> {
     values.first().and_then(|v| lower_component(v, interner))
 }
@@ -164,14 +378,8 @@ fn lower_component(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// Lowers a bare keyword, handling the CSS-wide keywords, `auto`, and the two
 /// named colours the domain knows; anything else becomes an interned keyword.
 fn lower_keyword(keyword: &str, interner: &mut CssSymbolInterner) -> PropertyValue {
-    if keyword.eq_ignore_ascii_case("inherit") {
-        return PropertyValue::Inherit;
-    }
-    if keyword.eq_ignore_ascii_case("initial") {
-        return PropertyValue::Initial;
-    }
-    if keyword.eq_ignore_ascii_case("unset") {
-        return PropertyValue::Unset;
+    if let Some(wide) = css_wide_keyword(keyword) {
+        return wide;
     }
     if keyword.eq_ignore_ascii_case("auto") {
         return PropertyValue::Length(Length::Auto);
@@ -350,6 +558,26 @@ mod tests {
         standard(text).0.value().clone()
     }
 
+    fn compile_all(text: &str) -> Vec<CompiledDeclaration> {
+        let mut interner = CssSymbolInterner::new();
+        let parsed = decl(text);
+        PropertyCompiler::new().compile_all(
+            &parsed,
+            SelectorSpecificity::ZERO,
+            CascadeOrigin::GlobalApp,
+            0,
+            None,
+            &mut interner,
+        )
+    }
+
+    fn standard_of(compiled: &CompiledDeclaration) -> &Declaration {
+        match compiled {
+            CompiledDeclaration::Standard(d) => d,
+            other => panic!("expected standard declaration, got {other:?}"),
+        }
+    }
+
     #[test]
     fn resolves_known_property_names() {
         assert_eq!(property_id_from_name("color"), Some(PropertyId::Color));
@@ -363,12 +591,12 @@ mod tests {
 
     #[test]
     fn unknown_property_is_unsupported() {
-        let (result, _) = compile("margin: 1px");
+        let (result, _) = compile("float: left");
         let CompiledDeclaration::Unsupported(feature) = result else {
             panic!("expected unsupported");
         };
         assert_eq!(feature.kind(), UnsupportedFeatureKind::Property);
-        assert_eq!(feature.name(), "margin");
+        assert_eq!(feature.name(), "float");
     }
 
     #[test]
@@ -446,11 +674,13 @@ mod tests {
 
     #[test]
     fn lowers_plain_keyword_to_interned_symbol() {
-        let (d, interner) = standard("display: flex");
+        // `visibility` is not a closed-set layout property, so its keyword is
+        // interned normally (unlike `display`, which maps to a reserved symbol).
+        let (d, interner) = standard("visibility: hidden");
         let PropertyValue::Keyword(symbol) = d.value().clone() else {
             panic!("expected keyword");
         };
-        assert_eq!(interner.resolve(symbol), Some("flex"));
+        assert_eq!(interner.resolve(symbol), Some("hidden"));
     }
 
     #[test]
@@ -551,5 +781,200 @@ mod tests {
             CompiledDeclaration::Standard(d)
                 if *d.value() == PropertyValue::Color(StyleColor::rgba(0.0, 1.0, 0.0, 1.0))
         ));
+    }
+
+    // ---- P4b: box-model / sizing / flex / font longhands ----
+
+    #[test]
+    fn resolves_new_longhand_names() {
+        assert_eq!(
+            property_id_from_name("margin-top"),
+            Some(PropertyId::MarginTop)
+        );
+        assert_eq!(
+            property_id_from_name("padding-left"),
+            Some(PropertyId::PaddingLeft)
+        );
+        assert_eq!(property_id_from_name("min-width"), Some(PropertyId::MinWidth));
+        assert_eq!(property_id_from_name("gap"), Some(PropertyId::Gap));
+        assert_eq!(
+            property_id_from_name("flex-basis"),
+            Some(PropertyId::FlexBasis)
+        );
+        assert_eq!(property_id_from_name("font-size"), Some(PropertyId::FontSize));
+        // Case-insensitive, matching the existing seven.
+        assert_eq!(
+            property_id_from_name("FLEX-DIRECTION"),
+            Some(PropertyId::FlexDirection)
+        );
+        // Shorthands are not longhand ids.
+        assert_eq!(property_id_from_name("margin"), None);
+        assert_eq!(property_id_from_name("padding"), None);
+    }
+
+    #[test]
+    fn lowers_length_longhands() {
+        assert_eq!(
+            value_of("margin-top: 8px"),
+            PropertyValue::Length(Length::px(8.0))
+        );
+        assert_eq!(
+            value_of("padding-left: 5%"),
+            PropertyValue::Length(Length::Percent(5.0))
+        );
+        assert_eq!(
+            value_of("min-width: 100px"),
+            PropertyValue::Length(Length::px(100.0))
+        );
+        assert_eq!(value_of("gap: 12px"), PropertyValue::Length(Length::px(12.0)));
+        assert_eq!(
+            value_of("font-size: 14px"),
+            PropertyValue::Length(Length::px(14.0))
+        );
+    }
+
+    #[test]
+    fn length_longhand_carries_its_property_id() {
+        assert_eq!(
+            standard("margin-top: 8px").0.property(),
+            PropertyId::MarginTop
+        );
+        assert_eq!(standard("font-size: 14px").0.property(), PropertyId::FontSize);
+    }
+
+    #[test]
+    fn flex_basis_auto_lowers_to_auto_length() {
+        assert_eq!(
+            value_of("flex-basis: auto"),
+            PropertyValue::Length(Length::Auto)
+        );
+    }
+
+    #[test]
+    fn lowers_number_valued_flex_props() {
+        assert_eq!(value_of("flex-grow: 1"), PropertyValue::Number(1.0));
+        assert_eq!(value_of("flex-shrink: 0"), PropertyValue::Number(0.0));
+    }
+
+    #[test]
+    fn display_maps_to_reserved_symbols() {
+        assert_eq!(
+            value_of("display: flex"),
+            PropertyValue::Keyword(layout_keyword::DISPLAY_FLEX)
+        );
+        assert_eq!(
+            value_of("display: grid"),
+            PropertyValue::Keyword(layout_keyword::DISPLAY_GRID)
+        );
+        assert_eq!(
+            value_of("display: block"),
+            PropertyValue::Keyword(layout_keyword::DISPLAY_BLOCK)
+        );
+        assert_eq!(
+            value_of("display: none"),
+            PropertyValue::Keyword(layout_keyword::DISPLAY_NONE)
+        );
+    }
+
+    #[test]
+    fn flex_layout_keywords_map_to_reserved_symbols() {
+        assert_eq!(
+            value_of("flex-direction: column"),
+            PropertyValue::Keyword(layout_keyword::FLEX_COLUMN)
+        );
+        assert_eq!(
+            value_of("justify-content: center"),
+            PropertyValue::Keyword(layout_keyword::JUSTIFY_CENTER)
+        );
+        assert_eq!(
+            value_of("align-items: stretch"),
+            PropertyValue::Keyword(layout_keyword::ALIGN_STRETCH)
+        );
+    }
+
+    #[test]
+    fn unknown_layout_keyword_falls_back_to_intern() {
+        // `display: inline` is outside the closed set: it interns rather than
+        // resolving to a reserved symbol (and is not dropped).
+        let (d, interner) = standard("display: inline");
+        let PropertyValue::Keyword(symbol) = d.value().clone() else {
+            panic!("expected interned keyword");
+        };
+        assert_eq!(interner.resolve(symbol), Some("inline"));
+    }
+
+    #[test]
+    fn layout_keyword_prop_honours_css_wide_keywords() {
+        assert_eq!(value_of("display: inherit"), PropertyValue::Inherit);
+        assert_eq!(value_of("flex-direction: initial"), PropertyValue::Initial);
+    }
+
+    #[test]
+    fn margin_shorthand_expands_to_four_longhands() {
+        let decls = compile_all("margin: 8px");
+        assert_eq!(decls.len(), 4);
+        let ids: Vec<_> = decls.iter().map(|d| standard_of(d).property()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                PropertyId::MarginTop,
+                PropertyId::MarginRight,
+                PropertyId::MarginBottom,
+                PropertyId::MarginLeft,
+            ]
+        );
+        for d in &decls {
+            assert_eq!(
+                *standard_of(d).value(),
+                PropertyValue::Length(Length::px(8.0))
+            );
+        }
+    }
+
+    #[test]
+    fn padding_two_value_shorthand_maps_sides() {
+        let decls = compile_all("padding: 4px 8px");
+        assert_eq!(decls.len(), 4);
+        let value = |i: usize| standard_of(&decls[i]).value().clone();
+        // top/bottom = 4px, right/left = 8px.
+        assert_eq!(value(0), PropertyValue::Length(Length::px(4.0)));
+        assert_eq!(value(1), PropertyValue::Length(Length::px(8.0)));
+        assert_eq!(value(2), PropertyValue::Length(Length::px(4.0)));
+        assert_eq!(value(3), PropertyValue::Length(Length::px(8.0)));
+        assert_eq!(standard_of(&decls[3]).property(), PropertyId::PaddingLeft);
+    }
+
+    #[test]
+    fn four_value_margin_shorthand_maps_each_side() {
+        let decls = compile_all("margin: 1px 2px 3px 4px");
+        let value = |i: usize| standard_of(&decls[i]).value().clone();
+        assert_eq!(value(0), PropertyValue::Length(Length::px(1.0)));
+        assert_eq!(value(1), PropertyValue::Length(Length::px(2.0)));
+        assert_eq!(value(2), PropertyValue::Length(Length::px(3.0)));
+        assert_eq!(value(3), PropertyValue::Length(Length::px(4.0)));
+    }
+
+    #[test]
+    fn unitless_zero_shorthand_lowers_to_zero_px() {
+        let decls = compile_all("margin: 0");
+        assert_eq!(decls.len(), 4);
+        assert_eq!(
+            *standard_of(&decls[0]).value(),
+            PropertyValue::Length(Length::px(0.0))
+        );
+    }
+
+    #[test]
+    fn non_length_shorthand_is_unsupported() {
+        let decls = compile_all("margin: red");
+        assert_eq!(decls.len(), 1);
+        assert!(matches!(decls[0], CompiledDeclaration::Unsupported(_)));
+    }
+
+    #[test]
+    fn compile_all_wraps_a_single_longhand() {
+        let decls = compile_all("width: 10px");
+        assert_eq!(decls.len(), 1);
+        assert_eq!(standard_of(&decls[0]).property(), PropertyId::Width);
     }
 }
