@@ -3,6 +3,8 @@ mod layout_coordinator;
 pub use layout_coordinator::{LayoutBoxes, LayoutCoordinator, LayoutStyles};
 mod motion_coordinator;
 pub use motion_coordinator::MotionCoordinator;
+mod pseudo_states;
+pub use pseudo_states::PseudoStates;
 mod render_coordinator;
 pub use render_coordinator::RenderCoordinator;
 mod scene_coordinator;

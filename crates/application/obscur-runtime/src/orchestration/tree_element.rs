@@ -5,6 +5,8 @@ use obscur_style::selector::{MatchElement, PseudoState};
 use obscur_tree::node::RetainedNode;
 use obscur_tree::tree::RetainedTree;
 
+use super::PseudoStates;
+
 /// A cheap cursor over one [`RetainedNode`] that implements
 /// [`MatchElement`](obscur_style::selector::MatchElement), the seam the
 /// `obscur-style` selector matcher walks.
@@ -26,9 +28,13 @@ use obscur_tree::tree::RetainedTree;
 ///   any other attribute selector (e.g. `[data-*]`, `[aria-*]`) matches nothing
 ///   until the tree retains arbitrary attributes.
 /// - **Pseudo-state** — interaction-driven states (`:hover`, `:active`,
-///   `:focus`, …) are not sourced yet, so
-///   [`pseudo_state`](MatchElement::pseudo_state) always reports
-///   [`PseudoState::empty`]. Wiring live interaction state is a later concern.
+///   `:focus`, …) are sourced from an optional per-node [`PseudoStates`] map the
+///   runtime owns. A cursor built with [`new`](Self::new) carries no source and
+///   reports [`PseudoState::empty`] (the stateless matching path used by
+///   `run_matched`/`HeadlessHost`); a cursor built with
+///   [`with_pseudo`](Self::with_pseudo) reads that map, so `:hover`/`:focus`
+///   finally match once the runtime records the state. Navigation preserves the
+///   source, so ancestor/sibling combinators over pseudo-classes work too.
 /// - **Top-level siblings** — an element whose logical parent is the synthetic
 ///   [`Root`](obscur_tree::node::NodeKind::Root) grouping node is treated as
 ///   top-level: it reports no [`parent`](MatchElement::parent) (so `:root` and
@@ -40,13 +46,57 @@ pub struct TreeElement<'a> {
     tree: &'a RetainedTree,
     /// The node this cursor currently points at.
     id: NodeId,
+    /// The interaction-state source, or `None` for stateless matching (every
+    /// node then reports [`PseudoState::empty`]).
+    pseudo: Option<&'a PseudoStates>,
 }
 
 impl<'a> TreeElement<'a> {
-    /// Creates a cursor over `id` within `tree`.
+    /// Creates a **stateless** cursor over `id` within `tree`.
+    ///
+    /// The cursor carries no interaction-state source, so
+    /// [`pseudo_state`](MatchElement::pseudo_state) always reports
+    /// [`PseudoState::empty`]. This is the path `run_matched` and the headless
+    /// host use, where no live interaction state exists.
     #[must_use]
     pub const fn new(tree: &'a RetainedTree, id: NodeId) -> Self {
-        Self { tree, id }
+        Self {
+            tree,
+            id,
+            pseudo: None,
+        }
+    }
+
+    /// Creates a cursor over `id` within `tree` that reads interaction state
+    /// from `pseudo`.
+    ///
+    /// [`pseudo_state`](MatchElement::pseudo_state) then reports the state the
+    /// runtime recorded for the node, so interaction-driven pseudo-classes
+    /// (`:hover`, `:focus`, …) match. Navigation
+    /// ([`parent`](MatchElement::parent),
+    /// [`previous_sibling_element`](MatchElement::previous_sibling_element))
+    /// preserves the source.
+    #[must_use]
+    pub const fn with_pseudo(
+        tree: &'a RetainedTree,
+        id: NodeId,
+        pseudo: &'a PseudoStates,
+    ) -> Self {
+        Self {
+            tree,
+            id,
+            pseudo: Some(pseudo),
+        }
+    }
+
+    /// Mints a sibling cursor over `id` in the same tree, preserving the
+    /// interaction-state source so pseudo-class matching survives navigation.
+    const fn cursor(&self, id: NodeId) -> Self {
+        Self {
+            tree: self.tree,
+            id,
+            pseudo: self.pseudo,
+        }
     }
 
     /// Returns the node id this cursor points at.
@@ -114,10 +164,12 @@ impl MatchElement for TreeElement<'_> {
         }
     }
 
-    /// Always [`PseudoState::empty`]: interaction-driven states are not sourced
-    /// yet (see the type-level note).
+    /// Reports the node's interaction state from the cursor's [`PseudoStates`]
+    /// source, or [`PseudoState::empty`] when the cursor is stateless (built via
+    /// [`new`](Self::new)) or the node has no recorded state.
     fn pseudo_state(&self) -> PseudoState {
-        PseudoState::empty()
+        self.pseudo
+            .map_or_else(PseudoState::empty, |states| states.get(self.id))
     }
 
     /// Returns the logical parent **only when it is an element node**. When the
@@ -129,16 +181,14 @@ impl MatchElement for TreeElement<'_> {
         parent_node
             .kind()
             .is_element()
-            .then(|| TreeElement::new(self.tree, parent_id))
+            .then(|| self.cursor(parent_id))
     }
 
     fn previous_sibling_element(&self) -> Option<Self> {
         let siblings = self.element_siblings();
         let pos = siblings.iter().position(|s| *s == self.id)?;
         let prev = pos.checked_sub(1)?;
-        siblings
-            .get(prev)
-            .map(|prev_id| TreeElement::new(self.tree, *prev_id))
+        siblings.get(prev).map(|prev_id| self.cursor(*prev_id))
     }
 
     fn index_among_siblings(&self) -> usize {
@@ -300,5 +350,55 @@ mod tests {
         );
         assert!(TreeElement::new(&tree, container_id).has_children());
         assert!(!first.has_children());
+    }
+
+    #[test]
+    fn with_pseudo_reads_recorded_interaction_state() {
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![ViewNode::element(
+            ComponentId::from_raw(10),
+        )]));
+        let tree = reconcile(&view);
+        let child = root_children(&tree)[0];
+
+        // Stateless cursor: always empty.
+        assert_eq!(
+            TreeElement::new(&tree, child).pseudo_state(),
+            PseudoState::empty()
+        );
+
+        // Pseudo-aware cursor over a map that records HOVER for the node.
+        let mut states = crate::orchestration::PseudoStates::new();
+        states.set(child, PseudoState::HOVER);
+        let hovered = TreeElement::with_pseudo(&tree, child, &states);
+        assert_eq!(hovered.pseudo_state(), PseudoState::HOVER);
+
+        // A node with no recorded state still reads empty through the same map.
+        let mut empty_states = crate::orchestration::PseudoStates::new();
+        empty_states.set(NodeId::from_raw(9999), PseudoState::FOCUS);
+        assert_eq!(
+            TreeElement::with_pseudo(&tree, child, &empty_states).pseudo_state(),
+            PseudoState::empty()
+        );
+    }
+
+    #[test]
+    fn navigation_preserves_the_pseudo_source() {
+        // container -> child; record HOVER on the container, navigate up from the
+        // child and confirm the source survived the parent() hop.
+        let container = ViewNode::element(ComponentId::from_raw(1)).with_children(
+            ViewFragment::from_nodes(vec![ViewNode::element(ComponentId::from_raw(11))]),
+        );
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![container]));
+        let tree = reconcile(&view);
+        let container_id = root_children(&tree)[0];
+        let child_id = tree.get(container_id).unwrap().children().to_vec()[0];
+
+        let mut states = crate::orchestration::PseudoStates::new();
+        states.set(container_id, PseudoState::HOVER);
+
+        let child = TreeElement::with_pseudo(&tree, child_id, &states);
+        let parent = child.parent().expect("child has an element parent");
+        assert_eq!(parent.node_id(), container_id);
+        assert_eq!(parent.pseudo_state(), PseudoState::HOVER);
     }
 }
