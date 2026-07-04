@@ -7,7 +7,7 @@ use obscur_render::target::RenderTarget;
 
 use crate::conversion::SceneConverter;
 use crate::error::VelloRenderError;
-use crate::renderer::{VelloDevice, VelloFrame};
+use crate::renderer::{VelloDevice, VelloFrame, VelloSurface};
 
 /// A GPU-accelerated [`Renderer`] backed by Vello and wgpu (spec §5.2).
 ///
@@ -34,6 +34,11 @@ pub struct VelloRenderer {
     device: Option<VelloDevice>,
     scene_converter: SceneConverter,
     frames_rendered: u64,
+    /// Cached surface blitter for the on-screen present path, keyed by the
+    /// surface format it was built for. Rebuilding a `TextureBlitter` recompiles
+    /// its render pipeline, so we keep one alive across frames and only rebuild
+    /// when absent or when the surface format changes.
+    blitter: Option<(wgpu::TextureFormat, wgpu::util::TextureBlitter)>,
 }
 
 impl VelloRenderer {
@@ -55,6 +60,7 @@ impl VelloRenderer {
             device: None,
             scene_converter: SceneConverter::new(),
             frames_rendered: 0,
+            blitter: None,
         }
     }
 
@@ -80,6 +86,112 @@ impl VelloRenderer {
     #[must_use]
     pub const fn frames_rendered(&self) -> u64 {
         self.frames_rendered
+    }
+
+    /// Presents a submission **on-screen** by rendering into the adapter's
+    /// offscreen [`VelloFrame`] and blitting it to a windowed [`VelloSurface`].
+    ///
+    /// This is the counterpart to the port [`Renderer::render`], which targets an
+    /// offscreen texture only. Vello 0.9 has no render-to-surface helper, so the
+    /// documented pattern is followed here: rasterize into an
+    /// `Rgba8Unorm + STORAGE_BINDING` intermediate (`VelloFrame::new_offscreen`)
+    /// with [`vello::Renderer::render_to_texture`], then copy that texture onto
+    /// the acquired swapchain image with a [`wgpu::util::TextureBlitter`]. The
+    /// blitter is cached on the renderer (keyed by surface format) so its render
+    /// pipeline is only compiled once, not per frame.
+    ///
+    /// This is an inherent method, not part of the [`Renderer`] trait: only a host
+    /// that owns a window and a [`VelloSurface`] can drive it, whereas the trait's
+    /// offscreen path stays device- and window-agnostic.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RendererError::DeviceLost`] when no GPU device is attached,
+    /// [`RendererError::Backend`] when the surface has a zero extent or Vello's
+    /// rasterization fails, and surfaces any swapchain-acquisition failure
+    /// (e.g. [`RendererError::Backend`] for a lost/outdated surface).
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn present_to_surface(
+        &mut self,
+        submission: &FrameSubmission,
+        surface: &VelloSurface,
+    ) -> Result<PresentResult, RendererError> {
+        // Physical swapchain extent; wgpu rejects a zero-sized surface, so treat
+        // it as a backend error rather than submitting empty work.
+        let width = surface.config().width;
+        let height = surface.config().height;
+        if width == 0 || height == 0 {
+            return Err(
+                VelloRenderError::RenderFailed("empty surface extent".into()).into_renderer_error(),
+            );
+        }
+        let format = surface.config().format;
+
+        // Convert first (device-free) so the display list drives Vello's encoding
+        // regardless of the device's presence, mirroring the port `render`.
+        let scene = self
+            .scene_converter
+            .convert(submission.frame().scene().display_list());
+
+        let Some(device) = self.device.as_mut() else {
+            return Err(
+                VelloRenderError::DeviceCreation("no gpu device".into()).into_renderer_error()
+            );
+        };
+
+        // Acquire the swapchain image to present into.
+        let surface_texture = surface
+            .current_texture()
+            .map_err(VelloRenderError::into_renderer_error)?;
+
+        // Rasterize into the offscreen intermediate exactly like the port path.
+        let frame = VelloFrame::new_offscreen(device.device(), width, height);
+        let params = vello::RenderParams {
+            base_color: vello::peniko::Color::TRANSPARENT,
+            width,
+            height,
+            antialiasing_method: vello::AaConfig::Area,
+        };
+        // wgpu `Device`/`Queue` are cheap ref-counted handles; clone them so the
+        // renderer can be borrowed mutably alongside the immutable device/queue.
+        let gpu_device = device.device().clone();
+        let gpu_queue = device.queue().clone();
+        device
+            .renderer_mut()
+            .render_to_texture(&gpu_device, &gpu_queue, &scene, frame.view(), &params)
+            .map_err(|error| {
+                VelloRenderError::RenderFailed(error.to_string().into()).into_renderer_error()
+            })?;
+
+        // Obtain a blitter matching the surface format, rebuilding only on a
+        // format change (or first use) to avoid recompiling the pipeline. Drop a
+        // stale (differently formatted) cache entry, then lazily build one.
+        if self
+            .blitter
+            .as_ref()
+            .is_some_and(|(cached, _)| *cached != format)
+        {
+            self.blitter = None;
+        }
+        let (_, blitter) = self
+            .blitter
+            .get_or_insert_with(|| (format, wgpu::util::TextureBlitter::new(&gpu_device, format)));
+
+        // Copy offscreen -> swapchain and present.
+        let surface_view = surface_texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("obscur-vello-present"),
+        });
+        blitter.copy(&gpu_device, &mut encoder, frame.view(), &surface_view);
+        gpu_queue.submit(std::iter::once(encoder.finish()));
+        surface_texture.present();
+
+        self.frames_rendered += 1;
+        Ok(PresentResult::Presented {
+            generation: submission.generation(),
+        })
     }
 }
 
