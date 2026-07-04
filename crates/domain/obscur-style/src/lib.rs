@@ -8,6 +8,7 @@ pub use computed::ComputedStyle;
 
 pub mod cascade;
 pub mod invalidation;
+pub mod matching;
 pub mod property;
 pub mod scope;
 pub mod selector;
