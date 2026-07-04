@@ -29,7 +29,7 @@
 //!    `FrameSubmission` and submitted to the `VelloRenderer` against a
 //!    `RenderTarget::Window` sized from the live winit window.
 //!
-//! # Two honest limitations (why the window shows only a clear color)
+//! # One honest limitation (why the window shows only a clear color)
 //!
 //! - **Offscreen render path.** The Vello adapter's `Renderer::render`
 //!   rasterizes the scene to an *offscreen* GPU texture (`VelloFrame::
@@ -40,9 +40,11 @@
 //!   offscreen texture that is never presented. Because the render is offscreen,
 //!   no wgpu `Surface`/swapchain is needed at all — `Instance → Adapter →
 //!   Device → Queue` suffices.
-//! - **Empty display list.** Painting needs a CSS selector-matching engine that
-//!   is not yet built, so the committed scene's display list is currently empty
-//!   and the offscreen texture is a cleared frame.
+//!
+//! The scene itself is now genuinely painted: `render_styled` matches the
+//! compiled `.counter` stylesheet against the reconciled tree, so the committed
+//! display list carries a real fill (it is that fill which is rasterized
+//! offscreen).
 //!
 //! The example's purpose is therefore to prove that the `full` backend graph
 //! *links* and that the winit + wgpu + Vello + toolkit wiring compiles and
@@ -50,6 +52,9 @@
 #![forbid(unsafe_code)]
 
 use obscur_kit::bootstrap::KitBootstrap;
+use obscur_kit::css::compiler::StylesheetCompiler;
+use obscur_kit::css::parser::StylesheetParser;
+use obscur_kit::css::source::CssSource;
 use obscur_kit::geometry::Size;
 use obscur_kit::headless::HeadlessHost;
 use obscur_kit::identity::InternedSymbol;
@@ -58,8 +63,8 @@ use obscur_kit::render::frame::{FrameSubmission, RenderFrame};
 use obscur_kit::render::renderer::{Renderer, RendererId};
 use obscur_kit::render::target::{RenderTarget, WindowTarget};
 use obscur_kit::render_vello::renderer::{VelloDevice, VelloRenderer};
-use obscur_kit::runtime::orchestration::StyleInputs;
-use obscur_kit::view::view::{View, ViewNode};
+use obscur_kit::style::matching::Stylesheet;
+use obscur_kit::view::view::{CLASS, View, ViewNode, ViewProperty, ViewValue};
 use obscur_kit::widgets::button::Button;
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -84,8 +89,9 @@ struct WindowedCounter {
     renderer: Option<VelloRenderer>,
     /// The deterministic host that runs the real pipeline each frame.
     host: HeadlessHost,
-    /// Styling inputs handed to the host (empty: no external style state here).
-    inputs: StyleInputs,
+    /// The compiled stylesheet matched against the tree each frame so the
+    /// `.counter` container paints a real fill.
+    style_sheet: Stylesheet,
     /// The "-" button (fixed; drives the decrement command symbol).
     decrement: Button,
     /// The "+" button whose headless state machine we drive each frame.
@@ -105,7 +111,7 @@ impl WindowedCounter {
             window: None,
             renderer: None,
             host: KitBootstrap::new().with_runtime_id(1).headless_host(),
-            inputs: StyleInputs::new(),
+            style_sheet: counter_stylesheet(),
             decrement: Button::new("-", CMD_DECREMENT),
             increment: Button::new("+", CMD_INCREMENT),
             count: 0,
@@ -132,7 +138,11 @@ impl WindowedCounter {
         let view = build_counter_view(self.count, &self.decrement, &self.increment);
 
         // --- Stage 3: drive the real pipeline and read the committed scene. ---
-        let frame = self.host.render(&view, &self.inputs);
+        // `render_styled` matches the stylesheet against the reconciled tree, so
+        // the `.counter` rule paints the container.
+        let frame = self
+            .host
+            .render_styled(&view, std::slice::from_ref(&self.style_sheet));
         let snapshot = self.host.snapshot();
 
         // --- Stage 4: derive the viewport + target from the live window. ------
@@ -272,13 +282,22 @@ fn scale_factor_f32(scale: f64) -> f32 {
 
 /// Builds the counter UI: a [`Container`] grouping a text label and the two
 /// buttons' element nodes, returned as a single-root [`View`].
+fn counter_stylesheet() -> Stylesheet {
+    // A paintable rule: give the `.counter` container a background and a size so
+    // the pipeline arranges a box and emits a fill for it.
+    let css = ".counter { background-color: #3366ff; width: 240px; height: 80px; }";
+    let parsed = StylesheetParser::new(&CssSource::anonymous(css)).parse();
+    StylesheetCompiler::new().compile(&parsed).matchable
+}
+
 fn build_counter_view(count: i64, decrement: &Button, increment: &Button) -> View {
     let label = Text::new(format!("Count: {count}")).into_view_node();
     let container = Container::new()
         .child(label)
         .with_children(button_nodes(decrement))
         .with_children(button_nodes(increment))
-        .into_view_node();
+        .into_view_node()
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into())));
     View::single(container)
 }
 
