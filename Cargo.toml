@@ -49,6 +49,9 @@ obscur-runtime = { path = "crates/application/obscur-runtime" }
 obscur-headless = { path = "crates/application/obscur-headless" }
 # components
 obscur-primitives = { path = "crates/components/obscur-primitives" }
+# frontend
+obscur-ui-ir = { path = "crates/frontend/obscur-ui-ir" }
+obscur-okui-syntax = { path = "crates/frontend/obscur-okui-syntax" }
 # adapters (optional, wired by the facade behind features)
 obscur-resource-fs = { path = "crates/adapters/obscur-resource-fs" }
 obscur-cache-fs = { path = "crates/adapters/obscur-cache-fs" }

@@ -1494,6 +1494,12 @@ dependencies = [
 [[package]]
 name = "obscur-okui-compiler"
 version = "0.0.0"
+dependencies = [
+ "obscur-capability",
+ "obscur-identity",
+ "obscur-okui-syntax",
+ "obscur-ui-ir",
+]
 
 [[package]]
 name = "obscur-okui-lsp"
@@ -1729,6 +1735,11 @@ dependencies = [
 [[package]]
 name = "obscur-ui-ir"
 version = "0.0.0"
+dependencies = [
+ "obscur-capability",
+ "obscur-diagnostics",
+ "obscur-identity",
+]
 
 [[package]]
 name = "obscur-ui-macros"
@@ -1751,6 +1762,7 @@ dependencies = [
  "obscur-geometry",
  "obscur-identity",
  "obscur-interaction",
+ "obscur-layout",
  "obscur-primitives",
  "obscur-text",
  "obscur-view",
