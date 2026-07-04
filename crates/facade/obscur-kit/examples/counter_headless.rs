@@ -49,7 +49,11 @@ use obscur_kit::widgets::button::Button;
 const STYLESHEET: &str = "\
 @import \"reset.css\";\n\
 :root { --accent: #3366ff; }\n\
-.counter { display: flex; opacity: 0.9; background-color: #3366ff; width: 240px; height: 80px; }\n\
+.counter   { display: flex; opacity: 0.9; background-color: #1e2636; width: 468px; height: 228px; }\n\
+.label     { background-color: #3a4560; width: 300px; height: 56px; }\n\
+.btn       { width: 300px; height: 56px; }\n\
+.decrement { background-color: #d9534f; }\n\
+.increment { background-color: #5cb85c; }\n\
 .counter .value { color: var(--accent); }\n\
 button:hover { background-color: #224488; }\n\
 button { float: left; }\n\
@@ -204,16 +208,27 @@ fn compile_stylesheet() -> CompiledStylesheet {
 /// container we need its [`ViewNode`]s, which we pull out of the button's root
 /// fragment.
 fn build_counter_view(count: i64, decrement: &Button, increment: &Button) -> View {
-    let label = Text::new(format!("Count: {count}")).into_view_node();
-    // Tag the container with the `counter` class so the authored `.counter`
-    // rule matches it during the selector-matching pass and paints it.
+    // Each child is wrapped in a container carrying a class the stylesheet
+    // paints; the `.counter` panel stacks them (flow layout, top-to-bottom).
+    let label = tagged("label", vec![Text::new(format!("Count: {count}")).into_view_node()]);
+    let minus = tagged("btn decrement", button_nodes(decrement));
+    let plus = tagged("btn increment", button_nodes(increment));
     let container = Container::new()
         .child(label)
-        .with_children(button_nodes(decrement))
-        .with_children(button_nodes(increment))
+        .child(minus)
+        .child(plus)
         .into_view_node()
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into())));
     View::single(container)
+}
+
+/// Wraps `children` in a container element tagged with the space-separated
+/// `class` string, so an authored rule (e.g. `.btn`) matches and paints it.
+fn tagged(class: &str, children: Vec<ViewNode>) -> ViewNode {
+    Container::new()
+        .with_children(children)
+        .into_view_node()
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
 /// Extracts a button's desired [`ViewNode`]s from the [`View`] it renders,

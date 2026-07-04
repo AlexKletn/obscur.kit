@@ -310,22 +310,41 @@ fn init_gpu(
     Ok((surface, config, device, queue))
 }
 
-/// Builds the counter UI: a [`Container`] grouping a text label and the two
-/// buttons' element nodes, returned as a single-root [`View`].
+/// The authored stylesheet: one rule per class, each painting a background +
+/// size. Layout is flow (vertical stacking) — `display` is not yet mapped and
+/// the property set has no margin/align — so the bars stack top-to-bottom
+/// inside the dark `.counter` panel.
 fn counter_stylesheet() -> Stylesheet {
-    // A paintable rule: give the `.counter` container a background and a size so
-    // the pipeline arranges a box and emits a fill for it.
-    let css = ".counter { background-color: #3366ff; width: 240px; height: 80px; }";
+    let css = "\
+.counter   { background-color: #1e2636; width: 468px; height: 228px; }\n\
+.label     { background-color: #3a4560; width: 300px; height: 56px; }\n\
+.btn       { width: 300px; height: 56px; }\n\
+.decrement { background-color: #d9534f; }\n\
+.increment { background-color: #5cb85c; }\n\
+";
     let parsed = StylesheetParser::new(&CssSource::anonymous(css)).parse();
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
+/// Wraps `children` in a container element tagged with the space-separated
+/// `class` string, so an authored rule (e.g. `.btn`) matches and paints it.
+fn tagged(class: &str, children: Vec<ViewNode>) -> ViewNode {
+    Container::new()
+        .with_children(children)
+        .into_view_node()
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
+}
+
+/// Builds the counter UI: a dark `.counter` panel stacking a label bar and the
+/// two buttons, each wrapped so it carries a class the stylesheet paints.
 fn build_counter_view(count: i64, decrement: &Button, increment: &Button) -> View {
-    let label = Text::new(format!("Count: {count}")).into_view_node();
+    let label = tagged("label", vec![Text::new(format!("Count: {count}")).into_view_node()]);
+    let minus = tagged("btn decrement", button_nodes(decrement));
+    let plus = tagged("btn increment", button_nodes(increment));
     let container = Container::new()
         .child(label)
-        .with_children(button_nodes(decrement))
-        .with_children(button_nodes(increment))
+        .child(minus)
+        .child(plus)
         .into_view_node()
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into())));
     View::single(container)
