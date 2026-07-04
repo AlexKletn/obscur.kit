@@ -2,7 +2,7 @@
 //! [`ResolvedDeclarations`]: [`StyleMatcher`].
 
 use crate::cascade::{Cascade, Declaration, ResolvedDeclarations};
-use crate::matching::Stylesheet;
+use crate::matching::{MediaEnvironment, Stylesheet};
 use crate::selector::{MatchElement, SelectorMatcher};
 
 /// The style-matching entry point: selects the rules that apply to an element
@@ -56,6 +56,27 @@ impl StyleMatcher {
         sheets: &[Stylesheet],
         element: &E,
     ) -> ResolvedDeclarations {
+        self.match_element_in(sheets, element, &MediaEnvironment::unbounded())
+    }
+
+    /// Matches `element` against all `sheets` in `environment` and returns its
+    /// cascaded values.
+    ///
+    /// Identical to [`match_element`](Self::match_element) but each rule that was
+    /// authored inside an `@media`/`@container` group only contributes when its
+    /// [`RuleCondition`](crate::matching::RuleCondition)
+    /// [`holds`](crate::matching::RuleCondition::holds) against `environment`;
+    /// unconditional rules always contribute. A rule whose condition fails still
+    /// advances the shared `source_order` counter (exactly as a rule whose
+    /// selector list does not match does), so document-order tie-breaks are
+    /// unaffected by which rules the environment gated out.
+    #[must_use]
+    pub fn match_element_in<E: MatchElement>(
+        &self,
+        sheets: &[Stylesheet],
+        element: &E,
+        environment: &MediaEnvironment,
+    ) -> ResolvedDeclarations {
         let mut collected: Vec<Declaration> = Vec::new();
         // A single monotonic counter across all sheets/rules/declarations, in
         // document order. Incremented per encountered declaration so that later
@@ -66,10 +87,15 @@ impl StyleMatcher {
             let origin = sheet.origin();
             for rule in sheet.rules() {
                 let specificity = SelectorMatcher::matches_list(rule.selectors(), element);
+                let condition_holds = rule
+                    .condition()
+                    .is_none_or(|condition| condition.holds(environment));
                 for block_decl in rule.block() {
                     let order = source_order;
                     source_order = source_order.wrapping_add(1);
-                    if let Some(specificity) = specificity {
+                    if condition_holds
+                        && let Some(specificity) = specificity
+                    {
                         collected.push(Declaration::new(
                             block_decl.property(),
                             block_decl.value().clone(),
@@ -422,5 +448,64 @@ mod tests {
         let element = FakeElement::new("div");
         let resolved = StyleMatcher::new().match_element(&[], &element);
         assert!(resolved.is_empty());
+    }
+
+    #[test]
+    fn conditional_rule_gates_on_environment() {
+        use crate::matching::{ConditionAxis, ConditionComparator, FeatureQuery, RuleCondition};
+        // `.cls { color }` gated behind `@media (max-width: 1px)`.
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![
+                rule(
+                    vec![class("cls")],
+                    vec![BlockDeclaration::normal(PropertyId::Color, color(0.7))],
+                )
+                .with_condition(RuleCondition::Feature(FeatureQuery::new(
+                    ConditionAxis::ViewportWidth,
+                    ConditionComparator::Le,
+                    1.0,
+                ))),
+            ],
+        );
+        let element = FakeElement::new("div").with_class("cls");
+        let matcher = StyleMatcher::new();
+
+        // Under a wide viewport the condition fails: the rule does not apply.
+        let wide = matcher.match_element_in(
+            std::slice::from_ref(&sheet),
+            &element,
+            &MediaEnvironment::viewport(1000.0, 1000.0),
+        );
+        assert!(wide.is_empty(), "max-width:1px must not match at 1000px");
+
+        // Under a ≤1px viewport the condition holds: the rule applies.
+        let narrow = matcher.match_element_in(
+            std::slice::from_ref(&sheet),
+            &element,
+            &MediaEnvironment::viewport(1.0, 1000.0),
+        );
+        assert_eq!(narrow.get(PropertyId::Color), Some(&color(0.7)));
+    }
+
+    #[test]
+    fn unconditional_rule_always_matches_regardless_of_environment() {
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![rule(
+                vec![class("cls")],
+                vec![BlockDeclaration::normal(PropertyId::Color, color(0.4))],
+            )],
+        );
+        let element = FakeElement::new("div").with_class("cls");
+        let matcher = StyleMatcher::new();
+        for env in [
+            MediaEnvironment::viewport(1.0, 1.0),
+            MediaEnvironment::viewport(4000.0, 4000.0),
+            MediaEnvironment::unbounded(),
+        ] {
+            let resolved = matcher.match_element_in(std::slice::from_ref(&sheet), &element, &env);
+            assert_eq!(resolved.get(PropertyId::Color), Some(&color(0.4)));
+        }
     }
 }

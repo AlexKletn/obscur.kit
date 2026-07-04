@@ -13,7 +13,7 @@ use obscur_motion::timeline::{Timeline, TimelineId};
 use obscur_motion::track::KeyframeTrack;
 use obscur_scene::scene::{Scene, SceneSnapshot};
 use obscur_style::computed::ComputedValue;
-use obscur_style::matching::Stylesheet;
+use obscur_style::matching::{MediaEnvironment, Stylesheet};
 use obscur_style::property::PropertyId;
 use obscur_style::selector::PseudoState;
 use obscur_tree::reconciliation::Reconciler;
@@ -220,10 +220,16 @@ impl UiRuntime {
         let reconciled = !plan.is_empty();
 
         // 2. Match authored sheets against the fresh tree, honouring live
-        //    interaction state so `:hover`/`:focus` participate.
-        let inputs = self
-            .matcher
-            .build_inputs_with_pseudo(&self.tree, sheets, &self.pseudo);
+        //    interaction state so `:hover`/`:focus` participate and gating
+        //    `@media`/`@container` rules by this frame's viewport (§4.13).
+        let environment =
+            MediaEnvironment::viewport(ctx.viewport().width, ctx.viewport().height);
+        let inputs = self.matcher.build_inputs_with_pseudo_env(
+            &self.tree,
+            sheets,
+            &self.pseudo,
+            &environment,
+        );
 
         // 3. Style: resolve computed styles over the retained tree.
         let mut computed = self.style.resolve(&self.tree, &inputs);

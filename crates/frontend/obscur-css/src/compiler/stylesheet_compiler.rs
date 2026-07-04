@@ -21,10 +21,11 @@ use crate::parser::{
 
 use obscur_identity::InternedSymbol;
 use obscur_style::cascade::{CascadeOrigin, Declaration};
-use obscur_style::matching::{BlockDeclaration, StyleRule, Stylesheet};
+use obscur_style::matching::{BlockDeclaration, RuleCondition, StyleRule, Stylesheet};
 use obscur_style::property::CustomProperty;
 use obscur_style::selector::SelectorSpecificity;
 
+use super::condition_lowering::lower_condition;
 use super::keyframe_compiler::{CompiledKeyframes, KeyframeCompiler};
 use super::property_compiler::{CompiledDeclaration, PropertyCompiler};
 use super::selector_compiler::SelectorCompiler;
@@ -128,10 +129,12 @@ pub struct CompiledStylesheet {
     /// origin and source order at match time. Only standard longhand declarations
     /// enter a block; custom properties and unsupported declarations are recorded
     /// on the other fields, not here. Style rules nested inside `@media` /
-    /// `@container` groups are lowered **unconditionally** (their condition is
-    /// ignored for matching purposes for now) so that no authored rule is dropped
-    /// from the matchable set; conditional gating remains modelled separately by
-    /// [`conditional_groups`](Self::conditional_groups).
+    /// `@container` groups are lowered with their group's condition **attached**
+    /// as an `obscur-style`
+    /// [`RuleCondition`](obscur_style::matching::RuleCondition), so the matcher
+    /// only lets them contribute when that condition holds against the runtime
+    /// environment (§4.13); the condition is *also* modelled, alongside the
+    /// group's flat declarations, in [`conditional_groups`](Self::conditional_groups).
     pub matchable: Stylesheet,
     /// Recognised-but-unsupported features (from parsing and compiling).
     pub unsupported: Vec<UnsupportedCssFeature>,
@@ -335,13 +338,26 @@ impl Default for StylesheetCompiler {
 /// Lifts an inner accumulator into `acc`: nested keyframes, conditional groups
 /// and diagnostics rise to the enclosing scope, while the flat declarations and
 /// transitions are wrapped in a [`CompiledConditionalGroup`] under `condition`.
+///
+/// The nested style rules also rise into the enclosing matchable set, but each
+/// is now **gated** by `condition`: its `condition` is lowered into an
+/// `obscur-style` [`RuleCondition`](obscur_style::matching::RuleCondition) and
+/// attached to the rule, so the runtime matcher only lets it contribute when the
+/// condition holds against the live environment (§4.13). A rule that already
+/// carries a condition (it came from a group nested inside this one) is gated by
+/// the conjunction of the outer and inner conditions.
 fn lift_group(condition: CompiledCondition, mut inner: Accumulator, acc: &mut Accumulator) {
     acc.keyframes.append(&mut inner.keyframes);
     acc.conditional_groups.append(&mut inner.conditional_groups);
     acc.unsupported.append(&mut inner.unsupported);
-    // Matchable rules rise unconditionally to the enclosing sheet (their gating
-    // condition is not modelled in the matchable set — see `CompiledStylesheet::matchable`).
-    acc.matchable_rules.append(&mut inner.matchable_rules);
+    let lowered = lower_condition(&condition);
+    for rule in inner.matchable_rules {
+        let combined = match rule.condition() {
+            Some(existing) => RuleCondition::All(vec![lowered.clone(), existing.clone()]),
+            None => lowered.clone(),
+        };
+        acc.matchable_rules.push(rule.with_condition(combined));
+    }
     acc.conditional_groups.push(CompiledConditionalGroup {
         condition,
         declarations: inner.declarations,
@@ -572,12 +588,50 @@ mod tests {
     }
 
     #[test]
-    fn matchable_includes_conditional_group_rules_unconditionally() {
+    fn matchable_includes_conditional_group_rules_gated() {
         let sheet = compile("a { color: black } @media screen { p { width: 10px } }");
         // Both the top-level `a` rule and the nested `p` rule are matchable.
         assert_eq!(sheet.matchable.rules().len(), 2);
         // The conditional group output is preserved untouched.
         assert_eq!(sheet.conditional_groups.len(), 1);
+        // The top-level rule is unconditional; the nested rule carries a gating
+        // condition lowered from its `@media` group.
+        assert!(sheet.matchable.rules()[0].condition().is_none());
+        assert!(sheet.matchable.rules()[1].condition().is_some());
+    }
+
+    #[test]
+    fn nested_media_rule_gates_by_viewport_width() {
+        use obscur_style::matching::MediaEnvironment;
+        let sheet = compile("@media (max-width: 1px) { a { color: black } }");
+        let rule = &sheet.matchable.rules()[0];
+        let condition = rule.condition().expect("nested rule is gated");
+        // Fails at a wide viewport, holds at a ≤1px one.
+        assert!(!condition.holds(&MediaEnvironment::viewport(1000.0, 1000.0)));
+        assert!(condition.holds(&MediaEnvironment::viewport(1.0, 1000.0)));
+    }
+
+    #[test]
+    fn nested_groups_combine_conditions() {
+        // A rule inside `@media (max-width: 800px)` inside
+        // `@container (min-inline-size: 400px)` must satisfy both axes.
+        use obscur_style::matching::MediaEnvironment;
+        let sheet = compile(
+            "@container (min-inline-size: 400px) { @media (max-width: 800px) { a { color: black } } }",
+        );
+        let condition = sheet.matchable.rules()[0]
+            .condition()
+            .expect("doubly-nested rule is gated");
+        let env = MediaEnvironment::viewport(500.0, 500.0);
+        // Container too small: fails.
+        assert!(!condition.holds(&env.with_container(200.0, 200.0)));
+        // Container large enough and viewport ≤ 800px: holds.
+        assert!(condition.holds(&env.with_container(500.0, 200.0)));
+        // Viewport too wide: fails even with a large container.
+        assert!(
+            !condition
+                .holds(&MediaEnvironment::viewport(900.0, 500.0).with_container(500.0, 200.0))
+        );
     }
 
     #[test]

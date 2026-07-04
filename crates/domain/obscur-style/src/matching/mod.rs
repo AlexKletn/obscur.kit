@@ -1,6 +1,10 @@
 //! Matching module.
 mod block_declaration;
 pub use block_declaration::BlockDeclaration;
+mod media_environment;
+pub use media_environment::MediaEnvironment;
+mod rule_condition;
+pub use rule_condition::{ConditionAxis, ConditionComparator, FeatureQuery, RuleCondition};
 mod style_matcher;
 pub use style_matcher::StyleMatcher;
 mod style_rule;

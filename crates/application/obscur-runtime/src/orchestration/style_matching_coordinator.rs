@@ -1,7 +1,7 @@
 //! Matches authored stylesheets against the retained tree to build the
 //! per-node cascade inputs: [`StyleMatchingCoordinator`].
 
-use obscur_style::matching::{StyleMatcher, Stylesheet};
+use obscur_style::matching::{MediaEnvironment, StyleMatcher, Stylesheet};
 use obscur_tree::tree::RetainedTree;
 
 use super::{PseudoStates, StyleInputs, TreeElement};
@@ -41,9 +41,27 @@ impl StyleMatchingCoordinator {
     #[must_use]
     pub fn build_inputs(&self, tree: &RetainedTree, sheets: &[Stylesheet]) -> StyleInputs {
         // The stateless path: no interaction state, so `:hover`/`:focus` never
-        // match. This keeps `FramePipeline::run_matched` (and the headless host
-        // that drives it) behaviourally identical.
+        // match, and an unbounded environment, so every `@media`/`@container`
+        // rule applies. This keeps behaviour identical for callers that supply
+        // neither interaction state nor a viewport.
         self.build_inputs_with_pseudo(tree, sheets, &PseudoStates::new())
+    }
+
+    /// Matches `sheets` against every element node in `tree` in `environment`,
+    /// gating each `@media`/`@container` rule by whether its condition holds.
+    ///
+    /// The stateless (no-interaction) counterpart of
+    /// [`build_inputs_with_pseudo_env`](Self::build_inputs_with_pseudo_env): only
+    /// the media/container environment participates, so `:hover`/`:focus` still
+    /// never match.
+    #[must_use]
+    pub fn build_inputs_env(
+        &self,
+        tree: &RetainedTree,
+        sheets: &[Stylesheet],
+        environment: &MediaEnvironment,
+    ) -> StyleInputs {
+        self.build_inputs_with_pseudo_env(tree, sheets, &PseudoStates::new(), environment)
     }
 
     /// Matches `sheets` against every element node in `tree`, sourcing each
@@ -66,6 +84,26 @@ impl StyleMatchingCoordinator {
         sheets: &[Stylesheet],
         pseudo: &PseudoStates,
     ) -> StyleInputs {
+        self.build_inputs_with_pseudo_env(tree, sheets, pseudo, &MediaEnvironment::unbounded())
+    }
+
+    /// Matches `sheets` against every element node in `tree`, honouring both the
+    /// interaction state in `pseudo` and the media/container `environment`.
+    ///
+    /// This is the fully-parameterised worker the runtime frame path uses: each
+    /// element is matched with [`StyleMatcher::match_element_in`], so a rule that
+    /// was authored inside an `@media`/`@container` group contributes only when
+    /// its condition holds against `environment` (§4.13), while `:hover`/`:focus`
+    /// are honoured against `pseudo`. Passing [`MediaEnvironment::unbounded`] is
+    /// exactly equivalent to [`build_inputs_with_pseudo`](Self::build_inputs_with_pseudo).
+    #[must_use]
+    pub fn build_inputs_with_pseudo_env(
+        &self,
+        tree: &RetainedTree,
+        sheets: &[Stylesheet],
+        pseudo: &PseudoStates,
+        environment: &MediaEnvironment,
+    ) -> StyleInputs {
         let mut inputs = StyleInputs::new();
         let matcher = StyleMatcher::new();
         for (id, node) in tree.iter() {
@@ -73,7 +111,7 @@ impl StyleMatchingCoordinator {
                 continue;
             }
             let element = TreeElement::with_pseudo(tree, id, pseudo);
-            let resolved = matcher.match_element(sheets, &element);
+            let resolved = matcher.match_element_in(sheets, &element, environment);
             if !resolved.is_empty() {
                 inputs.set_cascaded(id, resolved);
             }

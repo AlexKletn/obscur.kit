@@ -1,4 +1,5 @@
 //! CSS compiler: lowers the parsed AST into obscur-style / obscur-motion (§4.12).
+mod condition_lowering;
 mod keyframe_compiler;
 pub use keyframe_compiler::{CompiledKeyframes, KeyframeCompiler};
 mod property_compiler;

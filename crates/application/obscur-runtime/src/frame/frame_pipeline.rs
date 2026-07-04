@@ -1,7 +1,7 @@
 //! The synchronous, deterministic frame driver: [`FramePipeline`].
 
 use obscur_scene::scene::Scene;
-use obscur_style::matching::Stylesheet;
+use obscur_style::matching::{MediaEnvironment, Stylesheet};
 use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
@@ -129,8 +129,11 @@ impl FramePipeline {
         let plan = self.reconciler.reconcile_root(tree, desired);
         let reconciled = !plan.is_empty();
 
-        // 2. Match: build cascade inputs from the sheets against the fresh tree.
-        let inputs = StyleMatchingCoordinator::new().build_inputs(tree, sheets);
+        // 2. Match: build cascade inputs from the sheets against the fresh tree,
+        //    gating `@media`/`@container` rules by this frame's viewport (§4.13).
+        let environment =
+            MediaEnvironment::viewport(ctx.viewport().width, ctx.viewport().height);
+        let inputs = StyleMatchingCoordinator::new().build_inputs_env(tree, sheets, &environment);
 
         // 3-5. Style over the matched inputs, layout, and compose.
         self.finish_frame(tree, scene, ctx, reconciled, &inputs)
