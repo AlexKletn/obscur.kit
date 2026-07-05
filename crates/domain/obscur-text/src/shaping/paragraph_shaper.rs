@@ -227,16 +227,26 @@ impl ParagraphShaper {
             let sub = &text[range.start..range.end];
 
             let request = FontResolveRequest::new(families, attributes, sub, item.script());
-            let (font, face) = match self.resolver.resolve(&request) {
-                Some(resolved) => (resolved.font(), resolved.into_face()),
-                None => (FontId::PRIMARY, default_face.clone()),
+            let (font, face, synth_oblique, synth_bold) = match self.resolver.resolve(&request) {
+                Some(resolved) => {
+                    let oblique = resolved.synth_oblique();
+                    let bold = resolved.synth_bold();
+                    (resolved.font(), resolved.into_face(), oblique, bold)
+                }
+                // A default-face fallback carries no synthesis: nothing matched to
+                // fake a style against.
+                None => (FontId::PRIMARY, default_face.clone(), false, false),
             };
 
             let shape_request =
                 ShapingRequest::new(sub, face, font_size).with_direction(item.direction());
             let run = self.shaper.shape(&shape_request);
 
-            runs.push(ShapedRun::new(font, rebase_run(&run, range)).with_level(item.level()));
+            runs.push(
+                ShapedRun::new(font, rebase_run(&run, range))
+                    .with_level(item.level())
+                    .with_synthesis(synth_oblique, synth_bold),
+            );
         }
         runs
     }
@@ -522,6 +532,62 @@ mod tests {
         assert_eq!(rtl_runs.len(), 1);
         assert_eq!(rtl_runs[0].level(), 1);
         assert!(rtl_runs[0].level() % 2 == 1, "RTL item must carry an odd level");
+    }
+
+    /// A resolver that always resolves to font 0 with both synthesis flags set,
+    /// to prove the shaper carries synthesis from the [`ResolvedFont`] onto every
+    /// [`ShapedRun`].
+    struct SynthResolver;
+
+    impl FontResolver for SynthResolver {
+        fn resolve(
+            &self,
+            _request: &crate::font::FontResolveRequest,
+        ) -> Option<crate::font::ResolvedFont> {
+            Some(crate::font::ResolvedFont::new(FontId::new(0), face("Synth")).with_synthesis(true, true))
+        }
+    }
+
+    #[test]
+    fn propagates_synthesis_from_resolved_font_onto_runs() {
+        let shaper = ParagraphShaper::new(
+            Box::new(TwoScriptItemizer),
+            Box::new(SynthResolver),
+            Box::new(MockTextShaper::new()),
+        );
+        let default = face("Fallback");
+        let runs = shaper.shape_paragraph(
+            "abВГ",
+            &chain(),
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        );
+        assert_eq!(runs.len(), 2);
+        for run in &runs {
+            assert!(run.synth_oblique(), "oblique flag must reach the run");
+            assert!(run.synth_bold(), "bold flag must reach the run");
+        }
+
+        // A default-face fallback (empty resolver) synthesizes nothing.
+        let plain = ParagraphShaper::new(
+            Box::new(TwoScriptItemizer),
+            Box::new(MockFontResolver::new()),
+            Box::new(MockTextShaper::new()),
+        );
+        let runs = plain.shape_paragraph(
+            "abВГ",
+            &chain(),
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        );
+        for run in &runs {
+            assert!(!run.synth_oblique());
+            assert!(!run.synth_bold());
+        }
     }
 
     #[test]

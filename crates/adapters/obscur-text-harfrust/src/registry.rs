@@ -7,6 +7,7 @@ use obscur_text::font::{
     FontAttributes, FontFace, FontFamily, FontId, FontMetrics, FontResolveRequest, FontResolver,
     FontSource, ResolvedFont,
 };
+use obscur_text::span::FontSlant;
 use read_fonts::{FontRef as ReadFontRef, TableProvider};
 
 /// A real [`FontResolver`] backed by a set of registered fonts and their true
@@ -123,7 +124,11 @@ impl FontResolver for FontRegistry {
                     FontSource::memory(Arc::clone(&font.bytes)),
                     FontMetrics::new(font.units_per_em, font.ascent, font.descent, font.line_gap),
                 );
-                return Some(ResolvedFont::new(font.id, face));
+                // Detect synthesis: the request wants a slant/weight the matched
+                // face — chosen as the nearest available cut — does not actually
+                // carry, so the renderer must fake it (spec §5.18).
+                let (oblique, bold) = synthesis(requested, &font.attributes);
+                return Some(ResolvedFont::new(font.id, face).with_synthesis(oblique, bold));
             }
         }
         None
@@ -171,6 +176,28 @@ fn read_metrics(bytes: &[u8]) -> (u16, f32, f32, f32) {
         ))
     };
     read().unwrap_or((1000, 800.0, -200.0, 0.0))
+}
+
+/// The weight at and above which a request is treated as "bold-ish": a request
+/// this heavy matched to a clearly lighter face is faux-bolded (spec §5.18).
+const BOLD_THRESHOLD: u16 = 600;
+
+/// Decides whether a run resolved to `matched` (the nearest available face) must
+/// be synthesized to satisfy the `requested` attributes (spec §5.18).
+///
+/// * **Oblique** — the request wants a non-upright slant (italic or oblique) but
+///   the matched face is registered upright: shear the glyphs to fake the slant.
+/// * **Bold** — the request is bold-ish (weight ≥ [`BOLD_THRESHOLD`]) but the
+///   matched face is clearly lighter (weight < [`BOLD_THRESHOLD`]): thicken the
+///   glyphs to fake the weight.
+///
+/// When the matched face already carries the requested style neither flag is
+/// set, so a true italic/bold cut renders as itself.
+fn synthesis(requested: &FontAttributes, matched: &FontAttributes) -> (bool, bool) {
+    let oblique = requested.slant != FontSlant::Normal && matched.slant == FontSlant::Normal;
+    let bold =
+        requested.weight.value() >= BOLD_THRESHOLD && matched.weight.value() < BOLD_THRESHOLD;
+    (oblique, bold)
 }
 
 /// Returns whether `ch` is ignored for coverage: ASCII whitespace or an ASCII
@@ -488,6 +515,101 @@ mod tests {
             .resolve(&request(&chain, &light, "A"))
             .expect("Alpha covers 'A'");
         assert_eq!(resolved.font(), FontId::new(0));
+    }
+
+    #[test]
+    fn italic_request_against_upright_face_flags_synthetic_oblique() {
+        use obscur_text::span::FontSlant;
+
+        // Only an upright cut of "Alpha" is registered.
+        let mut registry = FontRegistry::new();
+        registry.register(
+            FontFamily::named("Alpha"),
+            FontAttributes::default(),
+            alpha_font(),
+        );
+        let chain = FontFallback::new(FontFamily::named("Alpha"));
+
+        // An italic request has no true italic cut → resolve to the upright face
+        // but flag it for synthetic oblique.
+        let italic = FontAttributes::default().with_slant(FontSlant::Italic);
+        let resolved = registry
+            .resolve(&request(&chain, &italic, "A"))
+            .expect("Alpha covers 'A'");
+        assert_eq!(resolved.font(), FontId::new(0));
+        assert!(resolved.synth_oblique(), "upright face must be sheared");
+        assert!(!resolved.synth_bold());
+
+        // An upright request needs no synthesis.
+        let upright = FontAttributes::default();
+        let resolved = registry
+            .resolve(&request(&chain, &upright, "A"))
+            .expect("Alpha covers 'A'");
+        assert!(!resolved.synth_oblique());
+    }
+
+    #[test]
+    fn italic_request_with_real_italic_face_is_not_synthesized() {
+        use obscur_text::span::FontSlant;
+
+        // Both an upright and a true italic cut of "Alpha" are registered.
+        let mut registry = FontRegistry::new();
+        registry.register(
+            FontFamily::named("Alpha"),
+            FontAttributes::default(),
+            alpha_font(),
+        );
+        registry.register(
+            FontFamily::named("Alpha"),
+            FontAttributes::default().with_slant(FontSlant::Italic),
+            alpha_font(),
+        );
+        let chain = FontFallback::new(FontFamily::named("Alpha"));
+
+        // The italic request resolves to the real italic cut (id 1), no synthesis.
+        let italic = FontAttributes::default().with_slant(FontSlant::Italic);
+        let resolved = registry
+            .resolve(&request(&chain, &italic, "A"))
+            .expect("Alpha covers 'A'");
+        assert_eq!(resolved.font(), FontId::new(1));
+        assert!(
+            !resolved.synth_oblique(),
+            "a real italic face must not be faux-sheared"
+        );
+    }
+
+    #[test]
+    fn bold_request_against_regular_face_flags_synthetic_bold() {
+        use obscur_text::span::FontWeight;
+
+        // Only a regular (400) cut is registered.
+        let mut registry = FontRegistry::new();
+        registry.register(
+            FontFamily::named("Alpha"),
+            FontAttributes::default().with_weight(FontWeight::NORMAL),
+            alpha_font(),
+        );
+        let chain = FontFallback::new(FontFamily::named("Alpha"));
+
+        // A bold (700) request has no true bold cut → flag synthetic bold.
+        let bold = FontAttributes::default().with_weight(FontWeight::BOLD);
+        let resolved = registry
+            .resolve(&request(&chain, &bold, "A"))
+            .expect("Alpha covers 'A'");
+        assert!(resolved.synth_bold(), "regular face must be thickened");
+        assert!(!resolved.synth_oblique());
+
+        // With a real bold cut registered, the bold request is not synthesized.
+        registry.register(
+            FontFamily::named("Alpha"),
+            FontAttributes::default().with_weight(FontWeight::BOLD),
+            alpha_font(),
+        );
+        let resolved = registry
+            .resolve(&request(&chain, &bold, "A"))
+            .expect("Alpha covers 'A'");
+        assert_eq!(resolved.font(), FontId::new(1));
+        assert!(!resolved.synth_bold(), "a real bold face must not be faux-bolded");
     }
 
     #[test]

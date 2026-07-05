@@ -44,6 +44,10 @@ struct Tagged {
     direction: TextDirection,
     font_size: f32,
     level: u8,
+    /// Whether the segment this glyph belongs to is faux-sheared (spec §5.18).
+    synth_oblique: bool,
+    /// Whether the segment this glyph belongs to is faux-bolded (spec §5.18).
+    synth_bold: bool,
     glyph: ShapedGlyph,
 }
 
@@ -336,12 +340,16 @@ impl ParagraphLayout {
             let direction = run.direction();
             let font_size = run.font_size();
             let level = shaped.level();
+            let synth_oblique = shaped.synth_oblique();
+            let synth_bold = shaped.synth_bold();
             for glyph in run.glyphs() {
                 stream.push(Tagged {
                     font,
                     direction,
                     font_size,
                     level,
+                    synth_oblique,
+                    synth_bold,
                     glyph: *glyph,
                 });
             }
@@ -739,6 +747,8 @@ impl ParagraphLayout {
             let direction = glyphs[index].direction;
             let font_size = glyphs[index].font_size;
             let level = glyphs[index].level;
+            let synth_oblique = glyphs[index].synth_oblique;
+            let synth_bold = glyphs[index].synth_bold;
             let seg_start = glyphs[index].glyph.cluster();
 
             let mut run_glyphs = Vec::new();
@@ -756,7 +766,11 @@ impl ParagraphLayout {
                 .map_or(line_end, |t| t.glyph.cluster());
             let range = TextRange::new(seg_start.min(seg_end), seg_start.max(seg_end));
             let run = GlyphRun::new(run_glyphs, direction, font_size, range);
-            segments.push(ShapedRun::new(font, run).with_level(level));
+            segments.push(
+                ShapedRun::new(font, run)
+                    .with_level(level)
+                    .with_synthesis(synth_oblique, synth_bold),
+            );
         }
         Self::reorder_visual(&mut segments);
         segments

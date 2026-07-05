@@ -19,6 +19,13 @@ use crate::shaping::GlyphRun;
 ///
 /// Because [`GlyphRun`] embeds `f32` metrics this type derives `PartialEq` but
 /// not `Eq`.
+/// The run also carries two per-run synthesis hints
+/// ([`synth_oblique`](Self::synth_oblique), [`synth_bold`](Self::synth_bold)):
+/// when the font resolver matched the run to an upright/lighter face because no
+/// true italic/bold cut was registered, the renderer must shear/thicken the
+/// glyphs to fake the requested style (spec §5.18). Both default to `false`;
+/// clusters and glyphs are unchanged — synthesis is purely a render-time effect.
+///
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShapedRun {
     /// The font the run's glyph indices belong to.
@@ -27,19 +34,28 @@ pub struct ShapedRun {
     run: GlyphRun,
     /// The bidi embedding level of the source run (even = LTR, odd = RTL).
     level: u8,
+    /// Whether the glyphs should be sheared to synthesize a slant the matched
+    /// face lacks (spec §5.18).
+    synth_oblique: bool,
+    /// Whether the glyphs should be thickened to synthesize a bold weight the
+    /// matched face lacks (spec §5.18).
+    synth_bold: bool,
 }
 
 impl ShapedRun {
     /// Creates a run tagged with the `font` its glyph indices belong to, at the
-    /// default bidi embedding level `0` (LTR).
+    /// default bidi embedding level `0` (LTR) and with no synthesis.
     ///
-    /// Set the level with [`with_level`](Self::with_level) when it is known.
+    /// Set the level with [`with_level`](Self::with_level) when it is known, and
+    /// the synthesis hints with [`with_synthesis`](Self::with_synthesis).
     #[must_use]
     pub const fn new(font: FontId, run: GlyphRun) -> Self {
         Self {
             font,
             run,
             level: 0,
+            synth_oblique: false,
+            synth_bold: false,
         }
     }
 
@@ -51,10 +67,33 @@ impl ShapedRun {
         self
     }
 
+    /// Returns this run flagged for synthetic styling: `oblique` shears the glyphs
+    /// to fake a slant, `bold` thickens them to fake weight (spec §5.18).
+    #[must_use]
+    pub const fn with_synthesis(mut self, oblique: bool, bold: bool) -> Self {
+        self.synth_oblique = oblique;
+        self.synth_bold = bold;
+        self
+    }
+
     /// Returns the font the run's glyph indices belong to.
     #[must_use]
     pub const fn font(&self) -> FontId {
         self.font
+    }
+
+    /// Returns whether the glyphs should be sheared to synthesize a slant the
+    /// matched face lacks (spec §5.18).
+    #[must_use]
+    pub const fn synth_oblique(&self) -> bool {
+        self.synth_oblique
+    }
+
+    /// Returns whether the glyphs should be thickened to synthesize a bold weight
+    /// the matched face lacks (spec §5.18).
+    #[must_use]
+    pub const fn synth_bold(&self) -> bool {
+        self.synth_bold
     }
 
     /// Returns the bidi embedding level of the source run (even = LTR, odd = RTL).
@@ -102,6 +141,27 @@ mod tests {
     fn into_run_yields_owned_run() {
         let shaped = ShapedRun::new(FontId::PRIMARY, sample_run());
         assert_eq!(shaped.into_run(), sample_run());
+    }
+
+    #[test]
+    fn synthesis_defaults_false_and_with_synthesis_sets_it() {
+        let plain = ShapedRun::new(FontId::new(3), sample_run());
+        assert!(!plain.synth_oblique());
+        assert!(!plain.synth_bold());
+
+        let synthesized = ShapedRun::new(FontId::new(3), sample_run()).with_synthesis(true, true);
+        assert!(synthesized.synth_oblique());
+        assert!(synthesized.synth_bold());
+        // The flags participate in equality (additive fields on the derive).
+        assert_ne!(plain, synthesized);
+
+        // Synthesis composes with level and each flag is independent.
+        let oblique_only = ShapedRun::new(FontId::new(3), sample_run())
+            .with_level(1)
+            .with_synthesis(true, false);
+        assert_eq!(oblique_only.level(), 1);
+        assert!(oblique_only.synth_oblique());
+        assert!(!oblique_only.synth_bold());
     }
 
     #[test]

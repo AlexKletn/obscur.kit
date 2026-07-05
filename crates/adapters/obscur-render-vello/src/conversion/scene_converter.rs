@@ -14,9 +14,9 @@ use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::layer::{CompositionMode, SceneLayer};
 use obscur_scene::paint::{BlendMode, Brush, Paint};
 use obscur_scene::text::GlyphRun;
-use vello::Scene;
-use vello::kurbo::{Affine, Rect as KurboRect};
+use vello::kurbo::{Affine, Diagonal2, Rect as KurboRect};
 use vello::peniko::{self, FontData};
+use vello::{FontEmbolden, Scene};
 
 use super::brush_converter::BrushConverter;
 use super::clip_converter::ClipConverter;
@@ -27,6 +27,17 @@ use super::path_converter::PathConverter;
 /// geometric clip shape. Large enough to bound any realistic scene while
 /// remaining finite (so it never produces non-finite path coordinates).
 const UNBOUNDED_HALF_EXTENT: f64 = 1.0e9;
+
+/// The synthetic-oblique shear factor: the standard faux-italic skew of `0.25`
+/// (`tan ≈ 14°`) applied as a per-glyph shear so above-baseline points slide
+/// right and the glyph leans forward (spec §5.18). Matches the CPU backend's
+/// factor so both fake the same slant.
+const FAUX_ITALIC_SKEW: f64 = 0.25;
+
+/// The synthetic-embolden amount as a fraction of the run's font size, fed to
+/// Vello's [`FontEmbolden`] to thicken outlines and fake a heavier weight
+/// (spec §5.18).
+const FAUX_BOLD_EMBOLDEN_FRACTION: f64 = 0.02;
 
 /// A converter from an obscur-scene [`DisplayList`] to a [`vello::Scene`].
 ///
@@ -221,11 +232,22 @@ impl SceneConverter {
         // Reuse the same Brush→peniko path fills use, so a `Brush::solid(color)`
         // becomes the glyph brush (gradients carry over too).
         let peniko_brush = self.brush.convert(brush);
-        scene
+        let mut draw = scene
             .draw_glyphs(font)
             .font_size(run.font_size())
-            .brush(&peniko_brush)
-            .draw(peniko::Fill::NonZero, glyphs.into_iter());
+            .brush(&peniko_brush);
+        // Synthetic styling (spec §5.18): when the run resolved to an upright /
+        // lighter face because no true italic / bold cut was registered, fake the
+        // style. Vello's glyph pipeline exposes both directly — a per-glyph shear
+        // for oblique and synthetic embolden for bold.
+        if run.synth_oblique() {
+            draw = draw.glyph_transform(Some(Affine::skew(FAUX_ITALIC_SKEW, 0.0)));
+        }
+        if run.synth_bold() {
+            let amount = f64::from(run.font_size()) * FAUX_BOLD_EMBOLDEN_FRACTION;
+            draw = draw.font_embolden(FontEmbolden::new(Diagonal2::new(amount, amount)));
+        }
+        draw.draw(peniko::Fill::NonZero, glyphs.into_iter());
     }
 
     /// Fills or strokes a single path.

@@ -510,8 +510,11 @@ impl fmt::Debug for SceneCoordinator {
 /// line box), and the shaping `x_offset`/`y_offset` are added on top. `text` is
 /// the source substring the segment covers, and the run is tagged with the
 /// segment's [`font`](ShapedRun::font) index so the renderer can pick the right
-/// face. For a single-font line (one segment) this reproduces the original
-/// single-run behavior exactly, with font `0`.
+/// face, plus the segment's synthetic-styling hints
+/// ([`synth_oblique`](ShapedRun::synth_oblique) / [`synth_bold`](ShapedRun::synth_bold))
+/// so a faux italic/bold run is sheared/thickened at raster time (spec §5.18).
+/// For a single-font line (one segment) this reproduces the original single-run
+/// behavior exactly, with font `0` and no synthesis.
 fn positioned_run(segment: &ShapedRun, baseline: f32, font_size: f32, text: &str) -> GlyphRun {
     let mut pen_x = 0.0_f32;
     let mut glyphs: Vec<PositionedGlyph> = Vec::new();
@@ -525,7 +528,9 @@ fn positioned_run(segment: &ShapedRun, baseline: f32, font_size: f32, text: &str
         ));
         pen_x += glyph.x_advance();
     }
-    GlyphRun::new(glyphs, font_size, text).with_font(segment.font().get())
+    GlyphRun::new(glyphs, font_size, text)
+        .with_font(segment.font().get())
+        .with_synthesis(segment.synth_oblique(), segment.synth_bold())
 }
 
 /// Reads a node's computed `background-color`, if present and color-valued.

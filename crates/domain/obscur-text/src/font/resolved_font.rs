@@ -11,25 +11,71 @@ use crate::font::{FontFace, FontId};
 /// back up in whatever registry issued the id, while the [`face`](Self::face) is
 /// handed straight to the shaper. Because [`FontFace`] embeds `f32` metrics this
 /// type derives `PartialEq` but not `Eq`.
+///
+/// # Synthetic styling (spec §5.18)
+///
+/// When the request asks for italic/oblique or a bold weight but the *matched*
+/// face is registered upright and/or lighter, the resolver cannot supply a true
+/// cut — the nearest face wins by [`FontAttributes::distance`](crate::font::FontAttributes::distance)
+/// but is upright/regular. Rather than render the run plainly, the resolver
+/// flags it for **synthesis**: [`synth_oblique`](Self::synth_oblique) shears the
+/// glyphs to fake a slant and [`synth_bold`](Self::synth_bold) thickens them to
+/// fake weight. The flags are render hints carried downstream to the renderer;
+/// they default to `false` (a true match needs no synthesis).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedFont {
     /// The id the resolved run's glyph indices belong to.
     font: FontId,
     /// The concrete face to shape the run with.
     face: FontFace,
+    /// Whether the run's glyphs should be sheared to synthesize a slant the
+    /// matched (upright) face lacks.
+    synth_oblique: bool,
+    /// Whether the run's glyphs should be thickened to synthesize a bold weight
+    /// the matched (lighter) face lacks.
+    synth_bold: bool,
 }
 
 impl ResolvedFont {
-    /// Creates a resolution pairing `font` with the concrete `face` it names.
+    /// Creates a resolution pairing `font` with the concrete `face` it names,
+    /// with no synthesis (an exact-enough match needs none).
     #[must_use]
     pub const fn new(font: FontId, face: FontFace) -> Self {
-        Self { font, face }
+        Self {
+            font,
+            face,
+            synth_oblique: false,
+            synth_bold: false,
+        }
+    }
+
+    /// Returns this resolution flagged for synthetic styling: `oblique` shears the
+    /// glyphs to fake a slant, `bold` thickens them to fake weight (spec §5.18).
+    #[must_use]
+    pub const fn with_synthesis(mut self, oblique: bool, bold: bool) -> Self {
+        self.synth_oblique = oblique;
+        self.synth_bold = bold;
+        self
     }
 
     /// Returns the id the resolved run's glyph indices belong to.
     #[must_use]
     pub const fn font(&self) -> FontId {
         self.font
+    }
+
+    /// Returns whether the run's glyphs should be sheared to synthesize a slant
+    /// the matched face lacks (spec §5.18).
+    #[must_use]
+    pub const fn synth_oblique(&self) -> bool {
+        self.synth_oblique
+    }
+
+    /// Returns whether the run's glyphs should be thickened to synthesize a bold
+    /// weight the matched face lacks (spec §5.18).
+    #[must_use]
+    pub const fn synth_bold(&self) -> bool {
+        self.synth_bold
     }
 
     /// Returns the concrete face to shape the run with.
@@ -70,5 +116,23 @@ mod tests {
     fn into_face_yields_owned_face() {
         let resolved = ResolvedFont::new(FontId::PRIMARY, face("Inter"));
         assert_eq!(resolved.into_face(), face("Inter"));
+    }
+
+    #[test]
+    fn synthesis_defaults_false_and_builder_sets_it() {
+        let plain = ResolvedFont::new(FontId::new(1), face("Inter"));
+        assert!(!plain.synth_oblique());
+        assert!(!plain.synth_bold());
+
+        let synthesized = ResolvedFont::new(FontId::new(1), face("Inter")).with_synthesis(true, true);
+        assert!(synthesized.synth_oblique());
+        assert!(synthesized.synth_bold());
+        // The flags participate in equality (additive fields on the derive).
+        assert_ne!(plain, synthesized);
+
+        // Each flag is independent.
+        let oblique_only = ResolvedFont::new(FontId::new(1), face("Inter")).with_synthesis(true, false);
+        assert!(oblique_only.synth_oblique());
+        assert!(!oblique_only.synth_bold());
     }
 }

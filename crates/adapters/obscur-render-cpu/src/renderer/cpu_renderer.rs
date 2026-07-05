@@ -450,15 +450,41 @@ fn draw_text_run(
     }
 
     // Real outlines when the run's font is registered and its bytes are a valid
-    // sfnt; box-coverage fallback otherwise.
+    // sfnt; box-coverage fallback otherwise. Synthetic-style hints (spec §5.18)
+    // travel with the run: an oblique run is sheared, a bold run thickened.
+    let skew = if run.synth_oblique() {
+        FAUX_ITALIC_SKEW
+    } else {
+        0.0
+    };
     if let Some(bytes) = fonts.get(&run.font())
         && let Ok(font_ref) = FontRef::new(bytes)
     {
-        draw_glyph_outlines(pixmap, origin, run, &font_ref, &sk_paint, clip, transform);
+        draw_glyph_outlines(
+            pixmap,
+            origin,
+            run,
+            &font_ref,
+            &sk_paint,
+            clip,
+            transform,
+            skew,
+            run.synth_bold(),
+        );
         return;
     }
-    draw_glyph_boxes(pixmap, origin, run, &sk_paint, clip, transform);
+    draw_glyph_boxes(pixmap, origin, run, &sk_paint, clip, transform, skew);
 }
+
+/// The synthetic-oblique shear factor: the standard faux-italic skew of `0.25`
+/// (`tan ≈ 14°`), applied as a rightward x-shift proportional to a point's height
+/// above the baseline (spec §5.18).
+const FAUX_ITALIC_SKEW: f32 = 0.25;
+
+/// The synthetic-bold stroke width as a fraction of the run's font size: the
+/// filled outline is additionally stroked at this width to thicken it, faking a
+/// heavier weight (spec §5.18).
+const FAUX_BOLD_STROKE_FRACTION: f32 = 0.03;
 
 /// Fills each glyph of `run` as its real outline extracted from `font` at the
 /// run's `font_size` (spec §5.2 real glyph rasterization).
@@ -469,6 +495,11 @@ fn draw_text_run(
 /// y-up coordinates that the pen flips into the pixmap's y-down device space. A
 /// glyph absent from the font, with no contours (whitespace, glyph 0), or whose
 /// outline `skrifa`/`tiny-skia` rejects contributes nothing.
+///
+/// `skew` shears the outline to synthesize an oblique slant (`0.0` = upright);
+/// when `bold` is set the filled outline is additionally stroked to thicken it,
+/// synthesizing a heavier weight (spec §5.18).
+#[allow(clippy::too_many_arguments)]
 fn draw_glyph_outlines(
     pixmap: &mut tiny_skia::Pixmap,
     origin: Point,
@@ -477,16 +508,24 @@ fn draw_glyph_outlines(
     sk_paint: &tiny_skia::Paint<'_>,
     clip: Option<&tiny_skia::Mask>,
     transform: tiny_skia::Transform,
+    skew: f32,
+    bold: bool,
 ) {
     let outlines = font.outline_glyphs();
     let size = SkrifaSize::new(run.font_size());
+    // Faux-bold: stroke the filled outline with a hairline proportional to the
+    // font size so the shape gains weight without re-shaping.
+    let bold_stroke = bold.then(|| tiny_skia::Stroke {
+        width: run.font_size() * FAUX_BOLD_STROKE_FRACTION,
+        ..Default::default()
+    });
     for glyph in run.glyphs() {
         let Some(outline) = outlines.get(GlyphId::new(glyph.glyph_id())) else {
             continue;
         };
         let pen_x = origin.x + glyph.x();
         let baseline_y = origin.y + glyph.y();
-        let mut pen = GlyphPathPen::new(pen_x, baseline_y);
+        let mut pen = GlyphPathPen::with_skew(pen_x, baseline_y, skew);
         let settings = DrawSettings::unhinted(size, LocationRef::default());
         if outline.draw(settings, &mut pen).is_err() {
             continue;
@@ -501,6 +540,9 @@ fn draw_glyph_outlines(
             transform,
             clip,
         );
+        if let Some(stroke) = &bold_stroke {
+            pixmap.stroke_path(&sk_path, sk_paint, stroke, transform, clip);
+        }
     }
 }
 
@@ -513,6 +555,11 @@ fn draw_glyph_outlines(
 /// `advance × font_size`, honoring `clip`. Whitespace glyphs — identified by the
 /// mock shaper's convention that a glyph id is the Unicode scalar — and
 /// non-positive cells draw nothing.
+///
+/// `skew` shears the cell into a forward-leaning parallelogram to approximate a
+/// synthetic oblique (spec §5.18): the top edge (a full `font_size` above the
+/// baseline) slides right by `skew * font_size` while the baseline edge stays
+/// put. `skew == 0.0` keeps the upright rectangle byte-identical to before.
 fn draw_glyph_boxes(
     pixmap: &mut tiny_skia::Pixmap,
     origin: Point,
@@ -520,6 +567,7 @@ fn draw_glyph_boxes(
     sk_paint: &tiny_skia::Paint<'_>,
     clip: Option<&tiny_skia::Mask>,
     transform: tiny_skia::Transform,
+    skew: f32,
 ) {
     let font_size = run.font_size();
     for glyph in run.glyphs() {
@@ -532,11 +580,28 @@ fn draw_glyph_boxes(
             continue;
         }
         let x = origin.x + glyph.x();
-        let top = origin.y + glyph.y() - font_size;
-        let Some(rect) = tiny_skia::Rect::from_xywh(x, top, width, font_size) else {
-            continue;
+        let baseline = origin.y + glyph.y();
+        let top = baseline - font_size;
+        let sk_path = if skew == 0.0 {
+            let Some(rect) = tiny_skia::Rect::from_xywh(x, top, width, font_size) else {
+                continue;
+            };
+            tiny_skia::PathBuilder::from_rect(rect)
+        } else {
+            // Parallelogram: baseline edge unshifted, top edge slid right by
+            // `skew * font_size`.
+            let shift = skew * font_size;
+            let mut builder = tiny_skia::PathBuilder::new();
+            builder.move_to(x, baseline);
+            builder.line_to(x + width, baseline);
+            builder.line_to(x + width + shift, top);
+            builder.line_to(x + shift, top);
+            builder.close();
+            let Some(path) = builder.finish() else {
+                continue;
+            };
+            path
         };
-        let sk_path = tiny_skia::PathBuilder::from_rect(rect);
         pixmap.fill_path(
             &sk_path,
             sk_paint,
@@ -686,12 +751,19 @@ mod tests {
     /// A scene drawing one instance of glyph `gid` from font handle `font_id` at
     /// font size 100, baseline at device `y = 100`, into a 100x120 target.
     fn glyph_submission(gid: u32, font_id: u32) -> FrameSubmission {
+        glyph_submission_synth(gid, font_id, false, false)
+    }
+
+    /// As [`glyph_submission`], but tags the run for synthetic styling: `oblique`
+    /// shears the glyph, `bold` thickens it.
+    fn glyph_submission_synth(gid: u32, font_id: u32, oblique: bool, bold: bool) -> FrameSubmission {
         let run = GlyphRun::new(
             vec![PositionedGlyph::new(gid, 0, 0.0, 100.0, 90.0)],
             100.0,
             "x",
         )
-        .with_font(font_id);
+        .with_font(font_id)
+        .with_synthesis(oblique, bold);
         let list = DisplayList::from_commands(vec![PaintCommand::DrawText {
             origin: Point::new(0.0, 0.0),
             run,
@@ -953,6 +1025,92 @@ mod tests {
             left_margin.alpha() > 200,
             "box fallback fills the full cell: {}",
             left_margin.alpha()
+        );
+    }
+
+    #[test]
+    fn synth_oblique_shears_the_glyph_outline() {
+        // Glyph 1 is a square over font units x∈[100,900], y∈[0,700]. Upright at
+        // font size 100 with baseline device y=100 it fills device x∈[10,90],
+        // y∈[30,100]. Faux-oblique shears above-baseline points right by
+        // skew(0.25)×height: near the top (device y≈33, ~67px above baseline) the
+        // square slides ≈16px right, so a pixel past the upright right edge is now
+        // covered.
+        let probe_x = 95;
+        let probe_y = 33;
+
+        // Upright: the probe (x=95 > right edge 90) is NOT covered.
+        let mut upright = CpuRenderer::default();
+        upright.register_font(4, outline_font());
+        upright
+            .render(&glyph_submission(1, 4), &bitmap_target(100.0, 120.0))
+            .expect("renders");
+        let upright_alpha = upright
+            .pixmap()
+            .expect("frame")
+            .pixel(probe_x, probe_y)
+            .expect("pixel")
+            .alpha();
+        assert_eq!(upright_alpha, 0, "upright glyph leaves the probe empty");
+
+        // Oblique: the same probe IS covered by the sheared outline.
+        let mut oblique = CpuRenderer::default();
+        oblique.register_font(4, outline_font());
+        oblique
+            .render(
+                &glyph_submission_synth(1, 4, true, false),
+                &bitmap_target(100.0, 120.0),
+            )
+            .expect("renders");
+        let oblique_alpha = oblique
+            .pixmap()
+            .expect("frame")
+            .pixel(probe_x, probe_y)
+            .expect("pixel")
+            .alpha();
+        assert!(
+            oblique_alpha > 200,
+            "sheared glyph covers the probe the upright one missed: {oblique_alpha}"
+        );
+    }
+
+    #[test]
+    fn synth_bold_thickens_the_glyph_outline() {
+        // The square's right edge is device x=90. A pixel just past it (column 91)
+        // is empty upright but caught by the faux-bold stroke (width font_size ×
+        // 0.03 = 3px, so ≈1.5px beyond the edge).
+        let probe_x = 91;
+        let probe_y = 65;
+
+        let mut plain = CpuRenderer::default();
+        plain.register_font(4, outline_font());
+        plain
+            .render(&glyph_submission(1, 4), &bitmap_target(100.0, 120.0))
+            .expect("renders");
+        let plain_alpha = plain
+            .pixmap()
+            .expect("frame")
+            .pixel(probe_x, probe_y)
+            .expect("pixel")
+            .alpha();
+
+        let mut bold = CpuRenderer::default();
+        bold.register_font(4, outline_font());
+        bold.render(
+            &glyph_submission_synth(1, 4, false, true),
+            &bitmap_target(100.0, 120.0),
+        )
+        .expect("renders");
+        let bold_alpha = bold
+            .pixmap()
+            .expect("frame")
+            .pixel(probe_x, probe_y)
+            .expect("pixel")
+            .alpha();
+
+        assert!(
+            bold_alpha > plain_alpha,
+            "faux-bold thickens the mark past the upright edge: bold {bold_alpha} > plain {plain_alpha}"
         );
     }
 

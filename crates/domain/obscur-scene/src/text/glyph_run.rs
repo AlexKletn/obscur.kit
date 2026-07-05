@@ -27,6 +27,15 @@ use super::PositionedGlyph;
 /// [`text`](Self::text) retains the source string as metadata (accessibility and
 /// diagnostics). Because it embeds `f32` metrics the type derives `PartialEq` but
 /// not `Eq`.
+///
+/// # Synthetic styling
+///
+/// Two plain-`bool` render hints — [`synth_oblique`](Self::synth_oblique) and
+/// [`synth_bold`](Self::synth_bold) — travel with the run: when the text's font
+/// resolver had no true italic/bold cut and fell back to an upright/lighter face,
+/// the renderer shears/thickens the glyphs to fake the requested style. They are
+/// bare `bool`s (not an `obscur-text` type) so this crate stays independent of the
+/// text domain; both default to `false`.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GlyphRun {
     /// The positioned glyphs, in pen order.
@@ -38,6 +47,10 @@ pub struct GlyphRun {
     font_size: f32,
     /// The run's source text, retained as metadata.
     text: Box<str>,
+    /// Whether the renderer should shear the glyphs to synthesize a slant.
+    synth_oblique: bool,
+    /// Whether the renderer should thicken the glyphs to synthesize a bold weight.
+    synth_bold: bool,
 }
 
 impl GlyphRun {
@@ -53,6 +66,8 @@ impl GlyphRun {
             font: 0,
             font_size,
             text: text.into(),
+            synth_oblique: false,
+            synth_bold: false,
         }
     }
 
@@ -62,6 +77,29 @@ impl GlyphRun {
     pub const fn with_font(mut self, font: u32) -> Self {
         self.font = font;
         self
+    }
+
+    /// Returns this run flagged for synthetic styling: `oblique` shears the glyphs
+    /// to fake a slant, `bold` thickens them to fake weight. Both default to
+    /// `false` (the resolved face carries the requested style).
+    #[must_use]
+    pub const fn with_synthesis(mut self, oblique: bool, bold: bool) -> Self {
+        self.synth_oblique = oblique;
+        self.synth_bold = bold;
+        self
+    }
+
+    /// Returns whether the renderer should shear the glyphs to synthesize a slant.
+    #[must_use]
+    pub const fn synth_oblique(&self) -> bool {
+        self.synth_oblique
+    }
+
+    /// Returns whether the renderer should thicken the glyphs to synthesize a bold
+    /// weight.
+    #[must_use]
+    pub const fn synth_bold(&self) -> bool {
+        self.synth_bold
     }
 
     /// Returns the font handle the run's glyph indices belong to (a bare face
@@ -157,5 +195,23 @@ mod tests {
         assert_eq!(run.len(), 0);
         assert_eq!(run.advance(), 0.0);
         assert_eq!(run.font(), 0);
+    }
+
+    #[test]
+    fn synthesis_defaults_false_and_with_synthesis_sets_it() {
+        let plain = sample_run();
+        assert!(!plain.synth_oblique());
+        assert!(!plain.synth_bold());
+
+        let synthesized = sample_run().with_synthesis(true, true);
+        assert!(synthesized.synth_oblique());
+        assert!(synthesized.synth_bold());
+        // The flags participate in equality (additive fields on the derive).
+        assert_ne!(synthesized, sample_run());
+        // Synthesis composes with the font handle; each flag is independent.
+        let oblique_only = sample_run().with_font(2).with_synthesis(true, false);
+        assert_eq!(oblique_only.font(), 2);
+        assert!(oblique_only.synth_oblique());
+        assert!(!oblique_only.synth_bold());
     }
 }
