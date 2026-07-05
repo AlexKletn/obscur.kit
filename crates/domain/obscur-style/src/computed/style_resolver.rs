@@ -24,9 +24,14 @@
 //!   property that would need its (unavailable) initial value is simply left
 //!   unresolved on the [`ComputedStyle`]. A later phase supplies the interner and
 //!   fills these in.
-//! * **Single starter property set.** The resolver computes only the Phase-1
-//!   longhands listed in [`StyleResolver::computed_properties`]; the set grows as
-//!   more longhands are modelled.
+//! * **Full modelled property set.** The resolver computes *every* modelled
+//!   [`PropertyId`] longhand (see [`StyleResolver::computed_properties`]), so an
+//!   authored value for any of them flows through the computed-value step to the
+//!   downstream layout / scene / text consumers. A property whose only value would
+//!   be a deferred keyword initial is still left unresolved (see the previous
+//!   bullet); an *unauthored* node is therefore byte-for-byte unchanged, because
+//!   each property still resolves to exactly the value (or [`None`]) it did before
+//!   — the set merely no longer drops authored values for the added longhands.
 
 use crate::cascade::ResolvedDeclarations;
 use crate::computed::{ComputedStyle, ComputedValue};
@@ -40,19 +45,56 @@ use std::collections::{HashMap, HashSet};
 /// `bolder` / `lighter` resolves against when there is no parent weight.
 const NORMAL_FONT_WEIGHT: f32 = 400.0;
 
-/// The Phase-1 longhands the resolver computes.
+/// Every modelled longhand the resolver computes.
 ///
-/// This is a local `const` list because the authoritative [`PropertyId`] enum
-/// lives in another module that this sub-step must not edit.
+/// This is the complete [`PropertyId`] catalogue: the resolver must compute each
+/// property that a downstream consumer reads back off a [`ComputedStyle`]
+/// (layout box-model / flex, scene paint, text typography), otherwise an authored
+/// CSS value for that property would be silently dropped at the computed-value
+/// step. It is spelled out as a local `const` list — rather than derived from the
+/// enum — because [`PropertyId`] lives in another module this file must not edit;
+/// the list is kept exhaustive by the `computed_properties_cover_every_property_id`
+/// test, which fails if a new longhand is added upstream without being computed.
 const COMPUTED_PROPERTIES: &[PropertyId] = &[
+    // Paint.
     PropertyId::Color,
     PropertyId::BackgroundColor,
     PropertyId::Opacity,
+    PropertyId::Visibility,
+    // Box model: sizing.
     PropertyId::Width,
     PropertyId::Height,
+    PropertyId::MinWidth,
+    PropertyId::MinHeight,
+    PropertyId::MaxWidth,
+    PropertyId::MaxHeight,
+    // Box model: margins.
+    PropertyId::MarginTop,
+    PropertyId::MarginRight,
+    PropertyId::MarginBottom,
+    PropertyId::MarginLeft,
+    // Box model: padding.
+    PropertyId::PaddingTop,
+    PropertyId::PaddingRight,
+    PropertyId::PaddingBottom,
+    PropertyId::PaddingLeft,
+    // Flex container / item.
     PropertyId::Display,
-    PropertyId::Visibility,
+    PropertyId::FlexDirection,
+    PropertyId::JustifyContent,
+    PropertyId::AlignItems,
+    PropertyId::Gap,
+    PropertyId::FlexBasis,
+    PropertyId::FlexGrow,
+    PropertyId::FlexShrink,
+    // Typography.
+    PropertyId::FontSize,
+    PropertyId::FontFamily,
     PropertyId::FontWeight,
+    PropertyId::FontStyle,
+    PropertyId::Direction,
+    PropertyId::TextAlign,
+    PropertyId::TextOverflow,
 ];
 
 /// Stateless resolver that computes a node's [`ComputedStyle`] from its cascaded
@@ -618,5 +660,251 @@ mod tests {
         // With no cascaded value and no parent, `display` cannot be computed yet.
         let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), None);
         assert_eq!(computed.get(PropertyId::Display), None);
+    }
+
+    /// Every modelled [`PropertyId`] must be in the computed set, or an authored
+    /// value for it would be dropped at the computed-value step (the bug this
+    /// closes). The `match` is exhaustive, so a new upstream variant fails to
+    /// compile here until it is classified; the assertion then fails until it is
+    /// also added to `COMPUTED_PROPERTIES`.
+    #[test]
+    fn computed_properties_cover_every_property_id() {
+        // Exhaustive by construction: adding a `PropertyId` variant upstream
+        // breaks this `match` until the new variant is listed below.
+        const fn assert_known(id: PropertyId) {
+            match id {
+                PropertyId::Color
+                | PropertyId::BackgroundColor
+                | PropertyId::Opacity
+                | PropertyId::Width
+                | PropertyId::Height
+                | PropertyId::Display
+                | PropertyId::Visibility
+                | PropertyId::MarginTop
+                | PropertyId::MarginRight
+                | PropertyId::MarginBottom
+                | PropertyId::MarginLeft
+                | PropertyId::PaddingTop
+                | PropertyId::PaddingRight
+                | PropertyId::PaddingBottom
+                | PropertyId::PaddingLeft
+                | PropertyId::MinWidth
+                | PropertyId::MinHeight
+                | PropertyId::MaxWidth
+                | PropertyId::MaxHeight
+                | PropertyId::Gap
+                | PropertyId::FlexBasis
+                | PropertyId::FlexGrow
+                | PropertyId::FlexShrink
+                | PropertyId::FlexDirection
+                | PropertyId::JustifyContent
+                | PropertyId::AlignItems
+                | PropertyId::FontSize
+                | PropertyId::FontFamily
+                | PropertyId::Direction
+                | PropertyId::FontWeight
+                | PropertyId::FontStyle
+                | PropertyId::TextAlign
+                | PropertyId::TextOverflow => {}
+            }
+        }
+        let all = [
+            PropertyId::Color,
+            PropertyId::BackgroundColor,
+            PropertyId::Opacity,
+            PropertyId::Width,
+            PropertyId::Height,
+            PropertyId::Display,
+            PropertyId::Visibility,
+            PropertyId::MarginTop,
+            PropertyId::MarginRight,
+            PropertyId::MarginBottom,
+            PropertyId::MarginLeft,
+            PropertyId::PaddingTop,
+            PropertyId::PaddingRight,
+            PropertyId::PaddingBottom,
+            PropertyId::PaddingLeft,
+            PropertyId::MinWidth,
+            PropertyId::MinHeight,
+            PropertyId::MaxWidth,
+            PropertyId::MaxHeight,
+            PropertyId::Gap,
+            PropertyId::FlexBasis,
+            PropertyId::FlexGrow,
+            PropertyId::FlexShrink,
+            PropertyId::FlexDirection,
+            PropertyId::JustifyContent,
+            PropertyId::AlignItems,
+            PropertyId::FontSize,
+            PropertyId::FontFamily,
+            PropertyId::Direction,
+            PropertyId::FontWeight,
+            PropertyId::FontStyle,
+            PropertyId::TextAlign,
+            PropertyId::TextOverflow,
+        ];
+        for id in all {
+            assert_known(id);
+            assert!(
+                COMPUTED_PROPERTIES.contains(&id),
+                "{} is modelled but not computed — authored values would be dropped",
+                id.name()
+            );
+        }
+        assert_eq!(COMPUTED_PROPERTIES.len(), all.len());
+    }
+
+    /// An authored typography value (previously dropped because the property was
+    /// not in the computed set) now flows through the real resolver.
+    #[test]
+    fn authored_typography_flows_to_computed_style() {
+        let resolver = StyleResolver::new();
+        let mut cascaded = ResolvedDeclarations::new();
+        cascaded.insert(PropertyId::FontSize, PropertyValue::Length(Length::px(24.0)));
+        cascaded.insert(
+            PropertyId::FontFamily,
+            PropertyValue::font_families(["Foo", "sans-serif"]),
+        );
+        cascaded.insert(
+            PropertyId::FontStyle,
+            PropertyValue::Keyword(layout_keyword::FONT_STYLE_ITALIC),
+        );
+        cascaded.insert(
+            PropertyId::Direction,
+            PropertyValue::Keyword(layout_keyword::DIRECTION_RTL),
+        );
+        cascaded.insert(
+            PropertyId::TextAlign,
+            PropertyValue::Keyword(layout_keyword::TEXT_ALIGN_CENTER),
+        );
+        cascaded.insert(
+            PropertyId::TextOverflow,
+            PropertyValue::Keyword(layout_keyword::TEXT_OVERFLOW_ELLIPSIS),
+        );
+
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+
+        assert_eq!(
+            computed.get(PropertyId::FontSize).and_then(ComputedValue::as_length),
+            Some(Length::px(24.0))
+        );
+        assert_eq!(
+            computed
+                .get(PropertyId::FontFamily)
+                .and_then(|v| v.value().as_font_families().map(<[_]>::len)),
+            Some(2)
+        );
+        assert_eq!(
+            computed.get(PropertyId::FontStyle).map(ComputedValue::value),
+            Some(&PropertyValue::Keyword(layout_keyword::FONT_STYLE_ITALIC))
+        );
+        assert_eq!(
+            computed.get(PropertyId::Direction).map(ComputedValue::value),
+            Some(&PropertyValue::Keyword(layout_keyword::DIRECTION_RTL))
+        );
+        assert_eq!(
+            computed.get(PropertyId::TextAlign).map(ComputedValue::value),
+            Some(&PropertyValue::Keyword(layout_keyword::TEXT_ALIGN_CENTER))
+        );
+        assert_eq!(
+            computed.get(PropertyId::TextOverflow).map(ComputedValue::value),
+            Some(&PropertyValue::Keyword(layout_keyword::TEXT_OVERFLOW_ELLIPSIS))
+        );
+    }
+
+    /// An authored box-model / flex value (previously dropped) now flows through.
+    #[test]
+    fn authored_layout_property_flows_to_computed_style() {
+        let resolver = StyleResolver::new();
+        let mut cascaded = ResolvedDeclarations::new();
+        cascaded.insert(
+            PropertyId::FlexDirection,
+            PropertyValue::Keyword(layout_keyword::FLEX_COLUMN),
+        );
+        cascaded.insert(PropertyId::MarginTop, PropertyValue::Length(Length::px(8.0)));
+        cascaded.insert(PropertyId::MinWidth, PropertyValue::Length(Length::px(50.0)));
+
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+
+        assert_eq!(
+            computed.get(PropertyId::FlexDirection).map(ComputedValue::value),
+            Some(&PropertyValue::Keyword(layout_keyword::FLEX_COLUMN))
+        );
+        assert_eq!(
+            computed.get(PropertyId::MarginTop).and_then(ComputedValue::as_length),
+            Some(Length::px(8.0))
+        );
+        assert_eq!(
+            computed.get(PropertyId::MinWidth).and_then(ComputedValue::as_length),
+            Some(Length::px(50.0))
+        );
+    }
+
+    /// Regression guard: an unauthored node's computed style is unchanged — every
+    /// deferred keyword / relative-only initial stays [`None`] (so downstream falls
+    /// back to its default exactly as before), and every concrete CSS initial
+    /// equals the value the downstream consumer already defaults to.
+    #[test]
+    fn unset_node_is_unchanged() {
+        let resolver = StyleResolver::new();
+        let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), None);
+
+        // Deferred keyword / weight initials remain unresolved, so the runtime
+        // helpers keep using their hardcoded defaults (byte-for-byte as before).
+        for id in [
+            PropertyId::Display,
+            PropertyId::FlexDirection,
+            PropertyId::JustifyContent,
+            PropertyId::AlignItems,
+            PropertyId::FontStyle,
+            PropertyId::Direction,
+            PropertyId::TextAlign,
+            PropertyId::TextOverflow,
+            PropertyId::FontWeight,
+            PropertyId::FontFamily,
+            PropertyId::MaxWidth,
+            PropertyId::MaxHeight,
+        ] {
+            assert_eq!(computed.get(id), None, "{} should stay deferred", id.name());
+        }
+
+        // Concrete CSS initials equal the downstream defaults, so no output moves.
+        assert_eq!(computed.opacity(), Some(1.0));
+        assert_eq!(
+            computed.get(PropertyId::Width).and_then(ComputedValue::as_length),
+            Some(Length::Auto)
+        );
+        for id in [
+            PropertyId::MarginTop,
+            PropertyId::PaddingLeft,
+            PropertyId::Gap,
+        ] {
+            assert_eq!(
+                computed.get(id).and_then(ComputedValue::as_length),
+                Some(Length::px(0.0)),
+                "{} initial is 0",
+                id.name()
+            );
+        }
+        assert_eq!(
+            computed.get(PropertyId::FontSize).and_then(ComputedValue::as_length),
+            Some(Length::px(16.0))
+        );
+    }
+
+    /// Inheritance still flows for an inherited property newly in the set:
+    /// `font-size` with no cascaded value takes the parent's computed size.
+    #[test]
+    fn inherited_font_size_flows_from_parent() {
+        let resolver = StyleResolver::new();
+        let mut parent = ComputedStyle::new();
+        parent.set(PropertyId::FontSize, ComputedValue::length(Length::px(30.0)));
+
+        let computed =
+            resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), Some(&parent));
+        assert_eq!(
+            computed.get(PropertyId::FontSize).and_then(ComputedValue::as_length),
+            Some(Length::px(30.0))
+        );
     }
 }
