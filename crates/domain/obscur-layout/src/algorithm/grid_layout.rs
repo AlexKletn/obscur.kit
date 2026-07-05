@@ -42,25 +42,37 @@ use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 /// 3. **Row track sizing** — the same resolution over the explicit `rows` using
 ///    `content_height` and `row_gap`. Rows past the explicit list are *implicit*
 ///    and sized as `Auto` (as tall as the tallest item placed in them).
-/// 4. **Auto-placement (row-major)** — with `n_cols = columns.len().max(1)`,
-///    item `i` occupies column `i % n_cols` of row `i / n_cols`; the grid has
-///    `ceil(n_items / n_cols)` rows.
-/// 5. **Placement + sizing** — each item is measured with its width fixed to its
-///    column track; for content-sized (`Auto` / implicit) rows its height is left
-///    loose (its own measured height), otherwise its height is fixed to the row
-///    track. It is placed at
-///    `(padding.left + Σ(prior column widths) + col * column_gap,
-///      padding.top  + Σ(prior row heights)  + row * row_gap)`.
+/// 4. **Placement** — each child carries a [`GridPlacement`](super::GridPlacement)
+///    (its `grid-column` / `grid-row` line pair). Placement runs in two phases:
+///    *Phase A* honours every item with a definite column and/or row line — a
+///    fully-definite item lands at its cell, a half-definite item locks the
+///    definite axis and auto-flows the other — marking each `col-span × row-span`
+///    block occupied. *Phase B* then places the remaining fully-auto items
+///    row-major by **first-fit**: each drops into the first free cell (skipping
+///    occupied cells, wrapping a too-wide span to the next row) that fits its
+///    span. Definite lines past the template add implicit `Auto` columns; rows
+///    past the template are implicit `Auto`. With every child left at the default
+///    all-`Auto` placement this reduces exactly to `(i % n_cols, i / n_cols)`.
+/// 5. **Sizing** — an item spanning `s` columns is `Σ(spanned column widths) +
+///    (s - 1) * column_gap` wide (analogously for a row span with `row_gap`); a
+///    spanning item attributes its content size to its first spanned track. It is
+///    measured with its width fixed to that span; a single content-sized (`Auto`
+///    / implicit) row keeps its own measured height, otherwise it fills its
+///    spanned row tracks. It is placed at
+///    `(padding.left + Σ(prior column widths) + start_col * column_gap,
+///      padding.top  + Σ(prior row heights)  + start_row * row_gap)`.
 /// 6. **Border box** — an explicit container axis sizes to that content extent
 ///    plus `padding`; an `Auto` axis sizes to the bounding box of the placed
 ///    children plus `padding`. The result is clamped into `constraints`.
 ///
 /// # Out of scope (later steps)
 ///
-/// This is real *track sizing* but still a subset: no explicit line-based
-/// placement, no row/column spanning, no dense auto-placement packing, no named
-/// lines, and no alignment of an item within its track. Those belong to later
-/// work; the CSS parsing and runtime wiring of templates is step 2.
+/// This does real track sizing plus line-based placement and spanning, but is
+/// still a subset: no *dense* auto-placement packing (placement is first-fit,
+/// never backfilling earlier holes), no named or negative grid lines, and no
+/// alignment of an item within its track. Half-definite items always auto-flow
+/// the missing axis. Those belong to later work; the CSS parsing and runtime
+/// wiring of placement is a later step.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GridLayout {
     /// The explicit column/row track template.
@@ -239,6 +251,93 @@ fn track_offsets(sizes: &[f32], gap: f32, origin: f32) -> Vec<f32> {
     offsets
 }
 
+/// The pixel extent a `span`-track cell covers: the sum of the spanned track
+/// sizes plus the `span - 1` interior gaps between them.
+fn span_extent(sizes: &[f32], start: usize, span: usize, gap: f32) -> f32 {
+    let end = (start + span).min(sizes.len());
+    let base: f32 = sizes.get(start..end).map_or(0.0, |s| s.iter().copied().sum());
+    base + gap * (span.saturating_sub(1) as f32)
+}
+
+/// Whether a `rspan × cspan` block anchored at `(row, col)` is entirely free in
+/// the occupancy grid. Cells in rows past the grid's current height are free.
+fn block_free(
+    occ: &[Vec<bool>],
+    row: usize,
+    rspan: usize,
+    col: usize,
+    cspan: usize,
+    n_cols: usize,
+) -> bool {
+    if col + cspan > n_cols {
+        return false;
+    }
+    for line in occ.iter().skip(row).take(rspan) {
+        for &cell in line.iter().skip(col).take(cspan) {
+            if cell {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Marks a `rspan × cspan` block occupied, growing `occ` (with `n_cols`-wide
+/// rows) to reach the block.
+fn mark_block(
+    occ: &mut Vec<Vec<bool>>,
+    row: usize,
+    rspan: usize,
+    col: usize,
+    cspan: usize,
+    n_cols: usize,
+) {
+    while occ.len() < row + rspan {
+        occ.push(vec![false; n_cols]);
+    }
+    for line in occ.iter_mut().skip(row).take(rspan) {
+        for cell in line.iter_mut().skip(col).take(cspan) {
+            *cell = true;
+        }
+    }
+}
+
+/// First row (scanning up from 0) where a column-locked block fits.
+fn first_row(occ: &[Vec<bool>], col: usize, cspan: usize, rspan: usize, n_cols: usize) -> usize {
+    let mut row = 0;
+    while !block_free(occ, row, rspan, col, cspan, n_cols) {
+        row += 1;
+    }
+    row
+}
+
+/// First column in a fixed row where a row-locked block fits (`0` if the row is
+/// already full — a degenerate overlap kept deterministic).
+fn first_col(occ: &[Vec<bool>], row: usize, cspan: usize, rspan: usize, n_cols: usize) -> usize {
+    if cspan > n_cols {
+        return 0;
+    }
+    (0..=(n_cols - cspan))
+        .find(|&col| block_free(occ, row, rspan, col, cspan, n_cols))
+        .unwrap_or(0)
+}
+
+/// First free `(col, row)` in row-major order for a fully-auto block (first-fit).
+fn first_fit(occ: &[Vec<bool>], cspan: usize, rspan: usize, n_cols: usize) -> (usize, usize) {
+    if cspan > n_cols {
+        return (0, 0);
+    }
+    let mut row = 0;
+    loop {
+        if let Some(col) =
+            (0..=(n_cols - cspan)).find(|&col| block_free(occ, row, rspan, col, cspan, n_cols))
+        {
+            return (col, row);
+        }
+        row += 1;
+    }
+}
+
 impl LayoutAlgorithm for GridLayout {
     fn layout(
         &self,
@@ -276,31 +375,106 @@ impl LayoutAlgorithm for GridLayout {
         } else {
             self.template.columns()
         };
-        let n_cols = columns.len().max(1);
         let count = children.len();
 
-        // Row-major auto-placement: item i → (col i % n_cols, row i / n_cols).
-        let n_rows = count.div_ceil(n_cols);
+        // Resolve each child's line-based placement into a definite/auto anchor
+        // plus its column/row span (spec §4.13, a subset). A default placement is
+        // all-`Auto` → `(None, 1)` on both axes: pure row-major auto-placement.
+        let templ_cols_len = columns.len();
+        let templ_rows_len = self.template.rows().len();
+        let mut col_anchor = Vec::with_capacity(count);
+        let mut col_span = Vec::with_capacity(count);
+        let mut row_anchor = Vec::with_capacity(count);
+        let mut row_span = Vec::with_capacity(count);
+        for child in children {
+            let placement = child.style().grid_placement();
+            let (ca, cs) = placement.resolve_column(templ_cols_len);
+            let (ra, rs) = placement.resolve_row(templ_rows_len);
+            col_anchor.push(ca);
+            col_span.push(cs.max(1));
+            row_anchor.push(ra);
+            row_span.push(rs.max(1));
+        }
 
-        // Step 2: column track sizing. `Auto` columns size to the widest item
-        // placed in them, measured under loose constraints.
+        // Column count: the explicit tracks, grown to cover any definite column
+        // line that overflows the template and any span wider than it (implicit
+        // auto columns). With all-`Auto` placement (every span 1, no definite
+        // line) this is exactly the template width — the historical grid.
+        let mut n_cols = columns.len().max(1);
+        for i in 0..count {
+            if let Some(c) = col_anchor[i] {
+                n_cols = n_cols.max(c + col_span[i]);
+            }
+            n_cols = n_cols.max(col_span[i]);
+        }
+
+        // Two-phase placement into an occupancy grid. Phase A — items with a
+        // definite column and/or row: honour the definite axis, auto-flow any
+        // missing axis. Phase B — fully-auto items: row-major first-fit into the
+        // first free cell that fits their span. With all-`Auto` placement Phase A
+        // is empty and Phase B fills cell `i` in row-major order — byte-identical
+        // to the previous `(i % n_cols, i / n_cols)` auto-placement.
+        let mut occ: Vec<Vec<bool>> = Vec::new();
+        let mut place_col = vec![0_usize; count];
+        let mut place_row = vec![0_usize; count];
+        for i in 0..count {
+            let (ca, ra) = (col_anchor[i], row_anchor[i]);
+            if ca.is_none() && ra.is_none() {
+                continue; // fully auto → Phase B
+            }
+            let (cspan, rspan) = (col_span[i], row_span[i]);
+            let (c0, r0) = match (ca, ra) {
+                (Some(c), Some(r)) => (c, r),
+                (Some(c), None) => (c, first_row(&occ, c, cspan, rspan, n_cols)),
+                (None, Some(r)) => (first_col(&occ, r, cspan, rspan, n_cols), r),
+                (None, None) => unreachable!(),
+            };
+            mark_block(&mut occ, r0, rspan, c0, cspan, n_cols);
+            place_col[i] = c0;
+            place_row[i] = r0;
+        }
+        for i in 0..count {
+            if col_anchor[i].is_some() || row_anchor[i].is_some() {
+                continue; // placed in Phase A
+            }
+            let (c0, r0) = first_fit(&occ, col_span[i], row_span[i], n_cols);
+            mark_block(&mut occ, r0, row_span[i], c0, col_span[i], n_cols);
+            place_col[i] = c0;
+            place_row[i] = r0;
+        }
+
+        // Total rows the grid spans (implicit auto rows past the template).
+        let n_rows = (0..count)
+            .map(|i| place_row[i] + row_span[i])
+            .max()
+            .unwrap_or(0);
+
+        // Effective column tracks: the template, padded with implicit `Auto`.
+        let cols_effective: Vec<TrackSize> = (0..n_cols)
+            .map(|c| columns.get(c).cloned().unwrap_or(TrackSize::Auto))
+            .collect();
+
+        // Step 2: column track sizing. An `Auto`/`minmax` column sizes to the
+        // widest item anchored in it; a spanning item attributes its content
+        // width to its FIRST spanned column (a deterministic simplification).
         let loose = BoxConstraints::loose(Size::new(content_width, content_height));
         let mut auto_col = vec![0.0_f32; n_cols];
-        for (i, _child) in children.iter().enumerate() {
-            if let TrackSize::Auto | TrackSize::MinMax(_, _) = columns[i % n_cols] {
+        for (i, &c0) in place_col.iter().enumerate() {
+            if let TrackSize::Auto | TrackSize::MinMax(_, _) = cols_effective[c0] {
                 let w = measurer.measure_child(i, loose).width;
-                let slot = &mut auto_col[i % n_cols];
-                *slot = slot.max(w);
+                auto_col[c0] = auto_col[c0].max(w);
             }
         }
-        let col_sizes = resolve_tracks(columns, content_width, self.column_gap, |c| auto_col[c]);
+        let col_sizes =
+            resolve_tracks(&cols_effective, content_width, self.column_gap, |c| auto_col[c]);
 
-        // Measure each item with its width fixed to its column, height loose; this
-        // feeds both content-sized row heights and the placed item boxes.
+        // Measure each item with its width fixed to its spanned columns (spanned
+        // track widths + interior column gaps), height loose; this feeds both
+        // content-sized row heights and the placed item boxes.
         let mut item_size = vec![Size::ZERO; count];
-        for (i, size) in item_size.iter_mut().enumerate() {
-            let w = col_sizes[i % n_cols];
-            *size = measurer.measure_child(
+        for i in 0..count {
+            let w = span_extent(&col_sizes, place_col[i], col_span[i], self.column_gap);
+            item_size[i] = measurer.measure_child(
                 i,
                 BoxConstraints {
                     min: Size::new(w, 0.0),
@@ -311,25 +485,21 @@ impl LayoutAlgorithm for GridLayout {
 
         // Step 3: row track sizing. Explicit rows come from the template; rows
         // past it are implicit (auto). Auto/implicit rows size to the tallest
-        // item in the row.
+        // item anchored in them (a spanning item attributes its height to its
+        // FIRST spanned row).
         let mut auto_row = vec![0.0_f32; n_rows];
-        for (i, size) in item_size.iter().enumerate() {
-            let row = i / n_cols;
-            auto_row[row] = auto_row[row].max(size.height);
+        for i in 0..count {
+            let r0 = place_row[i];
+            auto_row[r0] = auto_row[r0].max(item_size[i].height);
         }
         let template_rows = self.template.rows();
         let rows_effective: Vec<TrackSize> = (0..n_rows)
-            .map(|r| {
-                template_rows
-                    .get(r)
-                    .cloned()
-                    .unwrap_or(TrackSize::Auto)
-            })
+            .map(|r| template_rows.get(r).cloned().unwrap_or(TrackSize::Auto))
             .collect();
         let row_sizes =
             resolve_tracks(&rows_effective, content_height, self.row_gap, |r| auto_row[r]);
 
-        // Step 4 & 5: place each item into its track cell.
+        // Step 4 & 5: place each item into its (spanned) track cell.
         let col_offsets = track_offsets(&col_sizes, self.column_gap, padding.left);
         let row_offsets = track_offsets(&row_sizes, self.row_gap, padding.top);
 
@@ -339,17 +509,17 @@ impl LayoutAlgorithm for GridLayout {
         let mut max_right = padding.left;
         let mut max_bottom = padding.top;
         for (i, size) in item_size.iter().enumerate() {
-            let col = i % n_cols;
-            let row = i / n_cols;
-            let x = col_offsets[col];
-            let y = row_offsets[row];
-            let w = col_sizes[col];
-            // Content-sized rows keep the item's own measured height; sized rows
-            // fix the item to the track height.
-            let h = if matches!(rows_effective[row], TrackSize::Auto) {
+            let (c0, cspan) = (place_col[i], col_span[i]);
+            let (r0, rspan) = (place_row[i], row_span[i]);
+            let x = col_offsets[c0];
+            let y = row_offsets[r0];
+            let w = span_extent(&col_sizes, c0, cspan, self.column_gap);
+            // A single content-sized row keeps the item's own measured height;
+            // otherwise the item fills its spanned row tracks (+ interior gaps).
+            let h = if rspan == 1 && matches!(rows_effective[r0], TrackSize::Auto) {
                 size.height
             } else {
-                row_sizes[row]
+                span_extent(&row_sizes, r0, rspan, self.row_gap)
             };
             child_boxes.push(LayoutBox::new(Rect::new(Point::new(x, y), Size::new(w, h))));
             max_right = max_right.max(x + w);
@@ -380,13 +550,22 @@ impl LayoutAlgorithm for GridLayout {
 #[cfg(test)]
 mod tests {
     use super::{GridLayout, GridTemplate, TrackSize};
-    use crate::algorithm::{FixedChildMeasurer, LayoutAlgorithm, LayoutChild};
+    use crate::algorithm::{
+        FixedChildMeasurer, GridLine, GridPlacement, LayoutAlgorithm, LayoutChild,
+    };
     use crate::model::{Dimension, LayoutStyle};
     use obscur_geometry::{BoxConstraints, Insets, Point, Size};
     use obscur_identity::NodeId;
 
     fn child(raw: u64) -> LayoutChild {
         LayoutChild::new(NodeId::from_raw(raw), LayoutStyle::default())
+    }
+
+    fn placed(raw: u64, placement: GridPlacement) -> LayoutChild {
+        LayoutChild::new(
+            NodeId::from_raw(raw),
+            LayoutStyle::default().with_grid_placement(placement),
+        )
     }
 
     fn grid(columns: Vec<TrackSize>, rows: Vec<TrackSize>, col_gap: f32, row_gap: f32) -> GridLayout {
@@ -756,6 +935,191 @@ mod tests {
         assert_eq!(b[0].size().width, 250.0);
         assert_eq!(b[1].size().width, 250.0);
         assert_eq!(out.size().width, 500.0);
+    }
+
+    // ---- Line-based placement + spanning. ----
+
+    fn three_col_100() -> GridLayout {
+        grid(
+            vec![
+                TrackSize::Fixed(100.0),
+                TrackSize::Fixed(100.0),
+                TrackSize::Fixed(100.0),
+            ],
+            vec![],
+            0.0,
+            0.0,
+        )
+    }
+
+    // (a) `grid-column: 1 / 3` spans cols 0-1: width 200 at x=0.
+    #[test]
+    fn column_line_to_line_spans_two_tracks() {
+        let style = LayoutStyle::default();
+        let children = [placed(
+            1,
+            GridPlacement::column(GridLine::Line(1), GridLine::Line(3)),
+        )];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 20.0)]);
+        let out = three_col_100().layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(300.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].origin(), Point::new(0.0, 0.0));
+        assert_eq!(b[0].size().width, 200.0);
+    }
+
+    // (b) `grid-column: span 2` auto-placed occupies cols 0-1 (width 200 at x=0).
+    #[test]
+    fn column_span_auto_placed_occupies_two_cells() {
+        let style = LayoutStyle::default();
+        let children = [placed(
+            1,
+            GridPlacement::column(GridLine::Auto, GridLine::Span(2)),
+        )];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 20.0)]);
+        let out = three_col_100().layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(300.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].origin(), Point::new(0.0, 0.0));
+        assert_eq!(b[0].size().width, 200.0);
+    }
+
+    // (c) an explicit item at column line 2 + an auto item: the auto item flows
+    // around the occupied cell, landing in column 0.
+    #[test]
+    fn auto_item_flows_around_explicit_cell() {
+        let style = LayoutStyle::default();
+        let children = [
+            placed(1, GridPlacement::column(GridLine::Line(2), GridLine::Auto)),
+            child(2),
+        ];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(0.0, 20.0), Size::new(0.0, 20.0)]);
+        let out = three_col_100().layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(300.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // Explicit item on column 1 (x=100), auto item flows to column 0 (x=0).
+        assert_eq!(b[0].origin(), Point::new(100.0, 0.0));
+        assert_eq!(b[1].origin(), Point::new(0.0, 0.0));
+    }
+
+    // (d) `grid-row: 2` puts an item on row index 1. Row 0 is a fixed 50px track
+    // so the row boundary is a concrete coordinate.
+    #[test]
+    fn explicit_row_places_on_second_row() {
+        let style = LayoutStyle::default();
+        let children = [placed(
+            1,
+            GridPlacement::row(GridLine::Line(2), GridLine::Auto),
+        )];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 30.0)]);
+        let g = grid(
+            vec![TrackSize::Fixed(100.0)],
+            vec![TrackSize::Fixed(50.0)], // row 0 fixed; row 1 implicit auto
+            0.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(100.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // Row 0 (50px) is empty; the item sits on row 1 at y = 50.
+        assert_eq!(b[0].origin(), Point::new(0.0, 50.0));
+    }
+
+    // (e) a span that does not fit the remaining row wraps to the next row.
+    #[test]
+    fn span_that_does_not_fit_wraps_to_next_row() {
+        let style = LayoutStyle::default();
+        let children = [
+            child(1), // auto → (col0,row0)
+            placed(2, GridPlacement::column(GridLine::Auto, GridLine::Span(2))),
+        ];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(0.0, 10.0), Size::new(0.0, 15.0)]);
+        let g = grid(
+            vec![TrackSize::Fixed(100.0), TrackSize::Fixed(100.0)],
+            vec![],
+            0.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(200.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // child0 fills (0,0); the span-2 item cannot fit beside it, so it wraps
+        // to row 1 (y = row0 height = 10), spanning the full 200px width.
+        assert_eq!(b[0].origin(), Point::new(0.0, 0.0));
+        assert_eq!(b[1].origin(), Point::new(0.0, 10.0));
+        assert_eq!(b[1].size().width, 200.0);
+    }
+
+    // (f) regression: all-`Auto` placement reproduces the row-major result.
+    #[test]
+    fn all_auto_placement_is_row_major() {
+        let style = LayoutStyle::default();
+        let children = [child(1), child(2), child(3), child(4), child(5)];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 10.0); 5]);
+        let g = grid(vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)], vec![], 0.0, 0.0);
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(200.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[3].origin(), Point::new(100.0, 10.0)); // col1,row1
+        assert_eq!(b[4].origin(), Point::new(0.0, 20.0)); // col0,row2
+        assert_eq!(out.size(), Size::new(200.0, 30.0));
+    }
+
+    // (g) a column gap is applied across a span's interior.
+    #[test]
+    fn column_gap_applies_across_span_interior() {
+        let style = LayoutStyle::default();
+        let children = [placed(
+            1,
+            GridPlacement::column(GridLine::Line(1), GridLine::Line(3)),
+        )];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 20.0)]);
+        let g = grid(
+            vec![
+                TrackSize::Fixed(100.0),
+                TrackSize::Fixed(100.0),
+                TrackSize::Fixed(100.0),
+            ],
+            vec![],
+            10.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(320.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // Spans cols 0-1: 100 + 100 + one interior 10px gap = 210, at x=0.
+        assert_eq!(b[0].origin().x, 0.0);
+        assert_eq!(b[0].size().width, 210.0);
     }
 
     #[test]

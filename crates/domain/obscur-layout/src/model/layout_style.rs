@@ -1,5 +1,6 @@
 //! Layout's own per-node input style.
 
+use crate::algorithm::GridPlacement;
 use crate::model::{AlignItems, Dimension, FlexDirection, JustifyContent, LayoutDisplay};
 use obscur_geometry::Insets;
 
@@ -62,6 +63,14 @@ pub struct LayoutStyle {
     /// [`DEFAULT_FONT_SIZE`](Self::DEFAULT_FONT_SIZE) and is ignored by every
     /// box (non-text) algorithm.
     pub font_size: f32,
+
+    /// Grid item: explicit line-based placement (`grid-column` / `grid-row`).
+    ///
+    /// Only meaningful for a child of a grid container. The default is all
+    /// [`GridLine::Auto`](crate::algorithm::GridLine), i.e. pure row-major
+    /// auto-placement — the grid's historical behaviour — so a default style
+    /// never perturbs a non-grid layout.
+    pub grid_placement: GridPlacement,
 }
 
 impl LayoutStyle {
@@ -95,6 +104,7 @@ impl Default for LayoutStyle {
             flex_shrink: 1.0,
             flex_basis: Dimension::Auto,
             font_size: Self::DEFAULT_FONT_SIZE,
+            grid_placement: GridPlacement::default(),
         }
     }
 }
@@ -126,6 +136,19 @@ impl LayoutStyle {
     pub const fn with_font_size(mut self, font_size: f32) -> Self {
         self.font_size = font_size;
         self
+    }
+
+    /// Returns a copy with the grid item `grid_placement` replaced.
+    #[must_use]
+    pub const fn with_grid_placement(mut self, grid_placement: GridPlacement) -> Self {
+        self.grid_placement = grid_placement;
+        self
+    }
+
+    /// The grid item's explicit line-based placement.
+    #[must_use]
+    pub const fn grid_placement(&self) -> GridPlacement {
+        self.grid_placement
     }
 }
 

@@ -461,6 +461,9 @@ fn layout_style_from(computed: &ComputedStyle, viewport: Size, root_font_size: f
         // The node's font size, so a text leaf can shape and wrap to its
         // available width inside the constraint-aware measure/arrange pass.
         font_size: font_size_px(computed),
+        // Line-based grid placement is not yet mapped from CSS; keep the
+        // all-auto default so grid children auto-place as before.
+        grid_placement: default.grid_placement,
     }
 }
 
