@@ -256,6 +256,9 @@ impl LayoutCoordinator {
         let Some(root) = tree.root() else {
             return boxes;
         };
+        // The root's containing block — and the fixed-positioning reference for
+        // every `position: fixed` descendant — is the viewport rect at the origin.
+        let viewport_rect = Rect::new(Point::ORIGIN, viewport);
         arrange(
             tree,
             styles,
@@ -267,6 +270,8 @@ impl LayoutCoordinator {
             &mut boxes,
             paragraph,
             hyphenator,
+            viewport_rect,
+            viewport_rect,
             MAX_DEPTH,
         );
         boxes
@@ -883,6 +888,50 @@ fn children_of(tree: &RetainedTree, styles: &LayoutStyles, node: NodeId) -> Vec<
     })
 }
 
+/// Collects only a node's **in-flow** children (`Static` / `Relative`).
+///
+/// Out-of-flow children ([`Position::Absolute`] / [`Position::Fixed`]) are
+/// dropped: they neither reach the parent's flow/flex/grid algorithm nor
+/// contribute to its content size (spec §4.1). This is the child list the
+/// measure pass hands the algorithm, so its indices are stable.
+fn in_flow_children(tree: &RetainedTree, styles: &LayoutStyles, node: NodeId) -> Vec<LayoutChild> {
+    children_of(tree, styles, node)
+        .into_iter()
+        .filter(|child| !child.style().position.is_out_of_flow())
+        .collect()
+}
+
+/// Partitions a node's children into `(in_flow, out_of_flow)`, preserving
+/// document order within each list.
+///
+/// The in-flow list drives the formatting-context algorithm (its indices map to
+/// the algorithm's `measure_child`), and the out-of-flow list is positioned
+/// separately against the containing block.
+fn partition_children(
+    tree: &RetainedTree,
+    styles: &LayoutStyles,
+    node: NodeId,
+) -> (Vec<LayoutChild>, Vec<LayoutChild>) {
+    children_of(tree, styles, node)
+        .into_iter()
+        .partition(|child| !child.style().position.is_out_of_flow())
+}
+
+/// The **padding box** of a node — its absolute border-box `border_box` inset by
+/// its `border` edges — which is the containing block a positioned node
+/// establishes for its absolutely-positioned descendants (spec §4.1).
+///
+/// Extents are clamped non-negative so a box smaller than its borders yields a
+/// zero-extent (never negative) containing block. With no border-width property
+/// modelled yet, `border` is zero and the padding box equals the border box.
+fn padding_box(border_box: Rect, border: Insets) -> Rect {
+    let x = border_box.origin.x + border.left;
+    let y = border_box.origin.y + border.top;
+    let width = (border_box.size.width - border.left - border.right).max(0.0);
+    let height = (border_box.size.height - border.top - border.bottom).max(0.0);
+    Rect::new(Point::new(x, y), Size::new(width, height))
+}
+
 /// The [`ChildMeasurer`] the coordinator hands to an algorithm.
 ///
 /// It measures a child purely — by recursing into [`measure`] — and never
@@ -981,7 +1030,11 @@ fn measure(
     let Some(algorithm) = algorithm_for(style.display, node, grid_templates, style.gap) else {
         return Size::ZERO;
     };
-    let children = children_of(tree, styles, node);
+    // Out-of-flow (absolute/fixed) children are excluded from the formatting
+    // context: they contribute nothing to this node's content size. Only the
+    // in-flow children reach the algorithm, and the measurer's indices are over
+    // that in-flow list.
+    let children = in_flow_children(tree, styles, node);
     let mut measurer = RecMeasurer {
         tree,
         styles,
@@ -1012,9 +1065,23 @@ fn measure(
 /// Child boxes returned by the algorithm are **parent-relative**; each child's
 /// absolute origin is `origin + child_box.origin()`. The child count and the
 /// returned box count are reconciled defensively so no index can panic.
+///
+/// # Positioning (spec §4.1)
+///
+/// `containing_block` is the absolute rect an [`Position::Absolute`] descendant
+/// resolves its insets against (the padding box of the nearest positioned
+/// ancestor); `viewport` is the fixed-positioning reference for a
+/// [`Position::Fixed`] descendant. A **positioned** node
+/// ([`Position::is_positioned`]) establishes a *new* containing block for its
+/// descendants — its own padding box — which is threaded down in place of the
+/// inherited one; a `Static` node is transparent and passes the inherited block
+/// through unchanged. Out-of-flow children (partitioned out of the algorithm's
+/// in-flow list) are positioned after the in-flow walk, each within its
+/// containing block, and then recursed into as an independent positioned root.
 // The recursive arrange walk threads the tree, both style maps, the target
-// origin/constraints, the output map, the shaper, and the depth budget; these
-// are cohesive positional arguments of one internal recursion, not a public API.
+// origin/constraints, the containing block + viewport for positioning, the
+// output map, the shaper, and the depth budget; these are cohesive positional
+// arguments of one internal recursion, not a public API.
 #[allow(clippy::too_many_arguments)]
 fn arrange(
     tree: &RetainedTree,
@@ -1027,6 +1094,8 @@ fn arrange(
     boxes: &mut LayoutBoxes,
     paragraph: &ParagraphShaper,
     hyphenator: Option<&dyn Hyphenator>,
+    containing_block: Rect,
+    viewport: Rect,
     depth: u32,
 ) {
     if depth == 0 {
@@ -1062,7 +1131,11 @@ fn arrange(
     let Some(algorithm) = algorithm_for(style.display, node, grid_templates, style.gap) else {
         return;
     };
-    let children = children_of(tree, styles, node);
+    // Out-of-flow children are excluded from the formatting context (they do not
+    // shift in-flow siblings or contribute to content size) and positioned
+    // separately below. The in-flow list is what the algorithm sees, so its
+    // indices map one-to-one to the algorithm's `measure_child(index)`.
+    let (children, out_of_flow) = partition_children(tree, styles, node);
 
     // Measurer is pure: it does not borrow `boxes`, so `boxes` is free after.
     let out = {
@@ -1080,7 +1153,19 @@ fn arrange(
     };
 
     // Now safe to write this node's absolute box.
-    boxes.insert(node, LayoutBox::new(Rect::new(origin, out.size())));
+    let border_box = Rect::new(origin, out.size());
+    boxes.insert(node, LayoutBox::new(border_box));
+
+    // The containing block this node establishes for its positioned descendants:
+    // a positioned node (`relative`/`absolute`/`fixed`) hands down its own padding
+    // box; a `static` node is transparent and passes the inherited block through
+    // (so an absolute grandchild resolves against the nearest positioned ancestor,
+    // not this static node). `fixed` descendants use `viewport` regardless.
+    let descendant_cb = if style.position.is_positioned() {
+        padding_box(border_box, style.border)
+    } else {
+        containing_block
+    };
 
     // The containing block for a relatively-positioned child is this node's
     // content box; we approximate its size with this node's border-box size
@@ -1090,8 +1175,9 @@ fn arrange(
     // exact.
     let containing = out.size();
 
-    // Recurse into children, translating each parent-relative box to absolute.
-    // Zipping bounds both sides, so a mismatched length never indexes out of range.
+    // Recurse into in-flow children, translating each parent-relative box to
+    // absolute. Zipping bounds both sides, so a mismatched length never indexes
+    // out of range.
     for (child, child_rel) in children.iter().zip(out.child_boxes().iter()) {
         let rel = child_rel.origin();
         // `position: relative` offsets the child's final origin (and therefore its
@@ -1113,9 +1199,107 @@ fn arrange(
             boxes,
             paragraph,
             hyphenator,
+            descendant_cb,
+            viewport,
             depth - 1,
         );
     }
+
+    // Position each out-of-flow child within its containing block, then recurse
+    // into its subtree as an independent positioned root.
+    for child in &out_of_flow {
+        arrange_out_of_flow(
+            tree,
+            styles,
+            computed,
+            grid_templates,
+            *child,
+            descendant_cb,
+            viewport,
+            boxes,
+            paragraph,
+            hyphenator,
+            depth - 1,
+        );
+    }
+}
+
+/// Positions one out-of-flow ([`Position::Absolute`] / [`Position::Fixed`])
+/// child within its containing block and recurses into its subtree (spec §4.1).
+///
+/// The containing block is `parent_cb` (the nearest positioned ancestor's padding
+/// box) for an absolute child and `viewport` for a fixed one. The child's natural
+/// size is measured under a loose constraint bounded by the containing block, then
+/// [`Inset::resolve_absolute_box`] resolves its absolute border box from its insets
+/// and explicit size. The subtree is arranged under a tight constraint at that box,
+/// establishing the child's own padding box as the containing block for *its*
+/// positioned descendants (the child is itself positioned).
+// The out-of-flow placement threads the same cohesive recursion inputs as
+// [`arrange`]; they are one internal positioning step, not a public API.
+#[allow(clippy::too_many_arguments)]
+fn arrange_out_of_flow(
+    tree: &RetainedTree,
+    styles: &LayoutStyles,
+    computed: &ComputedStyles,
+    grid_templates: &GridTemplates,
+    child: LayoutChild,
+    parent_cb: Rect,
+    viewport: Rect,
+    boxes: &mut LayoutBoxes,
+    paragraph: &ParagraphShaper,
+    hyphenator: Option<&dyn Hyphenator>,
+    depth: u32,
+) {
+    if depth == 0 {
+        return;
+    }
+    let style = child.style();
+    // Fixed positions against the viewport, ignoring ancestors; absolute against
+    // the nearest positioned ancestor's padding box.
+    let cb = if matches!(style.position, Position::Fixed) {
+        viewport
+    } else {
+        parent_cb
+    };
+
+    // Natural (content) size: measure loosely up to the containing block. This is
+    // the used size on an axis that is not pinned by both insets.
+    let natural = measure(
+        tree,
+        styles,
+        computed,
+        grid_templates,
+        child.node(),
+        BoxConstraints::loose(cb.size),
+        paragraph,
+        hyphenator,
+        depth,
+    );
+    let rect = style
+        .inset
+        .resolve_absolute_box(cb, style.width, style.height, natural);
+
+    // Arrange the child's subtree under a tight constraint at its resolved box.
+    // The recursive `arrange` re-derives and writes the child's own box (identical
+    // to `rect` under the tight constraint) and, because the child is positioned,
+    // establishes its padding box as the containing block for its descendants; the
+    // `containing_block` argument we pass is therefore only a placeholder it
+    // overrides.
+    arrange(
+        tree,
+        styles,
+        computed,
+        grid_templates,
+        child.node(),
+        rect.origin,
+        BoxConstraints::tight(rect.size),
+        boxes,
+        paragraph,
+        hyphenator,
+        cb,
+        viewport,
+        depth,
+    );
 }
 
 #[cfg(test)]
@@ -1511,6 +1695,202 @@ mod tests {
         assert_eq!(boxes[&a].origin(), Point::new(0.0, 0.0));
         // `b` flow origin (0, 50) shifts by right=5 -> -5 x, bottom=10 -> -10 y.
         assert_eq!(boxes[&b].origin(), Point::new(-5.0, 40.0));
+    }
+
+    /// A block-only style with an explicit width and an auto (content-sized)
+    /// height, for a container whose height must reflect only its in-flow content.
+    fn auto_height_block(width: f32) -> LayoutStyle {
+        LayoutStyle::default()
+            .with_display(LayoutDisplay::Block)
+            .with_width(Dimension::Px(width))
+    }
+
+    #[test]
+    fn absolute_child_is_out_of_flow_and_positioned_by_insets() {
+        // Scenario (a): a flow container with an in-flow `.a` and an absolute `.b`.
+        // `.b` must not affect `.a` or the container's content height, and must be
+        // placed at its insets within its containing block (the viewport here).
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let container = add_child(&mut tree, root, 60);
+        let a = add_child(&mut tree, container, 61);
+        let b = add_child(&mut tree, container, 62);
+
+        // `.b { position: absolute; top: 10; left: 20; width: 40; height: 30 }`.
+        let b_absolute = block(40.0, 30.0)
+            .with_position(Position::Absolute)
+            .with_inset(Inset::new(
+                Dimension::Px(10.0),
+                Dimension::Auto,
+                Dimension::Auto,
+                Dimension::Px(20.0),
+            ));
+
+        let mut styles = LayoutStyles::new();
+        styles.insert(root, block(300.0, 300.0));
+        // Container is auto-height so its content height is observable.
+        styles.insert(container, auto_height_block(300.0));
+        styles.insert(a, block(300.0, 50.0));
+        styles.insert(b, b_absolute);
+
+        let coordinator = LayoutCoordinator::new();
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &ComputedStyles::new(),
+            &GridTemplates::new(),
+            Size::new(300.0, 300.0),
+            &test_paragraph(),
+        );
+
+        // `.a` is untouched by `.b`: flow origin (0, 0), its own size.
+        assert_eq!(boxes[&a].origin(), Point::new(0.0, 0.0));
+        assert_eq!(boxes[&a].size(), Size::new(300.0, 50.0));
+        // The container's content height reflects only `.a` (50), not `.b`.
+        assert_eq!(boxes[&container].size(), Size::new(300.0, 50.0));
+        // `.b` is placed at its insets (20, 10) with its explicit 40x30 size.
+        assert_eq!(boxes[&b].origin(), Point::new(20.0, 10.0));
+        assert_eq!(boxes[&b].size(), Size::new(40.0, 30.0));
+    }
+
+    #[test]
+    fn absolute_child_resolves_against_positioned_ancestor() {
+        // Scenario (b): an absolute child positioned within a `position: relative`
+        // ancestor (not the root), anchored by `right` / `bottom`.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let rel = add_child(&mut tree, root, 70);
+        let abs = add_child(&mut tree, rel, 71);
+
+        // `.rel { position: relative; left: 100; top: 100; width: 200; height: 200 }`.
+        let rel_style = block(200.0, 200.0)
+            .with_position(Position::Relative)
+            .with_inset(Inset::new(
+                Dimension::Px(100.0),
+                Dimension::Auto,
+                Dimension::Auto,
+                Dimension::Px(100.0),
+            ));
+        // `.abs { position: absolute; right: 0; bottom: 0; width: 20; height: 20 }`.
+        let abs_style = block(20.0, 20.0)
+            .with_position(Position::Absolute)
+            .with_inset(Inset::new(
+                Dimension::Auto,
+                Dimension::Px(0.0),
+                Dimension::Px(0.0),
+                Dimension::Auto,
+            ));
+
+        let mut styles = LayoutStyles::new();
+        styles.insert(root, block(400.0, 400.0));
+        styles.insert(rel, rel_style);
+        styles.insert(abs, abs_style);
+
+        let coordinator = LayoutCoordinator::new();
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &ComputedStyles::new(),
+            &GridTemplates::new(),
+            Size::new(400.0, 400.0),
+            &test_paragraph(),
+        );
+
+        // `.rel` is offset into the flow by its insets (100, 100).
+        assert_eq!(boxes[&rel].origin(), Point::new(100.0, 100.0));
+        // `.abs` sits flush against `.rel`'s far corner: (100+200-20, 100+200-20).
+        assert_eq!(boxes[&abs].origin(), Point::new(280.0, 280.0));
+        assert_eq!(boxes[&abs].size(), Size::new(20.0, 20.0));
+    }
+
+    #[test]
+    fn absolute_child_with_both_insets_stretches_to_containing_block() {
+        // Scenario (c): `left` and `right` both set pin both edges, so the width
+        // stretches to the containing block regardless of the explicit width.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let abs = add_child(&mut tree, root, 80);
+
+        // Explicit 999x999 is deliberately ignored on the pinned axes.
+        let abs_style = block(999.0, 999.0)
+            .with_position(Position::Absolute)
+            .with_inset(Inset::new(
+                Dimension::Px(0.0),
+                Dimension::Px(30.0),
+                Dimension::Px(0.0),
+                Dimension::Px(10.0),
+            ));
+
+        let mut styles = LayoutStyles::new();
+        styles.insert(root, block(300.0, 300.0));
+        styles.insert(abs, abs_style);
+
+        let coordinator = LayoutCoordinator::new();
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &ComputedStyles::new(),
+            &GridTemplates::new(),
+            Size::new(300.0, 300.0),
+            &test_paragraph(),
+        );
+
+        // Horizontal: x = 10, width = 300 - 10 - 30 = 260. Vertical: y = 0,
+        // height = 300 - 0 - 0 = 300.
+        assert_eq!(boxes[&abs].origin(), Point::new(10.0, 0.0));
+        assert_eq!(boxes[&abs].size(), Size::new(260.0, 300.0));
+    }
+
+    #[test]
+    fn fixed_child_positions_against_viewport_ignoring_ancestor() {
+        // Scenario (d): a `position: fixed` child ignores its positioned ancestor
+        // and resolves against the viewport, so `top: 0; left: 0` lands at (0, 0)
+        // rather than the ancestor's (100, 100) origin.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let rel = add_child(&mut tree, root, 90);
+        let fixed = add_child(&mut tree, rel, 91);
+
+        let rel_style = block(200.0, 200.0)
+            .with_position(Position::Relative)
+            .with_inset(Inset::new(
+                Dimension::Px(100.0),
+                Dimension::Auto,
+                Dimension::Auto,
+                Dimension::Px(100.0),
+            ));
+        let fixed_style = block(20.0, 20.0)
+            .with_position(Position::Fixed)
+            .with_inset(Inset::new(
+                Dimension::Px(0.0),
+                Dimension::Auto,
+                Dimension::Auto,
+                Dimension::Px(0.0),
+            ));
+
+        let mut styles = LayoutStyles::new();
+        styles.insert(root, block(400.0, 400.0));
+        styles.insert(rel, rel_style);
+        styles.insert(fixed, fixed_style);
+
+        let coordinator = LayoutCoordinator::new();
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &ComputedStyles::new(),
+            &GridTemplates::new(),
+            Size::new(400.0, 400.0),
+            &test_paragraph(),
+        );
+
+        // `.rel` still sits at (100, 100), but the fixed child ignores it.
+        assert_eq!(boxes[&rel].origin(), Point::new(100.0, 100.0));
+        assert_eq!(boxes[&fixed].origin(), Point::new(0.0, 0.0));
+        assert_eq!(boxes[&fixed].size(), Size::new(20.0, 20.0));
     }
 
     #[test]

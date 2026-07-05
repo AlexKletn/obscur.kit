@@ -25,9 +25,10 @@ pub struct LayoutStyle {
     /// [`Position::Static`] (the default) lays the node out in normal flow and
     /// ignores [`inset`](Self::inset). [`Position::Relative`] keeps the node in
     /// flow but offsets its final position (and its whole subtree) by
-    /// [`inset`](Self::inset). [`Position::Absolute`] / [`Position::Fixed`] are
-    /// placeholders treated as [`Position::Static`] until out-of-flow layout
-    /// lands.
+    /// [`inset`](Self::inset). [`Position::Absolute`] / [`Position::Fixed`] take
+    /// the node **out of flow** and position it by [`inset`](Self::inset) within
+    /// its containing block (the nearest positioned ancestor's padding box, or the
+    /// viewport for `fixed`).
     pub position: Position,
 
     /// The node's positioning insets (`top` / `right` / `bottom` / `left`).
@@ -403,8 +404,9 @@ mod tests {
     }
 
     #[test]
-    fn absolute_and_fixed_are_static_this_step() {
-        // Out-of-flow placeholders contribute no offset until step 2 wires them.
+    fn absolute_and_fixed_have_no_in_flow_relative_offset() {
+        // Out-of-flow schemes are placed by the coordinator's out-of-flow path,
+        // not by the in-flow relative offset, so `relative_offset` stays `(0, 0)`.
         for position in [Position::Absolute, Position::Fixed] {
             let style = LayoutStyle::default()
                 .with_position(position)

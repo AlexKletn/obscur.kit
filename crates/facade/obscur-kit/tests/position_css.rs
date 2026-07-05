@@ -51,12 +51,23 @@ fn view() -> View {
 
 /// Renders one real frame for `css` + the view and returns the driven runtime.
 fn drive(css: &str) -> UiRuntime {
+    drive_view(css, &view())
+}
+
+/// Renders one real frame for `css` + an arbitrary `view` and returns the runtime.
+fn drive_view(css: &str, view: &View) -> UiRuntime {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
     let sheet = compile(css);
-    let result = rt.render_now(&view(), std::slice::from_ref(&sheet));
+    let result = rt.render_now(view, std::slice::from_ref(&sheet));
     assert!(result.restyled(), "authored CSS resolved computed styles");
     assert!(result.relaid_out(), "the styled tree arranged layout boxes");
     rt
+}
+
+/// The absolute size `(width, height)` of a node's layout box.
+fn box_size(rt: &UiRuntime, node: NodeId) -> (f32, f32) {
+    let b = rt.layout_boxes().get(&node).copied().expect("node has a box");
+    (b.size().width, b.size().height)
 }
 
 /// The `.row` container [`NodeId`].
@@ -147,4 +158,71 @@ fn static_child_ignores_insets() {
     let (a, _b) = children(&rt);
     approx(origin(&rt, a).0, 0.0, "static a.x ignores left");
     approx(origin(&rt, a).1, 0.0, "static a.y ignores top");
+}
+
+// Scenario (a): an `position: absolute` sibling is out of flow — it neither
+// moves the in-flow `.a` nor contributes to the container's content height, and
+// is placed at its insets within its containing block.
+#[test]
+fn absolute_sibling_is_out_of_flow_and_positioned_by_insets() {
+    let a = tag(el(21), "a");
+    let b = tag(el(22), "b");
+    let container = tag(el(20), "row").with_children(ViewFragment::from_nodes(vec![a, b]));
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![container]));
+
+    let rt = drive_view(
+        ".row{width:300px} \
+         .a{width:300px;height:50px} \
+         .b{position:absolute;top:10px;left:20px;width:40px;height:30px}",
+        &view,
+    );
+
+    let container = container_node(&rt);
+    let (a, b) = children(&rt);
+
+    // `.a` keeps its flow origin and size, unaffected by `.b`.
+    approx(origin(&rt, a).0, 0.0, "a.x unaffected by absolute b");
+    approx(origin(&rt, a).1, 0.0, "a.y unaffected by absolute b");
+    approx(box_size(&rt, a).1, 50.0, "a keeps its own height");
+
+    // The auto-height container reflects only `.a` (50), not `.b`.
+    approx(box_size(&rt, container).1, 50.0, "container height is only a's 50");
+
+    // `.b` is placed at (left, top) = (20, 10) with its explicit 40x30 size.
+    approx(origin(&rt, b).0, 20.0, "b.x = left inset");
+    approx(origin(&rt, b).1, 10.0, "b.y = top inset");
+    approx(box_size(&rt, b).0, 40.0, "b.width explicit");
+    approx(box_size(&rt, b).1, 30.0, "b.height explicit");
+}
+
+// Scenario (b): an absolute element resolves against the padding box of a
+// `position: relative` ancestor (not the root); `right: 0; bottom: 0` pins it to
+// that ancestor's far corner.
+#[test]
+fn absolute_resolves_against_positioned_ancestor() {
+    let abs = tag(el(42), "abs");
+    let rel = tag(el(41), "rel").with_children(ViewFragment::from_nodes(vec![abs]));
+    let outer = tag(el(40), "outer").with_children(ViewFragment::from_nodes(vec![rel]));
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![outer]));
+
+    let rt = drive_view(
+        ".outer{width:300px;height:300px} \
+         .rel{position:relative;left:100px;top:100px;width:200px;height:200px} \
+         .abs{position:absolute;right:0px;bottom:0px;width:20px;height:20px}",
+        &view,
+    );
+
+    let outer = container_node(&rt);
+    let rel = rt.tree().get(outer).unwrap().children().to_vec()[0];
+    let abs = rt.tree().get(rel).unwrap().children().to_vec()[0];
+
+    // `.rel` is offset into the flow by its insets (100, 100).
+    approx(origin(&rt, rel).0, 100.0, "rel.x from left:100");
+    approx(origin(&rt, rel).1, 100.0, "rel.y from top:100");
+
+    // `.abs` sits flush against `.rel`'s far corner: (100+200-20, 100+200-20).
+    approx(origin(&rt, abs).0, 280.0, "abs.x = rel.right - width");
+    approx(origin(&rt, abs).1, 280.0, "abs.y = rel.bottom - height");
+    approx(box_size(&rt, abs).0, 20.0, "abs.width explicit");
+    approx(box_size(&rt, abs).1, 20.0, "abs.height explicit");
 }
