@@ -107,6 +107,17 @@ pub enum PropertyId {
     /// The `border-left-color` longhand.
     BorderLeftColor,
 
+    // ---- Border radius (Length-valued, not inherited; initial `0`) ----
+    /// The `border-top-left-radius` longhand. Rounds the top-left corner of the
+    /// border box (and clips the content there); initial `0` (a square corner).
+    BorderTopLeftRadius,
+    /// The `border-top-right-radius` longhand.
+    BorderTopRightRadius,
+    /// The `border-bottom-right-radius` longhand.
+    BorderBottomRightRadius,
+    /// The `border-bottom-left-radius` longhand.
+    BorderBottomLeftRadius,
+
     // ---- Sizing constraints (Length-valued, not inherited) ----
     /// The `min-width` property.
     MinWidth,
@@ -263,6 +274,10 @@ impl PropertyId {
             Self::BorderRightColor => "border-right-color",
             Self::BorderBottomColor => "border-bottom-color",
             Self::BorderLeftColor => "border-left-color",
+            Self::BorderTopLeftRadius => "border-top-left-radius",
+            Self::BorderTopRightRadius => "border-top-right-radius",
+            Self::BorderBottomRightRadius => "border-bottom-right-radius",
+            Self::BorderBottomLeftRadius => "border-bottom-left-radius",
             Self::MinWidth => "min-width",
             Self::MinHeight => "min-height",
             Self::MaxWidth => "max-width",
@@ -347,6 +362,10 @@ impl PropertyId {
             | Self::BorderRightColor
             | Self::BorderBottomColor
             | Self::BorderLeftColor
+            | Self::BorderTopLeftRadius
+            | Self::BorderTopRightRadius
+            | Self::BorderBottomRightRadius
+            | Self::BorderBottomLeftRadius
             | Self::MinWidth
             | Self::MinHeight
             | Self::MaxWidth
@@ -674,6 +693,39 @@ mod tests {
             PropertyId::BorderRightColor,
             PropertyId::BorderBottomColor,
             PropertyId::BorderLeftColor,
+        ] {
+            assert!(
+                !id.default_inheritance().is_inherited(),
+                "{} should not inherit",
+                id.name()
+            );
+        }
+    }
+
+    #[test]
+    fn border_radius_names_and_not_inherited() {
+        assert_eq!(
+            PropertyId::BorderTopLeftRadius.name(),
+            "border-top-left-radius"
+        );
+        assert_eq!(
+            PropertyId::BorderTopRightRadius.name(),
+            "border-top-right-radius"
+        );
+        assert_eq!(
+            PropertyId::BorderBottomRightRadius.name(),
+            "border-bottom-right-radius"
+        );
+        assert_eq!(
+            PropertyId::BorderBottomLeftRadius.name(),
+            "border-bottom-left-radius"
+        );
+        // Like the other box / paint properties, corner radii reset per element.
+        for id in [
+            PropertyId::BorderTopLeftRadius,
+            PropertyId::BorderTopRightRadius,
+            PropertyId::BorderBottomRightRadius,
+            PropertyId::BorderBottomLeftRadius,
         ] {
             assert!(
                 !id.default_inheritance().is_inherited(),

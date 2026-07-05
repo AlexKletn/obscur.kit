@@ -36,20 +36,49 @@ use obscur_tree::tree::RetainedTree;
 
 use super::ComputedStyles;
 
-/// One node's own paint commands, tagged with its stacking key.
+/// One node's own paint commands (or a clip bracket), tagged with its stacking
+/// key.
 ///
-/// The commands are exactly the node's own background / text (never its
-/// descendants'), captured in emission order. The key `(z, tree_index)` orders
-/// the unit against every other unit: `z` is the node's effective stacking level
-/// and `tree_index` its pre-order document position (the tie-breaker).
+/// The commands are exactly the node's own background / border / text (never its
+/// descendants'), captured in emission order — or, for a `border-radius` element,
+/// a lone `PushClip` / `PopClip` that brackets the node's subtree. The key
+/// `(z, tree_index, order)` orders the unit against every other unit: `z` is the
+/// node's effective stacking level, `tree_index` its pre-order document position
+/// (the primary tie-breaker), and `order` a within-position phase so a subtree's
+/// `PushClip` sorts before the node's paint and its `PopClip` sorts after the
+/// whole subtree (see [`PaintUnit::PAINT_ORDER`]). When no radius is authored
+/// every unit is [`PAINT_ORDER`](PaintUnit::PAINT_ORDER), so the key reduces to
+/// `(z, tree_index)` — the pre-radius ordering, byte-for-byte.
 pub(super) struct PaintUnit {
     /// The node's effective stacking z (see [`effective_stacking_z`]).
     pub z: i32,
-    /// The node's pre-order document position, tie-breaking equal-z units so ties
-    /// keep tree order.
+    /// The node's pre-order document position (for a `PopClip` bracket, the
+    /// subtree's *exit* index), tie-breaking equal-z units so ties keep tree order.
     pub tree_index: usize,
-    /// The node's own paint commands, in emission order.
+    /// The within-position phase (see [`PaintUnit::PAINT_ORDER`]).
+    pub order: i64,
+    /// The node's own paint commands (or the clip bracket), in emission order.
     pub commands: Vec<PaintCommand>,
+}
+
+impl PaintUnit {
+    /// A subtree's opening `PushClip`, sorted before the node's own paint at the
+    /// same document position. Pre-order enter indices are unique per node, so
+    /// pushes never collide; any value below [`PAINT_ORDER`](Self::PAINT_ORDER)
+    /// works.
+    pub(super) const CLIP_PUSH_ORDER: i64 = -1;
+    /// A node's own paint (background / border / text). The default phase.
+    pub(super) const PAINT_ORDER: i64 = 0;
+
+    /// The phase for a subtree's closing `PopClip` at its *exit* index: sorts
+    /// after the node's paint and after every descendant (all at
+    /// [`PAINT_ORDER`](Self::PAINT_ORDER)), and — when several clips end at the
+    /// same index (a rightmost-leaf chain) — deeper clips close first
+    /// (descending `depth`), so nested clips unwind in the correct order.
+    #[must_use]
+    pub(super) const fn clip_pop_order(depth: u32) -> i64 {
+        i64::MAX - depth as i64
+    }
 }
 
 /// Computes each node's **effective stacking z** for the whole tree.

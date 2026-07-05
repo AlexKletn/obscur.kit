@@ -4,11 +4,13 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use obscur_geometry::{Point, Rect, Size};
+use obscur_geometry::{CornerRadii, Point, Rect, Size};
 use obscur_identity::NodeId;
+use obscur_scene::clip::Clip;
 use obscur_scene::color::Color;
 use obscur_scene::command::{DisplayList, DisplayListBuilder, PaintCommand};
 use obscur_scene::paint::Brush;
+use obscur_scene::path::Path;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::ComputedValue;
 use obscur_style::property::{layout_keyword, Length, PropertyId, PropertyValue, StyleColor};
@@ -407,10 +409,25 @@ impl SceneCoordinator {
         // keep tree order. When no `z-index` is authored every z is 0 and the sort
         // reproduces the exact pre-order sequence (the regression guard).
         let mut visited: HashSet<NodeId> = HashSet::new();
-        let mut stack: Vec<NodeId> = vec![root];
+        // Each stack entry carries the node's parent and its tree depth, so a
+        // `border-radius` element can bracket its subtree with a clip whose
+        // `PopClip` sorts after the last descendant (see `clip_brackets`).
+        let mut stack: Vec<(NodeId, Option<NodeId>, u32)> = vec![(root, None, 0)];
         let mut units: Vec<PaintUnit> = Vec::new();
         let mut next_index: usize = 0;
-        while let Some(node) = stack.pop() {
+        // Per-node bookkeeping for the clip brackets: the node's pre-order enter
+        // index, its parent (to propagate subtree exit indices), its depth, the
+        // pre-order sequence, and — for the nodes that carry a radius — the clip
+        // shape to bracket their subtree with.
+        let mut enter_index: std::collections::HashMap<NodeId, usize> =
+            std::collections::HashMap::new();
+        let mut parent_of: std::collections::HashMap<NodeId, Option<NodeId>> =
+            std::collections::HashMap::new();
+        let mut depth_of: std::collections::HashMap<NodeId, u32> =
+            std::collections::HashMap::new();
+        let mut preorder: Vec<NodeId> = Vec::new();
+        let mut clip_brackets: Vec<(NodeId, Clip)> = Vec::new();
+        while let Some((node, parent, depth)) = stack.pop() {
             if !visited.insert(node) {
                 // Already painted (cycle or shared child): do not revisit.
                 continue;
@@ -419,6 +436,21 @@ impl SceneCoordinator {
             // tie-breaker) at pop time, matching the historical emission order.
             let tree_index = next_index;
             next_index += 1;
+            enter_index.insert(node, tree_index);
+            parent_of.insert(node, parent);
+            depth_of.insert(node, depth);
+            preorder.push(node);
+
+            // A node's per-corner `border-radius` (all four corners), read off its
+            // computed style. Non-zero radii round its background fill and clip its
+            // subtree to the rounded border box.
+            let radii = corner_radii_of(computed, node);
+            let has_radius = corner_radii_present(radii);
+            // The rounded clip shape (border box) bracketing this node's subtree,
+            // recorded for a second pass once every descendant's exit index is known.
+            if has_radius && let Some(layout_box) = boxes.get(&node) {
+                clip_brackets.push((node, Clip::rounded_rect(layout_box.bounds, radii)));
+            }
 
             // This node's own paint accumulates into a private builder so it can be
             // reordered as one unit; only leaf commands are emitted, so it stays
@@ -430,13 +462,23 @@ impl SceneCoordinator {
                 if color.a > 0.0
                     && let Some(layout_box) = boxes.get(&node)
                 {
-                    node_paint.fill_rect(layout_box.bounds, Brush::solid(scene_color_from(color)));
+                    let brush = Brush::solid(scene_color_from(color));
+                    if has_radius {
+                        // A rounded element fills a rounded-rect outline of its
+                        // border box instead of a plain rectangle.
+                        node_paint.fill(Path::rounded_rect(layout_box.bounds, radii), brush);
+                    } else {
+                        node_paint.fill_rect(layout_box.bounds, brush);
+                    }
                 }
             }
 
             // Border edges paint over the background, under the text: one filled
             // rectangle per visible side (style `solid`, width > 0), covering the
-            // border box's outer ring. An unauthored border emits nothing.
+            // border box's outer ring. An unauthored border emits nothing. When the
+            // element has a radius the edges are clipped to the rounded border box
+            // (the surrounding `PushClip`), so a uniform border follows the rounded
+            // outline; non-uniform rounded borders are approximate (documented).
             if let Some(layout_box) = boxes.get(&node) {
                 for (rect, color) in border_fills(computed, node, layout_box.bounds) {
                     node_paint.fill_rect(rect, Brush::solid(scene_color_from(color)));
@@ -517,7 +559,7 @@ impl SceneCoordinator {
 
                 for &child in retained.children().iter().rev() {
                     if !visited.contains(&child) {
-                        stack.push(child);
+                        stack.push((child, Some(node), depth.saturating_add(1)));
                     }
                 }
             }
@@ -530,16 +572,57 @@ impl SceneCoordinator {
                 units.push(PaintUnit {
                     z,
                     tree_index,
+                    order: PaintUnit::PAINT_ORDER,
                     commands,
                 });
             }
         }
 
-        // Stable sort by `(z ascending, tree_index ascending)`: higher z paints
-        // last (on top), and equal-z units keep their pre-order (document) order.
-        // `sort_by_key` is stable, and with all-zero z the key reduces to
-        // `tree_index` (already ascending), reproducing the pre-order sequence.
-        units.sort_by_key(|unit| (unit.z, unit.tree_index));
+        // Bracket each rounded element's subtree with a clip. The `PushClip` sorts
+        // at the node's enter index (before its own paint); the `PopClip` at the
+        // subtree's *exit* index — the largest enter index within the subtree — so
+        // it sorts after every descendant. The exit index is the running max of
+        // each node's own enter index propagated up to its parent, walking the
+        // pre-order sequence in reverse (descendants before ancestors).
+        if !clip_brackets.is_empty() {
+            let mut exit_index = enter_index.clone();
+            for &node in preorder.iter().rev() {
+                if let (Some(&enter), Some(Some(parent))) =
+                    (exit_index.get(&node), parent_of.get(&node))
+                {
+                    let parent = *parent;
+                    if let Some(slot) = exit_index.get_mut(&parent) {
+                        *slot = (*slot).max(enter);
+                    }
+                }
+            }
+            for (node, clip) in clip_brackets {
+                let z = zmap.get(&node).copied().unwrap_or(0);
+                let enter = enter_index.get(&node).copied().unwrap_or(0);
+                let exit = exit_index.get(&node).copied().unwrap_or(enter);
+                let depth = depth_of.get(&node).copied().unwrap_or(0);
+                units.push(PaintUnit {
+                    z,
+                    tree_index: enter,
+                    order: PaintUnit::CLIP_PUSH_ORDER,
+                    commands: vec![PaintCommand::PushClip(clip)],
+                });
+                units.push(PaintUnit {
+                    z,
+                    tree_index: exit,
+                    order: PaintUnit::clip_pop_order(depth),
+                    commands: vec![PaintCommand::PopClip],
+                });
+            }
+        }
+
+        // Stable sort by `(z ascending, tree_index ascending, order ascending)`:
+        // higher z paints last (on top); equal-z units keep pre-order (document)
+        // order; and `order` phases a subtree's `PushClip` before the node's paint
+        // and its `PopClip` after the whole subtree. With no radius every `order`
+        // is `PAINT_ORDER`, so the key reduces to `(z, tree_index)`, reproducing the
+        // pre-radius pre-order sequence byte-for-byte.
+        units.sort_by_key(|unit| (unit.z, unit.tree_index, unit.order));
 
         let mut ordered: Vec<PaintCommand> = Vec::new();
         for unit in units {
@@ -683,6 +766,31 @@ fn border_width_of(computed: &ComputedStyles, node: NodeId, id: PropertyId) -> f
         .and_then(ComputedValue::as_length)
         .and_then(Length::as_px)
         .map_or(0.0, |px| px.0)
+}
+
+/// Reads a node's four computed `border-*-radius` corner lengths into a
+/// [`CornerRadii`], in top-left / top-right / bottom-right / bottom-left order.
+///
+/// Only absolute `px` is honored (mirroring [`border_width_of`]); an absent or
+/// non-pixel corner radius contributes `0` (a square corner), so a node with no
+/// authored radius yields all-zero radii — the pre-radius behaviour.
+fn corner_radii_of(computed: &ComputedStyles, node: NodeId) -> CornerRadii {
+    CornerRadii {
+        top_left: border_width_of(computed, node, PropertyId::BorderTopLeftRadius),
+        top_right: border_width_of(computed, node, PropertyId::BorderTopRightRadius),
+        bottom_right: border_width_of(computed, node, PropertyId::BorderBottomRightRadius),
+        bottom_left: border_width_of(computed, node, PropertyId::BorderBottomLeftRadius),
+    }
+}
+
+/// Whether any of `radii`'s four corners is a positive radius, i.e. the element
+/// actually rounds (and therefore needs a rounded fill + subtree clip). All-zero
+/// radii (the common, unauthored case) return `false` for a byte-identical path.
+fn corner_radii_present(radii: CornerRadii) -> bool {
+    radii.top_left > 0.0
+        || radii.top_right > 0.0
+        || radii.bottom_right > 0.0
+        || radii.bottom_left > 0.0
 }
 
 /// Whether a node's computed `border-*-style` (`id`) is the reserved `solid`
@@ -1513,6 +1621,117 @@ mod tests {
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
         assert_eq!(fill_count(&list), 0, "no solid style ⇒ no border painted");
+    }
+
+    /// A `ComputedStyle` with a `background-color` and a uniform `border-radius`.
+    fn with_background_and_radius(color: StyleColor, radius: f32) -> ComputedStyle {
+        let mut style = with_background(color);
+        for id in [
+            PropertyId::BorderTopLeftRadius,
+            PropertyId::BorderTopRightRadius,
+            PropertyId::BorderBottomRightRadius,
+            PropertyId::BorderBottomLeftRadius,
+        ] {
+            style.set(id, ComputedValue::length(Length::px(radius)));
+        }
+        style
+    }
+
+    /// Whether a `DrawPath` path has any curved (rounded) corner segment.
+    fn path_has_curve(path: &obscur_scene::path::Path) -> bool {
+        path.segments()
+            .iter()
+            .any(|s| matches!(s, obscur_scene::path::PathSegment::CubicTo { .. }))
+    }
+
+    #[test]
+    fn border_radius_emits_rounded_fill_and_clip_bracketing_children() {
+        // root (bg + radius 8) -> child (bg, no radius). The rounded root fills a
+        // curved path and its subtree is bracketed by a clip; the child paints
+        // inside the clip.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let child = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(
+            root,
+            with_background_and_radius(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 8.0),
+        );
+        computed.insert(child, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 100.0, 100.0));
+        boxes.insert(child, box_at(10.0, 10.0, 20.0, 20.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let cmds = list.commands();
+        // PushClip, rounded root fill, child fill, PopClip — the clip brackets the
+        // whole subtree.
+        assert!(matches!(cmds[0], PaintCommand::PushClip(_)), "clip opens first");
+        assert!(matches!(cmds.last(), Some(PaintCommand::PopClip)), "clip closes last");
+        assert!(list.is_balanced(), "the clip bracket is balanced");
+
+        // The rounded root background is a curved path (not a plain rectangle),
+        // and its bounds still equal the border box.
+        match &cmds[1] {
+            PaintCommand::DrawPath { path, .. } => {
+                assert!(path_has_curve(path), "rounded background uses a curved path");
+                assert_eq!(
+                    path.bounds(),
+                    Some(Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 100.0)))
+                );
+            }
+            other => panic!("expected the rounded background fill, got {other:?}"),
+        }
+        // The child's plain-rect fill sits between the push and the pop.
+        match &cmds[2] {
+            PaintCommand::DrawPath { path, .. } => {
+                assert!(!path_has_curve(path), "child has no radius ⇒ plain rect");
+            }
+            other => panic!("expected the child fill, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_radius_emits_plain_fill_and_no_clip() {
+        // Regression guard: a background with no authored radius paints exactly one
+        // plain-rectangle fill and emits NO clip — byte-identical to pre-radius.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, with_background(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 30.0, 30.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let cmds = list.commands();
+        assert_eq!(cmds.len(), 1, "just the background, no clip");
+        match &cmds[0] {
+            PaintCommand::DrawPath { path, .. } => {
+                assert!(!path_has_curve(path), "no radius ⇒ plain rectangle");
+                assert_eq!(
+                    path,
+                    &obscur_scene::path::Path::rect(Rect::new(
+                        Point::new(0.0, 0.0),
+                        Size::new(30.0, 30.0)
+                    )),
+                    "byte-identical plain-rect fill"
+                );
+            }
+            other => panic!("expected a plain fill, got {other:?}"),
+        }
+        assert!(
+            !cmds.iter().any(|c| matches!(
+                c,
+                PaintCommand::PushClip(_) | PaintCommand::PopClip
+            )),
+            "no clip commands with no radius"
+        );
     }
 
     #[test]

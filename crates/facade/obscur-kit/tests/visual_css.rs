@@ -147,6 +147,64 @@ fn no_border_authored_paints_only_the_background() {
 }
 
 // `border-top: 3px solid blue` paints only the top edge, and its color is blue.
+// A `border-radius` element renders a rounded (curved) background path, and its
+// subtree is bracketed by a clip through the real live pipeline: the display
+// list opens a `PushClip`, paints the rounded background and the child, then
+// closes with a `PopClip`.
+#[test]
+fn authored_border_radius_rounds_background_and_clips_subtree() {
+    use obscur_kit::scene::path::PathSegment;
+
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(
+        ".box{width:100px;height:100px;background-color:#ff0000;border-radius:8px}\
+         .inner{width:20px;height:20px;background-color:#00ff00}",
+    );
+    // A `.box` parent (rounded, background) wrapping a `.inner` child (background).
+    let inner = ViewNode::element(ComponentId::from_raw(31))
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("inner".into())));
+    let outer = ViewNode::element(ComponentId::from_raw(30))
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("box".into())))
+        .with_children(ViewFragment::from_nodes(vec![inner]));
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![outer]));
+
+    let result = rt.render_now(&view, std::slice::from_ref(&sheet));
+    assert!(result.restyled(), "authored CSS resolved computed styles");
+    assert!(result.is_balanced(), "the clip bracket is well-formed");
+
+    let commands = result.snapshot().display_list().commands();
+    // The clip opens first and closes last, bracketing the whole subtree.
+    assert!(
+        matches!(commands.first(), Some(PaintCommand::PushClip(_))),
+        "the rounded subtree opens with a PushClip"
+    );
+    assert!(
+        matches!(commands.last(), Some(PaintCommand::PopClip)),
+        "the rounded subtree closes with a PopClip"
+    );
+
+    // The `.box` background is a curved (rounded) path, not a plain rectangle,
+    // and the green child fill paints inside the clip (before the PopClip).
+    let curved_red = commands.iter().any(|c| match c {
+        PaintCommand::DrawPath { path, paint } => {
+            let is_red = paint
+                .brush()
+                .as_solid()
+                .is_some_and(|s| (s.color().r - 1.0).abs() < 1e-3 && s.color().g < 1e-3);
+            is_red
+                && path
+                    .segments()
+                    .iter()
+                    .any(|s| matches!(s, PathSegment::CubicTo { .. }))
+        }
+        _ => false,
+    });
+    assert!(curved_red, "the rounded background is a curved path");
+
+    let green = fills_colored(commands, Color::rgba(0.0, 1.0, 0.0, 1.0));
+    assert_eq!(green.len(), 1, "the clipped child still paints its background");
+}
+
 #[test]
 fn per_side_border_paints_only_that_edge() {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));

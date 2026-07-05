@@ -98,6 +98,11 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::BorderRightColor,
     PropertyId::BorderBottomColor,
     PropertyId::BorderLeftColor,
+    // Box model: border radius (rounds the background / border / content clip).
+    PropertyId::BorderTopLeftRadius,
+    PropertyId::BorderTopRightRadius,
+    PropertyId::BorderBottomRightRadius,
+    PropertyId::BorderBottomLeftRadius,
     // Flex container / item.
     PropertyId::Display,
     PropertyId::FlexDirection,
@@ -192,6 +197,13 @@ impl StyleResolver {
             | PropertyId::BorderRightWidth
             | PropertyId::BorderBottomWidth
             | PropertyId::BorderLeftWidth
+            // `border-*-radius` initial is `0` (a square corner), so an element
+            // with no authored radius rounds nothing — byte-for-byte identical to
+            // before border-radius existed.
+            | PropertyId::BorderTopLeftRadius
+            | PropertyId::BorderTopRightRadius
+            | PropertyId::BorderBottomRightRadius
+            | PropertyId::BorderBottomLeftRadius
             | PropertyId::Gap => Some(ComputedValue::length(Length::px(0.0))),
             // Sizing minimums and `flex-basis`: initial `auto`.
             PropertyId::MinWidth | PropertyId::MinHeight | PropertyId::FlexBasis => {
@@ -832,6 +844,52 @@ mod tests {
     }
 
     #[test]
+    fn border_radius_initial_is_zero_and_authored_flows() {
+        let resolver = StyleResolver::new();
+        // Each corner's initial is a concrete `0` (a square corner).
+        for id in [
+            PropertyId::BorderTopLeftRadius,
+            PropertyId::BorderTopRightRadius,
+            PropertyId::BorderBottomRightRadius,
+            PropertyId::BorderBottomLeftRadius,
+        ] {
+            assert_eq!(
+                resolver.initial_value(id),
+                Some(ComputedValue::length(Length::px(0.0)))
+            );
+        }
+        // An unauthored node computes every corner to 0.
+        let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), None);
+        assert_eq!(
+            computed
+                .get(PropertyId::BorderTopLeftRadius)
+                .and_then(ComputedValue::as_length),
+            Some(Length::px(0.0))
+        );
+        // An authored corner radius flows through and does not inherit.
+        let mut cascaded = ResolvedDeclarations::new();
+        cascaded.insert(
+            PropertyId::BorderTopLeftRadius,
+            PropertyValue::Length(Length::px(8.0)),
+        );
+        let parent = resolver.resolve(&cascaded, &HashMap::new(), None);
+        assert_eq!(
+            parent
+                .get(PropertyId::BorderTopLeftRadius)
+                .and_then(ComputedValue::as_length),
+            Some(Length::px(8.0))
+        );
+        let child = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), Some(&parent));
+        assert_eq!(
+            child
+                .get(PropertyId::BorderTopLeftRadius)
+                .and_then(ComputedValue::as_length),
+            Some(Length::px(0.0)),
+            "corner radius does not inherit"
+        );
+    }
+
+    #[test]
     fn authored_border_flows_to_computed_style() {
         let resolver = StyleResolver::new();
         let mut cascaded = ResolvedDeclarations::new();
@@ -917,6 +975,10 @@ mod tests {
                 | PropertyId::BorderRightColor
                 | PropertyId::BorderBottomColor
                 | PropertyId::BorderLeftColor
+                | PropertyId::BorderTopLeftRadius
+                | PropertyId::BorderTopRightRadius
+                | PropertyId::BorderBottomRightRadius
+                | PropertyId::BorderBottomLeftRadius
                 | PropertyId::MinWidth
                 | PropertyId::MinHeight
                 | PropertyId::MaxWidth
@@ -986,6 +1048,10 @@ mod tests {
             PropertyId::BorderRightColor,
             PropertyId::BorderBottomColor,
             PropertyId::BorderLeftColor,
+            PropertyId::BorderTopLeftRadius,
+            PropertyId::BorderTopRightRadius,
+            PropertyId::BorderBottomRightRadius,
+            PropertyId::BorderBottomLeftRadius,
             PropertyId::MinWidth,
             PropertyId::MinHeight,
             PropertyId::MaxWidth,

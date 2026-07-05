@@ -222,6 +222,19 @@ fn box_shorthand_sides(name: &str) -> Option<[PropertyId; 4]> {
             PropertyId::BorderBottomWidth,
             PropertyId::BorderLeftWidth,
         ])
+    } else if name.eq_ignore_ascii_case("border-radius") {
+        // `border-radius` fans its 1-4 length values out to the four corner
+        // longhands in CSS corner order (top-left, top-right, bottom-right,
+        // bottom-left). The 1/2/3/4-value replication rule is identical to the
+        // box-model one, so the 2-value form `a b` yields the diagonal pairs
+        // top-left/bottom-right = `a` and top-right/bottom-left = `b`. Elliptical
+        // `/`-separated radii are out of scope (a single radius per corner).
+        Some([
+            PropertyId::BorderTopLeftRadius,
+            PropertyId::BorderTopRightRadius,
+            PropertyId::BorderBottomRightRadius,
+            PropertyId::BorderBottomLeftRadius,
+        ])
     } else {
         None
     }
@@ -983,7 +996,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 65] = [
+    const ALL: [PropertyId; 69] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::Opacity,
@@ -1017,6 +1030,10 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::BorderRightColor,
         PropertyId::BorderBottomColor,
         PropertyId::BorderLeftColor,
+        PropertyId::BorderTopLeftRadius,
+        PropertyId::BorderTopRightRadius,
+        PropertyId::BorderBottomRightRadius,
+        PropertyId::BorderBottomLeftRadius,
         PropertyId::MinWidth,
         PropertyId::MinHeight,
         PropertyId::MaxWidth,
@@ -1193,6 +1210,10 @@ fn is_length_longhand(property: PropertyId) -> bool {
             | PropertyId::BorderRightWidth
             | PropertyId::BorderBottomWidth
             | PropertyId::BorderLeftWidth
+            | PropertyId::BorderTopLeftRadius
+            | PropertyId::BorderTopRightRadius
+            | PropertyId::BorderBottomRightRadius
+            | PropertyId::BorderBottomLeftRadius
             | PropertyId::Gap
             | PropertyId::FlexBasis
             | PropertyId::FontSize
@@ -1991,6 +2012,67 @@ mod tests {
                 (PropertyId::BorderBottomColor, red),
                 (PropertyId::BorderLeftColor, green),
             ]
+        );
+    }
+
+    #[test]
+    fn border_radius_one_value_rounds_all_four_corners() {
+        let r = PropertyValue::Length(Length::px(8.0));
+        assert_eq!(
+            pairs(&compile_all("border-radius: 8px")),
+            vec![
+                (PropertyId::BorderTopLeftRadius, r.clone()),
+                (PropertyId::BorderTopRightRadius, r.clone()),
+                (PropertyId::BorderBottomRightRadius, r.clone()),
+                (PropertyId::BorderBottomLeftRadius, r),
+            ]
+        );
+    }
+
+    #[test]
+    fn border_radius_two_value_sets_diagonal_pairs() {
+        // `4px 8px` → top-left/bottom-right = 4, top-right/bottom-left = 8.
+        let four = PropertyValue::Length(Length::px(4.0));
+        let eight = PropertyValue::Length(Length::px(8.0));
+        assert_eq!(
+            pairs(&compile_all("border-radius: 4px 8px")),
+            vec![
+                (PropertyId::BorderTopLeftRadius, four.clone()),
+                (PropertyId::BorderTopRightRadius, eight.clone()),
+                (PropertyId::BorderBottomRightRadius, four),
+                (PropertyId::BorderBottomLeftRadius, eight),
+            ]
+        );
+    }
+
+    #[test]
+    fn border_radius_four_value_sets_each_corner() {
+        let got = pairs(&compile_all("border-radius: 1px 2px 3px 4px"));
+        assert_eq!(
+            got,
+            vec![
+                (PropertyId::BorderTopLeftRadius, PropertyValue::Length(Length::px(1.0))),
+                (PropertyId::BorderTopRightRadius, PropertyValue::Length(Length::px(2.0))),
+                (PropertyId::BorderBottomRightRadius, PropertyValue::Length(Length::px(3.0))),
+                (PropertyId::BorderBottomLeftRadius, PropertyValue::Length(Length::px(4.0))),
+            ]
+        );
+    }
+
+    #[test]
+    fn per_corner_radius_longhand_lowers_to_a_length() {
+        let got = pairs(&compile_all("border-top-left-radius: 6px"));
+        assert_eq!(
+            got,
+            vec![(
+                PropertyId::BorderTopLeftRadius,
+                PropertyValue::Length(Length::px(6.0))
+            )]
+        );
+        // The name resolves as a known longhand.
+        assert_eq!(
+            property_id_from_name("border-bottom-right-radius"),
+            Some(PropertyId::BorderBottomRightRadius)
         );
     }
 
