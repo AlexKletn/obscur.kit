@@ -61,6 +61,12 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::BackgroundColor,
     PropertyId::Opacity,
     PropertyId::Visibility,
+    // Positioning.
+    PropertyId::Position,
+    PropertyId::Top,
+    PropertyId::Right,
+    PropertyId::Bottom,
+    PropertyId::Left,
     // Box model: sizing.
     PropertyId::Width,
     PropertyId::Height,
@@ -170,6 +176,10 @@ impl StyleResolver {
             PropertyId::MinWidth | PropertyId::MinHeight | PropertyId::FlexBasis => {
                 Some(ComputedValue::length(Length::Auto))
             }
+            // Positioning insets: initial `auto` (no offset).
+            PropertyId::Top | PropertyId::Right | PropertyId::Bottom | PropertyId::Left => {
+                Some(ComputedValue::length(Length::Auto))
+            }
             // `max-width` / `max-height` initial is `none`, which `Length` cannot
             // yet represent; left unresolved until a `none` length lands.
             PropertyId::MaxWidth | PropertyId::MaxHeight => None,
@@ -184,6 +194,10 @@ impl StyleResolver {
             // Keyword initials need the interner; deferred to a later phase.
             PropertyId::Display
             | PropertyId::Visibility
+            // `position` initial is `static`; its keyword initial likewise needs
+            // the interner, so an absent value falls back to the runtime's default
+            // (`Position::Static`) — byte-for-byte identical to today.
+            | PropertyId::Position
             | PropertyId::FlexDirection
             | PropertyId::JustifyContent
             | PropertyId::AlignContent
@@ -738,6 +752,11 @@ mod tests {
                 | PropertyId::Height
                 | PropertyId::Display
                 | PropertyId::Visibility
+                | PropertyId::Position
+                | PropertyId::Top
+                | PropertyId::Right
+                | PropertyId::Bottom
+                | PropertyId::Left
                 | PropertyId::MarginTop
                 | PropertyId::MarginRight
                 | PropertyId::MarginBottom
@@ -789,6 +808,11 @@ mod tests {
             PropertyId::Height,
             PropertyId::Display,
             PropertyId::Visibility,
+            PropertyId::Position,
+            PropertyId::Top,
+            PropertyId::Right,
+            PropertyId::Bottom,
+            PropertyId::Left,
             PropertyId::MarginTop,
             PropertyId::MarginRight,
             PropertyId::MarginBottom,

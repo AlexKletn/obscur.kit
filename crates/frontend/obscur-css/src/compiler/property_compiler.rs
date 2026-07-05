@@ -192,6 +192,15 @@ fn box_shorthand_sides(name: &str) -> Option<[PropertyId; 4]> {
             PropertyId::PaddingBottom,
             PropertyId::PaddingLeft,
         ])
+    } else if name.eq_ignore_ascii_case("inset") {
+        // The `inset` shorthand fans out into the four positioning longhands in
+        // the same top/right/bottom/left order as `margin` / `padding`.
+        Some([
+            PropertyId::Top,
+            PropertyId::Right,
+            PropertyId::Bottom,
+            PropertyId::Left,
+        ])
     } else {
         None
     }
@@ -636,7 +645,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 47] = [
+    const ALL: [PropertyId; 52] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::Opacity,
@@ -644,6 +653,11 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::Height,
         PropertyId::Display,
         PropertyId::Visibility,
+        PropertyId::Position,
+        PropertyId::Top,
+        PropertyId::Right,
+        PropertyId::Bottom,
+        PropertyId::Left,
         PropertyId::MarginTop,
         PropertyId::MarginRight,
         PropertyId::MarginBottom,
@@ -834,6 +848,7 @@ fn font_family_name(group: &[ParsedValue]) -> Option<Box<str>> {
 fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<InternedSymbol>> {
     match property {
         PropertyId::Display => Some(layout_keyword::display_from_name),
+        PropertyId::Position => Some(layout_keyword::position_from_name),
         PropertyId::FlexDirection => Some(layout_keyword::flex_direction_from_name),
         PropertyId::JustifyContent => Some(layout_keyword::justify_content_from_name),
         // `align-content` shares the `justify-content` distribution value grammar
@@ -1929,6 +1944,62 @@ mod tests {
     fn layout_keyword_prop_honours_css_wide_keywords() {
         assert_eq!(value_of("display: inherit"), PropertyValue::Inherit);
         assert_eq!(value_of("flex-direction: initial"), PropertyValue::Initial);
+    }
+
+    #[test]
+    fn position_keyword_lowers_to_reserved_symbol() {
+        assert_eq!(
+            value_of("position: relative"),
+            PropertyValue::Keyword(layout_keyword::POSITION_RELATIVE)
+        );
+        assert_eq!(
+            value_of("position: static"),
+            PropertyValue::Keyword(layout_keyword::POSITION_STATIC)
+        );
+        assert_eq!(
+            value_of("position: absolute"),
+            PropertyValue::Keyword(layout_keyword::POSITION_ABSOLUTE)
+        );
+        assert_eq!(
+            value_of("position: fixed"),
+            PropertyValue::Keyword(layout_keyword::POSITION_FIXED)
+        );
+    }
+
+    #[test]
+    fn inset_longhands_lower_to_lengths() {
+        assert_eq!(value_of("top: 10px"), PropertyValue::Length(Length::px(10.0)));
+        assert_eq!(
+            value_of("left: 5px"),
+            PropertyValue::Length(Length::px(5.0))
+        );
+        assert_eq!(
+            value_of("right: 50%"),
+            PropertyValue::Length(Length::Percent(50.0))
+        );
+        assert_eq!(value_of("bottom: auto"), PropertyValue::Length(Length::Auto));
+    }
+
+    #[test]
+    fn inset_shorthand_expands_to_four_inset_longhands() {
+        // `inset: 4px 8px` => top/bottom = 4px, right/left = 8px.
+        let decls = compile_all("inset: 4px 8px");
+        assert_eq!(decls.len(), 4);
+        let ids: Vec<_> = decls.iter().map(|d| standard_of(d).property()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                PropertyId::Top,
+                PropertyId::Right,
+                PropertyId::Bottom,
+                PropertyId::Left,
+            ]
+        );
+        let value = |i: usize| standard_of(&decls[i]).value().clone();
+        assert_eq!(value(0), PropertyValue::Length(Length::px(4.0))); // top
+        assert_eq!(value(1), PropertyValue::Length(Length::px(8.0))); // right
+        assert_eq!(value(2), PropertyValue::Length(Length::px(4.0))); // bottom
+        assert_eq!(value(3), PropertyValue::Length(Length::px(8.0))); // left
     }
 
     #[test]

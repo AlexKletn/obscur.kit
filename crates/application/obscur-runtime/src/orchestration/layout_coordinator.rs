@@ -9,8 +9,8 @@ use obscur_layout::algorithm::{
     LayoutAlgorithm, LayoutChild,
 };
 use obscur_layout::model::{
-    AlignItems, AlignSelf, Dimension, FlexDirection, JustifyContent, LayoutBox, LayoutDisplay,
-    LayoutStyle,
+    AlignItems, AlignSelf, Dimension, FlexDirection, Inset, JustifyContent, LayoutBox,
+    LayoutDisplay, LayoutStyle, Position,
 };
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{
@@ -475,6 +475,16 @@ fn layout_style_from(computed: &ComputedStyle, viewport: Size, root_font_size: f
     let ctx = length_context(computed, viewport, root_font_size);
     LayoutStyle {
         display: display_of(computed),
+        // Positioning scheme + insets. An unauthored `position` stays `Static`
+        // and unauthored insets stay `Auto`, so a default node contributes no
+        // offset — byte-for-byte identical to before positioning was wired.
+        position: position_of(computed),
+        inset: Inset::new(
+            dimension_of(computed, PropertyId::Top, &ctx),
+            dimension_of(computed, PropertyId::Right, &ctx),
+            dimension_of(computed, PropertyId::Bottom, &ctx),
+            dimension_of(computed, PropertyId::Left, &ctx),
+        ),
         width: dimension_of(computed, PropertyId::Width, &ctx),
         height: dimension_of(computed, PropertyId::Height, &ctx),
         min_width: dimension_of(computed, PropertyId::MinWidth, &ctx),
@@ -727,6 +737,21 @@ fn display_of(computed: &ComputedStyle) -> LayoutDisplay {
         Some(sym) if sym == layout_keyword::DISPLAY_GRID => LayoutDisplay::Grid,
         Some(sym) if sym == layout_keyword::DISPLAY_NONE => LayoutDisplay::None,
         _ => LayoutDisplay::Block,
+    }
+}
+
+/// Resolves the computed `position` keyword to a [`Position`], defaulting to
+/// [`Position::Static`].
+///
+/// Compares the interned symbol against the reserved [`layout_keyword`]
+/// `POSITION_*` handles; an absent or unrecognized value maps to
+/// [`Position::Static`] (which also covers `POSITION_STATIC`).
+fn position_of(computed: &ComputedStyle) -> Position {
+    match keyword_sym(computed, PropertyId::Position) {
+        Some(sym) if sym == layout_keyword::POSITION_RELATIVE => Position::Relative,
+        Some(sym) if sym == layout_keyword::POSITION_ABSOLUTE => Position::Absolute,
+        Some(sym) if sym == layout_keyword::POSITION_FIXED => Position::Fixed,
+        _ => Position::Static,
     }
 }
 
@@ -1057,11 +1082,26 @@ fn arrange(
     // Now safe to write this node's absolute box.
     boxes.insert(node, LayoutBox::new(Rect::new(origin, out.size())));
 
+    // The containing block for a relatively-positioned child is this node's
+    // content box; we approximate its size with this node's border-box size
+    // (`out.size()`), which is exact when the node has no border/padding and is
+    // the only containing-block size available at this point in the walk. Only a
+    // definite percentage inset is affected by the approximation; a `px` inset is
+    // exact.
+    let containing = out.size();
+
     // Recurse into children, translating each parent-relative box to absolute.
     // Zipping bounds both sides, so a mismatched length never indexes out of range.
     for (child, child_rel) in children.iter().zip(out.child_boxes().iter()) {
         let rel = child_rel.origin();
-        let child_origin = Point::new(origin.x + rel.x, origin.y + rel.y);
+        // `position: relative` offsets the child's final origin (and therefore its
+        // whole subtree, since grandchildren are placed relative to this origin)
+        // by its resolved insets, without perturbing the flow box the algorithm
+        // computed — so siblings, which use the unchanged flow boxes, are
+        // unaffected. A `Static` child yields a `(0, 0)` offset, keeping the walk
+        // byte-identical to before.
+        let (dx, dy) = style_of(styles, child.node()).relative_offset(containing.width, containing.height);
+        let child_origin = Point::new(origin.x + rel.x + dx, origin.y + rel.y + dy);
         arrange(
             tree,
             styles,
@@ -1386,6 +1426,120 @@ mod tests {
         // Leaf absolute origin = root padding (10) + container padding (5) = 15.
         assert_eq!(boxes[&leaf].origin(), Point::new(15.0, 15.0));
         assert_eq!(boxes[&leaf].size(), Size::new(50.0, 50.0));
+    }
+
+    #[test]
+    fn relative_child_shifts_itself_and_subtree_without_moving_siblings() {
+        // Block root (200x200) with two stacked block children `a` (relative) and
+        // `b` (static). `a` holds a leaf grandchild so we can see the subtree shift.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 40);
+        let b = add_child(&mut tree, root, 41);
+        let leaf = add_child(&mut tree, a, 42);
+
+        // `a` is `position: relative; top: 10px; left: 5px`.
+        let a_relative = block(200.0, 50.0)
+            .with_position(Position::Relative)
+            .with_inset(Inset::new(
+                Dimension::Px(10.0),
+                Dimension::Auto,
+                Dimension::Auto,
+                Dimension::Px(5.0),
+            ));
+
+        let mut styles = LayoutStyles::new();
+        styles.insert(root, block(200.0, 200.0));
+        styles.insert(a, a_relative);
+        styles.insert(b, block(200.0, 50.0));
+        styles.insert(leaf, block(20.0, 20.0));
+
+        let coordinator = LayoutCoordinator::new();
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &ComputedStyles::new(),
+            &GridTemplates::new(),
+            Size::new(200.0, 200.0),
+            &test_paragraph(),
+        );
+
+        // `a` is offset from its flow origin (0,0) by (left=5, top=10).
+        assert_eq!(boxes[&a].origin(), Point::new(5.0, 10.0));
+        // The leaf (flow-placed at a's content origin) shifts with the subtree.
+        assert_eq!(boxes[&leaf].origin(), Point::new(5.0, 10.0));
+        // The sibling `b` is untouched: still at the flow position (0, 50).
+        assert_eq!(boxes[&b].origin(), Point::new(0.0, 50.0));
+    }
+
+    #[test]
+    fn static_child_is_not_offset_and_right_bottom_move_opposite() {
+        // `a` static (no offset), `b` relative with `right`/`bottom` only.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 50);
+        let b = add_child(&mut tree, root, 51);
+
+        // `b` is `position: relative; right: 5px; bottom: 10px` -> moves (-5, -10).
+        let b_relative = block(200.0, 50.0)
+            .with_position(Position::Relative)
+            .with_inset(Inset::new(
+                Dimension::Auto,
+                Dimension::Px(5.0),
+                Dimension::Px(10.0),
+                Dimension::Auto,
+            ));
+
+        let mut styles = LayoutStyles::new();
+        styles.insert(root, block(200.0, 200.0));
+        styles.insert(a, block(200.0, 50.0));
+        styles.insert(b, b_relative);
+
+        let coordinator = LayoutCoordinator::new();
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &ComputedStyles::new(),
+            &GridTemplates::new(),
+            Size::new(200.0, 200.0),
+            &test_paragraph(),
+        );
+
+        // Static `a` keeps its flow origin exactly.
+        assert_eq!(boxes[&a].origin(), Point::new(0.0, 0.0));
+        // `b` flow origin (0, 50) shifts by right=5 -> -5 x, bottom=10 -> -10 y.
+        assert_eq!(boxes[&b].origin(), Point::new(-5.0, 40.0));
+    }
+
+    #[test]
+    fn mapping_reads_position_and_insets() {
+        use obscur_style::property::layout_keyword;
+        let mut computed = ComputedStyle::new();
+        computed.set(
+            PropertyId::Position,
+            ComputedValue::from_concrete(PropertyValue::Keyword(layout_keyword::POSITION_RELATIVE))
+                .expect("concrete"),
+        );
+        computed.set(PropertyId::Top, ComputedValue::length(Length::px(10.0)));
+        computed.set(PropertyId::Left, ComputedValue::length(Length::px(5.0)));
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        assert_eq!(style.position, Position::Relative);
+        assert_eq!(style.inset.top, Dimension::Px(10.0));
+        assert_eq!(style.inset.left, Dimension::Px(5.0));
+        // Unauthored edges default to `Auto`.
+        assert_eq!(style.inset.right, Dimension::Auto);
+        assert_eq!(style.inset.bottom, Dimension::Auto);
+    }
+
+    #[test]
+    fn mapping_defaults_position_to_static() {
+        // A node with no authored `position` stays `Static` with all-`auto` insets.
+        let computed = ComputedStyle::new();
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        assert_eq!(style.position, Position::Static);
+        assert_eq!(style.inset, Inset::AUTO);
     }
 
     #[test]

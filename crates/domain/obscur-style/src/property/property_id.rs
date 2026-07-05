@@ -33,6 +33,20 @@ pub enum PropertyId {
     /// The `visibility` property.
     Visibility,
 
+    // ---- Positioning (not inherited) ----
+    /// The `position` property (Keyword-valued: `static` / `relative` /
+    /// `absolute` / `fixed`; NOT inherited). See the reserved `POSITION_*`
+    /// handles in [`crate::property::layout_keyword`].
+    Position,
+    /// The `top` inset longhand (Length-valued, not inherited).
+    Top,
+    /// The `right` inset longhand (Length-valued, not inherited).
+    Right,
+    /// The `bottom` inset longhand (Length-valued, not inherited).
+    Bottom,
+    /// The `left` inset longhand (Length-valued, not inherited).
+    Left,
+
     // ---- Box model: margins (Length-valued, not inherited) ----
     /// The `margin-top` longhand.
     MarginTop,
@@ -183,6 +197,11 @@ impl PropertyId {
             Self::Height => "height",
             Self::Display => "display",
             Self::Visibility => "visibility",
+            Self::Position => "position",
+            Self::Top => "top",
+            Self::Right => "right",
+            Self::Bottom => "bottom",
+            Self::Left => "left",
             Self::MarginTop => "margin-top",
             Self::MarginRight => "margin-right",
             Self::MarginBottom => "margin-bottom",
@@ -249,6 +268,11 @@ impl PropertyId {
             | Self::Width
             | Self::Height
             | Self::Display
+            | Self::Position
+            | Self::Top
+            | Self::Right
+            | Self::Bottom
+            | Self::Left
             | Self::MarginTop
             | Self::MarginRight
             | Self::MarginBottom
@@ -516,6 +540,29 @@ mod tests {
             PropertyId::GridColumnEnd,
             PropertyId::GridRowStart,
             PropertyId::GridRowEnd,
+        ] {
+            assert!(
+                !id.default_inheritance().is_inherited(),
+                "{} should not inherit",
+                id.name()
+            );
+        }
+    }
+
+    #[test]
+    fn position_and_inset_names_and_not_inherited() {
+        assert_eq!(PropertyId::Position.name(), "position");
+        assert_eq!(PropertyId::Top.name(), "top");
+        assert_eq!(PropertyId::Right.name(), "right");
+        assert_eq!(PropertyId::Bottom.name(), "bottom");
+        assert_eq!(PropertyId::Left.name(), "left");
+        // Like the other layout / box properties, positioning resets per element.
+        for id in [
+            PropertyId::Position,
+            PropertyId::Top,
+            PropertyId::Right,
+            PropertyId::Bottom,
+            PropertyId::Left,
         ] {
             assert!(
                 !id.default_inheritance().is_inherited(),

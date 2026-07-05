@@ -140,6 +140,19 @@ pub const GRID_AUTO_FLOW_ROW_DENSE: InternedSymbol = InternedSymbol::from_raw(0x
 /// The `grid-auto-flow: column dense` value (column-major, dense).
 pub const GRID_AUTO_FLOW_COLUMN_DENSE: InternedSymbol = InternedSymbol::from_raw(0x0000_1904);
 
+// ---- `position` keyword values ----
+
+/// The `position: static` keyword (the default; laid out in normal flow).
+pub const POSITION_STATIC: InternedSymbol = InternedSymbol::from_raw(0x0000_1A01);
+/// The `position: relative` keyword (in flow, then offset by its insets).
+pub const POSITION_RELATIVE: InternedSymbol = InternedSymbol::from_raw(0x0000_1A02);
+/// The `position: absolute` keyword. Out-of-flow; treated as `static` for layout
+/// until out-of-flow positioning lands.
+pub const POSITION_ABSOLUTE: InternedSymbol = InternedSymbol::from_raw(0x0000_1A03);
+/// The `position: fixed` keyword. Out-of-flow; treated as `static` for layout
+/// until out-of-flow positioning lands.
+pub const POSITION_FIXED: InternedSymbol = InternedSymbol::from_raw(0x0000_1A04);
+
 /// Maps a `display` keyword string to its reserved [`InternedSymbol`].
 ///
 /// The input is ASCII-lowercased before matching, so callers may pass authored
@@ -152,6 +165,21 @@ pub fn display_from_name(name: &str) -> Option<InternedSymbol> {
         "flex" => Some(DISPLAY_FLEX),
         "grid" => Some(DISPLAY_GRID),
         "none" => Some(DISPLAY_NONE),
+        _ => None,
+    }
+}
+
+/// Maps a `position` keyword string to its reserved [`InternedSymbol`].
+///
+/// The input is ASCII-lowercased before matching. Returns [`None`] for any
+/// keyword outside the closed `static` / `relative` / `absolute` / `fixed` set.
+#[must_use]
+pub fn position_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "static" => Some(POSITION_STATIC),
+        "relative" => Some(POSITION_RELATIVE),
+        "absolute" => Some(POSITION_ABSOLUTE),
+        "fixed" => Some(POSITION_FIXED),
         _ => None,
     }
 }
@@ -354,6 +382,10 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         DISPLAY_FLEX => Some("flex"),
         DISPLAY_GRID => Some("grid"),
         DISPLAY_NONE => Some("none"),
+        POSITION_STATIC => Some("static"),
+        POSITION_RELATIVE => Some("relative"),
+        POSITION_ABSOLUTE => Some("absolute"),
+        POSITION_FIXED => Some("fixed"),
         FLEX_ROW => Some("row"),
         FLEX_ROW_REVERSE => Some("row-reverse"),
         FLEX_COLUMN => Some("column"),
@@ -402,6 +434,10 @@ mod tests {
         DISPLAY_FLEX,
         DISPLAY_GRID,
         DISPLAY_NONE,
+        POSITION_STATIC,
+        POSITION_RELATIVE,
+        POSITION_ABSOLUTE,
+        POSITION_FIXED,
         FLEX_ROW,
         FLEX_ROW_REVERSE,
         FLEX_COLUMN,
@@ -449,6 +485,18 @@ mod tests {
         // Unknown.
         assert_eq!(display_from_name("inline"), None);
         assert_eq!(display_from_name(""), None);
+    }
+
+    #[test]
+    fn position_maps_known_keywords() {
+        assert_eq!(position_from_name("static"), Some(POSITION_STATIC));
+        assert_eq!(position_from_name("relative"), Some(POSITION_RELATIVE));
+        assert_eq!(position_from_name("absolute"), Some(POSITION_ABSOLUTE));
+        assert_eq!(position_from_name("Fixed"), Some(POSITION_FIXED));
+        assert_eq!(position_from_name("sticky"), None);
+        // Round-trips through `name_of`.
+        assert_eq!(name_of(POSITION_RELATIVE), Some("relative"));
+        assert_eq!(name_of(POSITION_STATIC), Some("static"));
     }
 
     #[test]

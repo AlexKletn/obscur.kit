@@ -1,7 +1,9 @@
 //! Layout's own per-node input style.
 
 use crate::algorithm::{GridAutoFlow, GridPlacement};
-use crate::model::{AlignItems, AlignSelf, Dimension, FlexDirection, JustifyContent, LayoutDisplay};
+use crate::model::{
+    AlignItems, AlignSelf, Dimension, FlexDirection, Inset, JustifyContent, LayoutDisplay, Position,
+};
 use obscur_geometry::Insets;
 
 /// The computed layout input for a single node (spec §2.3, §4.1).
@@ -17,6 +19,22 @@ use obscur_geometry::Insets;
 pub struct LayoutStyle {
     /// The formatting context this node establishes.
     pub display: LayoutDisplay,
+
+    /// The node's positioning scheme (`position`).
+    ///
+    /// [`Position::Static`] (the default) lays the node out in normal flow and
+    /// ignores [`inset`](Self::inset). [`Position::Relative`] keeps the node in
+    /// flow but offsets its final position (and its whole subtree) by
+    /// [`inset`](Self::inset). [`Position::Absolute`] / [`Position::Fixed`] are
+    /// placeholders treated as [`Position::Static`] until out-of-flow layout
+    /// lands.
+    pub position: Position,
+
+    /// The node's positioning insets (`top` / `right` / `bottom` / `left`).
+    ///
+    /// Only consulted for a [`Position::Relative`] (later, out-of-flow) node;
+    /// the default is all-`auto` ([`Inset::AUTO`]), which contributes no offset.
+    pub inset: Inset,
 
     /// Preferred width.
     pub width: Dimension,
@@ -114,6 +132,8 @@ impl Default for LayoutStyle {
     fn default() -> Self {
         Self {
             display: LayoutDisplay::Block,
+            position: Position::Static,
+            inset: Inset::AUTO,
             width: Dimension::Auto,
             height: Dimension::Auto,
             min_width: Dimension::Auto,
@@ -168,6 +188,56 @@ impl LayoutStyle {
     pub const fn with_font_size(mut self, font_size: f32) -> Self {
         self.font_size = font_size;
         self
+    }
+
+    /// Returns a copy with the positioning scheme `position` replaced.
+    #[must_use]
+    pub const fn with_position(mut self, position: Position) -> Self {
+        self.position = position;
+        self
+    }
+
+    /// Returns a copy with the positioning `inset` replaced.
+    #[must_use]
+    pub const fn with_inset(mut self, inset: Inset) -> Self {
+        self.inset = inset;
+        self
+    }
+
+    /// The offset a [`Position::Relative`] node adds to its final in-flow
+    /// position (and to its whole subtree), in logical pixels (spec §4.1).
+    ///
+    /// Returns `(dx, dy)`, computed from the node's [`inset`](Self::inset)
+    /// against the containing block size (`containing_width` / `containing_height`,
+    /// the parent content box). Per CSS `left` wins over `right` and `top` over
+    /// `bottom`:
+    ///
+    /// * `dx` = `left` if definite, else `-right` if definite, else `0`.
+    /// * `dy` = `top` if definite, else `-bottom` if definite, else `0`.
+    ///
+    /// A positive `left` moves the node right; a positive `right` moves it left
+    /// (and likewise for `top` / `bottom` on the y axis). Any non-[`Relative`]
+    /// scheme — including the [`Position::Absolute`] / [`Position::Fixed`]
+    /// placeholders, which are treated as [`Position::Static`] this step —
+    /// returns `(0.0, 0.0)`, so a default node is never perturbed.
+    #[must_use]
+    pub fn relative_offset(&self, containing_width: f32, containing_height: f32) -> (f32, f32) {
+        if !self.position.is_relative() {
+            return (0.0, 0.0);
+        }
+        let dx = self.inset.left.resolve(containing_width).or_else(|| {
+            self.inset
+                .right
+                .resolve(containing_width)
+                .map(|right| -right)
+        });
+        let dy = self.inset.top.resolve(containing_height).or_else(|| {
+            self.inset
+                .bottom
+                .resolve(containing_height)
+                .map(|bottom| -bottom)
+        });
+        (dx.unwrap_or(0.0), dy.unwrap_or(0.0))
     }
 
     /// Returns a copy with the grid item `grid_placement` replaced.
@@ -229,7 +299,8 @@ impl LayoutStyle {
 mod tests {
     use super::LayoutStyle;
     use crate::model::{
-        AlignItems, AlignSelf, Dimension, FlexDirection, JustifyContent, LayoutDisplay,
+        AlignItems, AlignSelf, Dimension, FlexDirection, Inset, JustifyContent, LayoutDisplay,
+        Position,
     };
     use obscur_geometry::Insets;
 
@@ -256,6 +327,95 @@ mod tests {
         assert_eq!(style.flex_shrink, 1.0);
         assert!(style.flex_basis.is_auto());
         assert_eq!(style.font_size, LayoutStyle::DEFAULT_FONT_SIZE);
+        // Positioning defaults: `static` with all-`auto` insets (no offset).
+        assert_eq!(style.position, Position::Static);
+        assert_eq!(style.inset, Inset::AUTO);
+    }
+
+    #[test]
+    fn static_node_has_no_relative_offset() {
+        // The default (static) node contributes no offset, regardless of insets.
+        let style = LayoutStyle::default().with_inset(Inset::new(
+            Dimension::Px(10.0),
+            Dimension::Auto,
+            Dimension::Auto,
+            Dimension::Px(5.0),
+        ));
+        assert_eq!(style.relative_offset(200.0, 100.0), (0.0, 0.0));
+    }
+
+    #[test]
+    fn relative_offset_uses_top_and_left() {
+        // `top: 10px; left: 5px` shifts the node by (+5, +10).
+        let style = LayoutStyle::default()
+            .with_position(Position::Relative)
+            .with_inset(Inset::new(
+                Dimension::Px(10.0),
+                Dimension::Auto,
+                Dimension::Auto,
+                Dimension::Px(5.0),
+            ));
+        assert_eq!(style.relative_offset(200.0, 100.0), (5.0, 10.0));
+    }
+
+    #[test]
+    fn relative_offset_right_and_bottom_move_opposite() {
+        // With no `left` / `top`, a positive `right` / `bottom` moves the node the
+        // other way: `right: 5px; bottom: 10px` => (-5, -10).
+        let style = LayoutStyle::default()
+            .with_position(Position::Relative)
+            .with_inset(Inset::new(
+                Dimension::Auto,
+                Dimension::Px(5.0),
+                Dimension::Px(10.0),
+                Dimension::Auto,
+            ));
+        assert_eq!(style.relative_offset(200.0, 100.0), (-5.0, -10.0));
+    }
+
+    #[test]
+    fn relative_offset_left_wins_over_right() {
+        // Both edges definite: `left` wins over `right`, `top` over `bottom`.
+        let style = LayoutStyle::default()
+            .with_position(Position::Relative)
+            .with_inset(Inset::new(
+                Dimension::Px(3.0),
+                Dimension::Px(99.0),
+                Dimension::Px(99.0),
+                Dimension::Px(7.0),
+            ));
+        assert_eq!(style.relative_offset(200.0, 100.0), (7.0, 3.0));
+    }
+
+    #[test]
+    fn relative_offset_resolves_percent_against_containing_block() {
+        // Percent insets resolve against the containing block size.
+        let style = LayoutStyle::default()
+            .with_position(Position::Relative)
+            .with_inset(Inset::new(
+                Dimension::Percent(10.0),
+                Dimension::Auto,
+                Dimension::Auto,
+                Dimension::Percent(25.0),
+            ));
+        // left = 25% of 200 = 50; top = 10% of 100 = 10.
+        assert_eq!(style.relative_offset(200.0, 100.0), (50.0, 10.0));
+    }
+
+    #[test]
+    fn absolute_and_fixed_are_static_this_step() {
+        // Out-of-flow placeholders contribute no offset until step 2 wires them.
+        for position in [Position::Absolute, Position::Fixed] {
+            let style = LayoutStyle::default()
+                .with_position(position)
+                .with_inset(Inset::new(
+                    Dimension::Px(10.0),
+                    Dimension::Auto,
+                    Dimension::Auto,
+                    Dimension::Px(5.0),
+                ));
+            assert_eq!(style.relative_offset(200.0, 100.0), (0.0, 0.0));
+        }
     }
 
     #[test]
