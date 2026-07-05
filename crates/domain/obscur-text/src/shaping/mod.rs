@@ -1,4 +1,6 @@
 //! Shaping module.
+mod caching_shaper;
+pub use caching_shaper::CachingShaper;
 mod glyph_run;
 pub use glyph_run::GlyphRun;
 mod line_metrics;

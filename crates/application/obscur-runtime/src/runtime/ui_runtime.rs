@@ -3085,4 +3085,51 @@ mod tests {
         assert_eq!(stub_ids, vec![7, 7]);
         assert_ne!(mock_ids, stub_ids);
     }
+
+    /// A shaper that tallies every `shape` call through a shared cell, so a test
+    /// can read the count after the shaper is moved behind the runtime seam.
+    struct TallyShaper(std::rc::Rc<std::cell::Cell<usize>>);
+
+    impl obscur_text::shaping::TextShaper for TallyShaper {
+        fn shape(
+            &self,
+            request: &obscur_text::shaping::ShapingRequest,
+        ) -> obscur_text::shaping::GlyphRun {
+            self.0.set(self.0.get() + 1);
+            obscur_text::shaping::MockTextShaper::new().shape(request)
+        }
+
+        fn can_shape(&self, _face: &obscur_text::font::FontFace) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn shaping_cache_dedups_measure_arrange_and_compose_within_a_frame() {
+        // A single text node needs shaping in the layout measure pass, the layout
+        // arrange pass, AND the scene compose pass. The runtime wraps the installed
+        // shaper in a CachingShaper, so the underlying engine must be invoked
+        // exactly ONCE for that one unique run despite all three needing it.
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(11))
+                .with_children(ViewFragment::from_nodes(vec![ViewNode::text("cached")])),
+        ]));
+
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_text_shaper(Box::new(TallyShaper(std::rc::Rc::clone(&calls))));
+
+        let frame = runtime.render_now(&view, &[]);
+        // The text still shaped correctly (mock: glyph ids are the scalars).
+        assert_eq!(
+            drawtext_glyph_ids(&frame),
+            "cached".chars().map(u32::from).collect::<Vec<_>>()
+        );
+        // ...but the inner engine ran once, not once per measure/arrange/compose.
+        assert_eq!(
+            calls.get(),
+            1,
+            "measure + arrange + compose must share one cached shaping call"
+        );
+    }
 }

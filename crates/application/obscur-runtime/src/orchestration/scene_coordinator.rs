@@ -14,7 +14,7 @@ use obscur_style::computed::ComputedValue;
 use obscur_style::property::{Length, PropertyId, StyleColor};
 use obscur_text::font::{FontAttributes, FontFace, FontFamily, FontMetrics, FontSource, GenericFamily};
 use obscur_text::layout::{TextAlignment, TextLayout, TextLine, TextOverflow};
-use obscur_text::shaping::{MockTextShaper, ShapingRequest, TextShaper};
+use obscur_text::shaping::{CachingShaper, MockTextShaper, ShapingRequest, TextShaper};
 use obscur_tree::tree::RetainedTree;
 
 use super::{ComputedStyles, LayoutBoxes};
@@ -94,7 +94,9 @@ impl SceneCoordinator {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            shaper: Box::new(MockTextShaper::new()),
+            // Wrap the default mock in the shaping cache so measure/arrange/compose
+            // share one shaped run per unique text within (and across) frames.
+            shaper: Box::new(CachingShaper::new(Box::new(MockTextShaper::new()))),
             default_face: FontFace::new(
                 FontFamily::generic(GenericFamily::Monospace),
                 FontAttributes::default(),
@@ -112,7 +114,11 @@ impl SceneCoordinator {
     /// glyph indices. Installing a different shaper changes the emitted
     /// [`GlyphRun`] — that is the seam the runtime's `set_text_shaper` drives.
     pub fn set_shaper(&mut self, shaper: Box<dyn TextShaper>) {
-        self.shaper = shaper;
+        // Wrap the installed engine in the shaping cache so every shape call
+        // (measure, arrange, compose) is memoized behind one seam. A fresh
+        // wrapper starts with an empty cache, so replacing the shaper never
+        // returns runs shaped by the previous one.
+        self.shaper = Box::new(CachingShaper::new(shaper));
     }
 
     /// Returns the installed text shaper as a `&dyn` port.
