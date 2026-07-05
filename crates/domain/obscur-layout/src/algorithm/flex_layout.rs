@@ -2,9 +2,37 @@
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
-use crate::model::{AlignItems, JustifyContent, LayoutBox, LayoutStyle};
+use crate::model::{AlignItems, Dimension, JustifyContent, LayoutBox, LayoutStyle};
 
 use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
+
+/// Clamps a main-axis size into the item's `[min, max]` range, resolving each
+/// bound against the container main extent (spec §4.6).
+///
+/// A [`Dimension::Auto`] bound is absent and imposes no limit; `max` is applied
+/// first, then `min`, so `min` wins on conflict (CSS `min-width` overrides
+/// `max-width`). The result is never negative. Both bounds default to `Auto`, so
+/// an item with neither set is returned unchanged.
+fn clamp_main(value: f32, min: Dimension, max: Dimension, container_main: f32) -> f32 {
+    let mut clamped = value;
+    if let Some(max_v) = max.resolve(container_main) {
+        clamped = clamped.min(max_v);
+    }
+    if let Some(min_v) = min.resolve(container_main) {
+        clamped = clamped.max(min_v);
+    }
+    clamped.max(0.0)
+}
+
+/// The item's main-axis min / max dimensions for the container's flow direction:
+/// `width` bounds along a row, `height` bounds along a column.
+fn main_bounds(style: &LayoutStyle, is_row: bool) -> (Dimension, Dimension) {
+    if is_row {
+        (style.min_width, style.max_width)
+    } else {
+        (style.min_height, style.max_height)
+    }
+}
 
 /// Single-line (no-wrap) flex layout (spec §4.1, §4.2, §4.6).
 ///
@@ -53,9 +81,12 @@ use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 ///
 /// This is deliberately a **subset**: no wrapping / multi-line flex, no `order`
 /// reordering, no baseline alignment (`AlignItems::Baseline` is not modelled),
-/// no `align-self` per-item cross override, and no per-item min/max size
-/// clamping beyond keeping final main sizes non-negative. These belong to later
-/// phases.
+/// and no `align-self` per-item cross override. These belong to later phases.
+///
+/// Per-item **main-axis min/max clamping** (`min-width`/`max-width` in a row,
+/// the height bounds in a column) and **margins** (which consume main-axis space
+/// and offset each item) *are* honoured; cross-axis min/max and margin
+/// interaction with `align-items`/auto margins remain later work.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FlexLayout;
 
@@ -90,7 +121,35 @@ impl LayoutAlgorithm for FlexLayout {
         let count = children.len();
         let gap_span = gap * (count.saturating_sub(1) as f32);
 
-        // Step 2: base main size per item.
+        // Per-item margins split into main-leading / main-trailing (which consume
+        // main-axis space and offset items) and a cross-leading offset. The
+        // physical edge that leads in cursor order depends on direction and
+        // reversal; a zero-margin item contributes nothing on every edge, so this
+        // is a no-op for the common case.
+        let mut main_lead = Vec::with_capacity(count);
+        let mut main_trail = Vec::with_capacity(count);
+        let mut cross_lead = Vec::with_capacity(count);
+        for child in children {
+            let m = child.style.margin;
+            let (lead, trail) = if is_row {
+                if is_reverse {
+                    (m.right, m.left)
+                } else {
+                    (m.left, m.right)
+                }
+            } else if is_reverse {
+                (m.bottom, m.top)
+            } else {
+                (m.top, m.bottom)
+            };
+            main_lead.push(lead);
+            main_trail.push(trail);
+            cross_lead.push(if is_row { m.top } else { m.left });
+        }
+        let sum_margin_main: f32 = main_lead.iter().chain(main_trail.iter()).copied().sum();
+
+        // Step 2: base main size per item, clamped into the item's main-axis
+        // min/max range.
         let mut base_main = Vec::with_capacity(count);
         for (index, child) in children.iter().enumerate() {
             let main_dim = if is_row {
@@ -114,12 +173,13 @@ impl LayoutAlgorithm for FlexLayout {
                         measured.height
                     }
                 });
-            base_main.push(base.max(0.0));
+            let (min_main, max_main) = main_bounds(&child.style, is_row);
+            base_main.push(clamp_main(base.max(0.0), min_main, max_main, container_main));
         }
 
-        // Step 3: free space along the main axis.
+        // Step 3: free space along the main axis (margins consume space too).
         let sum_base: f32 = base_main.iter().copied().sum();
-        let free = container_main - sum_base - gap_span;
+        let free = container_main - sum_base - gap_span - sum_margin_main;
 
         // Step 4: resolve final main sizes via grow / shrink.
         let sum_grow: f32 = children.iter().map(|c| c.style.flex_grow).sum();
@@ -144,6 +204,13 @@ impl LayoutAlgorithm for FlexLayout {
                     *final_size = (*final_size + free * weight / sum_weight).max(0.0);
                 }
             }
+        }
+
+        // Re-clamp the grown/shrunk main sizes into each item's min/max range so
+        // a `min-width` / `max-width` bound holds after free-space distribution.
+        for (final_size, child) in final_main.iter_mut().zip(children.iter()) {
+            let (min_main, max_main) = main_bounds(&child.style, is_row);
+            *final_size = clamp_main(*final_size, min_main, max_main, container_main);
         }
 
         // Step 5: cross size per item.
@@ -175,7 +242,7 @@ impl LayoutAlgorithm for FlexLayout {
 
         // Step 6: justify_content → leading offset and inter-item spacing.
         let total_final: f32 = final_main.iter().copied().sum();
-        let remaining = container_main - total_final - gap_span;
+        let remaining = container_main - total_final - gap_span - sum_margin_main;
         let (leading, spacing) = if remaining <= 0.0 || count == 0 {
             (0.0, 0.0)
         } else {
@@ -211,13 +278,17 @@ impl LayoutAlgorithm for FlexLayout {
             (0..count).collect()
         };
         for &index in &order {
+            // A leading main-axis margin pushes the item further along the main
+            // axis before it is placed.
+            cursor += main_lead[index];
             let main = final_main[index];
             let cross = cross_size[index];
-            let cross_start = match style.align_items {
-                AlignItems::FlexStart | AlignItems::Stretch => 0.0,
-                AlignItems::FlexEnd => container_cross - cross,
-                AlignItems::Center => (container_cross - cross) / 2.0,
-            };
+            let cross_start = cross_lead[index]
+                + match style.align_items {
+                    AlignItems::FlexStart | AlignItems::Stretch => 0.0,
+                    AlignItems::FlexEnd => container_cross - cross,
+                    AlignItems::Center => (container_cross - cross) / 2.0,
+                };
             let (origin, size) = if is_row {
                 (
                     Point::new(bp_left + cursor, bp_top + cross_start),
@@ -230,7 +301,7 @@ impl LayoutAlgorithm for FlexLayout {
                 )
             };
             child_boxes[index] = LayoutBox::new(Rect::new(origin, size));
-            cursor += main + gap + spacing;
+            cursor += main + main_trail[index] + gap + spacing;
         }
 
         let border_box = Size::new(content_width + bp_x, content_height + bp_y);
