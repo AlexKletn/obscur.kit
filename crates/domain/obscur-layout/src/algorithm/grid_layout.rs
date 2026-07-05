@@ -341,8 +341,12 @@ fn block_free(
     true
 }
 
-/// Marks a `rspan × cspan` block occupied, growing `occ` (with `n_cols`-wide
-/// rows) to reach the block.
+/// Marks a `rspan × cspan` block occupied, growing `occ` to reach the block.
+///
+/// Rows are at least `n_cols` wide but grow to `col + cspan` so a *column-flow*
+/// item placed past the explicit column count still marks its cells (implicit
+/// columns). For row flow `col + cspan ≤ n_cols` always, so the width is exactly
+/// `n_cols` and this is byte-identical to the previous fixed-width behaviour.
 fn mark_block(
     occ: &mut Vec<Vec<bool>>,
     row: usize,
@@ -351,8 +355,14 @@ fn mark_block(
     cspan: usize,
     n_cols: usize,
 ) {
+    let width = n_cols.max(col + cspan);
     while occ.len() < row + rspan {
-        occ.push(vec![false; n_cols]);
+        occ.push(vec![false; width]);
+    }
+    for line in occ.iter_mut() {
+        if line.len() < width {
+            line.resize(width, false);
+        }
     }
     for line in occ.iter_mut().skip(row).take(rspan) {
         for cell in line.iter_mut().skip(col).take(cspan) {
@@ -382,6 +392,9 @@ fn first_col(occ: &[Vec<bool>], row: usize, cspan: usize, rspan: usize, n_cols: 
 }
 
 /// First free `(col, row)` in row-major order for a fully-auto block (first-fit).
+///
+/// This scans from the grid origin every call — the *dense* row-major search
+/// (`grid-auto-flow: row dense`), which backfills earlier holes.
 fn first_fit(occ: &[Vec<bool>], cspan: usize, rspan: usize, n_cols: usize) -> (usize, usize) {
     if cspan > n_cols {
         return (0, 0);
@@ -394,6 +407,86 @@ fn first_fit(occ: &[Vec<bool>], cspan: usize, rspan: usize, n_cols: usize) -> (u
             return (col, row);
         }
         row += 1;
+    }
+}
+
+/// Whether a `rspan × cspan` block anchored at `(row, col)` is entirely free,
+/// treating any cell past the current occupancy extent (in either dimension) as
+/// free. Unlike [`block_free`] this does **not** bound the column axis, so it
+/// suits column-flow placement into implicit (growing) columns.
+fn block_is_free(occ: &[Vec<bool>], row: usize, rspan: usize, col: usize, cspan: usize) -> bool {
+    for line in occ.iter().skip(row).take(rspan) {
+        for c in col..col + cspan {
+            if line.get(c).copied().unwrap_or(false) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// First free `(col, row)` in **row-major** order at or after the cursor
+/// `(start_row, start_col)` — the *sparse* row-major search
+/// (`grid-auto-flow: row`).
+///
+/// The current row is scanned from `start_col` (never earlier — the cursor only
+/// moves forward, so a hole left behind is not backfilled); each later row is
+/// scanned from column `0`. A span wider than the row wraps to the next row.
+fn first_fit_from(
+    occ: &[Vec<bool>],
+    cspan: usize,
+    rspan: usize,
+    n_cols: usize,
+    start_row: usize,
+    start_col: usize,
+) -> (usize, usize) {
+    if cspan > n_cols {
+        return (0, start_row);
+    }
+    let hi = n_cols - cspan;
+    let mut row = start_row;
+    let mut col_lo = start_col;
+    loop {
+        if col_lo <= hi
+            && let Some(col) =
+                (col_lo..=hi).find(|&col| block_free(occ, row, rspan, col, cspan, n_cols))
+        {
+            return (col, row);
+        }
+        row += 1;
+        col_lo = 0;
+    }
+}
+
+/// First free `(col, row)` in **column-major** order at or after the cursor
+/// `(start_col, start_row)` — the column-flow search (`grid-auto-flow: column`).
+///
+/// Columns grow implicitly; `n_rows` is the fixed row-wrap bound. The current
+/// column is scanned from `start_row`; each later column is scanned from row `0`.
+/// Passing `(0, 0)` yields the dense column search (search from the origin every
+/// call); passing the running cursor yields the sparse one.
+fn first_fit_col_major(
+    occ: &[Vec<bool>],
+    cspan: usize,
+    rspan: usize,
+    n_rows: usize,
+    start_col: usize,
+    start_row: usize,
+) -> (usize, usize) {
+    if rspan > n_rows {
+        return (start_col, 0);
+    }
+    let hi = n_rows - rspan;
+    let mut col = start_col;
+    let mut row_lo = start_row;
+    loop {
+        if row_lo <= hi
+            && let Some(row) = (row_lo..=hi).find(|&row| block_is_free(occ, row, rspan, col, cspan))
+        {
+            return (col, row);
+        }
+        col += 1;
+        row_lo = 0;
     }
 }
 
@@ -479,12 +572,26 @@ impl LayoutAlgorithm for GridLayout {
             n_cols = n_cols.max(col_span[i]);
         }
 
+        // Row-wrap bound for **column** auto-flow: the explicit rows, grown to
+        // cover any definite row line / row span (the row analogue of `n_cols`).
+        // Only consulted when the container flows column-major.
+        let mut n_rows_flow = templ_rows_len.max(1);
+        for i in 0..count {
+            if let Some(r) = row_anchor[i] {
+                n_rows_flow = n_rows_flow.max(r + row_span[i]);
+            }
+            n_rows_flow = n_rows_flow.max(row_span[i]);
+        }
+
         // Two-phase placement into an occupancy grid. Phase A — items with a
         // definite column and/or row: honour the definite axis, auto-flow any
-        // missing axis. Phase B — fully-auto items: row-major first-fit into the
-        // first free cell that fits their span. With all-`Auto` placement Phase A
-        // is empty and Phase B fills cell `i` in row-major order — byte-identical
-        // to the previous `(i % n_cols, i / n_cols)` auto-placement.
+        // missing axis. Phase B — fully-auto items, placed per the container's
+        // `grid-auto-flow`: row- vs column-major (the iteration axis) and sparse
+        // vs dense (a forward-only cursor vs a from-the-origin search that
+        // backfills earlier holes). With the default `Row` (sparse) flow and
+        // all-`Auto` placement Phase A is empty and Phase B fills cell `i` in
+        // row-major order — byte-identical to the previous auto-placement.
+        let flow = style.grid_auto_flow;
         let mut occ: Vec<Vec<bool>> = Vec::new();
         let mut place_col = vec![0_usize; count];
         let mut place_row = vec![0_usize; count];
@@ -504,14 +611,44 @@ impl LayoutAlgorithm for GridLayout {
             place_col[i] = c0;
             place_row[i] = r0;
         }
+        // Phase B: the auto-placement cursor. `is_dense` searches from the origin
+        // every item (backfilling holes); the sparse cursor only moves forward.
+        let (mut cur_major, mut cur_minor) = (0_usize, 0_usize);
         for i in 0..count {
             if col_anchor[i].is_some() || row_anchor[i].is_some() {
                 continue; // placed in Phase A
             }
-            let (c0, r0) = first_fit(&occ, col_span[i], row_span[i], n_cols);
-            mark_block(&mut occ, r0, row_span[i], c0, col_span[i], n_cols);
+            let (cspan, rspan) = (col_span[i], row_span[i]);
+            let (c0, r0) = if flow.is_column() {
+                // Column-major: `cur_major` is the column, `cur_minor` the row.
+                let (sc, sr) = if flow.is_dense() {
+                    (0, 0)
+                } else {
+                    (cur_major, cur_minor)
+                };
+                first_fit_col_major(&occ, cspan, rspan, n_rows_flow, sc, sr)
+            } else if flow.is_dense() {
+                first_fit(&occ, cspan, rspan, n_cols)
+            } else {
+                // Row-major sparse: `cur_major` is the row, `cur_minor` the column.
+                first_fit_from(&occ, cspan, rspan, n_cols, cur_major, cur_minor)
+            };
+            mark_block(&mut occ, r0, rspan, c0, cspan, n_cols);
             place_col[i] = c0;
             place_row[i] = r0;
+            if !flow.is_dense() {
+                (cur_major, cur_minor) = if flow.is_column() {
+                    (c0, r0)
+                } else {
+                    (r0, c0)
+                };
+            }
+        }
+        // Column-flow items may land past the explicit column count (implicit
+        // columns); grow `n_cols` to cover them. For row flow every placed column
+        // is already within `n_cols`, so this is a no-op (byte-identical).
+        for i in 0..count {
+            n_cols = n_cols.max(place_col[i] + col_span[i]);
         }
 
         // Total rows the grid spans (implicit auto rows past the template).
@@ -636,8 +773,8 @@ impl LayoutAlgorithm for GridLayout {
 mod tests {
     use super::{GridLayout, GridTemplate, TrackSize};
     use crate::algorithm::{
-        AutoRepeat, AutoRepeatMode, FixedChildMeasurer, GridLine, GridPlacement, LayoutAlgorithm,
-        LayoutChild, TrackList,
+        AutoRepeat, AutoRepeatMode, FixedChildMeasurer, GridAutoFlow, GridLine, GridPlacement,
+        LayoutAlgorithm, LayoutChild, TrackList,
     };
     use crate::model::{Dimension, LayoutStyle};
     use obscur_geometry::{BoxConstraints, Insets, Point, Size};
@@ -1551,5 +1688,109 @@ mod tests {
         );
         assert!(out.is_empty());
         assert_eq!(out.size(), Size::new(8.0, 8.0));
+    }
+
+    // ---- `grid-auto-flow`: dense packing + column flow. ----
+
+    /// Three span-then-1x1 items in a 3-column grid leave a hole at `(row0, col2)`:
+    /// two span-2 items land on row 0 and row 1, then a 1x1 item follows. `dense`
+    /// backfills the hole (row 0); the default sparse flow does not (row 1). The
+    /// two flows must place that item at *different* coordinates.
+    fn hole_children() -> [LayoutChild; 3] {
+        [
+            placed(1, GridPlacement::column(GridLine::Auto, GridLine::Span(2))),
+            placed(2, GridPlacement::column(GridLine::Auto, GridLine::Span(2))),
+            child(3),
+        ]
+    }
+
+    #[test]
+    fn dense_backfills_earlier_hole_but_sparse_does_not() {
+        let cols = || {
+            grid(
+                vec![
+                    TrackSize::Fixed(100.0),
+                    TrackSize::Fixed(100.0),
+                    TrackSize::Fixed(100.0),
+                ],
+                vec![],
+                0.0,
+                0.0,
+            )
+        };
+        let sizes = || {
+            FixedChildMeasurer::new(vec![
+                Size::new(0.0, 10.0),
+                Size::new(0.0, 10.0),
+                Size::new(0.0, 10.0),
+            ])
+        };
+        let constraints = BoxConstraints::loose(Size::new(300.0, 1000.0));
+
+        // Sparse (default `Row`): the 1x1 item does NOT backfill — it follows the
+        // forward cursor onto row 1, col 2.
+        let sparse = LayoutStyle::default();
+        let mut m1 = sizes();
+        let out_sparse = cols().layout(&sparse, &hole_children(), constraints, &mut m1);
+        let bs = out_sparse.child_boxes();
+        assert_eq!(bs[2].origin(), Point::new(200.0, 10.0));
+
+        // Dense (`RowDense`): the 1x1 item backfills the hole at row 0, col 2.
+        let dense = LayoutStyle::default().with_grid_auto_flow(GridAutoFlow::RowDense);
+        let mut m2 = sizes();
+        let out_dense = cols().layout(&dense, &hole_children(), constraints, &mut m2);
+        let bd = out_dense.child_boxes();
+        assert_eq!(bd[2].origin(), Point::new(200.0, 0.0));
+
+        // The two flows differ (the whole point of `dense`).
+        assert_ne!(bs[2].origin(), bd[2].origin());
+    }
+
+    /// `column` flow fills *down* the rows of column 0, then across to column 1:
+    /// with two fixed 20px rows, four 1x1 items land at
+    /// `(c0,r0) (c0,r1) (c1,r0) (c1,r1)`.
+    #[test]
+    fn column_flow_places_down_then_across() {
+        let style = LayoutStyle::default().with_grid_auto_flow(GridAutoFlow::Column);
+        let children = [child(1), child(2), child(3), child(4)];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 20.0); 4]);
+        let g = grid(
+            vec![TrackSize::Fixed(50.0), TrackSize::Fixed(50.0)],
+            vec![TrackSize::Fixed(20.0), TrackSize::Fixed(20.0)],
+            0.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(100.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].origin(), Point::new(0.0, 0.0)); // col0, row0
+        assert_eq!(b[1].origin(), Point::new(0.0, 20.0)); // col0, row1 (down)
+        assert_eq!(b[2].origin(), Point::new(50.0, 0.0)); // col1, row0 (across)
+        assert_eq!(b[3].origin(), Point::new(50.0, 20.0)); // col1, row1
+    }
+
+    /// Regression: the default (`Row`, sparse) flow is unchanged — the same
+    /// row-major result as before `grid-auto-flow` existed.
+    #[test]
+    fn default_row_sparse_is_unchanged() {
+        let style = LayoutStyle::default();
+        assert_eq!(style.grid_auto_flow(), GridAutoFlow::Row);
+        let children = [child(1), child(2), child(3), child(4), child(5)];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 10.0); 5]);
+        let g = grid(vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)], vec![], 0.0, 0.0);
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(200.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[3].origin(), Point::new(100.0, 10.0)); // col1,row1
+        assert_eq!(b[4].origin(), Point::new(0.0, 20.0)); // col0,row2
+        assert_eq!(out.size(), Size::new(200.0, 30.0));
     }
 }

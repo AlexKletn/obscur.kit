@@ -88,6 +88,11 @@ pub enum PropertyId {
     /// The `grid-template-rows` property (a `GridTracks` track list).
     GridTemplateRows,
 
+    /// The `grid-auto-flow` property (Keyword-valued: `row` / `column` /
+    /// `dense` combinations; NOT inherited). See the reserved `GRID_AUTO_FLOW_*`
+    /// handles in [`crate::property::layout_keyword`].
+    GridAutoFlow,
+
     // ---- Grid item line placement (a `GridLine` edge; not inherited) ----
     /// The `grid-column-start` longhand (the `grid-column` start edge).
     GridColumnStart,
@@ -160,6 +165,7 @@ impl PropertyId {
             Self::AlignItems => "align-items",
             Self::GridTemplateColumns => "grid-template-columns",
             Self::GridTemplateRows => "grid-template-rows",
+            Self::GridAutoFlow => "grid-auto-flow",
             Self::GridColumnStart => "grid-column-start",
             Self::GridColumnEnd => "grid-column-end",
             Self::GridRowStart => "grid-row-start",
@@ -217,6 +223,7 @@ impl PropertyId {
             | Self::AlignItems
             | Self::GridTemplateColumns
             | Self::GridTemplateRows
+            | Self::GridAutoFlow
             | Self::GridColumnStart
             | Self::GridColumnEnd
             | Self::GridRowStart
@@ -362,6 +369,18 @@ mod tests {
         );
         assert!(
             !PropertyId::GridTemplateRows
+                .default_inheritance()
+                .is_inherited()
+        );
+    }
+
+    #[test]
+    fn grid_auto_flow_name_and_not_inherited() {
+        assert_eq!(PropertyId::GridAutoFlow.name(), "grid-auto-flow");
+        // Like the other grid / layout properties, `grid-auto-flow` resets per
+        // element rather than inheriting.
+        assert!(
+            !PropertyId::GridAutoFlow
                 .default_inheritance()
                 .is_inherited()
         );

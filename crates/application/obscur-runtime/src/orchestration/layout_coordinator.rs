@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use obscur_geometry::{BoxConstraints, Insets, Point, Rect, Size};
 use obscur_identity::{InternedSymbol, NodeId};
 use obscur_layout::algorithm::{
-    ChildMeasurer, FlexLayout, FlowLayout, GridLayout, GridLine, GridPlacement, LayoutAlgorithm,
-    LayoutChild,
+    ChildMeasurer, FlexLayout, FlowLayout, GridAutoFlow, GridLayout, GridLine, GridPlacement,
+    LayoutAlgorithm, LayoutChild,
 };
 use obscur_layout::model::{
     AlignItems, Dimension, FlexDirection, JustifyContent, LayoutBox, LayoutDisplay, LayoutStyle,
@@ -468,6 +468,24 @@ fn layout_style_from(computed: &ComputedStyle, viewport: Size, root_font_size: f
         // longhands; unauthored edges stay `Auto`, so a non-placed item keeps the
         // all-auto default and auto-places exactly as before.
         grid_placement: grid_placement_of(computed),
+        // The container's `grid-auto-flow`; an unauthored value stays `Row`
+        // (sparse), so auto-placement is byte-identical to before.
+        grid_auto_flow: grid_auto_flow_of(computed),
+    }
+}
+
+/// Resolves the computed `grid-auto-flow` keyword to a [`GridAutoFlow`],
+/// defaulting to [`GridAutoFlow::Row`].
+///
+/// Compares the interned keyword symbol against the reserved [`layout_keyword`]
+/// `GRID_AUTO_FLOW_*` handles (each authored combination folds to one symbol);
+/// an absent or unrecognized value maps to [`GridAutoFlow::Row`].
+fn grid_auto_flow_of(computed: &ComputedStyle) -> GridAutoFlow {
+    match keyword_sym(computed, PropertyId::GridAutoFlow) {
+        Some(sym) if sym == layout_keyword::GRID_AUTO_FLOW_COLUMN => GridAutoFlow::Column,
+        Some(sym) if sym == layout_keyword::GRID_AUTO_FLOW_ROW_DENSE => GridAutoFlow::RowDense,
+        Some(sym) if sym == layout_keyword::GRID_AUTO_FLOW_COLUMN_DENSE => GridAutoFlow::ColumnDense,
+        _ => GridAutoFlow::Row,
     }
 }
 
@@ -1301,6 +1319,32 @@ mod tests {
         let computed = ComputedStyle::new();
         let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
         assert_eq!(style.grid_placement(), GridPlacement::default());
+    }
+
+    #[test]
+    fn mapping_reads_grid_auto_flow_keyword() {
+        // Each reserved `grid-auto-flow` handle maps to its flow mode.
+        for (sym, expected) in [
+            (layout_keyword::GRID_AUTO_FLOW_COLUMN, GridAutoFlow::Column),
+            (
+                layout_keyword::GRID_AUTO_FLOW_ROW_DENSE,
+                GridAutoFlow::RowDense,
+            ),
+            (
+                layout_keyword::GRID_AUTO_FLOW_COLUMN_DENSE,
+                GridAutoFlow::ColumnDense,
+            ),
+            (layout_keyword::GRID_AUTO_FLOW_ROW, GridAutoFlow::Row),
+        ] {
+            let mut computed = ComputedStyle::new();
+            computed.set(PropertyId::GridAutoFlow, ComputedValue::keyword(sym));
+            let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+            assert_eq!(style.grid_auto_flow(), expected);
+        }
+        // Absent -> the `Row` (sparse) default.
+        let computed = ComputedStyle::new();
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        assert_eq!(style.grid_auto_flow(), GridAutoFlow::Row);
     }
 
     #[test]

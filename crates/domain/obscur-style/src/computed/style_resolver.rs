@@ -90,6 +90,7 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     // Grid container.
     PropertyId::GridTemplateColumns,
     PropertyId::GridTemplateRows,
+    PropertyId::GridAutoFlow,
     // Grid item line placement.
     PropertyId::GridColumnStart,
     PropertyId::GridColumnEnd,
@@ -192,6 +193,10 @@ impl StyleResolver {
             // the behaviour before authored templates were wired.
             | PropertyId::GridTemplateColumns
             | PropertyId::GridTemplateRows
+            // `grid-auto-flow` initial is `row`; its keyword initial likewise
+            // needs the interner, so an absent value falls back to the runtime's
+            // default (`GridAutoFlow::Row`) — byte-for-byte identical to today.
+            | PropertyId::GridAutoFlow
             // `grid-column-start` / `-end` / `grid-row-start` / `-end` initial is
             // `auto`. There is no `GridLine` value for `auto` (it is the enum's
             // implicit default), so an absent edge is left unresolved and the
@@ -725,6 +730,7 @@ mod tests {
                 | PropertyId::AlignItems
                 | PropertyId::GridTemplateColumns
                 | PropertyId::GridTemplateRows
+                | PropertyId::GridAutoFlow
                 | PropertyId::GridColumnStart
                 | PropertyId::GridColumnEnd
                 | PropertyId::GridRowStart
@@ -767,6 +773,7 @@ mod tests {
             PropertyId::AlignItems,
             PropertyId::GridTemplateColumns,
             PropertyId::GridTemplateRows,
+            PropertyId::GridAutoFlow,
             PropertyId::GridColumnStart,
             PropertyId::GridColumnEnd,
             PropertyId::GridRowStart,

@@ -1,6 +1,6 @@
 //! Layout's own per-node input style.
 
-use crate::algorithm::GridPlacement;
+use crate::algorithm::{GridAutoFlow, GridPlacement};
 use crate::model::{AlignItems, Dimension, FlexDirection, JustifyContent, LayoutDisplay};
 use obscur_geometry::Insets;
 
@@ -71,6 +71,13 @@ pub struct LayoutStyle {
     /// auto-placement — the grid's historical behaviour — so a default style
     /// never perturbs a non-grid layout.
     pub grid_placement: GridPlacement,
+
+    /// Grid container: the auto-placement flow mode (`grid-auto-flow`).
+    ///
+    /// Only meaningful for a grid container. The default is
+    /// [`GridAutoFlow::Row`] (row-major, sparse) — the grid's historical
+    /// behaviour — so a default style auto-places exactly as before.
+    pub grid_auto_flow: GridAutoFlow,
 }
 
 impl LayoutStyle {
@@ -105,6 +112,7 @@ impl Default for LayoutStyle {
             flex_basis: Dimension::Auto,
             font_size: Self::DEFAULT_FONT_SIZE,
             grid_placement: GridPlacement::default(),
+            grid_auto_flow: GridAutoFlow::default(),
         }
     }
 }
@@ -149,6 +157,19 @@ impl LayoutStyle {
     #[must_use]
     pub const fn grid_placement(&self) -> GridPlacement {
         self.grid_placement
+    }
+
+    /// Returns a copy with the grid container `grid_auto_flow` replaced.
+    #[must_use]
+    pub const fn with_grid_auto_flow(mut self, grid_auto_flow: GridAutoFlow) -> Self {
+        self.grid_auto_flow = grid_auto_flow;
+        self
+    }
+
+    /// The grid container's auto-placement flow mode.
+    #[must_use]
+    pub const fn grid_auto_flow(&self) -> GridAutoFlow {
+        self.grid_auto_flow
     }
 }
 

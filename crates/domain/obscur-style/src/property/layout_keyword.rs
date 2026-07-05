@@ -118,6 +118,22 @@ pub const FONT_WEIGHT_BOLDER: InternedSymbol = InternedSymbol::from_raw(0x0000_1
 /// computed weight (§4.14).
 pub const FONT_WEIGHT_LIGHTER: InternedSymbol = InternedSymbol::from_raw(0x0000_1802);
 
+// ---- `grid-auto-flow` keyword values ----
+//
+// `grid-auto-flow` is a multi-keyword property: an axis (`row` / `column`) and
+// an optional `dense` packing keyword combine (`row dense`, `column dense`).
+// Rather than carry two symbols, each authored combination folds to ONE reserved
+// handle, so the runtime reads a single keyword identity.
+
+/// The `grid-auto-flow: row` value (row-major, sparse). The default.
+pub const GRID_AUTO_FLOW_ROW: InternedSymbol = InternedSymbol::from_raw(0x0000_1901);
+/// The `grid-auto-flow: column` value (column-major, sparse).
+pub const GRID_AUTO_FLOW_COLUMN: InternedSymbol = InternedSymbol::from_raw(0x0000_1902);
+/// The `grid-auto-flow: row dense` (or bare `dense`) value (row-major, dense).
+pub const GRID_AUTO_FLOW_ROW_DENSE: InternedSymbol = InternedSymbol::from_raw(0x0000_1903);
+/// The `grid-auto-flow: column dense` value (column-major, dense).
+pub const GRID_AUTO_FLOW_COLUMN_DENSE: InternedSymbol = InternedSymbol::from_raw(0x0000_1904);
+
 /// Maps a `display` keyword string to its reserved [`InternedSymbol`].
 ///
 /// The input is ASCII-lowercased before matching, so callers may pass authored
@@ -257,6 +273,34 @@ pub fn font_weight_relative_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
+/// Maps a `grid-auto-flow` value to its reserved [`InternedSymbol`].
+///
+/// This is a *multi-keyword* property: the axis (`row` / `column`) and the
+/// optional `dense` packing keyword may appear together in either order. The
+/// input is ASCII-lowercased and split on whitespace, then each accepted
+/// combination folds to a single reserved handle:
+///
+/// * `row` → [`GRID_AUTO_FLOW_ROW`] (the default)
+/// * `column` → [`GRID_AUTO_FLOW_COLUMN`]
+/// * `dense` (bare) → [`GRID_AUTO_FLOW_ROW_DENSE`] (`row` is the implied axis)
+/// * `row dense` / `dense row` → [`GRID_AUTO_FLOW_ROW_DENSE`]
+/// * `column dense` / `dense column` → [`GRID_AUTO_FLOW_COLUMN_DENSE`]
+///
+/// Returns [`None`] for any other combination.
+#[must_use]
+pub fn grid_auto_flow_from_name(name: &str) -> Option<InternedSymbol> {
+    let lowered = name.to_ascii_lowercase();
+    let tokens: Vec<&str> = lowered.split_whitespace().collect();
+    match tokens.as_slice() {
+        ["row"] => Some(GRID_AUTO_FLOW_ROW),
+        ["column"] => Some(GRID_AUTO_FLOW_COLUMN),
+        // Bare `dense` implies the `row` axis, same as `row dense`.
+        ["dense"] | ["row", "dense"] | ["dense", "row"] => Some(GRID_AUTO_FLOW_ROW_DENSE),
+        ["column", "dense"] | ["dense", "column"] => Some(GRID_AUTO_FLOW_COLUMN_DENSE),
+        _ => None,
+    }
+}
+
 /// Returns the canonical CSS keyword string for a reserved layout symbol.
 ///
 /// This is the reverse of the `*_from_name` helpers, intended for diagnostics
@@ -302,6 +346,10 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         TEXT_OVERFLOW_ELLIPSIS => Some("ellipsis"),
         FONT_WEIGHT_BOLDER => Some("bolder"),
         FONT_WEIGHT_LIGHTER => Some("lighter"),
+        GRID_AUTO_FLOW_ROW => Some("row"),
+        GRID_AUTO_FLOW_COLUMN => Some("column"),
+        GRID_AUTO_FLOW_ROW_DENSE => Some("row dense"),
+        GRID_AUTO_FLOW_COLUMN_DENSE => Some("column dense"),
         _ => None,
     }
 }
@@ -344,6 +392,10 @@ mod tests {
         TEXT_OVERFLOW_ELLIPSIS,
         FONT_WEIGHT_BOLDER,
         FONT_WEIGHT_LIGHTER,
+        GRID_AUTO_FLOW_ROW,
+        GRID_AUTO_FLOW_COLUMN,
+        GRID_AUTO_FLOW_ROW_DENSE,
+        GRID_AUTO_FLOW_COLUMN_DENSE,
     ];
 
     #[test]
@@ -488,6 +540,43 @@ mod tests {
         assert_eq!(name_of(ALIGN_STRETCH), Some("stretch"));
         // A symbol outside the reserved block resolves to nothing.
         assert_eq!(name_of(InternedSymbol::from_raw(0x0000_9999)), None);
+    }
+
+    #[test]
+    fn grid_auto_flow_maps_single_and_multi_keyword_values() {
+        assert_eq!(grid_auto_flow_from_name("row"), Some(GRID_AUTO_FLOW_ROW));
+        assert_eq!(
+            grid_auto_flow_from_name("column"),
+            Some(GRID_AUTO_FLOW_COLUMN)
+        );
+        // Bare `dense` implies the `row` axis.
+        assert_eq!(
+            grid_auto_flow_from_name("dense"),
+            Some(GRID_AUTO_FLOW_ROW_DENSE)
+        );
+        // Multi-keyword, either order, case-insensitive.
+        assert_eq!(
+            grid_auto_flow_from_name("row dense"),
+            Some(GRID_AUTO_FLOW_ROW_DENSE)
+        );
+        assert_eq!(
+            grid_auto_flow_from_name("Dense Row"),
+            Some(GRID_AUTO_FLOW_ROW_DENSE)
+        );
+        assert_eq!(
+            grid_auto_flow_from_name("column dense"),
+            Some(GRID_AUTO_FLOW_COLUMN_DENSE)
+        );
+        assert_eq!(
+            grid_auto_flow_from_name("dense column"),
+            Some(GRID_AUTO_FLOW_COLUMN_DENSE)
+        );
+        // Unknown / malformed.
+        assert_eq!(grid_auto_flow_from_name("dense dense"), None);
+        assert_eq!(grid_auto_flow_from_name("diagonal"), None);
+        // Round-trips through `name_of`.
+        assert_eq!(name_of(GRID_AUTO_FLOW_COLUMN_DENSE), Some("column dense"));
+        assert_eq!(name_of(GRID_AUTO_FLOW_ROW), Some("row"));
     }
 
     #[test]

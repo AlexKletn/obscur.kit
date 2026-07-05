@@ -247,6 +247,44 @@ fn negative_single_line_places_in_last_column() {
     approx(aw, 100.0, "a.width (single column)");
 }
 
+// 10. `grid-auto-flow: dense` backfill: two `span 2` items in a 3-column grid land
+//     on rows 0 and 1, leaving a hole at (row0, col2). A trailing 1x1 auto item
+//     backfills that hole under `dense` (row 0, x=200, y=0) — whereas the default
+//     sparse flow leaves it on row 1 (y=10). The two flows place `.c` at different
+//     y-coordinates, proving dense packing reached the engine end-to-end.
+#[test]
+fn dense_auto_flow_backfills_earlier_hole() {
+    // Three fixed 100px columns; implicit auto rows sized by the 10px children.
+    // `extra` injects `grid-auto-flow` into the container rule (empty for sparse).
+    let css = |extra: &str| {
+        format!(
+            ".grid{{display:grid;width:300px;\
+             grid-template-columns:100px 100px 100px{extra}}} \
+             .a{{grid-column:span 2;height:10px}} \
+             .b{{grid-column:span 2;height:10px}} .c{{height:10px}}"
+        )
+    };
+
+    // Dense: `.c` backfills the hole at (row 0, col 2).
+    let (rt, k) = drive(&css(";grid-auto-flow:dense"), 3, 400.0, 200.0);
+    let (cx, cy, cw, _) = geom(&rt, k[2]);
+    approx(cx, 200.0, "c.x (backfilled col 2)");
+    approx(cy, 0.0, "c.y (dense backfills row 0's hole)");
+    approx(cw, 100.0, "c.width (single col)");
+
+    // Sparse (default): `.c` does NOT backfill — it stays on row 1.
+    let (rt_s, k_s) = drive(&css(""), 3, 400.0, 200.0);
+    let (sx, sy, _, _) = geom(&rt_s, k_s[2]);
+    approx(sx, 200.0, "c.x (col 2 on row 1)");
+    approx(sy, 10.0, "c.y (sparse leaves it on row 1)");
+
+    // The whole point: the flows differ on the y-coordinate.
+    assert!(
+        (cy - sy).abs() > 1e-3,
+        "dense backfill (y={cy}) must differ from sparse (y={sy})"
+    );
+}
+
 // 9. `grid-area` shorthand: `.a{grid-area: 1 / 1 / 2 / -1}` → row 1, from column
 //    line 1 to the last column line → the whole first row (x=0, width 300).
 #[test]

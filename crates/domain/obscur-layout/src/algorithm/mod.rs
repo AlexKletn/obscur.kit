@@ -15,7 +15,8 @@ mod flow_layout;
 pub use flow_layout::FlowLayout;
 mod grid;
 pub use grid::{
-    AutoRepeat, AutoRepeatMode, GridLine, GridPlacement, GridTemplate, TrackList, TrackSize,
+    AutoRepeat, AutoRepeatMode, GridAutoFlow, GridLine, GridPlacement, GridTemplate, TrackList,
+    TrackSize,
 };
 mod grid_layout;
 pub use grid_layout::GridLayout;

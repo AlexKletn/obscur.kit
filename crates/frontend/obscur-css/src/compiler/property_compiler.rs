@@ -454,6 +454,37 @@ fn lower_grid_line(values: &[ParsedValue]) -> Option<PropertyValue> {
     grid_line_edge(values).map(PropertyValue::GridLine)
 }
 
+/// Lowers a `grid-auto-flow` value into a single reserved
+/// [`PropertyValue::Keyword`].
+///
+/// `grid-auto-flow` is a *multi-keyword* property: the axis (`row` / `column`)
+/// and an optional `dense` packing keyword may appear together in either order
+/// (`row dense`, `dense column`, …). The CSS-wide keywords (`inherit` /
+/// `initial` / `unset`) take priority when they stand alone. Otherwise the
+/// keyword tokens are joined and folded to a single reserved cross-crate handle
+/// via [`layout_keyword::grid_auto_flow_from_name`] (`row dense` and `column
+/// dense` each collapse to one symbol), so the runtime compares one keyword
+/// identity. A value that is not a valid combination yields [`None`], degrading
+/// to an unsupported-feature diagnostic rather than being dropped.
+fn lower_grid_auto_flow(values: &[ParsedValue]) -> Option<PropertyValue> {
+    // A lone CSS-wide keyword (`inherit` / `initial` / `unset`) wins.
+    if let [ParsedValue::Keyword(keyword)] = values
+        && let Some(wide) = css_wide_keyword(keyword)
+    {
+        return Some(wide);
+    }
+    // Otherwise the value is one or two bare axis / `dense` keywords.
+    let mut tokens: Vec<&str> = Vec::new();
+    for value in values {
+        match value {
+            ParsedValue::Keyword(keyword) => tokens.push(keyword),
+            _ => return None,
+        }
+    }
+    let joined = tokens.join(" ");
+    layout_keyword::grid_auto_flow_from_name(&joined).map(PropertyValue::Keyword)
+}
+
 /// Lowers one component of a box shorthand to a [`PropertyValue::Length`].
 ///
 /// Accepts the same lengths as the longhand path (`px`, `%`, `auto`) plus a
@@ -479,7 +510,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 39] = [
+    const ALL: [PropertyId; 40] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::Opacity,
@@ -508,6 +539,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::AlignItems,
         PropertyId::GridTemplateColumns,
         PropertyId::GridTemplateRows,
+        PropertyId::GridAutoFlow,
         PropertyId::GridColumnStart,
         PropertyId::GridColumnEnd,
         PropertyId::GridRowStart,
@@ -582,6 +614,9 @@ fn lower_for_property(
             return Some(wide);
         }
         return lower_grid_template(values);
+    }
+    if property == PropertyId::GridAutoFlow {
+        return lower_grid_auto_flow(values);
     }
     if let Some(mapper) = layout_keyword_mapper(property)
         && let Some(ParsedValue::Keyword(keyword)) = values.first()
@@ -1628,6 +1663,40 @@ mod tests {
         assert_eq!(
             value_of("font-style: oblique"),
             PropertyValue::Keyword(layout_keyword::FONT_STYLE_OBLIQUE)
+        );
+    }
+
+    #[test]
+    fn grid_auto_flow_maps_to_reserved_symbols() {
+        assert_eq!(
+            property_id_from_name("grid-auto-flow"),
+            Some(PropertyId::GridAutoFlow)
+        );
+        assert_eq!(
+            value_of("grid-auto-flow: row"),
+            PropertyValue::Keyword(layout_keyword::GRID_AUTO_FLOW_ROW)
+        );
+        assert_eq!(
+            value_of("grid-auto-flow: column"),
+            PropertyValue::Keyword(layout_keyword::GRID_AUTO_FLOW_COLUMN)
+        );
+        // Bare `dense` folds to row-dense.
+        assert_eq!(
+            value_of("grid-auto-flow: dense"),
+            PropertyValue::Keyword(layout_keyword::GRID_AUTO_FLOW_ROW_DENSE)
+        );
+        // The multi-token `column dense` folds to a single canonical symbol.
+        assert_eq!(
+            value_of("grid-auto-flow: column dense"),
+            PropertyValue::Keyword(layout_keyword::GRID_AUTO_FLOW_COLUMN_DENSE)
+        );
+        assert_eq!(
+            value_of("grid-auto-flow: row dense"),
+            PropertyValue::Keyword(layout_keyword::GRID_AUTO_FLOW_ROW_DENSE)
+        );
+        assert_eq!(
+            standard("grid-auto-flow: dense").0.property(),
+            PropertyId::GridAutoFlow
         );
     }
 
