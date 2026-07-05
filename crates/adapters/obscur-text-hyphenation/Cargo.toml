@@ -1,0 +1,17 @@
+[package]
+name = "obscur-text-hyphenation"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+obscur-text = { workspace = true }
+# Knuth-Liang hyphenation patterns supplying real in-word break points (spec
+# §5.10). Adapter-only: keeps the pure `obscur-text` domain pattern-table-free.
+hyphenation = { workspace = true }
+
+[lints]
+workspace = true

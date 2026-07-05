@@ -1,4 +1,6 @@
 //! Layout module.
+mod hyphenator;
+pub use hyphenator::{Hyphenator, NullHyphenator};
 mod line_break;
 pub use line_break::{BreakKind, LineBreak};
 mod paragraph_layout;

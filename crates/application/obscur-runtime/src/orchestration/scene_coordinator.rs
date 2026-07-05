@@ -16,10 +16,10 @@ use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontResolver, FontSource,
     GenericFamily, MockFontResolver,
 };
-use obscur_text::layout::{ParagraphLayout, TextAlignment, TextOverflow};
+use obscur_text::layout::{Hyphenator, ParagraphLayout, TextAlignment, TextOverflow};
 use obscur_text::shaping::{
-    CachingShaper, MockTextShaper, ParagraphShaper, ShapedRun, SingleRunItemizer, TextDirection,
-    TextItemizer, TextShaper,
+    CachingShaper, MockTextShaper, ParagraphShaper, ShapedGlyph, ShapedRun, SingleRunItemizer,
+    TextDirection, TextItemizer, TextShaper,
 };
 use obscur_tree::tree::RetainedTree;
 
@@ -98,6 +98,16 @@ pub struct SceneCoordinator {
     /// metrics), so a generic monospace face suffices as the default; a real
     /// pipeline would resolve this per node via a `FontProvider`.
     default_face: FontFace,
+    /// The hyphenation port used to break an over-wide word at a valid point
+    /// (spec §5.10), or [`None`] when no hyphenator is installed.
+    ///
+    /// The default is [`None`]: text wraps exactly as it did before hyphenation
+    /// existed (no hyphen glyph is even shaped), which is what the cross-backend
+    /// determinism boundary relies on. A host installs a real adapter via
+    /// [`set_hyphenator`](Self::set_hyphenator); this is the
+    /// [`NullHyphenator`](obscur_text::layout::NullHyphenator)-equivalent default
+    /// made explicit so the byte-identical path takes no extra shaping.
+    hyphenator: Option<Box<dyn Hyphenator>>,
 }
 
 impl SceneCoordinator {
@@ -121,7 +131,33 @@ impl SceneCoordinator {
                 FontSource::system("mock"),
                 FontMetrics::new(1000, 800.0, -200.0, 0.0),
             ),
+            // No hyphenation by default: byte-identical to pre-hyphenation
+            // wrapping, and no hyphen glyph is shaped on the default path.
+            hyphenator: None,
         }
+    }
+
+    /// Installs `hyphenator` as the hyphenation port used to break an over-wide
+    /// word, replacing the default (no hyphenation) (spec §5.10).
+    ///
+    /// This is the seam the runtime's
+    /// [`set_hyphenator`](crate::runtime::UiRuntime::set_hyphenator) drives. The
+    /// same hyphenator sizes text in the measure pass and paints it in the
+    /// compose pass, so a hyphenated line's measured height and painted line count
+    /// agree. Leaving it unset preserves headless determinism.
+    pub fn set_hyphenator(&mut self, hyphenator: Box<dyn Hyphenator>) {
+        self.hyphenator = Some(hyphenator);
+    }
+
+    /// Returns the installed hyphenation port, or [`None`] when hyphenation is
+    /// off (the default).
+    ///
+    /// The layout phase measures text through this so it wraps (and hyphenates)
+    /// identically to the compose phase, keeping measured box height and painted
+    /// line count in agreement.
+    #[must_use]
+    pub fn hyphenator(&self) -> Option<&dyn Hyphenator> {
+        self.hyphenator.as_deref()
     }
 
     /// Installs `shaper` as the inner text shaper subsequent shaping runs through,
@@ -189,8 +225,9 @@ impl SceneCoordinator {
     /// lines — agree.
     // The shaping inputs (fallback chain, attributes, direction, alignment) plus
     // the font size and wrap width are cohesive positional arguments of one leaf
-    // shaping helper, not a public API surface.
-    #[allow(clippy::too_many_arguments)]
+    // shaping helper, not a public API surface. `attributes` is kept by reference
+    // to match the `shape_paragraph` convention used throughout this pass.
+    #[allow(clippy::too_many_arguments, clippy::trivially_copy_pass_by_ref)]
     fn shape_lines(
         &self,
         content: &str,
@@ -210,7 +247,24 @@ impl SceneCoordinator {
             direction,
         );
         let metrics = self.paragraph.line_metrics(font_size);
-        ParagraphLayout::wrap(
+        // No hyphenator installed: take the exact pre-hyphenation path — no hyphen
+        // glyph is shaped, so the output (and the shaping-cache call count) is
+        // byte-identical to today.
+        let Some(hyphenator) = self.hyphenator.as_deref() else {
+            return ParagraphLayout::wrap(
+                &runs,
+                content,
+                max_width,
+                metrics.line_height(),
+                metrics.baseline(),
+                alignment,
+                TextOverflow::Clip,
+            );
+        };
+        // Hyphenation on: shape the hyphen glyph so a break renders (and measures)
+        // with a real advance, and wrap through the installed port.
+        let hyphen = self.shape_hyphen(fallback, attributes, direction, font_size);
+        ParagraphLayout::wrap_hyphenated(
             &runs,
             content,
             max_width,
@@ -218,7 +272,33 @@ impl SceneCoordinator {
             metrics.baseline(),
             alignment,
             TextOverflow::Clip,
+            hyphenator,
+            hyphen,
         )
+    }
+
+    /// Shapes a single hyphen (`-`) at `font_size` through the paragraph
+    /// orchestrator and returns its first glyph, for
+    /// [`ParagraphLayout::wrap_hyphenated`] to render at a break (spec §5.10).
+    ///
+    /// The hyphen is shaped with the coordinator's default face — identical to the
+    /// layout coordinator's `measure_face` — so the glyph the compose pass paints
+    /// matches the one the measure pass sized with. Returns [`None`] only if
+    /// shaping yields no glyph.
+    // `attributes` stays by reference to match this pass's `shape_paragraph` calls.
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    fn shape_hyphen(
+        &self,
+        fallback: &FontFallback,
+        attributes: &FontAttributes,
+        direction: TextDirection,
+        font_size: f32,
+    ) -> Option<ShapedGlyph> {
+        self.paragraph
+            .shape_paragraph("-", fallback, attributes, &self.default_face, font_size, direction)
+            .iter()
+            .flat_map(|run| run.run().glyphs().iter().copied())
+            .next()
     }
 
     /// Composes a paint-ordered [`DisplayList`] of background fills from the
@@ -357,6 +437,7 @@ impl fmt::Debug for SceneCoordinator {
         f.debug_struct("SceneCoordinator")
             .field("paragraph", &"<ParagraphShaper>")
             .field("default_face", &self.default_face)
+            .field("hyphenator", &"<dyn Hyphenator>")
             .finish()
     }
 }
@@ -994,6 +1075,57 @@ mod tests {
         // Each segment carries its own script's glyphs.
         assert_eq!(runs[0].1.text(), "ab");
         assert_eq!(runs[1].1.text(), "ВГ");
+        assert!(coordinator.compose(&tree, &computed, &boxes).is_balanced());
+    }
+
+    /// A stub [`Hyphenator`] that proposes one fixed byte offset in any word long
+    /// enough to hold it.
+    struct StubHyphenator {
+        offset: usize,
+    }
+
+    impl obscur_text::layout::Hyphenator for StubHyphenator {
+        fn hyphenate(&self, word: &str) -> Vec<usize> {
+            if self.offset < word.len() {
+                vec![self.offset]
+            } else {
+                Vec::new()
+            }
+        }
+    }
+
+    #[test]
+    fn installed_hyphenator_breaks_over_wide_word_and_renders_a_hyphen() {
+        // "hyphenation" (eleven 9.6px mock glyphs = 105.6) in a 60px box. Without
+        // a hyphenator the whole word overflows on one line; with a stub proposing
+        // a break before byte 5 ("hyphe|nation"), compose emits two lines and the
+        // head line ends with a rendered hyphen glyph (mock id 45 = '-').
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "hyphenation");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(text, ComputedStyle::new());
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(text, box_at(0.0, 0.0, 60.0, 16.0));
+
+        let mut coordinator = SceneCoordinator::new();
+        // Default (no hyphenator): the over-wide word stays on one line.
+        assert_eq!(text_runs(&coordinator.compose(&tree, &computed, &boxes)).len(), 1);
+
+        coordinator.set_hyphenator(Box::new(StubHyphenator { offset: 5 }));
+        let runs = text_runs(&coordinator.compose(&tree, &computed, &boxes));
+        assert_eq!(runs.len(), 2, "the word breaks into a head and a tail line");
+        // The head line ("hyphe" + hyphen) ends with the mock hyphen glyph (id 45)
+        // and fits the 60px box.
+        let head = &runs[0].1;
+        assert_eq!(head.glyphs().last().map(PositionedGlyph::glyph_id), Some(45));
+        let head_width: f32 = head.glyphs().iter().map(PositionedGlyph::advance).sum();
+        assert!(head_width <= 60.0, "head width {head_width} must fit 60");
+        // The tail line ("nation") starts on the next line, no hyphen.
+        assert!(runs[1].0.y > runs[0].0.y);
+        assert!(!runs[1].1.glyphs().iter().any(|g| g.glyph_id() == 45));
         assert!(coordinator.compose(&tree, &computed, &boxes).is_balanced());
     }
 }

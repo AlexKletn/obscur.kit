@@ -15,8 +15,8 @@ use obscur_style::property::{layout_keyword, Length, LengthContext, PropertyId, 
 use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontSource, GenericFamily,
 };
-use obscur_text::layout::{ParagraphLayout, TextAlignment, TextOverflow};
-use obscur_text::shaping::{ParagraphShaper, TextDirection};
+use obscur_text::layout::{Hyphenator, ParagraphLayout, TextAlignment, TextOverflow};
+use obscur_text::shaping::{ParagraphShaper, ShapedGlyph, TextDirection};
 use obscur_tree::tree::RetainedTree;
 
 use super::{alignment_for, attributes_for, direction_for, families_for, ComputedStyles};
@@ -147,6 +147,29 @@ impl LayoutCoordinator {
         viewport: Size,
         paragraph: &ParagraphShaper,
     ) -> LayoutBoxes {
+        // The default path never hyphenates: [`None`] makes text-leaf measurement
+        // byte-identical to whitespace-only wrapping (no hyphen glyph is shaped).
+        self.layout_with_hyphenator(tree, styles, computed, viewport, paragraph, None)
+    }
+
+    /// Lays out like [`layout`](Self::layout) but wraps text-leaf nodes through an
+    /// optional `hyphenator`, so an over-wide word breaks at a valid point
+    /// (spec §5.10).
+    ///
+    /// The runtime passes the **same** hyphenator (and shapes the **same** hyphen
+    /// glyph) the scene phase composes with, so the measured box height and the
+    /// painted line count agree even when hyphenation splits a word. [`None`]
+    /// reproduces [`layout`](Self::layout) exactly.
+    #[must_use]
+    pub fn layout_with_hyphenator(
+        &self,
+        tree: &RetainedTree,
+        styles: &LayoutStyles,
+        computed: &ComputedStyles,
+        viewport: Size,
+        paragraph: &ParagraphShaper,
+        hyphenator: Option<&dyn Hyphenator>,
+    ) -> LayoutBoxes {
         let mut boxes = LayoutBoxes::new();
         let Some(root) = tree.root() else {
             return boxes;
@@ -160,6 +183,7 @@ impl LayoutCoordinator {
             BoxConstraints::tight(viewport),
             &mut boxes,
             paragraph,
+            hyphenator,
             MAX_DEPTH,
         );
         boxes
@@ -188,8 +212,9 @@ impl LayoutCoordinator {
 /// justification.
 // The shaping inputs (fallback chain, attributes, direction, alignment) plus the
 // style/constraints/shaper are cohesive positional arguments of one leaf-measure
-// helper, not a public API surface.
-#[allow(clippy::too_many_arguments)]
+// helper, not a public API surface. `attributes` is kept by reference to match
+// the `shape_paragraph`/`families_for` convention used throughout this pass.
+#[allow(clippy::too_many_arguments, clippy::trivially_copy_pass_by_ref)]
 fn measure_text_node(
     content: &str,
     style: &LayoutStyle,
@@ -199,6 +224,7 @@ fn measure_text_node(
     alignment: TextAlignment,
     constraints: BoxConstraints,
     paragraph: &ParagraphShaper,
+    hyphenator: Option<&dyn Hyphenator>,
 ) -> Size {
     let font_size = style.font_size;
     let metrics = paragraph.line_metrics(font_size);
@@ -214,16 +240,61 @@ fn measure_text_node(
     // almost always zero, but subtract it defensively so the content fits.
     let horizontal = style.padding.left + style.padding.right + style.border.left + style.border.right;
     let max_width = (constraints.max.width - horizontal).max(0.0);
-    let layout = ParagraphLayout::wrap(
-        &runs,
-        content,
-        max_width,
-        metrics.line_height(),
-        metrics.baseline(),
-        alignment,
-        TextOverflow::Clip,
-    );
+    // No hyphenator: take the exact pre-hyphenation path — no hyphen glyph is
+    // shaped, so the measured size is byte-identical to whitespace-only wrapping.
+    let layout = match hyphenator {
+        None => ParagraphLayout::wrap(
+            &runs,
+            content,
+            max_width,
+            metrics.line_height(),
+            metrics.baseline(),
+            alignment,
+            TextOverflow::Clip,
+        ),
+        // Hyphenation on: shape the hyphen the same way the scene phase does, so a
+        // hyphenated break measures with the identical advance it paints with.
+        Some(hyphenator) => {
+            let hyphen =
+                measure_hyphen_glyph(paragraph, fallback, attributes, direction, font_size);
+            ParagraphLayout::wrap_hyphenated(
+                &runs,
+                content,
+                max_width,
+                metrics.line_height(),
+                metrics.baseline(),
+                alignment,
+                TextOverflow::Clip,
+                hyphenator,
+                hyphen,
+            )
+        }
+    };
     constraints.constrain(layout.size())
+}
+
+/// Shapes a single hyphen (`-`) through `paragraph` at `font_size` and returns
+/// its first glyph, for [`ParagraphLayout::wrap_hyphenated`] to render at a
+/// break (spec §5.10).
+///
+/// The hyphen is shaped with the same [`measure_face`] the scene coordinator's
+/// default face mirrors, so the glyph the measure pass sizes with is identical
+/// to the one the compose pass paints, keeping the box height and painted line
+/// count in agreement. Returns [`None`] only if shaping yields no glyph.
+// `attributes` stays by reference to match this pass's `shape_paragraph` calls.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn measure_hyphen_glyph(
+    paragraph: &ParagraphShaper,
+    fallback: &FontFallback,
+    attributes: &FontAttributes,
+    direction: TextDirection,
+    font_size: f32,
+) -> Option<ShapedGlyph> {
+    paragraph
+        .shape_paragraph("-", fallback, attributes, &measure_face(), font_size, direction)
+        .iter()
+        .flat_map(|run| run.run().glyphs().iter().copied())
+        .next()
 }
 
 /// Maps a single [`ComputedStyle`] into layout's own [`LayoutStyle`].
@@ -541,6 +612,8 @@ struct RecMeasurer<'a> {
     children: &'a [LayoutChild],
     /// The paragraph orchestrator used to shape and wrap a text-leaf child.
     paragraph: &'a ParagraphShaper,
+    /// The hyphenator used to break an over-wide word in a text-leaf child.
+    hyphenator: Option<&'a dyn Hyphenator>,
     /// Remaining recursion budget for children measured through this measurer.
     depth: u32,
 }
@@ -555,6 +628,7 @@ impl ChildMeasurer for RecMeasurer<'_> {
                 child.node(),
                 constraints,
                 self.paragraph,
+                self.hyphenator,
                 self.depth,
             ),
             // Out-of-range index: contribute nothing rather than panic.
@@ -573,6 +647,9 @@ impl ChildMeasurer for RecMeasurer<'_> {
 ///
 /// `depth` bounds the recursion: at zero it returns [`Size::ZERO`], guaranteeing
 /// termination on a cyclic or pathologically deep tree.
+// The tree, both style maps, the constraints, the shaper, the hyphenator, and
+// the depth budget are cohesive positional arguments of one internal recursion.
+#[allow(clippy::too_many_arguments)]
 fn measure(
     tree: &RetainedTree,
     styles: &LayoutStyles,
@@ -580,6 +657,7 @@ fn measure(
     node: NodeId,
     constraints: BoxConstraints,
     paragraph: &ParagraphShaper,
+    hyphenator: Option<&dyn Hyphenator>,
     depth: u32,
 ) -> Size {
     if depth == 0 {
@@ -602,6 +680,7 @@ fn measure(
             alignment,
             constraints,
             paragraph,
+            hyphenator,
         );
     }
     let Some(algorithm) = algorithm_for(style.display) else {
@@ -614,6 +693,7 @@ fn measure(
         computed,
         children: &children,
         paragraph,
+        hyphenator,
         depth: depth - 1,
     };
     let out = algorithm.layout(&style, &children, constraints, &mut measurer);
@@ -649,6 +729,7 @@ fn arrange(
     constraints: BoxConstraints,
     boxes: &mut LayoutBoxes,
     paragraph: &ParagraphShaper,
+    hyphenator: Option<&dyn Hyphenator>,
     depth: u32,
 ) {
     if depth == 0 {
@@ -673,6 +754,7 @@ fn arrange(
             alignment,
             constraints,
             paragraph,
+            hyphenator,
         );
         boxes.insert(node, LayoutBox::new(Rect::new(origin, size)));
         return;
@@ -691,6 +773,7 @@ fn arrange(
             computed,
             children: &children,
             paragraph,
+            hyphenator,
             depth: depth - 1,
         };
         algorithm.layout(&style, &children, constraints, &mut measurer)
@@ -713,6 +796,7 @@ fn arrange(
             BoxConstraints::tight(child_rel.size()),
             boxes,
             paragraph,
+            hyphenator,
             depth - 1,
         );
     }

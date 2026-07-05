@@ -26,6 +26,7 @@ use obscur_style::matching::{MediaEnvironment, Stylesheet};
 use obscur_style::property::{Length, PropertyId, PropertyValue};
 use obscur_style::selector::{PseudoState, SelectorMatcher};
 use obscur_text::font::FontResolver;
+use obscur_text::layout::Hyphenator;
 use obscur_text::shaping::{TextItemizer, TextShaper};
 use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
@@ -330,6 +331,21 @@ impl UiRuntime {
         self.scene_composer.set_font_resolver(resolver);
     }
 
+    /// Installs a `hyphenator` on the owned scene coordinator, replacing the
+    /// default no-op [`NullHyphenator`](obscur_text::layout::NullHyphenator).
+    ///
+    /// Hyphenation is a hexagonal port: the runtime only knows the
+    /// `Box<dyn Hyphenator>` — it never depends on a concrete pattern set. A host
+    /// installs a real adapter (e.g. Knuth-Liang English patterns) here; from the
+    /// next laid-out frame on, an over-wide word breaks at a valid point and (when
+    /// a hyphen glyph is shaped) renders a trailing hyphen. The **same** port
+    /// sizes text in the layout pass and paints it in the compose pass, so the
+    /// measured box height and the painted line count agree. Leaving it unset
+    /// preserves headless determinism, so all default-path tests are unchanged.
+    pub fn set_hyphenator(&mut self, hyphenator: Box<dyn Hyphenator>) {
+        self.scene_composer.set_hyphenator(hyphenator);
+    }
+
     /// Requests a frame for `reason`, returning the scheduler's admission
     /// [`BackpressureDecision`] (§3.5).
     ///
@@ -603,12 +619,13 @@ impl UiRuntime {
             // borrow, and the same orchestrator sizes the boxes that the scene
             // phase later re-wraps and draws with — so height and painted line
             // count agree.
-            let boxes = self.layout.layout(
+            let boxes = self.layout.layout_with_hyphenator(
                 &self.tree,
                 &layout_styles,
                 &computed,
                 ctx.viewport(),
                 self.scene_composer.paragraph(),
+                self.scene_composer.hyphenator(),
             );
             let relaid_out = !boxes.is_empty();
             self.boxes = boxes;

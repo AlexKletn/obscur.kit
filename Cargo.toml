@@ -81,6 +81,11 @@ unicode-script = "0.5.8"
 # Unicode Bidirectional Algorithm (UAX #9) for per-byte embedding levels driving
 # direction itemization (adapter-only; spec §5.10).
 unicode-bidi = "0.3.18"
+# Knuth-Liang hyphenation patterns for real in-word break points (adapter-only;
+# spec §5.10). Confined to the hyphenation adapter so the pure `obscur-text`
+# domain carries no pattern tables. `embed_en-us` compiles the US-English
+# dictionary into the binary so it loads with no runtime file access.
+hyphenation = { version = "0.8.4", features = ["embed_en-us"] }
 # adapters (optional, wired by the facade behind features)
 obscur-resource-decode = { path = "crates/adapters/obscur-resource-decode" }
 obscur-resource-fs = { path = "crates/adapters/obscur-resource-fs" }
@@ -95,6 +100,7 @@ obscur-system-linux = { path = "crates/adapters/obscur-system-linux" }
 obscur-system-web = { path = "crates/adapters/obscur-system-web" }
 obscur-text-harfrust = { path = "crates/adapters/obscur-text-harfrust" }
 obscur-text-unicode = { path = "crates/adapters/obscur-text-unicode" }
+obscur-text-hyphenation = { path = "crates/adapters/obscur-text-hyphenation" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

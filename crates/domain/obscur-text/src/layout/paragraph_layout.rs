@@ -1,12 +1,14 @@
 //! The full laid-out multi-font paragraph: lines stacked vertically (spec §5.10).
 
+use std::collections::{HashSet, VecDeque};
+
 use obscur_geometry::Size;
 
 use crate::font::FontId;
 use crate::shaping::{GlyphRun, ShapedGlyph, ShapedRun, TextDirection};
 use crate::span::TextRange;
 
-use super::{LineBreak, ParagraphLine, TextAlignment, TextOverflow};
+use super::{Hyphenator, LineBreak, NullHyphenator, ParagraphLine, TextAlignment, TextOverflow};
 
 /// A fully laid-out multi-font paragraph: its [`ParagraphLine`]s stacked
 /// vertically together with the computed total [`size`](Self::size), alignment,
@@ -46,12 +48,45 @@ struct Tagged {
 }
 
 /// A word: the tagged glyphs between two adjacent break opportunities, its
-/// advance width, and whether a mandatory break follows it. A word may contain
-/// glyphs from more than one font.
+/// advance width, whether a mandatory break follows it, and the interior
+/// hyphenation points at which it may be split. A word may contain glyphs from
+/// more than one font.
 struct Word {
     glyphs: Vec<Tagged>,
     width: f32,
     mandatory_break_after: bool,
+    /// The in-word split points (from the hyphenator or author soft hyphens),
+    /// ascending by [`head_width`](HyphenPoint::head_width).
+    hyphens: Vec<HyphenPoint>,
+}
+
+/// One interior hyphenation opportunity inside a [`Word`]: where the head ends,
+/// where the tail resumes, the head's advance width, and the source byte a
+/// rendered hyphen glyph maps back to.
+///
+/// A break splits the word into `glyphs[0..head_end]` (the head, which may gain
+/// a trailing hyphen glyph) and `glyphs[tail_start..]` (the tail). For an
+/// algorithmic (interior) break `tail_start == head_end`; for an author soft
+/// hyphen (`U+00AD`) `tail_start == head_end + 1`, so the invisible soft-hyphen
+/// glyph is dropped at the break and replaced by the rendered hyphen.
+#[derive(Clone, Copy)]
+struct HyphenPoint {
+    /// Exclusive glyph index the head runs up to.
+    head_end: usize,
+    /// Glyph index the tail resumes at (`head_end`, or `head_end + 1` for a
+    /// soft hyphen whose glyph is dropped).
+    tail_start: usize,
+    /// The advance width of the head glyphs (`glyphs[0..head_end]`).
+    head_width: f32,
+    /// The source byte offset the rendered hyphen glyph carries as its cluster.
+    break_cluster: usize,
+}
+
+/// The result of breaking a [`Word`] at a hyphenation point: the head glyphs
+/// (with an appended hyphen when one was supplied) and the remaining tail.
+struct Split {
+    head: Vec<Tagged>,
+    tail: Word,
 }
 
 /// One packed line: its logical-order tagged glyphs, the number of words it holds
@@ -125,7 +160,78 @@ impl ParagraphLayout {
         alignment: TextAlignment,
         overflow: TextOverflow,
     ) -> Self {
-        let stream = Self::flatten(runs);
+        // The historical wrapper is exactly hyphenated wrapping through the no-op
+        // [`NullHyphenator`] with no hyphen glyph: no interior break is ever
+        // proposed, so the output is byte-identical to whitespace-only wrapping.
+        Self::wrap_hyphenated(
+            runs,
+            text,
+            max_width,
+            line_height,
+            baseline,
+            alignment,
+            overflow,
+            &NullHyphenator,
+            None,
+        )
+    }
+
+    /// Wraps like [`wrap`](Self::wrap) but additionally breaks over-wide words at
+    /// the opportunities a `hyphenator` proposes plus every author soft hyphen
+    /// (`U+00AD`), optionally rendering a visible `hyphen_glyph` at each break
+    /// (spec §5.10).
+    ///
+    /// The break opportunities are [`LineBreak::opportunities`] (whitespace and
+    /// mandatory breaks — which delimit words) **plus**, for each word, the
+    /// `hyphenator`'s interior byte offsets, **plus** every `U+00AD` in `text` as
+    /// a soft break. When the greedy packer meets a word that alone is wider than
+    /// the remaining line width, it breaks the word at the **last** hyphenation
+    /// opportunity whose head (plus the hyphen glyph's advance) still fits, places
+    /// the head — followed by `hyphen_glyph` when supplied — on the line, and
+    /// continues the tail on the next line (which may hyphenate again). A word
+    /// with no fitting opportunity still takes its own (overflowing) line, exactly
+    /// as before. A `U+00AD` that is not taken as a break is left zero-advance and
+    /// invisible. Determinism, cluster mapping, bidi reordering, and justification
+    /// are preserved: the hyphen glyph carries the break's source cluster and
+    /// inherits the font, direction, and bidi level of the glyph it follows, so it
+    /// segments and reorders with the head.
+    ///
+    /// [`wrap`](Self::wrap) is the special case `hyphenator = NullHyphenator` and
+    /// `hyphen_glyph = None`.
+    // The wrap inputs plus the hyphenation port and hyphen glyph are cohesive
+    // positional arguments of one leaf entry point, not a public API surface.
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub fn wrap_hyphenated(
+        runs: &[ShapedRun],
+        text: &str,
+        max_width: f32,
+        line_height: f32,
+        baseline: f32,
+        alignment: TextAlignment,
+        overflow: TextOverflow,
+        hyphenator: &dyn Hyphenator,
+        hyphen_glyph: Option<ShapedGlyph>,
+    ) -> Self {
+        let mut stream = Self::flatten(runs);
+
+        // Author soft hyphens: the byte offset of every `U+00AD` char. Their
+        // shaped glyphs are forced to zero advance so an untaken soft hyphen is
+        // invisible mid-line (spec §5.10).
+        let soft: HashSet<usize> = text
+            .char_indices()
+            .filter(|&(_, ch)| ch == '\u{00AD}')
+            .map(|(index, _)| index)
+            .collect();
+        if !soft.is_empty() {
+            for tagged in &mut stream {
+                if soft.contains(&tagged.glyph.cluster()) {
+                    tagged.glyph = tagged.glyph.with_x_advance(0.0);
+                }
+            }
+        }
+        // Interior break offsets proposed by the hyphenator, one word at a time.
+        let hyphen_offsets = Self::hyphen_offsets(text, hyphenator);
 
         // Split the flattened stream into per-line packed groups.
         let mut lines_glyphs = if stream.is_empty() {
@@ -145,7 +251,7 @@ impl ParagraphLayout {
                 mandatory_break_after: false,
             }]
         } else {
-            Self::pack_lines(&stream, text, max_width)
+            Self::pack_lines(&stream, text, max_width, &hyphen_offsets, &soft, hyphen_glyph)
         };
 
         // Justify: stretch every eligible line's inter-word gaps so it fills
@@ -211,17 +317,64 @@ impl ParagraphLayout {
         stream
     }
 
+    /// Collects the interior hyphenation offsets a `hyphenator` proposes across
+    /// the words of `text`, mapped into full-text byte coordinates (spec §5.10).
+    ///
+    /// The text is split into the same words the greedy packer sees (the spans
+    /// between adjacent [`LineBreak::opportunities`], and the leading/trailing
+    /// spans); each word substring is offered to the hyphenator, and every
+    /// returned offset is shifted by the word's start. Offsets that are not
+    /// strictly interior to their word are dropped, so an over-eager adapter can
+    /// never split at a word edge.
+    fn hyphen_offsets(text: &str, hyphenator: &dyn Hyphenator) -> HashSet<usize> {
+        let mut offsets = HashSet::new();
+        let mut bounds: Vec<usize> = LineBreak::opportunities(text)
+            .iter()
+            .map(LineBreak::offset)
+            .collect();
+        bounds.push(text.len());
+        let mut start = 0;
+        for end in bounds {
+            if end > start && end <= text.len() {
+                let word = &text[start..end];
+                for offset in hyphenator.hyphenate(word) {
+                    let full = start + offset;
+                    // Keep only strictly interior break points.
+                    if full > start && full < end {
+                        offsets.insert(full);
+                    }
+                }
+            }
+            start = end.max(start);
+        }
+        offsets
+    }
+
     /// Groups a non-empty glyph `stream` into per-line [`PackedLine`]s under a
-    /// greedy `max_width` fit, recording each line's word count and whether a
-    /// mandatory break closed it. `max_width` is assumed positive.
-    fn pack_lines(stream: &[Tagged], text: &str, max_width: f32) -> Vec<PackedLine> {
-        let words = Self::split_words(stream, text);
+    /// greedy `max_width` fit, breaking an over-wide word at its last fitting
+    /// hyphenation opportunity (spec §5.10). `max_width` is assumed positive.
+    ///
+    /// `hyphen_offsets` and `soft` are the full-text byte offsets of algorithmic
+    /// and author-soft-hyphen break points; `hyphen_glyph` (when present) is
+    /// appended at each taken break so a visible hyphen renders.
+    fn pack_lines(
+        stream: &[Tagged],
+        text: &str,
+        max_width: f32,
+        hyphen_offsets: &HashSet<usize>,
+        soft: &HashSet<usize>,
+        hyphen_glyph: Option<ShapedGlyph>,
+    ) -> Vec<PackedLine> {
+        let mut queue: VecDeque<Word> =
+            Self::split_words(stream, text, hyphen_offsets, soft).into();
 
         let mut lines: Vec<PackedLine> = Vec::new();
         let mut current: Vec<Tagged> = Vec::new();
         let mut current_width = 0.0_f32;
         let mut word_count = 0_usize;
-        for word in words {
+        while let Some(word) = queue.pop_front() {
+            // Greedy rule: a whole word that no longer fits the (non-empty) line
+            // closes it, exactly as before hyphenation existed.
             if !current.is_empty() && current_width + word.width > max_width {
                 lines.push(PackedLine {
                     glyphs: std::mem::take(&mut current),
@@ -231,6 +384,27 @@ impl ParagraphLayout {
                 current_width = 0.0;
                 word_count = 0;
             }
+
+            // The word alone is wider than the space left on the (now possibly
+            // fresh) line: try to break it at the last fitting opportunity.
+            let remaining = max_width - current_width;
+            if word.width > remaining
+                && let Some(split) =
+                    Self::try_split(&word, remaining, hyphen_glyph, hyphen_offsets, soft)
+            {
+                current.extend_from_slice(&split.head);
+                word_count += 1;
+                lines.push(PackedLine {
+                    glyphs: std::mem::take(&mut current),
+                    word_count,
+                    mandatory_break_after: false,
+                });
+                current_width = 0.0;
+                word_count = 0;
+                queue.push_front(split.tail);
+                continue;
+            }
+
             current.extend_from_slice(&word.glyphs);
             current_width += word.width;
             word_count += 1;
@@ -260,6 +434,51 @@ impl ParagraphLayout {
             });
         }
         lines
+    }
+
+    /// Attempts to break `word` so its head (plus the hyphen glyph's advance)
+    /// fits within `limit`, returning the head glyphs (with an appended
+    /// `hyphen_glyph` when supplied) and the remaining tail as a fresh [`Word`].
+    ///
+    /// The **last** (widest) fitting opportunity is chosen. Returns [`None`] when
+    /// no opportunity's head fits, so the caller falls back to placing the whole
+    /// (overflowing) word.
+    fn try_split(
+        word: &Word,
+        limit: f32,
+        hyphen_glyph: Option<ShapedGlyph>,
+        hyphen_offsets: &HashSet<usize>,
+        soft: &HashSet<usize>,
+    ) -> Option<Split> {
+        let hyphen_adv = hyphen_glyph.map_or(0.0, |g| g.x_advance());
+        // Points are ascending by head width; take the widest that still fits.
+        let point = word
+            .hyphens
+            .iter()
+            .rev()
+            .find(|p| p.head_width + hyphen_adv <= limit)
+            .copied()?;
+
+        let mut head: Vec<Tagged> = word.glyphs[..point.head_end].to_vec();
+        if let (Some(glyph), Some(last)) = (hyphen_glyph, head.last().copied()) {
+            // The hyphen inherits the trailing head glyph's font/direction/level
+            // so it segments and bidi-reorders with the head, and carries the
+            // break's source cluster for hit-testing.
+            let hyphen = ShapedGlyph::new(glyph.glyph_id(), point.break_cluster, glyph.x_advance())
+                .with_offset(glyph.x_offset(), glyph.y_offset());
+            head.push(Tagged {
+                glyph: hyphen,
+                ..last
+            });
+        }
+
+        let tail = Self::make_word(
+            word.glyphs[point.tail_start..].to_vec(),
+            word.mandatory_break_after,
+            hyphen_offsets,
+            soft,
+        );
+        Some(Split { head, tail })
     }
 
     /// Stretches every justification-eligible line so it fills `max_width`,
@@ -325,36 +544,92 @@ impl ParagraphLayout {
     /// Segments a glyph `stream` into [`Word`]s at the line-break opportunities of
     /// `text`. A break at byte offset `o` starts a new word at the glyph whose
     /// cluster equals `o`; a hard break marks the preceding word for a mandatory
-    /// line break.
-    fn split_words(stream: &[Tagged], text: &str) -> Vec<Word> {
+    /// line break. Each word records its interior hyphenation points from
+    /// `hyphen_offsets` and `soft` (see [`make_word`](Self::make_word)).
+    fn split_words(
+        stream: &[Tagged],
+        text: &str,
+        hyphen_offsets: &HashSet<usize>,
+        soft: &HashSet<usize>,
+    ) -> Vec<Word> {
         let breaks = LineBreak::opportunities(text);
         let mut words: Vec<Word> = Vec::new();
         let mut glyphs: Vec<Tagged> = Vec::new();
-        let mut width = 0.0_f32;
         for tagged in stream {
             if let Some(brk) = breaks
                 .iter()
                 .find(|b| b.offset() == tagged.glyph.cluster())
                 && !glyphs.is_empty()
             {
-                words.push(Word {
-                    glyphs: std::mem::take(&mut glyphs),
-                    width,
-                    mandatory_break_after: brk.is_mandatory(),
-                });
-                width = 0.0;
+                words.push(Self::make_word(
+                    std::mem::take(&mut glyphs),
+                    brk.is_mandatory(),
+                    hyphen_offsets,
+                    soft,
+                ));
             }
             glyphs.push(*tagged);
-            width += tagged.glyph.x_advance();
         }
         if !glyphs.is_empty() {
-            words.push(Word {
-                glyphs,
-                width,
-                mandatory_break_after: false,
-            });
+            words.push(Self::make_word(glyphs, false, hyphen_offsets, soft));
         }
         words
+    }
+
+    /// Builds a [`Word`] from its `glyphs`, computing its advance width and its
+    /// interior hyphenation points from `hyphen_offsets` (algorithmic breaks) and
+    /// `soft` (author `U+00AD` breaks).
+    ///
+    /// An interior point sits **before** a glyph whose cluster is an algorithmic
+    /// offset (the head runs up to it, the tail resumes at it). A soft-hyphen
+    /// point sits **at** a `U+00AD` glyph: the head ends before it and the tail
+    /// resumes after it, dropping the zero-advance soft-hyphen glyph. Neither
+    /// point is emitted at the word's first glyph (an empty head) or where it
+    /// would leave an empty tail. Points are sorted ascending by head width.
+    fn make_word(
+        glyphs: Vec<Tagged>,
+        mandatory_break_after: bool,
+        hyphen_offsets: &HashSet<usize>,
+        soft: &HashSet<usize>,
+    ) -> Word {
+        let width: f32 = glyphs.iter().map(|t| t.glyph.x_advance()).sum();
+        let mut hyphens: Vec<HyphenPoint> = Vec::new();
+        let mut head_width = 0.0_f32;
+        for (index, tagged) in glyphs.iter().enumerate() {
+            let cluster = tagged.glyph.cluster();
+            // An algorithmic break resumes the tail *at* this glyph.
+            if index >= 1 && hyphen_offsets.contains(&cluster) {
+                hyphens.push(HyphenPoint {
+                    head_end: index,
+                    tail_start: index,
+                    head_width,
+                    break_cluster: cluster,
+                });
+            }
+            // A soft hyphen breaks *after* this (invisible) glyph, which is
+            // dropped; require a non-empty head and a non-empty tail.
+            if soft.contains(&cluster) && index >= 1 && index + 1 < glyphs.len() {
+                hyphens.push(HyphenPoint {
+                    head_end: index,
+                    tail_start: index + 1,
+                    head_width,
+                    break_cluster: cluster,
+                });
+            }
+            head_width += tagged.glyph.x_advance();
+        }
+        hyphens.sort_by(|a, b| {
+            a.head_width
+                .partial_cmp(&b.head_width)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.head_end.cmp(&b.head_end))
+        });
+        Word {
+            glyphs,
+            width,
+            mandatory_break_after,
+            hyphens,
+        }
     }
 
     /// Splits one line's logical-order `glyphs` into contiguous same-font AND
@@ -908,6 +1183,189 @@ mod tests {
         );
         assert_eq!(right.lines()[0].width(), 30.0);
         assert_eq!(right.lines()[0].x_offset(), 70.0);
+    }
+
+    /// A stub [`Hyphenator`] that proposes a single fixed byte `offset` in any
+    /// word long enough to contain it.
+    struct StubHyphenator {
+        offset: usize,
+    }
+
+    impl Hyphenator for StubHyphenator {
+        fn hyphenate(&self, word: &str) -> Vec<usize> {
+            if self.offset < word.len() {
+                vec![self.offset]
+            } else {
+                Vec::new()
+            }
+        }
+    }
+
+    /// Flattens a layout's lines back into `(cluster, advance)` per glyph so a
+    /// test can inspect what each wrapped line carries.
+    fn line_glyphs(layout: &ParagraphLayout, line: usize) -> Vec<(usize, f32, u32)> {
+        layout.lines()[line]
+            .segments()
+            .iter()
+            .flat_map(|s| s.run().glyphs().iter())
+            .map(|g| (g.cluster(), g.x_advance(), g.glyph_id()))
+            .collect()
+    }
+
+    #[test]
+    fn null_hyphenator_wrap_hyphenated_equals_wrap() {
+        // Requirement (a): the no-op hyphenator with no hyphen glyph reproduces
+        // plain `wrap` exactly, across a multi-line greedy wrap.
+        let text = "aaaa bbbb cccc";
+        let runs = vec![run(
+            0,
+            &(0..14).map(|i| (i, 6.0)).collect::<Vec<_>>(),
+            TextRange::new(0, 14),
+        )];
+        let plain = ParagraphLayout::wrap(
+            &runs, text, 50.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Clip,
+        );
+        let hyphenated = ParagraphLayout::wrap_hyphenated(
+            &runs,
+            text,
+            50.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Clip,
+            &NullHyphenator,
+            None,
+        );
+        assert_eq!(plain, hyphenated);
+    }
+
+    #[test]
+    fn stub_hyphenator_breaks_over_wide_word_with_visible_hyphen() {
+        // Requirement (b): "hyphenate" (nine 6px glyphs = 54) in a 40px box, with
+        // a stub proposing a break before byte 5 ("hyphe|nate") and a 4px hyphen
+        // glyph (id 999). The head "hyphe" + hyphen (34px) fits 40; the tail
+        // "nate" starts the next line.
+        let text = "hyphenate";
+        let runs = vec![run(
+            0,
+            &(0..9).map(|i| (i, 6.0)).collect::<Vec<_>>(),
+            TextRange::new(0, 9),
+        )];
+        let hyphen = ShapedGlyph::new(999, 0, 4.0);
+        let layout = ParagraphLayout::wrap_hyphenated(
+            &runs,
+            text,
+            40.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Clip,
+            &StubHyphenator { offset: 5 },
+            Some(hyphen),
+        );
+        assert_eq!(layout.line_count(), 2);
+
+        // Head line: five source glyphs plus the hyphen, width 34 ≤ 40.
+        let head = line_glyphs(&layout, 0);
+        assert_eq!(head.len(), 6);
+        assert_eq!(layout.lines()[0].width(), 34.0);
+        assert!(layout.lines()[0].width() <= 40.0);
+        // The head ends with the hyphen glyph, which carries the break cluster (5).
+        assert_eq!(head[5], (5, 4.0, 999));
+        // The five source glyphs precede it, clusters 0..4.
+        assert_eq!(
+            head[..5].iter().map(|g| g.0).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3, 4]
+        );
+
+        // Tail line: "nate" (clusters 5..8), no hyphen, width 24.
+        let tail = line_glyphs(&layout, 1);
+        assert_eq!(tail.iter().map(|g| g.0).collect::<Vec<_>>(), vec![5, 6, 7, 8]);
+        assert_eq!(layout.lines()[1].width(), 24.0);
+    }
+
+    #[test]
+    fn soft_hyphen_breaks_when_over_wide_and_is_invisible_otherwise() {
+        // Requirement (c): "aa\u{AD}bb" carries an author soft hyphen at byte 2.
+        // Glyph clusters are 0,1,2(soft),4,5 (the soft hyphen is two bytes).
+        let text = "aa\u{AD}bb";
+        let runs = vec![run(
+            0,
+            &[(0, 6.0), (1, 6.0), (2, 6.0), (4, 6.0), (5, 6.0)],
+            TextRange::new(0, 6),
+        )];
+
+        // Wide box: no break taken, the soft-hyphen glyph is zero-advance and no
+        // hyphen renders. One line of width 24 (four visible 6px glyphs).
+        let wide = ParagraphLayout::wrap_hyphenated(
+            &runs,
+            text,
+            100.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Clip,
+            &NullHyphenator,
+            Some(ShapedGlyph::new(999, 0, 4.0)),
+        );
+        assert_eq!(wide.line_count(), 1);
+        let one = line_glyphs(&wide, 0);
+        // The soft-hyphen glyph (cluster 2) survives but is invisible (0 advance).
+        assert_eq!(one.iter().find(|g| g.0 == 2).map(|g| g.1), Some(0.0));
+        // No hyphen glyph (id 999) is present mid-line.
+        assert!(!one.iter().any(|g| g.2 == 999));
+        assert_eq!(wide.lines()[0].width(), 24.0);
+
+        // Narrow box (20px): the soft hyphen is taken as the break. Head "aa" +
+        // hyphen (16px), tail "bb" on the next line; the soft glyph is dropped.
+        let narrow = ParagraphLayout::wrap_hyphenated(
+            &runs,
+            text,
+            20.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Clip,
+            &NullHyphenator,
+            Some(ShapedGlyph::new(999, 0, 4.0)),
+        );
+        assert_eq!(narrow.line_count(), 2);
+        let head = line_glyphs(&narrow, 0);
+        // Head: two source glyphs (0,1) then the hyphen (id 999, cluster 2).
+        assert_eq!(head.iter().map(|g| g.0).collect::<Vec<_>>(), vec![0, 1, 2]);
+        assert_eq!(head[2], (2, 4.0, 999));
+        assert_eq!(narrow.lines()[0].width(), 16.0);
+        // Tail: "bb" (clusters 4,5); the invisible soft-hyphen glyph was dropped.
+        let tail = line_glyphs(&narrow, 1);
+        assert_eq!(tail.iter().map(|g| g.0).collect::<Vec<_>>(), vec![4, 5]);
+    }
+
+    #[test]
+    fn over_wide_word_without_fitting_break_takes_its_own_line() {
+        // A stub whose only break (byte 1) leaves too wide a head still overflows
+        // gracefully: no split fits, so the whole word takes its own line as
+        // before hyphenation existed.
+        let text = "wwwww";
+        let runs = vec![run(
+            0,
+            &[(0, 20.0), (1, 20.0), (2, 20.0), (3, 20.0), (4, 20.0)],
+            TextRange::new(0, 5),
+        )];
+        // Only break is before byte 1: head "w" (20) + hyphen (4) = 24 > 10, so
+        // no opportunity fits and the word is placed whole.
+        let layout = ParagraphLayout::wrap_hyphenated(
+            &runs,
+            text,
+            10.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Clip,
+            &StubHyphenator { offset: 1 },
+            Some(ShapedGlyph::new(999, 0, 4.0)),
+        );
+        assert_eq!(layout.line_count(), 1);
+        assert_eq!(line_glyphs(&layout, 0).len(), 5);
     }
 
     #[test]
