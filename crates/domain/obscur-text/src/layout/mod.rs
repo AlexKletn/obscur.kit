@@ -1,6 +1,10 @@
 //! Layout module.
 mod line_break;
 pub use line_break::{BreakKind, LineBreak};
+mod paragraph_layout;
+pub use paragraph_layout::ParagraphLayout;
+mod paragraph_line;
+pub use paragraph_line::ParagraphLine;
 mod text_alignment;
 pub use text_alignment::TextAlignment;
 mod text_hit_test;
