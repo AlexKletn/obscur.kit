@@ -20,7 +20,7 @@
 //! concrete pixels at the layout/compute step against a
 //! [`LengthContext`](crate::property::LengthContext) (spec §4.5, §4.13).
 
-use crate::property::{GridTrack, Length, LengthExpr, StyleColor};
+use crate::property::{GridLineValue, GridTrack, Length, LengthExpr, StyleColor};
 use obscur_identity::InternedSymbol;
 
 /// A typed CSS property value.
@@ -59,6 +59,13 @@ pub enum PropertyValue {
     /// runtime converts each [`GridTrack`] to `obscur_layout`'s `TrackSize` when
     /// it bridges the computed style into a grid layout input (spec §4.1).
     GridTracks(Box<[GridTrack]>),
+    /// A single grid line placement edge: the value of one `grid-column-start` /
+    /// `grid-column-end` / `grid-row-start` / `grid-row-end` longhand. The
+    /// [`GridLineValue`] is a style-local line edge (`auto`, a 1-based line index,
+    /// or `span N`); the runtime converts it to `obscur_layout`'s `GridLine` and
+    /// assembles the four edges into a `GridPlacement` when it bridges the computed
+    /// style into a grid layout input (spec §4.13).
+    GridLine(GridLineValue),
     /// An unresolved `var(--name)` reference to a custom property, named by its
     /// interned symbol. This is a pre-resolution placeholder: it is substituted
     /// with the referenced custom property's value before computed-value
@@ -120,6 +127,15 @@ impl PropertyValue {
     pub fn as_grid_tracks(&self) -> Option<&[GridTrack]> {
         match self {
             Self::GridTracks(tracks) => Some(tracks),
+            _ => None,
+        }
+    }
+
+    /// Returns the grid line edge if this value is a [`PropertyValue::GridLine`].
+    #[must_use]
+    pub const fn as_grid_line(&self) -> Option<GridLineValue> {
+        match self {
+            Self::GridLine(line) => Some(*line),
             _ => None,
         }
     }
@@ -202,6 +218,14 @@ mod tests {
         assert_eq!(tracks[2], GridTrack::Auto);
         // Other value kinds are not grid tracks.
         assert_eq!(PropertyValue::Number(1.0).as_grid_tracks(), None);
+    }
+
+    #[test]
+    fn as_grid_line_extracts_only_grid_lines() {
+        use crate::property::GridLineValue;
+        let value = PropertyValue::GridLine(GridLineValue::Line(3));
+        assert_eq!(value.as_grid_line(), Some(GridLineValue::Line(3)));
+        assert_eq!(PropertyValue::Number(1.0).as_grid_line(), None);
     }
 
     #[test]

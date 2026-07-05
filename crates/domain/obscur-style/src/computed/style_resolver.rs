@@ -90,6 +90,11 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     // Grid container.
     PropertyId::GridTemplateColumns,
     PropertyId::GridTemplateRows,
+    // Grid item line placement.
+    PropertyId::GridColumnStart,
+    PropertyId::GridColumnEnd,
+    PropertyId::GridRowStart,
+    PropertyId::GridRowEnd,
     // Typography.
     PropertyId::FontSize,
     PropertyId::FontFamily,
@@ -187,6 +192,15 @@ impl StyleResolver {
             // the behaviour before authored templates were wired.
             | PropertyId::GridTemplateColumns
             | PropertyId::GridTemplateRows
+            // `grid-column-start` / `-end` / `grid-row-start` / `-end` initial is
+            // `auto`. There is no `GridLine` value for `auto` (it is the enum's
+            // implicit default), so an absent edge is left unresolved and the
+            // runtime falls back to the all-`Auto` `GridPlacement` default — exactly
+            // the behaviour before authored line placement was wired.
+            | PropertyId::GridColumnStart
+            | PropertyId::GridColumnEnd
+            | PropertyId::GridRowStart
+            | PropertyId::GridRowEnd
             // `text-align` initial is `start`; its keyword initial likewise needs
             // the interner, so an absent value falls back to the runtime's default
             // (`Start`) — byte-for-byte identical to today's behaviour.
@@ -711,6 +725,10 @@ mod tests {
                 | PropertyId::AlignItems
                 | PropertyId::GridTemplateColumns
                 | PropertyId::GridTemplateRows
+                | PropertyId::GridColumnStart
+                | PropertyId::GridColumnEnd
+                | PropertyId::GridRowStart
+                | PropertyId::GridRowEnd
                 | PropertyId::FontSize
                 | PropertyId::FontFamily
                 | PropertyId::Direction
@@ -749,6 +767,10 @@ mod tests {
             PropertyId::AlignItems,
             PropertyId::GridTemplateColumns,
             PropertyId::GridTemplateRows,
+            PropertyId::GridColumnStart,
+            PropertyId::GridColumnEnd,
+            PropertyId::GridRowStart,
+            PropertyId::GridRowEnd,
             PropertyId::FontSize,
             PropertyId::FontFamily,
             PropertyId::Direction,
@@ -880,6 +902,10 @@ mod tests {
             PropertyId::MaxHeight,
             PropertyId::GridTemplateColumns,
             PropertyId::GridTemplateRows,
+            PropertyId::GridColumnStart,
+            PropertyId::GridColumnEnd,
+            PropertyId::GridRowStart,
+            PropertyId::GridRowEnd,
         ] {
             assert_eq!(computed.get(id), None, "{} should stay deferred", id.name());
         }
@@ -933,6 +959,39 @@ mod tests {
         assert_eq!(tracks.len(), 3);
         assert_eq!(tracks[0], GridTrack::Fixed(Length::px(100.0)));
         assert_eq!(tracks[2], GridTrack::Fr(2.0));
+    }
+
+    /// An authored `grid-column-start` / `-end` line edge flows through the
+    /// resolver as a concrete computed value (it is not a deferred keyword initial).
+    #[test]
+    fn authored_grid_line_flows_to_computed_style() {
+        use crate::property::GridLineValue;
+        let resolver = StyleResolver::new();
+        let mut cascaded = ResolvedDeclarations::new();
+        cascaded.insert(
+            PropertyId::GridColumnStart,
+            PropertyValue::GridLine(GridLineValue::Line(1)),
+        );
+        cascaded.insert(
+            PropertyId::GridColumnEnd,
+            PropertyValue::GridLine(GridLineValue::Span(2)),
+        );
+
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+        assert_eq!(
+            computed
+                .get(PropertyId::GridColumnStart)
+                .map(ComputedValue::value)
+                .and_then(PropertyValue::as_grid_line),
+            Some(GridLineValue::Line(1))
+        );
+        assert_eq!(
+            computed
+                .get(PropertyId::GridColumnEnd)
+                .map(ComputedValue::value)
+                .and_then(PropertyValue::as_grid_line),
+            Some(GridLineValue::Span(2))
+        );
     }
 
     /// Inheritance still flows for an inherited property newly in the set:

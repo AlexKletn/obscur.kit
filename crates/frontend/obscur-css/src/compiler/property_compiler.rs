@@ -23,7 +23,8 @@ use crate::parser::{ParsedDeclaration, ParsedValue};
 use obscur_identity::InternedSymbol;
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{
-    layout_keyword, CustomProperty, GridTrack, Length, PropertyId, PropertyValue, StyleColor,
+    layout_keyword, CustomProperty, GridLineValue, GridTrack, Length, PropertyId, PropertyValue,
+    StyleColor,
 };
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
@@ -144,6 +145,17 @@ impl PropertyCompiler {
                 interner,
             );
         }
+        if let Some((start, end)) = grid_line_shorthand_sides(&decl.name) {
+            return expand_grid_line_shorthand(
+                decl,
+                start,
+                end,
+                specificity,
+                origin,
+                source_order,
+                selector,
+            );
+        }
         vec![self.compile(decl, specificity, origin, source_order, selector, interner)]
     }
 }
@@ -229,6 +241,145 @@ fn expand_box_shorthand(
         .collect()
 }
 
+/// Returns the two longhand [`PropertyId`]s (`start`, `end`) that the
+/// `grid-column` / `grid-row` shorthand expands into, or [`None`] for any other
+/// name.
+fn grid_line_shorthand_sides(name: &str) -> Option<(PropertyId, PropertyId)> {
+    if name.eq_ignore_ascii_case("grid-column") {
+        Some((PropertyId::GridColumnStart, PropertyId::GridColumnEnd))
+    } else if name.eq_ignore_ascii_case("grid-row") {
+        Some((PropertyId::GridRowStart, PropertyId::GridRowEnd))
+    } else {
+        None
+    }
+}
+
+/// Expands a `grid-column` / `grid-row` shorthand into its `*-start` / `*-end`
+/// longhands (spec §4.13).
+///
+/// The value is split on a `/` delimiter into a start edge and an optional end
+/// edge; each side is a `<grid-line>` — an integer line index (`3`), `span N`, or
+/// `auto`. With no `/`, the end edge is `auto` (the line-based single-value form;
+/// named-ident copying is out of scope), so `grid-column: 2` is `2 / auto` and
+/// `grid-column: span 2` is `span 2 / auto`. An unparseable edge degrades the whole
+/// shorthand to a single [`CompiledDeclaration::Unsupported`] rather than dropping
+/// it.
+fn expand_grid_line_shorthand(
+    decl: &ParsedDeclaration,
+    start_id: PropertyId,
+    end_id: PropertyId,
+    specificity: SelectorSpecificity,
+    origin: CascadeOrigin,
+    source_order: u32,
+    selector: Option<SelectorId>,
+) -> Vec<CompiledDeclaration> {
+    let unsupported = || {
+        vec![CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
+            value_unsupported_kind(&decl.value),
+            &*decl.name,
+            decl.span,
+        ))]
+    };
+    // A `/` separates the start edge from the end edge; more than one `/` is not a
+    // valid two-value placement.
+    let mut sides = decl.value.split(|v| matches!(v, ParsedValue::Delimiter('/')));
+    let Some(start_group) = sides.next() else {
+        return unsupported();
+    };
+    let end_group = sides.next();
+    if sides.next().is_some() {
+        return unsupported();
+    }
+    let Some(start) = grid_line_edge(start_group) else {
+        return unsupported();
+    };
+    // No `/`: the end edge is `auto` (the line-based single-value form).
+    let end = match end_group {
+        Some(group) => match grid_line_edge(group) {
+            Some(edge) => edge,
+            None => return unsupported(),
+        },
+        None => GridLineValue::Auto,
+    };
+    let important = if decl.important {
+        ImportantFlag::Important
+    } else {
+        ImportantFlag::Normal
+    };
+    [(start_id, start), (end_id, end)]
+        .into_iter()
+        .map(|(property, edge)| {
+            CompiledDeclaration::Standard(Declaration::new(
+                property,
+                PropertyValue::GridLine(edge),
+                important,
+                origin,
+                specificity,
+                source_order,
+                selector,
+            ))
+        })
+        .collect()
+}
+
+/// Lowers one `<grid-line>` edge from a component group: `auto`, a non-zero
+/// integer line index (`3`, `-1`), or `span N` (`N` a positive integer, in either
+/// order `span 2` / `2 span`). Returns [`None`] for anything else.
+fn grid_line_edge(group: &[ParsedValue]) -> Option<GridLineValue> {
+    match group {
+        [ParsedValue::Keyword(keyword)] if keyword.eq_ignore_ascii_case("auto") => {
+            Some(GridLineValue::Auto)
+        }
+        [one] => grid_line_integer(one).map(GridLineValue::Line),
+        // `span N` / `N span`: exactly one `span` keyword and one positive integer.
+        [a, b] => {
+            let span = grid_line_span(a, b).or_else(|| grid_line_span(b, a))?;
+            Some(GridLineValue::Span(span))
+        }
+        _ => None,
+    }
+}
+
+/// Reads a non-zero integer line index from a single component (`3`, `-1`); a
+/// zero or non-integral number is not a valid line and yields [`None`].
+#[allow(clippy::cast_possible_truncation)]
+fn grid_line_integer(value: &ParsedValue) -> Option<i32> {
+    match value {
+        ParsedValue::Number(n) if n.fract() == 0.0 && *n != 0.0 => Some(*n as i32),
+        _ => None,
+    }
+}
+
+/// Reads a `span N` count when `keyword` is `span` and `count` is a positive
+/// integer, as a `u16`; [`None`] otherwise.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn grid_line_span(keyword: &ParsedValue, count: &ParsedValue) -> Option<u16> {
+    let ParsedValue::Keyword(keyword) = keyword else {
+        return None;
+    };
+    if !keyword.eq_ignore_ascii_case("span") {
+        return None;
+    }
+    match count {
+        ParsedValue::Number(n) if n.fract() == 0.0 && *n >= 1.0 => {
+            Some((*n as u32).min(u32::from(u16::MAX)) as u16)
+        }
+        _ => None,
+    }
+}
+
+/// Lowers a `grid-column-start` / `-end` / `grid-row-start` / `-end` longhand into
+/// a [`PropertyValue::GridLine`]. The CSS-wide keywords (`inherit` / `initial` /
+/// `unset`) take priority; otherwise the value is a single `<grid-line>` edge.
+fn lower_grid_line(values: &[ParsedValue]) -> Option<PropertyValue> {
+    if let [ParsedValue::Keyword(keyword)] = values
+        && let Some(wide) = css_wide_keyword(keyword)
+    {
+        return Some(wide);
+    }
+    grid_line_edge(values).map(PropertyValue::GridLine)
+}
+
 /// Lowers one component of a box shorthand to a [`PropertyValue::Length`].
 ///
 /// Accepts the same lengths as the longhand path (`px`, `%`, `auto`) plus a
@@ -254,7 +405,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 35] = [
+    const ALL: [PropertyId; 39] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::Opacity,
@@ -283,6 +434,10 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::AlignItems,
         PropertyId::GridTemplateColumns,
         PropertyId::GridTemplateRows,
+        PropertyId::GridColumnStart,
+        PropertyId::GridColumnEnd,
+        PropertyId::GridRowStart,
+        PropertyId::GridRowEnd,
         PropertyId::FontSize,
         PropertyId::FontFamily,
         PropertyId::Direction,
@@ -332,6 +487,15 @@ fn lower_for_property(
     }
     if property == PropertyId::FontWeight {
         return lower_font_weight(values);
+    }
+    if matches!(
+        property,
+        PropertyId::GridColumnStart
+            | PropertyId::GridColumnEnd
+            | PropertyId::GridRowStart
+            | PropertyId::GridRowEnd
+    ) {
+        return lower_grid_line(values);
     }
     if matches!(
         property,
@@ -1609,5 +1773,158 @@ mod tests {
         // A bare colour is not a valid track.
         let (result, _) = compile("grid-template-columns: red");
         assert!(matches!(result, CompiledDeclaration::Unsupported(_)));
+    }
+
+    // ---- grid-column / grid-row line placement ----
+
+    /// The `(PropertyId, GridLineValue)` pairs a compiled declaration list carries.
+    fn grid_lines(compiled: &[CompiledDeclaration]) -> Vec<(PropertyId, GridLineValue)> {
+        compiled
+            .iter()
+            .map(|d| {
+                let decl = standard_of(d);
+                let PropertyValue::GridLine(edge) = decl.value() else {
+                    panic!("expected grid line value, got {:?}", decl.value());
+                };
+                (decl.property(), *edge)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn resolves_grid_line_longhand_names() {
+        assert_eq!(
+            property_id_from_name("grid-column-start"),
+            Some(PropertyId::GridColumnStart)
+        );
+        assert_eq!(
+            property_id_from_name("GRID-COLUMN-END"),
+            Some(PropertyId::GridColumnEnd)
+        );
+        assert_eq!(
+            property_id_from_name("grid-row-start"),
+            Some(PropertyId::GridRowStart)
+        );
+        assert_eq!(
+            property_id_from_name("grid-row-end"),
+            Some(PropertyId::GridRowEnd)
+        );
+        // The shorthands are not longhand ids.
+        assert_eq!(property_id_from_name("grid-column"), None);
+        assert_eq!(property_id_from_name("grid-row"), None);
+    }
+
+    #[test]
+    fn grid_column_slash_form_expands_to_two_line_longhands() {
+        // `grid-column: 1 / 3` -> start = line 1, end = line 3.
+        assert_eq!(
+            grid_lines(&compile_all("grid-column: 1 / 3")),
+            vec![
+                (PropertyId::GridColumnStart, GridLineValue::Line(1)),
+                (PropertyId::GridColumnEnd, GridLineValue::Line(3)),
+            ]
+        );
+    }
+
+    #[test]
+    fn grid_column_single_line_sets_end_auto() {
+        // `grid-column: 2` -> start = line 2, end = auto.
+        assert_eq!(
+            grid_lines(&compile_all("grid-column: 2")),
+            vec![
+                (PropertyId::GridColumnStart, GridLineValue::Line(2)),
+                (PropertyId::GridColumnEnd, GridLineValue::Auto),
+            ]
+        );
+    }
+
+    #[test]
+    fn grid_column_span_form_sets_start_span_end_auto() {
+        // CSS-faithful: a single non-ident `grid-column: span 2` sets the *start*
+        // edge to `span 2` and the end edge to `auto` (the item spans 2 columns,
+        // auto-placed).
+        assert_eq!(
+            grid_lines(&compile_all("grid-column: span 2")),
+            vec![
+                (PropertyId::GridColumnStart, GridLineValue::Span(2)),
+                (PropertyId::GridColumnEnd, GridLineValue::Auto),
+            ]
+        );
+    }
+
+    #[test]
+    fn grid_row_single_line_expands() {
+        // `grid-row: 2` -> start = line 2, end = auto.
+        assert_eq!(
+            grid_lines(&compile_all("grid-row: 2")),
+            vec![
+                (PropertyId::GridRowStart, GridLineValue::Line(2)),
+                (PropertyId::GridRowEnd, GridLineValue::Auto),
+            ]
+        );
+    }
+
+    #[test]
+    fn grid_row_span_slash_line_end_anchored() {
+        // `grid-row: span 2 / 5` -> start = span 2, end = line 5.
+        assert_eq!(
+            grid_lines(&compile_all("grid-row: span 2 / 5")),
+            vec![
+                (PropertyId::GridRowStart, GridLineValue::Span(2)),
+                (PropertyId::GridRowEnd, GridLineValue::Line(5)),
+            ]
+        );
+    }
+
+    #[test]
+    fn grid_line_auto_edge_is_accepted() {
+        assert_eq!(
+            grid_lines(&compile_all("grid-column: auto / 3")),
+            vec![
+                (PropertyId::GridColumnStart, GridLineValue::Auto),
+                (PropertyId::GridColumnEnd, GridLineValue::Line(3)),
+            ]
+        );
+    }
+
+    #[test]
+    fn grid_line_longhands_lower_directly() {
+        assert_eq!(
+            value_of("grid-column-start: 1"),
+            PropertyValue::GridLine(GridLineValue::Line(1))
+        );
+        assert_eq!(
+            value_of("grid-column-end: span 3"),
+            PropertyValue::GridLine(GridLineValue::Span(3))
+        );
+        assert_eq!(
+            value_of("grid-row-start: auto"),
+            PropertyValue::GridLine(GridLineValue::Auto)
+        );
+        assert_eq!(
+            standard("grid-row-end: 4").0.property(),
+            PropertyId::GridRowEnd
+        );
+    }
+
+    #[test]
+    fn grid_line_longhand_honours_css_wide_keywords() {
+        assert_eq!(value_of("grid-column-start: inherit"), PropertyValue::Inherit);
+        assert_eq!(value_of("grid-row-end: initial"), PropertyValue::Initial);
+    }
+
+    #[test]
+    fn invalid_grid_line_is_unsupported() {
+        // A bare colour is not a valid grid line.
+        let decls = compile_all("grid-column: red");
+        assert_eq!(decls.len(), 1);
+        assert!(matches!(decls[0], CompiledDeclaration::Unsupported(_)));
+        // A zero line index is invalid.
+        let (result, _) = compile("grid-column-start: 0");
+        assert!(matches!(result, CompiledDeclaration::Unsupported(_)));
+        // More than one `/` is not a valid placement.
+        let decls = compile_all("grid-column: 1 / 2 / 3");
+        assert_eq!(decls.len(), 1);
+        assert!(matches!(decls[0], CompiledDeclaration::Unsupported(_)));
     }
 }

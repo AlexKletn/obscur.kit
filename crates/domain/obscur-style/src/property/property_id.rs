@@ -88,6 +88,16 @@ pub enum PropertyId {
     /// The `grid-template-rows` property (a `GridTracks` track list).
     GridTemplateRows,
 
+    // ---- Grid item line placement (a `GridLine` edge; not inherited) ----
+    /// The `grid-column-start` longhand (the `grid-column` start edge).
+    GridColumnStart,
+    /// The `grid-column-end` longhand (the `grid-column` end edge).
+    GridColumnEnd,
+    /// The `grid-row-start` longhand (the `grid-row` start edge).
+    GridRowStart,
+    /// The `grid-row-end` longhand (the `grid-row` end edge).
+    GridRowEnd,
+
     // ---- Typography (inherited) ----
     /// The `font-size` property (Length-valued, inherited).
     FontSize,
@@ -150,6 +160,10 @@ impl PropertyId {
             Self::AlignItems => "align-items",
             Self::GridTemplateColumns => "grid-template-columns",
             Self::GridTemplateRows => "grid-template-rows",
+            Self::GridColumnStart => "grid-column-start",
+            Self::GridColumnEnd => "grid-column-end",
+            Self::GridRowStart => "grid-row-start",
+            Self::GridRowEnd => "grid-row-end",
             Self::FontSize => "font-size",
             Self::FontFamily => "font-family",
             Self::Direction => "direction",
@@ -203,6 +217,10 @@ impl PropertyId {
             | Self::AlignItems
             | Self::GridTemplateColumns
             | Self::GridTemplateRows
+            | Self::GridColumnStart
+            | Self::GridColumnEnd
+            | Self::GridRowStart
+            | Self::GridRowEnd
             // `text-overflow` does not inherit (unlike the other typography
             // properties, which do).
             | Self::TextOverflow => Inheritance::NotInherited,
@@ -347,6 +365,27 @@ mod tests {
                 .default_inheritance()
                 .is_inherited()
         );
+    }
+
+    #[test]
+    fn grid_line_names_and_not_inherited() {
+        assert_eq!(PropertyId::GridColumnStart.name(), "grid-column-start");
+        assert_eq!(PropertyId::GridColumnEnd.name(), "grid-column-end");
+        assert_eq!(PropertyId::GridRowStart.name(), "grid-row-start");
+        assert_eq!(PropertyId::GridRowEnd.name(), "grid-row-end");
+        // Like the other layout / box properties, line placement resets per element.
+        for id in [
+            PropertyId::GridColumnStart,
+            PropertyId::GridColumnEnd,
+            PropertyId::GridRowStart,
+            PropertyId::GridRowEnd,
+        ] {
+            assert!(
+                !id.default_inheritance().is_inherited(),
+                "{} should not inherit",
+                id.name()
+            );
+        }
     }
 
     #[test]

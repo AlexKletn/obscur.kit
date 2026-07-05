@@ -5,13 +5,16 @@ use std::collections::HashMap;
 use obscur_geometry::{BoxConstraints, Insets, Point, Rect, Size};
 use obscur_identity::{InternedSymbol, NodeId};
 use obscur_layout::algorithm::{
-    ChildMeasurer, FlexLayout, FlowLayout, GridLayout, LayoutAlgorithm, LayoutChild,
+    ChildMeasurer, FlexLayout, FlowLayout, GridLayout, GridLine, GridPlacement, LayoutAlgorithm,
+    LayoutChild,
 };
 use obscur_layout::model::{
     AlignItems, Dimension, FlexDirection, JustifyContent, LayoutBox, LayoutDisplay, LayoutStyle,
 };
 use obscur_style::computed::{ComputedStyle, ComputedValue};
-use obscur_style::property::{layout_keyword, Length, LengthContext, PropertyId, PropertyValue};
+use obscur_style::property::{
+    layout_keyword, GridLineValue, Length, LengthContext, PropertyId, PropertyValue,
+};
 use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontSource, GenericFamily,
 };
@@ -461,9 +464,40 @@ fn layout_style_from(computed: &ComputedStyle, viewport: Size, root_font_size: f
         // The node's font size, so a text leaf can shape and wrap to its
         // available width inside the constraint-aware measure/arrange pass.
         font_size: font_size_px(computed),
-        // Line-based grid placement is not yet mapped from CSS; keep the
-        // all-auto default so grid children auto-place as before.
-        grid_placement: default.grid_placement,
+        // Line-based grid placement from the four `grid-column`/`grid-row`
+        // longhands; unauthored edges stay `Auto`, so a non-placed item keeps the
+        // all-auto default and auto-places exactly as before.
+        grid_placement: grid_placement_of(computed),
+    }
+}
+
+/// Assembles a [`GridPlacement`] from the four computed grid-line longhands
+/// (`grid-column-start` / `-end` / `grid-row-start` / `-end`).
+///
+/// Each edge is read via [`grid_line_of`]; an absent edge is [`GridLine::Auto`], so
+/// a node that authored no placement yields the all-[`GridLine::Auto`] default —
+/// byte-for-byte the historical auto-placement behaviour.
+fn grid_placement_of(computed: &ComputedStyle) -> GridPlacement {
+    GridPlacement::new(
+        grid_line_of(computed, PropertyId::GridColumnStart),
+        grid_line_of(computed, PropertyId::GridColumnEnd),
+        grid_line_of(computed, PropertyId::GridRowStart),
+        grid_line_of(computed, PropertyId::GridRowEnd),
+    )
+}
+
+/// Reads one grid-line longhand and converts the style-local [`GridLineValue`] into
+/// an `obscur_layout` [`GridLine`], defaulting to [`GridLine::Auto`] when the
+/// property is absent or is not a grid-line value.
+fn grid_line_of(computed: &ComputedStyle, property: PropertyId) -> GridLine {
+    match computed
+        .get(property)
+        .map(ComputedValue::value)
+        .and_then(PropertyValue::as_grid_line)
+    {
+        Some(GridLineValue::Line(index)) => GridLine::Line(index),
+        Some(GridLineValue::Span(n)) => GridLine::Span(n),
+        Some(GridLineValue::Auto) | None => GridLine::Auto,
     }
 }
 
@@ -1229,6 +1263,44 @@ mod tests {
         // Leaf absolute origin = root padding (10) + container padding (5) = 15.
         assert_eq!(boxes[&leaf].origin(), Point::new(15.0, 15.0));
         assert_eq!(boxes[&leaf].size(), Size::new(50.0, 50.0));
+    }
+
+    #[test]
+    fn mapping_builds_grid_placement_from_computed_lines() {
+        let mut computed = ComputedStyle::new();
+        computed.set(
+            PropertyId::GridColumnStart,
+            ComputedValue::from_concrete(PropertyValue::GridLine(GridLineValue::Line(1)))
+                .expect("concrete"),
+        );
+        computed.set(
+            PropertyId::GridColumnEnd,
+            ComputedValue::from_concrete(PropertyValue::GridLine(GridLineValue::Line(3)))
+                .expect("concrete"),
+        );
+        computed.set(
+            PropertyId::GridRowStart,
+            ComputedValue::from_concrete(PropertyValue::GridLine(GridLineValue::Span(2)))
+                .expect("concrete"),
+        );
+        // `grid-row-end` left unset -> Auto.
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let placement = style.grid_placement();
+        assert_eq!(placement.column_start(), GridLine::Line(1));
+        assert_eq!(placement.column_end(), GridLine::Line(3));
+        assert_eq!(placement.row_start(), GridLine::Span(2));
+        assert_eq!(placement.row_end(), GridLine::Auto);
+        // The column axis resolves to a definite start of track 0, span 2.
+        assert_eq!(placement.resolve_column(3), (Some(0), 2));
+    }
+
+    #[test]
+    fn mapping_defaults_grid_placement_to_all_auto() {
+        // A node with no authored line placement keeps the all-Auto default, so it
+        // auto-places exactly as before.
+        let computed = ComputedStyle::new();
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        assert_eq!(style.grid_placement(), GridPlacement::default());
     }
 
     #[test]

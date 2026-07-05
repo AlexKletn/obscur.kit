@@ -1,6 +1,8 @@
 //! Property module.
 mod custom_property;
 pub use custom_property::CustomProperty;
+mod grid_line_value;
+pub use grid_line_value::GridLineValue;
 mod grid_track;
 pub use grid_track::GridTrack;
 mod inheritance;
