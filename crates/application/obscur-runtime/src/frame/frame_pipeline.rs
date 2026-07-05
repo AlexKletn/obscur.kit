@@ -190,7 +190,12 @@ impl FramePipeline {
         let layout_styles = self
             .layout
             .layout_styles_from(&computed, ctx.viewport(), root_font);
-        let boxes = self.layout.layout(tree, &layout_styles, ctx.viewport());
+        // Text leaves are shaped + wrapped to their available width inside the
+        // layout pass through the scene's shaper (disjoint field, so a legal split
+        // borrow), so `self.scene` later re-wraps and paints identical lines.
+        let boxes =
+            self.layout
+                .layout(tree, &layout_styles, ctx.viewport(), self.scene.shaper());
         let relaid_out = !boxes.is_empty();
 
         // Compose: build the display list, install it, and publish a snapshot.

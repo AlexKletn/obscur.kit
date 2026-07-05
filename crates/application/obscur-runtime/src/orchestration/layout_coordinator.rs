@@ -15,6 +15,7 @@ use obscur_style::property::{layout_keyword, Length, LengthContext, PropertyId, 
 use obscur_text::font::{
     FontAttributes, FontFace, FontFamily, FontMetrics, FontSource, GenericFamily,
 };
+use obscur_text::layout::{TextAlignment, TextLayout, TextOverflow};
 use obscur_text::shaping::{ShapingRequest, TextShaper};
 use obscur_tree::tree::RetainedTree;
 
@@ -103,55 +104,6 @@ impl LayoutCoordinator {
             .collect()
     }
 
-    /// Measures every text node and injects its intrinsic size into `styles`.
-    ///
-    /// This is the text-sizing pass that runs **between**
-    /// [`layout_styles_from`](Self::layout_styles_from) and [`layout`](Self::layout):
-    /// a [`NodeKind::Text`](obscur_tree::node::NodeKind::Text) node carries no CSS
-    /// width/height, so without this pass its box collapses to zero. For each text
-    /// node in `tree` the pass shapes the content **once** through `shaper` and
-    /// derives its intrinsic size — `width = ` the run's total advance,
-    /// `height = ` the shaper's [`line_height`](obscur_text::shaping::LineMetrics::line_height)
-    /// at the node's font size — then writes it into that node's [`LayoutStyle`]
-    /// **only where the style leaves the dimension [`Auto`](Dimension::Auto)**, so an
-    /// explicit CSS size is never overridden. A node with no existing style entry
-    /// gets a default one first, so text nodes absent from `computed` are still sized.
-    ///
-    /// The font size is the node's computed `font-size` (via the same resolution as
-    /// the rest of the bridge), falling back to [`DEFAULT_FONT_SIZE`]. The same
-    /// `shaper` and size are used by the scene phase, so measured boxes and drawn
-    /// glyphs agree. The flow/flex math in [`layout`](Self::layout) is untouched;
-    /// it simply sees the now-sized text nodes as fixed-size leaves.
-    ///
-    /// Single-line only: the whole run is measured as one line (no wrapping), so a
-    /// long string yields a wide box rather than wrapping to the container.
-    pub fn measure_text(
-        &self,
-        tree: &RetainedTree,
-        styles: &mut LayoutStyles,
-        computed: &ComputedStyles,
-        shaper: &dyn TextShaper,
-    ) {
-        let face = measure_face();
-        for (node, retained) in tree.iter() {
-            let Some(content) = retained.kind().text() else {
-                continue;
-            };
-            let font_size = computed.get(&node).map_or(DEFAULT_FONT_SIZE, font_size_px);
-            let advance = shaper
-                .shape(&ShapingRequest::new(content, face.clone(), font_size))
-                .advance();
-            let line_height = shaper.line_metrics(font_size).line_height();
-            let entry = styles.entry(node).or_default();
-            if entry.width.is_auto() {
-                entry.width = Dimension::Px(advance);
-            }
-            if entry.height.is_auto() {
-                entry.height = Dimension::Px(line_height);
-            }
-        }
-    }
-
     /// Lays out the whole tree under `viewport` and returns each node's absolute
     /// [`LayoutBox`].
     ///
@@ -163,18 +115,32 @@ impl LayoutCoordinator {
     /// [`layout_styles_from`](Self::layout_styles_from)); a node missing from
     /// `styles` is laid out with [`LayoutStyle::default`].
     ///
+    /// # Text is a constraint-aware leaf (spec §5.10)
+    ///
+    /// A [`NodeKind::Text`](obscur_tree::node::NodeKind::Text) node carries no CSS
+    /// width/height, so the measure/arrange pass sizes it itself: it shapes the
+    /// content through `shaper` at the node's [`font_size`](LayoutStyle::font_size)
+    /// and **wraps** the run to the finite `max.width` its container hands down,
+    /// returning the wrapped paragraph's [`size`](TextLayout::size) as the node's
+    /// border box. A long string in a narrow container therefore wraps to *more,
+    /// shorter lines* (a taller box) instead of one wide line. The **same**
+    /// `shaper` and size drive the scene phase, which re-wraps each text node to
+    /// its arranged box width, so the measured height and the painted line count
+    /// always agree.
+    ///
     /// # Redundant work (Phase 1)
     ///
     /// The selected algorithm runs once per node during `arrange`, and each run
     /// re-measures that node's children (which recurses). This is deterministic
     /// and correct but does redundant measurement; a `LayoutCache` will remove
-    /// the redundancy in a later phase (spec §4.2).
+    /// the redundancy in a later phase (spec §4.2). Text is reshaped per frame.
     #[must_use]
     pub fn layout(
         &self,
         tree: &RetainedTree,
         styles: &LayoutStyles,
         viewport: Size,
+        shaper: &dyn TextShaper,
     ) -> LayoutBoxes {
         let mut boxes = LayoutBoxes::new();
         let Some(root) = tree.root() else {
@@ -187,10 +153,45 @@ impl LayoutCoordinator {
             Point::ORIGIN,
             BoxConstraints::tight(viewport),
             &mut boxes,
+            shaper,
             MAX_DEPTH,
         );
         boxes
     }
+}
+
+/// Shapes and wraps a text node's `content` to its available width and returns
+/// the wrapped paragraph's border-box size, constrained by `constraints`.
+///
+/// The run is shaped once at `style.font_size` and wrapped (greedy word wrap) to
+/// the finite `constraints.max.width`, minus the node's own horizontal
+/// border/padding (usually zero for a text node). The returned
+/// [`size`](TextLayout::size) is the widest line's width by the summed line
+/// heights, so a long string in a narrow width yields a taller box; the scene
+/// phase re-wraps to this box width and so emits exactly the same lines.
+fn measure_text_node(
+    content: &str,
+    style: &LayoutStyle,
+    constraints: BoxConstraints,
+    shaper: &dyn TextShaper,
+) -> Size {
+    let font_size = style.font_size;
+    let metrics = shaper.line_metrics(font_size);
+    let run = shaper.shape(&ShapingRequest::new(content, measure_face(), font_size));
+    // A text node's own horizontal border/padding shrinks the wrap width; it is
+    // almost always zero, but subtract it defensively so the content fits.
+    let horizontal = style.padding.left + style.padding.right + style.border.left + style.border.right;
+    let max_width = (constraints.max.width - horizontal).max(0.0);
+    let layout = TextLayout::wrap(
+        &run,
+        content,
+        max_width,
+        metrics.line_height(),
+        metrics.baseline(),
+        TextAlignment::Start,
+        TextOverflow::Clip,
+    );
+    constraints.constrain(layout.size())
 }
 
 /// Maps a single [`ComputedStyle`] into layout's own [`LayoutStyle`].
@@ -265,6 +266,9 @@ fn layout_style_from(computed: &ComputedStyle, viewport: Size, root_font_size: f
         flex_grow: number_of(computed, PropertyId::FlexGrow, default.flex_grow),
         flex_shrink: number_of(computed, PropertyId::FlexShrink, default.flex_shrink),
         flex_basis: dimension_of(computed, PropertyId::FlexBasis, &ctx),
+        // The node's font size, so a text leaf can shape and wrap to its
+        // available width inside the constraint-aware measure/arrange pass.
+        font_size: font_size_px(computed),
     }
 }
 
@@ -495,6 +499,8 @@ struct RecMeasurer<'a> {
     /// The children of the node currently being laid out, parallel to the
     /// indices the algorithm passes to [`ChildMeasurer::measure_child`].
     children: &'a [LayoutChild],
+    /// The text shaper used to shape and wrap a text-leaf child.
+    shaper: &'a dyn TextShaper,
     /// Remaining recursion budget for children measured through this measurer.
     depth: u32,
 }
@@ -507,6 +513,7 @@ impl ChildMeasurer for RecMeasurer<'_> {
                 self.styles,
                 child.node(),
                 constraints,
+                self.shaper,
                 self.depth,
             ),
             // Out-of-range index: contribute nothing rather than panic.
@@ -530,12 +537,18 @@ fn measure(
     styles: &LayoutStyles,
     node: NodeId,
     constraints: BoxConstraints,
+    shaper: &dyn TextShaper,
     depth: u32,
 ) -> Size {
     if depth == 0 {
         return Size::ZERO;
     }
     let style = style_of(styles, node);
+    // A text node is a constraint-aware leaf: shape + wrap to `max.width`,
+    // bypassing the box algorithms entirely (spec §5.10).
+    if let Some(content) = tree.get(node).and_then(|n| n.kind().text()) {
+        return measure_text_node(content, &style, constraints, shaper);
+    }
     let Some(algorithm) = algorithm_for(style.display) else {
         return Size::ZERO;
     };
@@ -544,6 +557,7 @@ fn measure(
         tree,
         styles,
         children: &children,
+        shaper,
         depth: depth - 1,
     };
     let out = algorithm.layout(&style, &children, constraints, &mut measurer);
@@ -573,12 +587,23 @@ fn arrange(
     origin: Point,
     constraints: BoxConstraints,
     boxes: &mut LayoutBoxes,
+    shaper: &dyn TextShaper,
     depth: u32,
 ) {
     if depth == 0 {
         return;
     }
     let style = style_of(styles, node);
+
+    // A text node is a constraint-aware leaf: shape + wrap to `max.width` and
+    // write the wrapped box, bypassing the box algorithms (spec §5.10). It has
+    // no laid-out children, so there is nothing to recurse into.
+    if let Some(content) = tree.get(node).and_then(|n| n.kind().text()) {
+        let size = measure_text_node(content, &style, constraints, shaper);
+        boxes.insert(node, LayoutBox::new(Rect::new(origin, size)));
+        return;
+    }
+
     let Some(algorithm) = algorithm_for(style.display) else {
         return;
     };
@@ -590,6 +615,7 @@ fn arrange(
             tree,
             styles,
             children: &children,
+            shaper,
             depth: depth - 1,
         };
         algorithm.layout(&style, &children, constraints, &mut measurer)
@@ -610,6 +636,7 @@ fn arrange(
             child_origin,
             BoxConstraints::tight(child_rel.size()),
             boxes,
+            shaper,
             depth - 1,
         );
     }
@@ -619,6 +646,7 @@ fn arrange(
 mod tests {
     use super::*;
     use obscur_identity::ComponentId;
+    use obscur_text::shaping::MockTextShaper;
     use obscur_tree::node::{LogicalParent, NodeKind};
 
     /// A default resolution viewport for the mapping tests.
@@ -654,7 +682,7 @@ mod tests {
         let coordinator = LayoutCoordinator::new();
         let tree = RetainedTree::new();
         let styles = LayoutStyles::new();
-        let boxes = coordinator.layout(&tree, &styles, Size::new(800.0, 600.0));
+        let boxes = coordinator.layout(&tree, &styles, Size::new(800.0, 600.0), &MockTextShaper::new());
         assert!(boxes.is_empty());
     }
 
@@ -765,7 +793,7 @@ mod tests {
         styles.insert(child_b, block(200.0, 50.0));
 
         let coordinator = LayoutCoordinator::new();
-        let boxes = coordinator.layout(&tree, &styles, Size::new(200.0, 100.0));
+        let boxes = coordinator.layout(&tree, &styles, Size::new(200.0, 100.0), &MockTextShaper::new());
 
         // Root at the viewport origin.
         assert_eq!(boxes[&root].origin(), Point::new(0.0, 0.0));
@@ -808,7 +836,7 @@ mod tests {
         styles.insert(child_b, flex_item);
 
         let coordinator = LayoutCoordinator::new();
-        let boxes = coordinator.layout(&tree, &styles, Size::new(200.0, 100.0));
+        let boxes = coordinator.layout(&tree, &styles, Size::new(200.0, 100.0), &MockTextShaper::new());
 
         // Children sit side by side along the main (row) axis: x=0 then x=50.
         assert_eq!(boxes[&child_a].origin(), Point::new(0.0, 0.0));
@@ -841,7 +869,7 @@ mod tests {
         styles.insert(leaf, leaf_style);
 
         let coordinator = LayoutCoordinator::new();
-        let boxes = coordinator.layout(&tree, &styles, Size::new(200.0, 200.0));
+        let boxes = coordinator.layout(&tree, &styles, Size::new(200.0, 200.0), &MockTextShaper::new());
 
         // Container offset by the root's top/left padding.
         assert_eq!(boxes[&container].origin(), Point::new(10.0, 10.0));
@@ -1020,7 +1048,7 @@ mod tests {
         // Sanity: the bridge produced a flex container.
         assert_eq!(styles[&root].display, LayoutDisplay::Flex);
 
-        let boxes = coordinator.layout(&tree, &styles, Size::new(200.0, 100.0));
+        let boxes = coordinator.layout(&tree, &styles, Size::new(200.0, 100.0), &MockTextShaper::new());
 
         // Children sit side by side along the row axis: distinct x offsets.
         assert_eq!(boxes[&child_a].origin().x, 0.0);
@@ -1044,97 +1072,95 @@ mod tests {
         id
     }
 
-    #[test]
-    fn measure_text_sizes_a_text_node_to_its_shaped_content() {
-        // Requirement (c): a measured text node gets a NON-ZERO box whose width is
-        // the shaped advance (chars · 0.6 · size) and height the line_height
-        // (== size for the mock).
-        use obscur_text::shaping::MockTextShaper;
-
+    /// Arranges a single text child under a fixed-size block `root` and returns
+    /// the text node's arranged box. The text node carries no computed style, so
+    /// its font size defaults to 16 (mock advance = 9.6 px/char, line_height 16).
+    fn text_box_in_container(content: &str, width: f32, height: f32) -> LayoutBox {
         let mut tree = RetainedTree::new();
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
-        let text = add_text_child(&mut tree, root, "abc");
+        let text = add_text_child(&mut tree, root, content);
 
-        // Root is a fixed-size block; the text node carries no computed style, so
-        // its font size defaults to 16.
         let mut computed = ComputedStyles::new();
         let mut root_style = ComputedStyle::new();
-        root_style.set(PropertyId::Width, ComputedValue::length(Length::px(200.0)));
-        root_style.set(PropertyId::Height, ComputedValue::length(Length::px(100.0)));
+        root_style.set(PropertyId::Width, ComputedValue::length(Length::px(width)));
+        root_style.set(PropertyId::Height, ComputedValue::length(Length::px(height)));
         computed.insert(root, root_style);
 
         let coordinator = LayoutCoordinator::new();
-        let mut styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
-        coordinator.measure_text(&tree, &mut styles, &computed, &MockTextShaper::new());
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let boxes = coordinator.layout(&tree, &styles, Size::new(width, height), &MockTextShaper::new());
+        boxes[&text]
+    }
 
-        let text_style = styles[&text];
-        // width = 3 chars * 0.6 * 16 ≈ 28.8; height = line_height = 16.
-        match text_style.width {
-            Dimension::Px(w) => assert!((w - 28.8).abs() < 1e-3, "width was {w}"),
-            other => panic!("expected measured Px width, got {other:?}"),
-        }
-        assert_eq!(text_style.height, Dimension::Px(16.0));
+    #[test]
+    fn long_text_in_a_narrow_container_wraps_to_multiple_lines() {
+        // Requirement (a): three 4-char words (each 4·9.6 = 38.4 wide, plus a
+        // trailing space → the first two words are 48.0 each) in a 50px-wide
+        // container wrap to three lines, so the box is 3·line_height (48) tall —
+        // strictly taller than a single line. Root is tall enough (200) that the
+        // measured height is not clamped.
+        let text_box = text_box_in_container("aaaa bbbb cccc", 50.0, 200.0);
+        // Three lines stacked → height == 3 · 16.
+        assert_eq!(text_box.size().height, 48.0);
+        // Widest line ("aaaa " = 5·9.6) fits within the 50px container width.
+        assert!((text_box.size().width - 48.0).abs() < 1e-3, "width {}", text_box.size().width);
+    }
 
-        // And the arranged box is non-zero with those dimensions.
-        let boxes = coordinator.layout(&tree, &styles, Size::new(200.0, 100.0));
-        let text_box = boxes[&text];
-        assert!(text_box.size().width > 0.0);
-        assert!(text_box.size().height > 0.0);
-        assert!((text_box.size().width - 28.8).abs() < 1e-3);
+    #[test]
+    fn same_text_in_a_wide_container_stays_one_line() {
+        // Requirement (b): the identical string in a 1000px container is a single
+        // line — one line_height tall — and as wide as the whole run.
+        let text_box = text_box_in_container("aaaa bbbb cccc", 1000.0, 200.0);
+        assert_eq!(text_box.size().height, 16.0);
+        // Full run advance: 14 chars · 9.6 = 134.4.
+        assert!((text_box.size().width - 134.4).abs() < 1e-3, "width {}", text_box.size().width);
+    }
+
+    #[test]
+    fn short_single_line_text_is_sized_to_its_run() {
+        // Requirement (e): short text that fits stays one line at its run advance.
+        let text_box = text_box_in_container("hi", 1000.0, 200.0);
+        assert_eq!(text_box.size().height, 16.0);
+        // 2 chars · 9.6 = 19.2.
+        assert!((text_box.size().width - 19.2).abs() < 1e-3, "width {}", text_box.size().width);
+    }
+
+    #[test]
+    fn empty_text_yields_one_empty_line_and_does_not_panic() {
+        // Requirement (d): an empty string measures to a zero-width, one-line box
+        // (height == line_height) without panicking.
+        let text_box = text_box_in_container("", 100.0, 200.0);
+        assert_eq!(text_box.size().width, 0.0);
         assert_eq!(text_box.size().height, 16.0);
     }
 
     #[test]
-    fn measure_text_honors_font_size_and_respects_explicit_width() {
-        // Requirement (e): an explicit CSS width is NOT overridden by measurement;
-        // only the Auto height is filled in. Also checks the node's font-size
-        // drives the measured size.
-        use obscur_text::shaping::MockTextShaper;
-
+    fn text_font_size_drives_the_wrapped_box() {
+        // The node's computed font-size (20px → advance 12.0, line_height 20)
+        // drives the shaped/wrapped size, not the 16px default.
         let mut tree = RetainedTree::new();
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
         let text = add_text_child(&mut tree, root, "abcd");
 
         let mut computed = ComputedStyles::new();
-        computed.insert(root, ComputedStyle::new());
-        // Explicit width 999px + font-size 20px; height left to measurement.
+        let mut root_style = ComputedStyle::new();
+        root_style.set(PropertyId::Width, ComputedValue::length(Length::px(1000.0)));
+        root_style.set(PropertyId::Height, ComputedValue::length(Length::px(200.0)));
+        computed.insert(root, root_style);
         let mut text_computed = ComputedStyle::new();
-        text_computed.set(PropertyId::Width, ComputedValue::length(Length::px(999.0)));
         text_computed.set(PropertyId::FontSize, ComputedValue::length(Length::px(20.0)));
         computed.insert(text, text_computed);
 
         let coordinator = LayoutCoordinator::new();
-        let mut styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
-        coordinator.measure_text(&tree, &mut styles, &computed, &MockTextShaper::new());
-
-        let text_style = styles[&text];
-        // Explicit width preserved, NOT replaced by the measured advance.
-        assert_eq!(text_style.width, Dimension::Px(999.0));
-        // Height filled from the measured line_height at font-size 20.
-        assert_eq!(text_style.height, Dimension::Px(20.0));
-    }
-
-    #[test]
-    fn measure_text_ignores_non_text_nodes() {
-        use obscur_text::shaping::MockTextShaper;
-
-        let mut tree = RetainedTree::new();
-        let root = tree.alloc(NodeKind::Root);
-        tree.set_root(root);
-        let element = add_child(&mut tree, root, 5);
-
-        let mut computed = ComputedStyles::new();
-        computed.insert(element, ComputedStyle::new());
-
-        let coordinator = LayoutCoordinator::new();
-        let mut styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
-        coordinator.measure_text(&tree, &mut styles, &computed, &MockTextShaper::new());
-
-        // The element's dimensions stay Auto (not text-measured).
-        assert_eq!(styles[&element].width, Dimension::Auto);
-        assert_eq!(styles[&element].height, Dimension::Auto);
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        assert_eq!(styles[&text].font_size, 20.0);
+        let boxes = coordinator.layout(&tree, &styles, Size::new(1000.0, 200.0), &MockTextShaper::new());
+        let text_box = boxes[&text];
+        // 4 chars · (20 · 0.6) = 48.0 wide, one line 20 tall.
+        assert!((text_box.size().width - 48.0).abs() < 1e-3, "width {}", text_box.size().width);
+        assert_eq!(text_box.size().height, 20.0);
     }
 
     #[test]
@@ -1150,7 +1176,7 @@ mod tests {
         );
 
         let coordinator = LayoutCoordinator::new();
-        let boxes = coordinator.layout(&tree, &styles, Size::new(100.0, 100.0));
+        let boxes = coordinator.layout(&tree, &styles, Size::new(100.0, 100.0), &MockTextShaper::new());
         // A `None` root produces no box at all.
         assert!(boxes.is_empty());
     }

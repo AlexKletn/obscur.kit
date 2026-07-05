@@ -143,12 +143,17 @@ impl PipelineSnapshot {
         let style = StyleCoordinator::new();
         let computed = style.resolve(tree, inputs);
 
+        // The scene coordinator owns the shaper; build it first so the layout
+        // pass shapes and wraps text leaves through the same shaper the scene
+        // later re-wraps and paints with (so box height and painted line count
+        // agree, deterministically).
+        let scene_coordinator = SceneCoordinator::new();
+
         let layout = LayoutCoordinator::new();
         let root_font = root_font_size(&computed, tree.root());
         let layout_styles = layout.layout_styles_from(&computed, viewport, root_font);
-        let boxes = layout.layout(tree, &layout_styles, viewport);
+        let boxes = layout.layout(tree, &layout_styles, viewport, scene_coordinator.shaper());
 
-        let scene_coordinator = SceneCoordinator::new();
         let display_list = scene_coordinator.compose(tree, &computed, &boxes);
         let mut scene = Scene::new();
         scene.set_root(display_list);

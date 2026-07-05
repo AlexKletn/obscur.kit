@@ -52,12 +52,29 @@ pub struct LayoutStyle {
     pub flex_shrink: f32,
     /// Flex item: base size along the main axis before grow/shrink.
     pub flex_basis: Dimension,
+
+    /// The node's font size in logical pixels, used to shape and wrap a text
+    /// leaf during the measure/arrange pass (spec §5.10).
+    ///
+    /// Only meaningful for a text node: the coordinator populates it from the
+    /// node's computed `font-size` so the constraint-aware measure can shape and
+    /// wrap the run to its available width. It defaults to
+    /// [`DEFAULT_FONT_SIZE`](Self::DEFAULT_FONT_SIZE) and is ignored by every
+    /// box (non-text) algorithm.
+    pub font_size: f32,
+}
+
+impl LayoutStyle {
+    /// The initial `font-size` (the CSS default), used for a text leaf whose
+    /// [`font_size`](Self::font_size) is not otherwise set.
+    pub const DEFAULT_FONT_SIZE: f32 = 16.0;
 }
 
 impl Default for LayoutStyle {
     /// CSS-like defaults: `Block` display, all sizes `Auto`, zero insets and gap,
     /// `Row` direction, `FlexStart` justification, `Stretch` alignment,
-    /// `flex_grow: 0.0`, `flex_shrink: 1.0`, and `Auto` flex basis.
+    /// `flex_grow: 0.0`, `flex_shrink: 1.0`, `Auto` flex basis, and the initial
+    /// `16px` font size.
     fn default() -> Self {
         Self {
             display: LayoutDisplay::Block,
@@ -77,6 +94,7 @@ impl Default for LayoutStyle {
             flex_grow: 0.0,
             flex_shrink: 1.0,
             flex_basis: Dimension::Auto,
+            font_size: Self::DEFAULT_FONT_SIZE,
         }
     }
 }
@@ -100,6 +118,13 @@ impl LayoutStyle {
     #[must_use]
     pub const fn with_height(mut self, height: Dimension) -> Self {
         self.height = height;
+        self
+    }
+
+    /// Returns a copy with `font_size` replaced.
+    #[must_use]
+    pub const fn with_font_size(mut self, font_size: f32) -> Self {
+        self.font_size = font_size;
         self
     }
 }
@@ -128,6 +153,7 @@ mod tests {
         assert_eq!(style.flex_grow, 0.0);
         assert_eq!(style.flex_shrink, 1.0);
         assert!(style.flex_basis.is_auto());
+        assert_eq!(style.font_size, LayoutStyle::DEFAULT_FONT_SIZE);
     }
 
     #[test]

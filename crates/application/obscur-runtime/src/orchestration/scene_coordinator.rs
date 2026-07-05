@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 use std::fmt;
 
+use obscur_geometry::Point;
 use obscur_identity::NodeId;
 use obscur_scene::color::Color;
 use obscur_scene::command::{DisplayList, DisplayListBuilder};
@@ -12,6 +13,7 @@ use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::ComputedValue;
 use obscur_style::property::{Length, PropertyId, StyleColor};
 use obscur_text::font::{FontAttributes, FontFace, FontFamily, FontMetrics, FontSource, GenericFamily};
+use obscur_text::layout::{TextAlignment, TextLayout, TextLine, TextOverflow};
 use obscur_text::shaping::{MockTextShaper, ShapingRequest, TextShaper};
 use obscur_tree::tree::RetainedTree;
 
@@ -126,40 +128,28 @@ impl SceneCoordinator {
         &*self.shaper
     }
 
-    /// Shapes `content` at `font_size` into a backend-independent [`GlyphRun`] of
-    /// positioned glyphs.
+    /// Shapes `content` at `font_size` and **wraps** it to `max_width` into a
+    /// multi-line [`TextLayout`] (spec §5.10).
     ///
-    /// Shaping runs **once**, here: the `obscur-text` shaper produces glyphs with
-    /// per-glyph advances, which this method lays out left-to-right into pen
-    /// positions relative to the run origin. Each glyph's `y` is the run's
-    /// **baseline** — the font's real ascent for `font_size`, from
-    /// [`TextShaper::line_metrics`], not the full em — so glyphs sit on the
-    /// baseline within the box the layout phase sized with the matching
-    /// `line_height`. The `x_offset`/`y_offset` from shaping are added on top. The
-    /// resulting run is what both the GPU and software backends consume verbatim.
-    fn shape_run(&self, content: &str, font_size: f32) -> GlyphRun {
+    /// Shaping runs **once**, here: the `obscur-text` shaper produces a single
+    /// [`GlyphRun`](obscur_text::shaping::GlyphRun), which [`TextLayout::wrap`]
+    /// greedily breaks into lines no wider than `max_width` (the arranged box
+    /// width). Because the layout phase measured the box by wrapping the **same**
+    /// shaper's run to the **same** width, the wrapped line count here matches the
+    /// box height layout produced. A `max_width <= 0` yields a single line.
+    fn shape_lines(&self, content: &str, font_size: f32, max_width: f32) -> TextLayout {
         let request = ShapingRequest::new(content, self.default_face.clone(), font_size);
-        let shaped = self.shaper.shape(&request);
-        // The baseline offset down from the box top is the font's ascent for this
-        // size; measure (line_height) and draw (baseline) come from one shaper.
-        let baseline = self.shaper.line_metrics(font_size).baseline();
-        let mut pen_x = 0.0_f32;
-        let glyphs: Vec<PositionedGlyph> = shaped
-            .glyphs()
-            .iter()
-            .map(|glyph| {
-                let positioned = PositionedGlyph::new(
-                    glyph.glyph_id(),
-                    glyph.cluster(),
-                    pen_x + glyph.x_offset(),
-                    baseline + glyph.y_offset(),
-                    glyph.x_advance(),
-                );
-                pen_x += glyph.x_advance();
-                positioned
-            })
-            .collect();
-        GlyphRun::new(glyphs, font_size, content)
+        let run = self.shaper.shape(&request);
+        let metrics = self.shaper.line_metrics(font_size);
+        TextLayout::wrap(
+            &run,
+            content,
+            max_width,
+            metrics.line_height(),
+            metrics.baseline(),
+            TextAlignment::Start,
+            TextOverflow::Clip,
+        )
     }
 
     /// Composes a paint-ordered [`DisplayList`] of background fills from the
@@ -208,20 +198,31 @@ impl SceneCoordinator {
             }
 
             if let Some(retained) = tree.get(node) {
-                // Text nodes emit a text run at their arranged box origin. A node
-                // is either a text node or an element with a background, so this
-                // never double-emits with the background fill above. A text node
-                // may have a zero-size box; the run is still emitted (the renderer
-                // decides its extent). A text node with no arranged box is skipped.
+                // Text nodes emit one text run **per wrapped line** at their
+                // arranged box. A node is either a text node or an element with a
+                // background, so this never double-emits with the background fill
+                // above. The content is wrapped to the box width the layout phase
+                // measured with — so the emitted line count matches the box height
+                // — and each line is drawn at `(origin.x + x_offset, origin.y +
+                // top)` with its glyphs on that line's baseline. A text node with
+                // no arranged box is skipped.
                 if let Some(content) = retained.kind().text()
                     && let Some(layout_box) = boxes.get(&node)
                 {
-                    let color = text_color_of(computed, node);
+                    let brush = Brush::solid(text_color_of(computed, node));
                     // Same per-node font size the layout phase measured with, so
                     // the drawn advances and baseline match the sized box.
                     let font_size = font_size_of(computed, node);
-                    let run = self.shape_run(content, font_size);
-                    builder.draw_text(layout_box.origin(), run, Brush::solid(color));
+                    let origin = layout_box.origin();
+                    let layout = self.shape_lines(content, font_size, layout_box.size().width);
+                    for line in layout.lines() {
+                        let range = line.range();
+                        let line_text = content.get(range.start..range.end).unwrap_or(content);
+                        let run = positioned_run(line, font_size, line_text);
+                        let line_origin =
+                            Point::new(origin.x + line.x_offset(), origin.y + line.top());
+                        builder.draw_text(line_origin, run, brush.clone());
+                    }
                 }
 
                 for &child in retained.children().iter().rev() {
@@ -251,6 +252,35 @@ impl fmt::Debug for SceneCoordinator {
             .field("default_face", &self.default_face)
             .finish()
     }
+}
+
+/// Converts one wrapped [`TextLine`] into a scene [`GlyphRun`], laying its glyphs
+/// out left-to-right into pen positions on the line's baseline.
+///
+/// The line's glyphs carry only per-glyph advances, so the pen accumulates them
+/// from the line's left edge (`0`); each glyph's `y` is the line
+/// [`baseline`](TextLine::baseline) (the ascent within the line box), and the
+/// shaping `x_offset`/`y_offset` are added on top. `text` is the source substring
+/// the line covers, carried on the run for downstream consumers. For a single-line
+/// text node (top `0`, baseline = ascent, `x_offset` `0`) this reproduces the
+/// original single-run behavior exactly.
+fn positioned_run(line: &TextLine, font_size: f32, text: &str) -> GlyphRun {
+    let baseline = line.baseline();
+    let mut pen_x = 0.0_f32;
+    let mut glyphs: Vec<PositionedGlyph> = Vec::new();
+    for run in line.runs() {
+        for glyph in run.glyphs() {
+            glyphs.push(PositionedGlyph::new(
+                glyph.glyph_id(),
+                glyph.cluster(),
+                pen_x + glyph.x_offset(),
+                baseline + glyph.y_offset(),
+                glyph.x_advance(),
+            ));
+            pen_x += glyph.x_advance();
+        }
+    }
+    GlyphRun::new(glyphs, font_size, text)
 }
 
 /// Reads a node's computed `background-color`, if present and color-valued.
@@ -656,6 +686,73 @@ mod tests {
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
         assert!(text_runs(&list).is_empty());
         assert!(list.is_empty());
+    }
+
+    #[test]
+    fn long_text_emits_one_run_per_wrapped_line_agreeing_with_box_height() {
+        // Requirement (c): three 4-char words in a 50px-wide box wrap to three
+        // lines, so the scene emits exactly three `DrawText` runs — one per line —
+        // at cumulative tops (0, 16, 32) and a shared x_offset of 0. The box
+        // height (48) equals N · line_height, so layout and scene AGREE.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "aaaa bbbb cccc");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(text, ComputedStyle::new());
+
+        let mut boxes = LayoutBoxes::new();
+        // Box as the layout phase would size it: 50px wide, 3·16 = 48 tall.
+        boxes.insert(text, box_at(10.0, 20.0, 50.0, 48.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let runs = text_runs(&list);
+        assert_eq!(runs.len(), 3, "one DrawText per wrapped line");
+        // Line count · line_height (16) equals the arranged box height (48).
+        assert_eq!(runs.len() as f32 * 16.0, boxes[&text].size().height);
+
+        // Origins stack by line height, all at the box's x (x_offset 0 for Start).
+        assert_eq!(runs[0].0, Point::new(10.0, 20.0));
+        assert_eq!(runs[1].0, Point::new(10.0, 36.0));
+        assert_eq!(runs[2].0, Point::new(10.0, 52.0));
+
+        // Glyph counts per line: "aaaa " (5), "bbbb " (5), "cccc" (4) = 14 total.
+        assert_eq!(runs[0].1.len(), 5);
+        assert_eq!(runs[1].1.len(), 5);
+        assert_eq!(runs[2].1.len(), 4);
+
+        // Every glyph sits on the line baseline (ascent 0.8·16 = 12.8), and each
+        // line lays its glyphs out from pen x = 0.
+        for (_, run, _) in &runs {
+            for (i, glyph) in run.glyphs().iter().enumerate() {
+                assert_eq!(glyph.y(), 12.8);
+                assert_eq!(glyph.x(), 9.6 * i as f32);
+            }
+        }
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn empty_text_emits_a_single_empty_run_without_panicking() {
+        // Requirement (d): an empty string yields one line with zero glyphs; the
+        // scene still emits a single (empty) run at the box origin and never panics.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(text, ComputedStyle::new());
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(text, box_at(3.0, 4.0, 0.0, 16.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let runs = text_runs(&list);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].0, Point::new(3.0, 4.0));
+        assert_eq!(runs[0].1.len(), 0);
+        assert!(list.is_balanced());
     }
 
     #[test]
