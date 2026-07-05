@@ -302,8 +302,17 @@ impl Compiler {
             self.validate_contracts(&element, &contract_validator, &mut diagnostics);
         }
 
-        // 4. Lowering to UI IR.
-        match UiIrLowering::new(self.source_name.clone()).lower(document) {
+        // 4. Lowering to UI IR. Non-fatal lowering diagnostics (e.g. a `<For>`
+        //    missing its mandatory key, §2.11) accumulate alongside the produced
+        //    document; a fatal error yields no document but keeps every earlier
+        //    diagnostic.
+        let mut lowering_diagnostics = Vec::new();
+        let outcome =
+            UiIrLowering::new(self.source_name.clone()).lower(document, &mut lowering_diagnostics);
+        for error in lowering_diagnostics {
+            diagnostics.push(CompileDiagnostic::Lowering(error));
+        }
+        match outcome {
             Ok(document) => {
                 let source_map = document.source_map().clone();
                 CompileResult {
@@ -490,6 +499,25 @@ mod tests {
                 .diagnostics()
                 .iter()
                 .any(|d| matches!(d, CompileDiagnostic::Lowering(LoweringError::EmptyDocument)))
+        );
+    }
+
+    #[test]
+    fn for_loop_without_key_surfaces_a_lowering_diagnostic_but_still_lowers() {
+        // A keyless <For> is a §2.11 violation reported through the pipeline,
+        // yet the document is still produced (the diagnostic is non-fatal).
+        let doc = document("<For each={items}><Row/></For>");
+        let result = Compiler::new("app.okui")
+            .defining(Symbol::prop("items"))
+            .compile(&doc);
+        assert!(result.document().is_some());
+        assert!(
+            result
+                .diagnostics()
+                .iter()
+                .any(|d| matches!(d, CompileDiagnostic::Lowering(LoweringError::MissingLoopKey(_)))),
+            "diagnostics: {:?}",
+            result.diagnostics()
         );
     }
 

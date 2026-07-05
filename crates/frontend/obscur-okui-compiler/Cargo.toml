@@ -15,3 +15,7 @@ obscur-identity = { workspace = true }
 obscur-capability = { workspace = true }
 obscur-okui-syntax = { workspace = true }
 obscur-ui-ir = { workspace = true }
+obscur-view = { workspace = true }
+
+[dev-dependencies]
+obscur-tree = { workspace = true }

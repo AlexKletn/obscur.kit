@@ -1576,7 +1576,9 @@ dependencies = [
  "obscur-capability",
  "obscur-identity",
  "obscur-okui-syntax",
+ "obscur-tree",
  "obscur-ui-ir",
+ "obscur-view",
 ]
 
 [[package]]

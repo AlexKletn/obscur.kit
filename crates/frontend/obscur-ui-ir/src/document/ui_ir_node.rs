@@ -43,14 +43,16 @@ impl UiIrNodeKind {
 /// The IR tree mirrors the runtime view tree but is the serializable compile
 /// artifact: every node has a stable [`id`](UiIrNode::id) (used by source maps
 /// and diagnostics), a [`kind`](UiIrNode::kind), and — depending on kind — a
-/// tag, text content, properties flowed down, event bindings flowing up, and
-/// recursively nested children.
+/// tag, text content, an optional stable [`key`](UiIrNode::key) (mandatory on a
+/// [`Loop`](UiIrNodeKind::Loop) lowered from a `<For>`, spec §2.11), properties
+/// flowed down, event bindings flowing up, and recursively nested children.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiIrNode {
     id: u64,
     kind: UiIrNodeKind,
     tag: Box<str>,
     text: Box<str>,
+    key: Option<UiIrExpression>,
     properties: Vec<UiIrProperty>,
     events: Vec<UiIrEvent>,
     children: Vec<UiIrNode>,
@@ -81,17 +83,52 @@ impl UiIrNode {
         Self::bare(id, UiIrNodeKind::Fragment, Box::from(""), Box::from(""))
     }
 
-    /// Builds a node with empty property/event/child collections.
+    /// Creates a [`Loop`](UiIrNodeKind::Loop) control-flow node with stable `id`
+    /// and control keyword `tag` (`"For"` or `"VirtualFor"`, spec §2.11).
+    ///
+    /// The loop's mandatory stable key is attached with [`with_key`](Self::with_key)
+    /// and its iterated collection flows in as an `each` property; the repeated
+    /// body is its children.
+    #[must_use]
+    pub fn loop_node(id: u64, tag: impl Into<Box<str>>) -> Self {
+        Self::bare(id, UiIrNodeKind::Loop, tag.into(), Box::from(""))
+    }
+
+    /// Creates a [`Conditional`](UiIrNodeKind::Conditional) control-flow node with
+    /// stable `id` and control keyword `tag` (`"If"`, `"ElseIf"` or `"Else"`,
+    /// spec §2.11).
+    ///
+    /// The branch condition flows in as a `cond` property (absent on a bare
+    /// `<Else>`); the guarded body is its children.
+    #[must_use]
+    pub fn conditional(id: u64, tag: impl Into<Box<str>>) -> Self {
+        Self::bare(id, UiIrNodeKind::Conditional, tag.into(), Box::from(""))
+    }
+
+    /// Builds a node with empty property/event/child collections and no key.
     fn bare(id: u64, kind: UiIrNodeKind, tag: Box<str>, text: Box<str>) -> Self {
         Self {
             id,
             kind,
             tag,
             text,
+            key: None,
             properties: Vec::new(),
             events: Vec::new(),
             children: Vec::new(),
         }
+    }
+
+    /// Attaches the stable key expression `key` to this node, returning the
+    /// updated node.
+    ///
+    /// A [`Loop`](UiIrNodeKind::Loop) carries the mandatory `key={…}` of a
+    /// `<For>` (spec §2.11) so reconciliation can preserve per-item identity; any
+    /// keyed node may carry one.
+    #[must_use]
+    pub fn with_key(mut self, key: UiIrExpression) -> Self {
+        self.key = Some(key);
+        self
     }
 
     /// Appends `property`, returning the updated node.
@@ -139,6 +176,15 @@ impl UiIrNode {
     #[must_use]
     pub fn tag(&self) -> &str {
         &self.tag
+    }
+
+    /// Returns this node's stable key expression, if one is attached.
+    ///
+    /// A [`Loop`](UiIrNodeKind::Loop) lowered from a `<For key={…}>` carries the
+    /// key here (spec §2.11); most other nodes have none.
+    #[must_use]
+    pub const fn key(&self) -> Option<&UiIrExpression> {
+        self.key.as_ref()
     }
 
     /// Returns the text content for text nodes (empty for non-text nodes).
@@ -290,5 +336,21 @@ mod tests {
         assert!(UiIrNodeKind::Element.is_container());
         assert!(UiIrNodeKind::Fragment.is_container());
         assert!(!UiIrNodeKind::Text.is_container());
+    }
+
+    #[test]
+    fn loop_node_carries_kind_tag_and_key() {
+        let node = UiIrNode::loop_node(1, "For").with_key(UiIrExpression::binding("row.id"));
+        assert_eq!(node.kind(), UiIrNodeKind::Loop);
+        assert_eq!(node.tag(), "For");
+        assert_eq!(node.key(), Some(&UiIrExpression::binding("row.id")));
+    }
+
+    #[test]
+    fn conditional_node_carries_kind_and_tag() {
+        let node = UiIrNode::conditional(1, "If");
+        assert_eq!(node.kind(), UiIrNodeKind::Conditional);
+        assert_eq!(node.tag(), "If");
+        assert_eq!(node.key(), None);
     }
 }

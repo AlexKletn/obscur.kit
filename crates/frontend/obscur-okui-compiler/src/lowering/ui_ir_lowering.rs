@@ -5,19 +5,29 @@ use obscur_capability::CapabilityId;
 use obscur_okui_syntax::ast::{Attribute, Document, Element, Expression};
 use obscur_okui_syntax::syntax::{SyntaxKind, SyntaxNode};
 use obscur_ui_ir::document::{
-    UiIrDocument, UiIrEvent, UiIrExpression, UiIrNode, UiIrProperty, UiIrValue,
+    UiIrDocument, UiIrEvent, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrProperty, UiIrValue,
 };
 use obscur_ui_ir::version::UiIrVersion;
 
 use crate::lowering::{ExpressionLowering, SourceMapBuilder};
 
-/// Why lowering a `.okui` document into UI IR failed (spec §2.15).
+/// Why lowering a `.okui` document into UI IR failed, or a non-fatal lowering
+/// diagnostic (spec §2.15).
+///
+/// [`EmptyDocument`](Self::EmptyDocument) and [`MissingTagName`](Self::MissingTagName)
+/// are *fatal*: they prevent building a tree and surface as the `Err` of
+/// [`UiIrLowering::lower`]. [`MissingLoopKey`](Self::MissingLoopKey) is *non-fatal*:
+/// the `<For>` is still lowered (keyless), but the missing mandatory key is
+/// reported through the lowering's accumulated diagnostics (spec §2.11).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweringError {
     /// The document had no top-level elements to lower.
     EmptyDocument,
     /// An element carried no tag name; the byte offset locates it in the source.
     MissingTagName(u32),
+    /// A `<For>`/`<VirtualFor>` loop lacked the mandatory stable `key={…}`
+    /// (spec §2.11); the byte offset locates it in the source.
+    MissingLoopKey(u32),
 }
 
 impl std::fmt::Display for LoweringError {
@@ -26,6 +36,9 @@ impl std::fmt::Display for LoweringError {
             Self::EmptyDocument => write!(f, "cannot lower an empty document"),
             Self::MissingTagName(offset) => {
                 write!(f, "element is missing a tag name at offset {offset}")
+            }
+            Self::MissingLoopKey(offset) => {
+                write!(f, "loop is missing a mandatory `key` at offset {offset}")
             }
         }
     }
@@ -48,9 +61,13 @@ impl std::error::Error for LoweringError {}
 /// - **Node kind.** An element whose tag starts with an uppercase letter becomes
 ///   a [`component`](UiIrNode::component); otherwise an
 ///   [`element`](UiIrNode::element). The element-shaped
-///   [`Conditional`](Element::is_conditional) and [`loop`](Element::is_loop)
-///   constructs are lowered as element/component nodes too — a dedicated
-///   control-flow IR node is future work.
+///   [`Conditional`](Element::is_conditional) (`<If>`/`<ElseIf>`/`<Else>`) and
+///   [`loop`](Element::is_loop) (`<For>`/`<VirtualFor>`) constructs lower to the
+///   dedicated [`Conditional`](UiIrNode::conditional)/[`Loop`](UiIrNode::loop_node)
+///   IR kinds (spec §2.11): a loop carries its mandatory `key={…}` on the node
+///   (a missing key is a [`LoweringError::MissingLoopKey`] diagnostic) and its
+///   `each={…}` collection as a property; a conditional carries its `cond={…}`
+///   as a property.
 /// - **Attributes.** An event attribute (`on:click=…`) becomes a
 ///   [`UiIrEvent`] wiring the local event name (after the `:`) to its handler;
 ///   every other attribute becomes a [`UiIrProperty`] whose value is the lowered
@@ -71,6 +88,7 @@ pub struct UiIrLowering {
     expr: ExpressionLowering,
     next_id: u64,
     required_capabilities: Vec<Box<str>>,
+    diagnostics: Vec<LoweringError>,
 }
 
 impl UiIrLowering {
@@ -83,6 +101,7 @@ impl UiIrLowering {
             expr: ExpressionLowering::new(),
             next_id: 1,
             required_capabilities: Vec::new(),
+            diagnostics: Vec::new(),
         }
     }
 
@@ -93,14 +112,22 @@ impl UiIrLowering {
         id
     }
 
-    /// Lowers `doc` into a complete [`UiIrDocument`], consuming the pass.
+    /// Lowers `doc` into a complete [`UiIrDocument`], consuming the pass and
+    /// appending any non-fatal lowering diagnostics (e.g. a `<For>` missing its
+    /// mandatory key, spec §2.11) to `diagnostics`.
     ///
     /// # Errors
     ///
     /// Returns [`LoweringError::EmptyDocument`] when the document has no
     /// top-level elements, or [`LoweringError::MissingTagName`] when an element
-    /// carries no tag name.
-    pub fn lower(mut self, doc: &Document) -> Result<UiIrDocument, LoweringError> {
+    /// carries no tag name. These are fatal — no document is produced; a
+    /// [`LoweringError::MissingLoopKey`] is *not* fatal and is reported through
+    /// `diagnostics` while the document is still lowered.
+    pub fn lower(
+        mut self,
+        doc: &Document,
+        diagnostics: &mut Vec<LoweringError>,
+    ) -> Result<UiIrDocument, LoweringError> {
         let elements: Vec<Element> = doc.elements().collect();
 
         let root = match elements.as_slice() {
@@ -124,10 +151,17 @@ impl UiIrLowering {
         for capability in self.required_capabilities {
             document = document.requiring(CapabilityId::new(capability));
         }
+        diagnostics.append(&mut self.diagnostics);
         Ok(document)
     }
 
     /// Lowers a single element (recursively) into a [`UiIrNode`].
+    ///
+    /// The element-shaped `<For>`/`<VirtualFor>` and `<If>`/`<ElseIf>`/`<Else>`
+    /// control-flow constructs (spec §2.11) lower to the dedicated
+    /// [`Loop`](obscur_ui_ir::document::UiIrNodeKind::Loop) and
+    /// [`Conditional`](obscur_ui_ir::document::UiIrNodeKind::Conditional) IR
+    /// kinds; every other element lowers to a component or element node.
     fn lower_element(&mut self, element: &Element) -> Result<UiIrNode, LoweringError> {
         let offset = element.syntax().offset().unwrap_or(0);
         let id = self.alloc_id();
@@ -137,12 +171,64 @@ impl UiIrLowering {
             .tag_name()
             .ok_or(LoweringError::MissingTagName(offset))?;
 
+        if element.is_loop() {
+            return self.lower_loop(element, id, tag, offset);
+        }
+        if element.is_conditional() {
+            return self.lower_conditional(element, id, tag);
+        }
+
         let mut node = if starts_uppercase(&tag) {
             UiIrNode::component(id, tag)
         } else {
             UiIrNode::element(id, tag)
         };
 
+        node = self.lower_attributes(element, node);
+        node = self.lower_children(element, node)?;
+        Ok(node)
+    }
+
+    /// Lowers a `<For>`/`<VirtualFor>` into a [`Loop`](obscur_ui_ir::document::UiIrNodeKind::Loop)
+    /// node, carrying the mandatory `key={…}` on the node and the iterated
+    /// collection (`each={…}`) as a property; a missing key is a non-fatal
+    /// [`LoweringError::MissingLoopKey`] diagnostic (spec §2.11).
+    fn lower_loop(
+        &mut self,
+        element: &Element,
+        id: u64,
+        tag: String,
+        offset: u32,
+    ) -> Result<UiIrNode, LoweringError> {
+        let mut node = UiIrNode::loop_node(id, tag);
+        if let Some(attribute) = element.attribute("key") {
+            let key = if let Some(expression) = attribute.value_expression() {
+                self.expr.lower(&expression)
+            } else if let Some(literal) = attribute.string_value() {
+                UiIrExpression::literal(UiIrValue::Text(literal.into()))
+            } else {
+                UiIrExpression::literal(UiIrValue::Null)
+            };
+            node = node.with_key(key);
+        } else {
+            self.diagnostics.push(LoweringError::MissingLoopKey(offset));
+        }
+        node = self.lower_attributes(element, node);
+        node = self.lower_children(element, node)?;
+        Ok(node)
+    }
+
+    /// Lowers an `<If>`/`<ElseIf>`/`<Else>` into a
+    /// [`Conditional`](obscur_ui_ir::document::UiIrNodeKind::Conditional) node;
+    /// the branch condition (`cond={…}`) flows through as a property and the
+    /// guarded body as children (spec §2.11).
+    fn lower_conditional(
+        &mut self,
+        element: &Element,
+        id: u64,
+        tag: String,
+    ) -> Result<UiIrNode, LoweringError> {
+        let mut node = UiIrNode::conditional(id, tag);
         node = self.lower_attributes(element, node);
         node = self.lower_children(element, node)?;
         Ok(node)
@@ -160,6 +246,12 @@ impl UiIrLowering {
             }
 
             let name = attribute.name().unwrap_or_default();
+
+            // A `<For>`'s mandatory `key` is carried on the Loop node itself
+            // (spec §2.11), not duplicated as a property.
+            if name == "key" && node.kind() == UiIrNodeKind::Loop {
+                continue;
+            }
 
             // A `requires="cap"` string attribute additionally declares a
             // capability requirement (spec §2.13, matching CapabilityValidator).
@@ -272,7 +364,17 @@ mod tests {
     }
 
     fn lower(src: &str) -> Result<UiIrDocument, LoweringError> {
-        UiIrLowering::new("test.okui").lower(&document(src))
+        UiIrLowering::new("test.okui").lower(&document(src), &mut Vec::new())
+    }
+
+    /// Lowers `src`, returning the document alongside the accumulated non-fatal
+    /// diagnostics.
+    fn lower_with_diagnostics(src: &str) -> (UiIrDocument, Vec<LoweringError>) {
+        let mut diagnostics = Vec::new();
+        let doc = UiIrLowering::new("test.okui")
+            .lower(&document(src), &mut diagnostics)
+            .expect("lowers");
+        (doc, diagnostics)
     }
 
     #[test]
@@ -346,6 +448,54 @@ mod tests {
     #[test]
     fn empty_document_is_an_error() {
         assert_eq!(lower(""), Err(LoweringError::EmptyDocument));
+    }
+
+    #[test]
+    fn for_loop_lowers_to_loop_node_carrying_key() {
+        let (doc, diagnostics) =
+            lower_with_diagnostics("<For each={items} key={row.id}><Row/></For>");
+        let root = doc.root();
+        assert_eq!(root.kind(), UiIrNodeKind::Loop);
+        assert_eq!(root.tag(), "For");
+        // The mandatory key is carried on the node, not as a property.
+        assert_eq!(root.key(), Some(&UiIrExpression::binding("row.id")));
+        assert!(root.property("key").is_none());
+        // The iterated collection flows through as a property.
+        assert_eq!(root.property("each"), Some(&UiIrExpression::binding("items")));
+        // The body is a child.
+        assert_eq!(root.children().len(), 1);
+        assert_eq!(root.children()[0].tag(), "Row");
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn for_loop_without_key_reports_missing_key_diagnostic() {
+        let (doc, diagnostics) = lower_with_diagnostics("<For each={items}><Row/></For>");
+        assert_eq!(doc.root().kind(), UiIrNodeKind::Loop);
+        assert!(doc.root().key().is_none());
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| matches!(d, LoweringError::MissingLoopKey(_))),
+            "diagnostics: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn if_lowers_to_conditional_node_with_condition_property() {
+        let doc = lower("<If cond={open}><A/></If>").expect("lowers");
+        let root = doc.root();
+        assert_eq!(root.kind(), UiIrNodeKind::Conditional);
+        assert_eq!(root.tag(), "If");
+        assert_eq!(root.property("cond"), Some(&UiIrExpression::binding("open")));
+        assert_eq!(root.children().len(), 1);
+    }
+
+    #[test]
+    fn virtual_for_lowers_to_loop_node_tagged_virtual_for() {
+        let doc = lower("<VirtualFor each={rows} key={id}><R/></VirtualFor>").expect("lowers");
+        assert_eq!(doc.root().kind(), UiIrNodeKind::Loop);
+        assert_eq!(doc.root().tag(), "VirtualFor");
     }
 
     #[test]
