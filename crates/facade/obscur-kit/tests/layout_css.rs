@@ -13,10 +13,10 @@
 //! algorithm fails the run.
 //!
 //! The container is laid out under a fixed 300x300 viewport, so all numbers are
-//! deterministic. (A flex container's own explicit `width`/`height` is currently
-//! stretched to the block containing block by the Phase-1 flow layout, so the
-//! container content extent used below is the 300x300 viewport; percentages,
-//! justification, and clamping are all verified against that extent.)
+//! deterministic. A flex container that authors an explicit `width`/`height` is
+//! sized to it, and its children, percentages, and `justify-content` all resolve
+//! against that authored extent (verified below); a container with no explicit
+//! size still fills the available viewport (the fill-available default).
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -67,10 +67,15 @@ fn drive(css: &str, view: &View) -> UiRuntime {
     rt
 }
 
+/// The single `.row` container [`NodeId`].
+fn container_node(rt: &UiRuntime) -> NodeId {
+    let root = rt.tree().root().expect("root after a frame");
+    rt.tree().get(root).unwrap().children().to_vec()[0]
+}
+
 /// The `.a` / `.b` child [`NodeId`]s of the single `.row` container, in order.
 fn children(rt: &UiRuntime) -> (NodeId, NodeId) {
-    let root = rt.tree().root().expect("root after a frame");
-    let container = rt.tree().get(root).unwrap().children().to_vec()[0];
+    let container = container_node(rt);
     let kids = rt.tree().get(container).unwrap().children().to_vec();
     (kids[0], kids[1])
 }
@@ -157,42 +162,48 @@ fn child_margin_left_shifts_it_right() {
     approx(bx, 27.0, "b.x = 7 margin + 20 a.width");
 }
 
-// 5. percentage width: `.a{width:50%}` is half the container content width.
+// 5. percentage width resolves against the container's OWN explicit width:
+//    `.row{width:200px}` + `.a{width:50%}` => 100 (half of 200, not of the 300 viewport).
 #[test]
-fn percentage_width_resolves_against_container() {
+fn percentage_width_resolves_against_explicit_container_width() {
     let rt = drive(
-        ".row{display:flex;flex-direction:row} \
+        ".row{display:flex;flex-direction:row;width:200px} \
          .a{width:50%;height:8px} .b{width:30px;height:8px}",
         &two_child_view(),
     );
+    // The container is its authored 200px wide, not stretched to the 300 viewport.
+    let (_, _, cw, _) = geom(&rt, container_node(&rt));
+    approx(cw, 200.0, "container honours its explicit width:200px");
     let (a, _) = children(&rt);
     let (_, _, aw, _) = geom(&rt, a);
-    // The flex container content extent is the 300px viewport; 50% => 150.
-    approx(aw, VIEWPORT * 0.5, "a.width = 50% of the 300px container");
+    // 50% of the explicit 200px container => 100 (would be 150 against the viewport).
+    approx(aw, 100.0, "a.width = 50% of the 200px container");
 }
 
-// 6. justify-content: `flex-end` and `center` shift the children block.
+// 6. justify-content resolves against the container's OWN explicit width:
+//    `.row{width:200px}` with two items (20 + 30 = 50 wide), remaining = 150.
 #[test]
-fn justify_content_shifts_children_block() {
-    // flex-end: the two items (20 + 30 = 50 wide) are pushed to the far right.
+fn justify_content_shifts_children_block_within_explicit_width() {
+    // flex-end: the items pack to the right within the authored 200px (not 300).
     let end = drive(
-        ".row{display:flex;flex-direction:row;justify-content:flex-end} \
+        ".row{display:flex;flex-direction:row;width:200px;justify-content:flex-end} \
          .a{width:20px;height:8px} .b{width:30px;height:8px}",
         &two_child_view(),
     );
+    approx(geom(&end, container_node(&end)).2, 200.0, "container is 200px wide");
     let (a, b) = children(&end);
-    approx(geom(&end, a).0, 250.0, "flex-end a.x = 300 - 50");
-    approx(geom(&end, b).0, 270.0, "flex-end b.x = 250 + 20");
+    approx(geom(&end, a).0, 150.0, "flex-end a.x = 200 - 50");
+    approx(geom(&end, b).0, 170.0, "flex-end b.x = 150 + 20");
 
-    // center: leading = (300 - 50) / 2 = 125.
+    // center: leading = (200 - 50) / 2 = 75.
     let center = drive(
-        ".row{display:flex;flex-direction:row;justify-content:center} \
+        ".row{display:flex;flex-direction:row;width:200px;justify-content:center} \
          .a{width:20px;height:8px} .b{width:30px;height:8px}",
         &two_child_view(),
     );
     let (a, b) = children(&center);
-    approx(geom(&center, a).0, 125.0, "center a.x = (300 - 50)/2");
-    approx(geom(&center, b).0, 145.0, "center b.x = 125 + 20");
+    approx(geom(&center, a).0, 75.0, "center a.x = (200 - 50)/2");
+    approx(geom(&center, b).0, 95.0, "center b.x = 75 + 20");
 }
 
 // 7. min-width / max-width clamp a child's size.

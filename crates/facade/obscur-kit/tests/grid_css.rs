@@ -15,14 +15,16 @@
 //! `GridLayout::with_template` dispatch → the track-sizing algorithm) fails the
 //! run.
 //!
-//! # Container width == viewport
+//! # Container sizing
 //!
-//! A grid container's own explicit `width`/`height` is *not* consulted by the
-//! grid formatting context: [`GridLayout`] sizes its tracks against the
-//! constraints its parent flow hands down, which the Phase-1 flow layout
-//! stretches to the block containing block (the viewport). So each test picks a
-//! viewport whose width equals the container width the case calls for, and all
-//! numbers are deterministic against that extent.
+//! A grid container honours its own explicit `width`/`height`: [`GridLayout`]
+//! sizes its tracks (and distributes `fr` space) against the authored extent, and
+//! the container box *is* that size. A container with no explicit size fills the
+//! available extent its parent flow hands down (the viewport) — the
+//! fill-available default. Tests that author an explicit container size render
+//! under a larger viewport and assert the container is its authored size;
+//! `auto_placement_wraps_to_second_row` keeps a viewport-driven (auto) case to
+//! prove the fill-available default still holds.
 //!
 //! # Proven vs still limited
 //!
@@ -74,8 +76,9 @@ fn grid_view(n: usize) -> View {
 }
 
 /// Renders one real frame for `css` + a `.grid` container of `n` children under a
-/// `width` x `height` viewport (which the grid stretches its tracks against), and
-/// returns each child's [`NodeId`] in authored order plus the driven runtime.
+/// `width` x `height` viewport (the available extent an auto-sized container
+/// fills), and returns each child's [`NodeId`] in authored order plus the driven
+/// runtime.
 fn drive(css: &str, n: usize, width: f32, height: f32) -> (UiRuntime, Vec<NodeId>) {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(width, height));
     let sheet = compile(css);
@@ -87,6 +90,12 @@ fn drive(css: &str, n: usize, width: f32, height: f32) -> (UiRuntime, Vec<NodeId
     let container = rt.tree().get(root).unwrap().children().to_vec()[0];
     let kids = rt.tree().get(container).unwrap().children().to_vec();
     (rt, kids)
+}
+
+/// The single `.grid` container [`NodeId`].
+fn container(rt: &UiRuntime) -> NodeId {
+    let root = rt.tree().root().expect("root after a frame");
+    rt.tree().get(root).unwrap().children().to_vec()[0]
 }
 
 /// The absolute origin `(x, y)` and size `(w, h)` of a node's layout box.
@@ -102,26 +111,29 @@ fn approx(actual: f32, expected: f32, what: &str) {
     );
 }
 
-// 1. fixed + fr columns: `100px 1fr 2fr` on a 400px container, 3 children.
-//    fr unit = (400 - 100) / (1 + 2) = 100 -> 1fr=100, 2fr=200.
+// 1. fixed + fr columns resolve against the container's OWN explicit width:
+//    `.grid{width:400px}` + `100px 1fr 2fr` under a *500px* viewport.
+//    fr unit = (400 - 100) / (1 + 2) = 100 -> 1fr=100, 2fr=200. The container is
+//    its authored 400px, not stretched to the 500px viewport.
 #[test]
-fn fixed_and_fr_columns() {
+fn fixed_and_fr_columns_against_explicit_width() {
     let (rt, k) = drive(
-        ".grid{display:grid;grid-template-columns:100px 1fr 2fr} \
+        ".grid{display:grid;width:400px;grid-template-columns:100px 1fr 2fr} \
          .a{height:10px} .b{height:10px} .c{height:10px}",
         3,
-        400.0,
+        500.0,
         200.0,
     );
+    approx(geom(&rt, container(&rt)).2, 400.0, "container is its authored 400px");
     let (ax, _, aw, _) = geom(&rt, k[0]);
     let (bx, _, bw, _) = geom(&rt, k[1]);
     let (cx, _, cw, _) = geom(&rt, k[2]);
     approx(ax, 0.0, "a.x");
     approx(aw, 100.0, "a.width (100px fixed)");
     approx(bx, 100.0, "b.x");
-    approx(bw, 100.0, "b.width (1fr)");
+    approx(bw, 100.0, "b.width (1fr against 400, not 500)");
     approx(cx, 200.0, "c.x");
-    approx(cw, 200.0, "c.width (2fr)");
+    approx(cw, 200.0, "c.width (2fr against 400, not 500)");
 }
 
 // 2. repeat + gap: `repeat(2, 1fr); gap: 10px` on a 300px container, 2 children.
@@ -166,17 +178,21 @@ fn auto_placement_wraps_to_second_row() {
     approx(cy, 10.0, "c.y (row1, below the 10px row0)");
 }
 
-// 4. explicit rows: `grid-template-rows: 50px 80px`, `grid-template-columns: 1fr`,
-//    2 children -> single column, a in the 50px row, b in the 80px row below it.
+// 4. explicit rows under an explicit container height: `.grid{height:200px}`,
+//    `grid-template-rows: 50px 80px`, `grid-template-columns: 1fr`, 2 children ->
+//    single column, a in the 50px row, b in the 80px row below it, and the
+//    container is its authored 200px tall (not the 130px its tracks occupy nor the
+//    400px viewport).
 #[test]
-fn explicit_fixed_rows() {
+fn explicit_fixed_rows_and_container_height() {
     let (rt, k) = drive(
-        ".grid{display:grid;grid-template-columns:1fr;grid-template-rows:50px 80px} \
+        ".grid{display:grid;height:200px;grid-template-columns:1fr;grid-template-rows:50px 80px} \
          .a{height:10px} .b{height:10px}",
         2,
         300.0,
         400.0,
     );
+    approx(geom(&rt, container(&rt)).3, 200.0, "container is its authored 200px tall");
     let (_, ay, aw, ah) = geom(&rt, k[0]);
     let (_, by, _, bh) = geom(&rt, k[1]);
     approx(ay, 0.0, "a.y (row0 at top)");

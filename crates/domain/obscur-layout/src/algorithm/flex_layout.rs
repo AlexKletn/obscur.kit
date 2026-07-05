@@ -44,8 +44,11 @@ fn main_bounds(style: &LayoutStyle, is_row: bool) -> (Dimension, Dimension) {
 /// # Algorithm (Phase-1 subset)
 ///
 /// 1. The main axis is horizontal for [`Row`]/[`RowReverse`] and vertical for
-///    [`Column`]/[`ColumnReverse`]. Container content extents come from
-///    `constraints.max` minus border + padding (clamped to be non-negative).
+///    [`Column`]/[`ColumnReverse`]. Container content extents honour the
+///    container's own explicit `width` / `height` (resolved against
+///    `constraints.max`); an `Auto` extent falls back to `constraints.max` minus
+///    border + padding. Both are clamped to be non-negative. Free space, `fr`
+///    growth, percentages, and `justify_content` all resolve against this extent.
 /// 2. Each item's **base main size** is `flex_basis` (resolved against the
 ///    container main extent); else its main-axis size (`width` for a row,
 ///    `height` for a column); else its measured natural main size (measured with
@@ -57,7 +60,8 @@ fn main_bounds(style: &LayoutStyle, is_row: bool) -> (Dimension, Dimension) {
 ///    `flex_shrink_i * base_i`, clamped so no final main size is negative.
 ///    Otherwise base sizes are kept and the slack is handled by justification.
 /// 5. Cross size per item is the container cross extent when
-///    `align_items == Stretch`, else the item's measured cross size (measured
+///    `align_items == Stretch` (unless the item sets an explicit cross-axis size,
+///    which wins over the stretch), else the item's measured cross size (measured
 ///    with its final main size fixed and a loose cross axis).
 /// 6. `justify_content` turns the leftover main-axis space into a leading offset
 ///    and an inter-item spacing (`FlexStart`, `FlexEnd`, `Center`,
@@ -109,9 +113,21 @@ impl LayoutAlgorithm for FlexLayout {
         let bp_x = bp_left + border.right + padding.right;
         let bp_y = bp_top + border.bottom + padding.bottom;
 
-        // Step 1: container content extents, split into main / cross.
-        let content_width = (constraints.max.width - bp_x).max(0.0);
-        let content_height = (constraints.max.height - bp_y).max(0.0);
+        // Step 1: container content extents, split into main / cross. An explicit
+        // `width` / `height` on the container is honoured (resolved against the
+        // available max, so a fixed px or a percentage of it both work); an `Auto`
+        // dimension falls back to the available content extent, so the common
+        // fill-available case is byte-identical to before.
+        let content_width = style
+            .width
+            .resolve(constraints.max.width)
+            .unwrap_or(constraints.max.width - bp_x)
+            .max(0.0);
+        let content_height = style
+            .height
+            .resolve(constraints.max.height)
+            .unwrap_or(constraints.max.height - bp_y)
+            .max(0.0);
         let (container_main, container_cross) = if is_row {
             (content_width, content_height)
         } else {
@@ -217,7 +233,16 @@ impl LayoutAlgorithm for FlexLayout {
         let mut cross_size = Vec::with_capacity(count);
         for (index, main) in final_main.iter().copied().enumerate() {
             let cross = if style.align_items == AlignItems::Stretch {
-                container_cross
+                // `stretch` fills the cross axis, but an explicit author-set
+                // cross-axis size on the item wins over the stretch (a stretched
+                // item must not override an author height in a row / width in a
+                // column). `Auto` (the usual case) keeps the stretched extent.
+                let cross_dim = if is_row {
+                    children[index].style.height
+                } else {
+                    children[index].style.width
+                };
+                cross_dim.resolve(container_cross).unwrap_or(container_cross)
             } else {
                 let item_constraints = if is_row {
                     BoxConstraints {
@@ -599,5 +624,103 @@ mod tests {
         // Last child takes the leading slot; first child follows.
         approx(boxes[1].origin().x, 0.0);
         approx(boxes[0].origin().x, 50.0);
+    }
+
+    #[test]
+    fn explicit_row_width_bounds_main_axis() {
+        // A `width: 200px` row under a 500px available extent packs items against
+        // its OWN 200px, not the 500px available.
+        let mut style = container(
+            FlexDirection::Row,
+            JustifyContent::FlexEnd,
+            AlignItems::FlexStart,
+            0.0,
+        );
+        style.width = Dimension::Px(200.0);
+        let children = [fixed_basis(1, 50.0), fixed_basis(2, 50.0)];
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(500.0, 100.0)),
+            &mut FixedChildMeasurer::default(),
+        );
+        // Container is its authored 200px, not the 500px available.
+        approx(out.size().width, 200.0);
+        let b = out.child_boxes();
+        // justify flex-end: remaining = 200 - 100 = 100, so items pack to x=100/150.
+        approx(b[0].origin().x, 100.0);
+        approx(b[1].origin().x, 150.0);
+    }
+
+    #[test]
+    fn explicit_column_height_bounds_main_axis() {
+        // A `height: 200px` column under a 500px available extent packs items
+        // against its OWN 200px along the (vertical) main axis.
+        let mut style = container(
+            FlexDirection::Column,
+            JustifyContent::FlexEnd,
+            AlignItems::FlexStart,
+            0.0,
+        );
+        style.height = Dimension::Px(200.0);
+        let children = [fixed_basis(1, 50.0), fixed_basis(2, 50.0)];
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(100.0, 500.0)),
+            &mut FixedChildMeasurer::default(),
+        );
+        approx(out.size().height, 200.0);
+        let b = out.child_boxes();
+        // flex-end along the vertical main axis: items pack to y=100/150 within 200.
+        approx(b[0].origin().y, 100.0);
+        approx(b[1].origin().y, 150.0);
+    }
+
+    #[test]
+    fn auto_width_fills_available_regression() {
+        // With no explicit width, the row still fills the available extent (500),
+        // preserving the fill-available default.
+        let style = container(
+            FlexDirection::Row,
+            JustifyContent::FlexEnd,
+            AlignItems::FlexStart,
+            0.0,
+        );
+        let children = [fixed_basis(1, 50.0), fixed_basis(2, 50.0)];
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(500.0, 100.0)),
+            &mut FixedChildMeasurer::default(),
+        );
+        approx(out.size().width, 500.0);
+        let b = out.child_boxes();
+        // flex-end within the full 500: remaining = 500 - 100 = 400.
+        approx(b[0].origin().x, 400.0);
+        approx(b[1].origin().x, 450.0);
+    }
+
+    #[test]
+    fn explicit_child_cross_size_wins_over_stretch() {
+        // `align-items: stretch` normally fills the cross axis, but an author-set
+        // cross size on the child overrides the stretch.
+        let style = container(
+            FlexDirection::Row,
+            JustifyContent::FlexStart,
+            AlignItems::Stretch,
+            0.0,
+        );
+        let mut a = fixed_basis(1, 50.0);
+        a.style.height = Dimension::Px(30.0);
+        let children = [a];
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(200.0, 100.0)),
+            &mut FixedChildMeasurer::default(),
+        );
+        // Cross (height) is the explicit 30, not the stretched 100.
+        approx(out.child_boxes()[0].size().height, 30.0);
     }
 }

@@ -26,8 +26,10 @@ use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 ///
 /// # Algorithm
 ///
-/// 1. **Content area** — the container `padding` is subtracted from
-///    `constraints.max` to get the content width/height (each clamped ≥ 0).
+/// 1. **Content area** — the container's own explicit `width`/`height` (resolved
+///    against `constraints.max`) gives the content width/height; an `Auto` axis
+///    falls back to `constraints.max` minus `padding` (each clamped ≥ 0). Tracks,
+///    `fr` distribution, and percentages all resolve against this extent.
 /// 2. **Column track sizing** — with `n = columns.len()` and
 ///    `available = content_width - (n - 1) * column_gap`, each column resolves to:
 ///    `Fixed(px)` → `px`; `Auto` → the largest measured content width among the
@@ -49,8 +51,9 @@ use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 ///    track. It is placed at
 ///    `(padding.left + Σ(prior column widths) + col * column_gap,
 ///      padding.top  + Σ(prior row heights)  + row * row_gap)`.
-/// 6. **Border box** — the bounding box of the placed children plus the container
-///    `padding`, then clamped into `constraints`.
+/// 6. **Border box** — an explicit container axis sizes to that content extent
+///    plus `padding`; an `Auto` axis sizes to the bounding box of the placed
+///    children plus `padding`. The result is clamped into `constraints`.
 ///
 /// # Out of scope (later steps)
 ///
@@ -248,9 +251,22 @@ impl LayoutAlgorithm for GridLayout {
         let pad_x = padding.left + padding.right;
         let pad_y = padding.top + padding.bottom;
 
-        // Step 1: content area available to the grid (clamped non-negative).
-        let content_width = (constraints.max.width - pad_x).max(0.0);
-        let content_height = (constraints.max.height - pad_y).max(0.0);
+        // Step 1: content area the grid sizes its tracks against. An explicit
+        // container `width` / `height` is honoured (resolved against the available
+        // max, so a fixed px or a percentage of it both work) so column/row tracks,
+        // `fr` distribution, and percentages all resolve against the authored size;
+        // an `Auto` dimension falls back to the available content extent, which is
+        // byte-identical to the previous fill-available behaviour.
+        let content_width = style
+            .width
+            .resolve(constraints.max.width)
+            .unwrap_or(constraints.max.width - pad_x)
+            .max(0.0);
+        let content_height = style
+            .height
+            .resolve(constraints.max.height)
+            .unwrap_or(constraints.max.height - pad_y)
+            .max(0.0);
 
         // An empty column template still lays out one flexible column so items
         // always have somewhere to go.
@@ -340,8 +356,21 @@ impl LayoutAlgorithm for GridLayout {
             max_bottom = max_bottom.max(y + h);
         }
 
-        // Step 6: border box = children bounding box + padding, clamped.
-        let border_box = Size::new(max_right + padding.right, max_bottom + padding.bottom);
+        // Step 6: border box, clamped. When the container sets an explicit size the
+        // border box is that content extent plus padding (so the container *is* the
+        // authored size, even if its tracks do not fill it); an `Auto` axis sizes to
+        // the children's bounding box plus padding, exactly as before.
+        let box_width = if style.width.is_auto() {
+            max_right + padding.right
+        } else {
+            content_width + pad_x
+        };
+        let box_height = if style.height.is_auto() {
+            max_bottom + padding.bottom
+        } else {
+            content_height + pad_y
+        };
+        let border_box = Size::new(box_width, box_height);
         let size = constraints.constrain(border_box);
 
         LayoutOutput::new(size, child_boxes)
@@ -352,7 +381,7 @@ impl LayoutAlgorithm for GridLayout {
 mod tests {
     use super::{GridLayout, GridTemplate, TrackSize};
     use crate::algorithm::{FixedChildMeasurer, LayoutAlgorithm, LayoutChild};
-    use crate::model::LayoutStyle;
+    use crate::model::{Dimension, LayoutStyle};
     use obscur_geometry::{BoxConstraints, Insets, Point, Size};
     use obscur_identity::NodeId;
 
@@ -650,6 +679,83 @@ mod tests {
         );
         assert_eq!(out.child_boxes()[0].origin(), Point::new(5.0, 5.0));
         assert_eq!(out.size(), Size::new(100.0, 50.0));
+    }
+
+    // Explicit container width bounds the fr tracks: `width:300px` with `1fr 1fr`
+    // under a 500px available extent → two 150px columns, not 250.
+    #[test]
+    fn explicit_width_bounds_fr_columns() {
+        let style = LayoutStyle {
+            width: Dimension::Px(300.0),
+            ..LayoutStyle::default()
+        };
+        let children = [child(1), child(2)];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(0.0, 10.0), Size::new(0.0, 10.0)]);
+        let g = grid(vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)], vec![], 0.0, 0.0);
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(500.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // fr tracks resolve against the explicit 300, not the 500 available.
+        assert_eq!(b[0].size().width, 150.0);
+        assert_eq!(b[1].origin().x, 150.0);
+        assert_eq!(b[1].size().width, 150.0);
+        // The container is its authored 300px wide.
+        assert_eq!(out.size().width, 300.0);
+    }
+
+    // Explicit container height bounds the fr rows: `height:200px` with two `1fr`
+    // rows → each row 100 tall, and the container is 200 tall.
+    #[test]
+    fn explicit_height_bounds_fr_rows() {
+        let style = LayoutStyle {
+            height: Dimension::Px(200.0),
+            ..LayoutStyle::default()
+        };
+        let children = [child(1), child(2)];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(0.0, 10.0), Size::new(0.0, 10.0)]);
+        let g = grid(
+            vec![TrackSize::Fr(1.0)],
+            vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)],
+            0.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(300.0, 500.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // Rows share the explicit 200 → 100 each; second child in the second row.
+        assert_eq!(b[1].origin().y, 100.0);
+        assert_eq!(out.size().height, 200.0);
+    }
+
+    // Regression: with no explicit width, tracks still fill the available extent.
+    #[test]
+    fn auto_width_fills_available_columns() {
+        let style = LayoutStyle::default();
+        let children = [child(1), child(2)];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(0.0, 10.0), Size::new(0.0, 10.0)]);
+        let g = grid(vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)], vec![], 0.0, 0.0);
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(500.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // Auto width → fr tracks fill the 500 available → two 250px columns.
+        assert_eq!(b[0].size().width, 250.0);
+        assert_eq!(b[1].size().width, 250.0);
+        assert_eq!(out.size().width, 500.0);
     }
 
     #[test]
