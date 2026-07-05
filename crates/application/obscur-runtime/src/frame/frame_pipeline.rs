@@ -194,9 +194,13 @@ impl FramePipeline {
         // layout pass through the scene's paragraph orchestrator (disjoint field,
         // so a legal split borrow), so `self.scene` later re-wraps and paints
         // identical lines.
-        let boxes =
-            self.layout
-                .layout(tree, &layout_styles, ctx.viewport(), self.scene.paragraph());
+        let boxes = self.layout.layout(
+            tree,
+            &layout_styles,
+            &computed,
+            ctx.viewport(),
+            self.scene.paragraph(),
+        );
         let relaid_out = !boxes.is_empty();
 
         // Compose: build the display list, install it, and publish a snapshot.

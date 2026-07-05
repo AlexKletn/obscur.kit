@@ -41,7 +41,8 @@ impl ComputedValue {
             | PropertyValue::Length(_)
             | PropertyValue::Calc(_)
             | PropertyValue::Number(_)
-            | PropertyValue::Color(_) => Some(Self(value)),
+            | PropertyValue::Color(_)
+            | PropertyValue::FontFamilies(_) => Some(Self(value)),
             PropertyValue::CustomRef(_)
             | PropertyValue::Inherit
             | PropertyValue::Initial

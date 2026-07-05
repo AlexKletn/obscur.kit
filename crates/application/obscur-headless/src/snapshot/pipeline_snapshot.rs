@@ -152,7 +152,13 @@ impl PipelineSnapshot {
         let layout = LayoutCoordinator::new();
         let root_font = root_font_size(&computed, tree.root());
         let layout_styles = layout.layout_styles_from(&computed, viewport, root_font);
-        let boxes = layout.layout(tree, &layout_styles, viewport, scene_coordinator.paragraph());
+        let boxes = layout.layout(
+            tree,
+            &layout_styles,
+            &computed,
+            viewport,
+            scene_coordinator.paragraph(),
+        );
 
         let display_list = scene_coordinator.compose(tree, &computed, &boxes);
         let mut scene = Scene::new();

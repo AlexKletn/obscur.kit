@@ -254,7 +254,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 27] = [
+    const ALL: [PropertyId; 28] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::Opacity,
@@ -282,6 +282,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::JustifyContent,
         PropertyId::AlignItems,
         PropertyId::FontSize,
+        PropertyId::FontFamily,
     ];
     ALL.into_iter()
         .find(|id| name.eq_ignore_ascii_case(id.name()))
@@ -313,6 +314,15 @@ fn lower_for_property(
     values: &[ParsedValue],
     interner: &mut CssSymbolInterner,
 ) -> Option<PropertyValue> {
+    if property == PropertyId::FontFamily {
+        if let Some(ParsedValue::Keyword(keyword)) = values.first()
+            && let Some(wide) = css_wide_keyword(keyword)
+            && values.len() == 1
+        {
+            return Some(wide);
+        }
+        return lower_font_family(values);
+    }
     if let Some(mapper) = layout_keyword_mapper(property)
         && let Some(ParsedValue::Keyword(keyword)) = values.first()
     {
@@ -325,6 +335,49 @@ fn lower_for_property(
         });
     }
     lower_value(values, interner)
+}
+
+/// Lowers a `font-family` value list into an ordered
+/// [`PropertyValue::FontFamilies`], preserving author order.
+///
+/// The component list is split on commas into one group per family. Within a
+/// group, a single quoted string is taken verbatim (`"Helvetica Neue"`), while
+/// one-or-more bare idents are joined with a single space (`Helvetica Neue`);
+/// a lone generic keyword (`serif`, `sans-serif`, …) is kept as its own name so
+/// the runtime can map it to a generic family. Empty groups (a stray or trailing
+/// comma) are skipped. Returns [`None`] when no family name can be recovered, so
+/// the declaration degrades to an unsupported-feature diagnostic rather than
+/// being dropped silently.
+fn lower_font_family(values: &[ParsedValue]) -> Option<PropertyValue> {
+    let mut families: Vec<Box<str>> = Vec::new();
+    for group in values.split(|value| matches!(value, ParsedValue::Comma)) {
+        if let Some(name) = font_family_name(group) {
+            families.push(name);
+        }
+    }
+    if families.is_empty() {
+        return None;
+    }
+    Some(PropertyValue::FontFamilies(families.into_boxed_slice()))
+}
+
+/// Builds one family name from a comma-delimited component group: a lone quoted
+/// string verbatim, or the group's bare idents joined by single spaces. Returns
+/// [`None`] for a group with no ident/string components.
+fn font_family_name(group: &[ParsedValue]) -> Option<Box<str>> {
+    let mut idents: Vec<&str> = Vec::new();
+    for value in group {
+        match value {
+            // A quoted family name or a bare ident both contribute their text.
+            ParsedValue::String(text) | ParsedValue::Keyword(text) => idents.push(text),
+            _ => {}
+        }
+    }
+    if idents.is_empty() {
+        None
+    } else {
+        Some(idents.join(" ").into_boxed_str())
+    }
 }
 
 /// Returns the keyword→reserved-symbol mapper for a closed-set layout property,
@@ -1038,6 +1091,64 @@ mod tests {
         let decls = compile_all("margin: red");
         assert_eq!(decls.len(), 1);
         assert!(matches!(decls[0], CompiledDeclaration::Unsupported(_)));
+    }
+
+    #[test]
+    fn resolves_font_family_name() {
+        assert_eq!(
+            property_id_from_name("font-family"),
+            Some(PropertyId::FontFamily)
+        );
+        assert_eq!(
+            property_id_from_name("FONT-FAMILY"),
+            Some(PropertyId::FontFamily)
+        );
+    }
+
+    /// Extracts the ordered family names from a lowered `font-family` value.
+    fn families(text: &str) -> Vec<String> {
+        match value_of(text) {
+            PropertyValue::FontFamilies(names) => {
+                names.iter().map(|n| n.to_string()).collect()
+            }
+            other => panic!("expected font families, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lowers_font_family_list_in_order() {
+        // Quoted string, bare ident, and generic keyword, in author order.
+        assert_eq!(
+            families(r#"font-family: "Foo", Arial, sans-serif"#),
+            vec![
+                "Foo".to_string(),
+                "Arial".to_string(),
+                "sans-serif".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn lowers_multi_ident_family_joined_by_spaces() {
+        // Unquoted multi-word family names join their idents with single spaces.
+        assert_eq!(
+            families("font-family: Helvetica Neue, monospace"),
+            vec!["Helvetica Neue".to_string(), "monospace".to_string()]
+        );
+    }
+
+    #[test]
+    fn font_family_carries_its_property_id() {
+        assert_eq!(
+            standard("font-family: Arial").0.property(),
+            PropertyId::FontFamily
+        );
+    }
+
+    #[test]
+    fn font_family_honours_css_wide_keywords() {
+        assert_eq!(value_of("font-family: inherit"), PropertyValue::Inherit);
+        assert_eq!(value_of("font-family: initial"), PropertyValue::Initial);
     }
 
     #[test]

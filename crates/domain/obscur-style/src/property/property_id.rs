@@ -85,6 +85,9 @@ pub enum PropertyId {
     // ---- Typography (inherited) ----
     /// The `font-size` property (Length-valued, inherited).
     FontSize,
+    /// The `font-family` property (a `FontFamilies` list of family/generic
+    /// names, inherited).
+    FontFamily,
 }
 
 impl PropertyId {
@@ -122,6 +125,7 @@ impl PropertyId {
             Self::JustifyContent => "justify-content",
             Self::AlignItems => "align-items",
             Self::FontSize => "font-size",
+            Self::FontFamily => "font-family",
         }
     }
 
@@ -133,7 +137,9 @@ impl PropertyId {
     pub const fn default_inheritance(self) -> Inheritance {
         match self {
             // Text-affecting / typography properties inherit by default.
-            Self::Color | Self::Visibility | Self::FontSize => Inheritance::Inherited,
+            Self::Color | Self::Visibility | Self::FontSize | Self::FontFamily => {
+                Inheritance::Inherited
+            }
             // Box / paint / layout properties reset on each element.
             Self::BackgroundColor
             | Self::Opacity
@@ -243,6 +249,13 @@ mod tests {
                 id.name()
             );
         }
+    }
+
+    #[test]
+    fn font_family_name_and_inheritance() {
+        assert_eq!(PropertyId::FontFamily.name(), "font-family");
+        // Like `font-size` and `color`, `font-family` inherits by default.
+        assert!(PropertyId::FontFamily.default_inheritance().is_inherited());
     }
 
     #[test]

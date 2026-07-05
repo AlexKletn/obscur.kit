@@ -44,6 +44,14 @@ pub enum PropertyValue {
     Number(f32),
     /// A color value (see [`StyleColor`]).
     Color(StyleColor),
+    /// An ordered `font-family` list, in author order. Each entry is either a
+    /// concrete family name (for example `"Helvetica Neue"`) or a generic
+    /// keyword (`"serif"`, `"sans-serif"`, `"monospace"`, `"cursive"`,
+    /// `"fantasy"`, `"system-ui"`). Family names are stored **as strings**, not
+    /// interned symbols: the runtime matches them against its font registry by
+    /// string, so this value crosses the CSS/runtime interner boundary without a
+    /// shared interner.
+    FontFamilies(Box<[Box<str>]>),
     /// An unresolved `var(--name)` reference to a custom property, named by its
     /// interned symbol. This is a pre-resolution placeholder: it is substituted
     /// with the referenced custom property's value before computed-value
@@ -64,6 +72,27 @@ impl PropertyValue {
     pub const fn as_color(&self) -> Option<StyleColor> {
         match self {
             Self::Color(color) => Some(*color),
+            _ => None,
+        }
+    }
+
+    /// Builds a [`PropertyValue::FontFamilies`] from an ordered iterator of
+    /// family / generic-keyword names, preserving author order.
+    #[must_use]
+    pub fn font_families<I, S>(names: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<Box<str>>,
+    {
+        Self::FontFamilies(names.into_iter().map(Into::into).collect())
+    }
+
+    /// Returns the ordered `font-family` list if this value is a
+    /// [`PropertyValue::FontFamilies`].
+    #[must_use]
+    pub fn as_font_families(&self) -> Option<&[Box<str>]> {
+        match self {
+            Self::FontFamilies(names) => Some(names),
             _ => None,
         }
     }
@@ -119,6 +148,16 @@ mod tests {
         assert!(PropertyValue::Unset.is_wide_keyword());
         assert!(!PropertyValue::Number(0.5).is_wide_keyword());
         assert!(!PropertyValue::CustomRef(InternedSymbol::from_raw(1)).is_wide_keyword());
+    }
+
+    #[test]
+    fn font_families_round_trips_in_order() {
+        let value = PropertyValue::font_families(["Foo", "Arial", "sans-serif"]);
+        let names = value.as_font_families().expect("font families");
+        let collected: Vec<&str> = names.iter().map(|n| &**n).collect();
+        assert_eq!(collected, ["Foo", "Arial", "sans-serif"]);
+        // Other value kinds are not font families.
+        assert_eq!(PropertyValue::Number(1.0).as_font_families(), None);
     }
 
     #[test]

@@ -19,7 +19,7 @@ use obscur_text::layout::{ParagraphLayout, TextAlignment, TextOverflow};
 use obscur_text::shaping::{ParagraphShaper, TextDirection};
 use obscur_tree::tree::RetainedTree;
 
-use super::ComputedStyles;
+use super::{families_for, ComputedStyles};
 
 /// The initial `font-size` (spec / CSS default), used as the `em`/`rem` base
 /// when a node (or the document root) has no computed `font-size`.
@@ -113,7 +113,10 @@ impl LayoutCoordinator {
     ///
     /// `styles` supplies the per-node [`LayoutStyle`] (typically produced by
     /// [`layout_styles_from`](Self::layout_styles_from)); a node missing from
-    /// `styles` is laid out with [`LayoutStyle::default`].
+    /// `styles` is laid out with [`LayoutStyle::default`]. `computed` supplies
+    /// each node's [`ComputedStyle`], from which a text leaf's `font-family`
+    /// fallback chain is resolved (via [`families_for`]) — the same chain the
+    /// scene phase paints with.
     ///
     /// # Text is a constraint-aware leaf (spec §5.10)
     ///
@@ -140,6 +143,7 @@ impl LayoutCoordinator {
         &self,
         tree: &RetainedTree,
         styles: &LayoutStyles,
+        computed: &ComputedStyles,
         viewport: Size,
         paragraph: &ParagraphShaper,
     ) -> LayoutBoxes {
@@ -150,6 +154,7 @@ impl LayoutCoordinator {
         arrange(
             tree,
             styles,
+            computed,
             root,
             Point::ORIGIN,
             BoxConstraints::tight(viewport),
@@ -172,9 +177,14 @@ impl LayoutCoordinator {
 /// is the widest line's width by the summed line heights, so a long string in a
 /// narrow width yields a taller box; the scene phase re-wraps to this box width
 /// through the **same** orchestrator and so emits exactly the same lines.
+///
+/// `fallback` is the node's font chain resolved from its computed `font-family`
+/// (via [`families_for`]); the scene phase resolves the identical chain, so the
+/// measured box and the painted glyphs use the same fonts.
 fn measure_text_node(
     content: &str,
     style: &LayoutStyle,
+    fallback: &FontFallback,
     constraints: BoxConstraints,
     paragraph: &ParagraphShaper,
 ) -> Size {
@@ -182,7 +192,7 @@ fn measure_text_node(
     let metrics = paragraph.line_metrics(font_size);
     let runs = paragraph.shape_paragraph(
         content,
-        &FontFallback::default_chain(),
+        fallback,
         &FontAttributes::default(),
         &measure_face(),
         font_size,
@@ -512,6 +522,8 @@ struct RecMeasurer<'a> {
     tree: &'a RetainedTree,
     /// Per-node layout styles.
     styles: &'a LayoutStyles,
+    /// Per-node computed styles, for resolving a text child's `font-family`.
+    computed: &'a ComputedStyles,
     /// The children of the node currently being laid out, parallel to the
     /// indices the algorithm passes to [`ChildMeasurer::measure_child`].
     children: &'a [LayoutChild],
@@ -527,6 +539,7 @@ impl ChildMeasurer for RecMeasurer<'_> {
             Some(child) => measure(
                 self.tree,
                 self.styles,
+                self.computed,
                 child.node(),
                 constraints,
                 self.paragraph,
@@ -551,6 +564,7 @@ impl ChildMeasurer for RecMeasurer<'_> {
 fn measure(
     tree: &RetainedTree,
     styles: &LayoutStyles,
+    computed: &ComputedStyles,
     node: NodeId,
     constraints: BoxConstraints,
     paragraph: &ParagraphShaper,
@@ -563,7 +577,8 @@ fn measure(
     // A text node is a constraint-aware leaf: shape + wrap to `max.width`,
     // bypassing the box algorithms entirely (spec §5.10).
     if let Some(content) = tree.get(node).and_then(|n| n.kind().text()) {
-        return measure_text_node(content, &style, constraints, paragraph);
+        let fallback = families_for(computed.get(&node));
+        return measure_text_node(content, &style, &fallback, constraints, paragraph);
     }
     let Some(algorithm) = algorithm_for(style.display) else {
         return Size::ZERO;
@@ -572,6 +587,7 @@ fn measure(
     let mut measurer = RecMeasurer {
         tree,
         styles,
+        computed,
         children: &children,
         paragraph,
         depth: depth - 1,
@@ -596,9 +612,14 @@ fn measure(
 /// Child boxes returned by the algorithm are **parent-relative**; each child's
 /// absolute origin is `origin + child_box.origin()`. The child count and the
 /// returned box count are reconciled defensively so no index can panic.
+// The recursive arrange walk threads the tree, both style maps, the target
+// origin/constraints, the output map, the shaper, and the depth budget; these
+// are cohesive positional arguments of one internal recursion, not a public API.
+#[allow(clippy::too_many_arguments)]
 fn arrange(
     tree: &RetainedTree,
     styles: &LayoutStyles,
+    computed: &ComputedStyles,
     node: NodeId,
     origin: Point,
     constraints: BoxConstraints,
@@ -615,7 +636,8 @@ fn arrange(
     // write the wrapped box, bypassing the box algorithms (spec §5.10). It has
     // no laid-out children, so there is nothing to recurse into.
     if let Some(content) = tree.get(node).and_then(|n| n.kind().text()) {
-        let size = measure_text_node(content, &style, constraints, paragraph);
+        let fallback = families_for(computed.get(&node));
+        let size = measure_text_node(content, &style, &fallback, constraints, paragraph);
         boxes.insert(node, LayoutBox::new(Rect::new(origin, size)));
         return;
     }
@@ -630,6 +652,7 @@ fn arrange(
         let mut measurer = RecMeasurer {
             tree,
             styles,
+            computed,
             children: &children,
             paragraph,
             depth: depth - 1,
@@ -648,6 +671,7 @@ fn arrange(
         arrange(
             tree,
             styles,
+            computed,
             child.node(),
             child_origin,
             BoxConstraints::tight(child_rel.size()),
@@ -744,7 +768,13 @@ mod tests {
         let coordinator = LayoutCoordinator::new();
         let tree = RetainedTree::new();
         let styles = LayoutStyles::new();
-        let boxes = coordinator.layout(&tree, &styles, Size::new(800.0, 600.0), &test_paragraph());
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &ComputedStyles::new(),
+            Size::new(800.0, 600.0),
+            &test_paragraph(),
+        );
         assert!(boxes.is_empty());
     }
 
@@ -855,7 +885,13 @@ mod tests {
         styles.insert(child_b, block(200.0, 50.0));
 
         let coordinator = LayoutCoordinator::new();
-        let boxes = coordinator.layout(&tree, &styles, Size::new(200.0, 100.0), &test_paragraph());
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &ComputedStyles::new(),
+            Size::new(200.0, 100.0),
+            &test_paragraph(),
+        );
 
         // Root at the viewport origin.
         assert_eq!(boxes[&root].origin(), Point::new(0.0, 0.0));
@@ -898,7 +934,13 @@ mod tests {
         styles.insert(child_b, flex_item);
 
         let coordinator = LayoutCoordinator::new();
-        let boxes = coordinator.layout(&tree, &styles, Size::new(200.0, 100.0), &test_paragraph());
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &ComputedStyles::new(),
+            Size::new(200.0, 100.0),
+            &test_paragraph(),
+        );
 
         // Children sit side by side along the main (row) axis: x=0 then x=50.
         assert_eq!(boxes[&child_a].origin(), Point::new(0.0, 0.0));
@@ -931,7 +973,13 @@ mod tests {
         styles.insert(leaf, leaf_style);
 
         let coordinator = LayoutCoordinator::new();
-        let boxes = coordinator.layout(&tree, &styles, Size::new(200.0, 200.0), &test_paragraph());
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &ComputedStyles::new(),
+            Size::new(200.0, 200.0),
+            &test_paragraph(),
+        );
 
         // Container offset by the root's top/left padding.
         assert_eq!(boxes[&container].origin(), Point::new(10.0, 10.0));
@@ -1110,7 +1158,13 @@ mod tests {
         // Sanity: the bridge produced a flex container.
         assert_eq!(styles[&root].display, LayoutDisplay::Flex);
 
-        let boxes = coordinator.layout(&tree, &styles, Size::new(200.0, 100.0), &test_paragraph());
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &computed,
+            Size::new(200.0, 100.0),
+            &test_paragraph(),
+        );
 
         // Children sit side by side along the row axis: distinct x offsets.
         assert_eq!(boxes[&child_a].origin().x, 0.0);
@@ -1151,7 +1205,13 @@ mod tests {
 
         let coordinator = LayoutCoordinator::new();
         let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
-        let boxes = coordinator.layout(&tree, &styles, Size::new(width, height), &test_paragraph());
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &computed,
+            Size::new(width, height),
+            &test_paragraph(),
+        );
         boxes[&text]
     }
 
@@ -1176,7 +1236,8 @@ mod tests {
 
         let coordinator = LayoutCoordinator::new();
         let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
-        let boxes = coordinator.layout(&tree, &styles, Size::new(width, height), paragraph);
+        let boxes =
+            coordinator.layout(&tree, &styles, &computed, Size::new(width, height), paragraph);
         boxes[&text]
     }
 
@@ -1258,7 +1319,13 @@ mod tests {
         let coordinator = LayoutCoordinator::new();
         let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
         assert_eq!(styles[&text].font_size, 20.0);
-        let boxes = coordinator.layout(&tree, &styles, Size::new(1000.0, 200.0), &test_paragraph());
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &computed,
+            Size::new(1000.0, 200.0),
+            &test_paragraph(),
+        );
         let text_box = boxes[&text];
         // 4 chars · (20 · 0.6) = 48.0 wide, one line 20 tall.
         assert!((text_box.size().width - 48.0).abs() < 1e-3, "width {}", text_box.size().width);
@@ -1278,7 +1345,13 @@ mod tests {
         );
 
         let coordinator = LayoutCoordinator::new();
-        let boxes = coordinator.layout(&tree, &styles, Size::new(100.0, 100.0), &test_paragraph());
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &ComputedStyles::new(),
+            Size::new(100.0, 100.0),
+            &test_paragraph(),
+        );
         // A `None` root produces no box at all.
         assert!(boxes.is_empty());
     }

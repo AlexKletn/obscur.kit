@@ -606,6 +606,7 @@ impl UiRuntime {
             let boxes = self.layout.layout(
                 &self.tree,
                 &layout_styles,
+                &computed,
                 ctx.viewport(),
                 self.scene_composer.paragraph(),
             );

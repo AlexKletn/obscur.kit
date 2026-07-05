@@ -112,6 +112,9 @@ impl StyleResolver {
             PropertyId::FlexShrink => Some(ComputedValue::number(1.0)),
             // `font-size` initial is `medium` (~16px logical).
             PropertyId::FontSize => Some(ComputedValue::length(Length::px(16.0))),
+            // `font-family` initial is UA-dependent; left unresolved so an absent
+            // authored value falls back to the runtime's default font chain.
+            PropertyId::FontFamily => None,
             // Keyword initials need the interner; deferred to a later phase.
             PropertyId::Display
             | PropertyId::Visibility
