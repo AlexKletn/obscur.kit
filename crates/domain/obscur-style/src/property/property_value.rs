@@ -20,7 +20,7 @@
 //! concrete pixels at the layout/compute step against a
 //! [`LengthContext`](crate::property::LengthContext) (spec §4.5, §4.13).
 
-use crate::property::{Length, LengthExpr, StyleColor};
+use crate::property::{GridTrack, Length, LengthExpr, StyleColor};
 use obscur_identity::InternedSymbol;
 
 /// A typed CSS property value.
@@ -52,6 +52,13 @@ pub enum PropertyValue {
     /// string, so this value crosses the CSS/runtime interner boundary without a
     /// shared interner.
     FontFamilies(Box<[Box<str>]>),
+    /// A grid track list, in author order: the value of `grid-template-columns`
+    /// or `grid-template-rows`. Each entry is a [`GridTrack`] sizing function
+    /// (`100px`, `1fr`, `auto`, `minmax(…)`); `repeat(…)` is expanded to its flat
+    /// track list before this value is built, so this list is already flat. The
+    /// runtime converts each [`GridTrack`] to `obscur_layout`'s `TrackSize` when
+    /// it bridges the computed style into a grid layout input (spec §4.1).
+    GridTracks(Box<[GridTrack]>),
     /// An unresolved `var(--name)` reference to a custom property, named by its
     /// interned symbol. This is a pre-resolution placeholder: it is substituted
     /// with the referenced custom property's value before computed-value
@@ -93,6 +100,26 @@ impl PropertyValue {
     pub fn as_font_families(&self) -> Option<&[Box<str>]> {
         match self {
             Self::FontFamilies(names) => Some(names),
+            _ => None,
+        }
+    }
+
+    /// Builds a [`PropertyValue::GridTracks`] from an ordered iterator of
+    /// [`GridTrack`]s, preserving author order.
+    #[must_use]
+    pub fn grid_tracks<I>(tracks: I) -> Self
+    where
+        I: IntoIterator<Item = GridTrack>,
+    {
+        Self::GridTracks(tracks.into_iter().collect())
+    }
+
+    /// Returns the ordered grid track list if this value is a
+    /// [`PropertyValue::GridTracks`].
+    #[must_use]
+    pub fn as_grid_tracks(&self) -> Option<&[GridTrack]> {
+        match self {
+            Self::GridTracks(tracks) => Some(tracks),
             _ => None,
         }
     }
@@ -158,6 +185,23 @@ mod tests {
         assert_eq!(collected, ["Foo", "Arial", "sans-serif"]);
         // Other value kinds are not font families.
         assert_eq!(PropertyValue::Number(1.0).as_font_families(), None);
+    }
+
+    #[test]
+    fn grid_tracks_round_trips_in_order() {
+        use crate::property::GridTrack;
+        let value = PropertyValue::grid_tracks([
+            GridTrack::Fixed(Length::px(100.0)),
+            GridTrack::Fr(1.0),
+            GridTrack::Auto,
+        ]);
+        let tracks = value.as_grid_tracks().expect("grid tracks");
+        assert_eq!(tracks.len(), 3);
+        assert_eq!(tracks[0], GridTrack::Fixed(Length::px(100.0)));
+        assert_eq!(tracks[1], GridTrack::Fr(1.0));
+        assert_eq!(tracks[2], GridTrack::Auto);
+        // Other value kinds are not grid tracks.
+        assert_eq!(PropertyValue::Number(1.0).as_grid_tracks(), None);
     }
 
     #[test]

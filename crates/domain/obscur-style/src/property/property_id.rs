@@ -82,6 +82,12 @@ pub enum PropertyId {
     /// [`crate::property::layout_keyword`]).
     AlignItems,
 
+    // ---- Grid container (not inherited) ----
+    /// The `grid-template-columns` property (a `GridTracks` track list).
+    GridTemplateColumns,
+    /// The `grid-template-rows` property (a `GridTracks` track list).
+    GridTemplateRows,
+
     // ---- Typography (inherited) ----
     /// The `font-size` property (Length-valued, inherited).
     FontSize,
@@ -142,6 +148,8 @@ impl PropertyId {
             Self::FlexDirection => "flex-direction",
             Self::JustifyContent => "justify-content",
             Self::AlignItems => "align-items",
+            Self::GridTemplateColumns => "grid-template-columns",
+            Self::GridTemplateRows => "grid-template-rows",
             Self::FontSize => "font-size",
             Self::FontFamily => "font-family",
             Self::Direction => "direction",
@@ -193,6 +201,8 @@ impl PropertyId {
             | Self::FlexDirection
             | Self::JustifyContent
             | Self::AlignItems
+            | Self::GridTemplateColumns
+            | Self::GridTemplateRows
             // `text-overflow` does not inherit (unlike the other typography
             // properties, which do).
             | Self::TextOverflow => Inheritance::NotInherited,
@@ -313,6 +323,27 @@ mod tests {
         // Unlike the other typography properties, `text-overflow` does not inherit.
         assert!(
             !PropertyId::TextOverflow
+                .default_inheritance()
+                .is_inherited()
+        );
+    }
+
+    #[test]
+    fn grid_template_names_and_not_inherited() {
+        assert_eq!(
+            PropertyId::GridTemplateColumns.name(),
+            "grid-template-columns"
+        );
+        assert_eq!(PropertyId::GridTemplateRows.name(), "grid-template-rows");
+        // Like the other layout / box properties, the grid templates reset per
+        // element rather than inheriting.
+        assert!(
+            !PropertyId::GridTemplateColumns
+                .default_inheritance()
+                .is_inherited()
+        );
+        assert!(
+            !PropertyId::GridTemplateRows
                 .default_inheritance()
                 .is_inherited()
         );

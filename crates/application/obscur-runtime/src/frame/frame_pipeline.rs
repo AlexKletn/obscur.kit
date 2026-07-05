@@ -190,6 +190,12 @@ impl FramePipeline {
         let layout_styles = self
             .layout
             .layout_styles_from(&computed, ctx.viewport(), root_font);
+        // Authored grid templates (`grid-template-columns`/`-rows`) become a
+        // per-node side-table so a grid container dispatches the real track-sizing
+        // algorithm; a grid node with no template falls back to a single column.
+        let grid_templates = self
+            .layout
+            .grid_templates_from(&computed, ctx.viewport(), root_font);
         // Text leaves are shaped + wrapped to their available width inside the
         // layout pass through the scene's paragraph orchestrator (disjoint field,
         // so a legal split borrow), so `self.scene` later re-wraps and paints
@@ -198,6 +204,7 @@ impl FramePipeline {
             tree,
             &layout_styles,
             &computed,
+            &grid_templates,
             ctx.viewport(),
             self.scene.paragraph(),
         );

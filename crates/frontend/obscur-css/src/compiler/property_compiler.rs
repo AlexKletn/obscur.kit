@@ -23,7 +23,7 @@ use crate::parser::{ParsedDeclaration, ParsedValue};
 use obscur_identity::InternedSymbol;
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{
-    layout_keyword, CustomProperty, Length, PropertyId, PropertyValue, StyleColor,
+    layout_keyword, CustomProperty, GridTrack, Length, PropertyId, PropertyValue, StyleColor,
 };
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
@@ -254,7 +254,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 33] = [
+    const ALL: [PropertyId; 35] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::Opacity,
@@ -281,6 +281,8 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::FlexDirection,
         PropertyId::JustifyContent,
         PropertyId::AlignItems,
+        PropertyId::GridTemplateColumns,
+        PropertyId::GridTemplateRows,
         PropertyId::FontSize,
         PropertyId::FontFamily,
         PropertyId::Direction,
@@ -330,6 +332,18 @@ fn lower_for_property(
     }
     if property == PropertyId::FontWeight {
         return lower_font_weight(values);
+    }
+    if matches!(
+        property,
+        PropertyId::GridTemplateColumns | PropertyId::GridTemplateRows
+    ) {
+        if let Some(ParsedValue::Keyword(keyword)) = values.first()
+            && let Some(wide) = css_wide_keyword(keyword)
+            && values.len() == 1
+        {
+            return Some(wide);
+        }
+        return lower_grid_template(values);
     }
     if let Some(mapper) = layout_keyword_mapper(property)
         && let Some(ParsedValue::Keyword(keyword)) = values.first()
@@ -439,6 +453,126 @@ fn font_weight_keyword(keyword: &str) -> Option<f32> {
     match keyword.to_ascii_lowercase().as_str() {
         "normal" => Some(400.0),
         "bold" => Some(700.0),
+        _ => None,
+    }
+}
+
+/// The largest number of tracks a single `repeat(N, …)` is allowed to expand to,
+/// so a pathological repetition count cannot blow up the track list.
+const MAX_REPEAT: usize = 1024;
+
+/// Lowers a `grid-template-columns` / `grid-template-rows` value into a
+/// [`PropertyValue::GridTracks`] track list (spec §4.1).
+///
+/// The value is a space-separated list of tracks; each track is a `<length>`
+/// (`px`/`%`/`em`/… → [`GridTrack::Fixed`]), an `<fr>` (`1fr` → [`GridTrack::Fr`]),
+/// the `auto` keyword ([`GridTrack::Auto`]), or `minmax(min, max)`
+/// ([`GridTrack::MinMax`]). A `repeat(N, <tracks>)` is expanded in place into `N`
+/// flat copies of its inner track list. Returns [`None`] (so the declaration
+/// degrades to an unsupported-feature diagnostic) when the list is empty or any
+/// component is not a recognised track.
+fn lower_grid_template(values: &[ParsedValue]) -> Option<PropertyValue> {
+    let tracks = tracks_from_components(values)?;
+    if tracks.is_empty() {
+        return None;
+    }
+    Some(PropertyValue::grid_tracks(tracks))
+}
+
+/// Parses a space-separated component list into a flat [`GridTrack`] list,
+/// expanding any `repeat(…)` component in place.
+fn tracks_from_components(values: &[ParsedValue]) -> Option<Vec<GridTrack>> {
+    let mut out = Vec::new();
+    for value in values {
+        match value {
+            // A comma has no meaning inside a track list; reject rather than drop.
+            ParsedValue::Comma => return None,
+            ParsedValue::Function { name, args } if name.eq_ignore_ascii_case("repeat") => {
+                out.extend(expand_repeat(args)?);
+            }
+            other => out.push(grid_track_scalar(other)?),
+        }
+    }
+    Some(out)
+}
+
+/// Lowers one non-`repeat` track: `auto`, an `<fr>`, a `<length>`, or
+/// `minmax(min, max)`. Returns [`None`] for anything else.
+fn grid_track_scalar(value: &ParsedValue) -> Option<GridTrack> {
+    match value {
+        ParsedValue::Keyword(keyword) if keyword.eq_ignore_ascii_case("auto") => {
+            Some(GridTrack::Auto)
+        }
+        ParsedValue::Dimension { value, unit } if unit.eq_ignore_ascii_case("fr") => {
+            Some(GridTrack::Fr(narrow_f32(*value)))
+        }
+        ParsedValue::Dimension { value, unit } => {
+            dimension_length(*value, unit).map(GridTrack::Fixed)
+        }
+        ParsedValue::Percentage(p) => Some(GridTrack::Fixed(Length::Percent(narrow_f32(*p)))),
+        ParsedValue::Function { name, args } if name.eq_ignore_ascii_case("minmax") => {
+            lower_minmax(args)
+        }
+        _ => None,
+    }
+}
+
+/// Lowers `minmax(min, max)` into a [`GridTrack::MinMax`]; each bound is a single
+/// non-`repeat` track. Returns [`None`] unless exactly two comma-separated,
+/// single-component bounds are present.
+fn lower_minmax(args: &[ParsedValue]) -> Option<GridTrack> {
+    let groups: Vec<&[ParsedValue]> = args.split(|v| matches!(v, ParsedValue::Comma)).collect();
+    let [min_group, max_group] = groups.as_slice() else {
+        return None;
+    };
+    let min = grid_track_scalar(single_component(min_group)?)?;
+    let max = grid_track_scalar(single_component(max_group)?)?;
+    Some(GridTrack::minmax(min, max))
+}
+
+/// Expands `repeat(N, <tracks>)` into `N` flat copies of its inner track list.
+///
+/// `N` is a positive integer (clamped to [`MAX_REPEAT`]); the `auto-fill` /
+/// `auto-fit` keywords cannot be resolved without the container width, so they are
+/// treated as a single repetition (a documented limitation). Returns [`None`] on a
+/// missing count, an empty inner list, or an unparseable inner track.
+fn expand_repeat(args: &[ParsedValue]) -> Option<Vec<GridTrack>> {
+    let comma = args.iter().position(|v| matches!(v, ParsedValue::Comma))?;
+    let (count_part, rest) = args.split_at(comma);
+    let inner = tracks_from_components(&rest[1..])?;
+    if inner.is_empty() {
+        return None;
+    }
+    let count = repeat_count(count_part)?;
+    let mut out = Vec::with_capacity(inner.len().saturating_mul(count));
+    for _ in 0..count {
+        out.extend(inner.iter().cloned());
+    }
+    Some(out)
+}
+
+/// Resolves the count component of a `repeat(N, …)`: a positive integer clamped to
+/// [`MAX_REPEAT`], or `1` for the `auto-fill` / `auto-fit` keywords (unsupported,
+/// treated as a single repetition). [`None`] for any other count.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn repeat_count(part: &[ParsedValue]) -> Option<usize> {
+    match single_component(part)? {
+        ParsedValue::Number(n) if *n >= 1.0 => Some((*n as usize).min(MAX_REPEAT)),
+        ParsedValue::Keyword(keyword)
+            if keyword.eq_ignore_ascii_case("auto-fill")
+                || keyword.eq_ignore_ascii_case("auto-fit") =>
+        {
+            Some(1)
+        }
+        _ => None,
+    }
+}
+
+/// Returns the sole component of a group, or [`None`] when it has zero or more
+/// than one component.
+fn single_component(group: &[ParsedValue]) -> Option<&ParsedValue> {
+    match group {
+        [one] => Some(one),
         _ => None,
     }
 }
@@ -1350,5 +1484,130 @@ mod tests {
         let decls = compile_all("width: 10px");
         assert_eq!(decls.len(), 1);
         assert_eq!(standard_of(&decls[0]).property(), PropertyId::Width);
+    }
+
+    // ---- grid-template-columns / grid-template-rows ----
+
+    /// Extracts the lowered [`GridTrack`] list for a `grid-template-*` value.
+    fn tracks(text: &str) -> Vec<GridTrack> {
+        match value_of(text) {
+            PropertyValue::GridTracks(list) => list.into_vec(),
+            other => panic!("expected grid tracks, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn resolves_grid_template_names() {
+        assert_eq!(
+            property_id_from_name("grid-template-columns"),
+            Some(PropertyId::GridTemplateColumns)
+        );
+        assert_eq!(
+            property_id_from_name("GRID-TEMPLATE-ROWS"),
+            Some(PropertyId::GridTemplateRows)
+        );
+    }
+
+    #[test]
+    fn lowers_fixed_and_fr_track_list() {
+        assert_eq!(
+            tracks("grid-template-columns: 100px 1fr 2fr"),
+            vec![
+                GridTrack::Fixed(Length::px(100.0)),
+                GridTrack::Fr(1.0),
+                GridTrack::Fr(2.0),
+            ]
+        );
+        // Carries its own property id, and rows lower identically.
+        assert_eq!(
+            standard("grid-template-columns: 1fr").0.property(),
+            PropertyId::GridTemplateColumns
+        );
+        assert_eq!(
+            standard("grid-template-rows: 1fr").0.property(),
+            PropertyId::GridTemplateRows
+        );
+    }
+
+    #[test]
+    fn lowers_auto_and_percent_and_em_tracks() {
+        assert_eq!(
+            tracks("grid-template-columns: auto"),
+            vec![GridTrack::Auto]
+        );
+        assert_eq!(
+            tracks("grid-template-columns: 50% 2em"),
+            vec![
+                GridTrack::Fixed(Length::Percent(50.0)),
+                GridTrack::Fixed(Length::Em(2.0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn lowers_repeat_to_flat_list() {
+        assert_eq!(
+            tracks("grid-template-columns: repeat(2, 1fr)"),
+            vec![GridTrack::Fr(1.0), GridTrack::Fr(1.0)]
+        );
+        // A multi-track repeat body expands each copy in order.
+        assert_eq!(
+            tracks("grid-template-columns: repeat(2, 100px 1fr)"),
+            vec![
+                GridTrack::Fixed(Length::px(100.0)),
+                GridTrack::Fr(1.0),
+                GridTrack::Fixed(Length::px(100.0)),
+                GridTrack::Fr(1.0),
+            ]
+        );
+        // repeat mixes with surrounding tracks.
+        assert_eq!(
+            tracks("grid-template-columns: 20px repeat(2, 1fr)"),
+            vec![
+                GridTrack::Fixed(Length::px(20.0)),
+                GridTrack::Fr(1.0),
+                GridTrack::Fr(1.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn lowers_minmax_track() {
+        assert_eq!(
+            tracks("grid-template-columns: minmax(100px, 1fr)"),
+            vec![GridTrack::minmax(
+                GridTrack::Fixed(Length::px(100.0)),
+                GridTrack::Fr(1.0)
+            )]
+        );
+    }
+
+    #[test]
+    fn auto_fill_repeat_is_a_single_repetition() {
+        // `auto-fill` cannot be resolved without a container width, so it is
+        // treated as one repetition (documented limitation).
+        assert_eq!(
+            tracks("grid-template-columns: repeat(auto-fill, 100px)"),
+            vec![GridTrack::Fixed(Length::px(100.0))]
+        );
+    }
+
+    #[test]
+    fn grid_template_honours_css_wide_keywords() {
+        assert_eq!(
+            value_of("grid-template-columns: inherit"),
+            PropertyValue::Inherit
+        );
+        assert_eq!(
+            value_of("grid-template-rows: initial"),
+            PropertyValue::Initial
+        );
+    }
+
+    #[test]
+    fn invalid_grid_template_is_unsupported() {
+        // A bare colour is not a valid track.
+        let (result, _) = compile("grid-template-columns: red");
+        assert!(matches!(result, CompiledDeclaration::Unsupported(_)));
     }
 }

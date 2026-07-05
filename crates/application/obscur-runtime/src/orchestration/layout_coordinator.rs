@@ -22,7 +22,8 @@ use obscur_text::shaping::{ParagraphShaper, ShapedGlyph, TextDirection};
 use obscur_tree::tree::RetainedTree;
 
 use super::{
-    alignment_for, attributes_for, direction_for, families_for, overflow_for, ComputedStyles,
+    alignment_for, attributes_for, direction_for, families_for, grid_templates_from, overflow_for,
+    ComputedStyles, GridTemplates,
 };
 
 /// The initial `font-size` (spec / CSS default), used as the `em`/`rem` base
@@ -148,12 +149,39 @@ impl LayoutCoordinator {
         tree: &RetainedTree,
         styles: &LayoutStyles,
         computed: &ComputedStyles,
+        grid_templates: &GridTemplates,
         viewport: Size,
         paragraph: &ParagraphShaper,
     ) -> LayoutBoxes {
         // The default path never hyphenates: [`None`] makes text-leaf measurement
         // byte-identical to whitespace-only wrapping (no hyphen glyph is shaped).
-        self.layout_with_hyphenator(tree, styles, computed, viewport, paragraph, None)
+        self.layout_with_hyphenator(
+            tree,
+            styles,
+            computed,
+            grid_templates,
+            viewport,
+            paragraph,
+            None,
+        )
+    }
+
+    /// Derives a [`GridTemplates`] side-table for every grid node in `computed`
+    /// that authored a `grid-template-columns` / `grid-template-rows`.
+    ///
+    /// This is the grid twin of
+    /// [`layout_styles_from`](Self::layout_styles_from): the same `viewport` /
+    /// `root_font_size` resolution context folds a fixed track's relative units to
+    /// pixels. Nodes with no authored template produce no entry (and fall back to
+    /// the default single implicit column at dispatch).
+    #[must_use]
+    pub fn grid_templates_from(
+        &self,
+        computed: &ComputedStyles,
+        viewport: Size,
+        root_font_size: f32,
+    ) -> GridTemplates {
+        grid_templates_from(computed, viewport, root_font_size)
     }
 
     /// Lays out like [`layout`](Self::layout) but wraps text-leaf nodes through an
@@ -164,12 +192,17 @@ impl LayoutCoordinator {
     /// glyph) the scene phase composes with, so the measured box height and the
     /// painted line count agree even when hyphenation splits a word. [`None`]
     /// reproduces [`layout`](Self::layout) exactly.
+    // The tree, the three per-node side-tables (styles, computed, grid templates),
+    // the viewport, and the shaping inputs (paragraph + hyphenator) are cohesive
+    // inputs of one layout entry point, not an incidental over-long parameter list.
+    #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn layout_with_hyphenator(
         &self,
         tree: &RetainedTree,
         styles: &LayoutStyles,
         computed: &ComputedStyles,
+        grid_templates: &GridTemplates,
         viewport: Size,
         paragraph: &ParagraphShaper,
         hyphenator: Option<&dyn Hyphenator>,
@@ -182,6 +215,7 @@ impl LayoutCoordinator {
             tree,
             styles,
             computed,
+            grid_templates,
             root,
             Point::ORIGIN,
             BoxConstraints::tight(viewport),
@@ -471,7 +505,11 @@ pub fn root_font_size(computed: &ComputedStyles, root: Option<NodeId>) -> f32 {
 /// against the containing block, and a `%` term inside `calc()` therefore does
 /// not fold here (that value falls back to `auto`/`0`, still without an
 /// unsupported-feature diagnostic).
-fn length_context(computed: &ComputedStyle, viewport: Size, root_font_size: f32) -> LengthContext {
+pub(super) fn length_context(
+    computed: &ComputedStyle,
+    viewport: Size,
+    root_font_size: f32,
+) -> LengthContext {
     LengthContext::new(
         font_size_px(computed),
         root_font_size,
@@ -614,20 +652,30 @@ fn align_items_of(computed: &ComputedStyle) -> AlignItems {
     }
 }
 
-/// Selects the [`LayoutAlgorithm`] for a `display` mode, or [`None`] when the
-/// node generates no box ([`LayoutDisplay::None`]).
+/// Selects the [`LayoutAlgorithm`] for `node`'s `display` mode, or [`None`] when
+/// the node generates no box ([`LayoutDisplay::None`]).
 ///
-/// The returned trait object is a zero-sized stateless algorithm; the caller
-/// invokes it with the node's style, children, constraints, and a measurer.
-fn algorithm_for(display: LayoutDisplay) -> Option<Box<dyn LayoutAlgorithm>> {
+/// A [`LayoutDisplay::Grid`] node that authored a template (present in
+/// `grid_templates`) dispatches the real track-sizing algorithm via
+/// [`GridLayout::with_template`], with the node's `gap` supplying both the column
+/// and row gap; a grid node with no authored template keeps the default single
+/// implicit column ([`GridLayout::new(1)`]) — spec-faithful when
+/// `grid-template-columns` is unspecified. The returned trait object is a
+/// stateless algorithm; the caller invokes it with the node's style, children,
+/// constraints, and a measurer.
+fn algorithm_for(
+    display: LayoutDisplay,
+    node: NodeId,
+    grid_templates: &GridTemplates,
+    gap: f32,
+) -> Option<Box<dyn LayoutAlgorithm>> {
     match display {
         LayoutDisplay::Block => Some(Box::new(FlowLayout)),
         LayoutDisplay::Flex => Some(Box::new(FlexLayout)),
-        // The layout model carries no grid-template fields yet, so a grid
-        // container uses the default single implicit column (spec-faithful when
-        // `grid-template-columns` is unspecified). A later phase will thread the
-        // real track count once the model represents it.
-        LayoutDisplay::Grid => Some(Box::new(GridLayout::new(1))),
+        LayoutDisplay::Grid => Some(match grid_templates.get(&node) {
+            Some(template) => Box::new(GridLayout::with_template(template.clone(), gap, gap)),
+            None => Box::new(GridLayout::new(1)),
+        }),
         LayoutDisplay::None => None,
     }
 }
@@ -662,6 +710,9 @@ struct RecMeasurer<'a> {
     styles: &'a LayoutStyles,
     /// Per-node computed styles, for resolving a text child's `font-family`.
     computed: &'a ComputedStyles,
+    /// Per-node authored grid templates, for dispatching a grid child's real
+    /// track-sizing algorithm.
+    grid_templates: &'a GridTemplates,
     /// The children of the node currently being laid out, parallel to the
     /// indices the algorithm passes to [`ChildMeasurer::measure_child`].
     children: &'a [LayoutChild],
@@ -680,6 +731,7 @@ impl ChildMeasurer for RecMeasurer<'_> {
                 self.tree,
                 self.styles,
                 self.computed,
+                self.grid_templates,
                 child.node(),
                 constraints,
                 self.paragraph,
@@ -709,6 +761,7 @@ fn measure(
     tree: &RetainedTree,
     styles: &LayoutStyles,
     computed: &ComputedStyles,
+    grid_templates: &GridTemplates,
     node: NodeId,
     constraints: BoxConstraints,
     paragraph: &ParagraphShaper,
@@ -740,7 +793,7 @@ fn measure(
             hyphenator,
         );
     }
-    let Some(algorithm) = algorithm_for(style.display) else {
+    let Some(algorithm) = algorithm_for(style.display, node, grid_templates, style.gap) else {
         return Size::ZERO;
     };
     let children = children_of(tree, styles, node);
@@ -748,6 +801,7 @@ fn measure(
         tree,
         styles,
         computed,
+        grid_templates,
         children: &children,
         paragraph,
         hyphenator,
@@ -781,6 +835,7 @@ fn arrange(
     tree: &RetainedTree,
     styles: &LayoutStyles,
     computed: &ComputedStyles,
+    grid_templates: &GridTemplates,
     node: NodeId,
     origin: Point,
     constraints: BoxConstraints,
@@ -819,7 +874,7 @@ fn arrange(
         return;
     }
 
-    let Some(algorithm) = algorithm_for(style.display) else {
+    let Some(algorithm) = algorithm_for(style.display, node, grid_templates, style.gap) else {
         return;
     };
     let children = children_of(tree, styles, node);
@@ -830,6 +885,7 @@ fn arrange(
             tree,
             styles,
             computed,
+            grid_templates,
             children: &children,
             paragraph,
             hyphenator,
@@ -850,6 +906,7 @@ fn arrange(
             tree,
             styles,
             computed,
+            grid_templates,
             child.node(),
             child_origin,
             BoxConstraints::tight(child_rel.size()),
@@ -951,6 +1008,7 @@ mod tests {
             &tree,
             &styles,
             &ComputedStyles::new(),
+            &GridTemplates::new(),
             Size::new(800.0, 600.0),
             &test_paragraph(),
         );
@@ -1068,6 +1126,7 @@ mod tests {
             &tree,
             &styles,
             &ComputedStyles::new(),
+            &GridTemplates::new(),
             Size::new(200.0, 100.0),
             &test_paragraph(),
         );
@@ -1117,6 +1176,7 @@ mod tests {
             &tree,
             &styles,
             &ComputedStyles::new(),
+            &GridTemplates::new(),
             Size::new(200.0, 100.0),
             &test_paragraph(),
         );
@@ -1156,6 +1216,7 @@ mod tests {
             &tree,
             &styles,
             &ComputedStyles::new(),
+            &GridTemplates::new(),
             Size::new(200.0, 200.0),
             &test_paragraph(),
         );
@@ -1282,7 +1343,10 @@ mod tests {
         );
         let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
         assert_eq!(style.display, LayoutDisplay::Grid);
-        assert!(algorithm_for(LayoutDisplay::Grid).is_some());
+        assert!(
+            algorithm_for(LayoutDisplay::Grid, NodeId::from_raw(1), &GridTemplates::new(), 0.0)
+                .is_some()
+        );
     }
 
     #[test]
@@ -1341,6 +1405,7 @@ mod tests {
             &tree,
             &styles,
             &computed,
+            &GridTemplates::new(),
             Size::new(200.0, 100.0),
             &test_paragraph(),
         );
@@ -1349,6 +1414,62 @@ mod tests {
         assert_eq!(boxes[&child_a].origin().x, 0.0);
         assert_eq!(boxes[&child_b].origin().x, 50.0);
         // Same y (a row, not a stack) — proving flex, not block, engaged.
+        assert_eq!(boxes[&child_a].origin().y, boxes[&child_b].origin().y);
+    }
+
+    #[test]
+    fn authored_grid_template_engages_two_columns() {
+        use obscur_style::property::{GridTrack, PropertyValue};
+        // A `display: grid` container with `grid-template-columns: 100px 50px`
+        // and two children must place them side by side (col 0 then col 1). With
+        // the default `GridLayout::new(1)` the two would stack in one column
+        // (same x); the authored two-column template puts the second at x=100.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let child_a = add_child(&mut tree, root, 50);
+        let child_b = add_child(&mut tree, root, 51);
+
+        let mut computed = ComputedStyles::new();
+        let mut root_style = ComputedStyle::new();
+        root_style.set(
+            PropertyId::Display,
+            ComputedValue::keyword(layout_keyword::DISPLAY_GRID),
+        );
+        root_style.set(PropertyId::Width, ComputedValue::length(Length::px(150.0)));
+        root_style.set(PropertyId::Height, ComputedValue::length(Length::px(100.0)));
+        root_style.set(
+            PropertyId::GridTemplateColumns,
+            ComputedValue::from_concrete(PropertyValue::grid_tracks([
+                GridTrack::Fixed(Length::px(100.0)),
+                GridTrack::Fixed(Length::px(50.0)),
+            ]))
+            .expect("concrete"),
+        );
+        computed.insert(root, root_style);
+        computed.insert(child_a, ComputedStyle::new());
+        computed.insert(child_b, ComputedStyle::new());
+
+        let coordinator = LayoutCoordinator::new();
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let templates = coordinator.grid_templates_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        assert!(templates.contains_key(&root), "root authored a template");
+
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &computed,
+            &templates,
+            Size::new(150.0, 100.0),
+            &test_paragraph(),
+        );
+
+        // First column at x=0 (100px wide), second column at x=100 (50px wide),
+        // both on the same row — proving the two-column template engaged.
+        assert_eq!(boxes[&child_a].origin().x, 0.0);
+        assert_eq!(boxes[&child_a].size().width, 100.0);
+        assert_eq!(boxes[&child_b].origin().x, 100.0);
+        assert_eq!(boxes[&child_b].size().width, 50.0);
         assert_eq!(boxes[&child_a].origin().y, boxes[&child_b].origin().y);
     }
 
@@ -1388,6 +1509,7 @@ mod tests {
             &tree,
             &styles,
             &computed,
+            &GridTemplates::new(),
             Size::new(width, height),
             &test_paragraph(),
         );
@@ -1415,8 +1537,14 @@ mod tests {
 
         let coordinator = LayoutCoordinator::new();
         let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
-        let boxes =
-            coordinator.layout(&tree, &styles, &computed, Size::new(width, height), paragraph);
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &computed,
+            &GridTemplates::new(),
+            Size::new(width, height),
+            paragraph,
+        );
         boxes[&text]
     }
 
@@ -1502,6 +1630,7 @@ mod tests {
             &tree,
             &styles,
             &computed,
+            &GridTemplates::new(),
             Size::new(1000.0, 200.0),
             &test_paragraph(),
         );
@@ -1528,6 +1657,7 @@ mod tests {
             &tree,
             &styles,
             &ComputedStyles::new(),
+            &GridTemplates::new(),
             Size::new(100.0, 100.0),
             &test_paragraph(),
         );

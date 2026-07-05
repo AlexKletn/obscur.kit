@@ -610,6 +610,13 @@ impl UiRuntime {
             let layout_styles = self
                 .layout
                 .layout_styles_from(&computed, ctx.viewport(), root_font);
+            // Authored grid templates (`grid-template-columns`/`-rows`) become a
+            // per-node side-table so a grid container dispatches the real
+            // track-sizing algorithm; a grid node with no template falls back to a
+            // single implicit column.
+            let grid_templates = self
+                .layout
+                .grid_templates_from(&computed, ctx.viewport(), root_font);
             // Text nodes are sized inside the constraint-aware measure/arrange
             // pass: `layout` shapes and wraps each text leaf to its available
             // width through the scene's paragraph orchestrator, so a long string
@@ -623,6 +630,7 @@ impl UiRuntime {
                 &self.tree,
                 &layout_styles,
                 &computed,
+                &grid_templates,
                 ctx.viewport(),
                 self.scene_composer.paragraph(),
                 self.scene_composer.hyphenator(),

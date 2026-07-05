@@ -87,6 +87,9 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::FlexBasis,
     PropertyId::FlexGrow,
     PropertyId::FlexShrink,
+    // Grid container.
+    PropertyId::GridTemplateColumns,
+    PropertyId::GridTemplateRows,
     // Typography.
     PropertyId::FontSize,
     PropertyId::FontFamily,
@@ -177,6 +180,13 @@ impl StyleResolver {
             | PropertyId::Direction
             | PropertyId::FontWeight
             | PropertyId::FontStyle
+            // `grid-template-columns` / `grid-template-rows` initial is `none`
+            // (no explicit tracks). There is no `GridTracks` value for `none`, so
+            // an absent template is left unresolved and the runtime falls back to
+            // the default single implicit column (`GridLayout::new(1)`) — exactly
+            // the behaviour before authored templates were wired.
+            | PropertyId::GridTemplateColumns
+            | PropertyId::GridTemplateRows
             // `text-align` initial is `start`; its keyword initial likewise needs
             // the interner, so an absent value falls back to the runtime's default
             // (`Start`) — byte-for-byte identical to today's behaviour.
@@ -699,6 +709,8 @@ mod tests {
                 | PropertyId::FlexDirection
                 | PropertyId::JustifyContent
                 | PropertyId::AlignItems
+                | PropertyId::GridTemplateColumns
+                | PropertyId::GridTemplateRows
                 | PropertyId::FontSize
                 | PropertyId::FontFamily
                 | PropertyId::Direction
@@ -735,6 +747,8 @@ mod tests {
             PropertyId::FlexDirection,
             PropertyId::JustifyContent,
             PropertyId::AlignItems,
+            PropertyId::GridTemplateColumns,
+            PropertyId::GridTemplateRows,
             PropertyId::FontSize,
             PropertyId::FontFamily,
             PropertyId::Direction,
@@ -864,6 +878,8 @@ mod tests {
             PropertyId::FontFamily,
             PropertyId::MaxWidth,
             PropertyId::MaxHeight,
+            PropertyId::GridTemplateColumns,
+            PropertyId::GridTemplateRows,
         ] {
             assert_eq!(computed.get(id), None, "{} should stay deferred", id.name());
         }
@@ -890,6 +906,33 @@ mod tests {
             computed.get(PropertyId::FontSize).and_then(ComputedValue::as_length),
             Some(Length::px(16.0))
         );
+    }
+
+    /// An authored `grid-template-columns` track list flows through the resolver
+    /// as a concrete computed value (it is not a deferred keyword initial).
+    #[test]
+    fn authored_grid_tracks_flow_to_computed_style() {
+        use crate::property::GridTrack;
+        let resolver = StyleResolver::new();
+        let mut cascaded = ResolvedDeclarations::new();
+        cascaded.insert(
+            PropertyId::GridTemplateColumns,
+            PropertyValue::grid_tracks([
+                GridTrack::Fixed(Length::px(100.0)),
+                GridTrack::Fr(1.0),
+                GridTrack::Fr(2.0),
+            ]),
+        );
+
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+        let tracks = computed
+            .get(PropertyId::GridTemplateColumns)
+            .map(ComputedValue::value)
+            .and_then(PropertyValue::as_grid_tracks)
+            .expect("grid tracks computed");
+        assert_eq!(tracks.len(), 3);
+        assert_eq!(tracks[0], GridTrack::Fixed(Length::px(100.0)));
+        assert_eq!(tracks[2], GridTrack::Fr(2.0));
     }
 
     /// Inheritance still flows for an inherited property newly in the set:
