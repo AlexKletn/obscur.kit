@@ -164,6 +164,19 @@ pub const POSITION_STICKY: InternedSymbol = InternedSymbol::from_raw(0x0000_1A05
 /// instead, so this reserved handle carries only the `auto` case across crates.
 pub const Z_INDEX_AUTO: InternedSymbol = InternedSymbol::from_raw(0x0000_1B01);
 
+// ---- `border-*-style` keyword values ----
+//
+// The full CSS line-style set (`dashed` / `dotted` / `double` / `groove` /
+// `ridge` / `inset` / `outset`) is not modelled as distinct raster styles yet;
+// every visible style folds to the single `solid` handle (a documented
+// simplification), while `none` / `hidden` fold to `none` (no border painted).
+
+/// The `border-*-style: none` value (also covers `hidden`): the border is not
+/// painted and, when it is the used style, its width paints nothing.
+pub const BORDER_STYLE_NONE: InternedSymbol = InternedSymbol::from_raw(0x0000_1C01);
+/// The `border-*-style: solid` value. Every visible line style folds here.
+pub const BORDER_STYLE_SOLID: InternedSymbol = InternedSymbol::from_raw(0x0000_1C02);
+
 /// Maps a `display` keyword string to its reserved [`InternedSymbol`].
 ///
 /// The input is ASCII-lowercased before matching, so callers may pass authored
@@ -208,6 +221,24 @@ pub fn z_index_from_name(name: &str) -> Option<InternedSymbol> {
         Some(Z_INDEX_AUTO)
     } else {
         None
+    }
+}
+
+/// Maps a `border-*-style` keyword string to its reserved [`InternedSymbol`].
+///
+/// The input is ASCII-lowercased before matching. `none` and `hidden` map to
+/// [`BORDER_STYLE_NONE`]; every visible line style (`solid` / `dashed` /
+/// `dotted` / `double` / `groove` / `ridge` / `inset` / `outset`) folds to the
+/// single [`BORDER_STYLE_SOLID`] handle, a documented simplification (only a
+/// solid stroke is painted). Returns [`None`] for any other keyword.
+#[must_use]
+pub fn border_style_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "none" | "hidden" => Some(BORDER_STYLE_NONE),
+        "solid" | "dashed" | "dotted" | "double" | "groove" | "ridge" | "inset" | "outset" => {
+            Some(BORDER_STYLE_SOLID)
+        }
+        _ => None,
     }
 }
 
@@ -415,6 +446,8 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         POSITION_FIXED => Some("fixed"),
         POSITION_STICKY => Some("sticky"),
         Z_INDEX_AUTO => Some("auto"),
+        BORDER_STYLE_NONE => Some("none"),
+        BORDER_STYLE_SOLID => Some("solid"),
         FLEX_ROW => Some("row"),
         FLEX_ROW_REVERSE => Some("row-reverse"),
         FLEX_COLUMN => Some("column"),
@@ -469,6 +502,8 @@ mod tests {
         POSITION_FIXED,
         POSITION_STICKY,
         Z_INDEX_AUTO,
+        BORDER_STYLE_NONE,
+        BORDER_STYLE_SOLID,
         FLEX_ROW,
         FLEX_ROW_REVERSE,
         FLEX_COLUMN,
@@ -751,6 +786,21 @@ mod tests {
         // Round-trips through `name_of`.
         assert_eq!(name_of(GRID_AUTO_FLOW_COLUMN_DENSE), Some("column dense"));
         assert_eq!(name_of(GRID_AUTO_FLOW_ROW), Some("row"));
+    }
+
+    #[test]
+    fn border_style_maps_known_keywords() {
+        assert_eq!(border_style_from_name("none"), Some(BORDER_STYLE_NONE));
+        assert_eq!(border_style_from_name("hidden"), Some(BORDER_STYLE_NONE));
+        assert_eq!(border_style_from_name("solid"), Some(BORDER_STYLE_SOLID));
+        // Every visible line style folds to `solid` (documented simplification).
+        assert_eq!(border_style_from_name("dashed"), Some(BORDER_STYLE_SOLID));
+        assert_eq!(border_style_from_name("DOTTED"), Some(BORDER_STYLE_SOLID));
+        assert_eq!(border_style_from_name("double"), Some(BORDER_STYLE_SOLID));
+        assert_eq!(border_style_from_name("wavy"), None);
+        // Round-trips through `name_of`.
+        assert_eq!(name_of(BORDER_STYLE_NONE), Some("none"));
+        assert_eq!(name_of(BORDER_STYLE_SOLID), Some("solid"));
     }
 
     #[test]

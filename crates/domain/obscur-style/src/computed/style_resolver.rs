@@ -85,6 +85,19 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::PaddingRight,
     PropertyId::PaddingBottom,
     PropertyId::PaddingLeft,
+    // Box model: border (width feeds the box model; style + color paint).
+    PropertyId::BorderTopWidth,
+    PropertyId::BorderRightWidth,
+    PropertyId::BorderBottomWidth,
+    PropertyId::BorderLeftWidth,
+    PropertyId::BorderTopStyle,
+    PropertyId::BorderRightStyle,
+    PropertyId::BorderBottomStyle,
+    PropertyId::BorderLeftStyle,
+    PropertyId::BorderTopColor,
+    PropertyId::BorderRightColor,
+    PropertyId::BorderBottomColor,
+    PropertyId::BorderLeftColor,
     // Flex container / item.
     PropertyId::Display,
     PropertyId::FlexDirection,
@@ -172,6 +185,13 @@ impl StyleResolver {
             | PropertyId::PaddingRight
             | PropertyId::PaddingBottom
             | PropertyId::PaddingLeft
+            // `border-*-width` initial is `medium`, but it is modelled as `0` so
+            // an element with no authored border insets nothing and paints
+            // nothing — byte-for-byte identical to before borders existed.
+            | PropertyId::BorderTopWidth
+            | PropertyId::BorderRightWidth
+            | PropertyId::BorderBottomWidth
+            | PropertyId::BorderLeftWidth
             | PropertyId::Gap => Some(ComputedValue::length(Length::px(0.0))),
             // Sizing minimums and `flex-basis`: initial `auto`.
             PropertyId::MinWidth | PropertyId::MinHeight | PropertyId::FlexBasis => {
@@ -198,8 +218,23 @@ impl StyleResolver {
             // parent's stacking level) — byte-for-byte identical to the pre-stacking
             // paint order.
             PropertyId::ZIndex => None,
+            // `border-*-style` initial is `none`; its keyword initial needs the
+            // interner, so an absent value is left unresolved and the scene treats
+            // the side as `none` (no border painted) — the pre-border behaviour.
+            PropertyId::BorderTopStyle
+            | PropertyId::BorderRightStyle
+            | PropertyId::BorderBottomStyle
+            | PropertyId::BorderLeftStyle
+            // `border-*-color` initial is `currentColor`. There is no computed
+            // value for `currentColor`, so an absent color is left unresolved and
+            // the scene falls back to the computed `color` when a style + width
+            // are present (the CSS `currentColor` rule).
+            | PropertyId::BorderTopColor
+            | PropertyId::BorderRightColor
+            | PropertyId::BorderBottomColor
+            | PropertyId::BorderLeftColor
             // Keyword initials need the interner; deferred to a later phase.
-            PropertyId::Display
+            | PropertyId::Display
             | PropertyId::Visibility
             // `position` initial is `static`; its keyword initial likewise needs
             // the interner, so an absent value falls back to the runtime's default
@@ -770,6 +805,74 @@ mod tests {
         assert_eq!(computed.get(PropertyId::ZIndex), None);
     }
 
+    #[test]
+    fn border_width_initial_is_zero_style_and_color_unresolved() {
+        let resolver = StyleResolver::new();
+        // `border-*-width` has a concrete `0` initial so an unauthored border
+        // insets nothing (box model byte-identical to before borders existed).
+        assert_eq!(
+            resolver.initial_value(PropertyId::BorderTopWidth),
+            Some(ComputedValue::length(Length::px(0.0)))
+        );
+        // `border-*-style` (`none`) and `border-*-color` (`currentColor`) initials
+        // are deferred, so an absent value is left unresolved.
+        assert_eq!(resolver.initial_value(PropertyId::BorderTopStyle), None);
+        assert_eq!(resolver.initial_value(PropertyId::BorderTopColor), None);
+
+        // With no authored border, width computes to 0 and style/color stay unset.
+        let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), None);
+        assert_eq!(
+            computed
+                .get(PropertyId::BorderTopWidth)
+                .and_then(ComputedValue::as_length),
+            Some(Length::px(0.0))
+        );
+        assert_eq!(computed.get(PropertyId::BorderTopStyle), None);
+        assert_eq!(computed.get(PropertyId::BorderTopColor), None);
+    }
+
+    #[test]
+    fn authored_border_flows_to_computed_style() {
+        let resolver = StyleResolver::new();
+        let mut cascaded = ResolvedDeclarations::new();
+        cascaded.insert(
+            PropertyId::BorderTopWidth,
+            PropertyValue::Length(Length::px(2.0)),
+        );
+        cascaded.insert(
+            PropertyId::BorderTopStyle,
+            PropertyValue::Keyword(crate::property::layout_keyword::BORDER_STYLE_SOLID),
+        );
+        cascaded.insert(
+            PropertyId::BorderTopColor,
+            PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
+        );
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+        assert_eq!(
+            computed
+                .get(PropertyId::BorderTopWidth)
+                .and_then(ComputedValue::as_length),
+            Some(Length::px(2.0))
+        );
+        assert_eq!(
+            computed
+                .get(PropertyId::BorderTopColor)
+                .and_then(ComputedValue::as_color),
+            Some(StyleColor::rgba(1.0, 0.0, 0.0, 1.0))
+        );
+        // Border does not inherit: a child with no authored border takes the
+        // initial (width 0, style/color unset), NOT the parent's red border.
+        let child =
+            resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), Some(&computed));
+        assert_eq!(child.get(PropertyId::BorderTopColor), None);
+        assert_eq!(
+            child
+                .get(PropertyId::BorderTopWidth)
+                .and_then(ComputedValue::as_length),
+            Some(Length::px(0.0))
+        );
+    }
+
     /// Every modelled [`PropertyId`] must be in the computed set, or an authored
     /// value for it would be dropped at the computed-value step (the bug this
     /// closes). The `match` is exhaustive, so a new upstream variant fails to
@@ -802,6 +905,18 @@ mod tests {
                 | PropertyId::PaddingRight
                 | PropertyId::PaddingBottom
                 | PropertyId::PaddingLeft
+                | PropertyId::BorderTopWidth
+                | PropertyId::BorderRightWidth
+                | PropertyId::BorderBottomWidth
+                | PropertyId::BorderLeftWidth
+                | PropertyId::BorderTopStyle
+                | PropertyId::BorderRightStyle
+                | PropertyId::BorderBottomStyle
+                | PropertyId::BorderLeftStyle
+                | PropertyId::BorderTopColor
+                | PropertyId::BorderRightColor
+                | PropertyId::BorderBottomColor
+                | PropertyId::BorderLeftColor
                 | PropertyId::MinWidth
                 | PropertyId::MinHeight
                 | PropertyId::MaxWidth
@@ -859,6 +974,18 @@ mod tests {
             PropertyId::PaddingRight,
             PropertyId::PaddingBottom,
             PropertyId::PaddingLeft,
+            PropertyId::BorderTopWidth,
+            PropertyId::BorderRightWidth,
+            PropertyId::BorderBottomWidth,
+            PropertyId::BorderLeftWidth,
+            PropertyId::BorderTopStyle,
+            PropertyId::BorderRightStyle,
+            PropertyId::BorderBottomStyle,
+            PropertyId::BorderLeftStyle,
+            PropertyId::BorderTopColor,
+            PropertyId::BorderRightColor,
+            PropertyId::BorderBottomColor,
+            PropertyId::BorderLeftColor,
             PropertyId::MinWidth,
             PropertyId::MinHeight,
             PropertyId::MaxWidth,

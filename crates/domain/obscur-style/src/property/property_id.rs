@@ -72,6 +72,41 @@ pub enum PropertyId {
     /// The `padding-left` longhand.
     PaddingLeft,
 
+    // ---- Box model: border width (Length-valued, not inherited) ----
+    /// The `border-top-width` longhand. Feeds the box model's border insets and,
+    /// paired with a non-`none` style, the painted border thickness. Initial `0`.
+    BorderTopWidth,
+    /// The `border-right-width` longhand.
+    BorderRightWidth,
+    /// The `border-bottom-width` longhand.
+    BorderBottomWidth,
+    /// The `border-left-width` longhand.
+    BorderLeftWidth,
+
+    // ---- Border style (Keyword-valued: `none` / `solid`; not inherited) ----
+    /// The `border-top-style` longhand (Keyword-valued against the reserved
+    /// `BORDER_STYLE_*` handles in [`crate::property::layout_keyword`]). Only
+    /// `none` and `solid` are modelled; other line styles fold to `solid`.
+    BorderTopStyle,
+    /// The `border-right-style` longhand.
+    BorderRightStyle,
+    /// The `border-bottom-style` longhand.
+    BorderBottomStyle,
+    /// The `border-left-style` longhand.
+    BorderLeftStyle,
+
+    // ---- Border color (Color-valued, not inherited) ----
+    /// The `border-top-color` longhand. When unset but a style + width are
+    /// present, the painted border falls back to the computed `color`
+    /// (CSS `currentColor`).
+    BorderTopColor,
+    /// The `border-right-color` longhand.
+    BorderRightColor,
+    /// The `border-bottom-color` longhand.
+    BorderBottomColor,
+    /// The `border-left-color` longhand.
+    BorderLeftColor,
+
     // ---- Sizing constraints (Length-valued, not inherited) ----
     /// The `min-width` property.
     MinWidth,
@@ -216,6 +251,18 @@ impl PropertyId {
             Self::PaddingRight => "padding-right",
             Self::PaddingBottom => "padding-bottom",
             Self::PaddingLeft => "padding-left",
+            Self::BorderTopWidth => "border-top-width",
+            Self::BorderRightWidth => "border-right-width",
+            Self::BorderBottomWidth => "border-bottom-width",
+            Self::BorderLeftWidth => "border-left-width",
+            Self::BorderTopStyle => "border-top-style",
+            Self::BorderRightStyle => "border-right-style",
+            Self::BorderBottomStyle => "border-bottom-style",
+            Self::BorderLeftStyle => "border-left-style",
+            Self::BorderTopColor => "border-top-color",
+            Self::BorderRightColor => "border-right-color",
+            Self::BorderBottomColor => "border-bottom-color",
+            Self::BorderLeftColor => "border-left-color",
             Self::MinWidth => "min-width",
             Self::MinHeight => "min-height",
             Self::MaxWidth => "max-width",
@@ -288,6 +335,18 @@ impl PropertyId {
             | Self::PaddingRight
             | Self::PaddingBottom
             | Self::PaddingLeft
+            | Self::BorderTopWidth
+            | Self::BorderRightWidth
+            | Self::BorderBottomWidth
+            | Self::BorderLeftWidth
+            | Self::BorderTopStyle
+            | Self::BorderRightStyle
+            | Self::BorderBottomStyle
+            | Self::BorderLeftStyle
+            | Self::BorderTopColor
+            | Self::BorderRightColor
+            | Self::BorderBottomColor
+            | Self::BorderLeftColor
             | Self::MinWidth
             | Self::MinHeight
             | Self::MaxWidth
@@ -585,6 +644,43 @@ mod tests {
         // Like the other positioning / layout properties, `z-index` resets per
         // element rather than inheriting.
         assert!(!PropertyId::ZIndex.default_inheritance().is_inherited());
+    }
+
+    #[test]
+    fn border_names_and_not_inherited() {
+        assert_eq!(PropertyId::BorderTopWidth.name(), "border-top-width");
+        assert_eq!(PropertyId::BorderRightWidth.name(), "border-right-width");
+        assert_eq!(PropertyId::BorderBottomWidth.name(), "border-bottom-width");
+        assert_eq!(PropertyId::BorderLeftWidth.name(), "border-left-width");
+        assert_eq!(PropertyId::BorderTopStyle.name(), "border-top-style");
+        assert_eq!(PropertyId::BorderRightStyle.name(), "border-right-style");
+        assert_eq!(PropertyId::BorderBottomStyle.name(), "border-bottom-style");
+        assert_eq!(PropertyId::BorderLeftStyle.name(), "border-left-style");
+        assert_eq!(PropertyId::BorderTopColor.name(), "border-top-color");
+        assert_eq!(PropertyId::BorderRightColor.name(), "border-right-color");
+        assert_eq!(PropertyId::BorderBottomColor.name(), "border-bottom-color");
+        assert_eq!(PropertyId::BorderLeftColor.name(), "border-left-color");
+        // Like the other box / paint properties, borders reset per element.
+        for id in [
+            PropertyId::BorderTopWidth,
+            PropertyId::BorderRightWidth,
+            PropertyId::BorderBottomWidth,
+            PropertyId::BorderLeftWidth,
+            PropertyId::BorderTopStyle,
+            PropertyId::BorderRightStyle,
+            PropertyId::BorderBottomStyle,
+            PropertyId::BorderLeftStyle,
+            PropertyId::BorderTopColor,
+            PropertyId::BorderRightColor,
+            PropertyId::BorderBottomColor,
+            PropertyId::BorderLeftColor,
+        ] {
+            assert!(
+                !id.default_inheritance().is_inherited(),
+                "{} should not inherit",
+                id.name()
+            );
+        }
     }
 
     #[test]

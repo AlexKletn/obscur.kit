@@ -4,14 +4,14 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use obscur_geometry::Point;
+use obscur_geometry::{Point, Rect, Size};
 use obscur_identity::NodeId;
 use obscur_scene::color::Color;
 use obscur_scene::command::{DisplayList, DisplayListBuilder, PaintCommand};
 use obscur_scene::paint::Brush;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::ComputedValue;
-use obscur_style::property::{Length, PropertyId, StyleColor};
+use obscur_style::property::{layout_keyword, Length, PropertyId, PropertyValue, StyleColor};
 use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontResolver, FontSource,
     GenericFamily, MockFontResolver,
@@ -434,6 +434,15 @@ impl SceneCoordinator {
                 }
             }
 
+            // Border edges paint over the background, under the text: one filled
+            // rectangle per visible side (style `solid`, width > 0), covering the
+            // border box's outer ring. An unauthored border emits nothing.
+            if let Some(layout_box) = boxes.get(&node) {
+                for (rect, color) in border_fills(computed, node, layout_box.bounds) {
+                    node_paint.fill_rect(rect, Brush::solid(scene_color_from(color)));
+                }
+            }
+
             if let Some(retained) = tree.get(node) {
                 // Text nodes emit one text run **per wrapped line** at their
                 // arranged box. A node is either a text node or an element with a
@@ -599,6 +608,120 @@ fn background_color_of(computed: &ComputedStyles, node: NodeId) -> Option<StyleC
         .get(&node)
         .and_then(|style| style.get(PropertyId::BackgroundColor))
         .and_then(ComputedValue::as_color)
+}
+
+/// Computes the filled rectangles painting a node's border, in top/right/bottom/
+/// left paint order, each paired with its side color (spec CSS Backgrounds and
+/// Borders §4).
+///
+/// A side contributes a rectangle only when its computed `border-*-style` is
+/// `solid` **and** its `border-*-width` is a positive pixel length; every other
+/// side (unauthored, `none`, or zero-width) paints nothing, so a node with no
+/// authored border yields an empty list (byte-identical to before borders were
+/// painted). The four rectangles tile the border box's outer ring: the top and
+/// bottom edges span the full width, and the left and right edges fill the
+/// remaining height between them, so per-side widths and colors compose without
+/// overlap (corner mitres are assigned to the top / bottom edges — a documented
+/// simplification). A side's color is its `border-*-color`, falling back to the
+/// node's computed `color` (CSS `currentColor`) when the color is unset.
+fn border_fills(computed: &ComputedStyles, node: NodeId, bounds: Rect) -> Vec<(Rect, StyleColor)> {
+    let top = border_width_of(computed, node, PropertyId::BorderTopWidth);
+    let right = border_width_of(computed, node, PropertyId::BorderRightWidth);
+    let bottom = border_width_of(computed, node, PropertyId::BorderBottomWidth);
+    let left = border_width_of(computed, node, PropertyId::BorderLeftWidth);
+    // Fast path: no positive border width ⇒ nothing to paint (the common case).
+    if top <= 0.0 && right <= 0.0 && bottom <= 0.0 && left <= 0.0 {
+        return Vec::new();
+    }
+    let current = current_color_of(computed, node);
+    let x = bounds.origin.x;
+    let y = bounds.origin.y;
+    let w = bounds.size.width;
+    let h = bounds.size.height;
+    // The height of the left / right edges: the border box height minus the top
+    // and bottom edges (clamped non-negative), so the four rects never overlap.
+    let mid_h = (h - top - bottom).max(0.0);
+    let mut out = Vec::new();
+    if top > 0.0 && border_is_solid(computed, node, PropertyId::BorderTopStyle) {
+        let color = border_color_of(computed, node, PropertyId::BorderTopColor, current);
+        out.push((Rect::new(Point::new(x, y), Size::new(w, top)), color));
+    }
+    if right > 0.0 && border_is_solid(computed, node, PropertyId::BorderRightStyle) {
+        let color = border_color_of(computed, node, PropertyId::BorderRightColor, current);
+        out.push((
+            Rect::new(Point::new(x + w - right, y + top), Size::new(right, mid_h)),
+            color,
+        ));
+    }
+    if bottom > 0.0 && border_is_solid(computed, node, PropertyId::BorderBottomStyle) {
+        let color = border_color_of(computed, node, PropertyId::BorderBottomColor, current);
+        out.push((
+            Rect::new(Point::new(x, y + h - bottom), Size::new(w, bottom)),
+            color,
+        ));
+    }
+    if left > 0.0 && border_is_solid(computed, node, PropertyId::BorderLeftStyle) {
+        let color = border_color_of(computed, node, PropertyId::BorderLeftColor, current);
+        out.push((
+            Rect::new(Point::new(x, y + top), Size::new(left, mid_h)),
+            color,
+        ));
+    }
+    out
+}
+
+/// Reads a node's computed `border-*-width` (`id`) in logical pixels, defaulting
+/// to `0.0` when absent or not an absolute pixel length.
+///
+/// Only absolute `px` is honored here (mirroring [`font_size_of`]); a relative or
+/// percentage border width contributes no painted edge even though the layout
+/// phase resolves it into the box model — a documented limitation.
+fn border_width_of(computed: &ComputedStyles, node: NodeId, id: PropertyId) -> f32 {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(id))
+        .and_then(ComputedValue::as_length)
+        .and_then(Length::as_px)
+        .map_or(0.0, |px| px.0)
+}
+
+/// Whether a node's computed `border-*-style` (`id`) is the reserved `solid`
+/// handle. An absent style (the deferred `none` initial) or any other value is
+/// treated as not solid, so no edge is painted.
+fn border_is_solid(computed: &ComputedStyles, node: NodeId, id: PropertyId) -> bool {
+    matches!(
+        computed
+            .get(&node)
+            .and_then(|style| style.get(id))
+            .map(ComputedValue::value),
+        Some(&PropertyValue::Keyword(sym)) if sym == layout_keyword::BORDER_STYLE_SOLID
+    )
+}
+
+/// Reads a node's computed `border-*-color` (`id`), falling back to `current`
+/// (the node's computed `color`, i.e. CSS `currentColor`) when the color is unset.
+fn border_color_of(
+    computed: &ComputedStyles,
+    node: NodeId,
+    id: PropertyId,
+    current: StyleColor,
+) -> StyleColor {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(id))
+        .and_then(ComputedValue::as_color)
+        .unwrap_or(current)
+}
+
+/// Reads a node's computed `color` as a [`StyleColor`] for the `currentColor`
+/// border fallback, defaulting to [`StyleColor::BLACK`] (the CSS `color` initial)
+/// when absent.
+fn current_color_of(computed: &ComputedStyles, node: NodeId) -> StyleColor {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::Color))
+        .and_then(ComputedValue::as_color)
+        .unwrap_or(StyleColor::BLACK)
 }
 
 /// Reads a node's computed text `color` as a scene [`Color`], defaulting to
@@ -1204,6 +1327,192 @@ mod tests {
         assert_eq!(runs[0].0, Point::new(3.0, 4.0));
         assert_eq!(runs[0].1.len(), 0);
         assert!(list.is_balanced());
+    }
+
+    /// Builds a `ComputedStyle` with a uniform solid border of `width` px and the
+    /// given per-side `color`.
+    fn with_border(width: f32, color: StyleColor) -> ComputedStyle {
+        let mut style = ComputedStyle::new();
+        for id in [
+            PropertyId::BorderTopWidth,
+            PropertyId::BorderRightWidth,
+            PropertyId::BorderBottomWidth,
+            PropertyId::BorderLeftWidth,
+        ] {
+            style.set(id, ComputedValue::length(Length::px(width)));
+        }
+        for id in [
+            PropertyId::BorderTopStyle,
+            PropertyId::BorderRightStyle,
+            PropertyId::BorderBottomStyle,
+            PropertyId::BorderLeftStyle,
+        ] {
+            style.set(id, ComputedValue::keyword(layout_keyword::BORDER_STYLE_SOLID));
+        }
+        for id in [
+            PropertyId::BorderTopColor,
+            PropertyId::BorderRightColor,
+            PropertyId::BorderBottomColor,
+            PropertyId::BorderLeftColor,
+        ] {
+            style.set(id, ComputedValue::color(color));
+        }
+        style
+    }
+
+    /// Collects the `DrawPath` fills of a display list as `(bounds, solid color)`
+    /// pairs, in paint order.
+    fn path_fills(list: &DisplayList) -> Vec<(Rect, Color)> {
+        list.commands()
+            .iter()
+            .filter_map(|c| match c {
+                PaintCommand::DrawPath { path, paint } => {
+                    Some((path.bounds()?, paint.brush().as_solid()?.color()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn border_paints_four_side_rects_covering_the_edges() {
+        // A 100×50 box at (10,20) with `border: 2px solid red` paints four edge
+        // rectangles in top/right/bottom/left order, each red, tiling the ring.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+
+        let red = StyleColor::rgba(1.0, 0.0, 0.0, 1.0);
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, with_border(2.0, red));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(10.0, 20.0, 100.0, 50.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let fills = path_fills(&list);
+        assert_eq!(fills.len(), 4, "four side rects, no background");
+        // Every side is red.
+        for (_, color) in &fills {
+            assert_eq!(*color, Color::rgba(1.0, 0.0, 0.0, 1.0));
+        }
+        // top, right, bottom, left — covering the 2px outer ring.
+        assert_eq!(fills[0].0, Rect::new(Point::new(10.0, 20.0), Size::new(100.0, 2.0)));
+        assert_eq!(fills[1].0, Rect::new(Point::new(108.0, 22.0), Size::new(2.0, 46.0)));
+        assert_eq!(fills[2].0, Rect::new(Point::new(10.0, 68.0), Size::new(100.0, 2.0)));
+        assert_eq!(fills[3].0, Rect::new(Point::new(10.0, 22.0), Size::new(2.0, 46.0)));
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn border_paints_over_background_under_no_op() {
+        // Background + border on the same node: the background fills first, then
+        // the four border edges paint over it (all within one node's paint unit).
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+
+        let mut style = with_border(1.0, StyleColor::rgba(0.0, 0.0, 1.0, 1.0));
+        style.set(
+            PropertyId::BackgroundColor,
+            ComputedValue::color(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)),
+        );
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, style);
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 20.0, 20.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let fills = path_fills(&list);
+        assert_eq!(fills.len(), 5, "one background + four border edges");
+        // The background is emitted first, covering the whole border box.
+        assert_eq!(fills[0].0, Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 20.0)));
+        assert_eq!(fills[0].1, Color::rgba(0.0, 1.0, 0.0, 1.0));
+        // The remaining four are the blue border edges.
+        for (_, color) in &fills[1..] {
+            assert_eq!(*color, Color::rgba(0.0, 0.0, 1.0, 1.0));
+        }
+    }
+
+    #[test]
+    fn no_authored_border_emits_no_border_paint() {
+        // Regression guard: a node with a background but no border paints exactly
+        // one fill (the background) — byte-identical to before borders existed.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, with_background(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 30.0, 30.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        assert_eq!(fill_count(&list), 1, "only the background, no border rects");
+    }
+
+    #[test]
+    fn border_color_falls_back_to_current_color_when_unset() {
+        // Width + solid style but NO border color: each edge paints in the node's
+        // computed `color` (CSS `currentColor`), here blue.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+
+        let blue = StyleColor::rgba(0.0, 0.0, 1.0, 1.0);
+        let mut style = ComputedStyle::new();
+        style.set(PropertyId::Color, ComputedValue::color(blue));
+        for id in [
+            PropertyId::BorderTopWidth,
+            PropertyId::BorderRightWidth,
+            PropertyId::BorderBottomWidth,
+            PropertyId::BorderLeftWidth,
+        ] {
+            style.set(id, ComputedValue::length(Length::px(2.0)));
+        }
+        for id in [
+            PropertyId::BorderTopStyle,
+            PropertyId::BorderRightStyle,
+            PropertyId::BorderBottomStyle,
+            PropertyId::BorderLeftStyle,
+        ] {
+            style.set(id, ComputedValue::keyword(layout_keyword::BORDER_STYLE_SOLID));
+        }
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, style);
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 40.0, 40.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let fills = path_fills(&list);
+        assert_eq!(fills.len(), 4);
+        for (_, color) in &fills {
+            assert_eq!(*color, Color::rgba(0.0, 0.0, 1.0, 1.0), "border uses currentColor");
+        }
+    }
+
+    #[test]
+    fn border_style_none_paints_nothing_even_with_width() {
+        // A width with no solid style (style unset ⇒ `none`) paints no edge, even
+        // though the width still insets the box model in the layout phase.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+
+        let mut style = ComputedStyle::new();
+        style.set(PropertyId::BorderTopWidth, ComputedValue::length(Length::px(4.0)));
+        // No border-top-style ⇒ treated as `none`.
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, style);
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 10.0, 10.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        assert_eq!(fill_count(&list), 0, "no solid style ⇒ no border painted");
     }
 
     #[test]

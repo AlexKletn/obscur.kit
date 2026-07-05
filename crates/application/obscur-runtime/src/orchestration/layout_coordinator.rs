@@ -478,10 +478,11 @@ fn measure_ellipsis_glyph(
 ///   MinHeight, MaxWidth, MaxHeight}` length, via [`dimension_of`]
 ///   ([`Length::Px`] → [`Dimension::Px`], [`Length::Percent`] →
 ///   [`Dimension::Percent`], [`Length::Auto`]/absent → [`Dimension::Auto`]).
-/// * `margin` / `padding` ← the four `*-top/right/bottom/left` longhands,
-///   resolved to pixel [`Insets`] via [`insets_of`]. Insets are pixel-only, so a
-///   `Percent`/`Auto` length contributes `0.0` on that edge. `border` stays at
-///   its zero default (no CSS border-width property is modelled yet).
+/// * `margin` / `padding` / `border` ← the four `*-top/right/bottom/left`
+///   longhands (the `border-*-width` longhands for `border`), resolved to pixel
+///   [`Insets`] via [`insets_of`]. Insets are pixel-only, so a `Percent`/`Auto`
+///   length contributes `0.0` on that edge. An unauthored `border-*-width`
+///   computes to its `0` initial, so `border` stays zero by default.
 /// * `gap` ← [`PropertyId::Gap`] length in pixels (`Percent`/`Auto` → `0.0`).
 /// * `flex_grow` / `flex_shrink` ← `PropertyId::{FlexGrow, FlexShrink}` numbers,
 ///   defaulting to the [`LayoutStyle::default`] values (`0.0` / `1.0`).
@@ -532,8 +533,17 @@ fn layout_style_from(computed: &ComputedStyle, viewport: Size, root_font_size: f
             PropertyId::PaddingLeft,
             &ctx,
         ),
-        // No CSS border-width property is modelled yet; keep the zero default.
-        border: default.border,
+        // Border insets from the four `border-*-width` longhands. Unauthored
+        // widths compute to `0` (their initial), so a node with no border keeps
+        // the zero default — byte-for-byte identical to before borders existed.
+        border: insets_of(
+            computed,
+            PropertyId::BorderTopWidth,
+            PropertyId::BorderRightWidth,
+            PropertyId::BorderBottomWidth,
+            PropertyId::BorderLeftWidth,
+            &ctx,
+        ),
         flex_direction: flex_direction_of(computed),
         justify_content: justify_content_of(computed),
         // Grid container: block-axis (row) track distribution. Unauthored stays
@@ -943,8 +953,8 @@ fn partition_children(
 /// establishes for its absolutely-positioned descendants (spec §4.1).
 ///
 /// Extents are clamped non-negative so a box smaller than its borders yields a
-/// zero-extent (never negative) containing block. With no border-width property
-/// modelled yet, `border` is zero and the padding box equals the border box.
+/// zero-extent (never negative) containing block. With no authored border-width,
+/// `border` is zero and the padding box equals the border box.
 fn padding_box(border_box: Rect, border: Insets) -> Rect {
     let x = border_box.origin.x + border.left;
     let y = border_box.origin.y + border.top;

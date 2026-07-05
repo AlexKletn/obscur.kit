@@ -145,6 +145,18 @@ impl PropertyCompiler {
                 interner,
             );
         }
+        if decl.name.eq_ignore_ascii_case("border-color") {
+            return expand_border_color(decl, specificity, origin, source_order, selector, interner);
+        }
+        if decl.name.eq_ignore_ascii_case("border-style") {
+            return expand_border_style(decl, specificity, origin, source_order, selector);
+        }
+        if decl.name.eq_ignore_ascii_case("border") {
+            return expand_border(decl, BORDER_SIDES, specificity, origin, source_order, selector, interner);
+        }
+        if let Some(side) = border_side_shorthand(&decl.name) {
+            return expand_border(decl, side, specificity, origin, source_order, selector, interner);
+        }
         if let Some((start, end)) = grid_line_shorthand_sides(&decl.name) {
             return expand_grid_line_shorthand(
                 decl,
@@ -201,6 +213,15 @@ fn box_shorthand_sides(name: &str) -> Option<[PropertyId; 4]> {
             PropertyId::Bottom,
             PropertyId::Left,
         ])
+    } else if name.eq_ignore_ascii_case("border-width") {
+        // `border-width` fans its 1-4 length values out to the four border-width
+        // longhands, the same edge-replication as `margin` / `padding`.
+        Some([
+            PropertyId::BorderTopWidth,
+            PropertyId::BorderRightWidth,
+            PropertyId::BorderBottomWidth,
+            PropertyId::BorderLeftWidth,
+        ])
     } else {
         None
     }
@@ -250,6 +271,323 @@ fn expand_box_shorthand(
     };
     sides
         .into_iter()
+        .zip(four)
+        .map(|(property, value)| {
+            CompiledDeclaration::Standard(Declaration::new(
+                property,
+                value,
+                important,
+                origin,
+                specificity,
+                source_order,
+                selector,
+            ))
+        })
+        .collect()
+}
+
+/// The three longhand ids of one border edge, in `width` / `style` / `color`
+/// order — the sub-properties the `border` and `border-<side>` shorthands set.
+struct BorderSide {
+    /// The edge's `border-*-width` longhand.
+    width: PropertyId,
+    /// The edge's `border-*-style` longhand.
+    style: PropertyId,
+    /// The edge's `border-*-color` longhand.
+    color: PropertyId,
+}
+
+/// The four border edges in top/right/bottom/left order (the target of the
+/// `border` shorthand and the per-edge fan-out of `border-width` / `-style` /
+/// `-color`).
+const BORDER_SIDES: &[BorderSide] = &[
+    BorderSide {
+        width: PropertyId::BorderTopWidth,
+        style: PropertyId::BorderTopStyle,
+        color: PropertyId::BorderTopColor,
+    },
+    BorderSide {
+        width: PropertyId::BorderRightWidth,
+        style: PropertyId::BorderRightStyle,
+        color: PropertyId::BorderRightColor,
+    },
+    BorderSide {
+        width: PropertyId::BorderBottomWidth,
+        style: PropertyId::BorderBottomStyle,
+        color: PropertyId::BorderBottomColor,
+    },
+    BorderSide {
+        width: PropertyId::BorderLeftWidth,
+        style: PropertyId::BorderLeftStyle,
+        color: PropertyId::BorderLeftColor,
+    },
+];
+
+/// Returns the single [`BorderSide`] a `border-top` / `-right` / `-bottom` /
+/// `-left` shorthand targets, or [`None`] for any other name.
+fn border_side_shorthand(name: &str) -> Option<&'static [BorderSide]> {
+    if name.eq_ignore_ascii_case("border-top") {
+        Some(&BORDER_SIDES[0..1])
+    } else if name.eq_ignore_ascii_case("border-right") {
+        Some(&BORDER_SIDES[1..2])
+    } else if name.eq_ignore_ascii_case("border-bottom") {
+        Some(&BORDER_SIDES[2..3])
+    } else if name.eq_ignore_ascii_case("border-left") {
+        Some(&BORDER_SIDES[3..4])
+    } else {
+        None
+    }
+}
+
+/// The `width` / `style` / `color` sub-values parsed from a `border` /
+/// `border-<side>` shorthand value, each present only when authored.
+struct BorderComponents {
+    width: Option<PropertyValue>,
+    style: Option<PropertyValue>,
+    color: Option<PropertyValue>,
+}
+
+/// Classifies the components of a `border` / `border-<side>` value into its
+/// `width` / `style` / `color` sub-values, in any order (spec CSS Backgrounds
+/// and Borders §4).
+///
+/// Each component is a `<line-width>` (a length, or unitless `0`), a
+/// `<line-style>` keyword ([`layout_keyword::border_style_from_name`]), or a
+/// `<color>` (hex, `rgb()`/`rgba()`, or a named color). A component that fits
+/// none of the three, or a second component of a category already seen, makes the
+/// whole shorthand unparseable ([`None`]). An all-absent (empty) value is [`Some`]
+/// with every field [`None`]; the caller reports that as unsupported.
+fn classify_border(values: &[ParsedValue], interner: &mut CssSymbolInterner) -> Option<BorderComponents> {
+    let mut out = BorderComponents {
+        width: None,
+        style: None,
+        color: None,
+    };
+    for value in values {
+        // A `<line-style>` keyword (`solid` / `none` / …) takes priority over the
+        // color reading of the same keyword token.
+        if let ParsedValue::Keyword(keyword) = value
+            && let Some(sym) = layout_keyword::border_style_from_name(keyword)
+        {
+            if out.style.is_some() {
+                return None;
+            }
+            out.style = Some(PropertyValue::Keyword(sym));
+            continue;
+        }
+        if let Some(width) = border_width_component(value) {
+            if out.width.is_some() {
+                return None;
+            }
+            out.width = Some(width);
+            continue;
+        }
+        if let Some(color) = border_color_component(value, interner) {
+            if out.color.is_some() {
+                return None;
+            }
+            out.color = Some(color);
+            continue;
+        }
+        return None;
+    }
+    Some(out)
+}
+
+/// Lowers one `border` component as a `<line-width>`: a `<length>` or a unitless
+/// `0` (`0px`). Percentages and keywords are not border widths and yield [`None`].
+fn border_width_component(value: &ParsedValue) -> Option<PropertyValue> {
+    match value {
+        ParsedValue::Number(n) if *n == 0.0 => Some(PropertyValue::Length(Length::px(0.0))),
+        ParsedValue::Dimension { value, unit } => {
+            dimension_length(*value, unit).map(PropertyValue::Length)
+        }
+        _ => None,
+    }
+}
+
+/// Lowers one `border` component as a `<color>`: a hex hash, an `rgb()`/`rgba()`
+/// function, or a modelled named color. Anything else yields [`None`].
+fn border_color_component(
+    value: &ParsedValue,
+    _interner: &mut CssSymbolInterner,
+) -> Option<PropertyValue> {
+    match value {
+        ParsedValue::Hash(hex) => parse_hex_color(hex).map(PropertyValue::Color),
+        ParsedValue::Keyword(keyword) => named_color(keyword).map(PropertyValue::Color),
+        ParsedValue::Function { name, args }
+            if name.eq_ignore_ascii_case("rgb") || name.eq_ignore_ascii_case("rgba") =>
+        {
+            parse_rgb(args).map(PropertyValue::Color)
+        }
+        _ => None,
+    }
+}
+
+/// Expands a `border` / `border-<side>` shorthand into the present
+/// `width` / `style` / `color` longhands for each targeted edge (spec CSS
+/// Backgrounds and Borders §4).
+///
+/// The value is classified once into its sub-values ([`classify_border`]); each
+/// authored sub-value is then emitted for every edge in `sides` (all four for
+/// `border`, one for `border-top` / …). Omitted sub-values are **not** emitted —
+/// a documented simplification of CSS's reset-to-initial semantics — so
+/// `border: 2px solid red` sets width + style + color on every side while
+/// `border-top: 1px solid red` sets them on the top edge only. An unparseable or
+/// empty value degrades the whole shorthand to a single
+/// [`CompiledDeclaration::Unsupported`].
+#[allow(clippy::too_many_arguments)]
+fn expand_border(
+    decl: &ParsedDeclaration,
+    sides: &[BorderSide],
+    specificity: SelectorSpecificity,
+    origin: CascadeOrigin,
+    source_order: u32,
+    selector: Option<SelectorId>,
+    interner: &mut CssSymbolInterner,
+) -> Vec<CompiledDeclaration> {
+    let unsupported = || {
+        vec![CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
+            value_unsupported_kind(&decl.value),
+            &*decl.name,
+            decl.span,
+        ))]
+    };
+    let Some(components) = classify_border(&decl.value, interner) else {
+        return unsupported();
+    };
+    // An empty value (no width / style / color) authors nothing to expand.
+    if components.width.is_none() && components.style.is_none() && components.color.is_none() {
+        return unsupported();
+    }
+    let important = if decl.important {
+        ImportantFlag::Important
+    } else {
+        ImportantFlag::Normal
+    };
+    let mut out = Vec::new();
+    for side in sides {
+        for (property, value) in [
+            (side.width, &components.width),
+            (side.style, &components.style),
+            (side.color, &components.color),
+        ] {
+            if let Some(value) = value {
+                out.push(CompiledDeclaration::Standard(Declaration::new(
+                    property,
+                    value.clone(),
+                    important,
+                    origin,
+                    specificity,
+                    source_order,
+                    selector,
+                )));
+            }
+        }
+    }
+    out
+}
+
+/// Expands a `border-color` shorthand into the four `border-*-color` longhands,
+/// using the same 1/2/3/4-value edge replication as `margin` / `padding`.
+///
+/// Each component is a single `<color>` (hex, `rgb()`/`rgba()`, or a named
+/// color); an unparseable component, or an empty or over-long list, degrades the
+/// whole shorthand to a single [`CompiledDeclaration::Unsupported`].
+fn expand_border_color(
+    decl: &ParsedDeclaration,
+    specificity: SelectorSpecificity,
+    origin: CascadeOrigin,
+    source_order: u32,
+    selector: Option<SelectorId>,
+    interner: &mut CssSymbolInterner,
+) -> Vec<CompiledDeclaration> {
+    let ids = [
+        PropertyId::BorderTopColor,
+        PropertyId::BorderRightColor,
+        PropertyId::BorderBottomColor,
+        PropertyId::BorderLeftColor,
+    ];
+    let mut components = Vec::new();
+    for value in &decl.value {
+        match border_color_component(value, interner) {
+            Some(color) => components.push(color),
+            None => return border_side_unsupported(decl),
+        }
+    }
+    emit_four(decl, ids, &components, specificity, origin, source_order, selector)
+}
+
+/// Expands a `border-style` shorthand into the four `border-*-style` longhands,
+/// with the same 1/2/3/4-value edge replication as `margin` / `padding`.
+///
+/// Each component is a `<line-style>` keyword folded to its reserved handle
+/// (`none` / `solid`, via [`layout_keyword::border_style_from_name`]); an
+/// unrecognised keyword, or an empty or over-long list, degrades the whole
+/// shorthand to a single [`CompiledDeclaration::Unsupported`].
+fn expand_border_style(
+    decl: &ParsedDeclaration,
+    specificity: SelectorSpecificity,
+    origin: CascadeOrigin,
+    source_order: u32,
+    selector: Option<SelectorId>,
+) -> Vec<CompiledDeclaration> {
+    let ids = [
+        PropertyId::BorderTopStyle,
+        PropertyId::BorderRightStyle,
+        PropertyId::BorderBottomStyle,
+        PropertyId::BorderLeftStyle,
+    ];
+    let mut components = Vec::new();
+    for value in &decl.value {
+        match value {
+            ParsedValue::Keyword(keyword) => {
+                match layout_keyword::border_style_from_name(keyword) {
+                    Some(sym) => components.push(PropertyValue::Keyword(sym)),
+                    None => return border_side_unsupported(decl),
+                }
+            }
+            _ => return border_side_unsupported(decl),
+        }
+    }
+    emit_four(decl, ids, &components, specificity, origin, source_order, selector)
+}
+
+/// The single unsupported-feature fallback for a malformed `border-color` /
+/// `border-style` value.
+fn border_side_unsupported(decl: &ParsedDeclaration) -> Vec<CompiledDeclaration> {
+    vec![CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
+        value_unsupported_kind(&decl.value),
+        &*decl.name,
+        decl.span,
+    ))]
+}
+
+/// Fans 1-4 pre-lowered `components` out to the four `ids` (top/right/bottom/left)
+/// using the CSS edge-replication rules, emitting one [`Declaration`] per side.
+/// An empty or over-long component list degrades to a single unsupported feature.
+fn emit_four(
+    decl: &ParsedDeclaration,
+    ids: [PropertyId; 4],
+    components: &[PropertyValue],
+    specificity: SelectorSpecificity,
+    origin: CascadeOrigin,
+    source_order: u32,
+    selector: Option<SelectorId>,
+) -> Vec<CompiledDeclaration> {
+    let four = match components {
+        [a] => [a.clone(), a.clone(), a.clone(), a.clone()],
+        [a, b] => [a.clone(), b.clone(), a.clone(), b.clone()],
+        [a, b, c] => [a.clone(), b.clone(), c.clone(), b.clone()],
+        [a, b, c, d] => [a.clone(), b.clone(), c.clone(), d.clone()],
+        _ => return border_side_unsupported(decl),
+    };
+    let important = if decl.important {
+        ImportantFlag::Important
+    } else {
+        ImportantFlag::Normal
+    };
+    ids.into_iter()
         .zip(four)
         .map(|(property, value)| {
             CompiledDeclaration::Standard(Declaration::new(
@@ -645,7 +983,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 53] = [
+    const ALL: [PropertyId; 65] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::Opacity,
@@ -667,6 +1005,18 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::PaddingRight,
         PropertyId::PaddingBottom,
         PropertyId::PaddingLeft,
+        PropertyId::BorderTopWidth,
+        PropertyId::BorderRightWidth,
+        PropertyId::BorderBottomWidth,
+        PropertyId::BorderLeftWidth,
+        PropertyId::BorderTopStyle,
+        PropertyId::BorderRightStyle,
+        PropertyId::BorderBottomStyle,
+        PropertyId::BorderLeftStyle,
+        PropertyId::BorderTopColor,
+        PropertyId::BorderRightColor,
+        PropertyId::BorderBottomColor,
+        PropertyId::BorderLeftColor,
         PropertyId::MinWidth,
         PropertyId::MinHeight,
         PropertyId::MaxWidth,
@@ -839,6 +1189,10 @@ fn is_length_longhand(property: PropertyId) -> bool {
             | PropertyId::PaddingRight
             | PropertyId::PaddingBottom
             | PropertyId::PaddingLeft
+            | PropertyId::BorderTopWidth
+            | PropertyId::BorderRightWidth
+            | PropertyId::BorderBottomWidth
+            | PropertyId::BorderLeftWidth
             | PropertyId::Gap
             | PropertyId::FlexBasis
             | PropertyId::FontSize
@@ -908,6 +1262,12 @@ fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<Inte
         PropertyId::AlignSelf | PropertyId::JustifySelf => {
             Some(layout_keyword::align_self_from_name)
         }
+        // The four `border-*-style` longhands share the closed `none` / `solid`
+        // (and folded visible-style) keyword set.
+        PropertyId::BorderTopStyle
+        | PropertyId::BorderRightStyle
+        | PropertyId::BorderBottomStyle
+        | PropertyId::BorderLeftStyle => Some(layout_keyword::border_style_from_name),
         PropertyId::Direction => Some(layout_keyword::direction_from_name),
         PropertyId::FontStyle => Some(layout_keyword::font_style_from_name),
         PropertyId::TextAlign => Some(layout_keyword::text_align_from_name),
@@ -1280,13 +1640,43 @@ fn lower_keyword(keyword: &str, interner: &mut CssSymbolInterner) -> PropertyVal
     if keyword.eq_ignore_ascii_case("auto") {
         return PropertyValue::Length(Length::Auto);
     }
-    if keyword.eq_ignore_ascii_case("transparent") {
-        return PropertyValue::Color(StyleColor::TRANSPARENT);
-    }
-    if keyword.eq_ignore_ascii_case("black") {
-        return PropertyValue::Color(StyleColor::BLACK);
+    if let Some(color) = named_color(keyword) {
+        return PropertyValue::Color(color);
     }
     PropertyValue::Keyword(interner.intern(keyword))
+}
+
+/// Maps a CSS named color to a [`StyleColor`], case-insensitively; [`None`] for
+/// any keyword that is not one of the modelled names.
+///
+/// This is the small named-color subset the domain recognises — `transparent`,
+/// `black`, and the common basic colors — enough for authored `color` /
+/// `background-color` / `border-*-color` values. The full CSS named-color table
+/// is a later extension; an unrecognised name falls through to an interned
+/// keyword rather than being lowered to a color.
+fn named_color(keyword: &str) -> Option<StyleColor> {
+    let c = |r: f32, g: f32, b: f32| StyleColor::rgba(r, g, b, 1.0);
+    match keyword.to_ascii_lowercase().as_str() {
+        "transparent" => Some(StyleColor::TRANSPARENT),
+        "black" => Some(StyleColor::BLACK),
+        "white" => Some(c(1.0, 1.0, 1.0)),
+        "red" => Some(c(1.0, 0.0, 0.0)),
+        "green" => Some(c(0.0, 128.0 / 255.0, 0.0)),
+        "lime" => Some(c(0.0, 1.0, 0.0)),
+        "blue" => Some(c(0.0, 0.0, 1.0)),
+        "yellow" => Some(c(1.0, 1.0, 0.0)),
+        "cyan" | "aqua" => Some(c(0.0, 1.0, 1.0)),
+        "magenta" | "fuchsia" => Some(c(1.0, 0.0, 1.0)),
+        "gray" | "grey" => Some(c(128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0)),
+        "silver" => Some(c(192.0 / 255.0, 192.0 / 255.0, 192.0 / 255.0)),
+        "maroon" => Some(c(128.0 / 255.0, 0.0, 0.0)),
+        "olive" => Some(c(128.0 / 255.0, 128.0 / 255.0, 0.0)),
+        "navy" => Some(c(0.0, 0.0, 128.0 / 255.0)),
+        "teal" => Some(c(0.0, 128.0 / 255.0, 128.0 / 255.0)),
+        "purple" => Some(c(128.0 / 255.0, 0.0, 128.0 / 255.0)),
+        "orange" => Some(c(1.0, 165.0 / 255.0, 0.0)),
+        _ => None,
+    }
 }
 
 /// Lowers a dimension into a [`Length`] term, accepting `px` (absolute), `%`
@@ -1514,6 +1904,133 @@ mod tests {
             CompiledDeclaration::Standard(d) => d,
             other => panic!("expected standard declaration, got {other:?}"),
         }
+    }
+
+    /// Collects the `(PropertyId, PropertyValue)` pairs of a compiled shorthand's
+    /// standard declarations, in emission order.
+    fn pairs(compiled: &[CompiledDeclaration]) -> Vec<(PropertyId, PropertyValue)> {
+        compiled
+            .iter()
+            .map(|c| {
+                let d = standard_of(c);
+                (d.property(), d.value().clone())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn border_shorthand_sets_width_style_color_on_all_four_sides() {
+        let compiled = compile_all("border: 2px solid #ff0000");
+        let got = pairs(&compiled);
+        let width = PropertyValue::Length(Length::px(2.0));
+        let style = PropertyValue::Keyword(layout_keyword::BORDER_STYLE_SOLID);
+        let color = PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0));
+        assert_eq!(
+            got,
+            vec![
+                (PropertyId::BorderTopWidth, width.clone()),
+                (PropertyId::BorderTopStyle, style.clone()),
+                (PropertyId::BorderTopColor, color.clone()),
+                (PropertyId::BorderRightWidth, width.clone()),
+                (PropertyId::BorderRightStyle, style.clone()),
+                (PropertyId::BorderRightColor, color.clone()),
+                (PropertyId::BorderBottomWidth, width.clone()),
+                (PropertyId::BorderBottomStyle, style.clone()),
+                (PropertyId::BorderBottomColor, color.clone()),
+                (PropertyId::BorderLeftWidth, width),
+                (PropertyId::BorderLeftStyle, style),
+                (PropertyId::BorderLeftColor, color),
+            ]
+        );
+    }
+
+    #[test]
+    fn border_shorthand_accepts_components_in_any_order() {
+        // `red solid 2px` classifies identically to `2px solid red`.
+        let got = pairs(&compile_all("border: red solid 2px"));
+        assert!(got.contains(&(PropertyId::BorderTopWidth, PropertyValue::Length(Length::px(2.0)))));
+        assert!(got.contains(&(
+            PropertyId::BorderTopStyle,
+            PropertyValue::Keyword(layout_keyword::BORDER_STYLE_SOLID)
+        )));
+        assert!(got.contains(&(
+            PropertyId::BorderTopColor,
+            PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0))
+        )));
+    }
+
+    #[test]
+    fn border_side_shorthand_sets_one_edge() {
+        let got = pairs(&compile_all("border-top: 1px solid red"));
+        assert_eq!(
+            got,
+            vec![
+                (PropertyId::BorderTopWidth, PropertyValue::Length(Length::px(1.0))),
+                (
+                    PropertyId::BorderTopStyle,
+                    PropertyValue::Keyword(layout_keyword::BORDER_STYLE_SOLID)
+                ),
+                (
+                    PropertyId::BorderTopColor,
+                    PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0))
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn border_color_two_value_replicates_to_four_sides() {
+        // `red green` → top/bottom = red, right/left = green (CSS 2-value rule).
+        let red = PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0));
+        let green = PropertyValue::Color(StyleColor::rgba(0.0, 128.0 / 255.0, 0.0, 1.0));
+        assert_eq!(
+            pairs(&compile_all("border-color: red green")),
+            vec![
+                (PropertyId::BorderTopColor, red.clone()),
+                (PropertyId::BorderRightColor, green.clone()),
+                (PropertyId::BorderBottomColor, red),
+                (PropertyId::BorderLeftColor, green),
+            ]
+        );
+    }
+
+    #[test]
+    fn border_width_and_style_shorthands_fan_out() {
+        assert_eq!(
+            pairs(&compile_all("border-width: 3px")),
+            vec![
+                (PropertyId::BorderTopWidth, PropertyValue::Length(Length::px(3.0))),
+                (PropertyId::BorderRightWidth, PropertyValue::Length(Length::px(3.0))),
+                (PropertyId::BorderBottomWidth, PropertyValue::Length(Length::px(3.0))),
+                (PropertyId::BorderLeftWidth, PropertyValue::Length(Length::px(3.0))),
+            ]
+        );
+        let solid = PropertyValue::Keyword(layout_keyword::BORDER_STYLE_SOLID);
+        assert_eq!(
+            pairs(&compile_all("border-style: solid")),
+            vec![
+                (PropertyId::BorderTopStyle, solid.clone()),
+                (PropertyId::BorderRightStyle, solid.clone()),
+                (PropertyId::BorderBottomStyle, solid.clone()),
+                (PropertyId::BorderLeftStyle, solid),
+            ]
+        );
+    }
+
+    #[test]
+    fn border_longhands_resolve_directly() {
+        assert_eq!(
+            property_id_from_name("border-top-width"),
+            Some(PropertyId::BorderTopWidth)
+        );
+        assert_eq!(
+            value_of("border-left-color: #00ff00"),
+            PropertyValue::Color(StyleColor::rgba(0.0, 1.0, 0.0, 1.0))
+        );
+        assert_eq!(
+            value_of("border-right-style: dashed"),
+            PropertyValue::Keyword(layout_keyword::BORDER_STYLE_SOLID)
+        );
     }
 
     #[test]
