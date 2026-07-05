@@ -36,7 +36,12 @@ impl SnapshotNormalizer {
     /// absolute layout `bounds` (if present) — and the rows are emitted **sorted
     /// by [`NodeId`]**. Because the sort is total and deterministic, two
     /// normalizations of equal snapshots are byte-for-byte equal (spec §7.14).
-    /// The scene's fill count and balance are copied through.
+    ///
+    /// The remaining §7.4 stages are copied through as stable scalar summaries,
+    /// each already order-independent: the scene's fill count and balance, the
+    /// paint-command stream length, the accessibility snapshot's node count and
+    /// root, the render graph's pass count, and the rendered image (if a backend
+    /// attached one).
     #[must_use]
     pub fn normalize(&self, snapshot: &PipelineSnapshot) -> NormalizedPipeline {
         let computed = snapshot.computed();
@@ -64,6 +69,11 @@ impl SnapshotNormalizer {
             nodes,
             snapshot.fill_count(),
             snapshot.is_balanced(),
+            snapshot.paint().len(),
+            snapshot.accessibility().len(),
+            snapshot.accessibility().root(),
+            snapshot.render_graph().pass_count(),
+            snapshot.image().copied(),
         )
     }
 }
@@ -174,6 +184,38 @@ mod tests {
             child_row.layout_bounds().is_some(),
             "the styled child was arranged",
         );
+    }
+
+    #[test]
+    fn normalized_form_carries_the_new_stage_summaries() {
+        // The paint, accessibility, and render-graph summaries survive
+        // normalization and are deterministic across two captures.
+        let inputs = StyleInputs::new();
+        let host = rendered_host(&inputs);
+        let viewport = host.config().viewport();
+
+        let snapshot = PipelineSnapshot::capture(host.tree(), &inputs, viewport);
+        let normalized = SnapshotNormalizer::new().normalize(&snapshot);
+
+        assert_eq!(normalized.paint_command_count(), snapshot.paint().len());
+        assert_eq!(
+            normalized.accessibility_node_count(),
+            snapshot.accessibility().len()
+        );
+        assert_eq!(
+            normalized.accessibility_root(),
+            snapshot.accessibility().root()
+        );
+        assert_eq!(
+            normalized.render_pass_count(),
+            snapshot.render_graph().pass_count()
+        );
+        assert!(normalized.image().is_none(), "no backend attached an image");
+
+        // Deterministic across captures.
+        let again = SnapshotNormalizer::new()
+            .normalize(&PipelineSnapshot::capture(host.tree(), &inputs, viewport));
+        assert_eq!(normalized, again);
     }
 
     #[test]

@@ -1423,6 +1423,7 @@ version = "0.0.0"
 name = "obscur-headless"
 version = "0.0.0"
 dependencies = [
+ "obscur-accessibility",
  "obscur-geometry",
  "obscur-identity",
  "obscur-layout",
@@ -1603,6 +1604,7 @@ version = "0.0.0"
 dependencies = [
  "obscur-capability",
  "obscur-geometry",
+ "obscur-headless",
  "obscur-render",
  "obscur-scene",
  "tiny-skia",
