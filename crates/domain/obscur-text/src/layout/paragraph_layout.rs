@@ -31,15 +31,17 @@ pub struct ParagraphLayout {
     overflow: TextOverflow,
 }
 
-/// One flattened glyph tagged with the font, direction, and font size of the
-/// [`ShapedRun`] it came from. Flattening the fallback result into this stream
-/// lets word-splitting and greedy packing treat the whole paragraph uniformly
-/// while retaining enough per-glyph provenance to rebuild same-font segments.
+/// One flattened glyph tagged with the font, direction, font size, and bidi
+/// embedding level of the [`ShapedRun`] it came from. Flattening the fallback
+/// result into this stream lets word-splitting and greedy packing treat the
+/// whole paragraph uniformly while retaining enough per-glyph provenance to
+/// rebuild same-font, same-level segments and reorder them into visual order.
 #[derive(Clone, Copy)]
 struct Tagged {
     font: FontId,
     direction: TextDirection,
     font_size: f32,
+    level: u8,
     glyph: ShapedGlyph,
 }
 
@@ -91,14 +93,18 @@ impl ParagraphLayout {
     /// 3. greedily packs words onto lines under `max_width`, closing a line when
     ///    the next word would overflow a non-empty line and always after a
     ///    mandatory break; a word wider than `max_width` still takes its own line;
-    /// 4. splits each line's glyphs into contiguous same-font segments, rebuilding
-    ///    a [`ShapedRun`] per segment, and assigns the line its cumulative `top`
-    ///    (spaced by `line_height`), `height`, `baseline`, and alignment offset.
+    /// 4. splits each line's glyphs into contiguous same-font, same-level
+    ///    segments, rebuilding a [`ShapedRun`] per segment, reorders those
+    ///    segments into visual order via the UAX#9 L2 rule (see `segment`), and
+    ///    assigns the line its cumulative `top` (spaced by `line_height`),
+    ///    `height`, `baseline`, and alignment offset.
     ///
     /// When `max_width <= 0` (unconstrained) the whole paragraph is one line.
     /// Empty input — no runs, or a single empty run — yields one empty line rather
-    /// than panicking. This greedy wrapper performs no bidi visual reordering
-    /// within a line and never splits a word, even one that spans fonts.
+    /// than panicking. This greedy wrapper reorders a line's *segments* into
+    /// visual order (line-level bidi) but never reorders glyphs within a segment —
+    /// that is the shaper's job — and never splits a word, even one that spans
+    /// fonts.
     #[must_use]
     pub fn wrap(
         runs: &[ShapedRun],
@@ -163,11 +169,13 @@ impl ParagraphLayout {
             let font = shaped.font();
             let direction = run.direction();
             let font_size = run.font_size();
+            let level = shaped.level();
             for glyph in run.glyphs() {
                 stream.push(Tagged {
                     font,
                     direction,
                     font_size,
+                    level,
                     glyph: *glyph,
                 });
             }
@@ -240,10 +248,17 @@ impl ParagraphLayout {
         words
     }
 
-    /// Splits one line's `glyphs` into contiguous same-font [`ShapedRun`]
-    /// segments, in visual order. Each segment's [`GlyphRun`] takes its direction
-    /// and font size from its glyphs' source run and a `source` byte range from
-    /// its glyphs' clusters (its last segment ending at `line_end`).
+    /// Splits one line's logical-order `glyphs` into contiguous same-font AND
+    /// same-level [`ShapedRun`] segments, then reorders those segments into visual
+    /// (left-to-right) order via the UAX#9 L2 rule (see `reorder_visual`). Each
+    /// segment's [`GlyphRun`] takes its direction and font size from its glyphs'
+    /// source run, a `source` byte range from its glyphs' clusters (its last
+    /// logical segment ending at `line_end`), and carries its bidi `level`.
+    ///
+    /// A level boundary ends a segment as well as a font boundary, so a run that
+    /// changes embedding level splits even within one font. Within a segment the
+    /// glyph order is left as the shaper produced it (HarfRust already visually
+    /// orders RTL runs; the mock emits LTR order — a documented mock limitation).
     fn segment(glyphs: &[Tagged], line_end: usize) -> Vec<ShapedRun> {
         let mut segments = Vec::new();
         let mut index = 0;
@@ -251,10 +266,14 @@ impl ParagraphLayout {
             let font = glyphs[index].font;
             let direction = glyphs[index].direction;
             let font_size = glyphs[index].font_size;
+            let level = glyphs[index].level;
             let seg_start = glyphs[index].glyph.cluster();
 
             let mut run_glyphs = Vec::new();
-            while index < glyphs.len() && glyphs[index].font == font {
+            while index < glyphs.len()
+                && glyphs[index].font == font
+                && glyphs[index].level == level
+            {
                 run_glyphs.push(glyphs[index].glyph);
                 index += 1;
             }
@@ -265,9 +284,54 @@ impl ParagraphLayout {
                 .map_or(line_end, |t| t.glyph.cluster());
             let range = TextRange::new(seg_start.min(seg_end), seg_start.max(seg_end));
             let run = GlyphRun::new(run_glyphs, direction, font_size, range);
-            segments.push(ShapedRun::new(font, run));
+            segments.push(ShapedRun::new(font, run).with_level(level));
         }
+        Self::reorder_visual(&mut segments);
         segments
+    }
+
+    /// Reorders a line's logical-order `segments` into visual (left-to-right)
+    /// order in place, applying the UAX#9 L2 rule using each segment's bidi
+    /// [`level`](ShapedRun::level).
+    ///
+    /// From the highest level present down to the lowest odd level, every maximal
+    /// contiguous span of segments whose level is `>= lvl` is reversed. This
+    /// places right-to-left runs (and nested higher-level runs within them) into
+    /// their correct visual position without touching within-segment glyph order.
+    /// A line that is entirely even-levelled (pure LTR) has no odd level and is
+    /// left untouched. The reversal is a pure function of the levels, so the
+    /// result is deterministic.
+    fn reorder_visual(segments: &mut [ShapedRun]) {
+        let Some(max_level) = segments.iter().map(ShapedRun::level).max() else {
+            return;
+        };
+        let lowest_odd = segments
+            .iter()
+            .map(ShapedRun::level)
+            .filter(|lvl| lvl % 2 == 1)
+            .min();
+        let Some(lowest_odd) = lowest_odd else {
+            // No odd level: pure LTR line, nothing to reorder.
+            return;
+        };
+
+        let mut lvl = max_level;
+        while lvl >= lowest_odd {
+            let mut start = 0;
+            while start < segments.len() {
+                if segments[start].level() >= lvl {
+                    let mut end = start;
+                    while end < segments.len() && segments[end].level() >= lvl {
+                        end += 1;
+                    }
+                    segments[start..end].reverse();
+                    start = end;
+                } else {
+                    start += 1;
+                }
+            }
+            lvl -= 1;
+        }
     }
 
     /// Returns the laid-out lines, top to bottom.
@@ -316,6 +380,95 @@ mod tests {
             FontId::new(font),
             GlyphRun::new(shaped, TextDirection::LeftToRight, 10.0, source),
         )
+    }
+
+    /// Builds a font-tagged run at bidi embedding `level` whose glyphs have the
+    /// given `(cluster, advance)` pairs and byte `source` range.
+    fn run_lvl(font: u32, level: u8, glyphs: &[(usize, f32)], source: TextRange) -> ShapedRun {
+        run(font, glyphs, source).with_level(level)
+    }
+
+    /// Wraps `runs` of `text` on one unconstrained line and returns the visual
+    /// segment order the L2 reordering produced.
+    fn visual_segments(runs: &[ShapedRun], text: &str) -> Vec<(u32, u8)> {
+        let layout = ParagraphLayout::wrap(
+            runs,
+            text,
+            1000.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Clip,
+        );
+        assert_eq!(layout.line_count(), 1);
+        layout.lines()[0]
+            .segments()
+            .iter()
+            .map(|s| (s.font().get(), s.level()))
+            .collect()
+    }
+
+    #[test]
+    fn single_ltr_run_level_zero_is_unchanged() {
+        // A pure-LTR line (level 0) keeps its logical order and level.
+        let text = "abc";
+        let runs = vec![run_lvl(0, 0, &[(0, 6.0), (1, 6.0), (2, 6.0)], TextRange::new(0, 3))];
+        assert_eq!(visual_segments(&runs, text), vec![(0, 0)]);
+    }
+
+    #[test]
+    fn mixed_ltr_rtl_ltr_levels_keep_rtl_in_place() {
+        // Logical segments levels [0,1,0] ("ab" LTR, "cd" RTL, "ef" LTR). Per
+        // UAX#9 L2 the lone level-1 span (one segment) stays between its LTR
+        // neighbors — only its interior glyphs would flip (the shaper's job).
+        let text = "abcdef";
+        let runs = vec![
+            run_lvl(0, 0, &[(0, 6.0), (1, 6.0)], TextRange::new(0, 2)),
+            run_lvl(1, 1, &[(2, 6.0), (3, 6.0)], TextRange::new(2, 4)),
+            run_lvl(2, 0, &[(4, 6.0), (5, 6.0)], TextRange::new(4, 6)),
+        ];
+        // Visual order unchanged: LTR, RTL, LTR.
+        assert_eq!(visual_segments(&runs, text), vec![(0, 0), (1, 1), (2, 0)]);
+
+        // Left-to-right pen positions place the three segments in that order.
+        let layout = ParagraphLayout::wrap(
+            &runs, text, 1000.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Clip,
+        );
+        let segs = layout.lines()[0].segments();
+        assert_eq!(segs[0].font(), FontId::new(0));
+        assert_eq!(segs[1].font(), FontId::new(1));
+        assert_eq!(segs[2].font(), FontId::new(2));
+        assert_eq!(layout.lines()[0].width(), 36.0);
+    }
+
+    #[test]
+    fn pure_rtl_line_reverses_segment_order() {
+        // Two level-1 segments in logical order → reversed visually.
+        let text = "abcd";
+        let runs = vec![
+            run_lvl(0, 1, &[(0, 6.0), (1, 6.0)], TextRange::new(0, 2)),
+            run_lvl(1, 1, &[(2, 6.0), (3, 6.0)], TextRange::new(2, 4)),
+        ];
+        // Logical [font0, font1] → visual [font1, font0].
+        assert_eq!(visual_segments(&runs, text), vec![(1, 1), (0, 1)]);
+    }
+
+    #[test]
+    fn nested_levels_reorder_higher_within_lower() {
+        // Logical segments levels [0,1,2,1,0] (fonts 0..4). L2 reverses the
+        // level-1 span (indices 1..4) → fonts [0, 3, 2, 1, 4].
+        let text = "abcde";
+        let runs = vec![
+            run_lvl(0, 0, &[(0, 6.0)], TextRange::new(0, 1)),
+            run_lvl(1, 1, &[(1, 6.0)], TextRange::new(1, 2)),
+            run_lvl(2, 2, &[(2, 6.0)], TextRange::new(2, 3)),
+            run_lvl(3, 1, &[(3, 6.0)], TextRange::new(3, 4)),
+            run_lvl(4, 0, &[(4, 6.0)], TextRange::new(4, 5)),
+        ];
+        assert_eq!(
+            visual_segments(&runs, text),
+            vec![(0, 0), (3, 1), (2, 2), (1, 1), (4, 0)]
+        );
     }
 
     #[test]

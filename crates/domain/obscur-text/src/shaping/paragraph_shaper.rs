@@ -117,7 +117,7 @@ impl ParagraphShaper {
                 ShapingRequest::new(sub, face, font_size).with_direction(item.direction());
             let run = self.shaper.shape(&shape_request);
 
-            runs.push(ShapedRun::new(font, rebase_run(&run, range)));
+            runs.push(ShapedRun::new(font, rebase_run(&run, range)).with_level(item.level()));
         }
         runs
     }
@@ -176,6 +176,21 @@ mod tests {
                     0,
                 ),
             ]
+        }
+    }
+
+    /// A stub itemizer emitting a single right-to-left item at odd bidi level 1
+    /// spanning the whole text, to check the shaper tags the run's level.
+    struct RtlItemizer;
+
+    impl TextItemizer for RtlItemizer {
+        fn itemize(&self, text: &str, _base_direction: TextDirection) -> Vec<TextItem> {
+            vec![TextItem::new(
+                TextRange::new(0, text.len()),
+                ScriptTag::ARABIC,
+                TextDirection::RightToLeft,
+                1,
+            )]
         }
     }
 
@@ -346,6 +361,48 @@ mod tests {
             shaper.line_metrics(16.0),
             MockTextShaper::new().line_metrics(16.0)
         );
+    }
+
+    #[test]
+    fn tags_run_with_item_bidi_level() {
+        // A two-script (LTR then LTR) run tags both at even level 0.
+        let mut resolver = MockFontResolver::new();
+        resolver.register(ScriptTag::LATIN, FontId::new(0), face("Latin"));
+        resolver.register(ScriptTag::CYRILLIC, FontId::new(1), face("Cyrillic"));
+        let shaper = ParagraphShaper::new(
+            Box::new(TwoScriptItemizer),
+            Box::new(resolver),
+            Box::new(MockTextShaper::new()),
+        );
+        let default = face("Fallback");
+        let runs = shaper.shape_paragraph(
+            "abВГ",
+            &chain(),
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        );
+        assert_eq!(runs[0].level(), 0);
+        assert_eq!(runs[1].level(), 0);
+
+        // An RTL item at odd level 1 tags the resulting run's level odd.
+        let rtl_shaper = ParagraphShaper::new(
+            Box::new(RtlItemizer),
+            Box::new(MockFontResolver::new()),
+            Box::new(MockTextShaper::new()),
+        );
+        let rtl_runs = rtl_shaper.shape_paragraph(
+            "hello",
+            &chain(),
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        );
+        assert_eq!(rtl_runs.len(), 1);
+        assert_eq!(rtl_runs[0].level(), 1);
+        assert!(rtl_runs[0].level() % 2 == 1, "RTL item must carry an odd level");
     }
 
     #[test]

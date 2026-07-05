@@ -12,6 +12,11 @@ use crate::shaping::GlyphRun;
 /// with the [`FontId`] its glyphs must be looked up and rasterized against. This
 /// keeps the multi-font result expressible without changing [`GlyphRun`] itself.
 ///
+/// The run also carries its source item's bidi embedding `level` (spec §5.10,
+/// UAX#9): even levels are left-to-right, odd right-to-left. Line layout uses it
+/// to reorder a line's segments into visual order (the L2 rule); `new` defaults
+/// it to `0` (LTR) so callers that don't yet know the level keep compiling.
+///
 /// Because [`GlyphRun`] embeds `f32` metrics this type derives `PartialEq` but
 /// not `Eq`.
 #[derive(Debug, Clone, PartialEq)]
@@ -20,19 +25,42 @@ pub struct ShapedRun {
     font: FontId,
     /// The shaped glyphs and their run metrics.
     run: GlyphRun,
+    /// The bidi embedding level of the source run (even = LTR, odd = RTL).
+    level: u8,
 }
 
 impl ShapedRun {
-    /// Creates a run tagged with the `font` its glyph indices belong to.
+    /// Creates a run tagged with the `font` its glyph indices belong to, at the
+    /// default bidi embedding level `0` (LTR).
+    ///
+    /// Set the level with [`with_level`](Self::with_level) when it is known.
     #[must_use]
     pub const fn new(font: FontId, run: GlyphRun) -> Self {
-        Self { font, run }
+        Self {
+            font,
+            run,
+            level: 0,
+        }
+    }
+
+    /// Returns this run tagged with the bidi embedding `level` of its source item
+    /// (even = LTR, odd = RTL).
+    #[must_use]
+    pub const fn with_level(mut self, level: u8) -> Self {
+        self.level = level;
+        self
     }
 
     /// Returns the font the run's glyph indices belong to.
     #[must_use]
     pub const fn font(&self) -> FontId {
         self.font
+    }
+
+    /// Returns the bidi embedding level of the source run (even = LTR, odd = RTL).
+    #[must_use]
+    pub const fn level(&self) -> u8 {
+        self.level
     }
 
     /// Returns the shaped glyph run.
@@ -74,5 +102,15 @@ mod tests {
     fn into_run_yields_owned_run() {
         let shaped = ShapedRun::new(FontId::PRIMARY, sample_run());
         assert_eq!(shaped.into_run(), sample_run());
+    }
+
+    #[test]
+    fn level_defaults_to_zero_and_with_level_sets_it() {
+        let ltr = ShapedRun::new(FontId::new(3), sample_run());
+        assert_eq!(ltr.level(), 0);
+        let rtl = ShapedRun::new(FontId::new(3), sample_run()).with_level(1);
+        assert_eq!(rtl.level(), 1);
+        // The level participates in equality (additive field on the derive).
+        assert_ne!(ltr, rtl);
     }
 }
