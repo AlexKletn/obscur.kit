@@ -17,6 +17,7 @@ default = ["resource-fs", "cache-fs", "task-smol", "render-cpu"]
 # Convenience: every optional adapter (needs a display/GPU/AT at runtime).
 full = [
     "resource-fs",
+    "resource-decode",
     "cache-fs",
     "task-smol",
     "task-tokio",
@@ -25,6 +26,7 @@ full = [
     "window-winit",
     "accesskit",
 ]
+resource-decode = ["dep:obscur-resource-decode"]
 resource-fs = ["dep:obscur-resource-fs"]
 cache-fs = ["dep:obscur-cache-fs"]
 task-smol = ["dep:obscur-task-smol"]
@@ -71,6 +73,7 @@ obscur-okui-compiler = { workspace = true }
 obscur-css = { workspace = true }
 obscur-ui-macros = { workspace = true }
 # optional adapters (behind features)
+obscur-resource-decode = { workspace = true, optional = true }
 obscur-resource-fs = { workspace = true, optional = true }
 obscur-cache-fs = { workspace = true, optional = true }
 obscur-task-smol = { workspace = true, optional = true }

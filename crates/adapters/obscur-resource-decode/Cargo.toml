@@ -1,0 +1,18 @@
+[package]
+name = "obscur-resource-decode"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+obscur-resources = { workspace = true }
+obscur-geometry = { workspace = true }
+image = { workspace = true }
+ttf-parser = { workspace = true }
+usvg = { workspace = true }
+
+[lints]
+workspace = true

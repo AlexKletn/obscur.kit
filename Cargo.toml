@@ -64,7 +64,12 @@ obscur-ui-macros = { path = "crates/frontend/obscur-ui-macros" }
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full", "extra-traits"] }
+# external decode crates (adapters only; forbidden in pure domain per spec §5.6)
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+ttf-parser = "0.25.1"
+usvg = { version = "0.46", default-features = false }
 # adapters (optional, wired by the facade behind features)
+obscur-resource-decode = { path = "crates/adapters/obscur-resource-decode" }
 obscur-resource-fs = { path = "crates/adapters/obscur-resource-fs" }
 obscur-cache-fs = { path = "crates/adapters/obscur-cache-fs" }
 obscur-task-smol = { path = "crates/adapters/obscur-task-smol" }

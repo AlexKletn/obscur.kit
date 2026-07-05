@@ -72,6 +72,8 @@ pub use obscur_cache_fs as cache_fs;
 pub use obscur_render_cpu as render_cpu;
 #[cfg(feature = "render-vello")]
 pub use obscur_render_vello as render_vello;
+#[cfg(feature = "resource-decode")]
+pub use obscur_resource_decode as resource_decode;
 #[cfg(feature = "resource-fs")]
 pub use obscur_resource_fs as resource_fs;
 #[cfg(feature = "task-smol")]
