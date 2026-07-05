@@ -116,6 +116,16 @@ pub enum PropertyId {
     /// `dense` combinations; NOT inherited). See the reserved `GRID_AUTO_FLOW_*`
     /// handles in [`crate::property::layout_keyword`].
     GridAutoFlow,
+    /// The `grid-auto-columns` property (a `GridTracks` track list; NOT inherited).
+    /// Sizes *implicit* column tracks — those created beyond the explicit
+    /// `grid-template-columns` by placement / auto-flow. The list is cycled: the
+    /// n-th implicit column uses index `n % len`. Initial is `auto`.
+    GridAutoColumns,
+    /// The `grid-auto-rows` property (a `GridTracks` track list; NOT inherited).
+    /// Sizes *implicit* row tracks — those created beyond the explicit
+    /// `grid-template-rows` by placement / auto-flow. The list is cycled: the n-th
+    /// implicit row uses index `n % len`. Initial is `auto`.
+    GridAutoRows,
 
     // ---- Grid item line placement (a `GridLine` edge; not inherited) ----
     /// The `grid-column-start` longhand (the `grid-column` start edge).
@@ -195,6 +205,8 @@ impl PropertyId {
             Self::GridTemplateAreas => "grid-template-areas",
             Self::GridArea => "grid-area",
             Self::GridAutoFlow => "grid-auto-flow",
+            Self::GridAutoColumns => "grid-auto-columns",
+            Self::GridAutoRows => "grid-auto-rows",
             Self::GridColumnStart => "grid-column-start",
             Self::GridColumnEnd => "grid-column-end",
             Self::GridRowStart => "grid-row-start",
@@ -258,6 +270,8 @@ impl PropertyId {
             | Self::GridTemplateAreas
             | Self::GridArea
             | Self::GridAutoFlow
+            | Self::GridAutoColumns
+            | Self::GridAutoRows
             | Self::GridColumnStart
             | Self::GridColumnEnd
             | Self::GridRowStart
@@ -453,6 +467,21 @@ mod tests {
                 .default_inheritance()
                 .is_inherited()
         );
+    }
+
+    #[test]
+    fn grid_auto_tracks_names_and_not_inherited() {
+        assert_eq!(PropertyId::GridAutoColumns.name(), "grid-auto-columns");
+        assert_eq!(PropertyId::GridAutoRows.name(), "grid-auto-rows");
+        // Like the other grid container properties, the implicit-track sizing
+        // properties reset per element rather than inheriting.
+        for id in [PropertyId::GridAutoColumns, PropertyId::GridAutoRows] {
+            assert!(
+                !id.default_inheritance().is_inherited(),
+                "{} should not inherit",
+                id.name()
+            );
+        }
     }
 
     #[test]

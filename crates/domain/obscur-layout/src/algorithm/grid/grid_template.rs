@@ -22,10 +22,21 @@ use super::{TrackList, TrackSize};
 /// `columns` should be non-empty; the grid algorithm treats an empty column list
 /// as a single flexible column so layout always has at least one column to place
 /// items into.
+///
+/// # Implicit-track sizes (`grid-auto-columns` / `grid-auto-rows`)
+///
+/// [`auto_columns`](Self::auto_columns) / [`auto_rows`](Self::auto_rows) hold the
+/// sizing functions for *implicit* tracks — those created past the explicit
+/// template by placement / auto-flow. The list is **cycled**: the n-th implicit
+/// track on an axis uses index `n % len`. An **empty** list means the default
+/// single content-sized `auto` (byte-identical to the historical behaviour where
+/// every implicit track was `Auto`).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GridTemplate {
     columns: TrackList,
     rows: TrackList,
+    auto_columns: Vec<TrackSize>,
+    auto_rows: Vec<TrackSize>,
 }
 
 impl GridTemplate {
@@ -40,6 +51,8 @@ impl GridTemplate {
         Self {
             columns: TrackList::from_tracks(columns),
             rows: TrackList::from_tracks(rows),
+            auto_columns: Vec::new(),
+            auto_rows: Vec::new(),
         }
     }
 
@@ -47,7 +60,12 @@ impl GridTemplate {
     /// carry an auto-repeat).
     #[must_use]
     pub fn from_track_lists(columns: TrackList, rows: TrackList) -> Self {
-        Self { columns, rows }
+        Self {
+            columns,
+            rows,
+            auto_columns: Vec::new(),
+            auto_rows: Vec::new(),
+        }
     }
 
     /// Builds a columns-only template; every row is implicit (auto).
@@ -56,7 +74,23 @@ impl GridTemplate {
         Self {
             columns: TrackList::from_tracks(columns),
             rows: TrackList::default(),
+            auto_columns: Vec::new(),
+            auto_rows: Vec::new(),
         }
+    }
+
+    /// Returns a copy with the implicit-track sizing lists (`grid-auto-columns` /
+    /// `grid-auto-rows`) replaced.
+    ///
+    /// Each list sizes the *implicit* tracks on its axis, cycled by the n-th
+    /// implicit track using index `n % len`. An empty list keeps the default
+    /// content-sized `auto` for that axis (byte-identical to the historical
+    /// all-`Auto` implicit tracks).
+    #[must_use]
+    pub fn with_auto_tracks(mut self, auto_columns: Vec<TrackSize>, auto_rows: Vec<TrackSize>) -> Self {
+        self.auto_columns = auto_columns;
+        self.auto_rows = auto_rows;
+        self
     }
 
     /// The column track list.
@@ -69,6 +103,18 @@ impl GridTemplate {
     #[must_use]
     pub const fn rows(&self) -> &TrackList {
         &self.rows
+    }
+
+    /// The `grid-auto-columns` sizes for implicit column tracks (empty → `auto`).
+    #[must_use]
+    pub fn auto_columns(&self) -> &[TrackSize] {
+        &self.auto_columns
+    }
+
+    /// The `grid-auto-rows` sizes for implicit row tracks (empty → `auto`).
+    #[must_use]
+    pub fn auto_rows(&self) -> &[TrackSize] {
+        &self.auto_rows
     }
 }
 
@@ -98,5 +144,16 @@ mod tests {
         let t = GridTemplate::default();
         assert!(t.columns().is_empty());
         assert!(t.rows().is_empty());
+        // Default implicit-track sizing is empty → the algorithm treats it as `auto`.
+        assert!(t.auto_columns().is_empty());
+        assert!(t.auto_rows().is_empty());
+    }
+
+    #[test]
+    fn with_auto_tracks_stores_implicit_sizes() {
+        let t = GridTemplate::columns_only(vec![TrackSize::Fr(1.0)])
+            .with_auto_tracks(vec![TrackSize::Fixed(50.0)], vec![TrackSize::Fixed(40.0)]);
+        assert_eq!(t.auto_columns(), &[TrackSize::Fixed(50.0)]);
+        assert_eq!(t.auto_rows(), &[TrackSize::Fixed(40.0)]);
     }
 }

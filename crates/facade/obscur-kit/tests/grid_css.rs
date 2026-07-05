@@ -266,6 +266,30 @@ fn auto_fill_columns_from_container_width() {
     approx(cx, 200.0, "c.x (col2 — 3 columns fit the 350px container)");
 }
 
+// 9. `grid-auto-rows: 40px` sizes the IMPLICIT wrapped rows: `1fr 1fr` columns
+//    with 4 children wraps c,d to row 1, and that implicit row is a fixed 40px
+//    (NOT sized to the 10px children), so c.y = d.y = 40 and both are 40px tall.
+#[test]
+fn grid_auto_rows_sizes_wrapped_rows() {
+    let (rt, k) = drive(
+        ".grid{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:40px} \
+         .a{height:10px} .b{height:10px} .c{height:10px} .d{height:10px}",
+        4,
+        300.0,
+        200.0,
+    );
+    let (_, ay, _, _) = geom(&rt, k[0]);
+    let (_, by, _, _) = geom(&rt, k[1]);
+    let (_, cy, _, ch) = geom(&rt, k[2]);
+    let (_, dy, _, dh) = geom(&rt, k[3]);
+    approx(ay, 0.0, "a.y (row0)");
+    approx(by, 0.0, "b.y (row0)");
+    approx(cy, 40.0, "c.y (row1 — the 40px implicit auto-row, not the 10px content)");
+    approx(dy, 40.0, "d.y (row1)");
+    approx(ch, 40.0, "c.height (fills the 40px implicit row)");
+    approx(dh, 40.0, "d.height (fills the 40px implicit row)");
+}
+
 // 8. percentage + fr columns resolve against the container's OWN content width:
 //    `.grid{width:400px}` + `30% 1fr`. 30% of 400 = 120; the 1fr track takes the
 //    280px remainder. This is the case that previously degraded to `auto` because

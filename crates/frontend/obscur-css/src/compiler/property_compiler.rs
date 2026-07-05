@@ -621,7 +621,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 44] = [
+    const ALL: [PropertyId; 46] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::Opacity,
@@ -655,6 +655,8 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::GridTemplateRows,
         PropertyId::GridTemplateAreas,
         PropertyId::GridAutoFlow,
+        PropertyId::GridAutoColumns,
+        PropertyId::GridAutoRows,
         PropertyId::GridColumnStart,
         PropertyId::GridColumnEnd,
         PropertyId::GridRowStart,
@@ -741,6 +743,18 @@ fn lower_for_property(
     }
     if property == PropertyId::GridAutoFlow {
         return lower_grid_auto_flow(values);
+    }
+    if matches!(
+        property,
+        PropertyId::GridAutoColumns | PropertyId::GridAutoRows
+    ) {
+        if let Some(ParsedValue::Keyword(keyword)) = values.first()
+            && let Some(wide) = css_wide_keyword(keyword)
+            && values.len() == 1
+        {
+            return Some(wide);
+        }
+        return lower_grid_auto_tracks(values);
     }
     if let Some(mapper) = layout_keyword_mapper(property)
         && let Some(ParsedValue::Keyword(keyword)) = values.first()
@@ -879,6 +893,29 @@ const MAX_REPEAT: usize = 1024;
 fn lower_grid_template(values: &[ParsedValue]) -> Option<PropertyValue> {
     let tracks = tracks_from_components(values)?;
     if tracks.is_empty() {
+        return None;
+    }
+    Some(PropertyValue::grid_tracks(tracks))
+}
+
+/// Lowers a `grid-auto-columns` / `grid-auto-rows` value into a
+/// [`PropertyValue::GridTracks`] track list — the implicit-track sizing functions.
+///
+/// The track grammar is identical to `grid-template-*` (a `<length>`, an `<fr>`,
+/// `auto`, or `minmax(min, max)`, with an integer `repeat(N, …)` expanded in
+/// place), and it *reuses* [`tracks_from_components`]. The one difference: an
+/// `auto-fill` / `auto-fit` `repeat(…)` is **invalid** for auto-tracks (there is
+/// no container basis for a repetition count here), so a lowered
+/// [`GridTrack::AutoRepeat`] degrades the declaration to an unsupported-feature
+/// diagnostic (returns [`None`]) rather than being sized against a meaningless
+/// repeat. Returns [`None`] on an empty list, exactly like `grid-template-*`.
+fn lower_grid_auto_tracks(values: &[ParsedValue]) -> Option<PropertyValue> {
+    let tracks = tracks_from_components(values)?;
+    if tracks.is_empty() {
+        return None;
+    }
+    // `auto-fill` / `auto-fit` is only valid on `grid-template-*`; reject it here.
+    if tracks.iter().any(|t| matches!(t, GridTrack::AutoRepeat { .. })) {
         return None;
     }
     Some(PropertyValue::grid_tracks(tracks))
@@ -2228,6 +2265,59 @@ mod tests {
     fn invalid_grid_template_is_unsupported() {
         // A bare colour is not a valid track.
         let (result, _) = compile("grid-template-columns: red");
+        assert!(matches!(result, CompiledDeclaration::Unsupported(_)));
+    }
+
+    // ---- grid-auto-columns / grid-auto-rows ----
+
+    #[test]
+    fn resolves_grid_auto_track_names() {
+        assert_eq!(
+            property_id_from_name("grid-auto-columns"),
+            Some(PropertyId::GridAutoColumns)
+        );
+        assert_eq!(
+            property_id_from_name("GRID-AUTO-ROWS"),
+            Some(PropertyId::GridAutoRows)
+        );
+    }
+
+    #[test]
+    fn lowers_grid_auto_rows_track_list() {
+        // `grid-auto-rows: 40px` -> a single fixed 40px implicit-track size.
+        assert_eq!(
+            tracks("grid-auto-rows: 40px"),
+            vec![GridTrack::Fixed(Length::px(40.0))]
+        );
+        assert_eq!(
+            standard("grid-auto-rows: 40px").0.property(),
+            PropertyId::GridAutoRows
+        );
+        // Cycled multi-track and minmax reuse the same track grammar.
+        assert_eq!(
+            tracks("grid-auto-columns: 30px 50px"),
+            vec![GridTrack::Fixed(Length::px(30.0)), GridTrack::Fixed(Length::px(50.0))]
+        );
+        assert_eq!(
+            tracks("grid-auto-columns: minmax(50px, 1fr)"),
+            vec![GridTrack::minmax(
+                GridTrack::Fixed(Length::px(50.0)),
+                GridTrack::Fr(1.0)
+            )]
+        );
+    }
+
+    #[test]
+    fn grid_auto_tracks_honour_css_wide_keywords() {
+        assert_eq!(value_of("grid-auto-rows: inherit"), PropertyValue::Inherit);
+        assert_eq!(value_of("grid-auto-columns: initial"), PropertyValue::Initial);
+    }
+
+    #[test]
+    fn grid_auto_tracks_reject_auto_repeat() {
+        // `auto-fill` / `auto-fit` is invalid for implicit tracks (no container
+        // basis for a repetition count); the declaration is unsupported.
+        let (result, _) = compile("grid-auto-columns: repeat(auto-fill, 100px)");
         assert!(matches!(result, CompiledDeclaration::Unsupported(_)));
     }
 

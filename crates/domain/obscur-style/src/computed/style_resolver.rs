@@ -95,6 +95,8 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::GridTemplateRows,
     PropertyId::GridTemplateAreas,
     PropertyId::GridAutoFlow,
+    PropertyId::GridAutoColumns,
+    PropertyId::GridAutoRows,
     // Grid item line placement.
     PropertyId::GridColumnStart,
     PropertyId::GridColumnEnd,
@@ -209,6 +211,12 @@ impl StyleResolver {
             // needs the interner, so an absent value falls back to the runtime's
             // default (`GridAutoFlow::Row`) — byte-for-byte identical to today.
             | PropertyId::GridAutoFlow
+            // `grid-auto-columns` / `grid-auto-rows` initial is `auto`. There is no
+            // no-interner `GridTracks` value for a single `auto` track, so an absent
+            // value is left unresolved and the runtime falls back to the default
+            // implicit-track sizing (`[Auto]`) — byte-for-byte identical to today.
+            | PropertyId::GridAutoColumns
+            | PropertyId::GridAutoRows
             // `grid-column-start` / `-end` / `grid-row-start` / `-end` initial is
             // `auto`. There is no `GridLine` value for `auto` (it is the enum's
             // implicit default), so an absent edge is left unresolved and the
@@ -754,6 +762,8 @@ mod tests {
                 | PropertyId::GridTemplateRows
                 | PropertyId::GridTemplateAreas
                 | PropertyId::GridAutoFlow
+                | PropertyId::GridAutoColumns
+                | PropertyId::GridAutoRows
                 | PropertyId::GridColumnStart
                 | PropertyId::GridColumnEnd
                 | PropertyId::GridRowStart
@@ -802,6 +812,8 @@ mod tests {
             PropertyId::GridTemplateRows,
             PropertyId::GridTemplateAreas,
             PropertyId::GridAutoFlow,
+            PropertyId::GridAutoColumns,
+            PropertyId::GridAutoRows,
             PropertyId::GridColumnStart,
             PropertyId::GridColumnEnd,
             PropertyId::GridRowStart,
@@ -995,6 +1007,31 @@ mod tests {
         assert_eq!(tracks.len(), 3);
         assert_eq!(tracks[0], GridTrack::Fixed(Length::px(100.0)));
         assert_eq!(tracks[2], GridTrack::Fr(2.0));
+    }
+
+    /// An authored `grid-auto-rows` track list flows through the resolver as a
+    /// concrete computed `GridTracks` value, reusing the same value vocabulary as
+    /// `grid-template-*` (it is not a deferred keyword initial).
+    #[test]
+    fn authored_grid_auto_rows_flow_to_computed_style() {
+        use crate::property::GridTrack;
+        let resolver = StyleResolver::new();
+        let mut cascaded = ResolvedDeclarations::new();
+        cascaded.insert(
+            PropertyId::GridAutoRows,
+            PropertyValue::grid_tracks([GridTrack::Fixed(Length::px(40.0))]),
+        );
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+        let tracks = computed
+            .get(PropertyId::GridAutoRows)
+            .map(ComputedValue::value)
+            .and_then(PropertyValue::as_grid_tracks)
+            .expect("grid-auto-rows computed");
+        assert_eq!(tracks, &[GridTrack::Fixed(Length::px(40.0))]);
+        // Unauthored on a child: not inherited, so it is absent (runtime defaults
+        // to the `[Auto]` implicit-track sizing).
+        let child = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), Some(&computed));
+        assert!(child.get(PropertyId::GridAutoRows).is_none());
     }
 
     /// An authored `grid-column-start` / `-end` line edge flows through the

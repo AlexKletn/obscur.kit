@@ -78,12 +78,33 @@ pub fn grid_template_for(
 ) -> Option<GridTemplate> {
     let columns = grid_tracks_of(computed, PropertyId::GridTemplateColumns);
     let rows = grid_tracks_of(computed, PropertyId::GridTemplateRows);
-    if columns.is_none() && rows.is_none() {
+    let auto_columns = grid_tracks_of(computed, PropertyId::GridAutoColumns);
+    let auto_rows = grid_tracks_of(computed, PropertyId::GridAutoRows);
+    if columns.is_none() && rows.is_none() && auto_columns.is_none() && auto_rows.is_none() {
         return None;
     }
     let ctx = length_context(computed, viewport, root_font_size);
     let map = |tracks: Option<&[GridTrack]>| track_list_of(tracks.unwrap_or(&[]), &ctx);
-    Some(GridTemplate::from_track_lists(map(columns), map(rows)))
+    // `grid-auto-columns` / `grid-auto-rows` are flat implicit-track sizing lists
+    // (auto-fill / auto-fit is rejected in the CSS layer), so each `GridTrack` maps
+    // straight to a `TrackSize` via the same conversion the template tracks use. An
+    // absent list stays empty → the algorithm's default `Auto` implicit tracks.
+    let auto_map =
+        |tracks: Option<&[GridTrack]>| auto_track_sizes(tracks.unwrap_or(&[]), &ctx);
+    Some(
+        GridTemplate::from_track_lists(map(columns), map(rows))
+            .with_auto_tracks(auto_map(auto_columns), auto_map(auto_rows)),
+    )
+}
+
+/// Converts a flat `grid-auto-columns` / `grid-auto-rows` [`GridTrack`] list into
+/// the implicit-track [`TrackSize`] vector, reusing [`track_size_of`].
+///
+/// These lists carry no auto-repeat (the CSS layer rejects `auto-fill` / `auto-fit`
+/// here), so every element maps 1:1; a stray auto-repeat would degrade to a
+/// content-sized [`TrackSize::Auto`] via [`track_size_of`] rather than panic.
+fn auto_track_sizes(tracks: &[GridTrack], ctx: &LengthContext) -> Vec<TrackSize> {
+    tracks.iter().map(|t| track_size_of(t, ctx)).collect()
 }
 
 /// Converts one axis's style [`GridTrack`] list into a layout [`TrackList`],
@@ -332,6 +353,69 @@ mod tests {
         let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
         let repeat = template.columns().auto_repeat().expect("auto-repeat present");
         assert_eq!(repeat.mode(), AutoRepeatMode::AutoFit);
+    }
+
+    #[test]
+    fn grid_auto_tracks_map_to_implicit_track_sizes() {
+        let mut computed = ComputedStyle::new();
+        computed.set(
+            PropertyId::GridTemplateColumns,
+            ComputedValue::from_concrete(PropertyValue::grid_tracks([GridTrack::Fixed(
+                Length::px(100.0),
+            )]))
+            .expect("concrete"),
+        );
+        computed.set(
+            PropertyId::GridAutoRows,
+            ComputedValue::from_concrete(PropertyValue::grid_tracks([GridTrack::Fixed(
+                Length::px(40.0),
+            )]))
+            .expect("concrete"),
+        );
+        computed.set(
+            PropertyId::GridAutoColumns,
+            ComputedValue::from_concrete(PropertyValue::grid_tracks([
+                GridTrack::Fixed(Length::px(30.0)),
+                GridTrack::Fr(1.0),
+            ]))
+            .expect("concrete"),
+        );
+        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
+        assert_eq!(template.auto_rows(), &[TrackSize::Fixed(40.0)]);
+        assert_eq!(
+            template.auto_columns(),
+            &[TrackSize::Fixed(30.0), TrackSize::Fr(1.0)]
+        );
+    }
+
+    #[test]
+    fn grid_auto_rows_alone_yields_template() {
+        // A node with only `grid-auto-rows` (no explicit template) still produces a
+        // template so its implicit rows are sized (not the default `None`).
+        let mut computed = ComputedStyle::new();
+        computed.set(
+            PropertyId::GridAutoRows,
+            ComputedValue::from_concrete(PropertyValue::grid_tracks([GridTrack::Fixed(
+                Length::px(40.0),
+            )]))
+            .expect("concrete"),
+        );
+        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
+        assert!(template.columns().is_empty());
+        assert_eq!(template.auto_rows(), &[TrackSize::Fixed(40.0)]);
+    }
+
+    #[test]
+    fn absent_auto_tracks_stay_empty() {
+        let mut computed = ComputedStyle::new();
+        computed.set(
+            PropertyId::GridTemplateColumns,
+            ComputedValue::from_concrete(PropertyValue::grid_tracks([GridTrack::Fr(1.0)]))
+                .expect("concrete"),
+        );
+        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
+        assert!(template.auto_columns().is_empty());
+        assert!(template.auto_rows().is_empty());
     }
 
     #[test]

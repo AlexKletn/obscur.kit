@@ -43,7 +43,10 @@ use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 ///    space among grow factors.
 /// 3. **Row track sizing** — the same resolution over the explicit `rows` using
 ///    `content_height` and `row_gap`. Rows past the explicit list are *implicit*
-///    and sized as `Auto` (as tall as the tallest item placed in them).
+///    and sized by the template's `grid-auto-rows`
+///    ([`auto_rows`](GridTemplate::auto_rows)) — cycled by the n-th implicit row
+///    using index `n % len` — defaulting (empty list) to `Auto`, as tall as the
+///    tallest item placed in them.
 /// 4. **Placement** — each child carries a [`GridPlacement`](super::GridPlacement)
 ///    (its `grid-column` / `grid-row` line pair). Placement runs in two phases:
 ///    *Phase A* honours every item with a definite column and/or row line — a
@@ -52,8 +55,9 @@ use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 ///    block occupied. *Phase B* then places the remaining fully-auto items
 ///    row-major by **first-fit**: each drops into the first free cell (skipping
 ///    occupied cells, wrapping a too-wide span to the next row) that fits its
-///    span. Definite lines past the template add implicit `Auto` columns; rows
-///    past the template are implicit `Auto`. With every child left at the default
+///    span. Definite lines past the template add implicit columns and rows past
+///    the template are implicit — both sized by `grid-auto-columns` /
+///    `grid-auto-rows` (cycled), defaulting to `Auto`. With every child left at the default
 ///    all-`Auto` placement this reduces exactly to `(i % n_cols, i / n_cols)`.
 /// 5. **Sizing** — an item spanning `s` columns is `Σ(spanned column widths) +
 ///    (s - 1) * column_gap` wide (analogously for a row span with `row_gap`); a
@@ -308,6 +312,23 @@ fn collapsed_tracks(
         }
     }
     collapsed
+}
+
+/// The sizing function for the `idx`-th *implicit* track on an axis, from the
+/// axis's `grid-auto-columns` / `grid-auto-rows` list.
+///
+/// The list is **cycled** (CSS §7.5): the n-th implicit track uses index
+/// `n % len`. An **empty** list means the default content-sized [`TrackSize::Auto`]
+/// — byte-identical to the historical behaviour where every implicit track was
+/// `Auto`. An `fr` in an implicit track resolves the same way as an explicit `fr`
+/// (via [`resolve_tracks`]); because an implicit track has no free-space basis of
+/// its own, on an indefinite axis its leftover is zero and it collapses to its
+/// floor (its `min`, else `0`) — documented, not special-cased.
+fn implicit_track(auto: &[TrackSize], idx: usize) -> TrackSize {
+    match auto.len() {
+        0 => TrackSize::Auto,
+        len => auto[idx % len].clone(),
+    }
 }
 
 /// The pixel extent a `span`-track cell covers: the sum of the spanned track
@@ -696,9 +717,17 @@ impl LayoutAlgorithm for GridLayout {
             .max()
             .unwrap_or(0);
 
-        // Effective column tracks: the template, padded with implicit `Auto`.
+        // Effective column tracks: the explicit template, padded with implicit
+        // tracks sized by `grid-auto-columns` (cycled; empty → `Auto`).
+        let auto_cols = self.template.auto_columns();
+        let explicit_cols = columns.len();
         let cols_effective: Vec<TrackSize> = (0..n_cols)
-            .map(|c| columns.get(c).cloned().unwrap_or(TrackSize::Auto))
+            .map(|c| {
+                columns
+                    .get(c)
+                    .cloned()
+                    .unwrap_or_else(|| implicit_track(auto_cols, c - explicit_cols))
+            })
             .collect();
 
         // Step 2: column track sizing. An `Auto`/`minmax` column sizes to the
@@ -739,16 +768,25 @@ impl LayoutAlgorithm for GridLayout {
         }
 
         // Step 3: row track sizing. Explicit rows come from the template; rows
-        // past it are implicit (auto). Auto/implicit rows size to the tallest
-        // item anchored in them (a spanning item attributes its height to its
-        // FIRST spanned row).
+        // past it are implicit, sized by `grid-auto-rows` (cycled; empty → auto).
+        // Auto/implicit rows size to the tallest item anchored in them (a spanning
+        // item attributes its height to its FIRST spanned row).
         let mut auto_row = vec![0.0_f32; n_rows];
         for i in 0..count {
             let r0 = place_row[i];
             auto_row[r0] = auto_row[r0].max(item_size[i].height);
         }
+        // Implicit rows (past the explicit template) are sized by `grid-auto-rows`
+        // (cycled; empty → `Auto` — the historical tallest-item content sizing).
+        let auto_rows = self.template.auto_rows();
+        let explicit_rows = rows_expanded.len();
         let rows_effective: Vec<TrackSize> = (0..n_rows)
-            .map(|r| rows_expanded.get(r).cloned().unwrap_or(TrackSize::Auto))
+            .map(|r| {
+                rows_expanded
+                    .get(r)
+                    .cloned()
+                    .unwrap_or_else(|| implicit_track(auto_rows, r - explicit_rows))
+            })
             .collect();
         let mut row_sizes =
             resolve_tracks(&rows_effective, content_height, self.row_gap, |r| auto_row[r]);
@@ -1004,6 +1042,107 @@ mod tests {
         assert_eq!(b[3].origin(), Point::new(100.0, 35.0));
         // Border box height = row0(35) + row1(15) = 50.
         assert_eq!(out.size(), Size::new(200.0, 50.0));
+    }
+
+    /// Builds a grid whose implicit tracks are sized by `grid-auto-columns` /
+    /// `grid-auto-rows` (each cycled; empty → `auto`).
+    fn grid_auto(
+        columns: Vec<TrackSize>,
+        rows: Vec<TrackSize>,
+        auto_columns: Vec<TrackSize>,
+        auto_rows: Vec<TrackSize>,
+    ) -> GridLayout {
+        GridLayout::with_template(
+            GridTemplate::new(columns, rows).with_auto_tracks(auto_columns, auto_rows),
+            0.0,
+            0.0,
+        )
+    }
+
+    // (auto-rows) explicit `100px 100px` columns, no explicit rows, and
+    // `grid-auto-rows: 40px`: all rows are implicit and are 40px tall (NOT sized to
+    // the content), so the two wrapped items land at y = 40.
+    #[test]
+    fn grid_auto_rows_sizes_implicit_rows() {
+        let style = LayoutStyle::default();
+        let children = [child(1), child(2), child(3), child(4)];
+        // Content heights (10) differ from the 40px track; the track wins.
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 10.0); 4]);
+        let g = grid_auto(
+            vec![TrackSize::Fixed(100.0), TrackSize::Fixed(100.0)],
+            vec![],
+            vec![],
+            vec![TrackSize::Fixed(40.0)],
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(200.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // Row 0 items at y=0; wrapped row-1 items at y=40 (not the 10px content).
+        assert_eq!(b[0].origin(), Point::new(0.0, 0.0));
+        assert_eq!(b[1].origin(), Point::new(100.0, 0.0));
+        assert_eq!(b[2].origin(), Point::new(0.0, 40.0));
+        assert_eq!(b[3].origin(), Point::new(100.0, 40.0));
+        assert_eq!(b[2].size().height, 40.0);
+        // Two 40px implicit rows → border box height 80.
+        assert_eq!(out.size(), Size::new(200.0, 80.0));
+    }
+
+    // (auto-columns) an item placed past the explicit columns (`grid-column: 4` in a
+    // 2-column grid) opens implicit column 3, sized by `grid-auto-columns: 50px`.
+    #[test]
+    fn grid_auto_columns_sizes_implicit_column() {
+        let style = LayoutStyle::default();
+        let placement = GridPlacement::column(GridLine::Line(4), GridLine::Auto);
+        let children = [placed(1, placement)];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 10.0)]);
+        let g = grid_auto(
+            vec![TrackSize::Fixed(100.0), TrackSize::Fixed(100.0)],
+            vec![],
+            vec![TrackSize::Fixed(50.0)],
+            vec![],
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(1000.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // Columns: 100,100 explicit then implicit 50 (col 2) + 50 (col 3). The item
+        // sits in col 3 → x = 100+100+50 = 250, width 50.
+        assert_eq!(b[0].origin().x, 250.0);
+        assert_eq!(b[0].size().width, 50.0);
+    }
+
+    // (auto-rows cycling) `grid-auto-rows: 30px 50px` cycles across implicit rows:
+    // row0=30, row1=50, row2=30 → single-column items stack at y 0/30/80.
+    #[test]
+    fn grid_auto_rows_cycles_two_sizes() {
+        let style = LayoutStyle::default();
+        let children = [child(1), child(2), child(3)];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 10.0); 3]);
+        let g = grid_auto(
+            vec![TrackSize::Fr(1.0)],
+            vec![],
+            vec![],
+            vec![TrackSize::Fixed(30.0), TrackSize::Fixed(50.0)],
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(100.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].origin().y, 0.0);
+        assert_eq!(b[1].origin().y, 30.0); // after the 30px row 0
+        assert_eq!(b[2].origin().y, 80.0); // after 30 + 50
+        // Border box height = 30 + 50 + 30 = 110.
+        assert_eq!(out.size().height, 110.0);
     }
 
     // (f) an `Auto` column sizes to its items' content width.
