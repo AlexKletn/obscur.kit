@@ -177,6 +177,24 @@ pub struct UiRuntime {
     /// whose reported count exceeds its bound records a violation into
     /// `telemetry` — a diagnostic, never a crash.
     budget: FrameBudget,
+    /// The number of pending background task-work units (spec §3.6 band 5:
+    /// background shaping / decode / cache work).
+    ///
+    /// Background work is a **signal, not a frame**: it is separate subsystem
+    /// task work driven by budgeting and starvation prevention rather than by a
+    /// [`FrameReason`]. A host enqueues a unit via
+    /// [`request_background`](Self::request_background); the scheduler is told
+    /// work is waiting ([`FrameScheduler::note_background_pending`]), and every
+    /// higher-priority frame drained afterwards counts as a preemption. When the
+    /// scheduler reports the work starved
+    /// ([`FrameScheduler::background_starved`]) the drain loop services one unit
+    /// on the live path, honouring §3.6 "starvation prevention for background
+    /// work".
+    background_work: usize,
+    /// How many background task-work units have been serviced through the drain
+    /// path, so a host (and the wiring tests) can observe that background work
+    /// made progress even under a stream of higher-priority frames.
+    serviced_background: u64,
 }
 
 impl UiRuntime {
@@ -217,6 +235,8 @@ impl UiRuntime {
             css_animations_started: HashSet::new(),
             telemetry: Box::new(NullTelemetrySink),
             budget: FrameBudget::unbounded(),
+            background_work: 0,
+            serviced_background: 0,
         }
     }
 
@@ -279,6 +299,76 @@ impl UiRuntime {
         self.scheduler.request_reason(reason)
     }
 
+    /// Enqueues one unit of **background task work** (spec §3.6 band 5:
+    /// background shaping, decoding and cache work) for the runtime to service.
+    ///
+    /// Background work is not a frame — it is separate, lower-priority subsystem
+    /// work — so it is signalled to the [`FrameScheduler`] rather than pushed as
+    /// a [`FrameRequest`]. This records the pending unit and, on the first
+    /// outstanding unit, tells the scheduler background work is now waiting
+    /// ([`FrameScheduler::note_background_pending`]). From then on every
+    /// higher-priority frame drained by [`run_due_frame`](Self::run_due_frame)
+    /// counts as a preemption of this work; once the scheduler's fairness
+    /// threshold is crossed the drain loop promotes and services a unit so the
+    /// background band cannot be starved (§3.6 "starvation prevention for
+    /// background work").
+    pub fn request_background(&mut self) {
+        self.background_work = self.background_work.saturating_add(1);
+        if self.background_work == 1 {
+            self.scheduler.note_background_pending();
+        }
+    }
+
+    /// Returns the number of background task-work units still waiting to be
+    /// serviced.
+    #[must_use]
+    pub const fn pending_background(&self) -> usize {
+        self.background_work
+    }
+
+    /// Returns how many background task-work units have been serviced through
+    /// the drain path so far.
+    ///
+    /// This advances only when [`run_due_frame`](Self::run_due_frame) promotes
+    /// and runs a starved background unit, so it is the observable proof that
+    /// background work made progress despite higher-priority frames (§3.6).
+    #[must_use]
+    pub const fn serviced_background(&self) -> u64 {
+        self.serviced_background
+    }
+
+    /// Returns whether pending background work has been preempted past the
+    /// scheduler's fairness threshold and must be serviced next (§3.6).
+    #[must_use]
+    pub const fn is_background_starved(&self) -> bool {
+        self.scheduler.background_starved()
+    }
+
+    /// Services exactly one pending background task-work unit, resetting the
+    /// scheduler's fairness count and clearing the pending signal when the last
+    /// unit drains (spec §3.6 band 5).
+    ///
+    /// The background unit's effect is deliberately minimal here — it advances
+    /// the serviced counter — but it flows through the same scheduler
+    /// bookkeeping a real shaping/decode/cache task would: it calls
+    /// [`FrameScheduler::service_background`] (resetting fairness so the next
+    /// wait starts over) and, when no further units remain,
+    /// [`FrameScheduler::note_background_idle`] so subsequent frames stop
+    /// counting as preemptions.
+    fn service_background_unit(&mut self) {
+        if self.background_work == 0 {
+            return;
+        }
+        self.background_work -= 1;
+        self.serviced_background = self.serviced_background.saturating_add(1);
+        // Reset the starvation fairness count: the waiting work just ran.
+        self.scheduler.service_background();
+        // With no work left, stop treating later frames as preemptions.
+        if self.background_work == 0 {
+            self.scheduler.note_background_idle();
+        }
+    }
+
     /// Returns whether any frame request is pending in the scheduler.
     #[must_use]
     pub fn has_pending_frame(&self) -> bool {
@@ -303,6 +393,16 @@ impl UiRuntime {
     /// exactly one frame. When idle it returns [`None`] without side effects — the
     /// runtime never busy-loops (§3.5).
     pub fn run_due_frame(&mut self, desired: &View, sheets: &[Stylesheet]) -> Option<FrameResult> {
+        // Starvation prevention (§3.6): if a stream of higher-priority frames has
+        // preempted pending background work past the scheduler's fairness
+        // threshold, promote and service one background unit *before* pulling the
+        // next frame. This drives the scheduler's background band on the live
+        // path — `background_starved`/`service_background` — so background work
+        // cannot be indefinitely starved by higher-priority frames. The frame
+        // priority order itself is untouched: a due frame still runs this call.
+        if self.scheduler.background_starved() {
+            self.service_background_unit();
+        }
         let request = self.scheduler.next_frame()?;
         let ctx = FrameContext::new(self.next_frame, request.reason(), self.viewport);
         Some(self.run_frame(ctx, desired, sheets))
@@ -1469,6 +1569,112 @@ mod tests {
         assert_eq!(runtime.pending_frames(), 1, "same reason coalesces");
         assert!(runtime.run_due_frame(&view, &[]).is_some());
         assert!(runtime.run_due_frame(&view, &[]).is_none());
+    }
+
+    #[test]
+    fn requesting_background_marks_it_pending_without_a_frame() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        // Background work is a signal, not a frame: it must not enqueue a frame.
+        assert_eq!(runtime.pending_background(), 0);
+        assert!(!runtime.has_pending_frame());
+        runtime.request_background();
+        assert_eq!(runtime.pending_background(), 1);
+        assert!(
+            !runtime.has_pending_frame(),
+            "background work is not a frame request"
+        );
+        assert!(!runtime.is_background_starved());
+        // A second unit accumulates but does not re-signal a frame either.
+        runtime.request_background();
+        assert_eq!(runtime.pending_background(), 2);
+        assert!(!runtime.has_pending_frame());
+    }
+
+    #[test]
+    fn background_work_is_serviced_through_the_drain_path_despite_higher_priority_frames() {
+        // Drive the *runtime* (not the bare scheduler): note background work, then
+        // pound it with a stream of higher-priority Input frames. §3.6 starvation
+        // prevention must eventually promote and service the background unit
+        // through `run_due_frame` — proving `background_starved`/`service_background`
+        // are live on the real path.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let view = counter_view();
+        let sheet = counter_stylesheet();
+        let sheets = std::slice::from_ref(&sheet);
+
+        runtime.request_background();
+        assert_eq!(runtime.serviced_background(), 0);
+
+        // The default fairness threshold before background work is starved.
+        let threshold = crate::scheduler::StarvationGuard::DEFAULT_THRESHOLD;
+
+        // Serve `threshold` higher-priority (Input) frames while the background
+        // unit waits. None of these service the background work yet.
+        for _ in 0..threshold {
+            runtime.request_frame(FrameReason::Input);
+            assert!(runtime.run_due_frame(&view, sheets).is_some());
+        }
+        assert_eq!(
+            runtime.serviced_background(),
+            0,
+            "background work is not serviced before the fairness threshold"
+        );
+        assert!(
+            runtime.is_background_starved(),
+            "after `threshold` preempting frames the background band is starved"
+        );
+
+        // The next drain call promotes and services the starved background unit.
+        runtime.request_frame(FrameReason::Input);
+        assert!(runtime.run_due_frame(&view, sheets).is_some());
+        assert_eq!(
+            runtime.serviced_background(),
+            1,
+            "the starved background unit is serviced through the drain path"
+        );
+        assert_eq!(runtime.pending_background(), 0);
+        // Servicing reset fairness and cleared the pending signal.
+        assert!(!runtime.is_background_starved());
+    }
+
+    #[test]
+    fn serviced_background_stays_pending_until_every_unit_drains() {
+        // Two units: the first promotion services one; the band stays pending and
+        // is starved again by another burst, servicing the second.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let view = counter_view();
+        let sheet = counter_stylesheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let threshold = crate::scheduler::StarvationGuard::DEFAULT_THRESHOLD;
+
+        runtime.request_background();
+        runtime.request_background();
+        assert_eq!(runtime.pending_background(), 2);
+
+        // First starvation cycle services one unit.
+        for _ in 0..threshold {
+            runtime.request_frame(FrameReason::Input);
+            let _ = runtime.run_due_frame(&view, sheets);
+        }
+        runtime.request_frame(FrameReason::Input);
+        let _ = runtime.run_due_frame(&view, sheets);
+        assert_eq!(runtime.serviced_background(), 1);
+        assert_eq!(runtime.pending_background(), 1);
+        assert!(
+            !runtime.is_background_starved(),
+            "fairness reset, so the remaining unit is not immediately starved"
+        );
+
+        // Second starvation cycle services the last unit and clears the band.
+        for _ in 0..threshold {
+            runtime.request_frame(FrameReason::Input);
+            let _ = runtime.run_due_frame(&view, sheets);
+        }
+        runtime.request_frame(FrameReason::Input);
+        let _ = runtime.run_due_frame(&view, sheets);
+        assert_eq!(runtime.serviced_background(), 2);
+        assert_eq!(runtime.pending_background(), 0);
+        assert!(!runtime.is_background_starved());
     }
 
     #[test]
