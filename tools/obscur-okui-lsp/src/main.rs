@@ -1,37 +1,51 @@
-//! `.okui` language-server CLI.
+//! `.okui` language-server binary.
 //!
-//! This binary is a thin, honest wrapper over the language-server core in the
-//! [`obscur_okui_lsp`] library. Pulling a full JSON-RPC framework is out of
-//! scope, so instead of speaking the LSP wire protocol this binary runs a
-//! single-shot **`.okui` checker**: it reads source from standard input, runs
-//! the [`Analyzer`](obscur_okui_lsp::Analyzer), and prints the diagnostics
-//! (`line:col severity [source] message`) and the document-symbol outline to
-//! standard output. It exits non-zero when any error-severity diagnostic is
-//! found, so it is usable in a CI check.
+//! By default this speaks the real Language Server Protocol over stdio: a
+//! JSON-RPC 2.0 loop (LSP base protocol, `Content-Length`-framed messages) built
+//! on the transport-agnostic core in the [`obscur_okui_lsp`] library. It handles
+//! `initialize`/`shutdown`/`exit`, the `textDocument/didOpen`/`didChange`/
+//! `didClose` lifecycle (pushing `textDocument/publishDiagnostics`),
+//! `textDocument/documentSymbol` and `textDocument/hover`, delegating all
+//! analysis to the [`Analyzer`](obscur_okui_lsp::Analyzer)/[`Server`].
 //!
-//! A real JSON-RPC/stdio LSP transport is a thin adapter over the same core:
-//! `initialize` advertises the capabilities, `textDocument/didOpen` calls
-//! [`DocumentStore::open`](obscur_okui_lsp::DocumentStore::open),
-//! `textDocument/didChange` calls
-//! [`DocumentStore::change`](obscur_okui_lsp::DocumentStore::change),
-//! `textDocument/didClose` calls
-//! [`DocumentStore::close`](obscur_okui_lsp::DocumentStore::close), and after
-//! each edit the server calls [`Analyzer::analyze`](obscur_okui_lsp::Analyzer::analyze)
-//! and emits `textDocument/publishDiagnostics`. `textDocument/documentSymbol`
-//! and `textDocument/hover` map to
-//! [`Analyzer::document_symbols`](obscur_okui_lsp::Analyzer::document_symbols)
-//! and [`Analyzer::hover`](obscur_okui_lsp::Analyzer::hover).
+//! With `--check` it instead runs a single-shot `.okui` checker: it reads source
+//! from standard input, prints the diagnostics (`line:col severity [source]
+//! message`) and the document-symbol outline, and exits non-zero when any
+//! error-severity diagnostic is found, so it is usable in a CI check.
 #![forbid(unsafe_code)]
 
 use std::io::{self, Read, Write};
 use std::process::ExitCode;
 
-use obscur_okui_lsp::{Analyzer, DocumentSymbol, LspDiagnostic, LspSeverity};
+use obscur_okui_lsp::{Analyzer, DocumentSymbol, LspDiagnostic, LspSeverity, Server};
 
-/// The synthetic URI used for the document read from standard input.
+/// The synthetic URI used for the document read from standard input in `--check`.
 const STDIN_URI: &str = "stdin://input.okui";
 
 fn main() -> ExitCode {
+    if std::env::args().any(|arg| arg == "--check") {
+        return run_check();
+    }
+    run_server()
+}
+
+/// Runs the JSON-RPC/stdio language server over real standard input/output.
+fn run_server() -> ExitCode {
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut reader = stdin.lock();
+    let mut writer = stdout.lock();
+    match Server::new().run(&mut reader, &mut writer) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("obscur-okui-lsp: transport error: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Runs the single-shot `.okui` checker over standard input (the `--check` mode).
+fn run_check() -> ExitCode {
     let mut source = String::new();
     if let Err(error) = io::stdin().read_to_string(&mut source) {
         eprintln!("obscur-okui-lsp: failed to read stdin: {error}");

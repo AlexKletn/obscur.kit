@@ -11,21 +11,25 @@
 //! - [`Analyzer`] — parses and compiles a document and produces
 //!   [`LspDiagnostic`]s, [`DocumentSymbol`] outlines and [`Hover`] results.
 //!
-//! A JSON-RPC/stdio wrapper (see the crate's binary) is a thin adapter: it
-//! translates `textDocument/didOpen` → [`DocumentStore::open`],
-//! `textDocument/didChange` → [`DocumentStore::change`],
-//! `textDocument/didClose` → [`DocumentStore::close`], then runs
-//! [`Analyzer::analyze`] and publishes the result via
-//! `textDocument/publishDiagnostics`. `textDocument/documentSymbol` and
-//! `textDocument/hover` map to [`Analyzer::document_symbols`] and
-//! [`Analyzer::hover`].
+//! On top of that core the crate provides a real transport:
+//!
+//! - [`json`] — a hand-rolled (`serde`-free) JSON value, parser and serializer.
+//! - [`transport`] — `Content-Length`-framed LSP base-protocol message I/O.
+//! - [`Server`] — the JSON-RPC 2.0/stdio dispatch loop that wires the LSP
+//!   `initialize`/`shutdown`, `textDocument/didOpen`/`didChange`/`didClose`
+//!   (→ `publishDiagnostics`), `textDocument/documentSymbol` and
+//!   `textDocument/hover` messages onto the [`Analyzer`].
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 pub mod analysis;
 pub mod diagnostics;
 pub mod document;
+pub mod json;
+pub mod server;
+pub mod transport;
 
 pub use analysis::{Analyzer, DocumentSymbol, Hover, SymbolKind};
 pub use diagnostics::{LspDiagnostic, LspSeverity, Position, Range};
 pub use document::{DocumentStore, LineIndex, TextDocument};
+pub use server::Server;
