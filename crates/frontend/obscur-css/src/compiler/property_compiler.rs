@@ -254,7 +254,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 31] = [
+    const ALL: [PropertyId; 32] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::Opacity,
@@ -286,6 +286,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::Direction,
         PropertyId::FontWeight,
         PropertyId::FontStyle,
+        PropertyId::TextAlign,
     ];
     ALL.into_iter()
         .find(|id| name.eq_ignore_ascii_case(id.name()))
@@ -396,6 +397,7 @@ fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<Inte
         PropertyId::AlignItems => Some(layout_keyword::align_items_from_name),
         PropertyId::Direction => Some(layout_keyword::direction_from_name),
         PropertyId::FontStyle => Some(layout_keyword::font_style_from_name),
+        PropertyId::TextAlign => Some(layout_keyword::text_align_from_name),
         _ => None,
     }
 }
@@ -1232,6 +1234,47 @@ mod tests {
             value_of("font-style: oblique"),
             PropertyValue::Keyword(layout_keyword::FONT_STYLE_OBLIQUE)
         );
+    }
+
+    #[test]
+    fn resolves_text_align_name() {
+        assert_eq!(
+            property_id_from_name("text-align"),
+            Some(PropertyId::TextAlign)
+        );
+        assert_eq!(
+            property_id_from_name("TEXT-ALIGN"),
+            Some(PropertyId::TextAlign)
+        );
+    }
+
+    #[test]
+    fn text_align_maps_to_reserved_symbols() {
+        assert_eq!(
+            value_of("text-align: justify"),
+            PropertyValue::Keyword(layout_keyword::TEXT_ALIGN_JUSTIFY)
+        );
+        assert_eq!(
+            value_of("text-align: center"),
+            PropertyValue::Keyword(layout_keyword::TEXT_ALIGN_CENTER)
+        );
+        assert_eq!(
+            value_of("text-align: right"),
+            PropertyValue::Keyword(layout_keyword::TEXT_ALIGN_RIGHT)
+        );
+        assert_eq!(
+            value_of("text-align: left"),
+            PropertyValue::Keyword(layout_keyword::TEXT_ALIGN_LEFT)
+        );
+        assert_eq!(
+            value_of("text-align: start"),
+            PropertyValue::Keyword(layout_keyword::TEXT_ALIGN_START)
+        );
+        assert_eq!(
+            value_of("text-align: end"),
+            PropertyValue::Keyword(layout_keyword::TEXT_ALIGN_END)
+        );
+        assert_eq!(standard("text-align: justify").0.property(), PropertyId::TextAlign);
     }
 
     #[test]

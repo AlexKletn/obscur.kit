@@ -23,7 +23,7 @@ use obscur_text::shaping::{
 };
 use obscur_tree::tree::RetainedTree;
 
-use super::{attributes_for, direction_for, families_for, ComputedStyles, LayoutBoxes};
+use super::{alignment_for, attributes_for, direction_for, families_for, ComputedStyles, LayoutBoxes};
 
 /// Default font size (in pixels) used to emit text runs.
 ///
@@ -180,17 +180,24 @@ impl SceneCoordinator {
     ///
     /// `fallback` is the node's resolved font chain (from its computed
     /// `font-family` via [`families_for`], or the default chain when unauthored);
-    /// `attributes` (weight + slant, via [`attributes_for`]) and `direction` (the
-    /// base bidi direction, via [`direction_for`]) come from the node's computed
-    /// `font-weight` / `font-style` / `direction`. The layout phase measures the
-    /// box with the identical chain, attributes, and direction, so the shaped runs
-    /// — and therefore the wrapped lines — agree.
+    /// `attributes` (weight + slant, via [`attributes_for`]), `direction` (the
+    /// base bidi direction, via [`direction_for`]), and `alignment` (the line
+    /// alignment, via [`alignment_for`]) come from the node's computed
+    /// `font-weight` / `font-style` / `direction` / `text-align`. The layout phase
+    /// measures the box with the identical chain, attributes, direction, and
+    /// alignment, so the shaped runs — and therefore the wrapped and justified
+    /// lines — agree.
+    // The shaping inputs (fallback chain, attributes, direction, alignment) plus
+    // the font size and wrap width are cohesive positional arguments of one leaf
+    // shaping helper, not a public API surface.
+    #[allow(clippy::too_many_arguments)]
     fn shape_lines(
         &self,
         content: &str,
         fallback: &FontFallback,
         attributes: &FontAttributes,
         direction: TextDirection,
+        alignment: TextAlignment,
         font_size: f32,
         max_width: f32,
     ) -> ParagraphLayout {
@@ -209,7 +216,7 @@ impl SceneCoordinator {
             max_width,
             metrics.line_height(),
             metrics.baseline(),
-            TextAlignment::Start,
+            alignment,
             TextOverflow::Clip,
         )
     }
@@ -282,12 +289,14 @@ impl SceneCoordinator {
                     let fallback = families_for(computed.get(&node));
                     let attributes = attributes_for(computed.get(&node));
                     let direction = direction_for(computed.get(&node));
+                    let alignment = alignment_for(computed.get(&node));
                     let origin = layout_box.origin();
                     let layout = self.shape_lines(
                         content,
                         &fallback,
                         &attributes,
                         direction,
+                        alignment,
                         font_size,
                         layout_box.size().width,
                     );

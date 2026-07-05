@@ -54,6 +54,16 @@ struct Word {
     mandatory_break_after: bool,
 }
 
+/// One packed line: its logical-order tagged glyphs, the number of words it holds
+/// (so its inter-word gap count is `word_count - 1`), and whether the line was
+/// closed by a *mandatory* (hard) break. Justification uses `word_count` and
+/// `mandatory_break_after` to decide whether the line stretches to fill the width.
+struct PackedLine {
+    glyphs: Vec<Tagged>,
+    word_count: usize,
+    mandatory_break_after: bool,
+}
+
 impl ParagraphLayout {
     /// Creates a layout from its `lines`, `alignment`, and `overflow` policy,
     /// computing the total [`size`](Self::size) from the lines (spec §5.10).
@@ -117,16 +127,33 @@ impl ParagraphLayout {
     ) -> Self {
         let stream = Self::flatten(runs);
 
-        // Split the flattened stream into per-line glyph groups.
-        let lines_glyphs = if stream.is_empty() {
+        // Split the flattened stream into per-line packed groups.
+        let mut lines_glyphs = if stream.is_empty() {
             // Empty input still yields a single (empty) line.
-            vec![Vec::new()]
+            vec![PackedLine {
+                glyphs: Vec::new(),
+                word_count: 0,
+                mandatory_break_after: false,
+            }]
         } else if max_width <= 0.0 {
-            // Unconstrained width: the whole paragraph is one line.
-            vec![stream]
+            // Unconstrained width: the whole paragraph is one line. A single
+            // unconstrained line is never justified (it is the last line), so its
+            // word count is immaterial.
+            vec![PackedLine {
+                glyphs: stream,
+                word_count: 0,
+                mandatory_break_after: false,
+            }]
         } else {
             Self::pack_lines(&stream, text, max_width)
         };
+
+        // Justify: stretch every eligible line's inter-word gaps so it fills
+        // `max_width`. Only meaningful under a positive constraint (the unbounded
+        // and empty branches produce a single, non-justified last line).
+        if alignment == TextAlignment::Justify && max_width > 0.0 {
+            Self::justify(&mut lines_glyphs, text, max_width);
+        }
 
         // The end byte of the last line falls back to the text length.
         let text_end = text.len();
@@ -135,13 +162,14 @@ impl ParagraphLayout {
         // ranges, same-font segments, and alignment offsets.
         let mut top = 0.0_f32;
         let mut lines = Vec::with_capacity(lines_glyphs.len());
-        for (index, glyphs) in lines_glyphs.iter().enumerate() {
+        for (index, packed) in lines_glyphs.iter().enumerate() {
+            let glyphs = &packed.glyphs;
             // The line's byte range runs from its first glyph's cluster to the
             // next line's first glyph cluster (or the text end).
             let start = glyphs.first().map_or(0, |t| t.glyph.cluster());
             let end = lines_glyphs
                 .get(index + 1)
-                .and_then(|next| next.first())
+                .and_then(|next| next.glyphs.first())
                 .map_or(text_end, |t| t.glyph.cluster());
             let range = TextRange::new(start.min(end), start.max(end));
 
@@ -183,34 +211,115 @@ impl ParagraphLayout {
         stream
     }
 
-    /// Groups a non-empty glyph `stream` into per-line glyph vectors under a
-    /// greedy `max_width` fit. `max_width` is assumed positive.
-    fn pack_lines(stream: &[Tagged], text: &str, max_width: f32) -> Vec<Vec<Tagged>> {
+    /// Groups a non-empty glyph `stream` into per-line [`PackedLine`]s under a
+    /// greedy `max_width` fit, recording each line's word count and whether a
+    /// mandatory break closed it. `max_width` is assumed positive.
+    fn pack_lines(stream: &[Tagged], text: &str, max_width: f32) -> Vec<PackedLine> {
         let words = Self::split_words(stream, text);
 
-        let mut lines: Vec<Vec<Tagged>> = Vec::new();
+        let mut lines: Vec<PackedLine> = Vec::new();
         let mut current: Vec<Tagged> = Vec::new();
         let mut current_width = 0.0_f32;
+        let mut word_count = 0_usize;
         for word in words {
             if !current.is_empty() && current_width + word.width > max_width {
-                lines.push(std::mem::take(&mut current));
+                lines.push(PackedLine {
+                    glyphs: std::mem::take(&mut current),
+                    word_count,
+                    mandatory_break_after: false,
+                });
                 current_width = 0.0;
+                word_count = 0;
             }
             current.extend_from_slice(&word.glyphs);
             current_width += word.width;
+            word_count += 1;
             if word.mandatory_break_after {
-                lines.push(std::mem::take(&mut current));
+                lines.push(PackedLine {
+                    glyphs: std::mem::take(&mut current),
+                    word_count,
+                    mandatory_break_after: true,
+                });
                 current_width = 0.0;
+                word_count = 0;
             }
         }
         if !current.is_empty() {
-            lines.push(current);
+            lines.push(PackedLine {
+                glyphs: current,
+                word_count,
+                mandatory_break_after: false,
+            });
         }
         if lines.is_empty() {
             // All content ended on a mandatory break; keep a single empty line.
-            lines.push(Vec::new());
+            lines.push(PackedLine {
+                glyphs: Vec::new(),
+                word_count: 0,
+                mandatory_break_after: false,
+            });
         }
         lines
+    }
+
+    /// Stretches every justification-eligible line so it fills `max_width`,
+    /// distributing the extra space equally across the line's inter-word gaps
+    /// (spec §5.10).
+    ///
+    /// A line is **not** justified — it keeps its natural width — when it is the
+    /// paragraph's last line, when it was closed by a mandatory (hard) break, or
+    /// when it holds fewer than two words (no inter-word gap to stretch). For an
+    /// eligible line the extra space `max_width - line_width` is split evenly
+    /// across its `g` gaps and added to the trailing glyph of each gap (typically
+    /// the word-final space); glyph ids and clusters are left intact, so the line's
+    /// rendered width becomes exactly `max_width`. A line already at or past
+    /// `max_width` gains nothing.
+    fn justify(lines: &mut [PackedLine], text: &str, max_width: f32) {
+        let Some(last) = lines.len().checked_sub(1) else {
+            return;
+        };
+        // Byte offsets that begin a word (every break opportunity); a glyph whose
+        // cluster equals one starts a new word, so the glyph before it ends a gap.
+        let word_starts: std::collections::HashSet<usize> = LineBreak::opportunities(text)
+            .iter()
+            .map(LineBreak::offset)
+            .collect();
+        for (index, line) in lines.iter_mut().enumerate() {
+            if index == last || line.mandatory_break_after || line.word_count < 2 {
+                continue;
+            }
+            Self::justify_line(&mut line.glyphs, &word_starts, max_width);
+        }
+    }
+
+    /// Distributes the extra space that fills `max_width` across one line's
+    /// inter-word gaps by widening the trailing glyph of each gap.
+    ///
+    /// A gap sits before every glyph (after the first) whose cluster is in
+    /// `word_starts`; the glyph immediately before it is the gap's trailing glyph.
+    /// The `max_width - line_width` surplus is split equally across the gaps, so a
+    /// line with `g` gaps grows to exactly `max_width`. Nothing happens when the
+    /// line has no interior gap or is already at/over `max_width`.
+    fn justify_line(glyphs: &mut [Tagged], word_starts: &std::collections::HashSet<usize>, max_width: f32) {
+        let line_width: f32 = glyphs.iter().map(|t| t.glyph.x_advance()).sum();
+        let extra = max_width - line_width;
+        if extra <= 0.0 {
+            return;
+        }
+        // Trailing-glyph index of every interior gap (before a word-start glyph).
+        let gap_ends: Vec<usize> = (1..glyphs.len())
+            .filter(|&j| word_starts.contains(&glyphs[j].glyph.cluster()))
+            .map(|j| j - 1)
+            .collect();
+        if gap_ends.is_empty() {
+            return;
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let add = extra / gap_ends.len() as f32;
+        for index in gap_ends {
+            let glyph = glyphs[index].glyph;
+            glyphs[index].glyph = glyph.with_x_advance(glyph.x_advance() + add);
+        }
     }
 
     /// Segments a glyph `stream` into [`Word`]s at the line-break opportunities of
@@ -635,6 +744,170 @@ mod tests {
             TextOverflow::Ellipsis,
         );
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn justify_stretches_non_last_lines_to_max_width() {
+        // "ab cd ef" all on one font. Each glyph advance 6; spaces at clusters
+        // 2 and 5. Breaks sit before "cd" (byte 3) and "ef" (byte 6). Natural
+        // width 8*6 = 48; on a two-line wrap the first line "ab cd " justifies.
+        let text = "ab cd ef";
+        let runs = vec![run(
+            0,
+            &[
+                (0, 6.0),
+                (1, 6.0),
+                (2, 6.0),
+                (3, 6.0),
+                (4, 6.0),
+                (5, 6.0),
+                (6, 6.0),
+                (7, 6.0),
+            ],
+            TextRange::new(0, 8),
+        )];
+        // max_width 40 fits "ab cd " (36) but not "+ef" (48), so "ef" wraps.
+        let layout = ParagraphLayout::wrap(
+            &runs, text, 40.0, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
+        );
+        assert_eq!(layout.line_count(), 2);
+        // The first line has a single interior gap (between "ab" and "cd") and is
+        // stretched to exactly max_width.
+        assert_eq!(layout.lines()[0].width(), 40.0);
+        assert_eq!(layout.lines()[0].x_offset(), 0.0);
+        // The paragraph's widest line is the justified one.
+        assert_eq!(layout.size().width, 40.0);
+        // The last line "ef" is NOT justified: it keeps its natural width (12).
+        assert_eq!(layout.lines()[1].width(), 12.0);
+    }
+
+    #[test]
+    fn justify_distributes_equally_across_two_gaps() {
+        // "aa bb cc dd": three words fit on the first line, so it has two interior
+        // gaps (the spaces at clusters 2 and 5). Every glyph advance is 5.
+        let text = "aa bb cc dd";
+        let runs = vec![run(
+            0,
+            &[
+                (0, 5.0),
+                (1, 5.0),
+                (2, 5.0),
+                (3, 5.0),
+                (4, 5.0),
+                (5, 5.0),
+                (6, 5.0),
+                (7, 5.0),
+                (8, 5.0),
+                (9, 5.0),
+                (10, 5.0),
+            ],
+            TextRange::new(0, 11),
+        )];
+        // max_width 50 fits "aa bb cc " (45) but not "+dd" (55): "dd" wraps.
+        let layout = ParagraphLayout::wrap(
+            &runs, text, 50.0, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
+        );
+        assert_eq!(layout.line_count(), 2);
+        // The first line has two gaps; the 5px surplus is split as 2.5 per gap,
+        // widening the two space glyphs (clusters 2 and 5) from 5 to 7.5 each.
+        assert_eq!(layout.lines()[0].width(), 50.0);
+        let glyphs = layout.lines()[0].segments()[0].run().glyphs();
+        assert_eq!(glyphs[2].x_advance(), 7.5);
+        assert_eq!(glyphs[5].x_advance(), 7.5);
+        // Non-gap glyphs keep their natural advance.
+        assert_eq!(glyphs[0].x_advance(), 5.0);
+        assert_eq!(glyphs[3].x_advance(), 5.0);
+        // The last line "dd" keeps its natural width (10).
+        assert_eq!(layout.lines()[1].width(), 10.0);
+    }
+
+    #[test]
+    fn justify_exempts_single_word_line() {
+        // One word, no interior gap: never justified even when not the last line.
+        // "abcd efgh": first line "abcd " wraps alone under a tight width.
+        let text = "abcd efgh";
+        let runs = vec![run(
+            0,
+            &[
+                (0, 8.0),
+                (1, 8.0),
+                (2, 8.0),
+                (3, 8.0),
+                (4, 8.0),
+                (5, 8.0),
+                (6, 8.0),
+                (7, 8.0),
+                (8, 8.0),
+            ],
+            TextRange::new(0, 9),
+        )];
+        // max_width 44 fits "abcd " (40) but not "+efgh" (72). First line is one
+        // word — not justified — so it keeps its natural width 40, not 44.
+        let layout = ParagraphLayout::wrap(
+            &runs, text, 44.0, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
+        );
+        assert_eq!(layout.line_count(), 2);
+        assert_eq!(layout.lines()[0].width(), 40.0);
+    }
+
+    #[test]
+    fn justify_exempts_hard_broken_line() {
+        // "ab cd\nef": the first line ends on a mandatory `\n` break, so it is not
+        // justified even though it is not the paragraph's last line.
+        let text = "ab cd\nef";
+        let runs = vec![run(
+            0,
+            &[
+                (0, 6.0),
+                (1, 6.0),
+                (2, 6.0),
+                (3, 6.0),
+                (4, 6.0),
+                (6, 6.0),
+                (7, 6.0),
+            ],
+            TextRange::new(0, 8),
+        )];
+        let layout = ParagraphLayout::wrap(
+            &runs, text, 100.0, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
+        );
+        assert_eq!(layout.line_count(), 2);
+        // First line "ab cd" ended by a hard break: natural width 5*6 = 30.
+        assert_eq!(layout.lines()[0].width(), 30.0);
+    }
+
+    #[test]
+    fn justify_noop_when_unconstrained() {
+        // max_width <= 0 disables justification entirely (one unconstrained line).
+        let text = "ab cd ef";
+        let runs = vec![run(
+            0,
+            &[(0, 6.0), (1, 6.0), (2, 6.0), (3, 6.0), (4, 6.0), (5, 6.0), (6, 6.0), (7, 6.0)],
+            TextRange::new(0, 8),
+        )];
+        let layout = ParagraphLayout::wrap(
+            &runs, text, 0.0, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
+        );
+        assert_eq!(layout.line_count(), 1);
+        assert_eq!(layout.lines()[0].width(), 48.0);
+    }
+
+    #[test]
+    fn center_and_right_still_use_x_offset() {
+        // Non-justify alignments keep offsetting via x_offset and never widen
+        // glyphs, so the line width stays natural.
+        let text = "ab cd";
+        let runs = vec![run(0, &[(0, 6.0), (1, 6.0), (2, 6.0), (3, 6.0), (4, 6.0)], TextRange::new(0, 5))];
+        let center = ParagraphLayout::wrap(
+            &runs, text, 100.0, 12.0, 9.0, TextAlignment::Center, TextOverflow::Clip,
+        );
+        assert_eq!(center.lines()[0].width(), 30.0);
+        assert_eq!(center.lines()[0].x_offset(), 35.0);
+        let right = ParagraphLayout::wrap(
+            &runs, text, 100.0, 12.0, 9.0, TextAlignment::Right, TextOverflow::Clip,
+        );
+        assert_eq!(right.lines()[0].width(), 30.0);
+        assert_eq!(right.lines()[0].x_offset(), 70.0);
     }
 
     #[test]

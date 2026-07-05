@@ -98,6 +98,10 @@ pub enum PropertyId {
     /// `oblique`; inherited). See the reserved `FONT_STYLE_*` handles in
     /// [`crate::property::layout_keyword`].
     FontStyle,
+    /// The `text-align` property (Keyword-valued: `left` / `right` / `center` /
+    /// `justify` / `start` / `end`; inherited). See the reserved `TEXT_ALIGN_*`
+    /// handles in [`crate::property::layout_keyword`].
+    TextAlign,
 }
 
 impl PropertyId {
@@ -139,6 +143,7 @@ impl PropertyId {
             Self::Direction => "direction",
             Self::FontWeight => "font-weight",
             Self::FontStyle => "font-style",
+            Self::TextAlign => "text-align",
         }
     }
 
@@ -156,7 +161,8 @@ impl PropertyId {
             | Self::FontFamily
             | Self::Direction
             | Self::FontWeight
-            | Self::FontStyle => Inheritance::Inherited,
+            | Self::FontStyle
+            | Self::TextAlign => Inheritance::Inherited,
             // Box / paint / layout properties reset on each element.
             Self::BackgroundColor
             | Self::Opacity
@@ -284,6 +290,13 @@ mod tests {
         assert!(PropertyId::Direction.default_inheritance().is_inherited());
         assert!(PropertyId::FontWeight.default_inheritance().is_inherited());
         assert!(PropertyId::FontStyle.default_inheritance().is_inherited());
+    }
+
+    #[test]
+    fn text_align_name_and_inheritance() {
+        assert_eq!(PropertyId::TextAlign.name(), "text-align");
+        // Like the other typography properties, `text-align` inherits by default.
+        assert!(PropertyId::TextAlign.default_inheritance().is_inherited());
     }
 
     #[test]

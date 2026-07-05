@@ -86,6 +86,21 @@ pub const FONT_STYLE_ITALIC: InternedSymbol = InternedSymbol::from_raw(0x0000_15
 /// The `font-style: oblique` keyword.
 pub const FONT_STYLE_OBLIQUE: InternedSymbol = InternedSymbol::from_raw(0x0000_1503);
 
+// ---- `text-align` keyword values ----
+
+/// The `text-align: left` keyword.
+pub const TEXT_ALIGN_LEFT: InternedSymbol = InternedSymbol::from_raw(0x0000_1601);
+/// The `text-align: right` keyword.
+pub const TEXT_ALIGN_RIGHT: InternedSymbol = InternedSymbol::from_raw(0x0000_1602);
+/// The `text-align: center` keyword.
+pub const TEXT_ALIGN_CENTER: InternedSymbol = InternedSymbol::from_raw(0x0000_1603);
+/// The `text-align: justify` keyword.
+pub const TEXT_ALIGN_JUSTIFY: InternedSymbol = InternedSymbol::from_raw(0x0000_1604);
+/// The `text-align: start` keyword.
+pub const TEXT_ALIGN_START: InternedSymbol = InternedSymbol::from_raw(0x0000_1605);
+/// The `text-align: end` keyword.
+pub const TEXT_ALIGN_END: InternedSymbol = InternedSymbol::from_raw(0x0000_1606);
+
 /// Maps a `display` keyword string to its reserved [`InternedSymbol`].
 ///
 /// The input is ASCII-lowercased before matching, so callers may pass authored
@@ -179,6 +194,24 @@ pub fn font_style_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
+/// Maps a `text-align` keyword string to its reserved [`InternedSymbol`].
+///
+/// The input is ASCII-lowercased before matching. Returns [`None`] for any
+/// keyword outside the closed `left` / `right` / `center` / `justify` / `start` /
+/// `end` set.
+#[must_use]
+pub fn text_align_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "left" => Some(TEXT_ALIGN_LEFT),
+        "right" => Some(TEXT_ALIGN_RIGHT),
+        "center" => Some(TEXT_ALIGN_CENTER),
+        "justify" => Some(TEXT_ALIGN_JUSTIFY),
+        "start" => Some(TEXT_ALIGN_START),
+        "end" => Some(TEXT_ALIGN_END),
+        _ => None,
+    }
+}
+
 /// Returns the canonical CSS keyword string for a reserved layout symbol.
 ///
 /// This is the reverse of the `*_from_name` helpers, intended for diagnostics
@@ -214,6 +247,12 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         FONT_STYLE_NORMAL => Some("normal"),
         FONT_STYLE_ITALIC => Some("italic"),
         FONT_STYLE_OBLIQUE => Some("oblique"),
+        TEXT_ALIGN_LEFT => Some("left"),
+        TEXT_ALIGN_RIGHT => Some("right"),
+        TEXT_ALIGN_CENTER => Some("center"),
+        TEXT_ALIGN_JUSTIFY => Some("justify"),
+        TEXT_ALIGN_START => Some("start"),
+        TEXT_ALIGN_END => Some("end"),
         _ => None,
     }
 }
@@ -246,6 +285,12 @@ mod tests {
         FONT_STYLE_NORMAL,
         FONT_STYLE_ITALIC,
         FONT_STYLE_OBLIQUE,
+        TEXT_ALIGN_LEFT,
+        TEXT_ALIGN_RIGHT,
+        TEXT_ALIGN_CENTER,
+        TEXT_ALIGN_JUSTIFY,
+        TEXT_ALIGN_START,
+        TEXT_ALIGN_END,
     ];
 
     #[test]
@@ -325,6 +370,25 @@ mod tests {
         assert_eq!(name_of(DIRECTION_RTL), Some("rtl"));
         assert_eq!(name_of(FONT_STYLE_ITALIC), Some("italic"));
         assert_eq!(name_of(FONT_STYLE_OBLIQUE), Some("oblique"));
+    }
+
+    #[test]
+    fn text_align_maps_known_keywords() {
+        assert_eq!(text_align_from_name("left"), Some(TEXT_ALIGN_LEFT));
+        assert_eq!(text_align_from_name("right"), Some(TEXT_ALIGN_RIGHT));
+        assert_eq!(text_align_from_name("center"), Some(TEXT_ALIGN_CENTER));
+        assert_eq!(text_align_from_name("justify"), Some(TEXT_ALIGN_JUSTIFY));
+        assert_eq!(text_align_from_name("start"), Some(TEXT_ALIGN_START));
+        assert_eq!(text_align_from_name("END"), Some(TEXT_ALIGN_END));
+        assert_eq!(text_align_from_name("middle"), None);
+    }
+
+    #[test]
+    fn name_of_round_trips_text_align() {
+        assert_eq!(name_of(TEXT_ALIGN_LEFT), Some("left"));
+        assert_eq!(name_of(TEXT_ALIGN_JUSTIFY), Some("justify"));
+        assert_eq!(name_of(TEXT_ALIGN_START), Some("start"));
+        assert_eq!(name_of(TEXT_ALIGN_END), Some("end"));
     }
 
     #[test]

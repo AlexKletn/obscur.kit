@@ -4,6 +4,7 @@
 use obscur_style::computed::ComputedStyle;
 use obscur_style::property::{layout_keyword, PropertyId, PropertyValue};
 use obscur_text::font::FontAttributes;
+use obscur_text::layout::TextAlignment;
 use obscur_text::shaping::TextDirection;
 use obscur_text::span::{FontSlant, FontWeight};
 
@@ -91,6 +92,35 @@ pub(crate) fn direction_for(computed: Option<&ComputedStyle>) -> TextDirection {
     }
 }
 
+/// Resolves a text node's line [`TextAlignment`] from its computed `text-align`
+/// (§4.14, §5.10).
+///
+/// Reads [`PropertyId::TextAlign`] — a [`PropertyValue::Keyword`] backed by one of
+/// the reserved [`layout_keyword`] handles — mapping each `TEXT_ALIGN_*` handle to
+/// its [`TextAlignment`] variant. An absent property (or any unrecognised keyword)
+/// resolves to [`TextAlignment::Start`], byte-for-byte the hardcoded behaviour
+/// before per-node alignment resolution. The same value drives both the layout
+/// measure/arrange pass and the scene compose pass so the sized box and the
+/// painted lines agree.
+#[must_use]
+pub(crate) fn alignment_for(computed: Option<&ComputedStyle>) -> TextAlignment {
+    let symbol = computed
+        .and_then(|style| style.get(PropertyId::TextAlign))
+        .and_then(|value| match value.value() {
+            PropertyValue::Keyword(symbol) => Some(*symbol),
+            _ => None,
+        });
+    match symbol {
+        Some(s) if s == layout_keyword::TEXT_ALIGN_LEFT => TextAlignment::Left,
+        Some(s) if s == layout_keyword::TEXT_ALIGN_RIGHT => TextAlignment::Right,
+        Some(s) if s == layout_keyword::TEXT_ALIGN_CENTER => TextAlignment::Center,
+        Some(s) if s == layout_keyword::TEXT_ALIGN_JUSTIFY => TextAlignment::Justify,
+        Some(s) if s == layout_keyword::TEXT_ALIGN_END => TextAlignment::End,
+        // `start` and everything else (including an absent property) → Start.
+        _ => TextAlignment::Start,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,5 +180,28 @@ mod tests {
             PropertyValue::Keyword(layout_keyword::DIRECTION_RTL),
         );
         assert_eq!(direction_for(Some(&rtl)), TextDirection::RightToLeft);
+    }
+
+    #[test]
+    fn alignment_defaults_to_start_and_maps_keywords() {
+        // Absent property and an empty style both resolve to Start.
+        assert_eq!(alignment_for(None), TextAlignment::Start);
+        assert_eq!(
+            alignment_for(Some(&ComputedStyle::new())),
+            TextAlignment::Start
+        );
+        // Each reserved handle maps to its variant.
+        let cases = [
+            (layout_keyword::TEXT_ALIGN_LEFT, TextAlignment::Left),
+            (layout_keyword::TEXT_ALIGN_RIGHT, TextAlignment::Right),
+            (layout_keyword::TEXT_ALIGN_CENTER, TextAlignment::Center),
+            (layout_keyword::TEXT_ALIGN_JUSTIFY, TextAlignment::Justify),
+            (layout_keyword::TEXT_ALIGN_START, TextAlignment::Start),
+            (layout_keyword::TEXT_ALIGN_END, TextAlignment::End),
+        ];
+        for (symbol, expected) in cases {
+            let style = styled(PropertyId::TextAlign, PropertyValue::Keyword(symbol));
+            assert_eq!(alignment_for(Some(&style)), expected);
+        }
     }
 }

@@ -19,7 +19,7 @@ use obscur_text::layout::{ParagraphLayout, TextAlignment, TextOverflow};
 use obscur_text::shaping::{ParagraphShaper, TextDirection};
 use obscur_tree::tree::RetainedTree;
 
-use super::{attributes_for, direction_for, families_for, ComputedStyles};
+use super::{alignment_for, attributes_for, direction_for, families_for, ComputedStyles};
 
 /// The initial `font-size` (spec / CSS default), used as the `em`/`rem` base
 /// when a node (or the document root) has no computed `font-size`.
@@ -179,17 +179,24 @@ impl LayoutCoordinator {
 /// through the **same** orchestrator and so emits exactly the same lines.
 ///
 /// `fallback` is the node's font chain resolved from its computed `font-family`
-/// (via [`families_for`]); `attributes` (weight + slant, via [`attributes_for`])
-/// and `direction` (the base bidi direction, via [`direction_for`]) come from the
-/// node's computed `font-weight` / `font-style` / `direction`. The scene phase
-/// resolves the identical chain, attributes, and direction, so the measured box
-/// and the painted glyphs use the same fonts and reordering.
+/// (via [`families_for`]); `attributes` (weight + slant, via [`attributes_for`]),
+/// `direction` (the base bidi direction, via [`direction_for`]), and `alignment`
+/// (the line alignment, via [`alignment_for`]) come from the node's computed
+/// `font-weight` / `font-style` / `direction` / `text-align`. The scene phase
+/// resolves the identical chain, attributes, direction, and alignment, so the
+/// measured box and the painted glyphs use the same fonts, reordering, and
+/// justification.
+// The shaping inputs (fallback chain, attributes, direction, alignment) plus the
+// style/constraints/shaper are cohesive positional arguments of one leaf-measure
+// helper, not a public API surface.
+#[allow(clippy::too_many_arguments)]
 fn measure_text_node(
     content: &str,
     style: &LayoutStyle,
     fallback: &FontFallback,
     attributes: &FontAttributes,
     direction: TextDirection,
+    alignment: TextAlignment,
     constraints: BoxConstraints,
     paragraph: &ParagraphShaper,
 ) -> Size {
@@ -213,7 +220,7 @@ fn measure_text_node(
         max_width,
         metrics.line_height(),
         metrics.baseline(),
-        TextAlignment::Start,
+        alignment,
         TextOverflow::Clip,
     );
     constraints.constrain(layout.size())
@@ -585,12 +592,14 @@ fn measure(
         let fallback = families_for(computed.get(&node));
         let attributes = attributes_for(computed.get(&node));
         let direction = direction_for(computed.get(&node));
+        let alignment = alignment_for(computed.get(&node));
         return measure_text_node(
             content,
             &style,
             &fallback,
             &attributes,
             direction,
+            alignment,
             constraints,
             paragraph,
         );
@@ -654,12 +663,14 @@ fn arrange(
         let fallback = families_for(computed.get(&node));
         let attributes = attributes_for(computed.get(&node));
         let direction = direction_for(computed.get(&node));
+        let alignment = alignment_for(computed.get(&node));
         let size = measure_text_node(
             content,
             &style,
             &fallback,
             &attributes,
             direction,
+            alignment,
             constraints,
             paragraph,
         );

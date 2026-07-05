@@ -127,7 +127,11 @@ impl StyleResolver {
             // (also 400) — byte-for-byte identical to today's behaviour.
             | PropertyId::Direction
             | PropertyId::FontWeight
-            | PropertyId::FontStyle => None,
+            | PropertyId::FontStyle
+            // `text-align` initial is `start`; its keyword initial likewise needs
+            // the interner, so an absent value falls back to the runtime's default
+            // (`Start`) — byte-for-byte identical to today's behaviour.
+            | PropertyId::TextAlign => None,
         }
     }
 
