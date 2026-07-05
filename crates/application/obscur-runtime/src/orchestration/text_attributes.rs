@@ -4,7 +4,7 @@
 use obscur_style::computed::ComputedStyle;
 use obscur_style::property::{layout_keyword, PropertyId, PropertyValue};
 use obscur_text::font::FontAttributes;
-use obscur_text::layout::TextAlignment;
+use obscur_text::layout::{TextAlignment, TextOverflow};
 use obscur_text::shaping::TextDirection;
 use obscur_text::span::{FontSlant, FontWeight};
 
@@ -121,6 +121,30 @@ pub(crate) fn alignment_for(computed: Option<&ComputedStyle>) -> TextAlignment {
     }
 }
 
+/// Resolves a text node's [`TextOverflow`] policy from its computed
+/// `text-overflow` (§4.14, §5.10).
+///
+/// Reads [`PropertyId::TextOverflow`] — a [`PropertyValue::Keyword`] backed by one
+/// of the reserved [`layout_keyword`] handles — mapping `TEXT_OVERFLOW_ELLIPSIS`
+/// to [`TextOverflow::Ellipsis`] and everything else (including `TEXT_OVERFLOW_CLIP`
+/// and an absent property) to [`TextOverflow::Clip`], the CSS initial. The same
+/// value drives both the layout measure/arrange pass and the scene compose pass so
+/// the sized box and the painted (possibly truncated) lines agree.
+#[must_use]
+pub(crate) fn overflow_for(computed: Option<&ComputedStyle>) -> TextOverflow {
+    let symbol = computed
+        .and_then(|style| style.get(PropertyId::TextOverflow))
+        .and_then(|value| match value.value() {
+            PropertyValue::Keyword(symbol) => Some(*symbol),
+            _ => None,
+        });
+    if symbol == Some(layout_keyword::TEXT_OVERFLOW_ELLIPSIS) {
+        TextOverflow::Ellipsis
+    } else {
+        TextOverflow::Clip
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,5 +227,23 @@ mod tests {
             let style = styled(PropertyId::TextAlign, PropertyValue::Keyword(symbol));
             assert_eq!(alignment_for(Some(&style)), expected);
         }
+    }
+
+    #[test]
+    fn overflow_defaults_to_clip_and_maps_ellipsis() {
+        // Absent property and an empty style both resolve to Clip (the CSS initial).
+        assert_eq!(overflow_for(None), TextOverflow::Clip);
+        assert_eq!(overflow_for(Some(&ComputedStyle::new())), TextOverflow::Clip);
+        // Each reserved handle maps to its variant.
+        let clip = styled(
+            PropertyId::TextOverflow,
+            PropertyValue::Keyword(layout_keyword::TEXT_OVERFLOW_CLIP),
+        );
+        assert_eq!(overflow_for(Some(&clip)), TextOverflow::Clip);
+        let ellipsis = styled(
+            PropertyId::TextOverflow,
+            PropertyValue::Keyword(layout_keyword::TEXT_OVERFLOW_ELLIPSIS),
+        );
+        assert_eq!(overflow_for(Some(&ellipsis)), TextOverflow::Ellipsis);
     }
 }

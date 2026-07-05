@@ -131,7 +131,11 @@ impl StyleResolver {
             // `text-align` initial is `start`; its keyword initial likewise needs
             // the interner, so an absent value falls back to the runtime's default
             // (`Start`) — byte-for-byte identical to today's behaviour.
-            | PropertyId::TextAlign => None,
+            | PropertyId::TextAlign
+            // `text-overflow` initial is `clip`; its keyword initial likewise needs
+            // the interner, so an absent value falls back to the runtime's default
+            // (`Clip`) — byte-for-byte identical to today's behaviour.
+            | PropertyId::TextOverflow => None,
         }
     }
 

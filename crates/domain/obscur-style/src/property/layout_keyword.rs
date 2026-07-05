@@ -101,6 +101,13 @@ pub const TEXT_ALIGN_START: InternedSymbol = InternedSymbol::from_raw(0x0000_160
 /// The `text-align: end` keyword.
 pub const TEXT_ALIGN_END: InternedSymbol = InternedSymbol::from_raw(0x0000_1606);
 
+// ---- `text-overflow` keyword values ----
+
+/// The `text-overflow: clip` keyword.
+pub const TEXT_OVERFLOW_CLIP: InternedSymbol = InternedSymbol::from_raw(0x0000_1701);
+/// The `text-overflow: ellipsis` keyword.
+pub const TEXT_OVERFLOW_ELLIPSIS: InternedSymbol = InternedSymbol::from_raw(0x0000_1702);
+
 /// Maps a `display` keyword string to its reserved [`InternedSymbol`].
 ///
 /// The input is ASCII-lowercased before matching, so callers may pass authored
@@ -212,6 +219,19 @@ pub fn text_align_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
+/// Maps a `text-overflow` keyword string to its reserved [`InternedSymbol`].
+///
+/// The input is ASCII-lowercased before matching. Returns [`None`] for any
+/// keyword outside the closed `clip` / `ellipsis` set.
+#[must_use]
+pub fn text_overflow_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "clip" => Some(TEXT_OVERFLOW_CLIP),
+        "ellipsis" => Some(TEXT_OVERFLOW_ELLIPSIS),
+        _ => None,
+    }
+}
+
 /// Returns the canonical CSS keyword string for a reserved layout symbol.
 ///
 /// This is the reverse of the `*_from_name` helpers, intended for diagnostics
@@ -253,6 +273,8 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         TEXT_ALIGN_JUSTIFY => Some("justify"),
         TEXT_ALIGN_START => Some("start"),
         TEXT_ALIGN_END => Some("end"),
+        TEXT_OVERFLOW_CLIP => Some("clip"),
+        TEXT_OVERFLOW_ELLIPSIS => Some("ellipsis"),
         _ => None,
     }
 }
@@ -291,6 +313,8 @@ mod tests {
         TEXT_ALIGN_JUSTIFY,
         TEXT_ALIGN_START,
         TEXT_ALIGN_END,
+        TEXT_OVERFLOW_CLIP,
+        TEXT_OVERFLOW_ELLIPSIS,
     ];
 
     #[test]
@@ -381,6 +405,20 @@ mod tests {
         assert_eq!(text_align_from_name("start"), Some(TEXT_ALIGN_START));
         assert_eq!(text_align_from_name("END"), Some(TEXT_ALIGN_END));
         assert_eq!(text_align_from_name("middle"), None);
+    }
+
+    #[test]
+    fn text_overflow_maps_known_keywords() {
+        assert_eq!(text_overflow_from_name("clip"), Some(TEXT_OVERFLOW_CLIP));
+        assert_eq!(
+            text_overflow_from_name("ellipsis"),
+            Some(TEXT_OVERFLOW_ELLIPSIS)
+        );
+        assert_eq!(text_overflow_from_name("ELLIPSIS"), Some(TEXT_OVERFLOW_ELLIPSIS));
+        assert_eq!(text_overflow_from_name("fade"), None);
+        // Round-trips through `name_of`.
+        assert_eq!(name_of(TEXT_OVERFLOW_CLIP), Some("clip"));
+        assert_eq!(name_of(TEXT_OVERFLOW_ELLIPSIS), Some("ellipsis"));
     }
 
     #[test]

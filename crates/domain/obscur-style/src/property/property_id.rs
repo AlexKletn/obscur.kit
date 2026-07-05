@@ -102,6 +102,10 @@ pub enum PropertyId {
     /// `justify` / `start` / `end`; inherited). See the reserved `TEXT_ALIGN_*`
     /// handles in [`crate::property::layout_keyword`].
     TextAlign,
+    /// The `text-overflow` property (Keyword-valued: `clip` / `ellipsis`; NOT
+    /// inherited). See the reserved `TEXT_OVERFLOW_*` handles in
+    /// [`crate::property::layout_keyword`].
+    TextOverflow,
 }
 
 impl PropertyId {
@@ -144,6 +148,7 @@ impl PropertyId {
             Self::FontWeight => "font-weight",
             Self::FontStyle => "font-style",
             Self::TextAlign => "text-align",
+            Self::TextOverflow => "text-overflow",
         }
     }
 
@@ -187,7 +192,10 @@ impl PropertyId {
             | Self::FlexShrink
             | Self::FlexDirection
             | Self::JustifyContent
-            | Self::AlignItems => Inheritance::NotInherited,
+            | Self::AlignItems
+            // `text-overflow` does not inherit (unlike the other typography
+            // properties, which do).
+            | Self::TextOverflow => Inheritance::NotInherited,
         }
     }
 }
@@ -297,6 +305,17 @@ mod tests {
         assert_eq!(PropertyId::TextAlign.name(), "text-align");
         // Like the other typography properties, `text-align` inherits by default.
         assert!(PropertyId::TextAlign.default_inheritance().is_inherited());
+    }
+
+    #[test]
+    fn text_overflow_name_and_not_inherited() {
+        assert_eq!(PropertyId::TextOverflow.name(), "text-overflow");
+        // Unlike the other typography properties, `text-overflow` does not inherit.
+        assert!(
+            !PropertyId::TextOverflow
+                .default_inheritance()
+                .is_inherited()
+        );
     }
 
     #[test]

@@ -254,7 +254,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 32] = [
+    const ALL: [PropertyId; 33] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::Opacity,
@@ -287,6 +287,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::FontWeight,
         PropertyId::FontStyle,
         PropertyId::TextAlign,
+        PropertyId::TextOverflow,
     ];
     ALL.into_iter()
         .find(|id| name.eq_ignore_ascii_case(id.name()))
@@ -398,6 +399,7 @@ fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<Inte
         PropertyId::Direction => Some(layout_keyword::direction_from_name),
         PropertyId::FontStyle => Some(layout_keyword::font_style_from_name),
         PropertyId::TextAlign => Some(layout_keyword::text_align_from_name),
+        PropertyId::TextOverflow => Some(layout_keyword::text_overflow_from_name),
         _ => None,
     }
 }
@@ -1275,6 +1277,36 @@ mod tests {
             PropertyValue::Keyword(layout_keyword::TEXT_ALIGN_END)
         );
         assert_eq!(standard("text-align: justify").0.property(), PropertyId::TextAlign);
+    }
+
+    #[test]
+    fn resolves_text_overflow_name() {
+        assert_eq!(
+            property_id_from_name("text-overflow"),
+            Some(PropertyId::TextOverflow)
+        );
+        assert_eq!(
+            property_id_from_name("TEXT-OVERFLOW"),
+            Some(PropertyId::TextOverflow)
+        );
+    }
+
+    #[test]
+    fn text_overflow_maps_to_reserved_symbols() {
+        assert_eq!(
+            value_of("text-overflow: ellipsis"),
+            PropertyValue::Keyword(layout_keyword::TEXT_OVERFLOW_ELLIPSIS)
+        );
+        assert_eq!(
+            value_of("text-overflow: clip"),
+            PropertyValue::Keyword(layout_keyword::TEXT_OVERFLOW_CLIP)
+        );
+        assert_eq!(
+            standard("text-overflow: ellipsis").0.property(),
+            PropertyId::TextOverflow
+        );
+        // CSS-wide keywords still take priority.
+        assert_eq!(value_of("text-overflow: inherit"), PropertyValue::Inherit);
     }
 
     #[test]

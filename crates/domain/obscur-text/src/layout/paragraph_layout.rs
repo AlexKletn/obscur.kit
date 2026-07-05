@@ -173,6 +173,7 @@ impl ParagraphLayout {
             overflow,
             &NullHyphenator,
             None,
+            None,
         )
     }
 
@@ -196,10 +197,26 @@ impl ParagraphLayout {
     /// inherits the font, direction, and bidi level of the glyph it follows, so it
     /// segments and reorders with the head.
     ///
-    /// [`wrap`](Self::wrap) is the special case `hyphenator = NullHyphenator` and
-    /// `hyphen_glyph = None`.
-    // The wrap inputs plus the hyphenation port and hyphen glyph are cohesive
-    // positional arguments of one leaf entry point, not a public API surface.
+    /// [`wrap`](Self::wrap) is the special case `hyphenator = NullHyphenator`,
+    /// `hyphen_glyph = None`, and `ellipsis_glyph = None`.
+    ///
+    /// # `text-overflow` truncation
+    ///
+    /// After packing (and justification), any line whose content width *still*
+    /// exceeds `max_width` — a single unbreakable, un-hyphenatable word is the
+    /// usual cause — is truncated in place when `overflow.is_truncating()` and
+    /// `max_width > 0` (spec §5.10). [`TextOverflow::Clip`] keeps the largest
+    /// glyph-granular prefix that fits and drops the rest;
+    /// [`TextOverflow::Ellipsis`] reserves the `ellipsis_glyph`'s advance, keeps
+    /// the largest prefix that fits alongside it, then appends the ellipsis glyph
+    /// (carrying the last kept glyph's cluster, font, direction, and level) — with
+    /// no `ellipsis_glyph` supplied it degrades to [`Clip`](TextOverflow::Clip).
+    /// [`TextOverflow::Visible`] (and any non-truncating policy) leaves overflow
+    /// untouched, as does an unconstrained (`max_width <= 0`) wrap. A truncated
+    /// line overflows, so justification never stretches it.
+    // The wrap inputs plus the hyphenation port, hyphen glyph, and ellipsis glyph
+    // are cohesive positional arguments of one leaf entry point, not a public API
+    // surface.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn wrap_hyphenated(
@@ -212,6 +229,7 @@ impl ParagraphLayout {
         overflow: TextOverflow,
         hyphenator: &dyn Hyphenator,
         hyphen_glyph: Option<ShapedGlyph>,
+        ellipsis_glyph: Option<ShapedGlyph>,
     ) -> Self {
         let mut stream = Self::flatten(runs);
 
@@ -259,6 +277,20 @@ impl ParagraphLayout {
         // and empty branches produce a single, non-justified last line).
         if alignment == TextAlignment::Justify && max_width > 0.0 {
             Self::justify(&mut lines_glyphs, text, max_width);
+        }
+
+        // Apply `text-overflow` truncation. Only lines that *still* overflow
+        // `max_width` (a lone unbreakable, un-hyphenatable word) are affected, and
+        // only under a truncating policy and a positive constraint. Truncation
+        // runs after justify — an overflowing line was never justify-eligible
+        // (justify only stretches lines with slack), so the two never conflict.
+        if overflow.is_truncating() && max_width > 0.0 {
+            for packed in &mut lines_glyphs {
+                let width: f32 = packed.glyphs.iter().map(|t| t.glyph.x_advance()).sum();
+                if width > max_width {
+                    Self::truncate_line(&mut packed.glyphs, max_width, overflow, ellipsis_glyph);
+                }
+            }
         }
 
         // The end byte of the last line falls back to the text length.
@@ -538,6 +570,62 @@ impl ParagraphLayout {
         for index in gap_ends {
             let glyph = glyphs[index].glyph;
             glyphs[index].glyph = glyph.with_x_advance(glyph.x_advance() + add);
+        }
+    }
+
+    /// Truncates one overflowing line's `glyphs` in place so it fits `max_width`
+    /// under the `overflow` policy, at glyph granularity (spec §5.10).
+    ///
+    /// [`Clip`](TextOverflow::Clip) — and [`Ellipsis`](TextOverflow::Ellipsis)
+    /// with no `ellipsis_glyph` — keeps the largest prefix whose cumulative
+    /// advance is `<= max_width` and drops the rest, adding nothing.
+    /// [`Ellipsis`](TextOverflow::Ellipsis) with a glyph reserves that glyph's
+    /// advance, keeps the largest prefix whose advance plus the ellipsis fits
+    /// `max_width`, then appends the ellipsis glyph. The appended glyph carries the
+    /// last kept glyph's cluster and inherits its font, direction, and bidi level
+    /// (falling back to the line's first glyph when nothing fits) so it segments
+    /// and reorders with the kept prefix. A partially-over glyph is dropped, so the
+    /// resulting line width never exceeds `max_width`.
+    fn truncate_line(
+        glyphs: &mut Vec<Tagged>,
+        max_width: f32,
+        overflow: TextOverflow,
+        ellipsis_glyph: Option<ShapedGlyph>,
+    ) {
+        // Only `Ellipsis` reserves and later appends a glyph; `Clip` (and
+        // `Ellipsis` without a supplied glyph) truncates without adding anything.
+        let ellipsis = match overflow {
+            TextOverflow::Ellipsis => ellipsis_glyph,
+            _ => None,
+        };
+        let limit = max_width - ellipsis.map_or(0.0, |g| g.x_advance());
+
+        // Keep the largest prefix whose cumulative advance fits `limit`.
+        let mut kept = 0_usize;
+        let mut width = 0.0_f32;
+        for tagged in glyphs.iter() {
+            let next = width + tagged.glyph.x_advance();
+            if next > limit {
+                break;
+            }
+            width = next;
+            kept += 1;
+        }
+
+        // The carrier lends the ellipsis its font/direction/level and cluster: the
+        // last kept glyph, or the first glyph when nothing fit.
+        let carrier = glyphs
+            .get(kept.wrapping_sub(1))
+            .or_else(|| glyphs.first())
+            .copied();
+        glyphs.truncate(kept);
+        if let (Some(glyph), Some(carrier)) = (ellipsis, carrier) {
+            let ellipsis = ShapedGlyph::new(glyph.glyph_id(), carrier.glyph.cluster(), glyph.x_advance())
+                .with_offset(glyph.x_offset(), glyph.y_offset());
+            glyphs.push(Tagged {
+                glyph: ellipsis,
+                ..carrier
+            });
         }
     }
 
@@ -1235,6 +1323,7 @@ mod tests {
             TextOverflow::Clip,
             &NullHyphenator,
             None,
+            None,
         );
         assert_eq!(plain, hyphenated);
     }
@@ -1262,6 +1351,7 @@ mod tests {
             TextOverflow::Clip,
             &StubHyphenator { offset: 5 },
             Some(hyphen),
+            None,
         );
         assert_eq!(layout.line_count(), 2);
 
@@ -1307,6 +1397,7 @@ mod tests {
             TextOverflow::Clip,
             &NullHyphenator,
             Some(ShapedGlyph::new(999, 0, 4.0)),
+            None,
         );
         assert_eq!(wide.line_count(), 1);
         let one = line_glyphs(&wide, 0);
@@ -1328,6 +1419,7 @@ mod tests {
             TextOverflow::Clip,
             &NullHyphenator,
             Some(ShapedGlyph::new(999, 0, 4.0)),
+            None,
         );
         assert_eq!(narrow.line_count(), 2);
         let head = line_glyphs(&narrow, 0);
@@ -1352,7 +1444,8 @@ mod tests {
             TextRange::new(0, 5),
         )];
         // Only break is before byte 1: head "w" (20) + hyphen (4) = 24 > 10, so
-        // no opportunity fits and the word is placed whole.
+        // no opportunity fits and the word is placed whole. `Visible` overflow
+        // isolates the packing fallback (a truncating policy would clip it).
         let layout = ParagraphLayout::wrap_hyphenated(
             &runs,
             text,
@@ -1360,9 +1453,10 @@ mod tests {
             12.0,
             9.0,
             TextAlignment::Start,
-            TextOverflow::Clip,
+            TextOverflow::Visible,
             &StubHyphenator { offset: 1 },
             Some(ShapedGlyph::new(999, 0, 4.0)),
+            None,
         );
         assert_eq!(layout.line_count(), 1);
         assert_eq!(line_glyphs(&layout, 0).len(), 5);
@@ -1383,5 +1477,122 @@ mod tests {
         );
         assert_eq!(layout.alignment(), TextAlignment::Right);
         assert_eq!(layout.overflow(), TextOverflow::Ellipsis);
+    }
+
+    /// Wraps a single unbreakable `n`-glyph word (each 10px, no break
+    /// opportunities) at `max_width` under `overflow`, with an optional ellipsis
+    /// glyph, and no hyphenation.
+    fn truncated(
+        n: usize,
+        max_width: f32,
+        alignment: TextAlignment,
+        overflow: TextOverflow,
+        ellipsis: Option<ShapedGlyph>,
+    ) -> ParagraphLayout {
+        // "wwww…" — one word, so `LineBreak` proposes no interior opportunity and
+        // the word cannot be packed onto multiple lines.
+        let text: String = "w".repeat(n);
+        let runs = vec![run(
+            0,
+            &(0..n).map(|i| (i, 10.0)).collect::<Vec<_>>(),
+            TextRange::new(0, n),
+        )];
+        ParagraphLayout::wrap_hyphenated(
+            &runs,
+            &text,
+            max_width,
+            12.0,
+            9.0,
+            alignment,
+            overflow,
+            &NullHyphenator,
+            None,
+            ellipsis,
+        )
+    }
+
+    #[test]
+    fn clip_drops_overflowing_glyphs_so_line_fits() {
+        // Five 10px glyphs (50px) in a 25px box: Clip keeps the largest prefix
+        // whose width ≤ 25 (two glyphs = 20) and drops the rest, adding nothing.
+        let layout = truncated(5, 25.0, TextAlignment::Start, TextOverflow::Clip, None);
+        assert_eq!(layout.line_count(), 1);
+        assert!(layout.lines()[0].width() <= 25.0);
+        let kept = line_glyphs(&layout, 0);
+        assert_eq!(kept.iter().map(|g| g.0).collect::<Vec<_>>(), vec![0, 1]);
+    }
+
+    #[test]
+    fn ellipsis_keeps_prefix_plus_ellipsis_and_ends_with_it() {
+        // A 5px ellipsis glyph (id 888) reserves its advance, so the prefix must
+        // fit 25 − 5 = 20 (two glyphs); the appended ellipsis carries the last
+        // kept glyph's cluster (1) and the total width (25) fits the box.
+        let ellipsis = ShapedGlyph::new(888, 0, 5.0);
+        let layout = truncated(
+            5,
+            25.0,
+            TextAlignment::Start,
+            TextOverflow::Ellipsis,
+            Some(ellipsis),
+        );
+        assert_eq!(layout.line_count(), 1);
+        assert!(layout.lines()[0].width() <= 25.0);
+        let kept = line_glyphs(&layout, 0);
+        // Two source glyphs (clusters 0,1) then the ellipsis (id 888, cluster 1).
+        assert_eq!(kept.len(), 3);
+        assert_eq!(kept[..2].iter().map(|g| g.0).collect::<Vec<_>>(), vec![0, 1]);
+        assert_eq!(kept[2], (1, 5.0, 888));
+    }
+
+    #[test]
+    fn ellipsis_without_glyph_behaves_like_clip() {
+        // No ellipsis glyph supplied: Ellipsis degrades to Clip (no glyph added).
+        let layout = truncated(5, 25.0, TextAlignment::Start, TextOverflow::Ellipsis, None);
+        let kept = line_glyphs(&layout, 0);
+        assert_eq!(kept.iter().map(|g| g.0).collect::<Vec<_>>(), vec![0, 1]);
+        assert!(layout.lines()[0].width() <= 25.0);
+    }
+
+    #[test]
+    fn within_width_line_is_untouched_by_truncation() {
+        // Two 10px glyphs (20px) in a 100px box: nothing overflows, so Clip and
+        // Ellipsis leave the line exactly as wrapped.
+        let clip = truncated(2, 100.0, TextAlignment::Start, TextOverflow::Clip, None);
+        assert_eq!(line_glyphs(&clip, 0).len(), 2);
+        assert_eq!(clip.lines()[0].width(), 20.0);
+        let ellipsis = truncated(
+            2,
+            100.0,
+            TextAlignment::Start,
+            TextOverflow::Ellipsis,
+            Some(ShapedGlyph::new(888, 0, 5.0)),
+        );
+        assert_eq!(line_glyphs(&ellipsis, 0).len(), 2);
+        assert_eq!(ellipsis.lines()[0].width(), 20.0);
+    }
+
+    #[test]
+    fn non_truncating_and_unconstrained_do_not_truncate() {
+        // Visible policy leaves an over-wide line intact (all five glyphs).
+        let visible = truncated(5, 25.0, TextAlignment::Start, TextOverflow::Visible, None);
+        assert_eq!(line_glyphs(&visible, 0).len(), 5);
+        assert_eq!(visible.lines()[0].width(), 50.0);
+        // Unconstrained width (≤ 0) is a single, never-truncated line even under
+        // a truncating policy.
+        let unconstrained = truncated(5, 0.0, TextAlignment::Start, TextOverflow::Clip, None);
+        assert_eq!(line_glyphs(&unconstrained, 0).len(), 5);
+    }
+
+    #[test]
+    fn a_truncated_line_is_not_justified() {
+        // Even under Justify, a truncated (overflowing) line keeps its glyphs'
+        // natural advances — justification never stretches it, because an
+        // overflowing line has no slack to distribute.
+        let layout = truncated(5, 25.0, TextAlignment::Justify, TextOverflow::Clip, None);
+        assert!(layout.lines()[0].width() <= 25.0);
+        let kept = line_glyphs(&layout, 0);
+        assert_eq!(kept.iter().map(|g| g.0).collect::<Vec<_>>(), vec![0, 1]);
+        // No advance was widened by justification.
+        assert!(kept.iter().all(|g| (g.1 - 10.0).abs() < f32::EPSILON));
     }
 }

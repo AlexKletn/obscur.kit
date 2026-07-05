@@ -15,11 +15,15 @@ use obscur_style::property::{layout_keyword, Length, LengthContext, PropertyId, 
 use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontSource, GenericFamily,
 };
-use obscur_text::layout::{Hyphenator, ParagraphLayout, TextAlignment, TextOverflow};
+use obscur_text::layout::{
+    Hyphenator, NullHyphenator, ParagraphLayout, TextAlignment, TextOverflow,
+};
 use obscur_text::shaping::{ParagraphShaper, ShapedGlyph, TextDirection};
 use obscur_tree::tree::RetainedTree;
 
-use super::{alignment_for, attributes_for, direction_for, families_for, ComputedStyles};
+use super::{
+    alignment_for, attributes_for, direction_for, families_for, overflow_for, ComputedStyles,
+};
 
 /// The initial `font-size` (spec / CSS default), used as the `em`/`rem` base
 /// when a node (or the document root) has no computed `font-size`.
@@ -222,6 +226,7 @@ fn measure_text_node(
     attributes: &FontAttributes,
     direction: TextDirection,
     alignment: TextAlignment,
+    overflow: TextOverflow,
     constraints: BoxConstraints,
     paragraph: &ParagraphShaper,
     hyphenator: Option<&dyn Hyphenator>,
@@ -240,17 +245,42 @@ fn measure_text_node(
     // almost always zero, but subtract it defensively so the content fits.
     let horizontal = style.padding.left + style.padding.right + style.border.left + style.border.right;
     let max_width = (constraints.max.width - horizontal).max(0.0);
-    // No hyphenator: take the exact pre-hyphenation path — no hyphen glyph is
-    // shaped, so the measured size is byte-identical to whitespace-only wrapping.
+    // `text-overflow: ellipsis` needs a shaped ellipsis glyph (shaped the same way
+    // the scene phase does, so a truncated line measures with the identical
+    // advance it paints with); `clip` / `visible` need none, so none is shaped on
+    // the default path.
+    let ellipsis = if overflow == TextOverflow::Ellipsis {
+        measure_ellipsis_glyph(paragraph, fallback, attributes, direction, font_size)
+    } else {
+        None
+    };
     let layout = match hyphenator {
-        None => ParagraphLayout::wrap(
+        // No hyphenator and no ellipsis glyph: the exact pre-hyphenation path — no
+        // hyphen or ellipsis glyph is shaped, so the measured size is byte-identical
+        // to whitespace-only wrapping (Clip truncation still applies through
+        // `overflow`, but only clips lines that actually overflow).
+        None if ellipsis.is_none() => ParagraphLayout::wrap(
             &runs,
             content,
             max_width,
             metrics.line_height(),
             metrics.baseline(),
             alignment,
-            TextOverflow::Clip,
+            overflow,
+        ),
+        // Ellipsis without a hyphenator: wrap through the no-op hyphenator so the
+        // shaped ellipsis glyph can be threaded into truncation.
+        None => ParagraphLayout::wrap_hyphenated(
+            &runs,
+            content,
+            max_width,
+            metrics.line_height(),
+            metrics.baseline(),
+            alignment,
+            overflow,
+            &NullHyphenator,
+            None,
+            ellipsis,
         ),
         // Hyphenation on: shape the hyphen the same way the scene phase does, so a
         // hyphenated break measures with the identical advance it paints with.
@@ -264,9 +294,10 @@ fn measure_text_node(
                 metrics.line_height(),
                 metrics.baseline(),
                 alignment,
-                TextOverflow::Clip,
+                overflow,
                 hyphenator,
                 hyphen,
+                ellipsis,
             )
         }
     };
@@ -292,6 +323,30 @@ fn measure_hyphen_glyph(
 ) -> Option<ShapedGlyph> {
     paragraph
         .shape_paragraph("-", fallback, attributes, &measure_face(), font_size, direction)
+        .iter()
+        .flat_map(|run| run.run().glyphs().iter().copied())
+        .next()
+}
+
+/// Shapes a single ellipsis (`…`) through `paragraph` at `font_size` and returns
+/// its first glyph, for [`ParagraphLayout::wrap_hyphenated`] to append when
+/// `text-overflow: ellipsis` truncates an overflowing line (spec §5.10).
+///
+/// The ellipsis is shaped with the same [`measure_face`] the scene coordinator's
+/// default face mirrors, so the glyph the measure pass sizes with is identical to
+/// the one the compose pass paints, keeping the box width and painted lines in
+/// agreement. Returns [`None`] only if shaping yields no glyph.
+// `attributes` stays by reference to match this pass's `shape_paragraph` calls.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn measure_ellipsis_glyph(
+    paragraph: &ParagraphShaper,
+    fallback: &FontFallback,
+    attributes: &FontAttributes,
+    direction: TextDirection,
+    font_size: f32,
+) -> Option<ShapedGlyph> {
+    paragraph
+        .shape_paragraph("…", fallback, attributes, &measure_face(), font_size, direction)
         .iter()
         .flat_map(|run| run.run().glyphs().iter().copied())
         .next()
@@ -671,6 +726,7 @@ fn measure(
         let attributes = attributes_for(computed.get(&node));
         let direction = direction_for(computed.get(&node));
         let alignment = alignment_for(computed.get(&node));
+        let overflow = overflow_for(computed.get(&node));
         return measure_text_node(
             content,
             &style,
@@ -678,6 +734,7 @@ fn measure(
             &attributes,
             direction,
             alignment,
+            overflow,
             constraints,
             paragraph,
             hyphenator,
@@ -745,6 +802,7 @@ fn arrange(
         let attributes = attributes_for(computed.get(&node));
         let direction = direction_for(computed.get(&node));
         let alignment = alignment_for(computed.get(&node));
+        let overflow = overflow_for(computed.get(&node));
         let size = measure_text_node(
             content,
             &style,
@@ -752,6 +810,7 @@ fn arrange(
             &attributes,
             direction,
             alignment,
+            overflow,
             constraints,
             paragraph,
             hyphenator,

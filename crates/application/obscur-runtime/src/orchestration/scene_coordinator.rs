@@ -16,14 +16,19 @@ use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontResolver, FontSource,
     GenericFamily, MockFontResolver,
 };
-use obscur_text::layout::{Hyphenator, ParagraphLayout, TextAlignment, TextOverflow};
+use obscur_text::layout::{
+    Hyphenator, NullHyphenator, ParagraphLayout, TextAlignment, TextOverflow,
+};
 use obscur_text::shaping::{
     CachingShaper, MockTextShaper, ParagraphShaper, ShapedGlyph, ShapedRun, SingleRunItemizer,
     TextDirection, TextItemizer, TextShaper,
 };
 use obscur_tree::tree::RetainedTree;
 
-use super::{alignment_for, attributes_for, direction_for, families_for, ComputedStyles, LayoutBoxes};
+use super::{
+    alignment_for, attributes_for, direction_for, families_for, overflow_for, ComputedStyles,
+    LayoutBoxes,
+};
 
 /// Default font size (in pixels) used to emit text runs.
 ///
@@ -235,6 +240,7 @@ impl SceneCoordinator {
         attributes: &FontAttributes,
         direction: TextDirection,
         alignment: TextAlignment,
+        overflow: TextOverflow,
         font_size: f32,
         max_width: f32,
     ) -> ParagraphLayout {
@@ -247,34 +253,85 @@ impl SceneCoordinator {
             direction,
         );
         let metrics = self.paragraph.line_metrics(font_size);
-        // No hyphenator installed: take the exact pre-hyphenation path — no hyphen
-        // glyph is shaped, so the output (and the shaping-cache call count) is
-        // byte-identical to today.
-        let Some(hyphenator) = self.hyphenator.as_deref() else {
-            return ParagraphLayout::wrap(
+        // `text-overflow: ellipsis` needs a shaped ellipsis glyph to append at a
+        // cut; `clip` / `visible` need none, so none is shaped on the default path
+        // (Clip truncation works from advances alone).
+        let ellipsis = if overflow == TextOverflow::Ellipsis {
+            self.shape_ellipsis(fallback, attributes, direction, font_size)
+        } else {
+            None
+        };
+        match self.hyphenator.as_deref() {
+            // No hyphenator and no ellipsis glyph: the exact pre-hyphenation path —
+            // no hyphen or ellipsis glyph is shaped, so the output (and the
+            // shaping-cache call count) is byte-identical to today. Clip truncation
+            // still applies through `overflow`, but only clips lines that overflow.
+            None if ellipsis.is_none() => ParagraphLayout::wrap(
                 &runs,
                 content,
                 max_width,
                 metrics.line_height(),
                 metrics.baseline(),
                 alignment,
-                TextOverflow::Clip,
-            );
-        };
-        // Hyphenation on: shape the hyphen glyph so a break renders (and measures)
-        // with a real advance, and wrap through the installed port.
-        let hyphen = self.shape_hyphen(fallback, attributes, direction, font_size);
-        ParagraphLayout::wrap_hyphenated(
-            &runs,
-            content,
-            max_width,
-            metrics.line_height(),
-            metrics.baseline(),
-            alignment,
-            TextOverflow::Clip,
-            hyphenator,
-            hyphen,
-        )
+                overflow,
+            ),
+            // Ellipsis without a hyphenator: wrap through the no-op hyphenator so
+            // the shaped ellipsis glyph can be threaded into truncation.
+            None => ParagraphLayout::wrap_hyphenated(
+                &runs,
+                content,
+                max_width,
+                metrics.line_height(),
+                metrics.baseline(),
+                alignment,
+                overflow,
+                &NullHyphenator,
+                None,
+                ellipsis,
+            ),
+            // Hyphenation on: shape the hyphen glyph so a break renders (and
+            // measures) with a real advance, and wrap through the installed port.
+            Some(hyphenator) => {
+                let hyphen = self.shape_hyphen(fallback, attributes, direction, font_size);
+                ParagraphLayout::wrap_hyphenated(
+                    &runs,
+                    content,
+                    max_width,
+                    metrics.line_height(),
+                    metrics.baseline(),
+                    alignment,
+                    overflow,
+                    hyphenator,
+                    hyphen,
+                    ellipsis,
+                )
+            }
+        }
+    }
+
+    /// Shapes a single ellipsis (`…`) at `font_size` through the paragraph
+    /// orchestrator and returns its first glyph, for
+    /// [`ParagraphLayout::wrap_hyphenated`] to append when `text-overflow:
+    /// ellipsis` truncates an overflowing line (spec §5.10).
+    ///
+    /// Shaped with the coordinator's default face — identical to the layout
+    /// coordinator's `measure_face` — so the glyph the compose pass paints matches
+    /// the one the measure pass sized with. Returns [`None`] only if shaping yields
+    /// no glyph.
+    // `attributes` stays by reference to match this pass's `shape_paragraph` calls.
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    fn shape_ellipsis(
+        &self,
+        fallback: &FontFallback,
+        attributes: &FontAttributes,
+        direction: TextDirection,
+        font_size: f32,
+    ) -> Option<ShapedGlyph> {
+        self.paragraph
+            .shape_paragraph("…", fallback, attributes, &self.default_face, font_size, direction)
+            .iter()
+            .flat_map(|run| run.run().glyphs().iter().copied())
+            .next()
     }
 
     /// Shapes a single hyphen (`-`) at `font_size` through the paragraph
@@ -370,6 +427,7 @@ impl SceneCoordinator {
                     let attributes = attributes_for(computed.get(&node));
                     let direction = direction_for(computed.get(&node));
                     let alignment = alignment_for(computed.get(&node));
+                    let overflow = overflow_for(computed.get(&node));
                     let origin = layout_box.origin();
                     let layout = self.shape_lines(
                         content,
@@ -377,6 +435,7 @@ impl SceneCoordinator {
                         &attributes,
                         direction,
                         alignment,
+                        overflow,
                         font_size,
                         layout_box.size().width,
                     );
@@ -716,7 +775,9 @@ mod tests {
 
         let mut boxes = LayoutBoxes::new();
         boxes.insert(root, box_at(0.0, 0.0, 100.0, 100.0));
-        boxes.insert(text, box_at(5.0, 12.0, 40.0, 16.0));
+        // Box wide enough for all five 9.6px glyphs (48px) so the default `clip`
+        // policy has nothing to truncate — this test exercises shaping, not overflow.
+        boxes.insert(text, box_at(5.0, 12.0, 60.0, 16.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
 
