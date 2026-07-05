@@ -1561,6 +1561,7 @@ dependencies = [
  "obscur-task-tokio",
  "obscur-text",
  "obscur-text-harfrust",
+ "obscur-text-unicode",
  "obscur-theme-system",
  "obscur-tree",
  "obscur-ui-ir",

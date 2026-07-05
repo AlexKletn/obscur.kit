@@ -68,18 +68,30 @@
 //! press on the lower `.decrement`/`.increment` region also nudges `count`; the
 //! hover/focus **visuals** are what the real input path now drives.
 //!
-//! # Text
+//! # Text (multi-font fallback stack)
 //!
-//! The counter's labels ("Count: N", "-", "+") are real text. Fonts are a host
-//! resource (like the GPU device): `resumed` loads a system font off disk and
-//! wires its bytes into **both** the real HarfRust shaper on the runtime
-//! ([`UiRuntime::set_text_shaper`]) and the renderer
-//! ([`VelloRenderer::set_font`]). Because the shaper and the renderer share the
-//! same font, the domain shapes each `DrawText` run into real, font-specific
-//! glyph **indices** once, and Vello draws those indices directly into the same
-//! offscreen texture the blit path presents. With no font found the runtime keeps
-//! its deterministic mock shaper, the shapes still paint, and only the glyphs are
-//! skipped.
+//! The counter's labels ("Count 数字: N", "-", "+") are real text with a
+//! deliberately **mixed-script** label. Fonts are a host resource (like the GPU
+//! device): `resumed` loads a primary system font plus (best-effort) a second,
+//! CJK-covering fallback font off disk and wires the FULL fallback stack via
+//! [`wire_text_stack`]:
+//!
+//! - a [`UnicodeTextItemizer`] on the runtime ([`UiRuntime::set_text_itemizer`])
+//!   splits each label into uniform bidi-level + script runs;
+//! - a coverage-driven [`FontRegistry`] resolver
+//!   ([`UiRuntime::set_font_resolver`]) picks, per run, the first registered font
+//!   whose `cmap` covers it (both fonts registered under `sans-serif`, so
+//!   COVERAGE — not name — disambiguates);
+//! - a font-less [`HarfrustShaper`] ([`UiRuntime::set_text_shaper`]) shapes each
+//!   item against its resolved face's in-memory bytes.
+//!
+//! The renderer is handed the **same** id->bytes assignment via
+//! [`VelloRenderer::register_font`], so the scene's per-run font handle (the
+//! resolved [`FontId`](obscur_kit::text::font::FontId)) selects the matching font
+//! when Vello rasterizes. On a machine with both fonts present, the Latin part
+//! draws from the primary and the CJK part from the fallback. With no fallback
+//! found the CJK glyphs render as `.notdef` (the fallback path activates only once
+//! a covering font is registered); with no font at all, text is skipped.
 //!
 //! # Environment note
 //!
@@ -104,7 +116,9 @@ use obscur_kit::render_vello::renderer::{VelloDevice, VelloRenderer, VelloSurfac
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::runtime::frame::FrameReason;
 use obscur_kit::style::matching::Stylesheet;
-use obscur_kit::text_harfrust::HarfrustShaper;
+use obscur_kit::text::font::{FontAttributes, FontFamily, GenericFamily};
+use obscur_kit::text_harfrust::{FontRegistry, HarfrustShaper};
+use obscur_kit::text_unicode::UnicodeTextItemizer;
 use obscur_kit::view::view::{CLASS, View, ViewNode, ViewProperty, ViewValue};
 use obscur_kit::widgets::button::Button;
 use obscur_kit::window_winit::conversion::{KeyboardConverter, PointerConverter};
@@ -338,21 +352,17 @@ impl ApplicationHandler for WindowedCounter {
                     Ok(vello_device) => {
                         let mut renderer =
                             VelloRenderer::new(RendererId::from_raw(1)).with_device(vello_device);
-                        // Text is a host resource (like the GPU device): load a
-                        // system font and hand its bytes to the renderer so the
-                        // counter's labels ("Count: N", "-", "+") rasterize into
-                        // real glyphs. With no font found, text is skipped.
-                        if let Some(bytes) = load_system_font() {
-                            // Wire the SAME font bytes into the real HarfRust
-                            // shaper on the runtime, so on-screen glyph indices
-                            // come from real shaping of the font the renderer
-                            // rasterizes (shaper and renderer must agree on the
-                            // font for indices to align). Then hand the bytes to
-                            // the renderer for the glyph outlines.
-                            self.runtime.set_text_shaper(Box::new(
-                                HarfrustShaper::from_bytes(bytes.clone()),
-                            ));
-                            renderer.set_font(bytes);
+                        // Text is a host resource (like the GPU device). Wire the
+                        // FULL multi-font fallback stack: the runtime itemizes
+                        // each label into uniform bidi+script runs
+                        // (`UnicodeTextItemizer`), resolves each run to the first
+                        // registered font whose `cmap` COVERS it (`FontRegistry`),
+                        // and shapes it against that resolved face's in-memory
+                        // bytes (font-less `HarfrustShaper`). The renderer gets the
+                        // SAME id->bytes assignment so scene font handles line up
+                        // with the fonts it rasterizes.
+                        if let Some(primary_bytes) = load_system_font() {
+                            wire_text_stack(&mut self.runtime, &mut renderer, primary_bytes);
                         } else {
                             eprintln!("no system font found; text will not render");
                         }
@@ -531,6 +541,85 @@ fn load_system_font() -> Option<Vec<u8>> {
     CANDIDATES.iter().find_map(|p| std::fs::read(p).ok())
 }
 
+/// Loads a *second*, different-script fallback font's bytes, for the multi-font
+/// fallback demo.
+///
+/// The primary system font ([`load_system_font`]) typically covers Latin (and
+/// often Cyrillic); this scans a few well-known CJK faces so a mixed-script label
+/// has a covering font for the ideographs the primary lacks. Returns `None` when
+/// none are present — the example still compiles and runs with only the primary
+/// (the mixed-script glyphs then render as `.notdef`; see [`wire_text_stack`]).
+fn load_fallback_font() -> Option<Vec<u8>> {
+    const CANDIDATES: &[&str] = &[
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto/NotoSansCJKsc-Regular.otf",
+        "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
+        "C:\\Windows\\Fonts\\msyh.ttc",
+    ];
+    CANDIDATES.iter().find_map(|p| std::fs::read(p).ok())
+}
+
+/// Wires the full multi-font fallback stack onto the runtime and the renderer.
+///
+/// Builds a [`FontRegistry`] (the coverage-driven [`FontResolver`]) and registers
+/// the primary under the `sans-serif` generic family — the family the runtime's
+/// default fallback chain (`FontFallback::default_chain`) consults — so it gets
+/// id `0`. If a fallback font is found it is registered under the **same** family
+/// (id `1`), so resolution picks between the two by `cmap` COVERAGE, not by name:
+/// a Latin run resolves to whichever covers it, a CJK run to the CJK face.
+///
+/// The renderer receives the **same** id->bytes assignment via
+/// [`VelloRenderer::register_font`], so the scene's per-run font handles (the
+/// resolved [`FontId`]s) line up with the fonts the renderer rasterizes.
+///
+/// Without a fallback font found, mixed-script glyphs the primary lacks resolve to
+/// no covering font and render as `.notdef`; the fallback path activates only once
+/// a covering font is registered here.
+fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, primary_bytes: Vec<u8>) {
+    let mut registry = FontRegistry::new();
+
+    // Primary under the SansSerif generic family -> id 0.
+    let primary_id = registry.register(
+        FontFamily::generic(GenericFamily::SansSerif),
+        FontAttributes::default(),
+        primary_bytes.clone(),
+    );
+    renderer.register_font(font_handle(primary_id), primary_bytes);
+
+    // Fallback under the SAME family -> id 1 (coverage, not name, disambiguates).
+    if let Some(fallback_bytes) = load_fallback_font() {
+        let fallback_id = registry.register(
+            FontFamily::generic(GenericFamily::SansSerif),
+            FontAttributes::default(),
+            fallback_bytes.clone(),
+        );
+        renderer.register_font(font_handle(fallback_id), fallback_bytes);
+    } else {
+        // No second font: the primary alone can't cover the CJK part of the
+        // demo label, so those glyphs paint as .notdef. Registering a covering
+        // face above is what activates the fallback path.
+        eprintln!(
+            "no fallback font found; mixed-script glyphs the primary lacks render as .notdef"
+        );
+    }
+
+    // Install the stack: resolve-by-coverage + itemize + per-item shaping.
+    runtime.set_font_resolver(Box::new(registry));
+    runtime.set_text_itemizer(Box::new(UnicodeTextItemizer::new()));
+    runtime.set_text_shaper(Box::new(HarfrustShaper::without_font()));
+}
+
+/// The scene font handle (a `u32`) for a resolved [`FontId`]: the renderer and
+/// the scene both key fonts by this value, so the two must agree.
+fn font_handle(id: obscur_kit::text::font::FontId) -> u32 {
+    u32::try_from(id.index()).unwrap_or(0)
+}
+
 /// The authored stylesheet: one rule per class, each painting a background +
 /// size. Layout is flow (vertical stacking) — `display` is not yet mapped and
 /// the property set has no margin/align — so the bars stack top-to-bottom
@@ -570,9 +659,12 @@ fn tagged(class: &str, children: Vec<ViewNode>) -> ViewNode {
 /// Builds the counter UI: a dark `.counter` panel stacking a label bar and the
 /// two buttons, each wrapped so it carries a class the stylesheet paints.
 fn build_counter_view(count: i64, decrement: &Button, increment: &Button) -> View {
+    // Mixed-script label (Latin + CJK): on a machine with both a Latin primary
+    // and a CJK fallback registered, each script renders from its covering font
+    // via the coverage resolver; with only the primary, the CJK part is .notdef.
     let label = tagged(
         "bar label",
-        vec![Text::new(format!("Count: {count}")).into_view_node()],
+        vec![Text::new(format!("Count 数字: {count}")).into_view_node()],
     );
     let minus = tagged("bar decrement", button_nodes(decrement));
     let plus = tagged("bar increment", button_nodes(increment));

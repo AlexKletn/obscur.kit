@@ -7,6 +7,8 @@
 //! preserved exactly; only rasterization is Vello's (spec §5.2 determinism
 //! boundary).
 
+use std::collections::HashMap;
+
 use obscur_scene::clip::Clip;
 use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::layer::{CompositionMode, SceneLayer};
@@ -59,28 +61,41 @@ const UNBOUNDED_HALF_EXTENT: f64 = 1.0e9;
 /// [`GlyphRun`](obscur_scene::text::GlyphRun): text is shaped **once**, in the
 /// `obscur-text` domain, so this adapter never re-shapes — it consumes the run's
 /// glyph positions verbatim (the same run the software backend consumes, spec
-/// §5.2). Rasterizing to *real* outlines still needs a host font, supplied via
-/// [`Self::set_font`] (fonts are a host resource, mirroring host-provides-device);
-/// with no font set the converter degrades gracefully and skips text runs. Each
-/// glyph's [`glyph_id`](obscur_scene::text::PositionedGlyph::glyph_id) is already a
-/// **font glyph index** (the domain shaped against this same host font), so it is
-/// used **directly** — no Unicode charmap remap — and drawn at the domain-supplied
-/// position; Vello's glyph pipeline rasterizes it (spec §5.2).
+/// §5.2). Rasterizing to *real* outlines still needs host fonts, supplied via
+/// [`Self::register_font`] / [`Self::set_font`] (fonts are a host resource,
+/// mirroring host-provides-device); with no font registered the converter
+/// degrades gracefully and skips text runs. Each glyph's
+/// [`glyph_id`](obscur_scene::text::PositionedGlyph::glyph_id) is already a
+/// **font glyph index** (the domain shaped against the run's resolved font), so it
+/// is used **directly** — no Unicode charmap remap — and drawn at the
+/// domain-supplied position; Vello's glyph pipeline rasterizes it (spec §5.2).
+///
+/// ## Multi-font runs
+///
+/// A [`GlyphRun`] carries a [`font`](GlyphRun::font) handle (`0` = primary): the
+/// runtime emits one `DrawText` per font-segment, each tagged with its resolved
+/// face's id. The converter keeps a registry keyed by that `u32` handle
+/// ([`Self::register_font`]) and draws each run against the matching font, so a
+/// mixed-script line (e.g. Latin + Cyrillic resolved to two different faces)
+/// rasterizes each segment from its covering font. An unknown handle falls back
+/// to id `0`; with neither present the run is skipped (no panic).
 #[derive(Debug, Default, Clone)]
 pub struct SceneConverter {
     path: PathConverter,
     brush: BrushConverter,
     clip: ClipConverter,
-    /// Host-provided font used to shape [`PaintCommand::DrawText`] runs. `None`
-    /// until [`Self::set_font`] is called; text is skipped while absent.
-    font: Option<FontData>,
+    /// Host-provided fonts keyed by the scene [`GlyphRun`] font handle (`0` =
+    /// primary). Empty until [`Self::register_font`] / [`Self::set_font`] is
+    /// called; text is skipped while a run's font (and the id-`0` fallback) are
+    /// both absent.
+    fonts: HashMap<u32, FontData>,
 }
 
 impl SceneConverter {
     /// Creates a scene converter with freshly constructed leaf converters.
     ///
-    /// No font is attached; call [`Self::set_font`] before text runs will
-    /// render.
+    /// No fonts are registered; call [`Self::register_font`] (or the
+    /// back-compat [`Self::set_font`]) before text runs will render.
     #[must_use]
     pub fn new() -> Self {
         let color = ColorConverter::new();
@@ -89,16 +104,34 @@ impl SceneConverter {
             path,
             brush: BrushConverter::new(color),
             clip: ClipConverter::new(path),
-            font: None,
+            fonts: HashMap::new(),
         }
     }
 
-    /// Attaches (or replaces) the host-provided [`FontData`] used to shape text.
+    /// Registers (or replaces) the host-provided [`FontData`] for the run font
+    /// handle `id` (`0` = primary; higher ids are fallback faces).
     ///
-    /// The font is a host resource; the adapter never fabricates one. Until a
-    /// font is set, [`PaintCommand::DrawText`] commands are silently skipped.
+    /// Fonts are a host resource; the adapter never fabricates one. The `id` must
+    /// match the face id the runtime's font resolver assigned (so scene run
+    /// handles line up with these fonts). Until a covering font is registered,
+    /// the run's [`PaintCommand::DrawText`] is skipped.
+    pub fn register_font(&mut self, id: u32, font: FontData) {
+        self.fonts.insert(id, font);
+    }
+
+    /// Attaches (or replaces) the primary host font (font handle `0`).
+    ///
+    /// Back-compat shim over [`Self::register_font`]: single-font callers keep
+    /// working, and every untagged run (`font == 0`) renders against this face.
     pub fn set_font(&mut self, font: FontData) {
-        self.font = Some(font);
+        self.register_font(0, font);
+    }
+
+    /// Selects the [`FontData`] a run tagged with handle `id` draws against:
+    /// the exact match if present, otherwise the primary (id `0`) as a fallback,
+    /// otherwise `None` (the run is skipped rather than panicking).
+    fn font_for(&self, id: u32) -> Option<&FontData> {
+        self.fonts.get(&id).or_else(|| self.fonts.get(&0))
     }
 
     /// Converts an obscur-scene [`DisplayList`] into a [`vello::Scene`].
@@ -160,8 +193,10 @@ impl SceneConverter {
         run: &GlyphRun,
         brush: &Brush,
     ) {
-        // No host font → no text (documented graceful degradation).
-        let Some(font) = self.font.as_ref() else {
+        // Pick the run's font by its handle (`0` = primary); fall back to id 0,
+        // else skip. No matching font → no text (documented graceful
+        // degradation).
+        let Some(font) = self.font_for(run.font()) else {
             return;
         };
 
@@ -389,6 +424,68 @@ mod tests {
             brush: Brush::solid(Color::WHITE),
         }]);
         let scene = SceneConverter::new().convert(&list);
+        assert!(scene.encoding().is_empty());
+    }
+
+    #[test]
+    fn set_font_and_register_font_populate_the_registry() {
+        use vello::peniko::Blob;
+        let mut converter = SceneConverter::new();
+        // `set_font` is the back-compat shim: it registers the primary (id 0).
+        converter.set_font(FontData::new(Blob::from(vec![1u8, 2, 3]), 0));
+        // `register_font` adds a distinct fallback face under id 1.
+        converter.register_font(1, FontData::new(Blob::from(vec![4u8, 5, 6]), 0));
+        assert_eq!(converter.fonts.len(), 2);
+        assert!(converter.fonts.contains_key(&0));
+        assert!(converter.fonts.contains_key(&1));
+    }
+
+    #[test]
+    fn run_font_handle_selects_the_matching_registered_font() {
+        use vello::peniko::Blob;
+        let primary = FontData::new(Blob::from(vec![1u8, 1, 1]), 0);
+        let fallback = FontData::new(Blob::from(vec![2u8, 2, 2]), 0);
+        let mut converter = SceneConverter::new();
+        converter.register_font(0, primary.clone());
+        converter.register_font(1, fallback.clone());
+        // A run tagged `font = 1` draws against font id 1, not the primary.
+        assert_eq!(converter.font_for(1), Some(&fallback));
+        // The primary (untagged, `font = 0`) run still draws against id 0.
+        assert_eq!(converter.font_for(0), Some(&primary));
+    }
+
+    #[test]
+    fn unknown_font_handle_falls_back_to_primary() {
+        use vello::peniko::Blob;
+        let primary = FontData::new(Blob::from(vec![7u8, 7, 7]), 0);
+        let mut converter = SceneConverter::new();
+        converter.register_font(0, primary.clone());
+        // No font id 5 is registered → fall back to the primary (id 0).
+        assert_eq!(converter.font_for(5), Some(&primary));
+    }
+
+    #[test]
+    fn unknown_font_handle_without_primary_is_skipped_without_panic() {
+        use obscur_scene::text::{GlyphRun, PositionedGlyph};
+        use vello::peniko::Blob;
+        // Only a fallback face (id 1) is registered — no primary (id 0). A run
+        // tagged with an unknown handle (2) resolves to neither, so it is
+        // skipped: `font_for` is `None` and conversion encodes nothing.
+        let mut converter = SceneConverter::new();
+        converter.register_font(1, FontData::new(Blob::from(vec![9u8]), 0));
+        assert!(converter.font_for(2).is_none());
+        let run = GlyphRun::new(
+            vec![PositionedGlyph::new(1, 0, 0.0, 16.0, 9.6)],
+            16.0,
+            "x",
+        )
+        .with_font(2);
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawText {
+            origin: Point::new(0.0, 0.0),
+            run,
+            brush: Brush::solid(Color::WHITE),
+        }]);
+        let scene = converter.convert(&list);
         assert!(scene.encoding().is_empty());
     }
 

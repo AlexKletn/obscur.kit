@@ -26,6 +26,7 @@ full = [
     "window-winit",
     "accesskit",
     "text-harfrust",
+    "text-unicode",
 ]
 resource-decode = ["dep:obscur-resource-decode"]
 resource-fs = ["dep:obscur-resource-fs"]
@@ -37,6 +38,7 @@ render-vello = ["dep:obscur-render-vello"]
 window-winit = ["dep:obscur-window-winit"]
 accesskit = ["dep:obscur-accessibility-accesskit"]
 text-harfrust = ["dep:obscur-text-harfrust"]
+text-unicode = ["dep:obscur-text-unicode"]
 
 [dependencies]
 # foundation
@@ -85,6 +87,7 @@ obscur-render-vello = { workspace = true, optional = true }
 obscur-window-winit = { workspace = true, optional = true }
 obscur-accessibility-accesskit = { workspace = true, optional = true }
 obscur-text-harfrust = { workspace = true, optional = true }
+obscur-text-unicode = { workspace = true, optional = true }
 
 # The platform system provider is selected automatically by target.
 [target.'cfg(target_os = "linux")'.dependencies]

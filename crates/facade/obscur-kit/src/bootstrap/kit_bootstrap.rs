@@ -117,6 +117,55 @@ impl KitBootstrap {
     ) -> Box<dyn crate::text::shaping::TextShaper> {
         Box::new(crate::text_harfrust::HarfrustShaper::from_bytes(bytes))
     }
+
+    /// Builds a font-less real
+    /// [`HarfrustShaper`](crate::text_harfrust::HarfrustShaper) that shapes each
+    /// itemized run against the face bytes its
+    /// [`FontResolver`](crate::text::font::FontResolver) resolved
+    /// ([`FontSource::Memory`](crate::text::font::FontSource::Memory)).
+    ///
+    /// Pair it with [`Self::font_registry`] and [`Self::text_itemizer`] on a
+    /// runtime ([`set_text_shaper`](crate::runtime::UiRuntime::set_text_shaper),
+    /// [`set_font_resolver`](crate::runtime::UiRuntime::set_font_resolver),
+    /// [`set_text_itemizer`](crate::runtime::UiRuntime::set_text_itemizer)) to
+    /// wire the full multi-font fallback stack: itemize → resolve by coverage →
+    /// shape per item.
+    #[cfg(feature = "text-harfrust")]
+    #[must_use]
+    pub fn text_shaper_without_font(&self) -> Box<dyn crate::text::shaping::TextShaper> {
+        Box::new(crate::text_harfrust::HarfrustShaper::without_font())
+    }
+
+    /// Builds an empty [`FontRegistry`](crate::text_harfrust::FontRegistry) — the
+    /// real [`FontResolver`](crate::text::font::FontResolver) that picks a face
+    /// from a fallback chain by true `cmap` coverage.
+    ///
+    /// Register faces on it (each `register` returns the
+    /// [`FontId`](crate::text::font::FontId) assigned in order `0, 1, …`), then
+    /// install it with
+    /// [`set_font_resolver`](crate::runtime::UiRuntime::set_font_resolver). Use
+    /// the **same** id↔bytes assignment on the renderer's `register_font` so
+    /// scene run handles line up with the renderer's fonts.
+    #[cfg(feature = "text-harfrust")]
+    #[must_use]
+    pub fn font_registry(&self) -> crate::text_harfrust::FontRegistry {
+        crate::text_harfrust::FontRegistry::new()
+    }
+
+    /// Builds the real
+    /// [`UnicodeTextItemizer`](crate::text_unicode::UnicodeTextItemizer) — the
+    /// [`TextItemizer`](crate::text::shaping::TextItemizer) that splits text into
+    /// uniform bidi-level + script runs before per-item resolution and shaping.
+    ///
+    /// Install it with
+    /// [`set_text_itemizer`](crate::runtime::UiRuntime::set_text_itemizer). The
+    /// itemizer is returned boxed as the domain port, so callers depend only on
+    /// the port, not the concrete adapter.
+    #[cfg(feature = "text-unicode")]
+    #[must_use]
+    pub fn text_itemizer(&self) -> Box<dyn crate::text::shaping::TextItemizer> {
+        Box::new(crate::text_unicode::UnicodeTextItemizer::new())
+    }
 }
 
 #[cfg(test)]

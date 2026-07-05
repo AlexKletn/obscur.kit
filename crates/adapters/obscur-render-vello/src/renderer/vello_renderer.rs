@@ -78,17 +78,33 @@ impl VelloRenderer {
         self.device = Some(device);
     }
 
-    /// Attaches (or replaces) the host-provided font used to render text runs.
+    /// Registers (or replaces) a host-provided font under the run font handle
+    /// `id` (`0` = primary; higher ids are fallback faces).
     ///
     /// Fonts are a host resource, mirroring the host-provides-device pattern:
     /// the adapter never bundles one, so the host reads a font file and hands
-    /// the raw bytes here. The bytes are wrapped in a peniko [`FontData`] (font
-    /// index 0) and forwarded to the scene converter, which shapes
-    /// [`DrawText`](obscur_scene::command::PaintCommand::DrawText) runs against
-    /// it. Until this is called, text runs are skipped.
-    pub fn set_font(&mut self, font_bytes: Vec<u8>) {
+    /// the raw bytes here. The bytes are wrapped in a peniko [`FontData`] (sfnt
+    /// face index 0) and forwarded to the scene converter, which draws each
+    /// [`DrawText`](obscur_scene::command::PaintCommand::DrawText) run against
+    /// the font whose id matches the run's
+    /// [`font`](obscur_scene::text::GlyphRun::font) handle.
+    ///
+    /// The `id` **must** match the face id the runtime's font resolver (e.g.
+    /// `FontRegistry`) assigned to the same bytes, so scene run handles line up
+    /// with these fonts. Until a covering font is registered, its runs are
+    /// skipped.
+    pub fn register_font(&mut self, id: u32, font_bytes: Vec<u8>) {
         let font = FontData::new(Blob::from(font_bytes), 0);
-        self.scene_converter.set_font(font);
+        self.scene_converter.register_font(id, font);
+    }
+
+    /// Attaches (or replaces) the primary host font (run font handle `0`).
+    ///
+    /// Back-compat shim over [`Self::register_font`]: single-font hosts keep
+    /// working, and every untagged run renders against this face. Until this (or
+    /// [`Self::register_font`]) is called, text runs are skipped.
+    pub fn set_font(&mut self, font_bytes: Vec<u8>) {
+        self.register_font(0, font_bytes);
     }
 
     /// Whether a GPU device is attached and rendering can submit work.

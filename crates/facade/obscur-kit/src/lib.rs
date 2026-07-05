@@ -83,6 +83,8 @@ pub use obscur_task_smol as task_smol;
 pub use obscur_task_tokio as task_tokio;
 #[cfg(feature = "text-harfrust")]
 pub use obscur_text_harfrust as text_harfrust;
+#[cfg(feature = "text-unicode")]
+pub use obscur_text_unicode as text_unicode;
 #[cfg(feature = "window-winit")]
 pub use obscur_window_winit as window_winit;
 
