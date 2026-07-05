@@ -729,8 +729,8 @@ impl ParagraphLayout {
     ///
     /// A level boundary ends a segment as well as a font boundary, so a run that
     /// changes embedding level splits even within one font. Within a segment the
-    /// glyph order is left as the shaper produced it (HarfRust already visually
-    /// orders RTL runs; the mock emits LTR order — a documented mock limitation).
+    /// glyph order is left as the shaper produced it: both HarfRust and the
+    /// deterministic mock already emit an RTL run's glyphs in visual order.
     fn segment(glyphs: &[Tagged], line_end: usize) -> Vec<ShapedRun> {
         let mut segments = Vec::new();
         let mut index = 0;

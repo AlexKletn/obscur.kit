@@ -54,18 +54,27 @@ pub trait TextShaper {
 ///
 /// `MockTextShaper` exists so headless tests have reproducible shaped output
 /// without a real font engine. It emits exactly one glyph per Unicode scalar
-/// value in the source text, in logical order, with:
+/// value in the source text, with:
 ///
 /// - `glyph_id` = the scalar's code point,
 /// - `cluster` = the scalar's **byte offset** in the source text,
 /// - `x_advance` = `font_size * ADVANCE_RATIO`, a fixed monospace em-ratio,
 /// - zero placement offsets.
 ///
-/// It deliberately does **not** perform ligatures, bidi reordering, font
-/// fallback, or real font metrics — every glyph is uniform width and the output
-/// order matches the input order. Given identical requests it produces identical
-/// [`GlyphRun`]s (no pointer hashing, no order-dependent iteration), which is
-/// exactly the determinism headless golden tests rely on.
+/// The glyphs are emitted in **visual** (pen, left-to-right) order, matching a
+/// real shaper such as `HarfRust`: an [`TextDirection::LeftToRight`] request
+/// yields glyphs in logical order (`glyph_id`s `['a','b','c']`, clusters
+/// `[0,1,2]` for `"abc"`), while an [`TextDirection::RightToLeft`] request
+/// yields the **reversed** sequence (`['c','b','a']`, clusters `[2,1,0]`). Each
+/// glyph keeps its own source byte offset as its cluster — clusters stay the
+/// source offsets, they simply appear in reversed order. This keeps the mock
+/// visually honest so the bidi L2 line reordering (which trusts each run's
+/// glyphs to already be in visual order) is consistent for the mock.
+///
+/// It deliberately does **not** perform ligatures, font fallback, or real font
+/// metrics — every glyph is uniform width. Given identical requests it produces
+/// identical [`GlyphRun`]s (no pointer hashing, no order-dependent iteration),
+/// which is exactly the determinism headless golden tests rely on.
 #[derive(Debug, Default, Clone)]
 pub struct MockTextShaper;
 
@@ -87,10 +96,18 @@ impl TextShaper for MockTextShaper {
     fn shape(&self, request: &ShapingRequest) -> GlyphRun {
         let text = request.text();
         let advance = request.font_size() * Self::ADVANCE_RATIO;
-        let glyphs: Vec<ShapedGlyph> = text
+        // One glyph per scalar; each keeps its source byte offset as its cluster.
+        let mut glyphs: Vec<ShapedGlyph> = text
             .char_indices()
             .map(|(byte_index, ch)| ShapedGlyph::new(u32::from(ch), byte_index, advance))
             .collect();
+        // Real shapers return an RTL run's glyphs in visual (pen, left-to-right)
+        // order, so the logical-last scalar's glyph comes first. Reversing keeps
+        // each glyph's cluster (source byte offset) intact — they just appear in
+        // reversed order. LTR is already visual == logical.
+        if request.direction().is_rtl() {
+            glyphs.reverse();
+        }
         GlyphRun::new(
             glyphs,
             request.direction(),
@@ -157,6 +174,59 @@ mod tests {
         assert_eq!(run.glyph_at(1).unwrap().cluster(), 1);
         assert_eq!(run.glyph_at(1).unwrap().glyph_id(), u32::from('é'));
         assert_eq!(run.source(), TextRange::new(0, 3));
+    }
+
+    #[test]
+    fn ltr_emits_glyphs_in_logical_order() {
+        // LTR: visual order == logical order, clusters ascending.
+        let shaper = MockTextShaper::new();
+        let request = ShapingRequest::new("abc", mono_face(), 10.0);
+        let run = shaper.shape(&request);
+        let ids: Vec<u32> = run.glyphs().iter().map(ShapedGlyph::glyph_id).collect();
+        let clusters: Vec<usize> = run.glyphs().iter().map(ShapedGlyph::cluster).collect();
+        assert_eq!(ids, vec![u32::from('a'), u32::from('b'), u32::from('c')]);
+        assert_eq!(clusters, vec![0, 1, 2]);
+        // Advances are uniform and the run direction/source are unchanged.
+        assert!(run.glyphs().iter().all(|g| g.x_advance() == 6.0));
+        assert_eq!(run.direction(), TextDirection::LeftToRight);
+        assert_eq!(run.source(), TextRange::new(0, 3));
+    }
+
+    #[test]
+    fn rtl_emits_glyphs_in_visual_reversed_order() {
+        // RTL: the run's glyphs come out in visual (pen) order, so the
+        // logical-last scalar ('c') is first. Clusters are the SOURCE byte
+        // offsets, preserved but reversed; advances stay uniform.
+        let shaper = MockTextShaper::new();
+        let request =
+            ShapingRequest::new("abc", mono_face(), 10.0).with_direction(TextDirection::RightToLeft);
+        let run = shaper.shape(&request);
+        let ids: Vec<u32> = run.glyphs().iter().map(ShapedGlyph::glyph_id).collect();
+        let clusters: Vec<usize> = run.glyphs().iter().map(ShapedGlyph::cluster).collect();
+        assert_eq!(ids, vec![u32::from('c'), u32::from('b'), u32::from('a')]);
+        assert_eq!(clusters, vec![2, 1, 0]);
+        assert!(run.glyphs().iter().all(|g| g.x_advance() == 6.0));
+        // Direction and full-text source range are unchanged by reversal.
+        assert_eq!(run.direction(), TextDirection::RightToLeft);
+        assert_eq!(run.source(), TextRange::new(0, 3));
+    }
+
+    #[test]
+    fn rtl_shaping_is_deterministic() {
+        let shaper = MockTextShaper::new();
+        let request =
+            ShapingRequest::new("abc", mono_face(), 10.0).with_direction(TextDirection::RightToLeft);
+        assert_eq!(shaper.shape(&request), shaper.shape(&request));
+    }
+
+    #[test]
+    fn empty_rtl_text_yields_empty_run() {
+        let shaper = MockTextShaper::new();
+        let request =
+            ShapingRequest::new("", mono_face(), 16.0).with_direction(TextDirection::RightToLeft);
+        let run = shaper.shape(&request);
+        assert!(run.is_empty());
+        assert_eq!(run.source(), TextRange::empty(0));
     }
 
     #[test]
