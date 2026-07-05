@@ -5,6 +5,8 @@ mod font_face;
 pub use font_face::{FontFace, FontMetrics};
 mod font_fallback;
 pub use font_fallback::FontFallback;
+mod font_id;
+pub use font_id::FontId;
 mod font_family;
 pub use font_family::{FontFamily, GenericFamily};
 mod font_provider;
