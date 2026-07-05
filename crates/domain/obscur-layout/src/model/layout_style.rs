@@ -40,8 +40,17 @@ pub struct LayoutStyle {
 
     /// Flex container: the main-axis direction.
     pub flex_direction: FlexDirection,
-    /// Flex container: main-axis distribution of items and free space.
+    /// Flex container: main-axis distribution of items and free space. Also the
+    /// grid container's *inline-axis* (column) distribution of leftover track
+    /// space (`justify-content`): when the columns' total size is smaller than
+    /// the content width the free space is distributed per this value.
     pub justify_content: JustifyContent,
+    /// Grid container: *block-axis* (row) distribution of leftover track space
+    /// (`align-content`): when the rows' total size is smaller than the content
+    /// height the free space is distributed per this value. Ignored by flex.
+    /// Defaults to [`JustifyContent::FlexStart`] (no distribution), so a default
+    /// grid packs its rows at the top exactly as before.
+    pub align_content: JustifyContent,
     /// Flex container: cross-axis alignment of items. Also the grid container's
     /// default *block-axis* (`align-items`) alignment of each item within its
     /// cell.
@@ -116,6 +125,7 @@ impl Default for LayoutStyle {
             border: Insets::uniform(0.0),
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::FlexStart,
+            align_content: JustifyContent::FlexStart,
             align_items: AlignItems::Stretch,
             justify_items: AlignItems::Stretch,
             align_self: AlignSelf::Auto,
@@ -236,6 +246,7 @@ mod tests {
         assert_eq!(style.border, Insets::uniform(0.0));
         assert_eq!(style.flex_direction, FlexDirection::Row);
         assert_eq!(style.justify_content, JustifyContent::FlexStart);
+        assert_eq!(style.align_content, JustifyContent::FlexStart);
         assert_eq!(style.align_items, AlignItems::Stretch);
         assert_eq!(style.justify_items, AlignItems::Stretch);
         assert_eq!(style.align_self, AlignSelf::Auto);

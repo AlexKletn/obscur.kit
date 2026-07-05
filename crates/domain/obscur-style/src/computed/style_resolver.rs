@@ -82,6 +82,7 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::Display,
     PropertyId::FlexDirection,
     PropertyId::JustifyContent,
+    PropertyId::AlignContent,
     PropertyId::AlignItems,
     PropertyId::JustifyItems,
     PropertyId::AlignSelf,
@@ -185,6 +186,7 @@ impl StyleResolver {
             | PropertyId::Visibility
             | PropertyId::FlexDirection
             | PropertyId::JustifyContent
+            | PropertyId::AlignContent
             | PropertyId::AlignItems
             // The grid alignment keyword initials (`justify-items` / `align-items`
             // stretch, `justify-self` / `align-self` auto) likewise need the
@@ -754,6 +756,7 @@ mod tests {
                 | PropertyId::FlexShrink
                 | PropertyId::FlexDirection
                 | PropertyId::JustifyContent
+                | PropertyId::AlignContent
                 | PropertyId::AlignItems
                 | PropertyId::JustifyItems
                 | PropertyId::AlignSelf
@@ -804,6 +807,7 @@ mod tests {
             PropertyId::FlexShrink,
             PropertyId::FlexDirection,
             PropertyId::JustifyContent,
+            PropertyId::AlignContent,
             PropertyId::AlignItems,
             PropertyId::JustifyItems,
             PropertyId::AlignSelf,
@@ -939,6 +943,7 @@ mod tests {
             PropertyId::Display,
             PropertyId::FlexDirection,
             PropertyId::JustifyContent,
+            PropertyId::AlignContent,
             PropertyId::AlignItems,
             PropertyId::FontStyle,
             PropertyId::Direction,

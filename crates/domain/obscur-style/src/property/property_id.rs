@@ -76,8 +76,13 @@ pub enum PropertyId {
     /// [`crate::property::layout_keyword`]).
     FlexDirection,
     /// The `justify-content` property (Keyword-valued; see
-    /// [`crate::property::layout_keyword`]).
+    /// [`crate::property::layout_keyword`]). On a grid container this is the
+    /// *inline-axis* (column) distribution of leftover track space.
     JustifyContent,
+    /// The `align-content` property (Keyword-valued; see
+    /// [`crate::property::layout_keyword`]). On a grid container this is the
+    /// *block-axis* (row) distribution of leftover track space. NOT inherited.
+    AlignContent,
     /// The `align-items` property (Keyword-valued; see
     /// [`crate::property::layout_keyword`]). On a grid container this is also the
     /// default *block-axis* alignment of each item within its cell.
@@ -196,6 +201,7 @@ impl PropertyId {
             Self::FlexShrink => "flex-shrink",
             Self::FlexDirection => "flex-direction",
             Self::JustifyContent => "justify-content",
+            Self::AlignContent => "align-content",
             Self::AlignItems => "align-items",
             Self::JustifyItems => "justify-items",
             Self::AlignSelf => "align-self",
@@ -261,6 +267,7 @@ impl PropertyId {
             | Self::FlexShrink
             | Self::FlexDirection
             | Self::JustifyContent
+            | Self::AlignContent
             | Self::AlignItems
             | Self::JustifyItems
             | Self::AlignSelf
@@ -327,8 +334,21 @@ mod tests {
         assert_eq!(PropertyId::FlexShrink.name(), "flex-shrink");
         assert_eq!(PropertyId::FlexDirection.name(), "flex-direction");
         assert_eq!(PropertyId::JustifyContent.name(), "justify-content");
+        assert_eq!(PropertyId::AlignContent.name(), "align-content");
         assert_eq!(PropertyId::AlignItems.name(), "align-items");
         assert_eq!(PropertyId::FontSize.name(), "font-size");
+    }
+
+    #[test]
+    fn align_content_name_and_not_inherited() {
+        assert_eq!(PropertyId::AlignContent.name(), "align-content");
+        // Like the other layout / box properties, `align-content` resets per
+        // element rather than inheriting.
+        assert!(
+            !PropertyId::AlignContent
+                .default_inheritance()
+                .is_inherited()
+        );
     }
 
     #[test]

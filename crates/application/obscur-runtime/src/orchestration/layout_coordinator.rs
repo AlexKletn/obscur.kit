@@ -465,6 +465,9 @@ fn measure_ellipsis_glyph(
 ///   reserved `FLEX_*` handles (default `Row`).
 /// * `justify_content` ← [`PropertyId::JustifyContent`] keyword against the
 ///   reserved `JUSTIFY_*` handles (default `FlexStart`).
+/// * `align_content` ← [`PropertyId::AlignContent`] keyword against the same
+///   reserved `JUSTIFY_*` handles (grid row-track distribution; default
+///   `FlexStart`).
 /// * `align_items` ← [`PropertyId::AlignItems`] keyword against the reserved
 ///   `ALIGN_*` handles (default `Stretch`).
 fn layout_style_from(computed: &ComputedStyle, viewport: Size, root_font_size: f32) -> LayoutStyle {
@@ -498,6 +501,9 @@ fn layout_style_from(computed: &ComputedStyle, viewport: Size, root_font_size: f
         border: default.border,
         flex_direction: flex_direction_of(computed),
         justify_content: justify_content_of(computed),
+        // Grid container: block-axis (row) track distribution. Unauthored stays
+        // `FlexStart` (no distribution), so a default grid packs rows at the top.
+        align_content: align_content_of(computed),
         align_items: align_items_of(computed),
         // Grid container item-alignment defaults + per-item overrides. Unauthored
         // values stay `Stretch` / `Auto`, so a default grid fills each cell
@@ -735,19 +741,34 @@ fn flex_direction_of(computed: &ComputedStyle) -> FlexDirection {
     }
 }
 
-/// Resolves the computed `justify-content` keyword to a [`JustifyContent`],
-/// defaulting to [`JustifyContent::FlexStart`].
-///
-/// Note: `space-evenly` has no reserved keyword handle yet, so it cannot be
-/// produced here; it falls through to the default.
-fn justify_content_of(computed: &ComputedStyle) -> JustifyContent {
-    match keyword_sym(computed, PropertyId::JustifyContent) {
+/// Resolves a reserved `JUSTIFY_*` keyword symbol to a [`JustifyContent`],
+/// defaulting to [`JustifyContent::FlexStart`] for an absent or unrecognized
+/// value. Shared by `justify-content` (flex main axis / grid columns) and
+/// `align-content` (grid rows), which use the same closed keyword set.
+fn justify_content_keyword(sym: Option<InternedSymbol>) -> JustifyContent {
+    match sym {
         Some(sym) if sym == layout_keyword::JUSTIFY_CENTER => JustifyContent::Center,
         Some(sym) if sym == layout_keyword::JUSTIFY_END => JustifyContent::FlexEnd,
         Some(sym) if sym == layout_keyword::JUSTIFY_SPACE_BETWEEN => JustifyContent::SpaceBetween,
         Some(sym) if sym == layout_keyword::JUSTIFY_SPACE_AROUND => JustifyContent::SpaceAround,
+        Some(sym) if sym == layout_keyword::JUSTIFY_SPACE_EVENLY => JustifyContent::SpaceEvenly,
         _ => JustifyContent::FlexStart,
     }
+}
+
+/// Resolves the computed `justify-content` keyword to a [`JustifyContent`],
+/// defaulting to [`JustifyContent::FlexStart`]. On a grid container this is the
+/// inline-axis (column) distribution of leftover track space.
+fn justify_content_of(computed: &ComputedStyle) -> JustifyContent {
+    justify_content_keyword(keyword_sym(computed, PropertyId::JustifyContent))
+}
+
+/// Resolves the computed `align-content` keyword to a [`JustifyContent`],
+/// defaulting to [`JustifyContent::FlexStart`]. On a grid container this is the
+/// block-axis (row) distribution of leftover track space; it shares the
+/// `justify-content` keyword set.
+fn align_content_of(computed: &ComputedStyle) -> JustifyContent {
+    justify_content_keyword(keyword_sym(computed, PropertyId::AlignContent))
 }
 
 /// Resolves the computed `align-items` keyword to an [`AlignItems`], defaulting

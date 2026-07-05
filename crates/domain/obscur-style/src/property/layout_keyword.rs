@@ -58,6 +58,8 @@ pub const JUSTIFY_END: InternedSymbol = InternedSymbol::from_raw(0x0000_1203);
 pub const JUSTIFY_SPACE_BETWEEN: InternedSymbol = InternedSymbol::from_raw(0x0000_1204);
 /// The `justify-content: space-around` keyword.
 pub const JUSTIFY_SPACE_AROUND: InternedSymbol = InternedSymbol::from_raw(0x0000_1205);
+/// The `justify-content` / `align-content: space-evenly` keyword.
+pub const JUSTIFY_SPACE_EVENLY: InternedSymbol = InternedSymbol::from_raw(0x0000_1206);
 
 // ---- `align-items` keyword values ----
 
@@ -183,8 +185,22 @@ pub fn justify_content_from_name(name: &str) -> Option<InternedSymbol> {
         "flex-end" | "end" => Some(JUSTIFY_END),
         "space-between" => Some(JUSTIFY_SPACE_BETWEEN),
         "space-around" => Some(JUSTIFY_SPACE_AROUND),
+        "space-evenly" => Some(JUSTIFY_SPACE_EVENLY),
         _ => None,
     }
+}
+
+/// Maps an `align-content` keyword string to its reserved [`InternedSymbol`].
+///
+/// `align-content` (the grid container's block-axis track distribution) shares
+/// the exact `justify-content` value grammar (`start` / `end` / `center` /
+/// `space-between` / `space-around` / `space-evenly`, plus the flexbox
+/// `flex-start` / `flex-end` spellings), so this simply delegates to
+/// [`justify_content_from_name`]. Returns [`None`] for any keyword outside that
+/// closed set.
+#[must_use]
+pub fn align_content_from_name(name: &str) -> Option<InternedSymbol> {
+    justify_content_from_name(name)
 }
 
 /// Maps an `align-items` keyword string to its reserved [`InternedSymbol`].
@@ -347,6 +363,7 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         JUSTIFY_END => Some("flex-end"),
         JUSTIFY_SPACE_BETWEEN => Some("space-between"),
         JUSTIFY_SPACE_AROUND => Some("space-around"),
+        JUSTIFY_SPACE_EVENLY => Some("space-evenly"),
         ALIGN_START => Some("flex-start"),
         ALIGN_CENTER => Some("center"),
         ALIGN_END => Some("flex-end"),
@@ -394,6 +411,7 @@ mod tests {
         JUSTIFY_END,
         JUSTIFY_SPACE_BETWEEN,
         JUSTIFY_SPACE_AROUND,
+        JUSTIFY_SPACE_EVENLY,
         ALIGN_START,
         ALIGN_CENTER,
         ALIGN_END,
@@ -463,7 +481,30 @@ mod tests {
             justify_content_from_name("space-around"),
             Some(JUSTIFY_SPACE_AROUND)
         );
-        assert_eq!(justify_content_from_name("space-evenly"), None);
+        assert_eq!(
+            justify_content_from_name("space-evenly"),
+            Some(JUSTIFY_SPACE_EVENLY)
+        );
+    }
+
+    #[test]
+    fn align_content_shares_justify_content_grammar() {
+        // `align-content` delegates to the `justify-content` value grammar,
+        // including the modern `start` / `end` spellings and `space-evenly`.
+        assert_eq!(align_content_from_name("start"), Some(JUSTIFY_START));
+        assert_eq!(align_content_from_name("center"), Some(JUSTIFY_CENTER));
+        assert_eq!(align_content_from_name("end"), Some(JUSTIFY_END));
+        assert_eq!(
+            align_content_from_name("space-between"),
+            Some(JUSTIFY_SPACE_BETWEEN)
+        );
+        assert_eq!(
+            align_content_from_name("space-evenly"),
+            Some(JUSTIFY_SPACE_EVENLY)
+        );
+        assert_eq!(align_content_from_name("stretch"), None);
+        // Round-trips through `name_of`.
+        assert_eq!(name_of(JUSTIFY_SPACE_EVENLY), Some("space-evenly"));
     }
 
     #[test]

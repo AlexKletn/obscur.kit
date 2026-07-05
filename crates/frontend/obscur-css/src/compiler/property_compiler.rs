@@ -257,14 +257,17 @@ fn expand_box_shorthand(
 }
 
 /// Returns the two longhand [`PropertyId`]s (`align`, `justify`) that a
-/// `place-items` / `place-self` shorthand expands into, or [`None`] for any other
-/// name. The CSS `place-*` grammar is `<align> <justify>`, so the *align* side
-/// comes first.
+/// `place-items` / `place-self` / `place-content` shorthand expands into, or
+/// [`None`] for any other name. The CSS `place-*` grammar is `<align> <justify>`,
+/// so the *align* side comes first (`place-content: <align-content>
+/// <justify-content>`).
 fn place_shorthand_sides(name: &str) -> Option<(PropertyId, PropertyId)> {
     if name.eq_ignore_ascii_case("place-items") {
         Some((PropertyId::AlignItems, PropertyId::JustifyItems))
     } else if name.eq_ignore_ascii_case("place-self") {
         Some((PropertyId::AlignSelf, PropertyId::JustifySelf))
+    } else if name.eq_ignore_ascii_case("place-content") {
+        Some((PropertyId::AlignContent, PropertyId::JustifyContent))
     } else {
         None
     }
@@ -633,7 +636,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 46] = [
+    const ALL: [PropertyId; 47] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::Opacity,
@@ -659,6 +662,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::FlexShrink,
         PropertyId::FlexDirection,
         PropertyId::JustifyContent,
+        PropertyId::AlignContent,
         PropertyId::AlignItems,
         PropertyId::JustifyItems,
         PropertyId::AlignSelf,
@@ -832,6 +836,9 @@ fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<Inte
         PropertyId::Display => Some(layout_keyword::display_from_name),
         PropertyId::FlexDirection => Some(layout_keyword::flex_direction_from_name),
         PropertyId::JustifyContent => Some(layout_keyword::justify_content_from_name),
+        // `align-content` shares the `justify-content` distribution value grammar
+        // (`start`/`end`/`center`/`space-*`).
+        PropertyId::AlignContent => Some(layout_keyword::align_content_from_name),
         // `align-items` and the grid container's `justify-items` share the closed
         // start/end/center/stretch keyword set.
         PropertyId::AlignItems | PropertyId::JustifyItems => {
@@ -1826,6 +1833,46 @@ mod tests {
                 (
                     PropertyId::JustifySelf,
                     PropertyValue::Keyword(layout_keyword::ALIGN_AUTO)
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn align_content_maps_to_reserved_symbols() {
+        // `align-content` shares the `justify-content` distribution grammar.
+        assert_eq!(
+            value_of("align-content: space-between"),
+            PropertyValue::Keyword(layout_keyword::JUSTIFY_SPACE_BETWEEN)
+        );
+        assert_eq!(
+            value_of("align-content: space-evenly"),
+            PropertyValue::Keyword(layout_keyword::JUSTIFY_SPACE_EVENLY)
+        );
+        assert_eq!(
+            value_of("align-content: center"),
+            PropertyValue::Keyword(layout_keyword::JUSTIFY_CENTER)
+        );
+    }
+
+    #[test]
+    fn place_content_expands_align_then_justify() {
+        // `place-content: <align-content> <justify-content>` — align side first.
+        let out = compile_all("place-content: center end");
+        let ids: Vec<_> = out
+            .iter()
+            .map(|c| (standard_of(c).property(), standard_of(c).value().clone()))
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                (
+                    PropertyId::AlignContent,
+                    PropertyValue::Keyword(layout_keyword::JUSTIFY_CENTER)
+                ),
+                (
+                    PropertyId::JustifyContent,
+                    PropertyValue::Keyword(layout_keyword::JUSTIFY_END)
                 ),
             ]
         );

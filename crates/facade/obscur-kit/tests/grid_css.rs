@@ -311,3 +311,47 @@ fn percent_and_fr_columns_against_explicit_width() {
     approx(bx, 120.0, "b.x (after the 30% track)");
     approx(bw, 280.0, "b.width (1fr takes the 280px remainder)");
 }
+
+// 10. `justify-content: center` distributes the leftover inline free space: two
+//     fixed `50px` columns (100px total) in a `200px` container leave a 100px
+//     leftover, so the column block is centered — the children land at x = 50/100
+//     (not 0/50). The tracks keep their 50px size; only their positions shift.
+#[test]
+fn justify_content_center_centers_the_column_block() {
+    let (rt, k) = drive(
+        ".grid{display:grid;width:200px;grid-template-columns:50px 50px;justify-content:center} \
+         .a{height:10px} .b{height:10px}",
+        2,
+        400.0,
+        200.0,
+    );
+    approx(geom(&rt, container(&rt)).2, 200.0, "container is its authored 200px");
+    let (ax, _, aw, _) = geom(&rt, k[0]);
+    let (bx, _, bw, _) = geom(&rt, k[1]);
+    approx(aw, 50.0, "a.width (50px fixed track keeps its size)");
+    approx(bw, 50.0, "b.width (50px fixed track keeps its size)");
+    approx(ax, 50.0, "a.x (centered: (200 - 100) / 2)");
+    approx(bx, 100.0, "b.x (second column, after the centered first)");
+}
+
+// 11. `align-content: end` distributes the leftover block free space: two fixed
+//     `50px` rows (100px total) in a `200px`-tall container leave a 100px leftover,
+//     so the whole row block is pushed to the bottom — the stacked children land at
+//     y = 100/150 (not 0/50).
+#[test]
+fn align_content_end_pushes_the_row_block_to_the_bottom() {
+    let (rt, k) = drive(
+        ".grid{display:grid;height:200px;grid-template-columns:1fr;\
+         grid-template-rows:50px 50px;align-content:end} \
+         .a{height:10px} .b{height:10px}",
+        2,
+        300.0,
+        400.0,
+    );
+    approx(geom(&rt, container(&rt)).3, 200.0, "container is its authored 200px tall");
+    let (_, ay, _, ah) = geom(&rt, k[0]);
+    let (_, by, _, _) = geom(&rt, k[1]);
+    approx(ah, 50.0, "a.height (50px fixed row keeps its size)");
+    approx(ay, 100.0, "a.y (rows pushed to the bottom: 200 - 100)");
+    approx(by, 150.0, "b.y (second row, after the pushed first)");
+}

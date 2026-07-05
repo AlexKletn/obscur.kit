@@ -2,7 +2,7 @@
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
-use crate::model::{AlignItems, LayoutBox, LayoutStyle};
+use crate::model::{AlignItems, JustifyContent, LayoutBox, LayoutStyle};
 
 use super::grid::{GridTemplate, TrackSize};
 use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
@@ -282,6 +282,100 @@ fn track_offsets(sizes: &[f32], gap: f32, origin: f32, collapsed: &[bool]) -> Ve
         }
         offsets.push(cursor);
         cursor += size + gap;
+    }
+    offsets
+}
+
+/// The `(leading, extra_gap)` a content-distribution mode contributes when the
+/// tracks along one axis leave leftover free space (spec §10.4, `align-content` /
+/// `justify-content` on a grid container).
+///
+/// `n` non-collapsed tracks occupy `Σ sizes + gap * (n − 1)` of the axis; the
+/// `leftover = content_extent − that` (when positive) is distributed:
+/// * `FlexStart` — nothing (the historical packing; both `0.0`).
+/// * `FlexEnd` — a `leading` of the full leftover, no extra gap.
+/// * `Center` — a `leading` of half the leftover, no extra gap.
+/// * `SpaceBetween` — no leading, an extra `leftover/(n−1)` between tracks (n≥2;
+///   n<2 falls back to `FlexStart`).
+/// * `SpaceAround` — a `leftover/(2n)` half-gap at each end plus `leftover/n`
+///   between adjacent tracks.
+/// * `SpaceEvenly` — an equal `leftover/(n+1)` gap at the ends and between tracks.
+///
+/// A non-positive leftover, an empty axis, or the `FlexStart` default all yield
+/// `(0.0, 0.0)`, so a default grid is byte-identical to the un-distributed
+/// packing.
+fn content_distribution(n: usize, leftover: f32, mode: JustifyContent) -> (f32, f32) {
+    if n == 0 || leftover <= 0.0 {
+        return (0.0, 0.0);
+    }
+    match mode {
+        JustifyContent::FlexStart => (0.0, 0.0),
+        JustifyContent::FlexEnd => (leftover, 0.0),
+        JustifyContent::Center => (leftover / 2.0, 0.0),
+        JustifyContent::SpaceBetween => {
+            if n >= 2 {
+                (0.0, leftover / (n - 1) as f32)
+            } else {
+                (0.0, 0.0)
+            }
+        }
+        JustifyContent::SpaceAround => {
+            let unit = leftover / n as f32;
+            (unit / 2.0, unit)
+        }
+        JustifyContent::SpaceEvenly => {
+            let unit = leftover / (n + 1) as f32;
+            (unit, unit)
+        }
+    }
+}
+
+/// Running start offsets for a track list with leftover free space distributed
+/// per a content-distribution `mode` (`justify-content` on columns /
+/// `align-content` on rows).
+///
+/// This generalises [`track_offsets`]: it computes the leftover
+/// (`content_extent − (Σ non-collapsed sizes + gap * (n − 1))`) and, when it is
+/// positive, shifts the first track by a `leading` offset and inserts an
+/// `extra_gap` between adjacent tracks per [`content_distribution`]. The track
+/// **sizes** are unchanged — only their **positions** move — so items placed in a
+/// track move with it. With the [`FlexStart`](JustifyContent::FlexStart) default
+/// (or no leftover) `leading` and `extra_gap` are both zero and this is
+/// byte-identical to [`track_offsets`].
+fn distributed_track_offsets(
+    sizes: &[f32],
+    gap: f32,
+    origin: f32,
+    collapsed: &[bool],
+    content_extent: f32,
+    mode: JustifyContent,
+) -> Vec<f32> {
+    // Non-collapsed track count and total size, for the leftover computation. A
+    // collapsed (empty `auto-fit`) track contributes neither size nor gap.
+    let mut n = 0_usize;
+    let mut sum = 0.0_f32;
+    for (i, &size) in sizes.iter().enumerate() {
+        if collapsed.get(i).copied().unwrap_or(false) {
+            continue;
+        }
+        n += 1;
+        sum += size;
+    }
+    let leftover = content_extent - (sum + gap * (n.saturating_sub(1) as f32));
+    let (leading, extra_gap) = content_distribution(n, leftover, mode);
+    // The un-distributed default path stays byte-identical to `track_offsets`.
+    if leading == 0.0 && extra_gap == 0.0 {
+        return track_offsets(sizes, gap, origin, collapsed);
+    }
+    let mut offsets = Vec::with_capacity(sizes.len());
+    let mut cursor = origin + leading;
+    for (i, &size) in sizes.iter().enumerate() {
+        if collapsed.get(i).copied().unwrap_or(false) {
+            offsets.push(cursor);
+            continue;
+        }
+        offsets.push(cursor);
+        cursor += size + gap + extra_gap;
     }
     offsets
 }
@@ -798,9 +892,27 @@ impl LayoutAlgorithm for GridLayout {
             }
         }
 
-        // Step 4 & 5: place each item into its (spanned) track cell.
-        let col_offsets = track_offsets(&col_sizes, self.column_gap, padding.left, &col_collapsed);
-        let row_offsets = track_offsets(&row_sizes, self.row_gap, padding.top, &row_collapsed);
+        // Step 4 & 5: place each item into its (spanned) track cell. Leftover free
+        // space on each axis (when the tracks do not fill the content extent) is
+        // distributed per `justify-content` (columns / inline axis) and
+        // `align-content` (rows / block axis); the default `FlexStart` on both
+        // packs the tracks at the start — byte-identical to before.
+        let col_offsets = distributed_track_offsets(
+            &col_sizes,
+            self.column_gap,
+            padding.left,
+            &col_collapsed,
+            content_width,
+            style.justify_content,
+        );
+        let row_offsets = distributed_track_offsets(
+            &row_sizes,
+            self.row_gap,
+            padding.top,
+            &row_collapsed,
+            content_height,
+            style.align_content,
+        );
 
         let mut child_boxes = Vec::with_capacity(count);
         // Bounding box of placed children; starts at the padding origin so an
@@ -899,7 +1011,7 @@ mod tests {
         AutoRepeat, AutoRepeatMode, FixedChildMeasurer, GridAutoFlow, GridLine, GridPlacement,
         LayoutAlgorithm, LayoutChild, TrackList,
     };
-    use crate::model::{Dimension, LayoutStyle};
+    use crate::model::{Dimension, JustifyContent, LayoutStyle};
     use obscur_geometry::{BoxConstraints, Insets, Point, Size};
     use obscur_identity::NodeId;
 
@@ -2134,5 +2246,142 @@ mod tests {
             aligned_in_cell_with(container, AlignSelf::Start, AlignSelf::Auto),
             (0.0, 0.0, 40.0, 100.0)
         );
+    }
+
+    // ---- content distribution: `justify-content` (columns) / `align-content`
+    // (rows) distribute the leftover free space when the tracks are smaller than
+    // the container content extent. Two 50px tracks in a 200px container leave a
+    // 100px leftover.
+
+    /// Lays out two `50px` columns in a 200px-wide container with `justify` and
+    /// returns the two children's `x` offsets.
+    fn distribute_cols(justify: JustifyContent) -> (f32, f32) {
+        let style = LayoutStyle {
+            width: Dimension::Px(200.0),
+            justify_content: justify,
+            ..LayoutStyle::default()
+        };
+        let children = [child(1), child(2)];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 10.0); 2]);
+        let g = grid(
+            vec![TrackSize::Fixed(50.0), TrackSize::Fixed(50.0)],
+            vec![],
+            0.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(200.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        (b[0].origin().x, b[1].origin().x)
+    }
+
+    /// Lays out two `50px` rows (single column) in a 200px-tall container with
+    /// `align` and returns the two children's `y` offsets.
+    fn distribute_rows(align: JustifyContent) -> (f32, f32) {
+        let style = LayoutStyle {
+            height: Dimension::Px(200.0),
+            align_content: align,
+            ..LayoutStyle::default()
+        };
+        let children = [child(1), child(2)];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 10.0); 2]);
+        let g = grid(
+            vec![TrackSize::Fr(1.0)],
+            vec![TrackSize::Fixed(50.0), TrackSize::Fixed(50.0)],
+            0.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(200.0, 200.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        (b[0].origin().y, b[1].origin().y)
+    }
+
+    #[test]
+    fn justify_content_start_is_unshifted_regression() {
+        // The default packs the columns at the start — byte-identical to before.
+        assert_eq!(distribute_cols(JustifyContent::FlexStart), (0.0, 50.0));
+    }
+
+    #[test]
+    fn justify_content_end_shifts_by_full_leftover() {
+        assert_eq!(distribute_cols(JustifyContent::FlexEnd), (100.0, 150.0));
+    }
+
+    #[test]
+    fn justify_content_center_shifts_by_half_leftover() {
+        assert_eq!(distribute_cols(JustifyContent::Center), (50.0, 100.0));
+    }
+
+    #[test]
+    fn justify_content_space_between_puts_leftover_between_tracks() {
+        // n = 2 → the whole 100px leftover becomes the gap between the tracks.
+        assert_eq!(distribute_cols(JustifyContent::SpaceBetween), (0.0, 150.0));
+    }
+
+    #[test]
+    fn justify_content_space_around_half_gaps_at_ends() {
+        // leftover/(2n) = 25 at the start, leftover/n = 50 between the tracks.
+        assert_eq!(distribute_cols(JustifyContent::SpaceAround), (25.0, 125.0));
+    }
+
+    #[test]
+    fn justify_content_space_evenly_equal_gaps_including_ends() {
+        // leftover/(n+1) = 100/3 ≈ 33.33 at each of the three gaps.
+        let (x0, x1) = distribute_cols(JustifyContent::SpaceEvenly);
+        assert!((x0 - 100.0 / 3.0).abs() < 1e-3, "x0 = {x0}");
+        assert!((x1 - (100.0 / 3.0 + 50.0 + 100.0 / 3.0)).abs() < 1e-3, "x1 = {x1}");
+    }
+
+    #[test]
+    fn align_content_distributes_rows_on_the_block_axis() {
+        // The same math on the row (block) axis via `align-content`.
+        assert_eq!(distribute_rows(JustifyContent::FlexStart), (0.0, 50.0));
+        assert_eq!(distribute_rows(JustifyContent::FlexEnd), (100.0, 150.0));
+        assert_eq!(distribute_rows(JustifyContent::Center), (50.0, 100.0));
+        assert_eq!(distribute_rows(JustifyContent::SpaceBetween), (0.0, 150.0));
+        assert_eq!(distribute_rows(JustifyContent::SpaceAround), (25.0, 125.0));
+        let (y0, y1) = distribute_rows(JustifyContent::SpaceEvenly);
+        assert!((y0 - 100.0 / 3.0).abs() < 1e-3, "y0 = {y0}");
+        assert!((y1 - (100.0 / 3.0 + 50.0 + 100.0 / 3.0)).abs() < 1e-3, "y1 = {y1}");
+    }
+
+    #[test]
+    fn content_distribution_axes_are_independent() {
+        // `justify-content: end` on columns must not disturb the row (block) axis,
+        // which keeps its `align-content: start` default.
+        let style = LayoutStyle {
+            width: Dimension::Px(200.0),
+            height: Dimension::Px(200.0),
+            justify_content: JustifyContent::FlexEnd,
+            ..LayoutStyle::default()
+        };
+        let children = [child(1), child(2)];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 10.0); 2]);
+        // 50px 50px columns, one 50px row → both items in row 0.
+        let g = grid(
+            vec![TrackSize::Fixed(50.0), TrackSize::Fixed(50.0)],
+            vec![TrackSize::Fixed(50.0)],
+            0.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(200.0, 200.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // Columns shifted to the end (x = 100 / 150); rows unshifted (y = 0).
+        assert_eq!(b[0].origin(), Point::new(100.0, 0.0));
+        assert_eq!(b[1].origin(), Point::new(150.0, 0.0));
     }
 }
