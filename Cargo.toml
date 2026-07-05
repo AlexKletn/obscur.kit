@@ -75,6 +75,10 @@ harfrust = "0.10"
 # harfrust adapter to read real vertical metrics (`hhea`) for line metrics. Kept
 # at harfrust's exact requirement so the two resolve to one build.
 read-fonts = "0.40.2"
+# Glyph-outline extraction (unhinted) used by the CPU renderer adapter to
+# rasterize real glyph shapes into a `tiny-skia` path (adapter-only; spec §5.2).
+# Pinned to the version already resolved in the lockfile so it shares one build.
+skrifa = "0.42.1"
 # Per-character Unicode `Script` property (ISO-15924) for script itemization
 # (adapter-only; spec §5.10).
 unicode-script = "0.5.8"

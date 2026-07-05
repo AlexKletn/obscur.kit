@@ -26,18 +26,29 @@
 //! - **Text runs** ([`DrawText`]) consume the same pre-shaped
 //!   [`GlyphRun`](obscur_scene::text::GlyphRun) the GPU backend does — text is
 //!   shaped once in `obscur-text`, never here — so both backends agree on glyph
-//!   count and position (spec §5.2 determinism boundary). Lacking real glyph
-//!   outlines, this backend rasterizes each glyph as a solid coverage cell of the
-//!   glyph's advance width and the run's font size; whitespace glyphs draw
-//!   nothing. This is a documented approximation of the mark, not of its layout.
+//!   count and position (spec §5.2 determinism boundary). When the run's font has
+//!   been registered with [`CpuRenderer::register_font`] (mirroring the Vello
+//!   backend's registry), each glyph's real outline is extracted with `skrifa`,
+//!   scaled to the run's font size, placed on its baseline, and filled — honest
+//!   glyph shapes, deterministic for a given font. When no font is registered for
+//!   the run's handle, the backend falls back to a solid coverage cell of the
+//!   glyph's advance width and the run's font size (whitespace glyphs draw
+//!   nothing) — a documented approximation of the mark so device-free callers
+//!   still get a defined result.
 //!
 //! [`DrawText`]: obscur_scene::command::PaintCommand::DrawText
 //!
 //! [`PushLayer`]: obscur_scene::command::PaintCommand::PushLayer
 //! [`PopLayer`]: obscur_scene::command::PaintCommand::PopLayer
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use obscur_capability::SupportLevel;
 use obscur_geometry::{Point, Size};
+use skrifa::instance::{LocationRef, Size as SkrifaSize};
+use skrifa::outline::DrawSettings;
+use skrifa::{FontRef, GlyphId, MetadataProvider};
 use obscur_render::frame::{FrameSubmission, PresentResult};
 use obscur_render::target::RenderTarget;
 use obscur_render::{Renderer, RendererCapabilities, RendererError, RendererId};
@@ -49,6 +60,7 @@ use obscur_scene::path::{FillRule, Path, PathSegment};
 use obscur_scene::text::GlyphRun;
 
 use crate::error::CpuRenderError;
+use crate::renderer::glyph_pen::GlyphPathPen;
 
 /// A software [`Renderer`] backend that rasterizes scenes to a CPU bitmap
 /// (spec §5.2, §2.7).
@@ -68,6 +80,12 @@ pub struct CpuRenderer {
     last_pixmap: Option<tiny_skia::Pixmap>,
     /// How many frames this renderer has rasterized.
     frames_rendered: u64,
+    /// Host-registered font faces keyed by the run font handle (spec §5.2). A run
+    /// tagged with handle `run.font()` is rasterized against the matching sfnt
+    /// bytes; when no font is registered for the handle the run falls back to
+    /// box-coverage cells. The bytes are shared (`Arc`) so `clone` is cheap and a
+    /// borrowed [`FontRef`] is rebuilt per draw (bytes must outlive the borrow).
+    fonts: HashMap<u32, Arc<[u8]>>,
 }
 
 impl CpuRenderer {
@@ -85,7 +103,22 @@ impl CpuRenderer {
                 .custom_shaders(false),
             last_pixmap: None,
             frames_rendered: 0,
+            fonts: HashMap::new(),
         }
+    }
+
+    /// Registers (or replaces) the host-provided sfnt `font_bytes` for the run
+    /// font handle `id` (spec §5.2).
+    ///
+    /// A [`DrawText`](obscur_scene::command::PaintCommand::DrawText) run tagged
+    /// with [`GlyphRun::font`]`() == id` is then rasterized as real glyph
+    /// outlines against these bytes; runs whose handle has no registered font
+    /// fall back to box-coverage cells. Mirrors the Vello backend's
+    /// `register_font(id, bytes)` shape so a host registers the same id↔bytes into
+    /// both and the two backends draw the same faces. The bytes are stored (shared
+    /// via [`Arc`]) and a borrowed [`FontRef`] is rebuilt per draw.
+    pub fn register_font(&mut self, id: u32, font_bytes: Vec<u8>) {
+        self.fonts.insert(id, Arc::from(font_bytes.into_boxed_slice()));
     }
 
     /// The pixels of the most recently rendered frame, or `None` before the
@@ -123,6 +156,7 @@ impl std::fmt::Debug for CpuRenderer {
             .field("capabilities", &self.capabilities)
             .field("has_pixmap", &self.last_pixmap.is_some())
             .field("frames_rendered", &self.frames_rendered)
+            .field("registered_fonts", &self.fonts.len())
             .finish()
     }
 }
@@ -244,7 +278,7 @@ impl Renderer for CpuRenderer {
                 PaintCommand::PushLayer(_) | PaintCommand::PopLayer => {}
                 PaintCommand::DrawText { origin, run, brush } => {
                     let clip = clip_stack.last().and_then(Option::as_ref);
-                    draw_text_run(&mut pixmap, *origin, run, brush, clip, identity);
+                    draw_text_run(&mut pixmap, *origin, run, brush, clip, identity, &self.fonts);
                 }
             }
         }
@@ -383,15 +417,18 @@ fn build_clip_mask(
     }
 }
 
-/// Rasterizes a pre-shaped [`GlyphRun`] at `origin` as one solid coverage cell
-/// per visible glyph (spec §5.2 rasterization approximation).
+/// Rasterizes a pre-shaped [`GlyphRun`] at `origin`, drawing real glyph outlines
+/// when the run's font is registered and box-coverage cells otherwise (spec §5.2).
 ///
 /// The run's glyph positions are authoritative — shaping already ran in the
-/// domain, so this never re-shapes. Each glyph fills the box whose top-left is
-/// `origin + (glyph.x, glyph.y - font_size)` (the baseline sits `font_size` below
-/// the glyph's ascent) sized `advance × font_size`, honoring `clip`. Whitespace
-/// glyphs and non-positive cells draw nothing. With a stop-less gradient brush
-/// (no resolvable color) the whole run is skipped.
+/// domain, so this never re-shapes. When [`GlyphRun::font`] names a font
+/// registered via [`CpuRenderer::register_font`] and its bytes parse as an sfnt,
+/// each glyph's outline is extracted with `skrifa`, scaled to `font_size`, placed
+/// on its baseline pen position, and filled (see [`draw_glyph_outlines`]).
+/// Otherwise — no font registered for the handle, or unparseable bytes — the run
+/// degrades to the documented box-coverage fallback (see [`draw_glyph_boxes`]) so
+/// device-free callers that register no font still get a defined, non-empty mark.
+/// With a stop-less gradient brush (no resolvable color) the whole run is skipped.
 fn draw_text_run(
     pixmap: &mut tiny_skia::Pixmap,
     origin: Point,
@@ -399,6 +436,7 @@ fn draw_text_run(
     brush: &Brush,
     clip: Option<&tiny_skia::Mask>,
     transform: tiny_skia::Transform,
+    fonts: &HashMap<u32, Arc<[u8]>>,
 ) {
     let Some(color) = brush_color(brush) else {
         return;
@@ -407,13 +445,90 @@ fn draw_text_run(
         return;
     };
     let font_size = run.font_size();
+    if font_size <= 0.0 {
+        return;
+    }
+
+    // Real outlines when the run's font is registered and its bytes are a valid
+    // sfnt; box-coverage fallback otherwise.
+    if let Some(bytes) = fonts.get(&run.font())
+        && let Ok(font_ref) = FontRef::new(bytes)
+    {
+        draw_glyph_outlines(pixmap, origin, run, &font_ref, &sk_paint, clip, transform);
+        return;
+    }
+    draw_glyph_boxes(pixmap, origin, run, &sk_paint, clip, transform);
+}
+
+/// Fills each glyph of `run` as its real outline extracted from `font` at the
+/// run's `font_size` (spec §5.2 real glyph rasterization).
+///
+/// For each glyph the outline is drawn (unhinted, no variation) into a
+/// [`GlyphPathPen`] anchored at the baseline pen position
+/// `(origin.x + glyph.x, origin.y + glyph.y)`; `skrifa` yields pixel-scaled,
+/// y-up coordinates that the pen flips into the pixmap's y-down device space. A
+/// glyph absent from the font, with no contours (whitespace, glyph 0), or whose
+/// outline `skrifa`/`tiny-skia` rejects contributes nothing.
+fn draw_glyph_outlines(
+    pixmap: &mut tiny_skia::Pixmap,
+    origin: Point,
+    run: &GlyphRun,
+    font: &FontRef<'_>,
+    sk_paint: &tiny_skia::Paint<'_>,
+    clip: Option<&tiny_skia::Mask>,
+    transform: tiny_skia::Transform,
+) {
+    let outlines = font.outline_glyphs();
+    let size = SkrifaSize::new(run.font_size());
+    for glyph in run.glyphs() {
+        let Some(outline) = outlines.get(GlyphId::new(glyph.glyph_id())) else {
+            continue;
+        };
+        let pen_x = origin.x + glyph.x();
+        let baseline_y = origin.y + glyph.y();
+        let mut pen = GlyphPathPen::new(pen_x, baseline_y);
+        let settings = DrawSettings::unhinted(size, LocationRef::default());
+        if outline.draw(settings, &mut pen).is_err() {
+            continue;
+        }
+        let Some(sk_path) = pen.into_path() else {
+            continue;
+        };
+        pixmap.fill_path(
+            &sk_path,
+            sk_paint,
+            tiny_skia::FillRule::Winding,
+            transform,
+            clip,
+        );
+    }
+}
+
+/// Rasterizes `run` as one solid coverage cell per visible glyph — the fallback
+/// used when no real font is registered for the run's handle (spec §5.2
+/// rasterization approximation).
+///
+/// Each glyph fills the box whose top-left is `origin + (glyph.x, glyph.y -
+/// font_size)` (the baseline sits `font_size` below the glyph's ascent) sized
+/// `advance × font_size`, honoring `clip`. Whitespace glyphs — identified by the
+/// mock shaper's convention that a glyph id is the Unicode scalar — and
+/// non-positive cells draw nothing.
+fn draw_glyph_boxes(
+    pixmap: &mut tiny_skia::Pixmap,
+    origin: Point,
+    run: &GlyphRun,
+    sk_paint: &tiny_skia::Paint<'_>,
+    clip: Option<&tiny_skia::Mask>,
+    transform: tiny_skia::Transform,
+) {
+    let font_size = run.font_size();
     for glyph in run.glyphs() {
         // Skip whitespace: the mock shaper's glyph id is the Unicode scalar.
         if char::from_u32(glyph.glyph_id()).is_none_or(char::is_whitespace) {
             continue;
         }
         let width = glyph.advance();
-        if width <= 0.0 || font_size <= 0.0 {
+        if width <= 0.0 {
             continue;
         }
         let x = origin.x + glyph.x();
@@ -424,7 +539,7 @@ fn draw_text_run(
         let sk_path = tiny_skia::PathBuilder::from_rect(rect);
         pixmap.fill_path(
             &sk_path,
-            &sk_paint,
+            sk_paint,
             tiny_skia::FillRule::Winding,
             transform,
             clip,
@@ -440,6 +555,152 @@ mod tests {
     use obscur_render::target::BitmapTarget;
     use obscur_scene::command::DisplayList;
     use obscur_scene::scene::{SceneGeneration, SceneSnapshot};
+    use obscur_scene::text::{GlyphRun, PositionedGlyph};
+
+    /// Builds a hermetic sfnt (1000 upem, 2 glyphs) whose glyph 1 is a real
+    /// filled square contour spanning font units `x∈[100,900]`, `y∈[0,700]`;
+    /// glyph 0 is the empty `.notdef`. Unlike the harfrust adapter's test font
+    /// (empty `glyf`), this one carries actual outlines so `skrifa` rasterizes a
+    /// non-trivial shape. Only the tables `skrifa` needs to extract an outline by
+    /// glyph id — `head`, `maxp`, `loca`, `glyf` — are emitted, plus `hhea`/`hmtx`
+    /// for a well-formed face; no `cmap`, since the CPU renderer addresses glyphs
+    /// by index, not codepoint.
+    fn outline_font() -> Vec<u8> {
+        fn head() -> Vec<u8> {
+            let mut t = Vec::new();
+            t.extend_from_slice(&0x0001_0000u32.to_be_bytes()); // version
+            t.extend_from_slice(&0u32.to_be_bytes()); // fontRevision
+            t.extend_from_slice(&0u32.to_be_bytes()); // checksumAdjustment
+            t.extend_from_slice(&0x5F0F_3CF5u32.to_be_bytes()); // magicNumber
+            t.extend_from_slice(&0u16.to_be_bytes()); // flags
+            t.extend_from_slice(&1000u16.to_be_bytes()); // unitsPerEm
+            t.extend_from_slice(&0u64.to_be_bytes()); // created
+            t.extend_from_slice(&0u64.to_be_bytes()); // modified
+            t.extend_from_slice(&0i16.to_be_bytes()); // xMin
+            t.extend_from_slice(&0i16.to_be_bytes()); // yMin
+            t.extend_from_slice(&900i16.to_be_bytes()); // xMax
+            t.extend_from_slice(&700i16.to_be_bytes()); // yMax
+            t.extend_from_slice(&0u16.to_be_bytes()); // macStyle
+            t.extend_from_slice(&8u16.to_be_bytes()); // lowestRecPPEM
+            t.extend_from_slice(&0i16.to_be_bytes()); // fontDirectionHint
+            t.extend_from_slice(&0i16.to_be_bytes()); // indexToLocFormat (short)
+            t.extend_from_slice(&0i16.to_be_bytes()); // glyphDataFormat
+            t
+        }
+
+        fn hhea() -> Vec<u8> {
+            let mut t = Vec::new();
+            t.extend_from_slice(&0x0001_0000u32.to_be_bytes()); // version
+            t.extend_from_slice(&800i16.to_be_bytes()); // ascender
+            t.extend_from_slice(&(-200i16).to_be_bytes()); // descender
+            t.extend_from_slice(&0i16.to_be_bytes()); // lineGap
+            t.extend_from_slice(&[0u8; 24]); // advanceWidthMax .. metricDataFormat
+            t.extend_from_slice(&2u16.to_be_bytes()); // numberOfHMetrics
+            t
+        }
+
+        fn maxp() -> Vec<u8> {
+            let mut t = Vec::new();
+            t.extend_from_slice(&0x0000_5000u32.to_be_bytes()); // version 0.5
+            t.extend_from_slice(&2u16.to_be_bytes()); // numGlyphs
+            t
+        }
+
+        fn hmtx() -> Vec<u8> {
+            let mut t = Vec::new();
+            for (advance, lsb) in [(1000u16, 0i16), (1000, 100)] {
+                t.extend_from_slice(&advance.to_be_bytes());
+                t.extend_from_slice(&lsb.to_be_bytes());
+            }
+            t
+        }
+
+        // glyph 1: one closed contour, 4 on-curve points (a filled square).
+        fn glyf() -> Vec<u8> {
+            let mut t = Vec::new();
+            t.extend_from_slice(&1i16.to_be_bytes()); // numberOfContours
+            t.extend_from_slice(&100i16.to_be_bytes()); // xMin
+            t.extend_from_slice(&0i16.to_be_bytes()); // yMin
+            t.extend_from_slice(&900i16.to_be_bytes()); // xMax
+            t.extend_from_slice(&700i16.to_be_bytes()); // yMax
+            t.extend_from_slice(&3u16.to_be_bytes()); // endPtsOfContours[0]
+            t.extend_from_slice(&0u16.to_be_bytes()); // instructionLength
+            t.extend_from_slice(&[0x01, 0x01, 0x01, 0x01]); // flags: all ON_CURVE
+            // x deltas: (100, 900, 900, 100) -> deltas 100, 800, 0, -800
+            for dx in [100i16, 800, 0, -800] {
+                t.extend_from_slice(&dx.to_be_bytes());
+            }
+            // y deltas: (0, 0, 700, 700) -> deltas 0, 0, 700, 0
+            for dy in [0i16, 0, 700, 0] {
+                t.extend_from_slice(&dy.to_be_bytes());
+            }
+            t
+        }
+
+        fn loca(glyf_len: usize) -> Vec<u8> {
+            // Short loca stores offset/2; glyph 0 empty, glyph 1 = [0, glyf_len].
+            let mut t = Vec::new();
+            for off in [0usize, 0, glyf_len] {
+                t.extend_from_slice(&((off / 2) as u16).to_be_bytes());
+            }
+            t
+        }
+
+        let glyf_bytes = glyf();
+        assert_eq!(glyf_bytes.len() % 2, 0, "short loca needs even glyf length");
+        let tables: [(&[u8; 4], Vec<u8>); 6] = [
+            (b"glyf", glyf_bytes.clone()),
+            (b"head", head()),
+            (b"hhea", hhea()),
+            (b"hmtx", hmtx()),
+            (b"loca", loca(glyf_bytes.len())),
+            (b"maxp", maxp()),
+        ];
+
+        let num_tables = tables.len() as u16;
+        let mut offset = 12 + tables.len() * 16;
+        let mut records = Vec::new();
+        let mut body = Vec::new();
+        for (tag, data) in &tables {
+            records.extend_from_slice(*tag);
+            records.extend_from_slice(&0u32.to_be_bytes()); // checksum (unchecked)
+            records.extend_from_slice(&(offset as u32).to_be_bytes());
+            records.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            body.extend_from_slice(data);
+            let pad = (4 - data.len() % 4) % 4;
+            body.extend(std::iter::repeat_n(0u8, pad));
+            offset += data.len() + pad;
+        }
+
+        let mut font = Vec::new();
+        font.extend_from_slice(&0x0001_0000u32.to_be_bytes()); // sfnt version
+        font.extend_from_slice(&num_tables.to_be_bytes());
+        font.extend_from_slice(&0u16.to_be_bytes()); // searchRange
+        font.extend_from_slice(&0u16.to_be_bytes()); // entrySelector
+        font.extend_from_slice(&0u16.to_be_bytes()); // rangeShift
+        font.extend_from_slice(&records);
+        font.extend_from_slice(&body);
+        font
+    }
+
+    /// A scene drawing one instance of glyph `gid` from font handle `font_id` at
+    /// font size 100, baseline at device `y = 100`, into a 100x120 target.
+    fn glyph_submission(gid: u32, font_id: u32) -> FrameSubmission {
+        let run = GlyphRun::new(
+            vec![PositionedGlyph::new(gid, 0, 0.0, 100.0, 90.0)],
+            100.0,
+            "x",
+        )
+        .with_font(font_id);
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawText {
+            origin: Point::new(0.0, 0.0),
+            run,
+            brush: Brush::solid(Color::WHITE),
+        }]);
+        let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(3));
+        let frame = RenderFrame::new(snapshot, Size::new(100.0, 120.0));
+        FrameSubmission::new(frame)
+    }
 
     /// A 16x16 scene with one red rectangle filling the region `(4,4)..(12,12)`.
     fn red_rect_submission() -> FrameSubmission {
@@ -540,8 +801,6 @@ mod tests {
 
     #[test]
     fn draw_text_run_rasterizes_glyph_cells() {
-        use obscur_scene::text::{GlyphRun, PositionedGlyph};
-
         // Two visible glyphs on the baseline at y=16 (font size 16), each 8px
         // wide starting at x=2, y=2. Cells span rows 2..18, cols 2..10 / 10..18.
         let run = GlyphRun::new(
@@ -576,8 +835,6 @@ mod tests {
 
     #[test]
     fn draw_text_whitespace_glyphs_paint_nothing() {
-        use obscur_scene::text::{GlyphRun, PositionedGlyph};
-
         // A single space glyph: it must contribute no coverage.
         let run = GlyphRun::new(
             vec![PositionedGlyph::new(u32::from(' '), 0, 0.0, 16.0, 8.0)],
@@ -622,5 +879,97 @@ mod tests {
         let mut renderer = CpuRenderer::default();
         let result = renderer.render(&submission, &bitmap_target(8.0, 8.0));
         assert!(matches!(result, Ok(PresentResult::Presented { .. })));
+    }
+
+    #[test]
+    fn register_font_populates_registry() {
+        let mut renderer = CpuRenderer::default();
+        assert!(format!("{renderer:?}").contains("registered_fonts: 0"));
+        renderer.register_font(7, outline_font());
+        assert!(format!("{renderer:?}").contains("registered_fonts: 1"));
+        // Re-registering the same id replaces, not grows.
+        renderer.register_font(7, outline_font());
+        assert!(format!("{renderer:?}").contains("registered_fonts: 1"));
+    }
+
+    #[test]
+    fn registered_font_draws_real_glyph_outline() {
+        // Glyph 1 is a square over font units x∈[100,900], y∈[0,700]. At font
+        // size 100 (upem 1000, scale 0.1) with baseline at device y=100, it fills
+        // device x∈[10,90], y∈[30,100].
+        let mut renderer = CpuRenderer::default();
+        renderer.register_font(4, outline_font());
+        renderer
+            .render(&glyph_submission(1, 4), &bitmap_target(100.0, 120.0))
+            .expect("renders");
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+
+        // A pixel well inside the outline is opaque.
+        let inside = pixmap.pixel(50, 65).expect("pixel exists");
+        assert!(inside.alpha() > 200, "glyph interior painted: {}", inside.alpha());
+
+        // A pixel the OLD box-coverage fallback would have filled but the real
+        // outline leaves empty (left of the square's x=10 edge, on the baseline
+        // band) is transparent — proving a real shape, not a full cell.
+        let left_margin = pixmap.pixel(3, 60).expect("pixel exists");
+        assert_eq!(left_margin.alpha(), 0, "left margin outside real outline");
+
+        // A pixel above the square's top (device y<30) is transparent, too.
+        let above = pixmap.pixel(50, 10).expect("pixel exists");
+        assert_eq!(above.alpha(), 0, "above real outline");
+
+        // A far corner stays transparent.
+        assert_eq!(pixmap.pixel(97, 5).expect("pixel exists").alpha(), 0);
+    }
+
+    #[test]
+    fn empty_outline_glyph_draws_nothing() {
+        // Glyph 0 is the empty .notdef: with a real font registered it must
+        // contribute no coverage (no box fallback for a registered font).
+        let mut renderer = CpuRenderer::default();
+        renderer.register_font(4, outline_font());
+        renderer
+            .render(&glyph_submission(0, 4), &bitmap_target(100.0, 120.0))
+            .expect("renders");
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+        assert!(
+            pixmap.pixels().iter().all(|p| p.alpha() == 0),
+            "empty glyph must paint nothing"
+        );
+    }
+
+    #[test]
+    fn unregistered_font_falls_back_to_box() {
+        // Same run, but no font registered for its handle: the box-coverage
+        // fallback fills the full advance×font_size cell, so the left margin that
+        // the real outline left empty is opaque here.
+        let mut renderer = CpuRenderer::default();
+        let result = renderer.render(&glyph_submission(1, 4), &bitmap_target(100.0, 120.0));
+        assert!(matches!(result, Ok(PresentResult::Presented { .. })));
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+        // Cell spans x∈[0,90], y∈[0,100]; the left margin (x=3, y=60) is filled.
+        let left_margin = pixmap.pixel(3, 60).expect("pixel exists");
+        assert!(
+            left_margin.alpha() > 200,
+            "box fallback fills the full cell: {}",
+            left_margin.alpha()
+        );
+    }
+
+    #[test]
+    fn outline_rasterization_is_deterministic() {
+        let mut a = CpuRenderer::default();
+        a.register_font(4, outline_font());
+        a.render(&glyph_submission(1, 4), &bitmap_target(100.0, 120.0))
+            .expect("renders");
+        let mut b = CpuRenderer::default();
+        b.register_font(4, outline_font());
+        b.render(&glyph_submission(1, 4), &bitmap_target(100.0, 120.0))
+            .expect("renders");
+        assert_eq!(
+            a.pixmap().expect("a").data(),
+            b.pixmap().expect("b").data(),
+            "same input + font must yield identical pixels"
+        );
     }
 }

@@ -1726,6 +1726,7 @@ dependencies = [
  "obscur-headless",
  "obscur-render",
  "obscur-scene",
+ "skrifa",
  "tiny-skia",
 ]
 
