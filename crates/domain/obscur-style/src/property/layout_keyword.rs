@@ -108,6 +108,16 @@ pub const TEXT_OVERFLOW_CLIP: InternedSymbol = InternedSymbol::from_raw(0x0000_1
 /// The `text-overflow: ellipsis` keyword.
 pub const TEXT_OVERFLOW_ELLIPSIS: InternedSymbol = InternedSymbol::from_raw(0x0000_1702);
 
+// ---- relative `font-weight` keyword values ----
+
+/// The `font-weight: bolder` keyword. Unlike the absolute weights (which lower
+/// to numbers), this is carried as a reserved handle so the computed-value step
+/// can resolve it *relative* to the parent's computed weight (§4.14).
+pub const FONT_WEIGHT_BOLDER: InternedSymbol = InternedSymbol::from_raw(0x0000_1801);
+/// The `font-weight: lighter` keyword, resolved relative to the parent's
+/// computed weight (§4.14).
+pub const FONT_WEIGHT_LIGHTER: InternedSymbol = InternedSymbol::from_raw(0x0000_1802);
+
 /// Maps a `display` keyword string to its reserved [`InternedSymbol`].
 ///
 /// The input is ASCII-lowercased before matching, so callers may pass authored
@@ -232,6 +242,21 @@ pub fn text_overflow_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
+/// Maps a relative `font-weight` keyword string (`bolder` / `lighter`) to its
+/// reserved [`InternedSymbol`].
+///
+/// The input is ASCII-lowercased before matching. Returns [`None`] for any other
+/// keyword — including the absolute `normal` / `bold` spellings, which lower to
+/// numeric weights rather than reserved handles.
+#[must_use]
+pub fn font_weight_relative_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "bolder" => Some(FONT_WEIGHT_BOLDER),
+        "lighter" => Some(FONT_WEIGHT_LIGHTER),
+        _ => None,
+    }
+}
+
 /// Returns the canonical CSS keyword string for a reserved layout symbol.
 ///
 /// This is the reverse of the `*_from_name` helpers, intended for diagnostics
@@ -275,6 +300,8 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         TEXT_ALIGN_END => Some("end"),
         TEXT_OVERFLOW_CLIP => Some("clip"),
         TEXT_OVERFLOW_ELLIPSIS => Some("ellipsis"),
+        FONT_WEIGHT_BOLDER => Some("bolder"),
+        FONT_WEIGHT_LIGHTER => Some("lighter"),
         _ => None,
     }
 }
@@ -315,6 +342,8 @@ mod tests {
         TEXT_ALIGN_END,
         TEXT_OVERFLOW_CLIP,
         TEXT_OVERFLOW_ELLIPSIS,
+        FONT_WEIGHT_BOLDER,
+        FONT_WEIGHT_LIGHTER,
     ];
 
     #[test]
@@ -419,6 +448,29 @@ mod tests {
         // Round-trips through `name_of`.
         assert_eq!(name_of(TEXT_OVERFLOW_CLIP), Some("clip"));
         assert_eq!(name_of(TEXT_OVERFLOW_ELLIPSIS), Some("ellipsis"));
+    }
+
+    #[test]
+    fn font_weight_relative_maps_known_keywords() {
+        assert_eq!(
+            font_weight_relative_from_name("bolder"),
+            Some(FONT_WEIGHT_BOLDER)
+        );
+        assert_eq!(
+            font_weight_relative_from_name("lighter"),
+            Some(FONT_WEIGHT_LIGHTER)
+        );
+        // Case-insensitive.
+        assert_eq!(
+            font_weight_relative_from_name("BOLDER"),
+            Some(FONT_WEIGHT_BOLDER)
+        );
+        // Absolute keywords and unknowns map to nothing (they lower to numbers).
+        assert_eq!(font_weight_relative_from_name("bold"), None);
+        assert_eq!(font_weight_relative_from_name("normal"), None);
+        // Round-trips through `name_of`.
+        assert_eq!(name_of(FONT_WEIGHT_BOLDER), Some("bolder"));
+        assert_eq!(name_of(FONT_WEIGHT_LIGHTER), Some("lighter"));
     }
 
     #[test]

@@ -30,9 +30,15 @@
 
 use crate::cascade::ResolvedDeclarations;
 use crate::computed::{ComputedStyle, ComputedValue};
-use crate::property::{InheritedProperty, Length, PropertyId, PropertyValue, StyleColor};
+use crate::property::{
+    layout_keyword, InheritedProperty, Length, PropertyId, PropertyValue, StyleColor,
+};
 use obscur_identity::InternedSymbol;
 use std::collections::{HashMap, HashSet};
+
+/// The CSS initial `font-weight` (`normal`), and the weight a relative
+/// `bolder` / `lighter` resolves against when there is no parent weight.
+const NORMAL_FONT_WEIGHT: f32 = 400.0;
 
 /// The Phase-1 longhands the resolver computes.
 ///
@@ -46,6 +52,7 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::Height,
     PropertyId::Display,
     PropertyId::Visibility,
+    PropertyId::FontWeight,
 ];
 
 /// Stateless resolver that computes a node's [`ComputedStyle`] from its cascaded
@@ -193,6 +200,17 @@ impl StyleResolver {
             Some(raw) => {
                 // Step 2: substitute var() (unresolved -> Unset).
                 let value = Self::substitute(raw, custom);
+                // A relative `font-weight` (`bolder` / `lighter`) resolves here,
+                // at the computed-value step, against the parent's already-
+                // computed weight (§4.14) — never as a fixed number.
+                if property == PropertyId::FontWeight
+                    && let PropertyValue::Keyword(symbol) = value
+                    && let Some(bolder) = relative_weight_is_bolder(symbol)
+                {
+                    let resolved =
+                        resolve_relative_font_weight(parent_font_weight(parent), bolder);
+                    return Some(ComputedValue::number(resolved));
+                }
                 self.resolve_specified(property, value, parent)
             }
             // No cascaded value: default inheritance.
@@ -274,6 +292,51 @@ impl StyleResolver {
             }
         }
     }
+}
+
+/// Classifies a reserved relative-`font-weight` handle: `Some(true)` for
+/// `bolder`, `Some(false)` for `lighter`, and [`None`] for any other symbol.
+fn relative_weight_is_bolder(symbol: InternedSymbol) -> Option<bool> {
+    if symbol == layout_keyword::FONT_WEIGHT_BOLDER {
+        Some(true)
+    } else if symbol == layout_keyword::FONT_WEIGHT_LIGHTER {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Reads the parent's computed numeric `font-weight`, defaulting to
+/// [`NORMAL_FONT_WEIGHT`] (400) when there is no parent or the parent did not
+/// compute a numeric weight (the root's implicit parent is `normal`).
+fn parent_font_weight(parent: Option<&ComputedStyle>) -> f32 {
+    parent
+        .and_then(|p| p.get(PropertyId::FontWeight))
+        .and_then(|value| match value.value() {
+            PropertyValue::Number(weight) => Some(*weight),
+            _ => None,
+        })
+        .unwrap_or(NORMAL_FONT_WEIGHT)
+}
+
+/// Resolves a relative `font-weight` (`bolder` / `lighter`) against the parent's
+/// computed weight, per the CSS fixed table (§4.14).
+///
+/// The parent weight is rounded to the nearest hundred and clamped to the
+/// `100..=900` buckets; each bucket maps to a fixed `(bolder, lighter)` pair:
+/// 100/200/300 → (400, 100), 400/500 → (700, 100), 600/700 → (900, 400),
+/// 800/900 → (900, 700).
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn resolve_relative_font_weight(parent_weight: f32, bolder: bool) -> f32 {
+    let bucket = (parent_weight / 100.0).round().clamp(1.0, 9.0) as u16;
+    let (heavier, lighter) = match bucket {
+        1..=3 => (400u16, 100u16),
+        4 | 5 => (700, 100),
+        6 | 7 => (900, 400),
+        // 8..=9 (the clamp guarantees the bucket is within `1..=9`).
+        _ => (900, 700),
+    };
+    f32::from(if bolder { heavier } else { lighter })
 }
 
 #[cfg(test)]
@@ -463,6 +526,89 @@ mod tests {
             computed.custom_property(b),
             Some(&PropertyValue::Number(2.0))
         );
+    }
+
+    /// Reads a computed numeric `font-weight` off a resolved style.
+    fn weight_of(style: &ComputedStyle) -> Option<f32> {
+        match style.get(PropertyId::FontWeight).map(ComputedValue::value) {
+            Some(PropertyValue::Number(n)) => Some(*n),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn relative_font_weight_table() {
+        // The nine CSS buckets, keyed on the parent's computed weight.
+        assert_eq!(resolve_relative_font_weight(100.0, true), 400.0);
+        assert_eq!(resolve_relative_font_weight(100.0, false), 100.0);
+        assert_eq!(resolve_relative_font_weight(400.0, true), 700.0);
+        assert_eq!(resolve_relative_font_weight(400.0, false), 100.0);
+        assert_eq!(resolve_relative_font_weight(500.0, true), 700.0);
+        assert_eq!(resolve_relative_font_weight(600.0, true), 900.0);
+        assert_eq!(resolve_relative_font_weight(600.0, false), 400.0);
+        assert_eq!(resolve_relative_font_weight(700.0, true), 900.0);
+        assert_eq!(resolve_relative_font_weight(700.0, false), 400.0);
+        assert_eq!(resolve_relative_font_weight(800.0, false), 700.0);
+        assert_eq!(resolve_relative_font_weight(900.0, false), 700.0);
+        // In-between values round to the nearest hundred bucket.
+        assert_eq!(resolve_relative_font_weight(430.0, true), 700.0);
+        // Out-of-range weights clamp into `100..=900`.
+        assert_eq!(resolve_relative_font_weight(20.0, true), 400.0);
+        assert_eq!(resolve_relative_font_weight(1500.0, false), 700.0);
+    }
+
+    #[test]
+    fn bolder_resolves_against_parent_computed_weight() {
+        let resolver = StyleResolver::new();
+        let mut parent = ComputedStyle::new();
+        parent.set(PropertyId::FontWeight, ComputedValue::number(700.0));
+
+        let mut cascaded = ResolvedDeclarations::new();
+        cascaded.insert(
+            PropertyId::FontWeight,
+            PropertyValue::Keyword(layout_keyword::FONT_WEIGHT_BOLDER),
+        );
+
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent));
+        assert_eq!(weight_of(&computed), Some(900.0));
+    }
+
+    #[test]
+    fn lighter_without_parent_resolves_against_normal() {
+        let resolver = StyleResolver::new();
+        let mut cascaded = ResolvedDeclarations::new();
+        cascaded.insert(
+            PropertyId::FontWeight,
+            PropertyValue::Keyword(layout_keyword::FONT_WEIGHT_LIGHTER),
+        );
+
+        // No parent -> the implicit parent weight is `normal` (400) -> lighter 100.
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+        assert_eq!(weight_of(&computed), Some(100.0));
+    }
+
+    #[test]
+    fn absolute_font_weight_is_unchanged() {
+        let resolver = StyleResolver::new();
+        let mut cascaded = ResolvedDeclarations::new();
+        cascaded.insert(PropertyId::FontWeight, PropertyValue::Number(500.0));
+
+        // An absolute numeric weight is stored verbatim, regardless of the parent.
+        let mut parent = ComputedStyle::new();
+        parent.set(PropertyId::FontWeight, ComputedValue::number(900.0));
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent));
+        assert_eq!(weight_of(&computed), Some(500.0));
+    }
+
+    #[test]
+    fn absent_font_weight_inherits_parent_weight() {
+        let resolver = StyleResolver::new();
+        let mut parent = ComputedStyle::new();
+        parent.set(PropertyId::FontWeight, ComputedValue::number(700.0));
+
+        // `font-weight` inherits: a child with none takes the parent's weight.
+        let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), Some(&parent));
+        assert_eq!(weight_of(&computed), Some(700.0));
     }
 
     #[test]

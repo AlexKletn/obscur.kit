@@ -121,7 +121,7 @@ mod tests {
     use super::*;
     use obscur_style::cascade::ResolvedDeclarations;
     use obscur_style::computed::ComputedValue;
-    use obscur_style::property::{PropertyId, PropertyValue, StyleColor};
+    use obscur_style::property::{layout_keyword, PropertyId, PropertyValue, StyleColor};
 
     fn node(raw: u64) -> NodeId {
         NodeId::from_raw(raw)
@@ -216,6 +216,40 @@ mod tests {
         // Proves parent-first inheritance: descendants inherit the root's color.
         assert_eq!(color_of(&styles, child), Some(red));
         assert_eq!(color_of(&styles, grandchild), Some(red));
+    }
+
+    #[test]
+    fn relative_font_weight_resolves_top_down_over_the_tree() {
+        // root font-weight:700; child A `bolder` -> 900; child B (none) inherits 700.
+        let (root, a, b) = (node(1), node(2), node(3));
+        let order = vec![(root, None), (a, Some(root)), (b, Some(root))];
+
+        let mut root_decls = ResolvedDeclarations::new();
+        root_decls.insert(PropertyId::FontWeight, PropertyValue::Number(700.0));
+        let mut a_decls = ResolvedDeclarations::new();
+        a_decls.insert(
+            PropertyId::FontWeight,
+            PropertyValue::Keyword(layout_keyword::FONT_WEIGHT_BOLDER),
+        );
+
+        let mut inputs = StyleInputs::new();
+        inputs.set_cascaded(root, root_decls);
+        inputs.set_cascaded(a, a_decls);
+        // Child B has no cascaded font-weight of its own.
+
+        let styles = StyleCoordinator::new().resolve_in_order(&order, &inputs);
+        let weight = |id| match styles
+            .get(&id)
+            .and_then(|s| s.get(PropertyId::FontWeight))
+            .map(ComputedValue::value)
+        {
+            Some(PropertyValue::Number(n)) => Some(*n),
+            _ => None,
+        };
+        // `bolder` resolves against the parent's computed 700 -> 900.
+        assert_eq!(weight(a), Some(900.0));
+        // No authored weight -> inherits the parent's 700.
+        assert_eq!(weight(b), Some(700.0));
     }
 
     #[test]

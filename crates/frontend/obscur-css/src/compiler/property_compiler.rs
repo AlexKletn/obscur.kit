@@ -404,13 +404,16 @@ fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<Inte
     }
 }
 
-/// Lowers a `font-weight` value into a [`PropertyValue::Number`] on the CSS
-/// `1..=1000` weight axis.
+/// Lowers a `font-weight` value on the CSS `1..=1000` weight axis.
 ///
-/// A bare number is taken verbatim; the named keywords map to their numeric
-/// equivalents (`normal` → 400, `bold` → 700). The relative keywords are
-/// resolved to fixed weights for now (`lighter` → 300, `bolder` → 700) rather
-/// than against the inherited weight. The CSS-wide keywords (`inherit` /
+/// A bare number is taken verbatim, and the absolute named keywords map to their
+/// numeric equivalents (`normal` → 400, `bold` → 700), both as a
+/// [`PropertyValue::Number`]. The *relative* keywords (`bolder` / `lighter`)
+/// lower to the reserved [`layout_keyword`] handles
+/// [`FONT_WEIGHT_BOLDER`](layout_keyword::FONT_WEIGHT_BOLDER) /
+/// [`FONT_WEIGHT_LIGHTER`](layout_keyword::FONT_WEIGHT_LIGHTER) instead of fixed
+/// numbers, so the computed-value step can resolve them *relative* to the
+/// parent's computed weight (§4.14). The CSS-wide keywords (`inherit` /
 /// `initial` / `unset`) still take priority. Any other value yields [`None`] so
 /// the declaration degrades to an unsupported-feature diagnostic.
 fn lower_font_weight(values: &[ParsedValue]) -> Option<PropertyValue> {
@@ -420,20 +423,22 @@ fn lower_font_weight(values: &[ParsedValue]) -> Option<PropertyValue> {
             if let Some(wide) = css_wide_keyword(keyword) {
                 return Some(wide);
             }
+            if let Some(symbol) = layout_keyword::font_weight_relative_from_name(keyword) {
+                return Some(PropertyValue::Keyword(symbol));
+            }
             font_weight_keyword(keyword).map(PropertyValue::Number)
         }
         _ => None,
     }
 }
 
-/// Maps a named `font-weight` keyword to its numeric weight, case-insensitively;
-/// [`None`] for any other keyword.
+/// Maps an absolute named `font-weight` keyword to its numeric weight,
+/// case-insensitively; [`None`] for any other keyword (including the relative
+/// `bolder` / `lighter`, which lower to reserved handles).
 fn font_weight_keyword(keyword: &str) -> Option<f32> {
     match keyword.to_ascii_lowercase().as_str() {
         "normal" => Some(400.0),
         "bold" => Some(700.0),
-        "lighter" => Some(300.0),
-        "bolder" => Some(700.0),
         _ => None,
     }
 }
@@ -1312,11 +1317,25 @@ mod tests {
     #[test]
     fn font_weight_lowers_numbers_and_keywords() {
         assert_eq!(value_of("font-weight: 300"), PropertyValue::Number(300.0));
+        assert_eq!(value_of("font-weight: 600"), PropertyValue::Number(600.0));
         assert_eq!(value_of("font-weight: bold"), PropertyValue::Number(700.0));
         assert_eq!(value_of("font-weight: normal"), PropertyValue::Number(400.0));
-        assert_eq!(value_of("font-weight: lighter"), PropertyValue::Number(300.0));
-        assert_eq!(value_of("font-weight: bolder"), PropertyValue::Number(700.0));
         assert_eq!(standard("font-weight: 500").0.property(), PropertyId::FontWeight);
+    }
+
+    #[test]
+    fn font_weight_relative_keywords_lower_to_reserved_handles() {
+        // `bolder` / `lighter` are carried as reserved handles so the computed-
+        // value step can resolve them relative to the parent (§4.14), rather than
+        // being flattened to fixed numbers here.
+        assert_eq!(
+            value_of("font-weight: bolder"),
+            PropertyValue::Keyword(layout_keyword::FONT_WEIGHT_BOLDER)
+        );
+        assert_eq!(
+            value_of("font-weight: lighter"),
+            PropertyValue::Keyword(layout_keyword::FONT_WEIGHT_LIGHTER)
+        );
     }
 
     #[test]
