@@ -1,0 +1,18 @@
+[package]
+name = "obscur-text-harfrust"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+obscur-text = { workspace = true }
+# Pure-Rust HarfBuzz port; the intended real shaping engine (spec §5.10). Its
+# `FontRef` / `Direction` / `Language` are re-exports of `read-fonts`, so no
+# separate font-parse dependency is required.
+harfrust = { workspace = true }
+
+[lints]
+workspace = true

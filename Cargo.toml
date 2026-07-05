@@ -68,6 +68,10 @@ syn = { version = "2", features = ["full", "extra-traits"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 ttf-parser = "0.25.1"
 usvg = { version = "0.46", default-features = false }
+# Pure-Rust HarfBuzz port for real text shaping (adapter-only; spec §5.10). Its
+# `FontRef`/`Direction`/`Language` re-export `read-fonts`, so no extra font-parse
+# dependency is needed here.
+harfrust = "0.10"
 # adapters (optional, wired by the facade behind features)
 obscur-resource-decode = { path = "crates/adapters/obscur-resource-decode" }
 obscur-resource-fs = { path = "crates/adapters/obscur-resource-fs" }
@@ -80,6 +84,7 @@ obscur-window-winit = { path = "crates/adapters/obscur-window-winit" }
 obscur-accessibility-accesskit = { path = "crates/adapters/obscur-accessibility-accesskit" }
 obscur-system-linux = { path = "crates/adapters/obscur-system-linux" }
 obscur-system-web = { path = "crates/adapters/obscur-system-web" }
+obscur-text-harfrust = { path = "crates/adapters/obscur-text-harfrust" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
