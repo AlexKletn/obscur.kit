@@ -79,8 +79,21 @@ pub enum PropertyId {
     /// [`crate::property::layout_keyword`]).
     JustifyContent,
     /// The `align-items` property (Keyword-valued; see
-    /// [`crate::property::layout_keyword`]).
+    /// [`crate::property::layout_keyword`]). On a grid container this is also the
+    /// default *block-axis* alignment of each item within its cell.
     AlignItems,
+    /// The `justify-items` property (Keyword-valued; the grid container's default
+    /// *inline-axis* alignment of each item within its cell). See
+    /// [`crate::property::layout_keyword`].
+    JustifyItems,
+    /// The `align-self` property (Keyword-valued; a grid item's *block-axis*
+    /// alignment override, `auto` inheriting the container `align-items`). See
+    /// [`crate::property::layout_keyword`].
+    AlignSelf,
+    /// The `justify-self` property (Keyword-valued; a grid item's *inline-axis*
+    /// alignment override, `auto` inheriting the container `justify-items`). See
+    /// [`crate::property::layout_keyword`].
+    JustifySelf,
 
     // ---- Grid container (not inherited) ----
     /// The `grid-template-columns` property (a `GridTracks` track list).
@@ -174,6 +187,9 @@ impl PropertyId {
             Self::FlexDirection => "flex-direction",
             Self::JustifyContent => "justify-content",
             Self::AlignItems => "align-items",
+            Self::JustifyItems => "justify-items",
+            Self::AlignSelf => "align-self",
+            Self::JustifySelf => "justify-self",
             Self::GridTemplateColumns => "grid-template-columns",
             Self::GridTemplateRows => "grid-template-rows",
             Self::GridTemplateAreas => "grid-template-areas",
@@ -234,6 +250,9 @@ impl PropertyId {
             | Self::FlexDirection
             | Self::JustifyContent
             | Self::AlignItems
+            | Self::JustifyItems
+            | Self::AlignSelf
+            | Self::JustifySelf
             | Self::GridTemplateColumns
             | Self::GridTemplateRows
             | Self::GridTemplateAreas
@@ -366,6 +385,26 @@ mod tests {
                 .default_inheritance()
                 .is_inherited()
         );
+    }
+
+    #[test]
+    fn grid_alignment_names_and_not_inherited() {
+        assert_eq!(PropertyId::JustifyItems.name(), "justify-items");
+        assert_eq!(PropertyId::AlignSelf.name(), "align-self");
+        assert_eq!(PropertyId::JustifySelf.name(), "justify-self");
+        // Like the other layout / box properties, the alignment properties reset
+        // per element rather than inheriting.
+        for id in [
+            PropertyId::JustifyItems,
+            PropertyId::AlignSelf,
+            PropertyId::JustifySelf,
+        ] {
+            assert!(
+                !id.default_inheritance().is_inherited(),
+                "{} should not inherit",
+                id.name()
+            );
+        }
     }
 
     #[test]

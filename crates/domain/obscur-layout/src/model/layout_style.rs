@@ -1,7 +1,7 @@
 //! Layout's own per-node input style.
 
 use crate::algorithm::{GridAutoFlow, GridPlacement};
-use crate::model::{AlignItems, Dimension, FlexDirection, JustifyContent, LayoutDisplay};
+use crate::model::{AlignItems, AlignSelf, Dimension, FlexDirection, JustifyContent, LayoutDisplay};
 use obscur_geometry::Insets;
 
 /// The computed layout input for a single node (spec §2.3, §4.1).
@@ -42,8 +42,19 @@ pub struct LayoutStyle {
     pub flex_direction: FlexDirection,
     /// Flex container: main-axis distribution of items and free space.
     pub justify_content: JustifyContent,
-    /// Flex container: cross-axis alignment of items.
+    /// Flex container: cross-axis alignment of items. Also the grid container's
+    /// default *block-axis* (`align-items`) alignment of each item within its
+    /// cell.
     pub align_items: AlignItems,
+    /// Grid container: default *inline-axis* (`justify-items`) alignment of each
+    /// item within its cell. Ignored by flex. Default [`AlignItems::Stretch`].
+    pub justify_items: AlignItems,
+    /// Grid item: per-item *block-axis* (`align-self`) alignment override.
+    /// [`AlignSelf::Auto`] (the default) inherits the container's `align-items`.
+    pub align_self: AlignSelf,
+    /// Grid item: per-item *inline-axis* (`justify-self`) alignment override.
+    /// [`AlignSelf::Auto`] (the default) inherits the container's `justify-items`.
+    pub justify_self: AlignSelf,
     /// Flex container: gap between adjacent items, in logical pixels.
     pub gap: f32,
 
@@ -106,6 +117,9 @@ impl Default for LayoutStyle {
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::FlexStart,
             align_items: AlignItems::Stretch,
+            justify_items: AlignItems::Stretch,
+            align_self: AlignSelf::Auto,
+            justify_self: AlignSelf::Auto,
             gap: 0.0,
             flex_grow: 0.0,
             flex_shrink: 1.0,
@@ -171,12 +185,42 @@ impl LayoutStyle {
     pub const fn grid_auto_flow(&self) -> GridAutoFlow {
         self.grid_auto_flow
     }
+
+    /// Returns a copy with the grid container `justify_items` default replaced.
+    #[must_use]
+    pub const fn with_justify_items(mut self, justify_items: AlignItems) -> Self {
+        self.justify_items = justify_items;
+        self
+    }
+
+    /// Returns a copy with the grid container `align_items` default replaced.
+    #[must_use]
+    pub const fn with_align_items(mut self, align_items: AlignItems) -> Self {
+        self.align_items = align_items;
+        self
+    }
+
+    /// Returns a copy with the grid item `align_self` override replaced.
+    #[must_use]
+    pub const fn with_align_self(mut self, align_self: AlignSelf) -> Self {
+        self.align_self = align_self;
+        self
+    }
+
+    /// Returns a copy with the grid item `justify_self` override replaced.
+    #[must_use]
+    pub const fn with_justify_self(mut self, justify_self: AlignSelf) -> Self {
+        self.justify_self = justify_self;
+        self
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::LayoutStyle;
-    use crate::model::{AlignItems, Dimension, FlexDirection, JustifyContent, LayoutDisplay};
+    use crate::model::{
+        AlignItems, AlignSelf, Dimension, FlexDirection, JustifyContent, LayoutDisplay,
+    };
     use obscur_geometry::Insets;
 
     #[test]
@@ -193,6 +237,9 @@ mod tests {
         assert_eq!(style.flex_direction, FlexDirection::Row);
         assert_eq!(style.justify_content, JustifyContent::FlexStart);
         assert_eq!(style.align_items, AlignItems::Stretch);
+        assert_eq!(style.justify_items, AlignItems::Stretch);
+        assert_eq!(style.align_self, AlignSelf::Auto);
+        assert_eq!(style.justify_self, AlignSelf::Auto);
         assert_eq!(style.gap, 0.0);
         assert_eq!(style.flex_grow, 0.0);
         assert_eq!(style.flex_shrink, 1.0);

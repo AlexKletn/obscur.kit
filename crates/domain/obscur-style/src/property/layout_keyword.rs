@@ -69,6 +69,10 @@ pub const ALIGN_CENTER: InternedSymbol = InternedSymbol::from_raw(0x0000_1302);
 pub const ALIGN_END: InternedSymbol = InternedSymbol::from_raw(0x0000_1303);
 /// The `align-items: stretch` keyword.
 pub const ALIGN_STRETCH: InternedSymbol = InternedSymbol::from_raw(0x0000_1304);
+/// The `justify-self` / `align-self: auto` keyword (inherit the container's
+/// items default). Only the *-self properties accept it; `justify-items` /
+/// `align-items` do not.
+pub const ALIGN_AUTO: InternedSymbol = InternedSymbol::from_raw(0x0000_1305);
 
 // ---- `direction` keyword values ----
 
@@ -198,6 +202,22 @@ pub fn align_items_from_name(name: &str) -> Option<InternedSymbol> {
         "stretch" => Some(ALIGN_STRETCH),
         _ => None,
     }
+}
+
+/// Maps a `justify-self` / `align-self` keyword string to its reserved
+/// [`InternedSymbol`].
+///
+/// The input is ASCII-lowercased before matching. This accepts everything
+/// [`align_items_from_name`] does (`start` / `end` / `center` / `stretch`, plus
+/// the flexbox `flex-start` / `flex-end` spellings) and additionally `auto`
+/// (mapped to [`ALIGN_AUTO`]), the per-item value that inherits the container's
+/// items default. Returns [`None`] for any keyword outside that set.
+#[must_use]
+pub fn align_self_from_name(name: &str) -> Option<InternedSymbol> {
+    if name.eq_ignore_ascii_case("auto") {
+        return Some(ALIGN_AUTO);
+    }
+    align_items_from_name(name)
 }
 
 /// Maps a `direction` keyword string to its reserved [`InternedSymbol`].
@@ -331,6 +351,7 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         ALIGN_CENTER => Some("center"),
         ALIGN_END => Some("flex-end"),
         ALIGN_STRETCH => Some("stretch"),
+        ALIGN_AUTO => Some("auto"),
         DIRECTION_LTR => Some("ltr"),
         DIRECTION_RTL => Some("rtl"),
         FONT_STYLE_NORMAL => Some("normal"),
@@ -377,6 +398,7 @@ mod tests {
         ALIGN_CENTER,
         ALIGN_END,
         ALIGN_STRETCH,
+        ALIGN_AUTO,
         DIRECTION_LTR,
         DIRECTION_RTL,
         FONT_STYLE_NORMAL,
@@ -452,6 +474,24 @@ mod tests {
         assert_eq!(align_items_from_name("flex-end"), Some(ALIGN_END));
         assert_eq!(align_items_from_name("stretch"), Some(ALIGN_STRETCH));
         assert_eq!(align_items_from_name("baseline"), None);
+        // `auto` is only valid on the *-self properties, not `align-items`.
+        assert_eq!(align_items_from_name("auto"), None);
+    }
+
+    #[test]
+    fn align_self_maps_known_keywords_including_auto() {
+        // Accepts everything `align-items` does…
+        assert_eq!(align_self_from_name("flex-start"), Some(ALIGN_START));
+        assert_eq!(align_self_from_name("start"), Some(ALIGN_START));
+        assert_eq!(align_self_from_name("center"), Some(ALIGN_CENTER));
+        assert_eq!(align_self_from_name("end"), Some(ALIGN_END));
+        assert_eq!(align_self_from_name("stretch"), Some(ALIGN_STRETCH));
+        // …plus `auto`, case-insensitively.
+        assert_eq!(align_self_from_name("auto"), Some(ALIGN_AUTO));
+        assert_eq!(align_self_from_name("AUTO"), Some(ALIGN_AUTO));
+        assert_eq!(align_self_from_name("baseline"), None);
+        // Round-trips through `name_of`.
+        assert_eq!(name_of(ALIGN_AUTO), Some("auto"));
     }
 
     #[test]

@@ -159,6 +159,18 @@ impl PropertyCompiler {
         if decl.name.eq_ignore_ascii_case("grid-area") {
             return expand_grid_area_shorthand(decl, specificity, origin, source_order, selector);
         }
+        if let Some((align, justify)) = place_shorthand_sides(&decl.name) {
+            return expand_place_shorthand(
+                decl,
+                align,
+                justify,
+                specificity,
+                origin,
+                source_order,
+                selector,
+                interner,
+            );
+        }
         vec![self.compile(decl, specificity, origin, source_order, selector, interner)]
     }
 }
@@ -230,6 +242,82 @@ fn expand_box_shorthand(
     sides
         .into_iter()
         .zip(four)
+        .map(|(property, value)| {
+            CompiledDeclaration::Standard(Declaration::new(
+                property,
+                value,
+                important,
+                origin,
+                specificity,
+                source_order,
+                selector,
+            ))
+        })
+        .collect()
+}
+
+/// Returns the two longhand [`PropertyId`]s (`align`, `justify`) that a
+/// `place-items` / `place-self` shorthand expands into, or [`None`] for any other
+/// name. The CSS `place-*` grammar is `<align> <justify>`, so the *align* side
+/// comes first.
+fn place_shorthand_sides(name: &str) -> Option<(PropertyId, PropertyId)> {
+    if name.eq_ignore_ascii_case("place-items") {
+        Some((PropertyId::AlignItems, PropertyId::JustifyItems))
+    } else if name.eq_ignore_ascii_case("place-self") {
+        Some((PropertyId::AlignSelf, PropertyId::JustifySelf))
+    } else {
+        None
+    }
+}
+
+/// Expands a `place-items` / `place-self` shorthand into its `align-*` /
+/// `justify-*` longhands (spec CSS Box Alignment).
+///
+/// The value is `<align> [<justify>]`: with a single component both longhands
+/// take it; with two, the FIRST is the align side and the SECOND the justify
+/// side (`place-items: center start` → `align-items: center; justify-items:
+/// start`). Each side is lowered through its own longhand rules (so `place-self`
+/// accepts `auto` while `place-items` does not, and a CSS-wide keyword like
+/// `inherit` still resolves). A side that does not lower, or a value that is
+/// empty or longer than two components, degrades the whole shorthand to a single
+/// [`CompiledDeclaration::Unsupported`].
+#[allow(clippy::too_many_arguments)]
+fn expand_place_shorthand(
+    decl: &ParsedDeclaration,
+    align: PropertyId,
+    justify: PropertyId,
+    specificity: SelectorSpecificity,
+    origin: CascadeOrigin,
+    source_order: u32,
+    selector: Option<SelectorId>,
+    interner: &mut CssSymbolInterner,
+) -> Vec<CompiledDeclaration> {
+    let unsupported = || {
+        vec![CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
+            value_unsupported_kind(&decl.value),
+            &*decl.name,
+            decl.span,
+        ))]
+    };
+    // The two sides' single-component value slices (align first, then justify).
+    let (align_values, justify_values): (&[ParsedValue], &[ParsedValue]) = match &*decl.value {
+        [a] => (std::slice::from_ref(a), std::slice::from_ref(a)),
+        [a, b] => (std::slice::from_ref(a), std::slice::from_ref(b)),
+        _ => return unsupported(),
+    };
+    let (Some(align_value), Some(justify_value)) = (
+        lower_for_property(align, align_values, interner),
+        lower_for_property(justify, justify_values, interner),
+    ) else {
+        return unsupported();
+    };
+    let important = if decl.important {
+        ImportantFlag::Important
+    } else {
+        ImportantFlag::Normal
+    };
+    [(align, align_value), (justify, justify_value)]
+        .into_iter()
         .map(|(property, value)| {
             CompiledDeclaration::Standard(Declaration::new(
                 property,
@@ -533,7 +621,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 41] = [
+    const ALL: [PropertyId; 44] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::Opacity,
@@ -560,6 +648,9 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::FlexDirection,
         PropertyId::JustifyContent,
         PropertyId::AlignItems,
+        PropertyId::JustifyItems,
+        PropertyId::AlignSelf,
+        PropertyId::JustifySelf,
         PropertyId::GridTemplateColumns,
         PropertyId::GridTemplateRows,
         PropertyId::GridTemplateAreas,
@@ -715,7 +806,15 @@ fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<Inte
         PropertyId::Display => Some(layout_keyword::display_from_name),
         PropertyId::FlexDirection => Some(layout_keyword::flex_direction_from_name),
         PropertyId::JustifyContent => Some(layout_keyword::justify_content_from_name),
-        PropertyId::AlignItems => Some(layout_keyword::align_items_from_name),
+        // `align-items` and the grid container's `justify-items` share the closed
+        // start/end/center/stretch keyword set.
+        PropertyId::AlignItems | PropertyId::JustifyItems => {
+            Some(layout_keyword::align_items_from_name)
+        }
+        // The per-item `*-self` properties additionally accept `auto`.
+        PropertyId::AlignSelf | PropertyId::JustifySelf => {
+            Some(layout_keyword::align_self_from_name)
+        }
         PropertyId::Direction => Some(layout_keyword::direction_from_name),
         PropertyId::FontStyle => Some(layout_keyword::font_style_from_name),
         PropertyId::TextAlign => Some(layout_keyword::text_align_from_name),
@@ -1517,6 +1616,106 @@ mod tests {
     fn lowers_number_valued_flex_props() {
         assert_eq!(value_of("flex-grow: 1"), PropertyValue::Number(1.0));
         assert_eq!(value_of("flex-shrink: 0"), PropertyValue::Number(0.0));
+    }
+
+    #[test]
+    fn grid_alignment_property_names_resolve() {
+        assert_eq!(
+            property_id_from_name("justify-items"),
+            Some(PropertyId::JustifyItems)
+        );
+        assert_eq!(
+            property_id_from_name("justify-self"),
+            Some(PropertyId::JustifySelf)
+        );
+        assert_eq!(
+            property_id_from_name("align-self"),
+            Some(PropertyId::AlignSelf)
+        );
+    }
+
+    #[test]
+    fn grid_alignment_keywords_map_to_reserved_symbols() {
+        // `justify-items` shares the `align-items` closed set (no `auto`).
+        assert_eq!(
+            value_of("justify-items: center"),
+            PropertyValue::Keyword(layout_keyword::ALIGN_CENTER)
+        );
+        assert_eq!(
+            value_of("justify-items: start"),
+            PropertyValue::Keyword(layout_keyword::ALIGN_START)
+        );
+        // The `*-self` properties additionally accept `auto`.
+        assert_eq!(
+            value_of("justify-self: center"),
+            PropertyValue::Keyword(layout_keyword::ALIGN_CENTER)
+        );
+        assert_eq!(
+            value_of("align-self: end"),
+            PropertyValue::Keyword(layout_keyword::ALIGN_END)
+        );
+        assert_eq!(
+            value_of("align-self: auto"),
+            PropertyValue::Keyword(layout_keyword::ALIGN_AUTO)
+        );
+    }
+
+    #[test]
+    fn place_items_expands_align_then_justify() {
+        // `place-items: <align> <justify>` — align side first.
+        let out = compile_all("place-items: center start");
+        let ids: Vec<_> = out
+            .iter()
+            .map(|c| (standard_of(c).property(), standard_of(c).value().clone()))
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                (
+                    PropertyId::AlignItems,
+                    PropertyValue::Keyword(layout_keyword::ALIGN_CENTER)
+                ),
+                (
+                    PropertyId::JustifyItems,
+                    PropertyValue::Keyword(layout_keyword::ALIGN_START)
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn place_items_single_value_replicates_to_both_axes() {
+        let out = compile_all("place-items: stretch");
+        let ids: Vec<_> = out.iter().map(|c| standard_of(c).property()).collect();
+        assert_eq!(ids, vec![PropertyId::AlignItems, PropertyId::JustifyItems]);
+        for c in &out {
+            assert_eq!(
+                standard_of(c).value(),
+                &PropertyValue::Keyword(layout_keyword::ALIGN_STRETCH)
+            );
+        }
+    }
+
+    #[test]
+    fn place_self_expands_and_accepts_auto() {
+        let out = compile_all("place-self: end auto");
+        let ids: Vec<_> = out
+            .iter()
+            .map(|c| (standard_of(c).property(), standard_of(c).value().clone()))
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                (
+                    PropertyId::AlignSelf,
+                    PropertyValue::Keyword(layout_keyword::ALIGN_END)
+                ),
+                (
+                    PropertyId::JustifySelf,
+                    PropertyValue::Keyword(layout_keyword::ALIGN_AUTO)
+                ),
+            ]
+        );
     }
 
     #[test]

@@ -83,6 +83,9 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::FlexDirection,
     PropertyId::JustifyContent,
     PropertyId::AlignItems,
+    PropertyId::JustifyItems,
+    PropertyId::AlignSelf,
+    PropertyId::JustifySelf,
     PropertyId::Gap,
     PropertyId::FlexBasis,
     PropertyId::FlexGrow,
@@ -181,6 +184,13 @@ impl StyleResolver {
             | PropertyId::FlexDirection
             | PropertyId::JustifyContent
             | PropertyId::AlignItems
+            // The grid alignment keyword initials (`justify-items` / `align-items`
+            // stretch, `justify-self` / `align-self` auto) likewise need the
+            // interner, so an absent value falls back to the layout defaults
+            // (`Stretch` / `Auto`) — byte-for-byte identical to today.
+            | PropertyId::JustifyItems
+            | PropertyId::AlignSelf
+            | PropertyId::JustifySelf
             // `direction` (`ltr`) / `font-style` (`normal`) keyword initials are
             // likewise deferred, and `font-weight`'s initial (`normal` = 400) is
             // left unresolved so an absent value falls back to the shaping default
@@ -737,6 +747,9 @@ mod tests {
                 | PropertyId::FlexDirection
                 | PropertyId::JustifyContent
                 | PropertyId::AlignItems
+                | PropertyId::JustifyItems
+                | PropertyId::AlignSelf
+                | PropertyId::JustifySelf
                 | PropertyId::GridTemplateColumns
                 | PropertyId::GridTemplateRows
                 | PropertyId::GridTemplateAreas
@@ -782,6 +795,9 @@ mod tests {
             PropertyId::FlexDirection,
             PropertyId::JustifyContent,
             PropertyId::AlignItems,
+            PropertyId::JustifyItems,
+            PropertyId::AlignSelf,
+            PropertyId::JustifySelf,
             PropertyId::GridTemplateColumns,
             PropertyId::GridTemplateRows,
             PropertyId::GridTemplateAreas,

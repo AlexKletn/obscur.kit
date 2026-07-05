@@ -336,3 +336,82 @@ fn named_grid_areas_place_children_by_name() {
     approx(zy, 10.0, "z.y (area c → row 1)");
     approx(zw, 100.0, "z.width (single column 1)");
 }
+
+// ---- Grid item alignment within a cell (`justify-self` / `align-self` and the
+//      `place-self` shorthand), end-to-end through the real pipeline. ----
+
+/// A single `100×100` fixed cell holding one `40×30` child. Callers append the
+/// per-child alignment rule.
+const ONE_CELL: &str =
+    ".grid{display:grid;width:100px;grid-template-columns:100px;grid-template-rows:100px}";
+
+// A `40×30` item in a `100×100` cell with `justify-self:center` (inline/x) and
+// `align-self:end` (block/y): x centered at (100-40)/2 = 30, y at the cell end
+// 100-30 = 70, keeping its natural 40×30 size (no stretch to the cell).
+#[test]
+fn justify_and_align_self_position_item_within_cell() {
+    let (rt, k) = drive(
+        &format!("{ONE_CELL} .a{{width:40px;height:30px;justify-self:center;align-self:end}}"),
+        1,
+        400.0,
+        200.0,
+    );
+    let (ax, ay, aw, ah) = geom(&rt, k[0]);
+    approx(ax, 30.0, "a.x (justify-self:center → (100-40)/2)");
+    approx(ay, 70.0, "a.y (align-self:end → 100-30)");
+    approx(aw, 40.0, "a.width (natural, not stretched)");
+    approx(ah, 30.0, "a.height (natural, not stretched)");
+}
+
+// The `place-self: <align> <justify>` shorthand: `end center` → `align-self:end`
+// (block/y = 70) + `justify-self:center` (inline/x = 30), the same geometry as
+// the two longhands, proving the shorthand expansion reaches layout end-to-end.
+#[test]
+fn place_self_shorthand_positions_item_within_cell() {
+    let (rt, k) = drive(
+        &format!("{ONE_CELL} .a{{width:40px;height:30px;place-self:end center}}"),
+        1,
+        400.0,
+        200.0,
+    );
+    let (ax, ay, aw, ah) = geom(&rt, k[0]);
+    approx(ax, 30.0, "a.x (place-self justify side = center)");
+    approx(ay, 70.0, "a.y (place-self align side = end)");
+    approx(aw, 40.0, "a.width (natural)");
+    approx(ah, 30.0, "a.height (natural)");
+}
+
+// A container `justify-items:center` default applies to an item that leaves
+// `justify-self` at its `auto` default: x centered (30), while the block axis
+// keeps the container's default `stretch` (y=0, height fills the 100px cell).
+#[test]
+fn container_justify_items_default_centers_auto_item() {
+    let (rt, k) = drive(
+        &format!("{ONE_CELL} .grid{{justify-items:center}} .a{{width:40px;height:30px}}"),
+        1,
+        400.0,
+        200.0,
+    );
+    let (ax, ay, aw, ah) = geom(&rt, k[0]);
+    approx(ax, 30.0, "a.x (container justify-items:center)");
+    approx(ay, 0.0, "a.y (align-items default stretch → cell top)");
+    approx(aw, 40.0, "a.width (natural, inline axis centered)");
+    approx(ah, 100.0, "a.height (block axis stretches to fill the cell)");
+}
+
+// Regression: with no alignment authored, an item fills its whole cell exactly
+// as before this feature (default `stretch` on both axes).
+#[test]
+fn default_grid_item_still_fills_its_cell() {
+    let (rt, k) = drive(
+        &format!("{ONE_CELL} .a{{width:40px;height:30px}}"),
+        1,
+        400.0,
+        200.0,
+    );
+    let (ax, ay, aw, ah) = geom(&rt, k[0]);
+    approx(ax, 0.0, "a.x (cell origin)");
+    approx(ay, 0.0, "a.y (cell origin)");
+    approx(aw, 100.0, "a.width (stretched to the 100px cell)");
+    approx(ah, 100.0, "a.height (stretched to the 100px cell)");
+}

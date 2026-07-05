@@ -1,6 +1,8 @@
 //! Model module.
 mod align_items;
 pub use align_items::AlignItems;
+mod align_self;
+pub use align_self::AlignSelf;
 mod dimension;
 pub use dimension::Dimension;
 mod flex_direction;

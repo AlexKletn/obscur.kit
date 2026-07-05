@@ -157,6 +157,8 @@ impl TaffyStyleMapper {
         match align {
             AlignItems::FlexStart => taffy::AlignItems::FlexStart,
             AlignItems::FlexEnd => taffy::AlignItems::FlexEnd,
+            AlignItems::Start => taffy::AlignItems::Start,
+            AlignItems::End => taffy::AlignItems::End,
             AlignItems::Center => taffy::AlignItems::Center,
             AlignItems::Stretch => taffy::AlignItems::Stretch,
         }

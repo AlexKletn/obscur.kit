@@ -9,7 +9,8 @@ use obscur_layout::algorithm::{
     LayoutAlgorithm, LayoutChild,
 };
 use obscur_layout::model::{
-    AlignItems, Dimension, FlexDirection, JustifyContent, LayoutBox, LayoutDisplay, LayoutStyle,
+    AlignItems, AlignSelf, Dimension, FlexDirection, JustifyContent, LayoutBox, LayoutDisplay,
+    LayoutStyle,
 };
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{
@@ -477,6 +478,12 @@ fn layout_style_from(computed: &ComputedStyle, viewport: Size, root_font_size: f
         flex_direction: flex_direction_of(computed),
         justify_content: justify_content_of(computed),
         align_items: align_items_of(computed),
+        // Grid container item-alignment defaults + per-item overrides. Unauthored
+        // values stay `Stretch` / `Auto`, so a default grid fills each cell
+        // exactly as before.
+        justify_items: justify_items_of(computed),
+        align_self: align_self_of(computed, PropertyId::AlignSelf),
+        justify_self: align_self_of(computed, PropertyId::JustifySelf),
         gap: length_px_of(computed, PropertyId::Gap, &ctx),
         flex_grow: number_of(computed, PropertyId::FlexGrow, default.flex_grow),
         flex_shrink: number_of(computed, PropertyId::FlexShrink, default.flex_shrink),
@@ -724,6 +731,36 @@ fn align_items_of(computed: &ComputedStyle) -> AlignItems {
         Some(sym) if sym == layout_keyword::ALIGN_CENTER => AlignItems::Center,
         Some(sym) if sym == layout_keyword::ALIGN_END => AlignItems::FlexEnd,
         _ => AlignItems::Stretch,
+    }
+}
+
+/// Resolves the computed grid-container `justify-items` keyword to an
+/// [`AlignItems`], defaulting to [`AlignItems::Stretch`].
+///
+/// This shares the reserved `ALIGN_*` handle set with `align-items`; the grid
+/// interprets it as the default *inline-axis* cell alignment.
+fn justify_items_of(computed: &ComputedStyle) -> AlignItems {
+    match keyword_sym(computed, PropertyId::JustifyItems) {
+        Some(sym) if sym == layout_keyword::ALIGN_START => AlignItems::Start,
+        Some(sym) if sym == layout_keyword::ALIGN_CENTER => AlignItems::Center,
+        Some(sym) if sym == layout_keyword::ALIGN_END => AlignItems::End,
+        _ => AlignItems::Stretch,
+    }
+}
+
+/// Resolves a computed grid-item `justify-self` / `align-self` keyword (named by
+/// `property`) to an [`AlignSelf`], defaulting to [`AlignSelf::Auto`].
+///
+/// The reserved `ALIGN_AUTO` handle maps to [`AlignSelf::Auto`] (inherit the
+/// container's items default); the start/end/center/stretch handles map to the
+/// matching override. An absent or unrecognized value is [`AlignSelf::Auto`].
+fn align_self_of(computed: &ComputedStyle, property: PropertyId) -> AlignSelf {
+    match keyword_sym(computed, property) {
+        Some(sym) if sym == layout_keyword::ALIGN_START => AlignSelf::Start,
+        Some(sym) if sym == layout_keyword::ALIGN_CENTER => AlignSelf::Center,
+        Some(sym) if sym == layout_keyword::ALIGN_END => AlignSelf::End,
+        Some(sym) if sym == layout_keyword::ALIGN_STRETCH => AlignSelf::Stretch,
+        _ => AlignSelf::Auto,
     }
 }
 
@@ -1365,6 +1402,41 @@ mod tests {
         let computed = ComputedStyle::new();
         let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
         assert_eq!(style.grid_auto_flow(), GridAutoFlow::Row);
+    }
+
+    #[test]
+    fn mapping_reads_grid_item_alignment_keywords() {
+        // Container defaults: `justify-items` / `align-items`.
+        let mut computed = ComputedStyle::new();
+        computed.set(
+            PropertyId::JustifyItems,
+            ComputedValue::keyword(layout_keyword::ALIGN_CENTER),
+        );
+        computed.set(
+            PropertyId::AlignItems,
+            ComputedValue::keyword(layout_keyword::ALIGN_END),
+        );
+        // Per-item overrides: `justify-self` / `align-self` (incl. `auto`).
+        computed.set(
+            PropertyId::JustifySelf,
+            ComputedValue::keyword(layout_keyword::ALIGN_START),
+        );
+        computed.set(
+            PropertyId::AlignSelf,
+            ComputedValue::keyword(layout_keyword::ALIGN_AUTO),
+        );
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        assert_eq!(style.justify_items, AlignItems::Center);
+        assert_eq!(style.align_items, AlignItems::FlexEnd);
+        assert_eq!(style.justify_self, AlignSelf::Start);
+        assert_eq!(style.align_self, AlignSelf::Auto);
+
+        // Absent -> the layout defaults (`Stretch` container, `Auto` item).
+        let empty = ComputedStyle::new();
+        let default_style = layout_style_from(&empty, TEST_VIEWPORT, TEST_ROOT_FONT);
+        assert_eq!(default_style.justify_items, AlignItems::Stretch);
+        assert_eq!(default_style.justify_self, AlignSelf::Auto);
+        assert_eq!(default_style.align_self, AlignSelf::Auto);
     }
 
     #[test]

@@ -310,8 +310,8 @@ impl LayoutAlgorithm for FlexLayout {
             let cross = cross_size[index];
             let cross_start = cross_lead[index]
                 + match style.align_items {
-                    AlignItems::FlexStart | AlignItems::Stretch => 0.0,
-                    AlignItems::FlexEnd => container_cross - cross,
+                    AlignItems::FlexStart | AlignItems::Start | AlignItems::Stretch => 0.0,
+                    AlignItems::FlexEnd | AlignItems::End => container_cross - cross,
                     AlignItems::Center => (container_cross - cross) / 2.0,
                 };
             let (origin, size) = if is_row {

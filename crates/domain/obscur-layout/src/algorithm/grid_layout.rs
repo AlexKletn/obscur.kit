@@ -2,7 +2,7 @@
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
-use crate::model::{LayoutBox, LayoutStyle};
+use crate::model::{AlignItems, LayoutBox, LayoutStyle};
 
 use super::grid::{GridTemplate, TrackSize};
 use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
@@ -490,6 +490,45 @@ fn first_fit_col_major(
     }
 }
 
+/// How a grid item is positioned within its cell on one axis, after resolving
+/// the container default (`justify-items` / `align-items`) against any per-item
+/// override (`justify-self` / `align-self`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CellAlign {
+    /// Fill the cell extent (the default; measured with a fixed size).
+    Stretch,
+    /// Place the item at the cell start.
+    Start,
+    /// Place the item at the cell end (`cell − item`).
+    End,
+    /// Center the item within the cell (`(cell − item) / 2`).
+    Center,
+}
+
+/// Classifies an effective [`AlignItems`] into a grid [`CellAlign`]. The flexbox
+/// spellings (`FlexStart` / `FlexEnd`) fold onto the grid `Start` / `End`
+/// physical alignments so an authored `align-items: start` (which the runtime
+/// maps to [`AlignItems::FlexStart`]) behaves as a grid start.
+const fn cell_align(align: AlignItems) -> CellAlign {
+    match align {
+        AlignItems::Stretch => CellAlign::Stretch,
+        AlignItems::Center => CellAlign::Center,
+        AlignItems::FlexStart | AlignItems::Start => CellAlign::Start,
+        AlignItems::FlexEnd | AlignItems::End => CellAlign::End,
+    }
+}
+
+/// The offset of an `item`-sized box within a `cell`-sized extent for `align`.
+/// `Stretch` and `Start` sit at the cell start; `End` at `cell − item`; `Center`
+/// halves the slack.
+fn align_offset(align: CellAlign, cell: f32, item: f32) -> f32 {
+    match align {
+        CellAlign::Stretch | CellAlign::Start => 0.0,
+        CellAlign::End => cell - item,
+        CellAlign::Center => (cell - item) / 2.0,
+    }
+}
+
 impl LayoutAlgorithm for GridLayout {
     fn layout(
         &self,
@@ -733,19 +772,65 @@ impl LayoutAlgorithm for GridLayout {
         for (i, size) in item_size.iter().enumerate() {
             let (c0, cspan) = (place_col[i], col_span[i]);
             let (r0, rspan) = (place_row[i], row_span[i]);
-            let x = col_offsets[c0];
-            let y = row_offsets[r0];
-            let w = span_extent(&col_sizes, c0, cspan, self.column_gap);
+            let cell_x = col_offsets[c0];
+            let cell_y = row_offsets[r0];
+            let cell_w = span_extent(&col_sizes, c0, cspan, self.column_gap);
             // A single content-sized row keeps the item's own measured height;
-            // otherwise the item fills its spanned row tracks (+ interior gaps).
-            let h = if rspan == 1 && matches!(rows_effective[r0], TrackSize::Auto) {
+            // otherwise the cell fills its spanned row tracks (+ interior gaps).
+            let cell_h = if rspan == 1 && matches!(rows_effective[r0], TrackSize::Auto) {
                 size.height
             } else {
                 span_extent(&row_sizes, r0, rspan, self.row_gap)
             };
+
+            // Resolve this item's effective alignment on each axis: a per-item
+            // `justify-self` / `align-self` (if not `auto`) overrides the
+            // container's `justify-items` / `align-items` default. The inline axis
+            // is the column (x) axis; the block axis is the row (y) axis.
+            let cs = children[i].style();
+            let inline = cell_align(cs.justify_self.resolve(style.justify_items));
+            let block = cell_align(cs.align_self.resolve(style.align_items));
+
+            let (x, y, w, h) = if inline == CellAlign::Stretch && block == CellAlign::Stretch {
+                // Default: the item fills its cell — byte-identical to before.
+                (cell_x, cell_y, cell_w, cell_h)
+            } else {
+                // At least one axis aligns the item within its cell. Re-measure
+                // the natural size: an axis that still stretches keeps a size
+                // fixed to the cell extent, an aligned axis is loose up to it.
+                let natural = measurer.measure_child(
+                    i,
+                    BoxConstraints {
+                        min: Size::new(
+                            if inline == CellAlign::Stretch { cell_w } else { 0.0 },
+                            if block == CellAlign::Stretch { cell_h } else { 0.0 },
+                        ),
+                        max: Size::new(cell_w, cell_h),
+                    },
+                );
+                let iw = if inline == CellAlign::Stretch {
+                    cell_w
+                } else {
+                    natural.width
+                };
+                let ih = if block == CellAlign::Stretch {
+                    cell_h
+                } else {
+                    natural.height
+                };
+                (
+                    cell_x + align_offset(inline, cell_w, iw),
+                    cell_y + align_offset(block, cell_h, ih),
+                    iw,
+                    ih,
+                )
+            };
             child_boxes.push(LayoutBox::new(Rect::new(Point::new(x, y), Size::new(w, h))));
-            max_right = max_right.max(x + w);
-            max_bottom = max_bottom.max(y + h);
+            // The grid's own extent is defined by its tracks (the cell), not by
+            // where an aligned item sits inside it, so the bounding box grows by
+            // the cell — byte-identical to the fill case.
+            max_right = max_right.max(cell_x + cell_w);
+            max_bottom = max_bottom.max(cell_y + cell_h);
         }
 
         // Step 6: border box, clamped. When the container sets an explicit size the
@@ -1792,5 +1877,123 @@ mod tests {
         assert_eq!(b[3].origin(), Point::new(100.0, 10.0)); // col1,row1
         assert_eq!(b[4].origin(), Point::new(0.0, 20.0)); // col0,row2
         assert_eq!(out.size(), Size::new(200.0, 30.0));
+    }
+
+    // ---- Grid item alignment within a cell (`justify-self` / `align-self`). ----
+
+    use crate::model::{AlignItems, AlignSelf};
+
+    /// A single `40×30` child in one `100×100` fixed cell, aligned per-item.
+    fn aligned_in_cell(justify: AlignSelf, align: AlignSelf) -> (f32, f32, f32, f32) {
+        aligned_in_cell_with(LayoutStyle::default(), justify, align)
+    }
+
+    /// As [`aligned_in_cell`], but the container `style` supplies the
+    /// `justify-items` / `align-items` defaults.
+    fn aligned_in_cell_with(
+        style: LayoutStyle,
+        justify: AlignSelf,
+        align: AlignSelf,
+    ) -> (f32, f32, f32, f32) {
+        let child = LayoutChild::new(
+            NodeId::from_raw(1),
+            LayoutStyle::default()
+                .with_justify_self(justify)
+                .with_align_self(align),
+        );
+        // The measurer reports the item's natural size (40×30) regardless of
+        // constraints; the fixed 100×100 tracks are the cell.
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(40.0, 30.0)]);
+        let g = grid(
+            vec![TrackSize::Fixed(100.0)],
+            vec![TrackSize::Fixed(100.0)],
+            0.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &[child],
+            BoxConstraints::loose(Size::new(100.0, 100.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes()[0];
+        (b.origin().x, b.origin().y, b.size().width, b.size().height)
+    }
+
+    // `justify-self:start` + `align-self:start` → the item sits at the cell
+    // origin at its natural 40×30 size (no stretch to the 100×100 cell).
+    #[test]
+    fn self_start_places_at_cell_origin_natural_size() {
+        assert_eq!(
+            aligned_in_cell(AlignSelf::Start, AlignSelf::Start),
+            (0.0, 0.0, 40.0, 30.0)
+        );
+    }
+
+    // `center` on both axes → offset ((100-40)/2, (100-30)/2) = (30, 35).
+    #[test]
+    fn self_center_offsets_by_half_the_slack() {
+        assert_eq!(
+            aligned_in_cell(AlignSelf::Center, AlignSelf::Center),
+            (30.0, 35.0, 40.0, 30.0)
+        );
+    }
+
+    // `end` on both axes → offset (100-40, 100-30) = (60, 70).
+    #[test]
+    fn self_end_places_at_cell_end() {
+        assert_eq!(
+            aligned_in_cell(AlignSelf::End, AlignSelf::End),
+            (60.0, 70.0, 40.0, 30.0)
+        );
+    }
+
+    // `stretch` (the default) → the item fills the 100×100 cell, byte-identical
+    // to the historical grid behaviour.
+    #[test]
+    fn self_stretch_fills_the_cell() {
+        assert_eq!(
+            aligned_in_cell(AlignSelf::Stretch, AlignSelf::Stretch),
+            (0.0, 0.0, 100.0, 100.0)
+        );
+        // The `auto`/`auto` default (no per-item override, container all-stretch)
+        // is likewise a full-cell fill.
+        assert_eq!(
+            aligned_in_cell(AlignSelf::Auto, AlignSelf::Auto),
+            (0.0, 0.0, 100.0, 100.0)
+        );
+    }
+
+    // The two axes are independent: `justify-self:end` (inline/x) with
+    // `align-self:stretch` (block/y) → x at the cell end, y filling the cell.
+    #[test]
+    fn self_axes_are_independent() {
+        assert_eq!(
+            aligned_in_cell(AlignSelf::End, AlignSelf::Stretch),
+            (60.0, 0.0, 40.0, 100.0)
+        );
+    }
+
+    // A container `justify-items:center` default applies to an item whose
+    // `justify-self` is `auto`; the block axis stays at the container's
+    // `align-items` (stretch) default.
+    #[test]
+    fn container_justify_items_applies_when_self_is_auto() {
+        let container = LayoutStyle::default().with_justify_items(AlignItems::Center);
+        assert_eq!(
+            aligned_in_cell_with(container, AlignSelf::Auto, AlignSelf::Auto),
+            (30.0, 0.0, 40.0, 100.0)
+        );
+    }
+
+    // A per-item `justify-self` overrides the container `justify-items` default.
+    #[test]
+    fn self_overrides_container_items_default() {
+        let container = LayoutStyle::default().with_justify_items(AlignItems::Center);
+        // `justify-self:start` beats the container `center`.
+        assert_eq!(
+            aligned_in_cell_with(container, AlignSelf::Start, AlignSelf::Auto),
+            (0.0, 0.0, 40.0, 100.0)
+        );
     }
 }

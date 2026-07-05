@@ -1,15 +1,26 @@
-//! Cross-axis alignment of items in a flex container.
+//! Cross-axis / grid default alignment of items in a container.
 
-/// How a flex container aligns its items along the cross axis (spec §4.1).
+/// How a container aligns its items along the cross axis (flex, spec §4.1) or a
+/// grid item within its cell on one axis (the container default, spec §4.1 grid).
+///
+/// The `FlexStart` / `FlexEnd` spellings are the flexbox cross-axis values; the
+/// `Start` / `End` spellings are the grid (and CSS-align) values. They are kept
+/// as distinct variants so flex layout can key off its own pair without a grid
+/// value ever perturbing it; a grid formatting context treats `FlexStart` and
+/// `Start` (and `FlexEnd` / `End`) as the same physical alignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AlignItems {
-    /// Align items toward the cross-axis start.
+    /// Align items toward the cross-axis start (flexbox spelling).
     FlexStart,
-    /// Align items toward the cross-axis end.
+    /// Align items toward the cross-axis end (flexbox spelling).
     FlexEnd,
-    /// Center items along the cross axis.
+    /// Align items toward the start of the axis (grid / CSS-align spelling).
+    Start,
+    /// Align items toward the end of the axis (grid / CSS-align spelling).
+    End,
+    /// Center items along the axis.
     Center,
-    /// Stretch items to fill the cross axis (the default).
+    /// Stretch items to fill the axis (the default).
     #[default]
     Stretch,
 }
@@ -27,5 +38,7 @@ mod tests {
     fn variants_are_distinct() {
         assert_ne!(AlignItems::FlexStart, AlignItems::FlexEnd);
         assert_ne!(AlignItems::Center, AlignItems::Stretch);
+        assert_ne!(AlignItems::Start, AlignItems::End);
+        assert_ne!(AlignItems::Start, AlignItems::FlexStart);
     }
 }
