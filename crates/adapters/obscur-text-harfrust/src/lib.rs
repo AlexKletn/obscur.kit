@@ -23,6 +23,8 @@
 //! itemization happen upstream; this adapter shapes one already-uniform run.
 #![deny(unsafe_op_in_unsafe_fn)]
 
+mod registry;
 mod shaper;
 
+pub use registry::FontRegistry;
 pub use shaper::HarfrustShaper;
