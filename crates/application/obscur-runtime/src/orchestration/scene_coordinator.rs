@@ -12,9 +12,15 @@ use obscur_scene::paint::Brush;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::ComputedValue;
 use obscur_style::property::{Length, PropertyId, StyleColor};
-use obscur_text::font::{FontAttributes, FontFace, FontFamily, FontMetrics, FontSource, GenericFamily};
-use obscur_text::layout::{TextAlignment, TextLayout, TextLine, TextOverflow};
-use obscur_text::shaping::{CachingShaper, MockTextShaper, ShapingRequest, TextShaper};
+use obscur_text::font::{
+    FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontResolver, FontSource,
+    GenericFamily, MockFontResolver,
+};
+use obscur_text::layout::{ParagraphLayout, TextAlignment, TextOverflow};
+use obscur_text::shaping::{
+    CachingShaper, MockTextShaper, ParagraphShaper, ShapedRun, SingleRunItemizer, TextDirection,
+    TextItemizer, TextShaper,
+};
 use obscur_tree::tree::RetainedTree;
 
 use super::{ComputedStyles, LayoutBoxes};
@@ -67,36 +73,48 @@ const DEFAULT_FONT_SIZE: f32 = 16.0;
 /// resulting [`DisplayList`] is always well-formed (balanced) and can be consumed
 /// by a renderer or `Scene` directly.
 ///
-/// The coordinator owns its shaper and a default resolved face; construct it with
-/// [`new`](Self::new) or [`Default`].
+/// The coordinator owns its paragraph orchestrator and a default resolved face;
+/// construct it with [`new`](Self::new) or [`Default`].
 ///
-/// The shaper is a replaceable [`TextShaper`] port held as a `Box<dyn TextShaper>`.
-/// The default is the deterministic [`MockTextShaper`], so headless determinism is
-/// preserved; a host installs a real engine (e.g. the HarfRust adapter) via
-/// [`set_shaper`](Self::set_shaper). Because `dyn TextShaper` is neither `Clone`
-/// nor `Debug`, the coordinator is not `Clone` and carries a manual [`fmt::Debug`].
+/// Text is shaped through a [`ParagraphShaper`] — the multi-font fallback
+/// orchestrator composing an itemizer, a font resolver, and an inner
+/// [`TextShaper`]. The default composition (a [`SingleRunItemizer`], an empty
+/// [`MockFontResolver`], and a cache-wrapped [`MockTextShaper`]) reproduces the
+/// historical single-font behavior exactly, so headless determinism is preserved;
+/// a host installs a real engine, a Unicode itemizer, and a coverage registry via
+/// [`set_text_shaper`](Self::set_text_shaper),
+/// [`set_itemizer`](Self::set_itemizer), and
+/// [`set_font_resolver`](Self::set_font_resolver). Because `ParagraphShaper` holds
+/// `dyn` ports it is neither `Clone` nor `Debug`, so the coordinator is not
+/// `Clone` and carries a manual [`fmt::Debug`].
 pub struct SceneCoordinator {
-    /// The shaper turning text-node strings into positioned glyphs. The default
-    /// [`MockTextShaper`] is deterministic: identical input yields identical
-    /// glyphs, which is what the cross-backend determinism boundary relies on. A
-    /// host may install a real shaper via [`set_shaper`](Self::set_shaper).
-    shaper: Box<dyn TextShaper>,
-    /// The resolved face requests are shaped against. The mock shaper is
-    /// font-agnostic (it needs no real metrics), so a generic monospace face
-    /// suffices as the default; a real pipeline would resolve this per node via a
-    /// `FontProvider`.
+    /// The multi-font orchestrator turning text-node strings into font-tagged
+    /// runs. The default composition is deterministic (single run, primary face,
+    /// mock glyphs), which is what the cross-backend determinism boundary relies
+    /// on. A host swaps its ports via the setters.
+    paragraph: ParagraphShaper,
+    /// The default fallback face requests resolve to when the resolver covers no
+    /// font for a run. The mock shaper is font-agnostic (it needs no real
+    /// metrics), so a generic monospace face suffices as the default; a real
+    /// pipeline would resolve this per node via a `FontProvider`.
     default_face: FontFace,
 }
 
 impl SceneCoordinator {
-    /// Creates a coordinator with the deterministic [`MockTextShaper`] and a
-    /// generic monospace default face.
+    /// Creates a coordinator whose default paragraph orchestrator reproduces the
+    /// historical single-font behavior (single run, primary face, deterministic
+    /// [`MockTextShaper`]) with a generic monospace default face.
     #[must_use]
     pub fn new() -> Self {
         Self {
-            // Wrap the default mock in the shaping cache so measure/arrange/compose
-            // share one shaped run per unique text within (and across) frames.
-            shaper: Box::new(CachingShaper::new(Box::new(MockTextShaper::new()))),
+            // Single-run itemizer + empty resolver ⇒ one PRIMARY run per text; the
+            // inner mock is cache-wrapped so measure/arrange/compose share one
+            // shaped run per unique request within (and across) frames.
+            paragraph: ParagraphShaper::new(
+                Box::new(SingleRunItemizer::new()),
+                Box::new(MockFontResolver::new()),
+                Box::new(CachingShaper::new(Box::new(MockTextShaper::new()))),
+            ),
             default_face: FontFace::new(
                 FontFamily::generic(GenericFamily::Monospace),
                 FontAttributes::default(),
@@ -106,49 +124,71 @@ impl SceneCoordinator {
         }
     }
 
-    /// Installs `shaper` as the text shaper subsequent [`compose`](Self::compose)
-    /// calls shape runs through, replacing the previous one.
+    /// Installs `shaper` as the inner text shaper subsequent shaping runs through,
+    /// replacing the previous one and keeping the itemizer and resolver in place.
     ///
-    /// The default is the deterministic [`MockTextShaper`]; a host installs a real
-    /// engine (e.g. the HarfRust adapter) so on-screen text uses real, font-specific
-    /// glyph indices. Installing a different shaper changes the emitted
-    /// [`GlyphRun`] — that is the seam the runtime's `set_text_shaper` drives.
-    pub fn set_shaper(&mut self, shaper: Box<dyn TextShaper>) {
-        // Wrap the installed engine in the shaping cache so every shape call
-        // (measure, arrange, compose) is memoized behind one seam. A fresh
-        // wrapper starts with an empty cache, so replacing the shaper never
-        // returns runs shaped by the previous one.
-        self.shaper = Box::new(CachingShaper::new(shaper));
+    /// The engine is wrapped in a **fresh** shaping cache so every shape call
+    /// (measure, arrange, compose) is memoized behind one seam and no run shaped
+    /// by the previous engine survives. Installing a different shaper changes the
+    /// emitted [`GlyphRun`] — that is the seam the runtime's `set_text_shaper`
+    /// drives (e.g. the HarfRust adapter for real, font-specific glyph indices).
+    pub fn set_text_shaper(&mut self, shaper: Box<dyn TextShaper>) {
+        self.paragraph
+            .set_shaper(Box::new(CachingShaper::new(shaper)));
     }
 
-    /// Returns the installed text shaper as a `&dyn` port.
+    /// Installs `itemizer` as the paragraph itemizer, replacing the default
+    /// [`SingleRunItemizer`] (e.g. a real Unicode script/bidi itemizer) so a text
+    /// node splits into multiple script runs.
+    pub fn set_itemizer(&mut self, itemizer: Box<dyn TextItemizer>) {
+        self.paragraph.set_itemizer(itemizer);
+    }
+
+    /// Installs `resolver` as the font resolver, replacing the default empty
+    /// [`MockFontResolver`] (e.g. a coverage registry) so each script run resolves
+    /// to a covering font.
+    pub fn set_font_resolver(&mut self, resolver: Box<dyn FontResolver>) {
+        self.paragraph.set_resolver(resolver);
+    }
+
+    /// Returns the paragraph orchestrator as a shared borrow.
     ///
     /// This is the seam the layout phase measures text through: `SceneCoordinator`
-    /// owns the shaper, so the layout coordinator borrows it from here to size text
-    /// nodes with the **same** engine (and therefore the same advances and line
-    /// metrics) the scene phase later draws with. Because `layout` and
-    /// `scene_composer` are disjoint fields of the runtime, this shared borrow
-    /// coexists with a mutable borrow of the layout coordinator.
+    /// owns the orchestrator, so the layout coordinator borrows it from here to
+    /// size text nodes with the **same** itemizer/resolver/shaper (and therefore
+    /// the same runs, advances, and line metrics) the scene phase later draws
+    /// with. Because `layout` and `scene_composer` are disjoint fields of the
+    /// runtime, this shared borrow coexists with a mutable borrow of the layout
+    /// coordinator.
     #[must_use]
-    pub fn shaper(&self) -> &dyn TextShaper {
-        &*self.shaper
+    pub fn paragraph(&self) -> &ParagraphShaper {
+        &self.paragraph
     }
 
-    /// Shapes `content` at `font_size` and **wraps** it to `max_width` into a
-    /// multi-line [`TextLayout`] (spec §5.10).
+    /// Shapes `content` at `font_size` through the fallback orchestrator and
+    /// **wraps** the font-tagged runs to `max_width` into a multi-line, multi-font
+    /// [`ParagraphLayout`] (spec §5.10).
     ///
-    /// Shaping runs **once**, here: the `obscur-text` shaper produces a single
-    /// [`GlyphRun`](obscur_text::shaping::GlyphRun), which [`TextLayout::wrap`]
-    /// greedily breaks into lines no wider than `max_width` (the arranged box
-    /// width). Because the layout phase measured the box by wrapping the **same**
-    /// shaper's run to the **same** width, the wrapped line count here matches the
-    /// box height layout produced. A `max_width <= 0` yields a single line.
-    fn shape_lines(&self, content: &str, font_size: f32, max_width: f32) -> TextLayout {
-        let request = ShapingRequest::new(content, self.default_face.clone(), font_size);
-        let run = self.shaper.shape(&request);
-        let metrics = self.shaper.line_metrics(font_size);
-        TextLayout::wrap(
-            &run,
+    /// Shaping runs **once**, here: [`shape_paragraph`](ParagraphShaper::shape_paragraph)
+    /// produces one [`ShapedRun`] per script/font run, which
+    /// [`ParagraphLayout::wrap`] greedily breaks into lines no wider than
+    /// `max_width` (the arranged box width), each line split into contiguous
+    /// same-font segments. Because the layout phase measured the box by wrapping
+    /// the **same** orchestrator's runs to the **same** width, the wrapped line
+    /// count here matches the box height layout produced. A `max_width <= 0` yields
+    /// a single line.
+    fn shape_lines(&self, content: &str, font_size: f32, max_width: f32) -> ParagraphLayout {
+        let runs = self.paragraph.shape_paragraph(
+            content,
+            &FontFallback::default_chain(),
+            &FontAttributes::default(),
+            &self.default_face,
+            font_size,
+            TextDirection::LeftToRight,
+        );
+        let metrics = self.paragraph.line_metrics(font_size);
+        ParagraphLayout::wrap(
+            &runs,
             content,
             max_width,
             metrics.line_height(),
@@ -222,12 +262,34 @@ impl SceneCoordinator {
                     let origin = layout_box.origin();
                     let layout = self.shape_lines(content, font_size, layout_box.size().width);
                     for line in layout.lines() {
-                        let range = line.range();
-                        let line_text = content.get(range.start..range.end).unwrap_or(content);
-                        let run = positioned_run(line, font_size, line_text);
-                        let line_origin =
-                            Point::new(origin.x + line.x_offset(), origin.y + line.top());
-                        builder.draw_text(line_origin, run, brush.clone());
+                        let baseline = line.baseline();
+                        let line_top = origin.y + line.top();
+                        let line_left = origin.x + line.x_offset();
+                        if line.segments().is_empty() {
+                            // An empty line (e.g. empty text) still emits a single
+                            // empty run at the line origin so the painted line count
+                            // matches the box height (one line per wrapped line).
+                            let range = line.range();
+                            let line_text =
+                                content.get(range.start..range.end).unwrap_or_default();
+                            let run = GlyphRun::new(Vec::new(), font_size, line_text);
+                            builder.draw_text(Point::new(line_left, line_top), run, brush.clone());
+                            continue;
+                        }
+                        // Walk the line's contiguous same-font segments left to
+                        // right, emitting one DrawText per segment at the running
+                        // pen origin so a multi-font line paints as several
+                        // font-tagged runs (spec §5.10).
+                        let mut seg_x = 0.0_f32;
+                        for segment in line.segments() {
+                            let range = segment.run().source();
+                            let seg_text =
+                                content.get(range.start..range.end).unwrap_or_default();
+                            let run = positioned_run(segment, baseline, font_size, seg_text);
+                            let seg_origin = Point::new(line_left + seg_x, line_top);
+                            builder.draw_text(seg_origin, run, brush.clone());
+                            seg_x += segment.run().advance();
+                        }
                     }
                 }
 
@@ -250,43 +312,41 @@ impl Default for SceneCoordinator {
 }
 
 impl fmt::Debug for SceneCoordinator {
-    /// `dyn TextShaper` is not `Debug`, so the shaper is shown as an opaque
-    /// placeholder; the resolved default face is printed normally.
+    /// `ParagraphShaper` holds `dyn` ports and is not `Debug`, so it is shown as an
+    /// opaque placeholder; the resolved default face is printed normally.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SceneCoordinator")
-            .field("shaper", &"<dyn TextShaper>")
+            .field("paragraph", &"<ParagraphShaper>")
             .field("default_face", &self.default_face)
             .finish()
     }
 }
 
-/// Converts one wrapped [`TextLine`] into a scene [`GlyphRun`], laying its glyphs
-/// out left-to-right into pen positions on the line's baseline.
+/// Converts one line [`segment`](ShapedRun) into a font-tagged scene [`GlyphRun`],
+/// laying its glyphs out left-to-right into pen positions on the line's baseline.
 ///
-/// The line's glyphs carry only per-glyph advances, so the pen accumulates them
-/// from the line's left edge (`0`); each glyph's `y` is the line
-/// [`baseline`](TextLine::baseline) (the ascent within the line box), and the
-/// shaping `x_offset`/`y_offset` are added on top. `text` is the source substring
-/// the line covers, carried on the run for downstream consumers. For a single-line
-/// text node (top `0`, baseline = ascent, `x_offset` `0`) this reproduces the
-/// original single-run behavior exactly.
-fn positioned_run(line: &TextLine, font_size: f32, text: &str) -> GlyphRun {
-    let baseline = line.baseline();
+/// The segment's glyphs carry only per-glyph advances, so the pen accumulates
+/// them from the segment's left edge (`0`, relative to the segment origin the
+/// caller places); each glyph's `y` is the line `baseline` (the ascent within the
+/// line box), and the shaping `x_offset`/`y_offset` are added on top. `text` is
+/// the source substring the segment covers, and the run is tagged with the
+/// segment's [`font`](ShapedRun::font) index so the renderer can pick the right
+/// face. For a single-font line (one segment) this reproduces the original
+/// single-run behavior exactly, with font `0`.
+fn positioned_run(segment: &ShapedRun, baseline: f32, font_size: f32, text: &str) -> GlyphRun {
     let mut pen_x = 0.0_f32;
     let mut glyphs: Vec<PositionedGlyph> = Vec::new();
-    for run in line.runs() {
-        for glyph in run.glyphs() {
-            glyphs.push(PositionedGlyph::new(
-                glyph.glyph_id(),
-                glyph.cluster(),
-                pen_x + glyph.x_offset(),
-                baseline + glyph.y_offset(),
-                glyph.x_advance(),
-            ));
-            pen_x += glyph.x_advance();
-        }
+    for glyph in segment.run().glyphs() {
+        glyphs.push(PositionedGlyph::new(
+            glyph.glyph_id(),
+            glyph.cluster(),
+            pen_x + glyph.x_offset(),
+            baseline + glyph.y_offset(),
+            glyph.x_advance(),
+        ));
+        pen_x += glyph.x_advance();
     }
-    GlyphRun::new(glyphs, font_size, text)
+    GlyphRun::new(glyphs, font_size, text).with_font(segment.font().get())
 }
 
 /// Reads a node's computed `background-color`, if present and color-valued.
@@ -774,7 +834,10 @@ mod tests {
     struct FixedIdShaper(u32);
 
     impl obscur_text::shaping::TextShaper for FixedIdShaper {
-        fn shape(&self, request: &ShapingRequest) -> obscur_text::shaping::GlyphRun {
+        fn shape(
+            &self,
+            request: &obscur_text::shaping::ShapingRequest,
+        ) -> obscur_text::shaping::GlyphRun {
             let glyphs = request
                 .text()
                 .char_indices()
@@ -806,19 +869,92 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(text, box_at(0.0, 0.0, 40.0, 16.0));
 
-        // Default mock shaper: glyph ids are the Unicode scalars.
+        // Default mock shaper: glyph ids are the Unicode scalars, one segment on
+        // the primary face (font 0).
         let mut coordinator = SceneCoordinator::new();
         let mock_runs = text_runs(&coordinator.compose(&tree, &computed, &boxes));
         assert_eq!(mock_runs.len(), 1);
+        assert_eq!(mock_runs[0].1.font(), 0);
         let mock_ids: Vec<u32> = mock_runs[0].1.glyphs().iter().map(|g| g.glyph_id()).collect();
         assert_eq!(mock_ids, vec![u32::from('a'), u32::from('b')]);
 
-        // Install a fixed-id shaper: the emitted run reflects it (ids all 42).
-        coordinator.set_shaper(Box::new(FixedIdShaper(42)));
+        // Install a fixed-id shaper through the runtime seam: the emitted run
+        // reflects it (ids all 42), still one primary-face segment.
+        coordinator.set_text_shaper(Box::new(FixedIdShaper(42)));
         let stub_runs = text_runs(&coordinator.compose(&tree, &computed, &boxes));
         assert_eq!(stub_runs.len(), 1);
+        assert_eq!(stub_runs[0].1.font(), 0);
         let stub_ids: Vec<u32> = stub_runs[0].1.glyphs().iter().map(|g| g.glyph_id()).collect();
         assert_eq!(stub_ids, vec![42, 42]);
         assert_ne!(mock_ids, stub_ids);
+    }
+
+    /// A stub itemizer that cuts the fixed two-script string "abВГ" into a Latin
+    /// run `[0..2)` and a Cyrillic run `[2..6)` (each Cyrillic char is 2 bytes).
+    struct TwoScriptItemizer;
+
+    impl TextItemizer for TwoScriptItemizer {
+        fn itemize(
+            &self,
+            _text: &str,
+            _base: TextDirection,
+        ) -> Vec<obscur_text::shaping::TextItem> {
+            use obscur_text::shaping::{ScriptTag, TextItem};
+            use obscur_text::span::TextRange;
+            vec![
+                TextItem::new(TextRange::new(0, 2), ScriptTag::LATIN, TextDirection::LeftToRight, 0),
+                TextItem::new(
+                    TextRange::new(2, 6),
+                    ScriptTag::CYRILLIC,
+                    TextDirection::LeftToRight,
+                    0,
+                ),
+            ]
+        }
+    }
+
+    #[test]
+    fn multi_font_text_emits_one_font_tagged_run_per_segment() {
+        use obscur_text::font::FontId;
+        use obscur_text::shaping::ScriptTag;
+
+        // A two-script text node "abВГ" in a wide box: one line, two same-font
+        // segments (Latin→font 0, Cyrillic→font 1), so compose emits two DrawText
+        // runs carrying the two distinct fonts.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "abВГ");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(text, ComputedStyle::new());
+        let mut boxes = LayoutBoxes::new();
+        // Wide box, one line tall (line_height 16 at the default 16px font size).
+        boxes.insert(text, box_at(3.0, 4.0, 200.0, 16.0));
+
+        let mut coordinator = SceneCoordinator::new();
+        coordinator.set_itemizer(Box::new(TwoScriptItemizer));
+        let mut resolver = MockFontResolver::new();
+        let face = coordinator.default_face.clone();
+        resolver.register(ScriptTag::LATIN, FontId::new(0), face.clone());
+        resolver.register(ScriptTag::CYRILLIC, FontId::new(1), face);
+        coordinator.set_font_resolver(Box::new(resolver));
+
+        let runs = text_runs(&coordinator.compose(&tree, &computed, &boxes));
+        // Two font-tagged runs on a single line: fonts 0 then 1.
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].1.font(), 0);
+        assert_eq!(runs[1].1.font(), 1);
+        // Both segments paint on the SAME line (same y origin) — one wrapped line,
+        // so box height (16) == painted line count (1) × line_height (16).
+        assert_eq!(runs[0].0.y, runs[1].0.y);
+        assert_eq!(boxes[&text].size().height, 16.0);
+        // The second segment starts to the right of the first by the first
+        // segment's advance (2 glyphs × 9.6), continuing the pen across fonts.
+        assert!((runs[1].0.x - (runs[0].0.x + 2.0 * 9.6)).abs() < 1e-3);
+        // Each segment carries its own script's glyphs.
+        assert_eq!(runs[0].1.text(), "ab");
+        assert_eq!(runs[1].1.text(), "ВГ");
+        assert!(coordinator.compose(&tree, &computed, &boxes).is_balanced());
     }
 }

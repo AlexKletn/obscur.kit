@@ -5,7 +5,8 @@ use crate::font::{
     FontAttributes, FontFace, FontFallback, FontId, FontResolveRequest, FontResolver,
 };
 use crate::shaping::{
-    GlyphRun, ShapedGlyph, ShapedRun, ShapingRequest, TextDirection, TextItemizer, TextShaper,
+    GlyphRun, LineMetrics, ShapedGlyph, ShapedRun, ShapingRequest, TextDirection, TextItemizer,
+    TextShaper,
 };
 use crate::span::TextRange;
 
@@ -45,6 +46,39 @@ impl ParagraphShaper {
             resolver,
             shaper,
         }
+    }
+
+    /// Installs `shaper` as the inner single-run shaper, replacing the previous
+    /// one and leaving the itemizer and resolver in place.
+    ///
+    /// The caller wraps the engine in whatever caching decorator it wants before
+    /// calling this; the orchestrator stores it verbatim.
+    pub fn set_shaper(&mut self, shaper: Box<dyn TextShaper>) {
+        self.shaper = shaper;
+    }
+
+    /// Installs `itemizer` as the run itemizer, replacing the previous one and
+    /// leaving the resolver and inner shaper in place.
+    pub fn set_itemizer(&mut self, itemizer: Box<dyn TextItemizer>) {
+        self.itemizer = itemizer;
+    }
+
+    /// Installs `resolver` as the font resolver, replacing the previous one and
+    /// leaving the itemizer and inner shaper in place.
+    pub fn set_resolver(&mut self, resolver: Box<dyn FontResolver>) {
+        self.resolver = resolver;
+    }
+
+    /// Returns the vertical [`LineMetrics`] for a line at `font_size`, delegating
+    /// to the inner [`TextShaper`].
+    ///
+    /// A paragraph shares one line box height and baseline across all of its
+    /// fonts (spec §5.10), so the inner shaper's metrics — the idealized ratios
+    /// for the mock, real font metrics for an adapter — drive line stacking for
+    /// the whole paragraph.
+    #[must_use]
+    pub fn line_metrics(&self, font_size: f32) -> LineMetrics {
+        self.shaper.line_metrics(font_size)
     }
 
     /// Shapes `text` end to end, returning one [`ShapedRun`] per itemized run in
@@ -275,6 +309,43 @@ mod tests {
         assert_eq!(runs[1].font(), FontId::PRIMARY);
         assert_eq!(runs[1].run().source(), TextRange::new(2, 6));
         assert_eq!(runs[1].run().glyph_at(0).unwrap().cluster(), 2);
+    }
+
+    #[test]
+    fn setters_swap_ports_and_line_metrics_delegates() {
+        // Start single-run (empty resolver → one PRIMARY run), then swap in the
+        // two-script itemizer + a resolver so the same text splits into two fonts.
+        let mut shaper = ParagraphShaper::new(
+            Box::new(SingleRunItemizer::new()),
+            Box::new(MockFontResolver::new()),
+            Box::new(MockTextShaper::new()),
+        );
+        let default = face("Fallback");
+        assert_eq!(
+            shaper
+                .shape_paragraph("abВГ", &chain(), &attrs(), &default, 16.0, TextDirection::LeftToRight)
+                .len(),
+            1
+        );
+
+        shaper.set_itemizer(Box::new(TwoScriptItemizer));
+        let mut resolver = MockFontResolver::new();
+        resolver.register(ScriptTag::LATIN, FontId::new(0), face("Latin"));
+        resolver.register(ScriptTag::CYRILLIC, FontId::new(1), face("Cyrillic"));
+        shaper.set_resolver(Box::new(resolver));
+
+        let runs =
+            shaper.shape_paragraph("abВГ", &chain(), &attrs(), &default, 16.0, TextDirection::LeftToRight);
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].font(), FontId::new(0));
+        assert_eq!(runs[1].font(), FontId::new(1));
+
+        // Swapping the inner shaper is observable and line metrics delegate to it.
+        shaper.set_shaper(Box::new(MockTextShaper::new()));
+        assert_eq!(
+            shaper.line_metrics(16.0),
+            MockTextShaper::new().line_metrics(16.0)
+        );
     }
 
     #[test]

@@ -25,7 +25,8 @@ use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::matching::{MediaEnvironment, Stylesheet};
 use obscur_style::property::{Length, PropertyId, PropertyValue};
 use obscur_style::selector::{PseudoState, SelectorMatcher};
-use obscur_text::shaping::TextShaper;
+use obscur_text::font::FontResolver;
+use obscur_text::shaping::{TextItemizer, TextShaper};
 use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
@@ -301,7 +302,32 @@ impl UiRuntime {
     /// Unicode-scalar placeholders). Leaving it unset preserves headless
     /// determinism, so all default-path tests are unchanged.
     pub fn set_text_shaper(&mut self, shaper: Box<dyn TextShaper>) {
-        self.scene_composer.set_shaper(shaper);
+        self.scene_composer.set_text_shaper(shaper);
+    }
+
+    /// Installs a text `itemizer` on the owned scene coordinator, replacing the
+    /// default [`SingleRunItemizer`](obscur_text::shaping::SingleRunItemizer).
+    ///
+    /// Text itemization is a hexagonal port: the runtime only knows the
+    /// `Box<dyn TextItemizer>`. Installing a real Unicode script/bidi itemizer
+    /// makes a text node split into multiple script runs, which — paired with a
+    /// covering [`set_font_resolver`](Self::set_font_resolver) — the fallback
+    /// orchestrator shapes and paints as several font-tagged segments. Leaving it
+    /// unset keeps the single-run default, preserving headless determinism.
+    pub fn set_text_itemizer(&mut self, itemizer: Box<dyn TextItemizer>) {
+        self.scene_composer.set_itemizer(itemizer);
+    }
+
+    /// Installs a font `resolver` on the owned scene coordinator, replacing the
+    /// default empty [`MockFontResolver`](obscur_text::font::MockFontResolver).
+    ///
+    /// Font resolution is a hexagonal port: the runtime only knows the
+    /// `Box<dyn FontResolver>`. Installing a coverage registry lets each itemized
+    /// script run resolve to a covering font, so the fallback orchestrator tags
+    /// runs with the right face indices for the renderer to pick per run. Leaving
+    /// it unset falls every run back to the primary face (font `0`).
+    pub fn set_font_resolver(&mut self, resolver: Box<dyn FontResolver>) {
+        self.scene_composer.set_font_resolver(resolver);
     }
 
     /// Requests a frame for `reason`, returning the scheduler's admission
@@ -570,17 +596,18 @@ impl UiRuntime {
                 .layout_styles_from(&computed, ctx.viewport(), root_font);
             // Text nodes are sized inside the constraint-aware measure/arrange
             // pass: `layout` shapes and wraps each text leaf to its available
-            // width through the scene's shaper, so a long string wraps to more
-            // lines (a taller box) instead of collapsing to one wide line.
-            // `layout` and `scene_composer` are disjoint fields of the runtime, so
-            // borrowing the scene's shaper here is a legal split borrow, and the
-            // same shaper sizes the boxes that the scene phase later re-wraps and
-            // draws with — so height and painted line count agree.
+            // width through the scene's paragraph orchestrator, so a long string
+            // wraps to more lines (a taller box) instead of collapsing to one wide
+            // line. `layout` and `scene_composer` are disjoint fields of the
+            // runtime, so borrowing the scene's orchestrator here is a legal split
+            // borrow, and the same orchestrator sizes the boxes that the scene
+            // phase later re-wraps and draws with — so height and painted line
+            // count agree.
             let boxes = self.layout.layout(
                 &self.tree,
                 &layout_styles,
                 ctx.viewport(),
-                self.scene_composer.shaper(),
+                self.scene_composer.paragraph(),
             );
             let relaid_out = !boxes.is_empty();
             self.boxes = boxes;
@@ -3131,5 +3158,100 @@ mod tests {
             1,
             "measure + arrange + compose must share one cached shaping call"
         );
+    }
+
+    /// Collects the `(font, glyph_ids)` of every `DrawText` run in a frame, in
+    /// paint order.
+    fn drawtext_font_runs(result: &FrameResult) -> Vec<(u32, Vec<u32>)> {
+        result
+            .snapshot()
+            .display_list()
+            .commands()
+            .iter()
+            .filter_map(|c| match c {
+                obscur_scene::command::PaintCommand::DrawText { run, .. } => Some((
+                    run.font(),
+                    run.glyphs().iter().map(|g| g.glyph_id()).collect(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A stub itemizer cutting the fixed two-script string "abВГ" into a Latin run
+    /// `[0..2)` and a Cyrillic run `[2..6)` (each Cyrillic char is 2 bytes).
+    struct TwoScriptItemizer;
+
+    impl obscur_text::shaping::TextItemizer for TwoScriptItemizer {
+        fn itemize(
+            &self,
+            _text: &str,
+            _base: obscur_text::shaping::TextDirection,
+        ) -> Vec<obscur_text::shaping::TextItem> {
+            use obscur_text::shaping::{ScriptTag, TextDirection, TextItem};
+            use obscur_text::span::TextRange;
+            vec![
+                TextItem::new(TextRange::new(0, 2), ScriptTag::LATIN, TextDirection::LeftToRight, 0),
+                TextItem::new(
+                    TextRange::new(2, 6),
+                    ScriptTag::CYRILLIC,
+                    TextDirection::LeftToRight,
+                    0,
+                ),
+            ]
+        }
+    }
+
+    #[test]
+    fn multi_font_text_renders_font_tagged_segments_end_to_end() {
+        use obscur_text::font::{FontId, MockFontResolver};
+        use obscur_text::shaping::ScriptTag;
+
+        // A single two-script text node "abВГ". Installing a script itemizer plus a
+        // covering resolver through the public runtime seams makes the whole
+        // measure → arrange → compose path route through font fallback, so the
+        // frame paints two font-tagged DrawText runs on one line.
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(12))
+                .with_children(ViewFragment::from_nodes(vec![ViewNode::text("abВГ")])),
+        ]));
+
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_text_itemizer(Box::new(TwoScriptItemizer));
+        let mut resolver = MockFontResolver::new();
+        let face = obscur_text::font::FontFace::new(
+            obscur_text::font::FontFamily::generic(obscur_text::font::GenericFamily::Monospace),
+            obscur_text::font::FontAttributes::default(),
+            obscur_text::font::FontSource::system("mock"),
+            obscur_text::font::FontMetrics::new(1000, 800.0, -200.0, 0.0),
+        );
+        resolver.register(ScriptTag::LATIN, FontId::new(0), face.clone());
+        resolver.register(ScriptTag::CYRILLIC, FontId::new(1), face);
+        runtime.set_font_resolver(Box::new(resolver));
+
+        let frame = runtime.render_now(&view, &[]);
+        let runs = drawtext_font_runs(&frame);
+        // Two font-tagged runs: Latin (font 0, "ab") then Cyrillic (font 1, "ВГ").
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].0, 0);
+        assert_eq!(runs[0].1, vec![u32::from('a'), u32::from('b')]);
+        assert_eq!(runs[1].0, 1);
+        assert_eq!(runs[1].1, vec![u32::from('В'), u32::from('Г')]);
+    }
+
+    #[test]
+    fn default_single_font_text_stays_one_primary_run() {
+        // Requirement (a): with no ports installed the default single-run path
+        // renders a text node exactly as before — one DrawText run on the primary
+        // face (font 0) whose glyph ids are the Unicode scalars.
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(13))
+                .with_children(ViewFragment::from_nodes(vec![ViewNode::text("hi")])),
+        ]));
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let runs = drawtext_font_runs(&runtime.render_now(&view, &[]));
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].0, 0);
+        assert_eq!(runs[0].1, vec![u32::from('h'), u32::from('i')]);
     }
 }

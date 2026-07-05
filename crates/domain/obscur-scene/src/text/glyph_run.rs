@@ -16,6 +16,14 @@ use super::PositionedGlyph;
 /// (the same contract as the domain `ShapedGlyph`), so a renderer draws it
 /// directly against the host font with no remap.
 ///
+/// The run also carries a [`font`](Self::font) handle: a plain `u32` index that
+/// names *which* font face the run's glyph indices belong to. It is a bare index
+/// (id `0` = the primary/first-choice face) rather than a typed identity so that
+/// `obscur-scene` stays independent of `obscur-text`. Font fallback shapes one
+/// paragraph across several faces and emits one `GlyphRun` per contiguous
+/// same-font segment, so this handle is what lets a renderer pick the right font
+/// for each run (spec §5.10).
+///
 /// [`text`](Self::text) retains the source string as metadata (accessibility and
 /// diagnostics). Because it embeds `f32` metrics the type derives `PartialEq` but
 /// not `Eq`.
@@ -23,6 +31,9 @@ use super::PositionedGlyph;
 pub struct GlyphRun {
     /// The positioned glyphs, in pen order.
     glyphs: Vec<PositionedGlyph>,
+    /// The font handle the glyph indices belong to (a bare face index; `0` is the
+    /// primary face).
+    font: u32,
     /// The font size the run was shaped at, in logical pixels.
     font_size: f32,
     /// The run's source text, retained as metadata.
@@ -32,13 +43,32 @@ pub struct GlyphRun {
 impl GlyphRun {
     /// Creates a run from its positioned `glyphs`, the `font_size` they were
     /// shaped at, and the source `text` they were produced from.
+    ///
+    /// The [`font`](Self::font) handle defaults to `0` (the primary face); tag a
+    /// non-primary run with [`with_font`](Self::with_font).
     #[must_use]
     pub fn new(glyphs: Vec<PositionedGlyph>, font_size: f32, text: impl Into<Box<str>>) -> Self {
         Self {
             glyphs,
+            font: 0,
             font_size,
             text: text.into(),
         }
+    }
+
+    /// Returns this run tagged with the `font` handle its glyph indices belong to
+    /// (a bare face index; `0` is the primary face).
+    #[must_use]
+    pub const fn with_font(mut self, font: u32) -> Self {
+        self.font = font;
+        self
+    }
+
+    /// Returns the font handle the run's glyph indices belong to (a bare face
+    /// index; `0` is the primary face).
+    #[must_use]
+    pub const fn font(&self) -> u32 {
+        self.font
     }
 
     /// Returns the positioned glyphs, in pen order.
@@ -104,6 +134,20 @@ mod tests {
         assert_eq!(run.text(), "abc");
         assert_eq!(run.advance(), 18.0);
         assert_eq!(run.glyphs()[1].glyph_id(), u32::from('b'));
+        // A run built with `new` defaults to the primary face (font 0).
+        assert_eq!(run.font(), 0);
+    }
+
+    #[test]
+    fn with_font_tags_the_face_handle() {
+        let run = sample_run().with_font(2);
+        assert_eq!(run.font(), 2);
+        // `with_font` only changes the font handle; glyphs and metrics are intact.
+        assert_eq!(run.len(), 3);
+        assert_eq!(run.font_size(), 16.0);
+        // The handle participates in equality: same glyphs, different font differ.
+        assert_ne!(run, sample_run());
+        assert_eq!(run, sample_run().with_font(2));
     }
 
     #[test]
@@ -112,5 +156,6 @@ mod tests {
         assert!(run.is_empty());
         assert_eq!(run.len(), 0);
         assert_eq!(run.advance(), 0.0);
+        assert_eq!(run.font(), 0);
     }
 }
