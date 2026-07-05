@@ -154,11 +154,14 @@ fn map_compile_diagnostic(diagnostic: &CompileDiagnostic) -> (u32, String, LspSe
             LspSeverity::Warning,
         ),
         CompileDiagnostic::Lowering(error) => {
-            let offset = match error {
-                LoweringError::MissingTagName(offset) => *offset,
-                LoweringError::EmptyDocument => 0,
+            // A missing `<For>` key is non-fatal (spec §2.11) — report it as a
+            // warning; structural lowering errors stay errors.
+            let (offset, severity) = match error {
+                LoweringError::MissingTagName(offset) => (*offset, LspSeverity::Error),
+                LoweringError::EmptyDocument => (0, LspSeverity::Error),
+                LoweringError::MissingLoopKey(offset) => (*offset, LspSeverity::Warning),
             };
-            (offset, error.to_string(), LspSeverity::Error)
+            (offset, error.to_string(), severity)
         }
     }
 }
