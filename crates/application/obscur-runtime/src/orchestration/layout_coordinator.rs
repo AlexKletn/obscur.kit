@@ -12,6 +12,10 @@ use obscur_layout::model::{
 };
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{layout_keyword, Length, LengthContext, PropertyId, PropertyValue};
+use obscur_text::font::{
+    FontAttributes, FontFace, FontFamily, FontMetrics, FontSource, GenericFamily,
+};
+use obscur_text::shaping::{ShapingRequest, TextShaper};
 use obscur_tree::tree::RetainedTree;
 
 use super::ComputedStyles;
@@ -97,6 +101,55 @@ impl LayoutCoordinator {
             .iter()
             .map(|(&node, style)| (node, layout_style_from(style, viewport, root_font_size)))
             .collect()
+    }
+
+    /// Measures every text node and injects its intrinsic size into `styles`.
+    ///
+    /// This is the text-sizing pass that runs **between**
+    /// [`layout_styles_from`](Self::layout_styles_from) and [`layout`](Self::layout):
+    /// a [`NodeKind::Text`](obscur_tree::node::NodeKind::Text) node carries no CSS
+    /// width/height, so without this pass its box collapses to zero. For each text
+    /// node in `tree` the pass shapes the content **once** through `shaper` and
+    /// derives its intrinsic size — `width = ` the run's total advance,
+    /// `height = ` the shaper's [`line_height`](obscur_text::shaping::LineMetrics::line_height)
+    /// at the node's font size — then writes it into that node's [`LayoutStyle`]
+    /// **only where the style leaves the dimension [`Auto`](Dimension::Auto)**, so an
+    /// explicit CSS size is never overridden. A node with no existing style entry
+    /// gets a default one first, so text nodes absent from `computed` are still sized.
+    ///
+    /// The font size is the node's computed `font-size` (via the same resolution as
+    /// the rest of the bridge), falling back to [`DEFAULT_FONT_SIZE`]. The same
+    /// `shaper` and size are used by the scene phase, so measured boxes and drawn
+    /// glyphs agree. The flow/flex math in [`layout`](Self::layout) is untouched;
+    /// it simply sees the now-sized text nodes as fixed-size leaves.
+    ///
+    /// Single-line only: the whole run is measured as one line (no wrapping), so a
+    /// long string yields a wide box rather than wrapping to the container.
+    pub fn measure_text(
+        &self,
+        tree: &RetainedTree,
+        styles: &mut LayoutStyles,
+        computed: &ComputedStyles,
+        shaper: &dyn TextShaper,
+    ) {
+        let face = measure_face();
+        for (node, retained) in tree.iter() {
+            let Some(content) = retained.kind().text() else {
+                continue;
+            };
+            let font_size = computed.get(&node).map_or(DEFAULT_FONT_SIZE, font_size_px);
+            let advance = shaper
+                .shape(&ShapingRequest::new(content, face.clone(), font_size))
+                .advance();
+            let line_height = shaper.line_metrics(font_size).line_height();
+            let entry = styles.entry(node).or_default();
+            if entry.width.is_auto() {
+                entry.width = Dimension::Px(advance);
+            }
+            if entry.height.is_auto() {
+                entry.height = Dimension::Px(line_height);
+            }
+        }
     }
 
     /// Lays out the whole tree under `viewport` and returns each node's absolute
@@ -213,6 +266,22 @@ fn layout_style_from(computed: &ComputedStyle, viewport: Size, root_font_size: f
         flex_shrink: number_of(computed, PropertyId::FlexShrink, default.flex_shrink),
         flex_basis: dimension_of(computed, PropertyId::FlexBasis, &ctx),
     }
+}
+
+/// Builds the placeholder [`FontFace`] used to seed a text-measure
+/// [`ShapingRequest`].
+///
+/// The measure pass shapes through the runtime's installed shaper: the mock is
+/// font-agnostic and the wired HarfRust adapter ignores the request face in favor
+/// of its host font, so a generic monospace metadata face suffices as the request
+/// carrier. Real per-node face resolution (via a `FontProvider`) is a later phase.
+fn measure_face() -> FontFace {
+    FontFace::new(
+        FontFamily::generic(GenericFamily::Monospace),
+        FontAttributes::default(),
+        FontSource::system("measure"),
+        FontMetrics::new(1000, 800.0, -200.0, 0.0),
+    )
 }
 
 /// The document root's computed `font-size` in logical pixels, for `rem`.
@@ -958,6 +1027,114 @@ mod tests {
         assert_eq!(boxes[&child_b].origin().x, 50.0);
         // Same y (a row, not a stack) — proving flex, not block, engaged.
         assert_eq!(boxes[&child_a].origin().y, boxes[&child_b].origin().y);
+    }
+
+    /// Allocates a text node carrying `content` under `parent`, wiring the child
+    /// link and the logical parent, and returns its id.
+    fn add_text_child(tree: &mut RetainedTree, parent: NodeId, content: &str) -> NodeId {
+        let id = tree.alloc(NodeKind::Text {
+            content: content.into(),
+        });
+        if let Some(node) = tree.get_mut(parent) {
+            node.push_child(id);
+        }
+        if let Some(node) = tree.get_mut(id) {
+            node.set_logical_parent(LogicalParent::of(parent));
+        }
+        id
+    }
+
+    #[test]
+    fn measure_text_sizes_a_text_node_to_its_shaped_content() {
+        // Requirement (c): a measured text node gets a NON-ZERO box whose width is
+        // the shaped advance (chars · 0.6 · size) and height the line_height
+        // (== size for the mock).
+        use obscur_text::shaping::MockTextShaper;
+
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "abc");
+
+        // Root is a fixed-size block; the text node carries no computed style, so
+        // its font size defaults to 16.
+        let mut computed = ComputedStyles::new();
+        let mut root_style = ComputedStyle::new();
+        root_style.set(PropertyId::Width, ComputedValue::length(Length::px(200.0)));
+        root_style.set(PropertyId::Height, ComputedValue::length(Length::px(100.0)));
+        computed.insert(root, root_style);
+
+        let coordinator = LayoutCoordinator::new();
+        let mut styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        coordinator.measure_text(&tree, &mut styles, &computed, &MockTextShaper::new());
+
+        let text_style = styles[&text];
+        // width = 3 chars * 0.6 * 16 ≈ 28.8; height = line_height = 16.
+        match text_style.width {
+            Dimension::Px(w) => assert!((w - 28.8).abs() < 1e-3, "width was {w}"),
+            other => panic!("expected measured Px width, got {other:?}"),
+        }
+        assert_eq!(text_style.height, Dimension::Px(16.0));
+
+        // And the arranged box is non-zero with those dimensions.
+        let boxes = coordinator.layout(&tree, &styles, Size::new(200.0, 100.0));
+        let text_box = boxes[&text];
+        assert!(text_box.size().width > 0.0);
+        assert!(text_box.size().height > 0.0);
+        assert!((text_box.size().width - 28.8).abs() < 1e-3);
+        assert_eq!(text_box.size().height, 16.0);
+    }
+
+    #[test]
+    fn measure_text_honors_font_size_and_respects_explicit_width() {
+        // Requirement (e): an explicit CSS width is NOT overridden by measurement;
+        // only the Auto height is filled in. Also checks the node's font-size
+        // drives the measured size.
+        use obscur_text::shaping::MockTextShaper;
+
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "abcd");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        // Explicit width 999px + font-size 20px; height left to measurement.
+        let mut text_computed = ComputedStyle::new();
+        text_computed.set(PropertyId::Width, ComputedValue::length(Length::px(999.0)));
+        text_computed.set(PropertyId::FontSize, ComputedValue::length(Length::px(20.0)));
+        computed.insert(text, text_computed);
+
+        let coordinator = LayoutCoordinator::new();
+        let mut styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        coordinator.measure_text(&tree, &mut styles, &computed, &MockTextShaper::new());
+
+        let text_style = styles[&text];
+        // Explicit width preserved, NOT replaced by the measured advance.
+        assert_eq!(text_style.width, Dimension::Px(999.0));
+        // Height filled from the measured line_height at font-size 20.
+        assert_eq!(text_style.height, Dimension::Px(20.0));
+    }
+
+    #[test]
+    fn measure_text_ignores_non_text_nodes() {
+        use obscur_text::shaping::MockTextShaper;
+
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let element = add_child(&mut tree, root, 5);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(element, ComputedStyle::new());
+
+        let coordinator = LayoutCoordinator::new();
+        let mut styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        coordinator.measure_text(&tree, &mut styles, &computed, &MockTextShaper::new());
+
+        // The element's dimensions stay Auto (not text-measured).
+        assert_eq!(styles[&element].width, Dimension::Auto);
+        assert_eq!(styles[&element].height, Dimension::Auto);
     }
 
     #[test]

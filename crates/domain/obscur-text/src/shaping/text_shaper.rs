@@ -1,7 +1,7 @@
 //! The replaceable text-shaping port and its deterministic mock (spec §5.10).
 
 use crate::font::FontFace;
-use crate::shaping::{GlyphRun, ShapedGlyph, ShapingRequest};
+use crate::shaping::{GlyphRun, LineMetrics, ShapedGlyph, ShapingRequest};
 use crate::span::TextRange;
 
 /// The hexagonal port for turning styled text into positioned glyphs
@@ -31,6 +31,22 @@ pub trait TextShaper {
     /// `true` for every face.
     #[must_use]
     fn can_shape(&self, face: &FontFace) -> bool;
+
+    /// Returns the vertical [`LineMetrics`] for a line at `font_size`, in logical
+    /// pixels (spec §5.10).
+    ///
+    /// The layout pass uses [`line_height`](LineMetrics::line_height) to size a
+    /// text box and the scene pass uses [`baseline`](LineMetrics::baseline) to
+    /// place the glyph baseline within it. The **default** returns the idealized
+    /// ratios ([`LineMetrics::idealized`]) — `ascent = 0.8·size`,
+    /// `descent = 0.2·size`, `line_gap = 0`, so `line_height == font_size` — which
+    /// keeps the deterministic [`MockTextShaper`] and any stub shaper working
+    /// without real font tables. A real adapter overrides this to read the loaded
+    /// font's own vertical metrics.
+    #[must_use]
+    fn line_metrics(&self, font_size: f32) -> LineMetrics {
+        LineMetrics::idealized(font_size)
+    }
 }
 
 /// A deterministic, reference [`TextShaper`] modeling an idealized monospace
@@ -160,5 +176,18 @@ mod tests {
         assert!(run.is_empty());
         assert_eq!(run.advance(), 0.0);
         assert_eq!(run.source(), TextRange::empty(0));
+    }
+
+    #[test]
+    fn default_line_metrics_are_idealized_ratios() {
+        // The trait default (used by the mock) gives ascent 0.8·size, descent
+        // 0.2·size, zero line-gap — so line_height == font_size exactly.
+        let shaper = MockTextShaper::new();
+        let metrics = shaper.line_metrics(16.0);
+        assert_eq!(metrics.ascent(), 12.8); // 0.8 * 16
+        assert_eq!(metrics.descent(), 16.0 * 0.2);
+        assert_eq!(metrics.line_gap(), 0.0);
+        assert_eq!(metrics.line_height(), 16.0);
+        assert_eq!(metrics.baseline(), 12.8);
     }
 }

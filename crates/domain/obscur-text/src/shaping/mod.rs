@@ -1,6 +1,8 @@
 //! Shaping module.
 mod glyph_run;
 pub use glyph_run::GlyphRun;
+mod line_metrics;
+pub use line_metrics::LineMetrics;
 mod shaped_glyph;
 pub use shaped_glyph::ShapedGlyph;
 mod shaping_request;

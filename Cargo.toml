@@ -69,9 +69,12 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 ttf-parser = "0.25.1"
 usvg = { version = "0.46", default-features = false }
 # Pure-Rust HarfBuzz port for real text shaping (adapter-only; spec §5.10). Its
-# `FontRef`/`Direction`/`Language` re-export `read-fonts`, so no extra font-parse
-# dependency is needed here.
+# `FontRef`/`Direction`/`Language` re-export `read-fonts` for shaping.
 harfrust = "0.10"
+# The font-table parser underlying `harfrust` (same version it pins), used by the
+# harfrust adapter to read real vertical metrics (`hhea`) for line metrics. Kept
+# at harfrust's exact requirement so the two resolve to one build.
+read-fonts = "0.40.2"
 # adapters (optional, wired by the facade behind features)
 obscur-resource-decode = { path = "crates/adapters/obscur-resource-decode" }
 obscur-resource-fs = { path = "crates/adapters/obscur-resource-fs" }

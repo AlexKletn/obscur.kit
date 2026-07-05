@@ -565,9 +565,20 @@ impl UiRuntime {
         //    boxes and hit-test index carry over unchanged.
         let relaid_out = if plan.layout() {
             let root_font = root_font_size(&computed, self.tree.root());
-            let layout_styles = self
+            let mut layout_styles = self
                 .layout
                 .layout_styles_from(&computed, ctx.viewport(), root_font);
+            // Measure text nodes so their boxes are sized to the shaped content
+            // (advance × line-height) instead of collapsing to zero. `layout` and
+            // `scene_composer` are disjoint fields, so borrowing the scene's shaper
+            // while mutating the layout styles is a legal split borrow. The same
+            // shaper sizes the boxes here that the scene phase later draws with.
+            self.layout.measure_text(
+                &self.tree,
+                &mut layout_styles,
+                &computed,
+                self.scene_composer.shaper(),
+            );
             let boxes = self.layout.layout(&self.tree, &layout_styles, ctx.viewport());
             let relaid_out = !boxes.is_empty();
             self.boxes = boxes;

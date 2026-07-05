@@ -10,7 +10,7 @@ use obscur_scene::command::{DisplayList, DisplayListBuilder};
 use obscur_scene::paint::Brush;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::ComputedValue;
-use obscur_style::property::{PropertyId, StyleColor};
+use obscur_style::property::{Length, PropertyId, StyleColor};
 use obscur_text::font::{FontAttributes, FontFace, FontFamily, FontMetrics, FontSource, GenericFamily};
 use obscur_text::shaping::{MockTextShaper, ShapingRequest, TextShaper};
 use obscur_tree::tree::RetainedTree;
@@ -19,9 +19,9 @@ use super::{ComputedStyles, LayoutBoxes};
 
 /// Default font size (in pixels) used to emit text runs.
 ///
-/// The fixed [`PropertyId`] set carries no font-size property yet, so text runs
-/// are emitted at this default. When a font-size property is introduced this
-/// constant becomes the fallback and the computed value takes precedence.
+/// A text node with no computed `font-size` (or one that is not an absolute
+/// pixel length) is shaped at this fallback; a node that carries `font-size: Npx`
+/// is shaped at that value (see [`font_size_of`]).
 const DEFAULT_FONT_SIZE: f32 = 16.0;
 
 /// Orchestrates the scene phase: turns the styled + laid-out tree into a
@@ -54,8 +54,11 @@ const DEFAULT_FONT_SIZE: f32 = 16.0;
 /// coordinator turns the node's string into a [`GlyphRun`] of positioned glyphs
 /// and carries those glyphs in the [`DrawText`](obscur_scene::command::PaintCommand::DrawText)
 /// command, so every renderer consumes an identical run and only rasterization
-/// differs (spec §5.10, §5.2). A font-size property does not exist yet, so runs
-/// use [`DEFAULT_FONT_SIZE`]. Opacity/clip layers, borders, and images are
+/// differs (spec §5.10, §5.2). Each run is shaped at the node's computed
+/// `font-size` (falling back to [`DEFAULT_FONT_SIZE`]) and its glyphs sit on the
+/// font's real baseline (the shaper's [`line_metrics`](TextShaper::line_metrics)
+/// ascent), the same size and metrics the layout phase measured the box with.
+/// Opacity/clip layers, borders, and images are
 /// deferred to later phases. Because only leaf
 /// [`fill_rect`](DisplayListBuilder::fill_rect) and
 /// [`draw_text`](DisplayListBuilder::draw_text) commands are emitted, the
@@ -110,17 +113,36 @@ impl SceneCoordinator {
         self.shaper = shaper;
     }
 
-    /// Shapes `content` at [`DEFAULT_FONT_SIZE`] into a backend-independent
-    /// [`GlyphRun`] of positioned glyphs.
+    /// Returns the installed text shaper as a `&dyn` port.
+    ///
+    /// This is the seam the layout phase measures text through: `SceneCoordinator`
+    /// owns the shaper, so the layout coordinator borrows it from here to size text
+    /// nodes with the **same** engine (and therefore the same advances and line
+    /// metrics) the scene phase later draws with. Because `layout` and
+    /// `scene_composer` are disjoint fields of the runtime, this shared borrow
+    /// coexists with a mutable borrow of the layout coordinator.
+    #[must_use]
+    pub fn shaper(&self) -> &dyn TextShaper {
+        &*self.shaper
+    }
+
+    /// Shapes `content` at `font_size` into a backend-independent [`GlyphRun`] of
+    /// positioned glyphs.
     ///
     /// Shaping runs **once**, here: the `obscur-text` shaper produces glyphs with
     /// per-glyph advances, which this method lays out left-to-right into pen
-    /// positions relative to the run origin (the baseline sits [`DEFAULT_FONT_SIZE`]
-    /// below the top-left, matching the box's ascent). The resulting run is what
-    /// both the GPU and software backends consume verbatim.
-    fn shape_run(&self, content: &str) -> GlyphRun {
-        let request = ShapingRequest::new(content, self.default_face.clone(), DEFAULT_FONT_SIZE);
+    /// positions relative to the run origin. Each glyph's `y` is the run's
+    /// **baseline** — the font's real ascent for `font_size`, from
+    /// [`TextShaper::line_metrics`], not the full em — so glyphs sit on the
+    /// baseline within the box the layout phase sized with the matching
+    /// `line_height`. The `x_offset`/`y_offset` from shaping are added on top. The
+    /// resulting run is what both the GPU and software backends consume verbatim.
+    fn shape_run(&self, content: &str, font_size: f32) -> GlyphRun {
+        let request = ShapingRequest::new(content, self.default_face.clone(), font_size);
         let shaped = self.shaper.shape(&request);
+        // The baseline offset down from the box top is the font's ascent for this
+        // size; measure (line_height) and draw (baseline) come from one shaper.
+        let baseline = self.shaper.line_metrics(font_size).baseline();
         let mut pen_x = 0.0_f32;
         let glyphs: Vec<PositionedGlyph> = shaped
             .glyphs()
@@ -130,14 +152,14 @@ impl SceneCoordinator {
                     glyph.glyph_id(),
                     glyph.cluster(),
                     pen_x + glyph.x_offset(),
-                    DEFAULT_FONT_SIZE + glyph.y_offset(),
+                    baseline + glyph.y_offset(),
                     glyph.x_advance(),
                 );
                 pen_x += glyph.x_advance();
                 positioned
             })
             .collect();
-        GlyphRun::new(glyphs, DEFAULT_FONT_SIZE, content)
+        GlyphRun::new(glyphs, font_size, content)
     }
 
     /// Composes a paint-ordered [`DisplayList`] of background fills from the
@@ -195,7 +217,10 @@ impl SceneCoordinator {
                     && let Some(layout_box) = boxes.get(&node)
                 {
                     let color = text_color_of(computed, node);
-                    let run = self.shape_run(content);
+                    // Same per-node font size the layout phase measured with, so
+                    // the drawn advances and baseline match the sized box.
+                    let font_size = font_size_of(computed, node);
+                    let run = self.shape_run(content, font_size);
                     builder.draw_text(layout_box.origin(), run, Brush::solid(color));
                 }
 
@@ -251,6 +276,22 @@ fn text_color_of(computed: &ComputedStyles, node: NodeId) -> Color {
         .and_then(|style| style.get(PropertyId::Color))
         .and_then(ComputedValue::as_color)
         .map_or(Color::WHITE, scene_color_from)
+}
+
+/// Reads a node's computed `font-size` in logical pixels, defaulting to
+/// [`DEFAULT_FONT_SIZE`] when absent or not an absolute pixel length.
+///
+/// This mirrors the layout coordinator's font-size resolution so the scene draws
+/// each text run at the same size the layout phase measured its box with (only
+/// absolute `px` is honored here; relative `font-size` units are a later
+/// extension, matching layout).
+fn font_size_of(computed: &ComputedStyles, node: NodeId) -> f32 {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::FontSize))
+        .and_then(ComputedValue::as_length)
+        .and_then(Length::as_px)
+        .map_or(DEFAULT_FONT_SIZE, |px| px.0)
 }
 
 /// Converts an authored style color into a scene paint color.
@@ -481,7 +522,8 @@ mod tests {
     #[test]
     fn text_node_shapes_one_positioned_glyph_per_char_in_order() {
         // A four-char run yields four glyphs, laid out left-to-right at the
-        // mock's fixed advance, on the baseline (DEFAULT_FONT_SIZE below origin).
+        // mock's fixed advance, on the real baseline (the ascent below origin,
+        // 0.8·size for the mock — NOT the full em).
         let mut tree = RetainedTree::new();
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
@@ -498,12 +540,39 @@ mod tests {
         let run = &runs[0].1;
         assert_eq!(run.len(), 4);
         let advance = DEFAULT_FONT_SIZE * 0.6;
+        // The mock's idealized ascent baseline: 0.8 * 16 = 12.8, below the em.
+        let baseline = DEFAULT_FONT_SIZE * 0.8;
+        assert_ne!(baseline, DEFAULT_FONT_SIZE);
         for (i, glyph) in run.glyphs().iter().enumerate() {
             assert_eq!(glyph.glyph_id(), u32::from(['a', 'b', 'c', 'd'][i]));
             assert_eq!(glyph.cluster(), i);
             assert_eq!(glyph.x(), advance * i as f32);
-            assert_eq!(glyph.y(), DEFAULT_FONT_SIZE);
+            assert_eq!(glyph.y(), baseline);
             assert_eq!(glyph.advance(), advance);
+        }
+    }
+
+    #[test]
+    fn composed_glyphs_sit_on_the_ascent_baseline_not_the_full_em() {
+        // Requirement (d): the baseline is the font's ascent (0.8·size for the
+        // idealized mock), strictly less than the full em `DEFAULT_FONT_SIZE`.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "hi");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(text, ComputedStyle::new());
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(text, box_at(0.0, 0.0, 40.0, 16.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let runs = text_runs(&list);
+        let run = &runs[0].1;
+        let ascent = DEFAULT_FONT_SIZE * 0.8; // 12.8
+        for glyph in run.glyphs() {
+            assert_eq!(glyph.y(), ascent);
+            assert!(glyph.y() < DEFAULT_FONT_SIZE);
         }
     }
 

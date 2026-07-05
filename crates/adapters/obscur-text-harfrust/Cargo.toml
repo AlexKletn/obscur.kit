@@ -10,9 +10,12 @@ publish = false
 [dependencies]
 obscur-text = { workspace = true }
 # Pure-Rust HarfBuzz port; the intended real shaping engine (spec §5.10). Its
-# `FontRef` / `Direction` / `Language` are re-exports of `read-fonts`, so no
-# separate font-parse dependency is required.
+# `FontRef` / `Direction` / `Language` are re-exports of `read-fonts`.
 harfrust = { workspace = true }
+# `read-fonts` (harfrust's own font-table parser) is used directly to read the
+# font's real vertical metrics (`head` upem + `hhea` ascender/descender/line-gap)
+# for `line_metrics`; the shaper API exposes only `units_per_em`.
+read-fonts = { workspace = true }
 
 [lints]
 workspace = true

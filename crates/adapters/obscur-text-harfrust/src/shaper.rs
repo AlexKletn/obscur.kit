@@ -5,8 +5,11 @@ use std::sync::Arc;
 
 use harfrust::{Direction, FontRef, Language, ShapeOptions, ShaperData, UnicodeBuffer};
 use obscur_text::font::FontFace;
-use obscur_text::shaping::{GlyphRun, ShapedGlyph, ShapingRequest, TextDirection, TextShaper};
+use obscur_text::shaping::{
+    GlyphRun, LineMetrics, ShapedGlyph, ShapingRequest, TextDirection, TextShaper,
+};
 use obscur_text::span::TextRange;
+use read_fonts::{FontRef as ReadFontRef, TableProvider};
 
 /// A real [`TextShaper`] that shapes text with the HarfRust engine (spec §5.10).
 ///
@@ -138,6 +141,38 @@ impl TextShaper for HarfrustShaper {
     fn can_shape(&self, face: &FontFace) -> bool {
         self.font_bytes.is_some() || face.source().data().is_some()
     }
+
+    fn line_metrics(&self, font_size: f32) -> LineMetrics {
+        // Read the real vertical metrics from the wired host font; fall back to
+        // the idealized default ratios when there is no font (or its tables are
+        // unreadable), so a font-less shaper stays deterministic.
+        self.font_bytes
+            .as_deref()
+            .and_then(|bytes| line_metrics_from_bytes(bytes, font_size))
+            .unwrap_or_else(|| LineMetrics::idealized(font_size))
+    }
+}
+
+/// Reads a font's real vertical [`LineMetrics`] from its `head` (units-per-em)
+/// and `hhea` (ascender / descender / line-gap) tables, scaled to `font_size`.
+///
+/// Metrics are stored in font design units; scaling by `font_size / upem`
+/// converts them to logical pixels. `hhea.descender` is negative below the
+/// baseline, so its magnitude is taken to match [`LineMetrics`]'s positive
+/// descent convention. Returns [`None`] when the bytes are not a loadable font,
+/// the `head`/`hhea` tables are missing, or `units_per_em` is zero.
+fn line_metrics_from_bytes(bytes: &[u8], font_size: f32) -> Option<LineMetrics> {
+    let font = ReadFontRef::new(bytes).ok()?;
+    let units_per_em = font.head().ok()?.units_per_em();
+    if units_per_em == 0 {
+        return None;
+    }
+    let hhea = font.hhea().ok()?;
+    let scale = font_size / f32::from(units_per_em);
+    let ascent = f32::from(hhea.ascender().to_i16()) * scale;
+    let descent = f32::from(hhea.descender().to_i16()).abs() * scale;
+    let line_gap = f32::from(hhea.line_gap().to_i16()) * scale;
+    Some(LineMetrics::new(ascent, descent, line_gap))
 }
 
 /// Maps a domain [`TextDirection`] to the HarfRust [`Direction`] for horizontal
@@ -390,5 +425,40 @@ mod tests {
     fn is_object_safe() {
         let shaper: Box<dyn TextShaper> = Box::new(HarfrustShaper::from_bytes(test_font()));
         assert!(shaper.can_shape(&system_face()));
+    }
+
+    #[test]
+    fn line_metrics_read_the_loaded_fonts_scaled_vertical_metrics() {
+        // The embedded font's hhea carries ascender 800, descender -200, lineGap
+        // 0 at 1000 upem. At 32px the scale is 32/1000, so ascent = 25.6,
+        // descent = 6.4 (magnitude), line_gap = 0 -> line_height = 32.
+        let shaper = HarfrustShaper::from_bytes(test_font());
+        let metrics = shaper.line_metrics(32.0);
+        assert!((metrics.ascent() - 800.0 * 32.0 / 1000.0).abs() < 1e-4);
+        assert!((metrics.descent() - 200.0 * 32.0 / 1000.0).abs() < 1e-4);
+        assert_eq!(metrics.line_gap(), 0.0);
+        assert!((metrics.line_height() - 32.0).abs() < 1e-4);
+        // Baseline is the ascent, not the full em.
+        assert!((metrics.baseline() - 25.6).abs() < 1e-4);
+        assert_ne!(metrics.baseline(), 32.0);
+    }
+
+    #[test]
+    fn font_less_line_metrics_fall_back_to_idealized_ratios() {
+        // No wired font -> the idealized default (ascent 0.8·size, line_height
+        // == size), preserving determinism.
+        let shaper = HarfrustShaper::without_font();
+        let metrics = shaper.line_metrics(20.0);
+        assert_eq!(metrics.ascent(), 16.0); // 0.8 * 20
+        assert_eq!(metrics.descent(), 4.0); // 0.2 * 20
+        assert_eq!(metrics.line_height(), 20.0);
+    }
+
+    #[test]
+    fn unloadable_bytes_line_metrics_fall_back_to_idealized() {
+        let shaper = HarfrustShaper::from_bytes(vec![0u8, 1, 2, 3, 4, 5, 6, 7]);
+        let metrics = shaper.line_metrics(16.0);
+        assert_eq!(metrics.line_height(), 16.0);
+        assert_eq!(metrics.baseline(), 12.8);
     }
 }
