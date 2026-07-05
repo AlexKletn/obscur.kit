@@ -8,9 +8,10 @@
 /// * [`Auto`](GridLine::Auto) — no explicit line; the item is auto-placed on this
 ///   edge (the initial value).
 /// * [`Line`](GridLine::Line) — a **1-based** grid line index (`grid-column: 2`
-///   is line `2`, i.e. the start of the second track). Only positive lines are
-///   meaningful here; a non-positive value is clamped to line `1` (named and
-///   negative lines are out of scope).
+///   is line `2`, i.e. the start of the second track). A **negative** index counts
+///   back from the end of the explicit grid (`-1` is the last line); it is resolved
+///   against the real track count during placement. A zero index is clamped to line
+///   `1`. Named lines are out of scope.
 /// * [`Span`](GridLine::Span) — `span N`: the edge is placed `N` tracks away from
 ///   the opposite edge. A zero span is clamped to `1`.
 ///
@@ -22,7 +23,8 @@
 pub enum GridLine {
     /// No explicit line on this edge; the item is auto-placed here.
     Auto,
-    /// A 1-based grid line index. Non-positive inputs are clamped to `1`.
+    /// A 1-based grid line index; a negative index counts back from the end of the
+    /// explicit grid (`-1` is the last line), resolved against the track count.
     Line(i32),
     /// `span N`: this edge is `N` tracks from the opposite edge (clamped ≥ 1).
     Span(u16),

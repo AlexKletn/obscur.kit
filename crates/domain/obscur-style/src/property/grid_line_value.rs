@@ -14,7 +14,9 @@
 /// * [`Auto`](GridLineValue::Auto) — no explicit line; the item is auto-placed on
 ///   this edge (the initial value).
 /// * [`Line`](GridLineValue::Line) — a **1-based** grid line index (`grid-column: 2`
-///   is line `2`). Named and negative lines are out of scope.
+///   is line `2`). A negative index counts back from the end of the explicit grid
+///   (`-1` is the last line); the layout crate resolves it against the real track
+///   count. Named lines are out of scope.
 /// * [`Span`](GridLineValue::Span) — `span N`: the edge is placed `N` tracks away
 ///   from the opposite edge.
 ///

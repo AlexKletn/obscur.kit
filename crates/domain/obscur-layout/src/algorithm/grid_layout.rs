@@ -69,9 +69,10 @@ use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 ///
 /// # Out of scope (later steps)
 ///
-/// This does real track sizing plus line-based placement and spanning, but is
-/// still a subset: no *dense* auto-placement packing (placement is first-fit,
-/// never backfilling earlier holes), no named or negative grid lines, and no
+/// This does real track sizing plus line-based placement and spanning (including
+/// negative, from-end grid lines resolved against the track count), but is still a
+/// subset: no *dense* auto-placement packing (placement is first-fit, never
+/// backfilling earlier holes), no named grid lines, and no
 /// alignment of an item within its track. Half-definite items always auto-flow
 /// the missing axis. Those belong to later work; the CSS parsing and runtime
 /// wiring of placement is a later step.
@@ -1326,6 +1327,72 @@ mod tests {
         // Spans cols 0-1: 100 + 100 + one interior 10px gap = 210, at x=0.
         assert_eq!(b[0].origin().x, 0.0);
         assert_eq!(b[0].size().width, 210.0);
+    }
+
+    // (neg-a) `grid-column: 1 / -1` spans every column: width 300 at x=0 (3×100).
+    #[test]
+    fn negative_end_line_spans_all_columns() {
+        let style = LayoutStyle::default();
+        let children = [placed(
+            1,
+            GridPlacement::column(GridLine::Line(1), GridLine::Line(-1)),
+        )];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 20.0)]);
+        let out = three_col_100().layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(300.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].origin(), Point::new(0.0, 0.0));
+        assert_eq!(b[0].size().width, 300.0);
+    }
+
+    // (neg-b) `grid-column: -1` lands on the last column: x=200, width 100.
+    #[test]
+    fn negative_start_line_places_in_last_column() {
+        let style = LayoutStyle::default();
+        let children = [placed(
+            1,
+            GridPlacement::column(GridLine::Line(-1), GridLine::Auto),
+        )];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 20.0)]);
+        let out = three_col_100().layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(300.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].origin().x, 200.0);
+        assert_eq!(b[0].size().width, 100.0);
+    }
+
+    // (neg-c) a negative row line: `grid-row: -1` places on the last explicit row.
+    #[test]
+    fn negative_row_line_places_on_last_row() {
+        let style = LayoutStyle::default();
+        let children = [placed(
+            1,
+            GridPlacement::row(GridLine::Line(-1), GridLine::Auto),
+        )];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 30.0)]);
+        // Two explicit 50px rows; -1 is the last row (index 1) → y = 50.
+        let g = grid(
+            vec![TrackSize::Fixed(100.0)],
+            vec![TrackSize::Fixed(50.0), TrackSize::Fixed(50.0)],
+            0.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(100.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].origin().y, 50.0);
     }
 
     // ---- `repeat(auto-fill | auto-fit, …)` computed from the container size. ----

@@ -156,6 +156,9 @@ impl PropertyCompiler {
                 selector,
             );
         }
+        if decl.name.eq_ignore_ascii_case("grid-area") {
+            return expand_grid_area_shorthand(decl, specificity, origin, source_order, selector);
+        }
         vec![self.compile(decl, specificity, origin, source_order, selector, interner)]
     }
 }
@@ -320,6 +323,77 @@ fn expand_grid_line_shorthand(
             ))
         })
         .collect()
+}
+
+/// Expands the `grid-area` shorthand into its FOUR line longhands (spec §4.13).
+///
+/// The value is split on `/` into up to four `<grid-line>` edges in CSS order —
+/// `row-start / column-start / row-end / column-end` — mapping to
+/// [`PropertyId::GridRowStart`], [`PropertyId::GridColumnStart`],
+/// [`PropertyId::GridRowEnd`], [`PropertyId::GridColumnEnd`]. Omitted edges follow
+/// the CSS filling rules over the LINE-based forms only:
+///
+/// * `a` → all four are `a` (a bare `<custom-ident>` named area is out of scope,
+///   so it fails `grid_line_edge` and degrades to `Unsupported`).
+/// * `a / b` → `row-start=a, column-start=b`, both ends `auto`.
+/// * `a / b / c` → `row-start=a, column-start=b, row-end=c`, `column-end=auto`.
+/// * `a / b / c / d` → the four edges directly.
+///
+/// An unparseable edge, or more than four values, degrades the whole shorthand to
+/// a single [`CompiledDeclaration::Unsupported`] rather than dropping it.
+fn expand_grid_area_shorthand(
+    decl: &ParsedDeclaration,
+    specificity: SelectorSpecificity,
+    origin: CascadeOrigin,
+    source_order: u32,
+    selector: Option<SelectorId>,
+) -> Vec<CompiledDeclaration> {
+    let unsupported = || {
+        vec![CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
+            value_unsupported_kind(&decl.value),
+            &*decl.name,
+            decl.span,
+        ))]
+    };
+    let mut edges = Vec::new();
+    for group in decl.value.split(|v| matches!(v, ParsedValue::Delimiter('/'))) {
+        match grid_line_edge(group) {
+            Some(edge) => edges.push(edge),
+            None => return unsupported(),
+        }
+    }
+    // Fill omitted edges: `[row-start, column-start, row-end, column-end]`.
+    let [row_start, column_start, row_end, column_end] = match edges.as_slice() {
+        [a] => [*a, *a, *a, *a],
+        [a, b] => [*a, *b, GridLineValue::Auto, GridLineValue::Auto],
+        [a, b, c] => [*a, *b, *c, GridLineValue::Auto],
+        [a, b, c, d] => [*a, *b, *c, *d],
+        _ => return unsupported(),
+    };
+    let important = if decl.important {
+        ImportantFlag::Important
+    } else {
+        ImportantFlag::Normal
+    };
+    [
+        (PropertyId::GridRowStart, row_start),
+        (PropertyId::GridColumnStart, column_start),
+        (PropertyId::GridRowEnd, row_end),
+        (PropertyId::GridColumnEnd, column_end),
+    ]
+    .into_iter()
+    .map(|(property, edge)| {
+        CompiledDeclaration::Standard(Declaration::new(
+            property,
+            PropertyValue::GridLine(edge),
+            important,
+            origin,
+            specificity,
+            source_order,
+            selector,
+        ))
+    })
+    .collect()
 }
 
 /// Lowers one `<grid-line>` edge from a component group: `auto`, a non-zero
@@ -1971,6 +2045,91 @@ mod tests {
         assert!(matches!(result, CompiledDeclaration::Unsupported(_)));
         // More than one `/` is not a valid placement.
         let decls = compile_all("grid-column: 1 / 2 / 3");
+        assert_eq!(decls.len(), 1);
+        assert!(matches!(decls[0], CompiledDeclaration::Unsupported(_)));
+    }
+
+    // ---- grid-area shorthand ----
+
+    #[test]
+    fn grid_area_four_values_expand_in_css_order() {
+        // `grid-area: <row-start> / <col-start> / <row-end> / <col-end>`.
+        assert_eq!(
+            grid_lines(&compile_all("grid-area: 1 / 2 / 3 / 4")),
+            vec![
+                (PropertyId::GridRowStart, GridLineValue::Line(1)),
+                (PropertyId::GridColumnStart, GridLineValue::Line(2)),
+                (PropertyId::GridRowEnd, GridLineValue::Line(3)),
+                (PropertyId::GridColumnEnd, GridLineValue::Line(4)),
+            ]
+        );
+    }
+
+    #[test]
+    fn grid_area_mixes_line_and_span_edges() {
+        // `grid-area: 1 / 1 / span 2 / span 2`.
+        assert_eq!(
+            grid_lines(&compile_all("grid-area: 1 / 1 / span 2 / span 2")),
+            vec![
+                (PropertyId::GridRowStart, GridLineValue::Line(1)),
+                (PropertyId::GridColumnStart, GridLineValue::Line(1)),
+                (PropertyId::GridRowEnd, GridLineValue::Span(2)),
+                (PropertyId::GridColumnEnd, GridLineValue::Span(2)),
+            ]
+        );
+    }
+
+    #[test]
+    fn grid_area_two_values_leave_ends_auto() {
+        // `grid-area: 2 / 3` → row-start=2, col-start=3, both ends auto.
+        assert_eq!(
+            grid_lines(&compile_all("grid-area: 2 / 3")),
+            vec![
+                (PropertyId::GridRowStart, GridLineValue::Line(2)),
+                (PropertyId::GridColumnStart, GridLineValue::Line(3)),
+                (PropertyId::GridRowEnd, GridLineValue::Auto),
+                (PropertyId::GridColumnEnd, GridLineValue::Auto),
+            ]
+        );
+    }
+
+    #[test]
+    fn grid_area_single_value_fills_all_four() {
+        // `grid-area: 2` → all four edges = line 2.
+        assert_eq!(
+            grid_lines(&compile_all("grid-area: 2")),
+            vec![
+                (PropertyId::GridRowStart, GridLineValue::Line(2)),
+                (PropertyId::GridColumnStart, GridLineValue::Line(2)),
+                (PropertyId::GridRowEnd, GridLineValue::Line(2)),
+                (PropertyId::GridColumnEnd, GridLineValue::Line(2)),
+            ]
+        );
+    }
+
+    #[test]
+    fn grid_area_negative_end_lines_carry_through() {
+        // `grid-area: 1 / 1 / -1 / -1` (a full-grid cell) keeps the negative lines
+        // for the layout to resolve against the track count.
+        assert_eq!(
+            grid_lines(&compile_all("grid-area: 1 / 1 / -1 / -1")),
+            vec![
+                (PropertyId::GridRowStart, GridLineValue::Line(1)),
+                (PropertyId::GridColumnStart, GridLineValue::Line(1)),
+                (PropertyId::GridRowEnd, GridLineValue::Line(-1)),
+                (PropertyId::GridColumnEnd, GridLineValue::Line(-1)),
+            ]
+        );
+    }
+
+    #[test]
+    fn grid_area_named_ident_is_unsupported() {
+        // A bare named-area ident is out of scope → a single Unsupported.
+        let decls = compile_all("grid-area: header");
+        assert_eq!(decls.len(), 1);
+        assert!(matches!(decls[0], CompiledDeclaration::Unsupported(_)));
+        // More than four values is invalid.
+        let decls = compile_all("grid-area: 1 / 2 / 3 / 4 / 5");
         assert_eq!(decls.len(), 1);
         assert!(matches!(decls[0], CompiledDeclaration::Unsupported(_)));
     }

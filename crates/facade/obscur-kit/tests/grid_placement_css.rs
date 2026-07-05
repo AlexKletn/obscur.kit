@@ -24,10 +24,11 @@
 //! Proven end-to-end here: line-based column placement (`grid-column: 1 / 3`),
 //! `span` on an auto-placed item (`grid-column: span 2`), a single explicit line
 //! (`grid-column: 2`) with auto items flowing around it, explicit row placement
-//! (`grid-row: 2`) against fixed row tracks, a span crossing an interior `gap`, and
-//! a mixed explicit + auto layout where the auto items first-fit around the
-//! occupied cell. Still out of scope (documented in steps 1-2, not exercised here):
-//! dense packing / backfill, named or negative lines, and `grid-area`.
+//! (`grid-row: 2`) against fixed row tracks, a span crossing an interior `gap`, a
+//! mixed explicit + auto layout where the auto items first-fit around the occupied
+//! cell, negative (from-end) lines (`grid-column: 1 / -1` spanning the whole row),
+//! and the `grid-area` four-line shorthand. Still out of scope (documented in
+//! steps 1-2, not exercised here): dense packing / backfill and named lines/areas.
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -214,4 +215,51 @@ fn mixed_explicit_and_auto_fill_remaining_cells() {
     approx(cy, 0.0, "c.y (row 0)");
     approx(dx, 0.0, "d.x (auto wraps → col 0)");
     approx(dy, 10.0, "d.y (row 1, below the 10px row 0)");
+}
+
+// 7. negative end line: `.a{grid-column: 1 / -1}` spans from line 1 to the LAST
+//    line (line 4 in a 3-track grid) → the whole row (x=0, width 300).
+#[test]
+fn negative_end_line_spans_all_columns() {
+    let (rt, k) = drive(
+        &format!("{THREE_COL} .a{{grid-column:1 / -1;height:10px}}"),
+        1,
+        400.0,
+        200.0,
+    );
+    let (ax, ay, aw, _) = geom(&rt, k[0]);
+    approx(ax, 0.0, "a.x (line 1 → col 0)");
+    approx(ay, 0.0, "a.y (row 0)");
+    approx(aw, 300.0, "a.width (line 1 → -1 spans all three 100px columns)");
+}
+
+// 8. negative single line: `.a{grid-column: -1}` lands on the LAST column (x=200).
+#[test]
+fn negative_single_line_places_in_last_column() {
+    let (rt, k) = drive(
+        &format!("{THREE_COL} .a{{grid-column:-1;height:10px}}"),
+        1,
+        400.0,
+        200.0,
+    );
+    let (ax, _, aw, _) = geom(&rt, k[0]);
+    approx(ax, 200.0, "a.x (-1 → last column, index 2)");
+    approx(aw, 100.0, "a.width (single column)");
+}
+
+// 9. `grid-area` shorthand: `.a{grid-area: 1 / 1 / 2 / -1}` → row 1, from column
+//    line 1 to the last column line → the whole first row (x=0, width 300).
+#[test]
+fn grid_area_shorthand_spans_row_via_lines() {
+    let (rt, k) = drive(
+        ".grid{display:grid;width:300px;grid-template-columns:100px 100px 100px;\
+         grid-template-rows:20px 20px} .a{grid-area:1 / 1 / 2 / -1;height:10px}",
+        1,
+        400.0,
+        200.0,
+    );
+    let (ax, ay, aw, _) = geom(&rt, k[0]);
+    approx(ax, 0.0, "a.x (column line 1 → col 0)");
+    approx(ay, 0.0, "a.y (row line 1 → row 0)");
+    approx(aw, 300.0, "a.width (col 1 → -1 spans all three columns)");
 }

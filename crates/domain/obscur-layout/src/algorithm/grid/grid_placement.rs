@@ -105,9 +105,9 @@ impl GridPlacement {
 
     /// Resolves the **column** axis to `(start, span)` — see the type docs.
     ///
-    /// `num_tracks` is the number of explicit tracks on the axis (reserved for
-    /// forward-compatible clamping; the current positive-line subset resolves
-    /// without needing it).
+    /// `num_tracks` is the number of explicit tracks on the axis; it is the basis a
+    /// negative (from-end) line resolves against (`-1` is the last line) and bounds
+    /// a from-end block into the grid. Positive-line placements ignore it.
     #[must_use]
     pub fn resolve_column(&self, num_tracks: usize) -> (Option<usize>, usize) {
         resolve_axis(self.column_start, self.column_end, num_tracks)
@@ -124,11 +124,37 @@ impl GridPlacement {
 ///
 /// `start` is `None` when the axis must be auto-flowed, `Some(i)` for a definite
 /// 0-based track index; `span` is always `≥ 1`.
+///
+/// # Negative (from-end) lines
+///
+/// A [`Line`](GridLine::Line) with a **negative** index counts back from the end
+/// of the explicit grid: `-1` is the *last* line (1-based line `num_tracks + 1`),
+/// `-2` the line before it, i.e. `Line(-k)` → 1-based line `num_tracks + 2 - k`.
+/// Each negative edge is first normalised to that positive line against
+/// `num_tracks`, then resolved by the same rules as a positive line — so
+/// `1 / -1` spans the whole row and a bare `-1` lands on the last track. When any
+/// edge was negative the resolved block is finally clamped to stay inside the
+/// grid (`start ≥ 0`, `start + span ≤ num_tracks`); positive-only placements are
+/// left byte-identical (never clamped, so definite positive lines past the
+/// template still open implicit tracks).
 fn resolve_axis(start: GridLine, end: GridLine, num_tracks: usize) -> (Option<usize>, usize) {
-    let _ = num_tracks;
+    let tracks_i32 = i32::try_from(num_tracks).unwrap_or(i32::MAX);
+    let has_negative = matches!(start, GridLine::Line(a) if a < 0)
+        || matches!(end, GridLine::Line(b) if b < 0);
+    // Normalise a negative (from-end) line to a positive 1-based line: `-1` is the
+    // last line (`num_tracks + 1`), i.e. `num_tracks + 2 + a` for a negative `a`;
+    // clamped to a valid `≥ 1` line. Positive/`Auto`/`Span` edges pass through.
+    let norm = |line: GridLine| -> GridLine {
+        match line {
+            GridLine::Line(a) if a < 0 => GridLine::Line((tracks_i32 + 2 + a).max(1)),
+            other => other,
+        }
+    };
+    let start = norm(start);
+    let end = norm(end);
     // A clamped-positive line index (`≥ 1`) as a 0-based track index.
     let track = |line: i32| usize::try_from(line.max(1)).unwrap_or(1) - 1;
-    match (start, end) {
+    let (anchor, span) = match (start, end) {
         // Definite start line — end decides the span.
         (GridLine::Line(a), end) => {
             let span = match end {
@@ -150,6 +176,14 @@ fn resolve_axis(start: GridLine, end: GridLine, num_tracks: usize) -> (Option<us
             (None, usize::from(n.max(1)))
         }
         (GridLine::Auto, GridLine::Auto) => (None, 1),
+    };
+    // A from-end (negative) edge resolves against the real track grid: keep the
+    // block inside it. Positive-only placements are never touched here.
+    match anchor {
+        Some(a) if has_negative && num_tracks > 0 => {
+            (Some(a.min(num_tracks.saturating_sub(span))), span)
+        }
+        other => (other, span),
     }
 }
 
@@ -201,5 +235,40 @@ mod tests {
     fn reversed_lines_clamp_to_span_one() {
         let p = GridPlacement::column(GridLine::Line(3), GridLine::Line(1));
         assert_eq!(p.resolve_column(3), (Some(2), 1));
+    }
+
+    #[test]
+    fn negative_end_line_spans_to_last_line() {
+        // grid-column: 1 / -1 in a 3-track grid → whole row: start 0, span 3.
+        let p = GridPlacement::column(GridLine::Line(1), GridLine::Line(-1));
+        assert_eq!(p.resolve_column(3), (Some(0), 3));
+    }
+
+    #[test]
+    fn negative_start_line_lands_on_last_track() {
+        // grid-column: -1 → last column: start 2, span 1 in a 3-track grid.
+        let p = GridPlacement::column(GridLine::Line(-1), GridLine::Auto);
+        assert_eq!(p.resolve_column(3), (Some(2), 1));
+    }
+
+    #[test]
+    fn negative_second_from_end_line() {
+        // grid-row: -2 → line before last (1-based line 3) → track 2 in a 3-track grid.
+        let p = GridPlacement::row(GridLine::Line(-2), GridLine::Auto);
+        assert_eq!(p.resolve_row(3), (Some(2), 1));
+    }
+
+    #[test]
+    fn negative_range_spans_interior() {
+        // grid-column: 2 / -1 in a 4-track grid → start 1, up to last line 5 → span 3.
+        let p = GridPlacement::column(GridLine::Line(2), GridLine::Line(-1));
+        assert_eq!(p.resolve_column(4), (Some(1), 3));
+    }
+
+    #[test]
+    fn positive_lines_unaffected_by_track_count() {
+        // A positive line past the template still opens implicit tracks (no clamp).
+        let p = GridPlacement::column(GridLine::Line(5), GridLine::Auto);
+        assert_eq!(p.resolve_column(3), (Some(4), 1));
     }
 }
