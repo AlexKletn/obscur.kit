@@ -23,7 +23,7 @@ use obscur_text::shaping::{
 };
 use obscur_tree::tree::RetainedTree;
 
-use super::{families_for, ComputedStyles, LayoutBoxes};
+use super::{attributes_for, direction_for, families_for, ComputedStyles, LayoutBoxes};
 
 /// Default font size (in pixels) used to emit text runs.
 ///
@@ -180,22 +180,27 @@ impl SceneCoordinator {
     ///
     /// `fallback` is the node's resolved font chain (from its computed
     /// `font-family` via [`families_for`], or the default chain when unauthored);
-    /// the layout phase measures the box with the identical chain, so the shaped
-    /// runs — and therefore the wrapped lines — agree.
+    /// `attributes` (weight + slant, via [`attributes_for`]) and `direction` (the
+    /// base bidi direction, via [`direction_for`]) come from the node's computed
+    /// `font-weight` / `font-style` / `direction`. The layout phase measures the
+    /// box with the identical chain, attributes, and direction, so the shaped runs
+    /// — and therefore the wrapped lines — agree.
     fn shape_lines(
         &self,
         content: &str,
         fallback: &FontFallback,
+        attributes: &FontAttributes,
+        direction: TextDirection,
         font_size: f32,
         max_width: f32,
     ) -> ParagraphLayout {
         let runs = self.paragraph.shape_paragraph(
             content,
             fallback,
-            &FontAttributes::default(),
+            attributes,
             &self.default_face,
             font_size,
-            TextDirection::LeftToRight,
+            direction,
         );
         let metrics = self.paragraph.line_metrics(font_size);
         ParagraphLayout::wrap(
@@ -271,11 +276,21 @@ impl SceneCoordinator {
                     // the drawn advances and baseline match the sized box.
                     let font_size = font_size_of(computed, node);
                     // The node's authored `font-family` drives the fallback chain,
-                    // the SAME chain the layout phase measured this box with.
+                    // and its `font-weight`/`font-style`/`direction` drive the
+                    // shaping attributes and base direction — the SAME inputs the
+                    // layout phase measured this box with.
                     let fallback = families_for(computed.get(&node));
+                    let attributes = attributes_for(computed.get(&node));
+                    let direction = direction_for(computed.get(&node));
                     let origin = layout_box.origin();
-                    let layout =
-                        self.shape_lines(content, &fallback, font_size, layout_box.size().width);
+                    let layout = self.shape_lines(
+                        content,
+                        &fallback,
+                        &attributes,
+                        direction,
+                        font_size,
+                        layout_box.size().width,
+                    );
                     for line in layout.lines() {
                         let baseline = line.baseline();
                         let line_top = origin.y + line.top();

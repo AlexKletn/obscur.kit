@@ -120,7 +120,14 @@ impl StyleResolver {
             | PropertyId::Visibility
             | PropertyId::FlexDirection
             | PropertyId::JustifyContent
-            | PropertyId::AlignItems => None,
+            | PropertyId::AlignItems
+            // `direction` (`ltr`) / `font-style` (`normal`) keyword initials are
+            // likewise deferred, and `font-weight`'s initial (`normal` = 400) is
+            // left unresolved so an absent value falls back to the shaping default
+            // (also 400) — byte-for-byte identical to today's behaviour.
+            | PropertyId::Direction
+            | PropertyId::FontWeight
+            | PropertyId::FontStyle => None,
         }
     }
 

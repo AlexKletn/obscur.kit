@@ -254,7 +254,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 28] = [
+    const ALL: [PropertyId; 31] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::Opacity,
@@ -283,6 +283,9 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::AlignItems,
         PropertyId::FontSize,
         PropertyId::FontFamily,
+        PropertyId::Direction,
+        PropertyId::FontWeight,
+        PropertyId::FontStyle,
     ];
     ALL.into_iter()
         .find(|id| name.eq_ignore_ascii_case(id.name()))
@@ -322,6 +325,9 @@ fn lower_for_property(
             return Some(wide);
         }
         return lower_font_family(values);
+    }
+    if property == PropertyId::FontWeight {
+        return lower_font_weight(values);
     }
     if let Some(mapper) = layout_keyword_mapper(property)
         && let Some(ParsedValue::Keyword(keyword)) = values.first()
@@ -388,6 +394,42 @@ fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<Inte
         PropertyId::FlexDirection => Some(layout_keyword::flex_direction_from_name),
         PropertyId::JustifyContent => Some(layout_keyword::justify_content_from_name),
         PropertyId::AlignItems => Some(layout_keyword::align_items_from_name),
+        PropertyId::Direction => Some(layout_keyword::direction_from_name),
+        PropertyId::FontStyle => Some(layout_keyword::font_style_from_name),
+        _ => None,
+    }
+}
+
+/// Lowers a `font-weight` value into a [`PropertyValue::Number`] on the CSS
+/// `1..=1000` weight axis.
+///
+/// A bare number is taken verbatim; the named keywords map to their numeric
+/// equivalents (`normal` → 400, `bold` → 700). The relative keywords are
+/// resolved to fixed weights for now (`lighter` → 300, `bolder` → 700) rather
+/// than against the inherited weight. The CSS-wide keywords (`inherit` /
+/// `initial` / `unset`) still take priority. Any other value yields [`None`] so
+/// the declaration degrades to an unsupported-feature diagnostic.
+fn lower_font_weight(values: &[ParsedValue]) -> Option<PropertyValue> {
+    match values.first()? {
+        ParsedValue::Number(n) => Some(PropertyValue::Number(narrow_f32(*n))),
+        ParsedValue::Keyword(keyword) => {
+            if let Some(wide) = css_wide_keyword(keyword) {
+                return Some(wide);
+            }
+            font_weight_keyword(keyword).map(PropertyValue::Number)
+        }
+        _ => None,
+    }
+}
+
+/// Maps a named `font-weight` keyword to its numeric weight, case-insensitively;
+/// [`None`] for any other keyword.
+fn font_weight_keyword(keyword: &str) -> Option<f32> {
+    match keyword.to_ascii_lowercase().as_str() {
+        "normal" => Some(400.0),
+        "bold" => Some(700.0),
+        "lighter" => Some(300.0),
+        "bolder" => Some(700.0),
         _ => None,
     }
 }
@@ -1149,6 +1191,64 @@ mod tests {
     fn font_family_honours_css_wide_keywords() {
         assert_eq!(value_of("font-family: inherit"), PropertyValue::Inherit);
         assert_eq!(value_of("font-family: initial"), PropertyValue::Initial);
+    }
+
+    // ---- direction / font-weight / font-style ----
+
+    #[test]
+    fn resolves_direction_weight_style_names() {
+        assert_eq!(property_id_from_name("direction"), Some(PropertyId::Direction));
+        assert_eq!(
+            property_id_from_name("FONT-WEIGHT"),
+            Some(PropertyId::FontWeight)
+        );
+        assert_eq!(property_id_from_name("font-style"), Some(PropertyId::FontStyle));
+    }
+
+    #[test]
+    fn direction_maps_to_reserved_symbols() {
+        assert_eq!(
+            value_of("direction: rtl"),
+            PropertyValue::Keyword(layout_keyword::DIRECTION_RTL)
+        );
+        assert_eq!(
+            value_of("direction: ltr"),
+            PropertyValue::Keyword(layout_keyword::DIRECTION_LTR)
+        );
+        assert_eq!(standard("direction: rtl").0.property(), PropertyId::Direction);
+    }
+
+    #[test]
+    fn font_style_maps_to_reserved_symbols() {
+        assert_eq!(
+            value_of("font-style: italic"),
+            PropertyValue::Keyword(layout_keyword::FONT_STYLE_ITALIC)
+        );
+        assert_eq!(
+            value_of("font-style: normal"),
+            PropertyValue::Keyword(layout_keyword::FONT_STYLE_NORMAL)
+        );
+        assert_eq!(
+            value_of("font-style: oblique"),
+            PropertyValue::Keyword(layout_keyword::FONT_STYLE_OBLIQUE)
+        );
+    }
+
+    #[test]
+    fn font_weight_lowers_numbers_and_keywords() {
+        assert_eq!(value_of("font-weight: 300"), PropertyValue::Number(300.0));
+        assert_eq!(value_of("font-weight: bold"), PropertyValue::Number(700.0));
+        assert_eq!(value_of("font-weight: normal"), PropertyValue::Number(400.0));
+        assert_eq!(value_of("font-weight: lighter"), PropertyValue::Number(300.0));
+        assert_eq!(value_of("font-weight: bolder"), PropertyValue::Number(700.0));
+        assert_eq!(standard("font-weight: 500").0.property(), PropertyId::FontWeight);
+    }
+
+    #[test]
+    fn direction_weight_style_honour_css_wide_keywords() {
+        assert_eq!(value_of("direction: inherit"), PropertyValue::Inherit);
+        assert_eq!(value_of("font-weight: initial"), PropertyValue::Initial);
+        assert_eq!(value_of("font-style: unset"), PropertyValue::Unset);
     }
 
     #[test]

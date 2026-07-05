@@ -19,7 +19,7 @@ use obscur_text::layout::{ParagraphLayout, TextAlignment, TextOverflow};
 use obscur_text::shaping::{ParagraphShaper, TextDirection};
 use obscur_tree::tree::RetainedTree;
 
-use super::{families_for, ComputedStyles};
+use super::{attributes_for, direction_for, families_for, ComputedStyles};
 
 /// The initial `font-size` (spec / CSS default), used as the `em`/`rem` base
 /// when a node (or the document root) has no computed `font-size`.
@@ -179,12 +179,17 @@ impl LayoutCoordinator {
 /// through the **same** orchestrator and so emits exactly the same lines.
 ///
 /// `fallback` is the node's font chain resolved from its computed `font-family`
-/// (via [`families_for`]); the scene phase resolves the identical chain, so the
-/// measured box and the painted glyphs use the same fonts.
+/// (via [`families_for`]); `attributes` (weight + slant, via [`attributes_for`])
+/// and `direction` (the base bidi direction, via [`direction_for`]) come from the
+/// node's computed `font-weight` / `font-style` / `direction`. The scene phase
+/// resolves the identical chain, attributes, and direction, so the measured box
+/// and the painted glyphs use the same fonts and reordering.
 fn measure_text_node(
     content: &str,
     style: &LayoutStyle,
     fallback: &FontFallback,
+    attributes: &FontAttributes,
+    direction: TextDirection,
     constraints: BoxConstraints,
     paragraph: &ParagraphShaper,
 ) -> Size {
@@ -193,10 +198,10 @@ fn measure_text_node(
     let runs = paragraph.shape_paragraph(
         content,
         fallback,
-        &FontAttributes::default(),
+        attributes,
         &measure_face(),
         font_size,
-        TextDirection::LeftToRight,
+        direction,
     );
     // A text node's own horizontal border/padding shrinks the wrap width; it is
     // almost always zero, but subtract it defensively so the content fits.
@@ -578,7 +583,17 @@ fn measure(
     // bypassing the box algorithms entirely (spec §5.10).
     if let Some(content) = tree.get(node).and_then(|n| n.kind().text()) {
         let fallback = families_for(computed.get(&node));
-        return measure_text_node(content, &style, &fallback, constraints, paragraph);
+        let attributes = attributes_for(computed.get(&node));
+        let direction = direction_for(computed.get(&node));
+        return measure_text_node(
+            content,
+            &style,
+            &fallback,
+            &attributes,
+            direction,
+            constraints,
+            paragraph,
+        );
     }
     let Some(algorithm) = algorithm_for(style.display) else {
         return Size::ZERO;
@@ -637,7 +652,17 @@ fn arrange(
     // no laid-out children, so there is nothing to recurse into.
     if let Some(content) = tree.get(node).and_then(|n| n.kind().text()) {
         let fallback = families_for(computed.get(&node));
-        let size = measure_text_node(content, &style, &fallback, constraints, paragraph);
+        let attributes = attributes_for(computed.get(&node));
+        let direction = direction_for(computed.get(&node));
+        let size = measure_text_node(
+            content,
+            &style,
+            &fallback,
+            &attributes,
+            direction,
+            constraints,
+            paragraph,
+        );
         boxes.insert(node, LayoutBox::new(Rect::new(origin, size)));
         return;
     }

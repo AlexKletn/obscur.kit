@@ -88,6 +88,16 @@ pub enum PropertyId {
     /// The `font-family` property (a `FontFamilies` list of family/generic
     /// names, inherited).
     FontFamily,
+    /// The `direction` property (Keyword-valued: `ltr` / `rtl`; inherited). See
+    /// the reserved `DIRECTION_*` handles in [`crate::property::layout_keyword`].
+    Direction,
+    /// The `font-weight` property (Number-valued on the `1..=1000` axis;
+    /// inherited).
+    FontWeight,
+    /// The `font-style` property (Keyword-valued: `normal` / `italic` /
+    /// `oblique`; inherited). See the reserved `FONT_STYLE_*` handles in
+    /// [`crate::property::layout_keyword`].
+    FontStyle,
 }
 
 impl PropertyId {
@@ -126,6 +136,9 @@ impl PropertyId {
             Self::AlignItems => "align-items",
             Self::FontSize => "font-size",
             Self::FontFamily => "font-family",
+            Self::Direction => "direction",
+            Self::FontWeight => "font-weight",
+            Self::FontStyle => "font-style",
         }
     }
 
@@ -137,9 +150,13 @@ impl PropertyId {
     pub const fn default_inheritance(self) -> Inheritance {
         match self {
             // Text-affecting / typography properties inherit by default.
-            Self::Color | Self::Visibility | Self::FontSize | Self::FontFamily => {
-                Inheritance::Inherited
-            }
+            Self::Color
+            | Self::Visibility
+            | Self::FontSize
+            | Self::FontFamily
+            | Self::Direction
+            | Self::FontWeight
+            | Self::FontStyle => Inheritance::Inherited,
             // Box / paint / layout properties reset on each element.
             Self::BackgroundColor
             | Self::Opacity
@@ -256,6 +273,17 @@ mod tests {
         assert_eq!(PropertyId::FontFamily.name(), "font-family");
         // Like `font-size` and `color`, `font-family` inherits by default.
         assert!(PropertyId::FontFamily.default_inheritance().is_inherited());
+    }
+
+    #[test]
+    fn direction_weight_style_names_and_inheritance() {
+        assert_eq!(PropertyId::Direction.name(), "direction");
+        assert_eq!(PropertyId::FontWeight.name(), "font-weight");
+        assert_eq!(PropertyId::FontStyle.name(), "font-style");
+        // Like the other typography properties, all three inherit by default.
+        assert!(PropertyId::Direction.default_inheritance().is_inherited());
+        assert!(PropertyId::FontWeight.default_inheritance().is_inherited());
+        assert!(PropertyId::FontStyle.default_inheritance().is_inherited());
     }
 
     #[test]

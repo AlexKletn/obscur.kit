@@ -104,21 +104,26 @@ impl FontRegistry {
 impl FontResolver for FontRegistry {
     fn resolve(&self, request: &FontResolveRequest) -> Option<ResolvedFont> {
         let text = request.text();
+        let requested = request.attributes();
         for family in request.families() {
-            for font in self
+            // Among the same-family faces that cover the run, pick the one whose
+            // attributes are nearest the request (smallest `FontAttributes::distance`).
+            // `min_by_key` keeps the **first** face on a tie, so equal-distance
+            // faces resolve in registration order — a stable, deterministic choice.
+            let best = self
                 .fonts
                 .iter()
                 .filter(|font| font.family.name() == family.name())
-            {
-                if font.covers(text) {
-                    let face = FontFace::new(
-                        font.family.clone(),
-                        font.attributes,
-                        FontSource::memory(Arc::clone(&font.bytes)),
-                        FontMetrics::new(font.units_per_em, font.ascent, font.descent, font.line_gap),
-                    );
-                    return Some(ResolvedFont::new(font.id, face));
-                }
+                .filter(|font| font.covers(text))
+                .min_by_key(|font| font.attributes.distance(requested));
+            if let Some(font) = best {
+                let face = FontFace::new(
+                    font.family.clone(),
+                    font.attributes,
+                    FontSource::memory(Arc::clone(&font.bytes)),
+                    FontMetrics::new(font.units_per_em, font.ascent, font.descent, font.line_gap),
+                );
+                return Some(ResolvedFont::new(font.id, face));
             }
         }
         None
@@ -448,6 +453,41 @@ mod tests {
         let chain = FontFallback::new(FontFamily::named("Alpha"));
         let attributes = FontAttributes::default();
         assert!(registry.resolve(&request(&chain, &attributes, "Я")).is_none());
+    }
+
+    #[test]
+    fn nearest_weight_of_same_family_is_selected() {
+        use obscur_text::span::FontWeight;
+
+        // Two cuts of one family, both covering 'A': a regular (400) and a bold
+        // (700). Registration order is regular first (id 0), bold second (id 1).
+        let mut registry = FontRegistry::new();
+        registry.register(
+            FontFamily::named("Alpha"),
+            FontAttributes::default().with_weight(FontWeight::NORMAL),
+            alpha_font(),
+        );
+        registry.register(
+            FontFamily::named("Alpha"),
+            FontAttributes::default().with_weight(FontWeight::BOLD),
+            alpha_font(),
+        );
+        let chain = FontFallback::new(FontFamily::named("Alpha"));
+
+        // A bold request resolves to the bold cut (id 1), not the first-registered
+        // regular, because its attributes are nearer.
+        let bold = FontAttributes::default().with_weight(FontWeight::BOLD);
+        let resolved = registry
+            .resolve(&request(&chain, &bold, "A"))
+            .expect("Alpha covers 'A'");
+        assert_eq!(resolved.font(), FontId::new(1));
+
+        // A light request resolves to the regular cut (id 0), the nearer weight.
+        let light = FontAttributes::default().with_weight(FontWeight::LIGHT);
+        let resolved = registry
+            .resolve(&request(&chain, &light, "A"))
+            .expect("Alpha covers 'A'");
+        assert_eq!(resolved.font(), FontId::new(0));
     }
 
     #[test]

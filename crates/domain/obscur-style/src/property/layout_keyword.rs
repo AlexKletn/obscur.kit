@@ -70,6 +70,22 @@ pub const ALIGN_END: InternedSymbol = InternedSymbol::from_raw(0x0000_1303);
 /// The `align-items: stretch` keyword.
 pub const ALIGN_STRETCH: InternedSymbol = InternedSymbol::from_raw(0x0000_1304);
 
+// ---- `direction` keyword values ----
+
+/// The `direction: ltr` (left-to-right) keyword.
+pub const DIRECTION_LTR: InternedSymbol = InternedSymbol::from_raw(0x0000_1401);
+/// The `direction: rtl` (right-to-left) keyword.
+pub const DIRECTION_RTL: InternedSymbol = InternedSymbol::from_raw(0x0000_1402);
+
+// ---- `font-style` keyword values ----
+
+/// The `font-style: normal` keyword.
+pub const FONT_STYLE_NORMAL: InternedSymbol = InternedSymbol::from_raw(0x0000_1501);
+/// The `font-style: italic` keyword.
+pub const FONT_STYLE_ITALIC: InternedSymbol = InternedSymbol::from_raw(0x0000_1502);
+/// The `font-style: oblique` keyword.
+pub const FONT_STYLE_OBLIQUE: InternedSymbol = InternedSymbol::from_raw(0x0000_1503);
+
 /// Maps a `display` keyword string to its reserved [`InternedSymbol`].
 ///
 /// The input is ASCII-lowercased before matching, so callers may pass authored
@@ -136,6 +152,33 @@ pub fn align_items_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
+/// Maps a `direction` keyword string to its reserved [`InternedSymbol`].
+///
+/// The input is ASCII-lowercased before matching. Returns [`None`] for any
+/// keyword outside the closed `ltr` / `rtl` set.
+#[must_use]
+pub fn direction_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "ltr" => Some(DIRECTION_LTR),
+        "rtl" => Some(DIRECTION_RTL),
+        _ => None,
+    }
+}
+
+/// Maps a `font-style` keyword string to its reserved [`InternedSymbol`].
+///
+/// The input is ASCII-lowercased before matching. Returns [`None`] for any
+/// keyword outside the closed `normal` / `italic` / `oblique` set.
+#[must_use]
+pub fn font_style_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "normal" => Some(FONT_STYLE_NORMAL),
+        "italic" => Some(FONT_STYLE_ITALIC),
+        "oblique" => Some(FONT_STYLE_OBLIQUE),
+        _ => None,
+    }
+}
+
 /// Returns the canonical CSS keyword string for a reserved layout symbol.
 ///
 /// This is the reverse of the `*_from_name` helpers, intended for diagnostics
@@ -166,6 +209,11 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         ALIGN_CENTER => Some("center"),
         ALIGN_END => Some("flex-end"),
         ALIGN_STRETCH => Some("stretch"),
+        DIRECTION_LTR => Some("ltr"),
+        DIRECTION_RTL => Some("rtl"),
+        FONT_STYLE_NORMAL => Some("normal"),
+        FONT_STYLE_ITALIC => Some("italic"),
+        FONT_STYLE_OBLIQUE => Some("oblique"),
         _ => None,
     }
 }
@@ -193,6 +241,11 @@ mod tests {
         ALIGN_CENTER,
         ALIGN_END,
         ALIGN_STRETCH,
+        DIRECTION_LTR,
+        DIRECTION_RTL,
+        FONT_STYLE_NORMAL,
+        FONT_STYLE_ITALIC,
+        FONT_STYLE_OBLIQUE,
     ];
 
     #[test]
@@ -249,6 +302,29 @@ mod tests {
         assert_eq!(align_items_from_name("flex-end"), Some(ALIGN_END));
         assert_eq!(align_items_from_name("stretch"), Some(ALIGN_STRETCH));
         assert_eq!(align_items_from_name("baseline"), None);
+    }
+
+    #[test]
+    fn direction_maps_known_keywords() {
+        assert_eq!(direction_from_name("ltr"), Some(DIRECTION_LTR));
+        assert_eq!(direction_from_name("rtl"), Some(DIRECTION_RTL));
+        assert_eq!(direction_from_name("RTL"), Some(DIRECTION_RTL));
+        assert_eq!(direction_from_name("sideways"), None);
+    }
+
+    #[test]
+    fn font_style_maps_known_keywords() {
+        assert_eq!(font_style_from_name("normal"), Some(FONT_STYLE_NORMAL));
+        assert_eq!(font_style_from_name("italic"), Some(FONT_STYLE_ITALIC));
+        assert_eq!(font_style_from_name("Oblique"), Some(FONT_STYLE_OBLIQUE));
+        assert_eq!(font_style_from_name("slanted"), None);
+    }
+
+    #[test]
+    fn name_of_round_trips_direction_and_font_style() {
+        assert_eq!(name_of(DIRECTION_RTL), Some("rtl"));
+        assert_eq!(name_of(FONT_STYLE_ITALIC), Some("italic"));
+        assert_eq!(name_of(FONT_STYLE_OBLIQUE), Some("oblique"));
     }
 
     #[test]
