@@ -5,6 +5,8 @@ mod glyph_run;
 pub use glyph_run::GlyphRun;
 mod line_metrics;
 pub use line_metrics::LineMetrics;
+mod paragraph_shaper;
+pub use paragraph_shaper::ParagraphShaper;
 mod script_tag;
 pub use script_tag::ScriptTag;
 mod shaped_glyph;
