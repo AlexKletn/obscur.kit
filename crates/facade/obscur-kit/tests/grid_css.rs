@@ -28,12 +28,13 @@
 //!
 //! # Proven vs still limited
 //!
-//! Proven end-to-end here: fixed / `fr` / `auto` / `minmax` column tracks, `fr`
-//! free-space distribution, `gap` on both axes, `repeat(N, …)` expansion,
-//! row-major auto-placement into implicit rows, and explicit fixed row tracks.
-//! Still out of scope (documented in steps 1-2, not exercised here): line-based
-//! placement / spanning, dense packing, named lines, percent tracks (they degrade
-//! to `auto` — no known basis at conversion time), `auto-fill` / `auto-fit` (one
+//! Proven end-to-end here: fixed / percentage / `fr` / `auto` / `minmax` column
+//! tracks, `fr` free-space distribution, `gap` on both axes, `repeat(N, …)`
+//! expansion, row-major auto-placement into implicit rows, and explicit fixed row
+//! tracks. Percentage tracks resolve against the container's own content extent
+//! inside the algorithm (`30%` of a `400px` container → `120px`). Still out of
+//! scope (documented in steps 1-2, not exercised here): line-based placement /
+//! spanning, dense packing, named lines, `auto-fill` / `auto-fit` (one
 //! repetition), and alignment of an item within its track.
 #![forbid(unsafe_code)]
 
@@ -240,4 +241,26 @@ fn minmax_floors_first_column() {
     approx(aw, 120.0, "a.width floored at the 120px minmax minimum");
     approx(bx, 120.0, "b.x (after the floored first column)");
     approx(bw, 0.0, "b.width collapses (no free space after the floor)");
+}
+
+// 8. percentage + fr columns resolve against the container's OWN content width:
+//    `.grid{width:400px}` + `30% 1fr`. 30% of 400 = 120; the 1fr track takes the
+//    280px remainder. This is the case that previously degraded to `auto` because
+//    the percent basis was unknown at the runtime->layout conversion step; it now
+//    resolves inside the algorithm, which knows the container content size.
+#[test]
+fn percent_and_fr_columns_against_explicit_width() {
+    let (rt, k) = drive(
+        ".grid{display:grid;width:400px;grid-template-columns:30% 1fr} \
+         .a{height:10px} .b{height:10px}",
+        2,
+        500.0,
+        200.0,
+    );
+    let (ax, _, aw, _) = geom(&rt, k[0]);
+    let (bx, _, bw, _) = geom(&rt, k[1]);
+    approx(ax, 0.0, "a.x");
+    approx(aw, 120.0, "a.width (30% of the 400px container)");
+    approx(bx, 120.0, "b.x (after the 30% track)");
+    approx(bw, 280.0, "b.width (1fr takes the 280px remainder)");
 }

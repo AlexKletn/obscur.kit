@@ -32,9 +32,11 @@ use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 ///    `fr` distribution, and percentages all resolve against this extent.
 /// 2. **Column track sizing** — with `n = columns.len()` and
 ///    `available = content_width - (n - 1) * column_gap`, each column resolves to:
-///    `Fixed(px)` → `px`; `Auto` → the largest measured content width among the
-///    items auto-placed in it (measured under loose constraints); `Fr(f)` → a
-///    share `f / Σfr` of the space left after the fixed + auto tracks; and
+///    `Fixed(px)` → `px`; `Percent(f)` → `f * content_width` (its basis is the
+///    grid container's content extent, known only here); `Auto` → the largest
+///    measured content width among the items auto-placed in it (measured under
+///    loose constraints); `Fr(f)` → a share `f / Σfr` of the space left after the
+///    fixed + percentage + auto tracks; and
 ///    `MinMax(min, max)` → the `max` function resolved, then floored at the `min`
 ///    function (so `minmax(px, fr)` grows flexibly from `px` up). `fr` space is
 ///    distributed exactly like [`FlexLayout`](super::FlexLayout) shares free
@@ -157,10 +159,19 @@ impl GridLayout {
 ///
 /// `auto_size` is the content size to use for `Auto` (or an `auto` `minmax`
 /// bound): the largest content extent among the items placed in this track.
-fn resolve_track(track: &TrackSize, auto_size: f32) -> (f32, f32, f32) {
+/// `axis_size` is the container's content extent along this axis (the content
+/// width for columns / content height for rows), the basis a
+/// [`Percent`](TrackSize::Percent) track resolves against.
+fn resolve_track(track: &TrackSize, auto_size: f32, axis_size: f32) -> (f32, f32, f32) {
     match track {
         TrackSize::Fixed(px) => {
             let v = px.max(0.0);
+            (v, 0.0, v)
+        }
+        // A percentage resolves against the axis extent and, like a fixed track,
+        // is inflexible (it consumes its space before `fr` distribution).
+        TrackSize::Percent(f) => {
+            let v = (f * axis_size).max(0.0);
             (v, 0.0, v)
         }
         TrackSize::Auto => {
@@ -169,10 +180,11 @@ fn resolve_track(track: &TrackSize, auto_size: f32) -> (f32, f32, f32) {
         }
         TrackSize::Fr(f) => (0.0, f.max(0.0), 0.0),
         TrackSize::MinMax(min, max) => {
-            let floor = resolve_min(min, auto_size);
+            let floor = resolve_min(min, auto_size, axis_size);
             match max.as_ref() {
                 TrackSize::Fr(f) => (floor, f.max(0.0), floor),
                 TrackSize::Fixed(px) => (px.max(0.0).max(floor), 0.0, floor),
+                TrackSize::Percent(f) => ((f * axis_size).max(0.0).max(floor), 0.0, floor),
                 TrackSize::Auto => (auto_size.max(0.0).max(floor), 0.0, floor),
                 // A nested `minmax` as the `max` bound is not meaningful; keep the
                 // floor so the track never collapses below its `min`.
@@ -182,13 +194,15 @@ fn resolve_track(track: &TrackSize, auto_size: f32) -> (f32, f32, f32) {
     }
 }
 
-/// Resolves the floor a `minmax` `min` bound imposes. An `fr` min acts as `0`.
-fn resolve_min(track: &TrackSize, auto_size: f32) -> f32 {
+/// Resolves the floor a `minmax` `min` bound imposes. An `fr` min acts as `0`; a
+/// `Percent` min resolves against `axis_size` exactly like a standalone percentage.
+fn resolve_min(track: &TrackSize, auto_size: f32, axis_size: f32) -> f32 {
     match track {
         TrackSize::Fixed(px) => px.max(0.0),
+        TrackSize::Percent(f) => (f * axis_size).max(0.0),
         TrackSize::Auto => auto_size.max(0.0),
         TrackSize::Fr(_) => 0.0,
-        TrackSize::MinMax(inner_min, _) => resolve_min(inner_min, auto_size),
+        TrackSize::MinMax(inner_min, _) => resolve_min(inner_min, auto_size, axis_size),
     }
 }
 
@@ -196,9 +210,10 @@ fn resolve_min(track: &TrackSize, auto_size: f32) -> f32 {
 ///
 /// `available` is the content extent along the axis, `gap` the inter-track gap,
 /// and `auto_size(i)` supplies the content size for track `i`'s `Auto` (or `auto`
-/// `minmax`) resolution. Fixed and auto tracks take their base size; the space
-/// left over (after subtracting the gaps and those bases) is shared among the
-/// `fr` tracks in proportion to their fractions — the same free-space split
+/// `minmax`) resolution. Fixed, percentage (resolved as `fraction * available`),
+/// and auto tracks take their base size; the space left over (after subtracting
+/// the gaps and those bases) is shared among the `fr` tracks in proportion to
+/// their fractions — the same free-space split
 /// [`FlexLayout`](super::FlexLayout) uses for `flex-grow`. Every track is then
 /// floored (per its `minmax` `min`) and clamped to be non-negative.
 fn resolve_tracks(
@@ -218,7 +233,7 @@ fn resolve_tracks(
     let mut floors = Vec::with_capacity(n);
     let mut frs = Vec::with_capacity(n);
     for (i, track) in tracks.iter().enumerate() {
-        let (base, fr, floor) = resolve_track(track, auto_size(i));
+        let (base, fr, floor) = resolve_track(track, auto_size(i), available);
         sizes.push(base);
         frs.push(fr);
         floors.push(floor);
@@ -750,6 +765,127 @@ mod tests {
         assert_eq!(b[0].size().width, 100.0);
         assert_eq!(b[1].size().width, 100.0);
         assert_eq!(b[1].origin().x, 100.0);
+    }
+
+    // (p1) `30% 1fr` on a 400px content width: 30% = 120, fr takes the 280 remainder.
+    #[test]
+    fn percent_and_fr_columns_share_leftover() {
+        let style = LayoutStyle {
+            width: Dimension::Px(400.0),
+            ..LayoutStyle::default()
+        };
+        let children = [child(1), child(2)];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(0.0, 10.0), Size::new(0.0, 10.0)]);
+        let g = grid(
+            vec![TrackSize::Percent(0.30), TrackSize::Fr(1.0)],
+            vec![],
+            0.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(400.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // 30% of 400 = 120; the 1fr track takes the 280 remainder. (f32 percent
+        // arithmetic rounds 0.30 * 400 to ~120.00001, so compare with tolerance.)
+        assert_eq!(b[0].origin().x, 0.0);
+        assert!((b[0].size().width - 120.0).abs() < 1e-3);
+        assert!((b[1].origin().x - 120.0).abs() < 1e-3);
+        assert!((b[1].size().width - 280.0).abs() < 1e-3);
+    }
+
+    // (p2) two `50%` columns fill the content width exactly: 200 / 200 on 400px.
+    #[test]
+    fn two_percent_columns_split_content_width() {
+        let style = LayoutStyle {
+            width: Dimension::Px(400.0),
+            ..LayoutStyle::default()
+        };
+        let children = [child(1), child(2)];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(0.0, 10.0), Size::new(0.0, 10.0)]);
+        let g = grid(
+            vec![TrackSize::Percent(0.50), TrackSize::Percent(0.50)],
+            vec![],
+            0.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(400.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].size().width, 200.0);
+        assert_eq!(b[1].origin().x, 200.0);
+        assert_eq!(b[1].size().width, 200.0);
+    }
+
+    // (p3) a `Percent` inside `minmax(30%, 1fr)` acts as the floor: with a 300px
+    // fixed track ahead of it on a 400px width there is no room to grow, so the
+    // minmax track floors at 30% of 400 = 120 (not below).
+    #[test]
+    fn minmax_percent_floor_holds() {
+        let style = LayoutStyle {
+            width: Dimension::Px(400.0),
+            ..LayoutStyle::default()
+        };
+        let children = [child(1), child(2)];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(0.0, 10.0), Size::new(0.0, 10.0)]);
+        let g = grid(
+            vec![
+                TrackSize::Fixed(300.0),
+                TrackSize::minmax(TrackSize::Percent(0.30), TrackSize::Fr(1.0)),
+            ],
+            vec![],
+            0.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(400.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].size().width, 300.0);
+        // No leftover for fr growth (300 + 120 > 400), so the minmax floors at 120
+        // (f32 percent arithmetic rounds 0.30 * 400 to ~120.00001).
+        assert_eq!(b[1].origin().x, 300.0);
+        assert!((b[1].size().width - 120.0).abs() < 1e-3);
+    }
+
+    // (p4) percentage ROW tracks resolve against the container content height.
+    #[test]
+    fn percent_rows_resolve_against_content_height() {
+        let style = LayoutStyle {
+            height: Dimension::Px(200.0),
+            ..LayoutStyle::default()
+        };
+        let children = [child(1), child(2)];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(0.0, 10.0), Size::new(0.0, 10.0)]);
+        let g = grid(
+            vec![TrackSize::Fr(1.0)],
+            vec![TrackSize::Percent(0.25), TrackSize::Fr(1.0)],
+            0.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(300.0, 500.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // Row 0 = 25% of 200 = 50; the second child starts on row 1 at y = 50.
+        assert_eq!(b[1].origin().y, 50.0);
     }
 
     // (h) regression: `GridLayout::new(1)` lays a single equal column.

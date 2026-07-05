@@ -11,9 +11,10 @@
 //! A [`GridTrack::Fixed`] length is resolved to logical pixels through the same
 //! [`LengthContext`] the box-model lengths use. A bare percentage inside a track
 //! has no known basis at this point (the grid container's content size is not yet
-//! known here), so it degrades to [`TrackSize::Auto`] — a documented limitation,
-//! alongside `auto-fill` / `auto-fit` (handled in the CSS layer) and line
-//! placement / spanning, which are out of scope for this step.
+//! known here), so it is carried symbolically as a [`TrackSize::Percent`]
+//! fraction and resolved against the container content extent *inside* the layout
+//! algorithm. `auto-fill` / `auto-fit` (handled in the CSS layer) and line
+//! placement / spanning remain out of scope for this step.
 
 use std::collections::HashMap;
 
@@ -100,10 +101,10 @@ fn grid_tracks_of(computed: &ComputedStyle, property: PropertyId) -> Option<&[Gr
 /// Maps one style [`GridTrack`] into an `obscur_layout` [`TrackSize`].
 ///
 /// A [`GridTrack::Fixed`] length is resolved to logical pixels against `ctx`; a
-/// length with no resolvable pixel value here (a bare percentage — its basis is
-/// the not-yet-known container content size — or `auto`) degrades to
-/// [`TrackSize::Auto`]. `fr`, `auto`, and `minmax` map structurally, recursing on
-/// the `minmax` bounds.
+/// bare percentage — its basis is the not-yet-known container content size —
+/// becomes a [`TrackSize::Percent`] fraction the algorithm resolves later, and
+/// `auto` (no numeric value) degrades to [`TrackSize::Auto`]. `fr`, `auto`, and
+/// `minmax` map structurally, recursing on the `minmax` bounds.
 fn track_size_of(track: &GridTrack, ctx: &LengthContext) -> TrackSize {
     match track {
         GridTrack::Fixed(length) => fixed_track_size(*length, ctx),
@@ -115,15 +116,21 @@ fn track_size_of(track: &GridTrack, ctx: &LengthContext) -> TrackSize {
     }
 }
 
-/// Resolves a fixed-track [`Length`] to a [`TrackSize::Fixed`] pixel value,
-/// falling back to [`TrackSize::Auto`] when the length has no resolvable pixel
-/// value in this context (a bare percentage or `auto`).
+/// Resolves a fixed-track [`Length`] to a concrete [`TrackSize`].
+///
+/// A `px` (or resolvable relative unit) becomes a [`TrackSize::Fixed`]; a bare
+/// percentage becomes a [`TrackSize::Percent`] fraction (the `0..100` percent is
+/// converted to `0..1`) carried symbolically to the layout algorithm, where the
+/// container content extent — its basis — is known; `auto` (no numeric value)
+/// degrades to [`TrackSize::Auto`].
 fn fixed_track_size(length: Length, ctx: &LengthContext) -> TrackSize {
     match length {
         Length::Px(px) => TrackSize::Fixed(px.0),
-        // A bare percentage's basis (the container content size) is unknown here,
-        // and `auto` has no numeric value; both degrade to a content-sized track.
-        Length::Percent(_) | Length::Auto => TrackSize::Auto,
+        // A percentage's basis (the container content size) is unknown here, so
+        // carry the fraction to the algorithm instead of degrading it.
+        Length::Percent(pct) => TrackSize::Percent(pct / 100.0),
+        // `auto` has no numeric value; it is a content-sized track.
+        Length::Auto => TrackSize::Auto,
         relative => relative
             .resolve_px(ctx)
             .map_or(TrackSize::Auto, TrackSize::Fixed),
@@ -190,17 +197,41 @@ mod tests {
     }
 
     #[test]
-    fn percent_track_degrades_to_auto() {
+    fn percent_track_maps_to_percent_fraction() {
         let mut computed = ComputedStyle::new();
         computed.set(
             PropertyId::GridTemplateColumns,
-            ComputedValue::from_concrete(PropertyValue::grid_tracks([GridTrack::Fixed(
-                Length::Percent(50.0),
+            ComputedValue::from_concrete(PropertyValue::grid_tracks([
+                GridTrack::Fixed(Length::Percent(30.0)),
+                GridTrack::Fixed(Length::Percent(50.0)),
+            ]))
+            .expect("concrete"),
+        );
+        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
+        // A bare percentage no longer degrades to `Auto`: it carries its `0..1`
+        // fraction to the algorithm, which resolves it against the container size.
+        assert_eq!(
+            template.columns(),
+            &[TrackSize::Percent(0.30), TrackSize::Percent(0.50)]
+        );
+    }
+
+    #[test]
+    fn percent_inside_minmax_maps_to_percent_fraction() {
+        let mut computed = ComputedStyle::new();
+        computed.set(
+            PropertyId::GridTemplateColumns,
+            ComputedValue::from_concrete(PropertyValue::grid_tracks([GridTrack::minmax(
+                GridTrack::Fixed(Length::Percent(30.0)),
+                GridTrack::Fr(1.0),
             )]))
             .expect("concrete"),
         );
         let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
-        assert_eq!(template.columns(), &[TrackSize::Auto]);
+        assert_eq!(
+            template.columns(),
+            &[TrackSize::minmax(TrackSize::Percent(0.30), TrackSize::Fr(1.0))]
+        );
     }
 
     #[test]
