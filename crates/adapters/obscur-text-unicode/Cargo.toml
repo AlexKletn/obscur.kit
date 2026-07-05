@@ -1,0 +1,20 @@
+[package]
+name = "obscur-text-unicode"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+obscur-text = { workspace = true }
+# Per-character Unicode `Script` property (ISO-15924) driving script itemization
+# (spec §5.10). Adapter-only: keeps the pure `obscur-text` domain table-free.
+unicode-script = { workspace = true }
+# Unicode Bidirectional Algorithm (UAX #9) resolving per-byte embedding levels
+# so runs can be split at direction changes (spec §5.10). Adapter-only.
+unicode-bidi = { workspace = true }
+
+[lints]
+workspace = true

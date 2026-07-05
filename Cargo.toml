@@ -75,6 +75,12 @@ harfrust = "0.10"
 # harfrust adapter to read real vertical metrics (`hhea`) for line metrics. Kept
 # at harfrust's exact requirement so the two resolve to one build.
 read-fonts = "0.40.2"
+# Per-character Unicode `Script` property (ISO-15924) for script itemization
+# (adapter-only; spec §5.10).
+unicode-script = "0.5.8"
+# Unicode Bidirectional Algorithm (UAX #9) for per-byte embedding levels driving
+# direction itemization (adapter-only; spec §5.10).
+unicode-bidi = "0.3.18"
 # adapters (optional, wired by the facade behind features)
 obscur-resource-decode = { path = "crates/adapters/obscur-resource-decode" }
 obscur-resource-fs = { path = "crates/adapters/obscur-resource-fs" }
@@ -88,6 +94,7 @@ obscur-accessibility-accesskit = { path = "crates/adapters/obscur-accessibility-
 obscur-system-linux = { path = "crates/adapters/obscur-system-linux" }
 obscur-system-web = { path = "crates/adapters/obscur-system-web" }
 obscur-text-harfrust = { path = "crates/adapters/obscur-text-harfrust" }
+obscur-text-unicode = { path = "crates/adapters/obscur-text-unicode" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
