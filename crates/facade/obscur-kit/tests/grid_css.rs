@@ -30,12 +30,12 @@
 //!
 //! Proven end-to-end here: fixed / percentage / `fr` / `auto` / `minmax` column
 //! tracks, `fr` free-space distribution, `gap` on both axes, `repeat(N, …)`
-//! expansion, row-major auto-placement into implicit rows, and explicit fixed row
-//! tracks. Percentage tracks resolve against the container's own content extent
-//! inside the algorithm (`30%` of a `400px` container → `120px`). Still out of
-//! scope (documented in steps 1-2, not exercised here): line-based placement /
-//! spanning, dense packing, named lines, `auto-fill` / `auto-fit` (one
-//! repetition), and alignment of an item within its track.
+//! expansion, `repeat(auto-fill, …)` sized from the container extent, row-major
+//! auto-placement into implicit rows, and explicit fixed row tracks. Percentage
+//! tracks resolve against the container's own content extent inside the algorithm
+//! (`30%` of a `400px` container → `120px`). Still out of scope (documented in
+//! steps 1-2, not exercised here): line-based placement / spanning, dense packing,
+//! named lines, and alignment of an item within its track.
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -241,6 +241,29 @@ fn minmax_floors_first_column() {
     approx(aw, 120.0, "a.width floored at the 120px minmax minimum");
     approx(bx, 120.0, "b.x (after the floored first column)");
     approx(bw, 0.0, "b.width collapses (no free space after the floor)");
+}
+
+// 7. `repeat(auto-fill, 100px)` on a 350px container: the algorithm fits 3 whole
+//    100px columns (3*100 = 300 <= 350; a 4th overflows), so the 3 children land at
+//    x = 0 / 100 / 200 — the repetition count computed from the container size, not
+//    a single repetition.
+#[test]
+fn auto_fill_columns_from_container_width() {
+    let (rt, k) = drive(
+        ".grid{display:grid;width:350px;grid-template-columns:repeat(auto-fill,100px)} \
+         .a{height:10px} .b{height:10px} .c{height:10px}",
+        3,
+        500.0,
+        200.0,
+    );
+    let (ax, _, aw, _) = geom(&rt, k[0]);
+    let (bx, _, bw, _) = geom(&rt, k[1]);
+    let (cx, _, _, _) = geom(&rt, k[2]);
+    approx(ax, 0.0, "a.x (col0)");
+    approx(aw, 100.0, "a.width (100px auto-fill track)");
+    approx(bx, 100.0, "b.x (col1)");
+    approx(bw, 100.0, "b.width (100px auto-fill track)");
+    approx(cx, 200.0, "c.x (col2 — 3 columns fit the 350px container)");
 }
 
 // 8. percentage + fr columns resolve against the container's OWN content width:

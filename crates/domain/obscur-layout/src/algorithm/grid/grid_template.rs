@@ -1,12 +1,15 @@
-//! `GridTemplate`: the explicit column and row track lists of a grid.
+//! `GridTemplate`: the column and row track lists of a grid.
 
-use super::TrackSize;
+use super::{TrackList, TrackSize};
 
-/// The explicit track template of a grid: its column and row sizing functions.
+/// The track template of a grid: its column and row sizing functions.
 ///
 /// A `GridTemplate` is the CSS `grid-template-columns` / `grid-template-rows`
-/// pair, each a list of [`TrackSize`]s (spec §4.1). Columns drive the horizontal
-/// track sizing; rows drive the vertical.
+/// pair, each a [`TrackList`] (spec §4.1) — explicit tracks plus an optional
+/// `repeat(auto-fill | auto-fit, …)` auto-repetition. Columns drive the horizontal
+/// track sizing; rows drive the vertical. The auto-repeat (if any) is expanded to
+/// a concrete track vector inside the layout algorithm, where the container's
+/// content extent — the basis for the repetition count — is known.
 ///
 /// # Implicit rows
 ///
@@ -21,17 +24,29 @@ use super::TrackSize;
 /// items into.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GridTemplate {
-    columns: Vec<TrackSize>,
-    rows: Vec<TrackSize>,
+    columns: TrackList,
+    rows: TrackList,
 }
 
 impl GridTemplate {
-    /// Builds a template from explicit `columns` and `rows` track lists.
+    /// Builds a template from explicit `columns` and `rows` track vectors (no
+    /// auto-repeat).
     ///
     /// Pass an empty `rows` vector for a columns-only template whose rows are all
-    /// implicit (auto).
+    /// implicit (auto). This is the common no-repeat constructor; each vector
+    /// becomes a [`TrackList::from_tracks`].
     #[must_use]
     pub fn new(columns: Vec<TrackSize>, rows: Vec<TrackSize>) -> Self {
+        Self {
+            columns: TrackList::from_tracks(columns),
+            rows: TrackList::from_tracks(rows),
+        }
+    }
+
+    /// Builds a template from column and row [`TrackList`]s (each of which may
+    /// carry an auto-repeat).
+    #[must_use]
+    pub fn from_track_lists(columns: TrackList, rows: TrackList) -> Self {
         Self { columns, rows }
     }
 
@@ -39,20 +54,20 @@ impl GridTemplate {
     #[must_use]
     pub fn columns_only(columns: Vec<TrackSize>) -> Self {
         Self {
-            columns,
-            rows: Vec::new(),
+            columns: TrackList::from_tracks(columns),
+            rows: TrackList::default(),
         }
     }
 
-    /// The explicit column tracks.
+    /// The column track list.
     #[must_use]
-    pub fn columns(&self) -> &[TrackSize] {
+    pub const fn columns(&self) -> &TrackList {
         &self.columns
     }
 
-    /// The explicit row tracks (may be empty → all rows implicit/auto).
+    /// The row track list (may be empty → all rows implicit/auto).
     #[must_use]
-    pub fn rows(&self) -> &[TrackSize] {
+    pub const fn rows(&self) -> &TrackList {
         &self.rows
     }
 }
@@ -67,15 +82,15 @@ mod tests {
             vec![TrackSize::Fixed(100.0), TrackSize::Fr(1.0)],
             vec![TrackSize::Auto],
         );
-        assert_eq!(t.columns().len(), 2);
-        assert_eq!(t.rows(), &[TrackSize::Auto]);
+        assert_eq!(t.columns().leading().len(), 2);
+        assert_eq!(t.rows().leading(), &[TrackSize::Auto]);
     }
 
     #[test]
     fn columns_only_has_empty_rows() {
         let t = GridTemplate::columns_only(vec![TrackSize::Fr(1.0)]);
         assert!(t.rows().is_empty());
-        assert_eq!(t.columns(), &[TrackSize::Fr(1.0)]);
+        assert_eq!(t.columns().leading(), &[TrackSize::Fr(1.0)]);
     }
 
     #[test]

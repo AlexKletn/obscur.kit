@@ -13,14 +13,17 @@
 //! has no known basis at this point (the grid container's content size is not yet
 //! known here), so it is carried symbolically as a [`TrackSize::Percent`]
 //! fraction and resolved against the container content extent *inside* the layout
-//! algorithm. `auto-fill` / `auto-fit` (handled in the CSS layer) and line
+//! algorithm. A `repeat(auto-fill | auto-fit, …)` track — whose repetition count
+//! also depends on the (not-yet-known) container size — is likewise carried
+//! symbolically: it becomes a layout [`AutoRepeat`] inside the axis
+//! [`TrackList`], expanded to concrete tracks by the grid algorithm. Line
 //! placement / spanning remain out of scope for this step.
 
 use std::collections::HashMap;
 
 use obscur_geometry::Size;
 use obscur_identity::NodeId;
-use obscur_layout::algorithm::{GridTemplate, TrackSize};
+use obscur_layout::algorithm::{AutoRepeat, AutoRepeatMode, GridTemplate, TrackList, TrackSize};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{GridTrack, Length, LengthContext, PropertyId, PropertyValue};
 
@@ -79,14 +82,46 @@ pub fn grid_template_for(
         return None;
     }
     let ctx = length_context(computed, viewport, root_font_size);
-    let map = |tracks: Option<&[GridTrack]>| {
-        tracks
-            .unwrap_or(&[])
-            .iter()
-            .map(|track| track_size_of(track, &ctx))
-            .collect::<Vec<_>>()
-    };
-    Some(GridTemplate::new(map(columns), map(rows)))
+    let map = |tracks: Option<&[GridTrack]>| track_list_of(tracks.unwrap_or(&[]), &ctx);
+    Some(GridTemplate::from_track_lists(map(columns), map(rows)))
+}
+
+/// Converts one axis's style [`GridTrack`] list into a layout [`TrackList`],
+/// splitting it around its (first) `repeat(auto-fill | auto-fit, …)`.
+///
+/// Tracks before the auto-repeat become the leading run, the auto-repeat's pattern
+/// becomes the [`AutoRepeat`], and tracks after it become the trailing run — the
+/// shape [`TrackList`] and the grid algorithm expand against the container size.
+/// A list with no auto-repeat yields a leading-only `TrackList` that expands
+/// byte-identically to its explicit tracks. Only the first auto-repeat is honoured
+/// (as in CSS, which allows one per axis); any later `AutoRepeat` degrades through
+/// [`track_size_of`] to a single [`TrackSize::Auto`] track.
+fn track_list_of(tracks: &[GridTrack], ctx: &LengthContext) -> TrackList {
+    let mut leading = Vec::new();
+    let mut auto_repeat = None;
+    let mut trailing = Vec::new();
+    for track in tracks {
+        match track {
+            GridTrack::AutoRepeat { fill, tracks: pattern } if auto_repeat.is_none() => {
+                let mode = if *fill {
+                    AutoRepeatMode::AutoFill
+                } else {
+                    AutoRepeatMode::AutoFit
+                };
+                let pattern = pattern.iter().map(|t| track_size_of(t, ctx)).collect();
+                auto_repeat = Some(AutoRepeat::new(mode, pattern));
+            }
+            other => {
+                let size = track_size_of(other, ctx);
+                if auto_repeat.is_none() {
+                    leading.push(size);
+                } else {
+                    trailing.push(size);
+                }
+            }
+        }
+    }
+    TrackList::new(leading, auto_repeat, trailing)
 }
 
 /// Reads a `grid-template-*` property as its authored [`GridTrack`] slice, or
@@ -109,10 +144,14 @@ fn track_size_of(track: &GridTrack, ctx: &LengthContext) -> TrackSize {
     match track {
         GridTrack::Fixed(length) => fixed_track_size(*length, ctx),
         GridTrack::Fr(fraction) => TrackSize::Fr(*fraction),
-        GridTrack::Auto => TrackSize::Auto,
         GridTrack::MinMax(min, max) => {
             TrackSize::minmax(track_size_of(min, ctx), track_size_of(max, ctx))
         }
+        // `Auto` is content-sized. A top-level auto-repeat is peeled off by
+        // `track_list_of`; only a nested or duplicate one reaches here, and it has
+        // no scalar size, so it degrades to the same content-sized `Auto` track (a
+        // documented fallback).
+        GridTrack::Auto | GridTrack::AutoRepeat { .. } => TrackSize::Auto,
     }
 }
 
@@ -164,9 +203,10 @@ mod tests {
         );
         let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
         assert_eq!(
-            template.columns(),
+            template.columns().leading(),
             &[TrackSize::Fixed(100.0), TrackSize::Fr(1.0), TrackSize::Auto]
         );
+        assert!(template.columns().auto_repeat().is_none());
         // No rows authored -> all-implicit (empty) row list.
         assert!(template.rows().is_empty());
     }
@@ -192,8 +232,8 @@ mod tests {
             .expect("concrete"),
         );
         let template = grid_template_for(&computed, VIEWPORT, 20.0).expect("template");
-        assert_eq!(template.columns(), &[TrackSize::Fixed(32.0)]);
-        assert_eq!(template.rows(), &[TrackSize::Fixed(40.0)]);
+        assert_eq!(template.columns().leading(), &[TrackSize::Fixed(32.0)]);
+        assert_eq!(template.rows().leading(), &[TrackSize::Fixed(40.0)]);
     }
 
     #[test]
@@ -211,7 +251,7 @@ mod tests {
         // A bare percentage no longer degrades to `Auto`: it carries its `0..1`
         // fraction to the algorithm, which resolves it against the container size.
         assert_eq!(
-            template.columns(),
+            template.columns().leading(),
             &[TrackSize::Percent(0.30), TrackSize::Percent(0.50)]
         );
     }
@@ -229,7 +269,7 @@ mod tests {
         );
         let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
         assert_eq!(
-            template.columns(),
+            template.columns().leading(),
             &[TrackSize::minmax(TrackSize::Percent(0.30), TrackSize::Fr(1.0))]
         );
     }
@@ -247,9 +287,51 @@ mod tests {
         );
         let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
         assert_eq!(
-            template.columns(),
+            template.columns().leading(),
             &[TrackSize::minmax(TrackSize::Fixed(100.0), TrackSize::Fr(1.0))]
         );
+    }
+
+    #[test]
+    fn auto_repeat_track_maps_to_layout_auto_repeat() {
+        let mut computed = ComputedStyle::new();
+        // `50px repeat(auto-fill, 100px) 20px`: leading 50px, an auto-fill repeat,
+        // and a trailing 20px track.
+        computed.set(
+            PropertyId::GridTemplateColumns,
+            ComputedValue::from_concrete(PropertyValue::grid_tracks([
+                GridTrack::Fixed(Length::px(50.0)),
+                GridTrack::AutoRepeat {
+                    fill: true,
+                    tracks: Box::from([GridTrack::Fixed(Length::px(100.0))]),
+                },
+                GridTrack::Fixed(Length::px(20.0)),
+            ]))
+            .expect("concrete"),
+        );
+        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
+        let columns = template.columns();
+        assert_eq!(columns.leading(), &[TrackSize::Fixed(50.0)]);
+        assert_eq!(columns.trailing(), &[TrackSize::Fixed(20.0)]);
+        let repeat = columns.auto_repeat().expect("auto-repeat present");
+        assert_eq!(repeat.mode(), AutoRepeatMode::AutoFill);
+        assert_eq!(repeat.tracks(), &[TrackSize::Fixed(100.0)]);
+    }
+
+    #[test]
+    fn auto_fit_track_maps_to_auto_fit_mode() {
+        let mut computed = ComputedStyle::new();
+        computed.set(
+            PropertyId::GridTemplateColumns,
+            ComputedValue::from_concrete(PropertyValue::grid_tracks([GridTrack::AutoRepeat {
+                fill: false,
+                tracks: Box::from([GridTrack::Fixed(Length::px(100.0))]),
+            }]))
+            .expect("concrete"),
+        );
+        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
+        let repeat = template.columns().auto_repeat().expect("auto-repeat present");
+        assert_eq!(repeat.mode(), AutoRepeatMode::AutoFit);
     }
 
     #[test]

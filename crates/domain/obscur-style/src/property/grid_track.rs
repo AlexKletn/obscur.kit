@@ -26,6 +26,11 @@ use crate::property::Length;
 /// * [`Auto`](GridTrack::Auto) — content-sized.
 /// * [`MinMax`](GridTrack::MinMax) — a `minmax(min, max)` clamp; each bound is
 ///   itself a [`GridTrack`].
+/// * [`AutoRepeat`](GridTrack::AutoRepeat) — a `repeat(auto-fill | auto-fit,
+///   <track-list>)` auto-repetition. Its repetition count depends on the grid
+///   container's content extent, which is unknown at CSS-lowering time, so the
+///   pattern is carried symbolically here (in author order among the other
+///   tracks) and expanded by the layout algorithm.
 ///
 /// Because [`Fixed`](GridTrack::Fixed) carries an `f32`-backed [`Length`] and
 /// [`Fr`](GridTrack::Fr) an `f32`, this derives [`PartialEq`] but not
@@ -41,6 +46,16 @@ pub enum GridTrack {
     /// `minmax(min, max)`: sized by `max`, floored at `min`. Each bound is itself
     /// a [`GridTrack`].
     MinMax(Box<GridTrack>, Box<GridTrack>),
+    /// A `repeat(auto-fill | auto-fit, <track-list>)` auto-repetition: `fill` is
+    /// `true` for `auto-fill` (empty tracks kept), `false` for `auto-fit` (empty
+    /// tracks collapse). `tracks` is one copy of the repeated pattern. The
+    /// repetition count is resolved against the container size inside layout.
+    AutoRepeat {
+        /// `true` for `auto-fill`, `false` for `auto-fit`.
+        fill: bool,
+        /// One copy of the repeated track pattern.
+        tracks: Box<[GridTrack]>,
+    },
 }
 
 impl GridTrack {

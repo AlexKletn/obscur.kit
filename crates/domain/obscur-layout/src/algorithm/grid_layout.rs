@@ -133,9 +133,14 @@ impl GridLayout {
     }
 
     /// The number of columns (always at least `1`).
+    ///
+    /// This reports the *explicit* column count (the explicit tracks plus one copy
+    /// of any auto-repeat pattern); the real per-content column count — which
+    /// depends on how many auto-repeat copies fit the container — is computed
+    /// during [`layout`](LayoutAlgorithm::layout).
     #[must_use]
     pub fn columns(&self) -> usize {
-        self.template.columns().len().max(1)
+        self.template.columns().explicit_len().max(1)
     }
 
     /// The horizontal gap between columns, in logical pixels.
@@ -256,14 +261,52 @@ fn resolve_tracks(
 
 /// Running start offsets for a track list: `offsets[i] = origin + Σ_{k<i}
 /// (sizes[k] + gap)`. Length is `sizes.len()`.
-fn track_offsets(sizes: &[f32], gap: f32, origin: f32) -> Vec<f32> {
+///
+/// A `collapsed[i]` track (an empty `auto-fit` track) contributes neither its size
+/// nor a following gap, so the gaps on either side of it merge into one and the
+/// occupied tracks pack together (CSS §4.1). With no collapsed track this is
+/// byte-identical to the plain running-offset accumulation.
+fn track_offsets(sizes: &[f32], gap: f32, origin: f32, collapsed: &[bool]) -> Vec<f32> {
     let mut offsets = Vec::with_capacity(sizes.len());
     let mut cursor = origin;
-    for &size in sizes {
+    for (i, &size) in sizes.iter().enumerate() {
+        if collapsed.get(i).copied().unwrap_or(false) {
+            // Collapsed to zero width; parks at the cursor without advancing it.
+            offsets.push(cursor);
+            continue;
+        }
         offsets.push(cursor);
         cursor += size + gap;
     }
     offsets
+}
+
+/// Marks which tracks of an `auto-fit` repeat region collapse: a track inside the
+/// `[start, end)` generated range that no placed item covers. Returns an
+/// all-`false` vector (nothing collapses) when there is no `auto-fit` region — so
+/// an `auto-fill` or plain template is untouched.
+fn collapsed_tracks(
+    len: usize,
+    auto_fit: Option<(usize, usize)>,
+    anchors: &[usize],
+    spans: &[usize],
+) -> Vec<bool> {
+    let mut collapsed = vec![false; len];
+    let Some((start, end)) = auto_fit else {
+        return collapsed;
+    };
+    let mut used = vec![false; len];
+    for (&anchor, &span) in anchors.iter().zip(spans.iter()) {
+        for slot in used.iter_mut().take((anchor + span).min(len)).skip(anchor) {
+            *slot = true;
+        }
+    }
+    for (track, slot) in collapsed.iter_mut().enumerate().take(end.min(len)).skip(start) {
+        if !used[track] {
+            *slot = true;
+        }
+    }
+    collapsed
 }
 
 /// The pixel extent a `span`-track cell covers: the sum of the spanned track
@@ -382,13 +425,25 @@ impl LayoutAlgorithm for GridLayout {
             .unwrap_or(constraints.max.height - pad_y)
             .max(0.0);
 
+        // Expand each axis's track list into a concrete track vector against the
+        // content extent: a `repeat(auto-fill | auto-fit, …)`'s repetition count
+        // depends on how many copies fit that extent (spec §4.1). For a template
+        // WITHOUT an auto-repeat this is byte-identical to its explicit track
+        // vector, so every non-auto-repeat template lays out exactly as before.
+        // `col_autofit` / `row_autofit` carry the generated `auto-fit` track range
+        // (if any) so empty ones collapse after placement.
+        let (columns_expanded, col_autofit) =
+            self.template.columns().expand(content_width, self.column_gap);
+        let (rows_expanded, row_autofit) =
+            self.template.rows().expand(content_height, self.row_gap);
+
         // An empty column template still lays out one flexible column so items
         // always have somewhere to go.
         let fallback_cols = [TrackSize::Fr(1.0)];
-        let columns: &[TrackSize] = if self.template.columns().is_empty() {
+        let columns: &[TrackSize] = if columns_expanded.is_empty() {
             &fallback_cols
         } else {
-            self.template.columns()
+            &columns_expanded
         };
         let count = children.len();
 
@@ -396,7 +451,7 @@ impl LayoutAlgorithm for GridLayout {
         // plus its column/row span (spec §4.13, a subset). A default placement is
         // all-`Auto` → `(None, 1)` on both axes: pure row-major auto-placement.
         let templ_cols_len = columns.len();
-        let templ_rows_len = self.template.rows().len();
+        let templ_rows_len = rows_expanded.len();
         let mut col_anchor = Vec::with_capacity(count);
         let mut col_span = Vec::with_capacity(count);
         let mut row_anchor = Vec::with_capacity(count);
@@ -480,8 +535,16 @@ impl LayoutAlgorithm for GridLayout {
                 auto_col[c0] = auto_col[c0].max(w);
             }
         }
-        let col_sizes =
+        let mut col_sizes =
             resolve_tracks(&cols_effective, content_width, self.column_gap, |c| auto_col[c]);
+        // `auto-fit`: a generated column no item landed in collapses to zero width
+        // (its surrounding gaps collapse in `track_offsets`).
+        let col_collapsed = collapsed_tracks(n_cols, col_autofit, &place_col, &col_span);
+        for (size, &collapsed) in col_sizes.iter_mut().zip(col_collapsed.iter()) {
+            if collapsed {
+                *size = 0.0;
+            }
+        }
 
         // Measure each item with its width fixed to its spanned columns (spanned
         // track widths + interior column gaps), height loose; this feeds both
@@ -507,16 +570,22 @@ impl LayoutAlgorithm for GridLayout {
             let r0 = place_row[i];
             auto_row[r0] = auto_row[r0].max(item_size[i].height);
         }
-        let template_rows = self.template.rows();
         let rows_effective: Vec<TrackSize> = (0..n_rows)
-            .map(|r| template_rows.get(r).cloned().unwrap_or(TrackSize::Auto))
+            .map(|r| rows_expanded.get(r).cloned().unwrap_or(TrackSize::Auto))
             .collect();
-        let row_sizes =
+        let mut row_sizes =
             resolve_tracks(&rows_effective, content_height, self.row_gap, |r| auto_row[r]);
+        // `auto-fit` on the row axis: collapse the generated rows with no item.
+        let row_collapsed = collapsed_tracks(n_rows, row_autofit, &place_row, &row_span);
+        for (size, &collapsed) in row_sizes.iter_mut().zip(row_collapsed.iter()) {
+            if collapsed {
+                *size = 0.0;
+            }
+        }
 
         // Step 4 & 5: place each item into its (spanned) track cell.
-        let col_offsets = track_offsets(&col_sizes, self.column_gap, padding.left);
-        let row_offsets = track_offsets(&row_sizes, self.row_gap, padding.top);
+        let col_offsets = track_offsets(&col_sizes, self.column_gap, padding.left, &col_collapsed);
+        let row_offsets = track_offsets(&row_sizes, self.row_gap, padding.top, &row_collapsed);
 
         let mut child_boxes = Vec::with_capacity(count);
         // Bounding box of placed children; starts at the padding origin so an
@@ -566,7 +635,8 @@ impl LayoutAlgorithm for GridLayout {
 mod tests {
     use super::{GridLayout, GridTemplate, TrackSize};
     use crate::algorithm::{
-        FixedChildMeasurer, GridLine, GridPlacement, LayoutAlgorithm, LayoutChild,
+        AutoRepeat, AutoRepeatMode, FixedChildMeasurer, GridLine, GridPlacement, LayoutAlgorithm,
+        LayoutChild, TrackList,
     };
     use crate::model::{Dimension, LayoutStyle};
     use obscur_geometry::{BoxConstraints, Insets, Point, Size};
@@ -1256,6 +1326,147 @@ mod tests {
         // Spans cols 0-1: 100 + 100 + one interior 10px gap = 210, at x=0.
         assert_eq!(b[0].origin().x, 0.0);
         assert_eq!(b[0].size().width, 210.0);
+    }
+
+    // ---- `repeat(auto-fill | auto-fit, …)` computed from the container size. ----
+
+    /// A columns-only grid whose single axis is one `auto-fill`/`auto-fit` repeat.
+    fn auto_repeat_grid(mode: AutoRepeatMode, pattern: Vec<TrackSize>, col_gap: f32) -> GridLayout {
+        let columns = TrackList::new(Vec::new(), Some(AutoRepeat::new(mode, pattern)), Vec::new());
+        GridLayout::with_template(
+            GridTemplate::from_track_lists(columns, TrackList::default()),
+            col_gap,
+            0.0,
+        )
+    }
+
+    fn width_style(px: f32) -> LayoutStyle {
+        LayoutStyle {
+            width: Dimension::Px(px),
+            ..LayoutStyle::default()
+        }
+    }
+
+    // (a) `repeat(auto-fill, 100px)` on a 350px container, no gap: 3 columns fit
+    // (3*100 = 300 <= 350; a 4th overflows), placed at x = 0 / 100 / 200.
+    #[test]
+    fn auto_fill_fits_three_columns() {
+        let style = width_style(350.0);
+        let children = [child(1), child(2), child(3)];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 10.0); 3]);
+        let g = auto_repeat_grid(AutoRepeatMode::AutoFill, vec![TrackSize::Fixed(100.0)], 0.0);
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(350.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].origin().x, 0.0);
+        assert_eq!(b[0].size().width, 100.0);
+        assert_eq!(b[1].origin().x, 100.0);
+        assert_eq!(b[2].origin().x, 200.0);
+    }
+
+    // (a') the same count with a 10px gap: floor((350 + 10) / (100 + 10)) = 3,
+    // columns at x = 0 / 110 / 220.
+    #[test]
+    fn auto_fill_count_accounts_for_gap() {
+        let style = width_style(350.0);
+        let children = [child(1), child(2), child(3)];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 10.0); 3]);
+        let g = auto_repeat_grid(AutoRepeatMode::AutoFill, vec![TrackSize::Fixed(100.0)], 10.0);
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(350.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].origin().x, 0.0);
+        assert_eq!(b[1].origin().x, 110.0);
+        assert_eq!(b[2].origin().x, 220.0);
+    }
+
+    // (b) `auto-fit`: with fewer items than tracks, an empty interior track
+    // collapses to 0 and its gaps collapse — an item on the last line packs left.
+    // Container 350px, `repeat(auto-fit, 100px)` -> 3 tracks. Child A auto (col0),
+    // child B on grid-column line 3 (col2); col1 is empty and collapses, so B sits
+    // at x = 100 (not 200).
+    #[test]
+    fn auto_fit_collapses_empty_interior_track() {
+        let style = width_style(350.0);
+        let children = [
+            child(1),
+            placed(2, GridPlacement::column(GridLine::Line(3), GridLine::Auto)),
+        ];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(0.0, 10.0), Size::new(0.0, 10.0)]);
+        let g = auto_repeat_grid(AutoRepeatMode::AutoFit, vec![TrackSize::Fixed(100.0)], 0.0);
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(350.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].origin().x, 0.0); // A in col0
+        assert_eq!(b[1].origin().x, 100.0); // B: col1 collapsed, so col2 starts at 100
+    }
+
+    // (b') `auto-fill` keeps the same empty interior track (no collapse): B on the
+    // last line sits at x = 200 (col1 occupies its 100px).
+    #[test]
+    fn auto_fill_keeps_empty_interior_track() {
+        let style = width_style(350.0);
+        let children = [
+            child(1),
+            placed(2, GridPlacement::column(GridLine::Line(3), GridLine::Auto)),
+        ];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(0.0, 10.0), Size::new(0.0, 10.0)]);
+        let g = auto_repeat_grid(AutoRepeatMode::AutoFill, vec![TrackSize::Fixed(100.0)], 0.0);
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(350.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].origin().x, 0.0);
+        assert_eq!(b[1].origin().x, 200.0); // col1 kept its 100px
+    }
+
+    // (c) a leading fixed 50px track ahead of `repeat(auto-fill, 100px)` on a 350px
+    // container: 3 more 100px tracks fit the remaining 300px, so tracks are
+    // [50, 100, 100, 100] and 4 children land at x = 0 / 50 / 150 / 250.
+    #[test]
+    fn auto_fill_count_after_leading_track() {
+        let style = width_style(350.0);
+        let children = [child(1), child(2), child(3), child(4)];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 10.0); 4]);
+        let columns = TrackList::new(
+            vec![TrackSize::Fixed(50.0)],
+            Some(AutoRepeat::new(AutoRepeatMode::AutoFill, vec![TrackSize::Fixed(100.0)])),
+            Vec::new(),
+        );
+        let g = GridLayout::with_template(
+            GridTemplate::from_track_lists(columns, TrackList::default()),
+            0.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(350.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].origin().x, 0.0);
+        assert_eq!(b[0].size().width, 50.0);
+        assert_eq!(b[1].origin().x, 50.0);
+        assert_eq!(b[2].origin().x, 150.0);
+        assert_eq!(b[3].origin().x, 250.0);
     }
 
     #[test]

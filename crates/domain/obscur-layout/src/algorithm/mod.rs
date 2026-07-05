@@ -14,7 +14,9 @@ pub use flex_layout::FlexLayout;
 mod flow_layout;
 pub use flow_layout::FlowLayout;
 mod grid;
-pub use grid::{GridLine, GridPlacement, GridTemplate, TrackSize};
+pub use grid::{
+    AutoRepeat, AutoRepeatMode, GridLine, GridPlacement, GridTemplate, TrackList, TrackSize,
+};
 mod grid_layout;
 pub use grid_layout::GridLayout;
 mod layout_algorithm;

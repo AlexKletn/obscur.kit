@@ -694,18 +694,29 @@ fn lower_minmax(args: &[ParsedValue]) -> Option<GridTrack> {
     Some(GridTrack::minmax(min, max))
 }
 
-/// Expands `repeat(N, <tracks>)` into `N` flat copies of its inner track list.
+/// Expands a `repeat(…)` component into [`GridTrack`]s.
 ///
-/// `N` is a positive integer (clamped to [`MAX_REPEAT`]); the `auto-fill` /
-/// `auto-fit` keywords cannot be resolved without the container width, so they are
-/// treated as a single repetition (a documented limitation). Returns [`None`] on a
-/// missing count, an empty inner list, or an unparseable inner track.
+/// An integer `repeat(N, <tracks>)` is expanded in place into `N` flat copies of
+/// its inner track list (`N` a positive integer clamped to [`MAX_REPEAT`]). A
+/// `repeat(auto-fill | auto-fit, <tracks>)` cannot be resolved without the
+/// container size, so it is carried symbolically as a single
+/// [`GridTrack::AutoRepeat`] (the layout algorithm computes the repetition count
+/// from the container's content extent); the `auto-fill` / `auto-fit` distinction
+/// is preserved in its `fill` flag. Returns [`None`] on a missing count, an empty
+/// inner list, or an unparseable inner track.
 fn expand_repeat(args: &[ParsedValue]) -> Option<Vec<GridTrack>> {
     let comma = args.iter().position(|v| matches!(v, ParsedValue::Comma))?;
     let (count_part, rest) = args.split_at(comma);
     let inner = tracks_from_components(&rest[1..])?;
     if inner.is_empty() {
         return None;
+    }
+    // `auto-fill` / `auto-fit`: keep the pattern as an auto-repeat resolved later.
+    if let Some(fill) = auto_repeat_fill(count_part) {
+        return Some(vec![GridTrack::AutoRepeat {
+            fill,
+            tracks: inner.into_boxed_slice(),
+        }]);
     }
     let count = repeat_count(count_part)?;
     let mut out = Vec::with_capacity(inner.len().saturating_mul(count));
@@ -715,19 +726,24 @@ fn expand_repeat(args: &[ParsedValue]) -> Option<Vec<GridTrack>> {
     Some(out)
 }
 
-/// Resolves the count component of a `repeat(N, …)`: a positive integer clamped to
-/// [`MAX_REPEAT`], or `1` for the `auto-fill` / `auto-fit` keywords (unsupported,
-/// treated as a single repetition). [`None`] for any other count.
+/// Reads the `auto-fill` / `auto-fit` keyword of a `repeat(…)` count: `Some(true)`
+/// for `auto-fill`, `Some(false)` for `auto-fit`, and [`None`] for any other count
+/// (a numeric repetition or an invalid keyword).
+fn auto_repeat_fill(part: &[ParsedValue]) -> Option<bool> {
+    match single_component(part)? {
+        ParsedValue::Keyword(keyword) if keyword.eq_ignore_ascii_case("auto-fill") => Some(true),
+        ParsedValue::Keyword(keyword) if keyword.eq_ignore_ascii_case("auto-fit") => Some(false),
+        _ => None,
+    }
+}
+
+/// Resolves the numeric count component of an integer `repeat(N, …)`: a positive
+/// integer clamped to [`MAX_REPEAT`]. [`None`] for any non-numeric count (the
+/// `auto-fill` / `auto-fit` keywords are handled by [`auto_repeat_fill`]).
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn repeat_count(part: &[ParsedValue]) -> Option<usize> {
     match single_component(part)? {
         ParsedValue::Number(n) if *n >= 1.0 => Some((*n as usize).min(MAX_REPEAT)),
-        ParsedValue::Keyword(keyword)
-            if keyword.eq_ignore_ascii_case("auto-fill")
-                || keyword.eq_ignore_ascii_case("auto-fit") =>
-        {
-            Some(1)
-        }
         _ => None,
     }
 }
@@ -1747,12 +1763,43 @@ mod tests {
     }
 
     #[test]
-    fn auto_fill_repeat_is_a_single_repetition() {
-        // `auto-fill` cannot be resolved without a container width, so it is
-        // treated as one repetition (documented limitation).
+    fn auto_fill_repeat_lowers_to_auto_repeat() {
+        // `auto-fill` cannot be resolved without a container width, so its pattern
+        // is carried as a single `AutoRepeat` (not expanded to one repetition) and
+        // the layout algorithm computes the count from the container size.
         assert_eq!(
             tracks("grid-template-columns: repeat(auto-fill, 100px)"),
-            vec![GridTrack::Fixed(Length::px(100.0))]
+            vec![GridTrack::AutoRepeat {
+                fill: true,
+                tracks: Box::from([GridTrack::Fixed(Length::px(100.0))]),
+            }]
+        );
+    }
+
+    #[test]
+    fn auto_fit_repeat_lowers_to_auto_repeat() {
+        assert_eq!(
+            tracks("grid-template-columns: repeat(auto-fit, 100px 1fr)"),
+            vec![GridTrack::AutoRepeat {
+                fill: false,
+                tracks: Box::from([GridTrack::Fixed(Length::px(100.0)), GridTrack::Fr(1.0)]),
+            }]
+        );
+    }
+
+    #[test]
+    fn auto_fill_repeat_keeps_surrounding_tracks() {
+        // A leading fixed track and a trailing track flank the auto-repeat.
+        assert_eq!(
+            tracks("grid-template-columns: 50px repeat(auto-fill, 100px) 20px"),
+            vec![
+                GridTrack::Fixed(Length::px(50.0)),
+                GridTrack::AutoRepeat {
+                    fill: true,
+                    tracks: Box::from([GridTrack::Fixed(Length::px(100.0))]),
+                },
+                GridTrack::Fixed(Length::px(20.0)),
+            ]
         );
     }
 
