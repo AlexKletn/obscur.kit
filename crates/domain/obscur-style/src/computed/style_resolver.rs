@@ -90,12 +90,14 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     // Grid container.
     PropertyId::GridTemplateColumns,
     PropertyId::GridTemplateRows,
+    PropertyId::GridTemplateAreas,
     PropertyId::GridAutoFlow,
     // Grid item line placement.
     PropertyId::GridColumnStart,
     PropertyId::GridColumnEnd,
     PropertyId::GridRowStart,
     PropertyId::GridRowEnd,
+    PropertyId::GridArea,
     // Typography.
     PropertyId::FontSize,
     PropertyId::FontFamily,
@@ -206,6 +208,13 @@ impl StyleResolver {
             | PropertyId::GridColumnEnd
             | PropertyId::GridRowStart
             | PropertyId::GridRowEnd
+            // `grid-template-areas` initial is `none` (no named areas), and
+            // `grid-area`'s named form is absent by default. Neither has a
+            // no-interner initial value, so an absent value is left unresolved and
+            // the runtime falls back to no named-area placement — byte-for-byte
+            // identical to today's behaviour.
+            | PropertyId::GridTemplateAreas
+            | PropertyId::GridArea
             // `text-align` initial is `start`; its keyword initial likewise needs
             // the interner, so an absent value falls back to the runtime's default
             // (`Start`) — byte-for-byte identical to today's behaviour.
@@ -730,11 +739,13 @@ mod tests {
                 | PropertyId::AlignItems
                 | PropertyId::GridTemplateColumns
                 | PropertyId::GridTemplateRows
+                | PropertyId::GridTemplateAreas
                 | PropertyId::GridAutoFlow
                 | PropertyId::GridColumnStart
                 | PropertyId::GridColumnEnd
                 | PropertyId::GridRowStart
                 | PropertyId::GridRowEnd
+                | PropertyId::GridArea
                 | PropertyId::FontSize
                 | PropertyId::FontFamily
                 | PropertyId::Direction
@@ -773,11 +784,13 @@ mod tests {
             PropertyId::AlignItems,
             PropertyId::GridTemplateColumns,
             PropertyId::GridTemplateRows,
+            PropertyId::GridTemplateAreas,
             PropertyId::GridAutoFlow,
             PropertyId::GridColumnStart,
             PropertyId::GridColumnEnd,
             PropertyId::GridRowStart,
             PropertyId::GridRowEnd,
+            PropertyId::GridArea,
             PropertyId::FontSize,
             PropertyId::FontFamily,
             PropertyId::Direction,

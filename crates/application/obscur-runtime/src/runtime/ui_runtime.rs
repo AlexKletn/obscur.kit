@@ -607,9 +607,14 @@ impl UiRuntime {
         //    boxes and hit-test index carry over unchanged.
         let relaid_out = if plan.layout() {
             let root_font = root_font_size(&computed, self.tree.root());
-            let layout_styles = self
+            let mut layout_styles = self
                 .layout
                 .layout_styles_from(&computed, ctx.viewport(), root_font);
+            // Named-area placement (`grid-area: <name>` against the container's
+            // `grid-template-areas`) needs the tree to resolve, so it patches the
+            // freshly built styles here; items with no named area are untouched.
+            self.layout
+                .resolve_named_grid_areas(&mut layout_styles, &self.tree, &computed);
             // Authored grid templates (`grid-template-columns`/`-rows`) become a
             // per-node side-table so a grid container dispatches the real
             // track-sizing algorithm; a grid node with no template falls back to a

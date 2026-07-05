@@ -20,7 +20,9 @@
 //! concrete pixels at the layout/compute step against a
 //! [`LengthContext`](crate::property::LengthContext) (spec §4.5, §4.13).
 
-use crate::property::{GridLineValue, GridTrack, Length, LengthExpr, StyleColor};
+use crate::property::{
+    GridAreaTemplate, GridLineValue, GridTrack, Length, LengthExpr, StyleColor,
+};
 use obscur_identity::InternedSymbol;
 
 /// A typed CSS property value.
@@ -66,6 +68,20 @@ pub enum PropertyValue {
     /// assembles the four edges into a `GridPlacement` when it bridges the computed
     /// style into a grid layout input (spec §4.13).
     GridLine(GridLineValue),
+    /// A parsed `grid-template-areas` grid: the value of a grid container's
+    /// `grid-template-areas`. The [`GridAreaTemplate`] carries every named area's
+    /// line-number rectangle (already validated as a filled rectangle at parse
+    /// time); the runtime looks a child's `grid-area: <name>` up against its
+    /// container's template to resolve a concrete placement (spec §4.2).
+    GridAreas(GridAreaTemplate),
+    /// A `grid-area: <custom-ident>` named-area reference on a grid item: the area
+    /// name to resolve against the item's container `grid-template-areas`. The name
+    /// is kept **as a string** (not an interned symbol) because it is matched
+    /// against the container template's area names in the runtime, which does not
+    /// share this crate's interner (spec §4.2). The numeric `grid-area:
+    /// a / b / c / d` line form does not produce this value; it expands to the four
+    /// [`GridLine`](PropertyValue::GridLine) longhands instead.
+    GridAreaName(Box<str>),
     /// An unresolved `var(--name)` reference to a custom property, named by its
     /// interned symbol. This is a pre-resolution placeholder: it is substituted
     /// with the referenced custom property's value before computed-value
@@ -136,6 +152,26 @@ impl PropertyValue {
     pub const fn as_grid_line(&self) -> Option<GridLineValue> {
         match self {
             Self::GridLine(line) => Some(*line),
+            _ => None,
+        }
+    }
+
+    /// Returns the parsed grid-area template if this value is a
+    /// [`PropertyValue::GridAreas`].
+    #[must_use]
+    pub const fn as_grid_areas(&self) -> Option<&GridAreaTemplate> {
+        match self {
+            Self::GridAreas(template) => Some(template),
+            _ => None,
+        }
+    }
+
+    /// Returns the named-area reference if this value is a
+    /// [`PropertyValue::GridAreaName`].
+    #[must_use]
+    pub fn as_grid_area_name(&self) -> Option<&str> {
+        match self {
+            Self::GridAreaName(name) => Some(name),
             _ => None,
         }
     }
@@ -226,6 +262,23 @@ mod tests {
         let value = PropertyValue::GridLine(GridLineValue::Line(3));
         assert_eq!(value.as_grid_line(), Some(GridLineValue::Line(3)));
         assert_eq!(PropertyValue::Number(1.0).as_grid_line(), None);
+    }
+
+    #[test]
+    fn as_grid_areas_extracts_only_templates() {
+        use crate::property::GridAreaTemplate;
+        let template =
+            GridAreaTemplate::from_rows(&[vec![Some("h".into()), Some("h".into())]]).expect("t");
+        let value = PropertyValue::GridAreas(template.clone());
+        assert_eq!(value.as_grid_areas(), Some(&template));
+        assert_eq!(PropertyValue::Number(1.0).as_grid_areas(), None);
+    }
+
+    #[test]
+    fn as_grid_area_name_extracts_only_names() {
+        let value = PropertyValue::GridAreaName("main".into());
+        assert_eq!(value.as_grid_area_name(), Some("main"));
+        assert_eq!(PropertyValue::Number(1.0).as_grid_area_name(), None);
     }
 
     #[test]

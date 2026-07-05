@@ -25,8 +25,8 @@ use obscur_text::shaping::{ParagraphShaper, ShapedGlyph, TextDirection};
 use obscur_tree::tree::RetainedTree;
 
 use super::{
-    alignment_for, attributes_for, direction_for, families_for, grid_templates_from, overflow_for,
-    ComputedStyles, GridTemplates,
+    alignment_for, attributes_for, direction_for, families_for, grid_templates_from,
+    overflow_for, resolve_named_grid_areas, ComputedStyles, GridTemplates,
 };
 
 /// The initial `font-size` (spec / CSS default), used as the `em`/`rem` base
@@ -185,6 +185,26 @@ impl LayoutCoordinator {
         root_font_size: f32,
     ) -> GridTemplates {
         grid_templates_from(computed, viewport, root_font_size)
+    }
+
+    /// Resolves every grid item's `grid-area: <name>` marker against its
+    /// container's `grid-template-areas`, patching the item's [`LayoutStyle`]
+    /// placement in `styles` (spec §4.2).
+    ///
+    /// Named-area placement is the one grid feature that needs the tree: a child's
+    /// `grid-area: header` names a rectangle defined on its **container**'s
+    /// `grid-template-areas`. This runs after
+    /// [`layout_styles_from`](Self::layout_styles_from) has built `styles`; it only
+    /// overwrites the `grid_placement` of items carrying a marker (looked up
+    /// against the parent's parsed template), so every non-named layout is left
+    /// byte-for-byte identical.
+    pub fn resolve_named_grid_areas(
+        &self,
+        styles: &mut LayoutStyles,
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+    ) {
+        resolve_named_grid_areas(styles, tree, computed);
     }
 
     /// Lays out like [`layout`](Self::layout) but wraps text-leaf nodes through an

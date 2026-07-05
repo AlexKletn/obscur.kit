@@ -87,6 +87,17 @@ pub enum PropertyId {
     GridTemplateColumns,
     /// The `grid-template-rows` property (a `GridTracks` track list).
     GridTemplateRows,
+    /// The `grid-template-areas` property (a `GridAreas` named-cell grid; NOT
+    /// inherited). The runtime resolves a child's [`GridArea`](Self::GridArea)
+    /// name against the container's parsed template.
+    GridTemplateAreas,
+    /// The `grid-area: <custom-ident>` named-area placement on a grid item (a
+    /// `GridAreaName` marker; NOT inherited). Carried unresolved from CSS because
+    /// the area rectangle lives on the item's *container* `grid-template-areas`,
+    /// which the runtime — not the cascade — has the tree context to resolve. The
+    /// numeric `grid-area: a / b / c / d` form does not use this id; it expands to
+    /// the four `grid-*-start` / `-end` line longhands.
+    GridArea,
 
     /// The `grid-auto-flow` property (Keyword-valued: `row` / `column` /
     /// `dense` combinations; NOT inherited). See the reserved `GRID_AUTO_FLOW_*`
@@ -165,6 +176,8 @@ impl PropertyId {
             Self::AlignItems => "align-items",
             Self::GridTemplateColumns => "grid-template-columns",
             Self::GridTemplateRows => "grid-template-rows",
+            Self::GridTemplateAreas => "grid-template-areas",
+            Self::GridArea => "grid-area",
             Self::GridAutoFlow => "grid-auto-flow",
             Self::GridColumnStart => "grid-column-start",
             Self::GridColumnEnd => "grid-column-end",
@@ -223,6 +236,8 @@ impl PropertyId {
             | Self::AlignItems
             | Self::GridTemplateColumns
             | Self::GridTemplateRows
+            | Self::GridTemplateAreas
+            | Self::GridArea
             | Self::GridAutoFlow
             | Self::GridColumnStart
             | Self::GridColumnEnd
@@ -372,6 +387,21 @@ mod tests {
                 .default_inheritance()
                 .is_inherited()
         );
+    }
+
+    #[test]
+    fn grid_areas_names_and_not_inherited() {
+        assert_eq!(
+            PropertyId::GridTemplateAreas.name(),
+            "grid-template-areas"
+        );
+        assert_eq!(PropertyId::GridArea.name(), "grid-area");
+        assert!(
+            !PropertyId::GridTemplateAreas
+                .default_inheritance()
+                .is_inherited()
+        );
+        assert!(!PropertyId::GridArea.default_inheritance().is_inherited());
     }
 
     #[test]

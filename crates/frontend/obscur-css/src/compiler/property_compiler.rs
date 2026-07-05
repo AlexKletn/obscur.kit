@@ -23,8 +23,8 @@ use crate::parser::{ParsedDeclaration, ParsedValue};
 use obscur_identity::InternedSymbol;
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{
-    layout_keyword, CustomProperty, GridLineValue, GridTrack, Length, PropertyId, PropertyValue,
-    StyleColor,
+    layout_keyword, CustomProperty, GridAreaTemplate, GridLineValue, GridTrack, Length, PropertyId,
+    PropertyValue, StyleColor,
 };
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
@@ -333,8 +333,11 @@ fn expand_grid_line_shorthand(
 /// [`PropertyId::GridRowEnd`], [`PropertyId::GridColumnEnd`]. Omitted edges follow
 /// the CSS filling rules over the LINE-based forms only:
 ///
-/// * `a` → all four are `a` (a bare `<custom-ident>` named area is out of scope,
-///   so it fails `grid_line_edge` and degrades to `Unsupported`).
+/// * a lone `<custom-ident>` (`grid-area: header`) is a **named-area** placement:
+///   it is carried as a single [`PropertyId::GridArea`] marker the runtime
+///   resolves against the item's container `grid-template-areas`, not expanded to
+///   the four line longhands.
+/// * `a` (a lone line number) → all four edges are `a`.
 /// * `a / b` → `row-start=a, column-start=b`, both ends `auto`.
 /// * `a / b / c` → `row-start=a, column-start=b, row-end=c`, `column-end=auto`.
 /// * `a / b / c / d` → the four edges directly.
@@ -355,6 +358,31 @@ fn expand_grid_area_shorthand(
             decl.span,
         ))]
     };
+    let important = if decl.important {
+        ImportantFlag::Important
+    } else {
+        ImportantFlag::Normal
+    };
+    // The single-`<custom-ident>` named form (`grid-area: header`): a lone keyword
+    // that is not a CSS-wide keyword and not the `auto` line edge is an area name.
+    // It cannot be resolved to line numbers here (the area rectangle lives on the
+    // item's *container* `grid-template-areas`), so it is carried as a
+    // `PropertyId::GridArea` marker the runtime resolves against the parent's
+    // template. The numeric `a / b / c / d` line form falls through below.
+    if let [ParsedValue::Keyword(name)] = decl.value.as_slice()
+        && css_wide_keyword(name).is_none()
+        && !name.eq_ignore_ascii_case("auto")
+    {
+        return vec![CompiledDeclaration::Standard(Declaration::new(
+            PropertyId::GridArea,
+            PropertyValue::GridAreaName((**name).into()),
+            important,
+            origin,
+            specificity,
+            source_order,
+            selector,
+        ))];
+    }
     let mut edges = Vec::new();
     for group in decl.value.split(|v| matches!(v, ParsedValue::Delimiter('/'))) {
         match grid_line_edge(group) {
@@ -369,11 +397,6 @@ fn expand_grid_area_shorthand(
         [a, b, c] => [*a, *b, *c, GridLineValue::Auto],
         [a, b, c, d] => [*a, *b, *c, *d],
         _ => return unsupported(),
-    };
-    let important = if decl.important {
-        ImportantFlag::Important
-    } else {
-        ImportantFlag::Normal
     };
     [
         (PropertyId::GridRowStart, row_start),
@@ -510,7 +533,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 40] = [
+    const ALL: [PropertyId; 41] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::Opacity,
@@ -539,6 +562,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::AlignItems,
         PropertyId::GridTemplateColumns,
         PropertyId::GridTemplateRows,
+        PropertyId::GridTemplateAreas,
         PropertyId::GridAutoFlow,
         PropertyId::GridColumnStart,
         PropertyId::GridColumnEnd,
@@ -614,6 +638,15 @@ fn lower_for_property(
             return Some(wide);
         }
         return lower_grid_template(values);
+    }
+    if property == PropertyId::GridTemplateAreas {
+        if let Some(ParsedValue::Keyword(keyword)) = values.first()
+            && let Some(wide) = css_wide_keyword(keyword)
+            && values.len() == 1
+        {
+            return Some(wide);
+        }
+        return lower_grid_template_areas(values);
     }
     if property == PropertyId::GridAutoFlow {
         return lower_grid_auto_flow(values);
@@ -750,6 +783,40 @@ fn lower_grid_template(values: &[ParsedValue]) -> Option<PropertyValue> {
         return None;
     }
     Some(PropertyValue::grid_tracks(tracks))
+}
+
+/// Lowers a `grid-template-areas` value into a [`PropertyValue::GridAreas`]
+/// (spec §4.2, the named-areas subset).
+///
+/// The value is a sequence of quoted strings, one per grid row; each string is a
+/// whitespace-separated list of cell tokens, where a token is a `<custom-ident>`
+/// area name or a run of one-or-more `.` characters denoting a null (empty) cell.
+/// Every row must have the same number of cells, and every named area must form a
+/// filled rectangle — both are enforced by
+/// [`GridAreaTemplate::from_rows`](GridAreaTemplate), which returns [`None`] on a
+/// ragged grid or a non-rectangular area, degrading the declaration to an
+/// unsupported-feature diagnostic rather than laying out against a malformed grid.
+/// A value that is not a list of strings (or an empty list) is likewise [`None`].
+fn lower_grid_template_areas(values: &[ParsedValue]) -> Option<PropertyValue> {
+    let mut rows: Vec<Vec<Option<Box<str>>>> = Vec::new();
+    for value in values {
+        let ParsedValue::String(row) = value else {
+            return None;
+        };
+        let cells: Vec<Option<Box<str>>> = row
+            .split_whitespace()
+            .map(|cell| {
+                // A run of one-or-more `.` is a null cell; any other token is a name.
+                if cell.bytes().all(|b| b == b'.') {
+                    None
+                } else {
+                    Some(cell.into())
+                }
+            })
+            .collect();
+        rows.push(cells);
+    }
+    GridAreaTemplate::from_rows(&rows).map(PropertyValue::GridAreas)
 }
 
 /// Parses a space-separated component list into a flat [`GridTrack`] list,
@@ -2192,14 +2259,70 @@ mod tests {
     }
 
     #[test]
-    fn grid_area_named_ident_is_unsupported() {
-        // A bare named-area ident is out of scope → a single Unsupported.
+    fn grid_area_named_ident_lowers_to_marker() {
+        // A bare named-area ident is a `GridArea` marker the runtime resolves.
         let decls = compile_all("grid-area: header");
         assert_eq!(decls.len(), 1);
-        assert!(matches!(decls[0], CompiledDeclaration::Unsupported(_)));
-        // More than four values is invalid.
+        let CompiledDeclaration::Standard(d) = &decls[0] else {
+            panic!("expected standard, got {:?}", decls[0]);
+        };
+        assert_eq!(d.property(), PropertyId::GridArea);
+        assert_eq!(d.value(), &PropertyValue::GridAreaName("header".into()));
+    }
+
+    #[test]
+    fn grid_area_more_than_four_values_is_unsupported() {
+        // More than four line values is invalid.
         let decls = compile_all("grid-area: 1 / 2 / 3 / 4 / 5");
         assert_eq!(decls.len(), 1);
         assert!(matches!(decls[0], CompiledDeclaration::Unsupported(_)));
+    }
+
+    // ---- grid-template-areas ----
+
+    #[test]
+    fn grid_template_areas_parses_into_a_template() {
+        // `"h h" "s m" "f f"`: three rows of two columns.
+        let PropertyValue::GridAreas(template) =
+            value_of("grid-template-areas: \"h h\" \"s m\" \"f f\"")
+        else {
+            panic!("expected a grid-areas value");
+        };
+        assert_eq!(template.rows(), 3);
+        assert_eq!(template.columns(), 2);
+        // `h` spans row 1, columns 1-2 → line rect (1..2, 1..3).
+        let h = template.area("h").expect("h");
+        assert_eq!((h.row_start, h.row_end, h.column_start, h.column_end), (1, 2, 1, 3));
+        // `s` is the single cell at row 2, column 1.
+        let s = template.area("s").expect("s");
+        assert_eq!((s.row_start, s.row_end, s.column_start, s.column_end), (2, 3, 1, 2));
+    }
+
+    #[test]
+    fn grid_template_areas_null_cell_is_empty() {
+        let PropertyValue::GridAreas(template) =
+            value_of("grid-template-areas: \"a .\" \". b\"")
+        else {
+            panic!("expected a grid-areas value");
+        };
+        assert!(template.area("a").is_some());
+        assert!(template.area("b").is_some());
+        assert!(template.area(".").is_none());
+    }
+
+    #[test]
+    fn grid_template_areas_non_rectangular_is_unsupported() {
+        // `a` forms an L-shape (a hole in its bounding box) → not a filled rectangle.
+        let (result, _) = compile("grid-template-areas: \"a a\" \"a .\"");
+        assert!(matches!(result, CompiledDeclaration::Unsupported(_)));
+        // A ragged grid (unequal columns) is likewise rejected.
+        let (result, _) = compile("grid-template-areas: \"a b\" \"a\"");
+        assert!(matches!(result, CompiledDeclaration::Unsupported(_)));
+    }
+
+    #[test]
+    fn grid_template_areas_honours_css_wide_keywords() {
+        assert_eq!(value_of("grid-template-areas: inherit"), PropertyValue::Inherit);
+        assert_eq!(value_of("grid-template-areas: initial"), PropertyValue::Initial);
     }
 }

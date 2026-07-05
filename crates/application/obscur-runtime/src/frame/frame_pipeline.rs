@@ -187,9 +187,14 @@ impl FramePipeline {
         // Layout: map styles into layout styles and arrange the tree. The root
         // `font-size` supplies the `rem` base; the viewport supplies `vw`/`vh`.
         let root_font = root_font_size(&computed, tree.root());
-        let layout_styles = self
+        let mut layout_styles = self
             .layout
             .layout_styles_from(&computed, ctx.viewport(), root_font);
+        // Named-area placement (`grid-area: <name>` against the container's
+        // `grid-template-areas`) needs the tree to resolve, so it patches the
+        // freshly built styles here; items with no named area are left untouched.
+        self.layout
+            .resolve_named_grid_areas(&mut layout_styles, tree, &computed);
         // Authored grid templates (`grid-template-columns`/`-rows`) become a
         // per-node side-table so a grid container dispatches the real track-sizing
         // algorithm; a grid node with no template falls back to a single column.

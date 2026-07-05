@@ -1,6 +1,10 @@
 //! Property module.
 mod custom_property;
 pub use custom_property::CustomProperty;
+mod grid_area_rect;
+pub use grid_area_rect::GridAreaRect;
+mod grid_area_template;
+pub use grid_area_template::GridAreaTemplate;
 mod grid_line_value;
 pub use grid_line_value::GridLineValue;
 mod grid_track;

@@ -27,8 +27,10 @@
 //! (`grid-row: 2`) against fixed row tracks, a span crossing an interior `gap`, a
 //! mixed explicit + auto layout where the auto items first-fit around the occupied
 //! cell, negative (from-end) lines (`grid-column: 1 / -1` spanning the whole row),
-//! and the `grid-area` four-line shorthand. Still out of scope (documented in
-//! steps 1-2, not exercised here): dense packing / backfill and named lines/areas.
+//! the `grid-area` four-line shorthand, and **named-area placement**
+//! (`grid-template-areas` on the container + `grid-area: <name>` on the items,
+//! resolved in the runtime against the parent's parsed template). Still out of
+//! scope (not exercised here): named grid *lines* (`[name]` in a track list).
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -300,4 +302,37 @@ fn grid_area_shorthand_spans_row_via_lines() {
     approx(ax, 0.0, "a.x (column line 1 → col 0)");
     approx(ay, 0.0, "a.y (row line 1 → row 0)");
     approx(aw, 300.0, "a.width (col 1 → -1 spans all three columns)");
+}
+
+// 11. `grid-template-areas` + `grid-area: <name>`: a 2x2 grid whose template is
+//     `"a b" "a c"` — area `a` fills column 0 of BOTH rows, `b` is (col1,row0),
+//     `c` is (col1,row1). Children `.x{grid-area:a}` `.y{grid-area:b}`
+//     `.z{grid-area:c}` resolve, in the runtime, against the container's parsed
+//     template to concrete placements: `.x` at col 0 spanning both rows (x=0, two
+//     rows tall), `.y` at (col1,row0), `.z` at (col1,row1).
+#[test]
+fn named_grid_areas_place_children_by_name() {
+    // Two 100px columns; two implicit rows sized by the 10px children.
+    let css = ".grid{display:grid;width:200px;grid-template-columns:100px 100px;\
+               grid-template-areas:\"a b\" \"a c\"} \
+               .a{grid-area:a;height:10px} .b{grid-area:b;height:10px} \
+               .c{grid-area:c;height:10px}";
+    let (rt, k) = drive(css, 3, 400.0, 200.0);
+    let (xx, xy, xw, xh) = geom(&rt, k[0]);
+    let (yx, yy, yw, _) = geom(&rt, k[1]);
+    let (zx, zy, zw, _) = geom(&rt, k[2]);
+
+    // `.x` (area `a`): column 0, spanning both rows → x=0, width 100, two 10px rows.
+    approx(xx, 0.0, "x.x (area a → col 0)");
+    approx(xy, 0.0, "x.y (area a starts on row 0)");
+    approx(xw, 100.0, "x.width (single column 0)");
+    approx(xh, 20.0, "x.height (area a spans both 10px rows)");
+    // `.y` (area `b`): col 1, row 0.
+    approx(yx, 100.0, "y.x (area b → col 1)");
+    approx(yy, 0.0, "y.y (area b → row 0)");
+    approx(yw, 100.0, "y.width (single column 1)");
+    // `.z` (area `c`): col 1, row 1 (below the 10px row 0).
+    approx(zx, 100.0, "z.x (area c → col 1)");
+    approx(zy, 10.0, "z.y (area c → row 1)");
+    approx(zw, 100.0, "z.width (single column 1)");
 }

@@ -44,7 +44,9 @@ impl ComputedValue {
             | PropertyValue::Color(_)
             | PropertyValue::FontFamilies(_)
             | PropertyValue::GridTracks(_)
-            | PropertyValue::GridLine(_) => Some(Self(value)),
+            | PropertyValue::GridLine(_)
+            | PropertyValue::GridAreas(_)
+            | PropertyValue::GridAreaName(_) => Some(Self(value)),
             PropertyValue::CustomRef(_)
             | PropertyValue::Inherit
             | PropertyValue::Initial
