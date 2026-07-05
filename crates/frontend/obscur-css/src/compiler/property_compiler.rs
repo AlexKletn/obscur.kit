@@ -645,7 +645,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 52] = [
+    const ALL: [PropertyId; 53] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::Opacity,
@@ -658,6 +658,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::Right,
         PropertyId::Bottom,
         PropertyId::Left,
+        PropertyId::ZIndex,
         PropertyId::MarginTop,
         PropertyId::MarginRight,
         PropertyId::MarginBottom,
@@ -740,6 +741,9 @@ fn lower_for_property(
     }
     if property == PropertyId::FontWeight {
         return lower_font_weight(values);
+    }
+    if property == PropertyId::ZIndex {
+        return lower_z_index(values);
     }
     if matches!(
         property,
@@ -894,6 +898,28 @@ fn lower_font_weight(values: &[ParsedValue]) -> Option<PropertyValue> {
                 return Some(PropertyValue::Keyword(symbol));
             }
             font_weight_keyword(keyword).map(PropertyValue::Number)
+        }
+        _ => None,
+    }
+}
+
+/// Lowers a `z-index` value: an `<integer>` or the `auto` keyword (spec §5.1).
+///
+/// A bare integer is taken verbatim as a [`PropertyValue::Number`] (negative
+/// values allowed, e.g. `z-index: -1`); a non-integral number is not a valid
+/// `z-index` and yields [`None`]. The `auto` keyword lowers to the reserved
+/// [`layout_keyword::Z_INDEX_AUTO`] handle so the runtime reads one keyword
+/// identity across crates. The CSS-wide keywords (`inherit` / `initial` /
+/// `unset`) still take priority. Any other value yields [`None`] so the
+/// declaration degrades to an unsupported-feature diagnostic.
+fn lower_z_index(values: &[ParsedValue]) -> Option<PropertyValue> {
+    match values.first()? {
+        ParsedValue::Number(n) if n.fract() == 0.0 => Some(PropertyValue::Number(narrow_f32(*n))),
+        ParsedValue::Keyword(keyword) => {
+            if let Some(wide) = css_wide_keyword(keyword) {
+                return Some(wide);
+            }
+            layout_keyword::z_index_from_name(keyword).map(PropertyValue::Keyword)
         }
         _ => None,
     }
@@ -1944,6 +1970,31 @@ mod tests {
     fn layout_keyword_prop_honours_css_wide_keywords() {
         assert_eq!(value_of("display: inherit"), PropertyValue::Inherit);
         assert_eq!(value_of("flex-direction: initial"), PropertyValue::Initial);
+    }
+
+    #[test]
+    fn z_index_lowers_integer_and_auto() {
+        // `z-index` is resolved a longhand name.
+        assert_eq!(property_id_from_name("z-index"), Some(PropertyId::ZIndex));
+        // A positive integer lowers to a bare number.
+        assert_eq!(value_of("z-index: 5"), PropertyValue::Number(5.0));
+        // A negative integer is valid and lowers to a negative number.
+        assert_eq!(value_of("z-index: -1"), PropertyValue::Number(-1.0));
+        // `auto` lowers to the reserved cross-crate handle.
+        assert_eq!(
+            value_of("z-index: auto"),
+            PropertyValue::Keyword(layout_keyword::Z_INDEX_AUTO)
+        );
+        // CSS-wide keywords still take priority.
+        assert_eq!(value_of("z-index: inherit"), PropertyValue::Inherit);
+    }
+
+    #[test]
+    fn z_index_non_integer_is_unsupported() {
+        // A non-integral number is not a valid `z-index`; it degrades rather than
+        // being dropped.
+        let (result, _) = compile("z-index: 1.5");
+        assert!(matches!(result, CompiledDeclaration::Unsupported(_)));
     }
 
     #[test]

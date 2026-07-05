@@ -153,6 +153,14 @@ pub const POSITION_ABSOLUTE: InternedSymbol = InternedSymbol::from_raw(0x0000_1A
 /// until out-of-flow positioning lands.
 pub const POSITION_FIXED: InternedSymbol = InternedSymbol::from_raw(0x0000_1A04);
 
+// ---- `z-index` keyword values ----
+
+/// The `z-index: auto` keyword (the default; the element does not establish its
+/// own stacking level and stacks with its parent). The `<integer>` form of
+/// `z-index` lowers to a [`PropertyValue::Number`](crate::property::PropertyValue::Number)
+/// instead, so this reserved handle carries only the `auto` case across crates.
+pub const Z_INDEX_AUTO: InternedSymbol = InternedSymbol::from_raw(0x0000_1B01);
+
 /// Maps a `display` keyword string to its reserved [`InternedSymbol`].
 ///
 /// The input is ASCII-lowercased before matching, so callers may pass authored
@@ -181,6 +189,20 @@ pub fn position_from_name(name: &str) -> Option<InternedSymbol> {
         "absolute" => Some(POSITION_ABSOLUTE),
         "fixed" => Some(POSITION_FIXED),
         _ => None,
+    }
+}
+
+/// Maps a `z-index` keyword string to its reserved [`InternedSymbol`].
+///
+/// The only keyword `z-index` accepts is `auto` (mapped to [`Z_INDEX_AUTO`]); the
+/// `<integer>` form lowers to a number, not a keyword. The input is
+/// ASCII-lowercased before matching. Returns [`None`] for any other keyword.
+#[must_use]
+pub fn z_index_from_name(name: &str) -> Option<InternedSymbol> {
+    if name.eq_ignore_ascii_case("auto") {
+        Some(Z_INDEX_AUTO)
+    } else {
+        None
     }
 }
 
@@ -386,6 +408,7 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         POSITION_RELATIVE => Some("relative"),
         POSITION_ABSOLUTE => Some("absolute"),
         POSITION_FIXED => Some("fixed"),
+        Z_INDEX_AUTO => Some("auto"),
         FLEX_ROW => Some("row"),
         FLEX_ROW_REVERSE => Some("row-reverse"),
         FLEX_COLUMN => Some("column"),
@@ -438,6 +461,7 @@ mod tests {
         POSITION_RELATIVE,
         POSITION_ABSOLUTE,
         POSITION_FIXED,
+        Z_INDEX_AUTO,
         FLEX_ROW,
         FLEX_ROW_REVERSE,
         FLEX_COLUMN,
@@ -497,6 +521,17 @@ mod tests {
         // Round-trips through `name_of`.
         assert_eq!(name_of(POSITION_RELATIVE), Some("relative"));
         assert_eq!(name_of(POSITION_STATIC), Some("static"));
+    }
+
+    #[test]
+    fn z_index_maps_auto_only() {
+        assert_eq!(z_index_from_name("auto"), Some(Z_INDEX_AUTO));
+        assert_eq!(z_index_from_name("AUTO"), Some(Z_INDEX_AUTO));
+        // The `<integer>` form is not a keyword, and no other keyword is valid.
+        assert_eq!(z_index_from_name("0"), None);
+        assert_eq!(z_index_from_name("static"), None);
+        // Round-trips through `name_of`.
+        assert_eq!(name_of(Z_INDEX_AUTO), Some("auto"));
     }
 
     #[test]

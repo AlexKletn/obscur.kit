@@ -67,6 +67,7 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::Right,
     PropertyId::Bottom,
     PropertyId::Left,
+    PropertyId::ZIndex,
     // Box model: sizing.
     PropertyId::Width,
     PropertyId::Height,
@@ -191,6 +192,12 @@ impl StyleResolver {
             // `font-family` initial is UA-dependent; left unresolved so an absent
             // authored value falls back to the runtime's default font chain.
             PropertyId::FontFamily => None,
+            // `z-index` initial is `auto`. Although `auto` has a reserved
+            // cross-crate handle, an absent value is left unresolved so the scene's
+            // stacking treats the node as `auto` (effective z of 0, inheriting its
+            // parent's stacking level) — byte-for-byte identical to the pre-stacking
+            // paint order.
+            PropertyId::ZIndex => None,
             // Keyword initials need the interner; deferred to a later phase.
             PropertyId::Display
             | PropertyId::Visibility
@@ -734,6 +741,35 @@ mod tests {
         assert_eq!(computed.get(PropertyId::Display), None);
     }
 
+    #[test]
+    fn authored_z_index_computes_to_a_number() {
+        let resolver = StyleResolver::new();
+        let mut cascaded = ResolvedDeclarations::new();
+        cascaded.insert(PropertyId::ZIndex, PropertyValue::Number(5.0));
+
+        // An authored integer `z-index` flows through to the computed style as a
+        // number the scene reads for stacking.
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+        assert_eq!(
+            computed.get(PropertyId::ZIndex).map(ComputedValue::value),
+            Some(&PropertyValue::Number(5.0))
+        );
+
+        // `z-index` does not inherit: a child with no authored value takes the
+        // initial (`auto`, left unresolved), NOT the parent's numeric level.
+        let child = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), Some(&computed));
+        assert_eq!(child.get(PropertyId::ZIndex), None);
+    }
+
+    #[test]
+    fn z_index_initial_is_auto_left_unresolved() {
+        let resolver = StyleResolver::new();
+        // `z-index` initial (`auto`) is deferred, so an absent value is unresolved.
+        assert_eq!(resolver.initial_value(PropertyId::ZIndex), None);
+        let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), None);
+        assert_eq!(computed.get(PropertyId::ZIndex), None);
+    }
+
     /// Every modelled [`PropertyId`] must be in the computed set, or an authored
     /// value for it would be dropped at the computed-value step (the bug this
     /// closes). The `match` is exhaustive, so a new upstream variant fails to
@@ -757,6 +793,7 @@ mod tests {
                 | PropertyId::Right
                 | PropertyId::Bottom
                 | PropertyId::Left
+                | PropertyId::ZIndex
                 | PropertyId::MarginTop
                 | PropertyId::MarginRight
                 | PropertyId::MarginBottom
@@ -813,6 +850,7 @@ mod tests {
             PropertyId::Right,
             PropertyId::Bottom,
             PropertyId::Left,
+            PropertyId::ZIndex,
             PropertyId::MarginTop,
             PropertyId::MarginRight,
             PropertyId::MarginBottom,

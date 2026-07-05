@@ -21,6 +21,7 @@ mod render_coordinator;
 pub use render_coordinator::RenderCoordinator;
 mod scene_coordinator;
 pub use scene_coordinator::SceneCoordinator;
+mod stacking;
 mod style_coordinator;
 pub use style_coordinator::{ComputedStyles, StyleCoordinator};
 mod style_inputs;

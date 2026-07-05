@@ -46,6 +46,11 @@ pub enum PropertyId {
     Bottom,
     /// The `left` inset longhand (Length-valued, not inherited).
     Left,
+    /// The `z-index` property (Number-valued `<integer>`, or the reserved
+    /// [`Z_INDEX_AUTO`](crate::property::layout_keyword::Z_INDEX_AUTO) keyword for
+    /// `auto`; NOT inherited). Only honored on positioned elements; drives the
+    /// scene's stacking (paint) order.
+    ZIndex,
 
     // ---- Box model: margins (Length-valued, not inherited) ----
     /// The `margin-top` longhand.
@@ -202,6 +207,7 @@ impl PropertyId {
             Self::Right => "right",
             Self::Bottom => "bottom",
             Self::Left => "left",
+            Self::ZIndex => "z-index",
             Self::MarginTop => "margin-top",
             Self::MarginRight => "margin-right",
             Self::MarginBottom => "margin-bottom",
@@ -273,6 +279,7 @@ impl PropertyId {
             | Self::Right
             | Self::Bottom
             | Self::Left
+            | Self::ZIndex
             | Self::MarginTop
             | Self::MarginRight
             | Self::MarginBottom
@@ -570,6 +577,14 @@ mod tests {
                 id.name()
             );
         }
+    }
+
+    #[test]
+    fn z_index_name_and_not_inherited() {
+        assert_eq!(PropertyId::ZIndex.name(), "z-index");
+        // Like the other positioning / layout properties, `z-index` resets per
+        // element rather than inheriting.
+        assert!(!PropertyId::ZIndex.default_inheritance().is_inherited());
     }
 
     #[test]

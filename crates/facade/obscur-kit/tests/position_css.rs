@@ -14,9 +14,10 @@
 use obscur_kit::css::compiler::StylesheetCompiler;
 use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
-use obscur_kit::geometry::Size;
+use obscur_kit::geometry::{Rect, Size};
 use obscur_kit::identity::{ComponentId, NodeId, RuntimeId};
 use obscur_kit::runtime::UiRuntime;
+use obscur_kit::scene::command::PaintCommand;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
@@ -225,4 +226,54 @@ fn absolute_resolves_against_positioned_ancestor() {
     approx(origin(&rt, abs).1, 280.0, "abs.y = rel.bottom - height");
     approx(box_size(&rt, abs).0, 20.0, "abs.width explicit");
     approx(box_size(&rt, abs).1, 20.0, "abs.height explicit");
+}
+
+// End-to-end: two overlapping `position: absolute` boxes with `background-color`
+// and different `z-index` paint in STACKING order, not tree order. `.boxa` is
+// FIRST in the tree but carries the HIGHER `z-index` (5) and `.boxb` is second
+// with the lower `z-index` (1); the composed display list must emit `.boxb`'s
+// fill first and `.boxa`'s fill LAST (higher z on top), overriding document
+// order. This drives the genuine pipeline through to the scene's paint commands.
+#[test]
+fn z_index_orders_overlapping_absolute_fills_by_stacking() {
+    let boxa = tag(el(31), "boxa");
+    let boxb = tag(el(32), "boxb");
+    let wrap = tag(el(30), "wrap").with_children(ViewFragment::from_nodes(vec![boxa, boxb]));
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![wrap]));
+
+    let rt = drive_view(
+        ".wrap{position:relative;width:100px;height:100px} \
+         .boxa{position:absolute;top:0px;left:0px;width:40px;height:40px;\
+               background-color:#ff0000;z-index:5} \
+         .boxb{position:absolute;top:20px;left:20px;width:40px;height:40px;\
+               background-color:#0000ff;z-index:1}",
+        &view,
+    );
+
+    let wrap = container_node(&rt);
+    let kids = rt.tree().get(wrap).unwrap().children().to_vec();
+    let (node_a, node_b) = (kids[0], kids[1]);
+    let bounds_a = rt.layout_boxes().get(&node_a).expect("boxa laid out").bounds;
+    let bounds_b = rt.layout_boxes().get(&node_b).expect("boxb laid out").bounds;
+
+    // Locate each node's background fill in the composed command stream by its
+    // arranged rectangle.
+    let snapshot = rt.snapshot();
+    let commands = snapshot.display_list().commands();
+    let fill_index = |target: Rect| {
+        commands.iter().position(|c| match c {
+            PaintCommand::DrawPath { path, .. } => path.bounds() == Some(target),
+            _ => false,
+        })
+    };
+    let index_a = fill_index(bounds_a).expect("boxa background fill emitted");
+    let index_b = fill_index(bounds_b).expect("boxb background fill emitted");
+
+    // `.boxa` has the higher z-index, so its fill is emitted AFTER `.boxb`'s
+    // despite being earlier in the tree — the paint order reflects z, not tree.
+    assert!(
+        index_a > index_b,
+        "higher z-index (.boxa, z=5) must paint after lower (.boxb, z=1): \
+         boxa at {index_a}, boxb at {index_b}",
+    );
 }

@@ -7,7 +7,7 @@ use std::fmt;
 use obscur_geometry::Point;
 use obscur_identity::NodeId;
 use obscur_scene::color::Color;
-use obscur_scene::command::{DisplayList, DisplayListBuilder};
+use obscur_scene::command::{DisplayList, DisplayListBuilder, PaintCommand};
 use obscur_scene::paint::Brush;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::ComputedValue;
@@ -25,6 +25,7 @@ use obscur_text::shaping::{
 };
 use obscur_tree::tree::RetainedTree;
 
+use super::stacking::{effective_stacking_z, PaintUnit};
 use super::{
     alignment_for, attributes_for, direction_for, families_for, overflow_for, ComputedStyles,
     LayoutBoxes,
@@ -49,11 +50,18 @@ const DEFAULT_FONT_SIZE: f32 = 16.0;
 /// # Paint order
 ///
 /// The tree is walked **pre-order** (a parent is emitted before its children,
-/// children left-to-right), which is exactly the scene's deterministic paint
-/// order: a parent paints first and its children paint on top (spec §5.1). The
-/// walk is **cycle-safe** — a visited-set guard means a shared or cyclic child
-/// link terminates instead of looping — and **panic-free**: every lookup is
-/// fallible and no indexing is performed.
+/// children left-to-right); the walk is **cycle-safe** — a visited-set guard
+/// means a shared or cyclic child link terminates instead of looping — and
+/// **panic-free**: every lookup is fallible and no indexing is performed.
+///
+/// Paint order is then the scene's `z-index` **stacking** order (spec §5.1): each
+/// node's own paint is captured as a unit keyed `(effective z, pre-order index)`
+/// and stable-sorted, so a positioned element with a higher `z-index` paints on
+/// top of a lower one, and a positioned subtree stacks together (see the
+/// [`stacking`](super::stacking) module for the bounded, flat model and its
+/// documented simplifications). When no `z-index` is authored every effective z
+/// is `0` and the order is exactly pre-order (parent, then children) — the
+/// pre-stacking behaviour, byte-for-byte.
 ///
 /// # Phase-1 scope
 ///
@@ -378,28 +386,51 @@ impl SceneCoordinator {
         computed: &ComputedStyles,
         boxes: &LayoutBoxes,
     ) -> DisplayList {
-        let mut builder = DisplayListBuilder::new();
         let Some(root) = tree.root() else {
-            return builder.build();
+            return DisplayListBuilder::new().build();
         };
+
+        // Each node's effective stacking z (a positioned element's numeric
+        // `z-index`, else its nearest z-index ancestor's, root = 0). Computed once
+        // up front so the emission walk can key each paint unit by it.
+        let zmap = effective_stacking_z(tree, computed);
 
         // Pre-order walk (parent before children). Children are pushed reversed
         // so the leftmost child is popped first, preserving left-to-right paint
         // order. The visited set makes the walk cycle-safe and panic-free.
+        //
+        // Instead of emitting directly, each node's own paint (background / text —
+        // not its descendants') is captured as a `PaintUnit` tagged with its
+        // stacking key `(z, tree_index)`, where `tree_index` is the node's
+        // pre-order position. The units are then STABLE-SORTED by `(z, tree_index)`
+        // so higher-z positioned elements paint last (on top) while equal-z units
+        // keep tree order. When no `z-index` is authored every z is 0 and the sort
+        // reproduces the exact pre-order sequence (the regression guard).
         let mut visited: HashSet<NodeId> = HashSet::new();
         let mut stack: Vec<NodeId> = vec![root];
+        let mut units: Vec<PaintUnit> = Vec::new();
+        let mut next_index: usize = 0;
         while let Some(node) = stack.pop() {
             if !visited.insert(node) {
                 // Already painted (cycle or shared child): do not revisit.
                 continue;
             }
+            // Assign the node's pre-order document position (the stacking
+            // tie-breaker) at pop time, matching the historical emission order.
+            let tree_index = next_index;
+            next_index += 1;
+
+            // This node's own paint accumulates into a private builder so it can be
+            // reordered as one unit; only leaf commands are emitted, so it stays
+            // balanced.
+            let mut node_paint = DisplayListBuilder::new();
 
             if let Some(color) = background_color_of(computed, node) {
                 // Skip fully transparent backgrounds: they paint nothing.
                 if color.a > 0.0
                     && let Some(layout_box) = boxes.get(&node)
                 {
-                    builder.fill_rect(layout_box.bounds, Brush::solid(scene_color_from(color)));
+                    node_paint.fill_rect(layout_box.bounds, Brush::solid(scene_color_from(color)));
                 }
             }
 
@@ -451,7 +482,11 @@ impl SceneCoordinator {
                             let line_text =
                                 content.get(range.start..range.end).unwrap_or_default();
                             let run = GlyphRun::new(Vec::new(), font_size, line_text);
-                            builder.draw_text(Point::new(line_left, line_top), run, brush.clone());
+                            node_paint.draw_text(
+                                Point::new(line_left, line_top),
+                                run,
+                                brush.clone(),
+                            );
                             continue;
                         }
                         // Walk the line's contiguous same-font segments left to
@@ -465,7 +500,7 @@ impl SceneCoordinator {
                                 content.get(range.start..range.end).unwrap_or_default();
                             let run = positioned_run(segment, baseline, font_size, seg_text);
                             let seg_origin = Point::new(line_left + seg_x, line_top);
-                            builder.draw_text(seg_origin, run, brush.clone());
+                            node_paint.draw_text(seg_origin, run, brush.clone());
                             seg_x += segment.run().advance();
                         }
                     }
@@ -477,9 +512,31 @@ impl SceneCoordinator {
                     }
                 }
             }
+
+            // A node with no own paint (no background, no text) contributes no
+            // unit — exactly as the historical walk emitted nothing for it.
+            let commands = node_paint.build().commands().to_vec();
+            if !commands.is_empty() {
+                let z = zmap.get(&node).copied().unwrap_or(0);
+                units.push(PaintUnit {
+                    z,
+                    tree_index,
+                    commands,
+                });
+            }
         }
 
-        builder.build()
+        // Stable sort by `(z ascending, tree_index ascending)`: higher z paints
+        // last (on top), and equal-z units keep their pre-order (document) order.
+        // `sort_by_key` is stable, and with all-zero z the key reduces to
+        // `tree_index` (already ascending), reproducing the pre-order sequence.
+        units.sort_by_key(|unit| (unit.z, unit.tree_index));
+
+        let mut ordered: Vec<PaintCommand> = Vec::new();
+        for unit in units {
+            ordered.extend(unit.commands);
+        }
+        DisplayList::from_commands(ordered)
     }
 }
 
@@ -662,6 +719,148 @@ mod tests {
             .iter()
             .filter(|c| matches!(c, PaintCommand::DrawPath { .. }))
             .count()
+    }
+
+    /// Collects the `DrawPath` (fill) rectangles of a display list, in paint order.
+    fn fill_rects(list: &DisplayList) -> Vec<Rect> {
+        list.commands()
+            .iter()
+            .filter_map(|c| match c {
+                PaintCommand::DrawPath { path, .. } => path.bounds(),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A `ComputedStyle` with a `background-color`, `position: absolute`, and an
+    /// optional numeric `z-index` — the shape the stacking sort keys on.
+    fn positioned_bg(color: StyleColor, z: Option<f32>) -> ComputedStyle {
+        let mut style = ComputedStyle::new();
+        style.set(PropertyId::BackgroundColor, ComputedValue::color(color));
+        style.set(
+            PropertyId::Position,
+            ComputedValue::keyword(obscur_style::property::layout_keyword::POSITION_ABSOLUTE),
+        );
+        if let Some(z) = z {
+            style.set(PropertyId::ZIndex, ComputedValue::number(z));
+        }
+        style
+    }
+
+    #[test]
+    fn z_index_reorders_positioned_fills_above_tree_order() {
+        // root -> [a (z=2), b (no z ⇒ 0), c (z=-1)] in tree order a, b, c. Despite
+        // c being LAST in the tree, its z=-1 paints it FIRST; a's z=2 paints it
+        // LAST (on top), overriding pure tree order.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+        let b = add_child(&mut tree, root, 11);
+        let c = add_child(&mut tree, root, 12);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new()); // root: no background.
+        computed.insert(a, positioned_bg(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), Some(2.0)));
+        computed.insert(b, positioned_bg(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), None));
+        computed.insert(c, positioned_bg(StyleColor::rgba(0.0, 0.0, 1.0, 1.0), Some(-1.0)));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
+        boxes.insert(b, box_at(1.0, 1.0, 10.0, 10.0));
+        boxes.insert(c, box_at(2.0, 2.0, 10.0, 10.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let rects = fill_rects(&list);
+        assert_eq!(rects.len(), 3);
+        // c (z=-1) first, b (z=0) middle, a (z=2) last (topmost).
+        assert_eq!(rects[0], Rect::new(Point::new(2.0, 2.0), Size::new(10.0, 10.0)));
+        assert_eq!(rects[1], Rect::new(Point::new(1.0, 1.0), Size::new(10.0, 10.0)));
+        assert_eq!(rects[2], Rect::new(Point::new(0.0, 0.0), Size::new(10.0, 10.0)));
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn no_z_index_keeps_tree_paint_order() {
+        // Regression guard: with no authored `z-index`, three positioned fills
+        // paint in exact pre-order (a, b, c) — byte-identical to pre-stacking.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+        let b = add_child(&mut tree, root, 11);
+        let c = add_child(&mut tree, root, 12);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(a, positioned_bg(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), None));
+        computed.insert(b, positioned_bg(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), None));
+        computed.insert(c, positioned_bg(StyleColor::rgba(0.0, 0.0, 1.0, 1.0), None));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
+        boxes.insert(b, box_at(1.0, 1.0, 10.0, 10.0));
+        boxes.insert(c, box_at(2.0, 2.0, 10.0, 10.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let rects = fill_rects(&list);
+        assert_eq!(
+            rects,
+            vec![
+                Rect::new(Point::new(0.0, 0.0), Size::new(10.0, 10.0)),
+                Rect::new(Point::new(1.0, 1.0), Size::new(10.0, 10.0)),
+                Rect::new(Point::new(2.0, 2.0), Size::new(10.0, 10.0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn positioned_subtree_stacks_together_above_lower_siblings() {
+        // root -> [ sib (z=0, bg), panel (z=1, positioned, bg) -> text ]. The panel
+        // and its text share stacking level 1 (the text inherits the panel's z), so
+        // both paint above the z=0 sibling, and the text paints above the panel's
+        // OWN background (equal z, later in tree).
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let sib = add_child(&mut tree, root, 20);
+        let panel = add_child(&mut tree, root, 21);
+        let text = add_text_child(&mut tree, panel, "hi");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(sib, positioned_bg(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), None));
+        computed.insert(panel, positioned_bg(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), Some(1.0)));
+        computed.insert(text, ComputedStyle::new());
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(sib, box_at(0.0, 0.0, 20.0, 20.0));
+        boxes.insert(panel, box_at(5.0, 5.0, 20.0, 20.0));
+        boxes.insert(text, box_at(6.0, 6.0, 20.0, 16.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+
+        // Command kinds in paint order: sib fill, panel fill, then the text run.
+        let kinds: Vec<&str> = list
+            .commands()
+            .iter()
+            .map(|c| match c {
+                PaintCommand::DrawPath { .. } => "fill",
+                PaintCommand::DrawText { .. } => "text",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(kinds, vec!["fill", "fill", "text"]);
+
+        // The two fills: the z=0 sibling first, the z=1 panel above it.
+        let rects = fill_rects(&list);
+        assert_eq!(rects[0], Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 20.0)));
+        assert_eq!(rects[1], Rect::new(Point::new(5.0, 5.0), Size::new(20.0, 20.0)));
+        // The text run sits at its box origin, painted last (on top of everything).
+        let runs = text_runs(&list);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].0, Point::new(6.0, 6.0));
+        assert!(list.is_balanced());
     }
 
     #[test]
