@@ -34,7 +34,9 @@ use super::{FrameContext, FrameResult};
 /// remaining §3.4 stages — input dispatch, motion sampling (pre- and
 /// post-layout), render-graph construction, submission, and post-frame
 /// notifications — are wired in later phases.
-#[derive(Debug, Clone, Default)]
+// Not `Clone`: it owns a `SceneCoordinator`, which holds a `Box<dyn TextShaper>`
+// (a replaceable, non-cloneable shaping port) and so cannot be cloned.
+#[derive(Debug, Default)]
 pub struct FramePipeline {
     /// Turns the desired view tree into retained-tree structure.
     reconciler: Reconciler,

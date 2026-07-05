@@ -70,14 +70,16 @@
 //!
 //! # Text
 //!
-//! The counter's labels ("Count: N", "-", "+") are real text. Text is shaped
-//! once in the `obscur-text` domain, so each `DrawText` command already carries
-//! positioned glyphs. Fonts are a host resource (like the GPU device): `resumed`
-//! loads a system font off disk and hands its bytes to
-//! [`VelloRenderer::set_font`]; the adapter resolves the run's glyphs against
-//! that font and Vello rasterizes them into the same offscreen texture the blit
-//! path presents. With no font found, the shapes still paint and only the glyphs
-//! are skipped.
+//! The counter's labels ("Count: N", "-", "+") are real text. Fonts are a host
+//! resource (like the GPU device): `resumed` loads a system font off disk and
+//! wires its bytes into **both** the real HarfRust shaper on the runtime
+//! ([`UiRuntime::set_text_shaper`]) and the renderer
+//! ([`VelloRenderer::set_font`]). Because the shaper and the renderer share the
+//! same font, the domain shapes each `DrawText` run into real, font-specific
+//! glyph **indices** once, and Vello draws those indices directly into the same
+//! offscreen texture the blit path presents. With no font found the runtime keeps
+//! its deterministic mock shaper, the shapes still paint, and only the glyphs are
+//! skipped.
 //!
 //! # Environment note
 //!
@@ -102,6 +104,7 @@ use obscur_kit::render_vello::renderer::{VelloDevice, VelloRenderer, VelloSurfac
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::runtime::frame::FrameReason;
 use obscur_kit::style::matching::Stylesheet;
+use obscur_kit::text_harfrust::HarfrustShaper;
 use obscur_kit::view::view::{CLASS, View, ViewNode, ViewProperty, ViewValue};
 use obscur_kit::widgets::button::Button;
 use obscur_kit::window_winit::conversion::{KeyboardConverter, PointerConverter};
@@ -340,6 +343,15 @@ impl ApplicationHandler for WindowedCounter {
                         // counter's labels ("Count: N", "-", "+") rasterize into
                         // real glyphs. With no font found, text is skipped.
                         if let Some(bytes) = load_system_font() {
+                            // Wire the SAME font bytes into the real HarfRust
+                            // shaper on the runtime, so on-screen glyph indices
+                            // come from real shaping of the font the renderer
+                            // rasterizes (shaper and renderer must agree on the
+                            // font for indices to align). Then hand the bytes to
+                            // the renderer for the glyph outlines.
+                            self.runtime.set_text_shaper(Box::new(
+                                HarfrustShaper::from_bytes(bytes.clone()),
+                            ));
                             renderer.set_font(bytes);
                         } else {
                             eprintln!("no system font found; text will not render");

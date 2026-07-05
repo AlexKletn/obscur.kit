@@ -1560,6 +1560,7 @@ dependencies = [
  "obscur-task-smol",
  "obscur-task-tokio",
  "obscur-text",
+ "obscur-text-harfrust",
  "obscur-theme-system",
  "obscur-tree",
  "obscur-ui-ir",
@@ -1698,7 +1699,6 @@ dependencies = [
  "obscur-identity",
  "obscur-render",
  "obscur-scene",
- "skrifa",
  "vello",
  "wgpu",
 ]

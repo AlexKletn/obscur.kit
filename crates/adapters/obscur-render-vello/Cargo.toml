@@ -18,6 +18,3 @@ obscur-scene = { workspace = true }
 obscur-render = { workspace = true }
 vello = "0.9"
 wgpu = "29"
-# Glyph mapping (charmap) + advances for `DrawText`. Pinned to the same 0.42
-# line Vello 0.9 already resolves, so no duplicate `skrifa`/`read-fonts` build.
-skrifa = "0.42"

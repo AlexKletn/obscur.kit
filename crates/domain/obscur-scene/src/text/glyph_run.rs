@@ -12,10 +12,13 @@ use super::PositionedGlyph;
 /// cross-backend determinism boundary (spec §5.2). Glyphs are stored in pen
 /// order; each carries a position relative to the command's origin.
 ///
-/// [`text`](Self::text) retains the source string as metadata (accessibility,
-/// diagnostics, and adapters that must resolve the run's glyphs against a
-/// concrete host font). Because it embeds `f32` metrics the type derives
-/// `PartialEq` but not `Eq`.
+/// Each glyph's [`glyph_id`](PositionedGlyph::glyph_id) is a **font glyph index**
+/// (the same contract as the domain `ShapedGlyph`), so a renderer draws it
+/// directly against the host font with no remap.
+///
+/// [`text`](Self::text) retains the source string as metadata (accessibility and
+/// diagnostics). Because it embeds `f32` metrics the type derives `PartialEq` but
+/// not `Eq`.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GlyphRun {
     /// The positioned glyphs, in pen order.

@@ -25,6 +25,7 @@ use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::matching::{MediaEnvironment, Stylesheet};
 use obscur_style::property::{Length, PropertyId, PropertyValue};
 use obscur_style::selector::{PseudoState, SelectorMatcher};
+use obscur_text::shaping::TextShaper;
 use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
@@ -286,6 +287,21 @@ impl UiRuntime {
         self.css_motion = rules;
         self.transition_targets.clear();
         self.css_animations_started.clear();
+    }
+
+    /// Installs a real text `shaper` on the owned scene coordinator, replacing the
+    /// default deterministic [`MockTextShaper`](obscur_text::shaping::MockTextShaper).
+    ///
+    /// Text shaping is a hexagonal port: the runtime only knows the
+    /// `Box<dyn TextShaper>` — it never depends on a concrete engine. A host (or
+    /// the facade) builds a real shaper (e.g. the HarfRust adapter, wired to the
+    /// same font bytes handed to the renderer so glyph indices align) and installs
+    /// it here. From the next composed frame on, each `DrawText` run carries that
+    /// shaper's glyphs (real, font-specific glyph **indices** rather than the mock's
+    /// Unicode-scalar placeholders). Leaving it unset preserves headless
+    /// determinism, so all default-path tests are unchanged.
+    pub fn set_text_shaper(&mut self, shaper: Box<dyn TextShaper>) {
+        self.scene_composer.set_shaper(shaper);
     }
 
     /// Requests a frame for `reason`, returning the scheduler's admission
@@ -2989,5 +3005,71 @@ mod tests {
             capture_commands, base_commands,
             "an idle capture re-presents the retained scene unchanged"
         );
+    }
+
+    /// A stub [`TextShaper`] emitting a fixed glyph id per source char, so an
+    /// installed shaper is observable in the composed `DrawText` run.
+    struct FixedIdShaper(u32);
+
+    impl obscur_text::shaping::TextShaper for FixedIdShaper {
+        fn shape(
+            &self,
+            request: &obscur_text::shaping::ShapingRequest,
+        ) -> obscur_text::shaping::GlyphRun {
+            let glyphs = request
+                .text()
+                .char_indices()
+                .map(|(byte, _)| obscur_text::shaping::ShapedGlyph::new(self.0, byte, 8.0))
+                .collect();
+            obscur_text::shaping::GlyphRun::new(
+                glyphs,
+                request.direction(),
+                request.font_size(),
+                obscur_text::span::TextRange::new(0, request.text().len()),
+            )
+        }
+
+        fn can_shape(&self, _face: &obscur_text::font::FontFace) -> bool {
+            true
+        }
+    }
+
+    /// Collects the glyph ids of every `DrawText` run in a frame's display list.
+    fn drawtext_glyph_ids(result: &FrameResult) -> Vec<u32> {
+        result
+            .snapshot()
+            .display_list()
+            .commands()
+            .iter()
+            .filter_map(|c| match c {
+                obscur_scene::command::PaintCommand::DrawText { run, .. } => Some(run),
+                _ => None,
+            })
+            .flat_map(|run| run.glyphs().iter().map(|g| g.glyph_id()))
+            .collect()
+    }
+
+    #[test]
+    fn set_text_shaper_changes_the_emitted_glyph_run() {
+        // A view with a single text node "AB": the pipeline lays it out and the
+        // scene coordinator emits a DrawText run for it.
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(10))
+                .with_children(ViewFragment::from_nodes(vec![ViewNode::text("AB")])),
+        ]));
+
+        // Default (mock) shaper: glyph ids are the Unicode scalars of "AB".
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let mock = runtime.render_now(&view, &[]);
+        let mock_ids = drawtext_glyph_ids(&mock);
+        assert_eq!(mock_ids, vec![u32::from('A'), u32::from('B')]);
+
+        // Install a stub shaper through the public runtime seam and re-render: the
+        // composed run now reflects it, proving the shaper injection plumbing.
+        runtime.set_text_shaper(Box::new(FixedIdShaper(7)));
+        let stub = runtime.render_now(&view, &[]);
+        let stub_ids = drawtext_glyph_ids(&stub);
+        assert_eq!(stub_ids, vec![7, 7]);
+        assert_ne!(mock_ids, stub_ids);
     }
 }

@@ -16,7 +16,8 @@
 //!
 //! The `default` set is portable (`render-cpu`, `task-smol`, `resource-fs`,
 //! `cache-fs`) and needs no display or GPU. The `full` set additionally enables
-//! `render-vello`, `window-winit`, `task-tokio`, and `accesskit`.
+//! `render-vello`, `window-winit`, `task-tokio`, `accesskit`, and `text-harfrust`
+//! (the real HarfRust text shaper).
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
@@ -80,6 +81,8 @@ pub use obscur_resource_fs as resource_fs;
 pub use obscur_task_smol as task_smol;
 #[cfg(feature = "task-tokio")]
 pub use obscur_task_tokio as task_tokio;
+#[cfg(feature = "text-harfrust")]
+pub use obscur_text_harfrust as text_harfrust;
 #[cfg(feature = "window-winit")]
 pub use obscur_window_winit as window_winit;
 

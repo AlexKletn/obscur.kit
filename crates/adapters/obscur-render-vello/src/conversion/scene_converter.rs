@@ -12,7 +12,6 @@ use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::layer::{CompositionMode, SceneLayer};
 use obscur_scene::paint::{BlendMode, Brush, Paint};
 use obscur_scene::text::GlyphRun;
-use skrifa::{FontRef, MetadataProvider};
 use vello::Scene;
 use vello::kurbo::{Affine, Rect as KurboRect};
 use vello::peniko::{self, FontData};
@@ -63,9 +62,10 @@ const UNBOUNDED_HALF_EXTENT: f64 = 1.0e9;
 /// §5.2). Rasterizing to *real* outlines still needs a host font, supplied via
 /// [`Self::set_font`] (fonts are a host resource, mirroring host-provides-device);
 /// with no font set the converter degrades gracefully and skips text runs. Each
-/// glyph's domain identifier (the reference shaper emits the Unicode scalar) is
-/// resolved to this font's glyph index through its charmap and drawn at the
-/// domain-supplied position; Vello's glyph pipeline rasterizes it (spec §5.2).
+/// glyph's [`glyph_id`](obscur_scene::text::PositionedGlyph::glyph_id) is already a
+/// **font glyph index** (the domain shaped against this same host font), so it is
+/// used **directly** — no Unicode charmap remap — and drawn at the domain-supplied
+/// position; Vello's glyph pipeline rasterizes it (spec §5.2).
 #[derive(Debug, Default, Clone)]
 pub struct SceneConverter {
     path: PathConverter,
@@ -144,17 +144,15 @@ impl SceneConverter {
 
     /// Rasterizes a single **pre-shaped** text run at `origin`.
     ///
-    /// The run was shaped once in the `obscur-text` domain, so this method does
-    /// not re-shape: it consumes each glyph's domain-supplied run-relative
-    /// position and places it at `origin + (x, y)`. Because the domain's abstract
-    /// font differs from the concrete host font, each glyph's domain identifier
-    /// (the reference shaper emits the Unicode scalar) is resolved to this font's
-    /// glyph index through its charmap; identifiers the font has no glyph for are
-    /// skipped. The assembled glyphs are drawn with Vello's glyph pipeline,
-    /// brushed with the command's own [`Brush`].
+    /// The run was shaped once in the `obscur-text` domain against this same host
+    /// font, so this method neither re-shapes nor remaps: each glyph's
+    /// [`glyph_id`](obscur_scene::text::PositionedGlyph::glyph_id) is already a
+    /// **font glyph index** and is used **directly**, placed at its domain-supplied
+    /// run-relative position offset by `origin`. The assembled glyphs are drawn with
+    /// Vello's glyph pipeline, brushed with the command's own [`Brush`].
     ///
-    /// Degrades gracefully: with no host font set, or if the font bytes fail to
-    /// parse, the run is skipped rather than erroring.
+    /// Degrades gracefully: with no host font set the run is skipped rather than
+    /// erroring.
     fn draw_text(
         &self,
         scene: &mut Scene,
@@ -166,26 +164,19 @@ impl SceneConverter {
         let Some(font) = self.font.as_ref() else {
             return;
         };
-        // Reparse the font bytes for skrifa's charmap. On a malformed font, skip
-        // this run rather than panic.
-        let Ok(font_ref) = FontRef::new(font.data.data()) else {
-            return;
-        };
 
-        let charmap = font_ref.charmap();
         let glyphs: Vec<vello::Glyph> = run
             .glyphs()
             .iter()
-            .filter_map(|glyph| {
-                // Resolve the domain glyph id (a Unicode scalar) to this font's
-                // glyph index; positions come from the domain, never re-shaped.
-                let ch = char::from_u32(glyph.glyph_id())?;
-                let gid = charmap.map(ch)?;
-                Some(vello::Glyph {
-                    id: gid.to_u32(),
+            .map(|glyph| {
+                // The domain glyph id IS this font's glyph index (shaped against
+                // the same host font); use it directly. Positions come from the
+                // domain, never re-shaped.
+                vello::Glyph {
+                    id: glyph.glyph_id(),
                     x: origin.x + glyph.x(),
                     y: origin.y + glyph.y(),
-                })
+                }
             })
             .collect();
         if glyphs.is_empty() {

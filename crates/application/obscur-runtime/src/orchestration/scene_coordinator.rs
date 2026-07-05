@@ -2,6 +2,7 @@
 //! [`SceneCoordinator`].
 
 use std::collections::HashSet;
+use std::fmt;
 
 use obscur_identity::NodeId;
 use obscur_scene::color::Color;
@@ -63,12 +64,18 @@ const DEFAULT_FONT_SIZE: f32 = 16.0;
 ///
 /// The coordinator owns its shaper and a default resolved face; construct it with
 /// [`new`](Self::new) or [`Default`].
-#[derive(Debug, Clone)]
+///
+/// The shaper is a replaceable [`TextShaper`] port held as a `Box<dyn TextShaper>`.
+/// The default is the deterministic [`MockTextShaper`], so headless determinism is
+/// preserved; a host installs a real engine (e.g. the HarfRust adapter) via
+/// [`set_shaper`](Self::set_shaper). Because `dyn TextShaper` is neither `Clone`
+/// nor `Debug`, the coordinator is not `Clone` and carries a manual [`fmt::Debug`].
 pub struct SceneCoordinator {
     /// The shaper turning text-node strings into positioned glyphs. The default
     /// [`MockTextShaper`] is deterministic: identical input yields identical
-    /// glyphs, which is what the cross-backend determinism boundary relies on.
-    shaper: MockTextShaper,
+    /// glyphs, which is what the cross-backend determinism boundary relies on. A
+    /// host may install a real shaper via [`set_shaper`](Self::set_shaper).
+    shaper: Box<dyn TextShaper>,
     /// The resolved face requests are shaped against. The mock shaper is
     /// font-agnostic (it needs no real metrics), so a generic monospace face
     /// suffices as the default; a real pipeline would resolve this per node via a
@@ -82,7 +89,7 @@ impl SceneCoordinator {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            shaper: MockTextShaper::new(),
+            shaper: Box::new(MockTextShaper::new()),
             default_face: FontFace::new(
                 FontFamily::generic(GenericFamily::Monospace),
                 FontAttributes::default(),
@@ -90,6 +97,17 @@ impl SceneCoordinator {
                 FontMetrics::new(1000, 800.0, -200.0, 0.0),
             ),
         }
+    }
+
+    /// Installs `shaper` as the text shaper subsequent [`compose`](Self::compose)
+    /// calls shape runs through, replacing the previous one.
+    ///
+    /// The default is the deterministic [`MockTextShaper`]; a host installs a real
+    /// engine (e.g. the HarfRust adapter) so on-screen text uses real, font-specific
+    /// glyph indices. Installing a different shaper changes the emitted
+    /// [`GlyphRun`] — that is the seam the runtime's `set_text_shaper` drives.
+    pub fn set_shaper(&mut self, shaper: Box<dyn TextShaper>) {
+        self.shaper = shaper;
     }
 
     /// Shapes `content` at [`DEFAULT_FONT_SIZE`] into a backend-independent
@@ -196,6 +214,17 @@ impl SceneCoordinator {
 impl Default for SceneCoordinator {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl fmt::Debug for SceneCoordinator {
+    /// `dyn TextShaper` is not `Debug`, so the shaper is shown as an opaque
+    /// placeholder; the resolved default face is printed normally.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SceneCoordinator")
+            .field("shaper", &"<dyn TextShaper>")
+            .field("default_face", &self.default_face)
+            .finish()
     }
 }
 
@@ -565,5 +594,59 @@ mod tests {
         let style_color = StyleColor::rgba(0.25, 0.5, 0.75, 0.9);
         let color = scene_color_from(style_color);
         assert_eq!(color, Color::rgba(0.25, 0.5, 0.75, 0.9));
+    }
+
+    /// A stub [`TextShaper`] that emits a fixed glyph id per source char,
+    /// independent of the character, so an installed shaper is observable in the
+    /// emitted [`GlyphRun`].
+    struct FixedIdShaper(u32);
+
+    impl obscur_text::shaping::TextShaper for FixedIdShaper {
+        fn shape(&self, request: &ShapingRequest) -> obscur_text::shaping::GlyphRun {
+            let glyphs = request
+                .text()
+                .char_indices()
+                .map(|(byte, _)| obscur_text::shaping::ShapedGlyph::new(self.0, byte, 8.0))
+                .collect();
+            obscur_text::shaping::GlyphRun::new(
+                glyphs,
+                request.direction(),
+                request.font_size(),
+                obscur_text::span::TextRange::new(0, request.text().len()),
+            )
+        }
+
+        fn can_shape(&self, _face: &FontFace) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn installed_shaper_changes_the_emitted_glyph_run() {
+        // A single text node with an arranged box, so a run is emitted.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "ab");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(text, ComputedStyle::new());
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(text, box_at(0.0, 0.0, 40.0, 16.0));
+
+        // Default mock shaper: glyph ids are the Unicode scalars.
+        let mut coordinator = SceneCoordinator::new();
+        let mock_runs = text_runs(&coordinator.compose(&tree, &computed, &boxes));
+        assert_eq!(mock_runs.len(), 1);
+        let mock_ids: Vec<u32> = mock_runs[0].1.glyphs().iter().map(|g| g.glyph_id()).collect();
+        assert_eq!(mock_ids, vec![u32::from('a'), u32::from('b')]);
+
+        // Install a fixed-id shaper: the emitted run reflects it (ids all 42).
+        coordinator.set_shaper(Box::new(FixedIdShaper(42)));
+        let stub_runs = text_runs(&coordinator.compose(&tree, &computed, &boxes));
+        assert_eq!(stub_runs.len(), 1);
+        let stub_ids: Vec<u32> = stub_runs[0].1.glyphs().iter().map(|g| g.glyph_id()).collect();
+        assert_eq!(stub_ids, vec![42, 42]);
+        assert_ne!(mock_ids, stub_ids);
     }
 }

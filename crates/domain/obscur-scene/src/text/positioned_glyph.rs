@@ -15,17 +15,22 @@
 /// - [`advance`](Self::advance) is the glyph's horizontal advance, letting a
 ///   software backend that lacks real glyph outlines approximate the glyph with a
 ///   coverage cell of this width.
-/// - [`glyph_id`](Self::glyph_id) is the shaper's glyph identifier. The reference
+/// - [`glyph_id`](Self::glyph_id) is a **font glyph index** — the same contract as
+///   the domain
+///   [`ShapedGlyph`](../../../obscur_text/shaping/struct.ShapedGlyph.html). A real
+///   shaper (the HarfRust adapter) emits real, font-specific glyph indices, so a
+///   renderer draws them directly with no remap; the reference
 ///   [`MockTextShaper`](../../../obscur_text/shaping/struct.MockTextShaper.html)
-///   emits the Unicode scalar value, which an adapter with a concrete host font
-///   resolves to that font's glyph index.
+///   emits the Unicode scalar value as a placeholder index for headless
+///   determinism.
 /// - [`cluster`](Self::cluster) is the byte offset into the run's source text the
 ///   glyph maps back to (for caret hit-testing / accessibility).
 ///
 /// Storing `f32` fields means the type derives `PartialEq` but not `Eq`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PositionedGlyph {
-    /// The shaper's glyph identifier (the mock shaper emits the Unicode scalar).
+    /// The font glyph index (the mock shaper emits the Unicode scalar as a
+    /// placeholder index).
     glyph_id: u32,
     /// The byte offset into the run's source text this glyph maps back to.
     cluster: usize,
@@ -51,7 +56,8 @@ impl PositionedGlyph {
         }
     }
 
-    /// Returns the shaper's glyph identifier.
+    /// Returns the font glyph index (the mock shaper emits the Unicode scalar as
+    /// a placeholder).
     #[must_use]
     pub const fn glyph_id(&self) -> u32 {
         self.glyph_id
