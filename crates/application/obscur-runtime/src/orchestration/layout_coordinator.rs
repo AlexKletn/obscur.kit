@@ -148,6 +148,9 @@ impl LayoutCoordinator {
     /// re-measures that node's children (which recurses). This is deterministic
     /// and correct but does redundant measurement; a `LayoutCache` will remove
     /// the redundancy in a later phase (spec §4.2). Text is reshaped per frame.
+    // The tree, the per-node side-tables, the viewport + scroll offset, and the
+    // shaper are the cohesive inputs of one layout entry point.
+    #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn layout(
         &self,
@@ -156,6 +159,7 @@ impl LayoutCoordinator {
         computed: &ComputedStyles,
         grid_templates: &GridTemplates,
         viewport: Size,
+        scroll_offset: (f32, f32),
         paragraph: &ParagraphShaper,
     ) -> LayoutBoxes {
         // The default path never hyphenates: [`None`] makes text-leaf measurement
@@ -166,6 +170,7 @@ impl LayoutCoordinator {
             computed,
             grid_templates,
             viewport,
+            scroll_offset,
             paragraph,
             None,
         )
@@ -237,9 +242,22 @@ impl LayoutCoordinator {
     /// glyph) the scene phase composes with, so the measured box height and the
     /// painted line count agree even when hyphenation splits a word. [`None`]
     /// reproduces [`layout`](Self::layout) exactly.
+    ///
+    /// # Scroll offset and `position: sticky`
+    ///
+    /// `scroll_offset` is the test-drivable viewport scroll `(x, y)` in logical
+    /// pixels: the document-coordinate point currently at the top-left of the
+    /// viewport. The single scroll container is the **viewport** (per-container
+    /// overflow scroll containers are a follow-up); live scroll-gesture wiring is
+    /// separate and simply feeds this value. It is consumed only by
+    /// [`Position::Sticky`] nodes, whose used position is clamped to the scrollport
+    /// edge within their containing block. With `scroll_offset == (0.0, 0.0)` (and
+    /// a sticky node still below its inset threshold) every node's box is
+    /// **byte-identical** to the pre-sticky walk.
     // The tree, the three per-node side-tables (styles, computed, grid templates),
-    // the viewport, and the shaping inputs (paragraph + hyphenator) are cohesive
-    // inputs of one layout entry point, not an incidental over-long parameter list.
+    // the viewport + scroll offset, and the shaping inputs (paragraph + hyphenator)
+    // are cohesive inputs of one layout entry point, not an incidental over-long
+    // parameter list.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn layout_with_hyphenator(
@@ -249,6 +267,7 @@ impl LayoutCoordinator {
         computed: &ComputedStyles,
         grid_templates: &GridTemplates,
         viewport: Size,
+        scroll_offset: (f32, f32),
         paragraph: &ParagraphShaper,
         hyphenator: Option<&dyn Hyphenator>,
     ) -> LayoutBoxes {
@@ -272,6 +291,7 @@ impl LayoutCoordinator {
             hyphenator,
             viewport_rect,
             viewport_rect,
+            scroll_offset,
             MAX_DEPTH,
         );
         boxes
@@ -756,6 +776,7 @@ fn position_of(computed: &ComputedStyle) -> Position {
         Some(sym) if sym == layout_keyword::POSITION_RELATIVE => Position::Relative,
         Some(sym) if sym == layout_keyword::POSITION_ABSOLUTE => Position::Absolute,
         Some(sym) if sym == layout_keyword::POSITION_FIXED => Position::Fixed,
+        Some(sym) if sym == layout_keyword::POSITION_STICKY => Position::Sticky,
         _ => Position::Static,
     }
 }
@@ -1096,6 +1117,7 @@ fn arrange(
     hyphenator: Option<&dyn Hyphenator>,
     containing_block: Rect,
     viewport: Rect,
+    scroll_offset: (f32, f32),
     depth: u32,
 ) {
     if depth == 0 {
@@ -1178,16 +1200,40 @@ fn arrange(
     // Recurse into in-flow children, translating each parent-relative box to
     // absolute. Zipping bounds both sides, so a mismatched length never indexes
     // out of range.
+    // The scroll container's visible rect in document coordinates: the viewport
+    // translated by the current scroll offset. Its top-left is the doc-coord point
+    // now at the top-left of the viewport, so a `position: sticky` child clamps its
+    // used position against this rect's edges.
+    let scrollport = Rect::new(
+        Point::new(
+            viewport.origin.x + scroll_offset.0,
+            viewport.origin.y + scroll_offset.1,
+        ),
+        viewport.size,
+    );
     for (child, child_rel) in children.iter().zip(out.child_boxes().iter()) {
         let rel = child_rel.origin();
-        // `position: relative` offsets the child's final origin (and therefore its
-        // whole subtree, since grandchildren are placed relative to this origin)
-        // by its resolved insets, without perturbing the flow box the algorithm
-        // computed — so siblings, which use the unchanged flow boxes, are
-        // unaffected. A `Static` child yields a `(0, 0)` offset, keeping the walk
-        // byte-identical to before.
-        let (dx, dy) = style_of(styles, child.node()).relative_offset(containing.width, containing.height);
-        let child_origin = Point::new(origin.x + rel.x + dx, origin.y + rel.y + dy);
+        let child_style = style_of(styles, child.node());
+        // The static (normal-flow) absolute origin the algorithm computed for this
+        // child, before any positioning offset.
+        let static_origin = Point::new(origin.x + rel.x, origin.y + rel.y);
+        // A `position: sticky` child stays IN flow (its flow box, and therefore its
+        // siblings, are untouched — siblings use the unchanged flow boxes), but its
+        // used position is scroll-clamped to the scrollport edge within its
+        // containing block; the delta rides its whole subtree, exactly like the
+        // relative offset. A `position: relative` child instead offsets by its
+        // resolved insets. Any other (`static`/out-of-flow) child yields `(0, 0)`,
+        // keeping the walk byte-identical to before. When `scroll_offset` is
+        // `(0, 0)` and a sticky child is still below its inset threshold, the sticky
+        // delta is `(0, 0)` too, so the default path is unchanged.
+        let (dx, dy) = if child_style.position.is_sticky() {
+            child_style
+                .inset
+                .sticky_offset(static_origin, child_rel.size(), containing_block, scrollport)
+        } else {
+            child_style.relative_offset(containing.width, containing.height)
+        };
+        let child_origin = Point::new(static_origin.x + dx, static_origin.y + dy);
         arrange(
             tree,
             styles,
@@ -1201,6 +1247,7 @@ fn arrange(
             hyphenator,
             descendant_cb,
             viewport,
+            scroll_offset,
             depth - 1,
         );
     }
@@ -1216,6 +1263,7 @@ fn arrange(
             *child,
             descendant_cb,
             viewport,
+            scroll_offset,
             boxes,
             paragraph,
             hyphenator,
@@ -1245,6 +1293,7 @@ fn arrange_out_of_flow(
     child: LayoutChild,
     parent_cb: Rect,
     viewport: Rect,
+    scroll_offset: (f32, f32),
     boxes: &mut LayoutBoxes,
     paragraph: &ParagraphShaper,
     hyphenator: Option<&dyn Hyphenator>,
@@ -1298,6 +1347,7 @@ fn arrange_out_of_flow(
         hyphenator,
         cb,
         viewport,
+        scroll_offset,
         depth,
     );
 }
@@ -1394,6 +1444,7 @@ mod tests {
             &ComputedStyles::new(),
             &GridTemplates::new(),
             Size::new(800.0, 600.0),
+            (0.0, 0.0),
             &test_paragraph(),
         );
         assert!(boxes.is_empty());
@@ -1512,6 +1563,7 @@ mod tests {
             &ComputedStyles::new(),
             &GridTemplates::new(),
             Size::new(200.0, 100.0),
+            (0.0, 0.0),
             &test_paragraph(),
         );
 
@@ -1562,6 +1614,7 @@ mod tests {
             &ComputedStyles::new(),
             &GridTemplates::new(),
             Size::new(200.0, 100.0),
+            (0.0, 0.0),
             &test_paragraph(),
         );
 
@@ -1602,6 +1655,7 @@ mod tests {
             &ComputedStyles::new(),
             &GridTemplates::new(),
             Size::new(200.0, 200.0),
+            (0.0, 0.0),
             &test_paragraph(),
         );
 
@@ -1646,6 +1700,7 @@ mod tests {
             &ComputedStyles::new(),
             &GridTemplates::new(),
             Size::new(200.0, 200.0),
+            (0.0, 0.0),
             &test_paragraph(),
         );
 
@@ -1655,6 +1710,84 @@ mod tests {
         assert_eq!(boxes[&leaf].origin(), Point::new(5.0, 10.0));
         // The sibling `b` is untouched: still at the flow position (0, 50).
         assert_eq!(boxes[&b].origin(), Point::new(0.0, 50.0));
+    }
+
+    #[test]
+    fn sticky_child_clamps_with_scroll_leaving_siblings_in_flow() {
+        // Block root (200x1000): a 200x50 `spacer`, then a 200x50 `a` (sticky;
+        // top:10) holding a leaf grandchild, then a 200x50 `b` (static). Flow:
+        // spacer y=0, a y=50, b y=100. `a`'s static top (50) is below its 10px
+        // inset, so at scroll 0 it sits at its static position (byte-identical).
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let spacer = add_child(&mut tree, root, 49);
+        let a = add_child(&mut tree, root, 50);
+        let b = add_child(&mut tree, root, 51);
+        let leaf = add_child(&mut tree, a, 52);
+
+        let a_sticky = block(200.0, 50.0)
+            .with_position(Position::Sticky)
+            .with_inset(Inset::new(
+                Dimension::Px(10.0),
+                Dimension::Auto,
+                Dimension::Auto,
+                Dimension::Auto,
+            ));
+
+        let mut styles = LayoutStyles::new();
+        styles.insert(root, block(200.0, 1000.0));
+        styles.insert(spacer, block(200.0, 50.0));
+        styles.insert(a, a_sticky);
+        styles.insert(b, block(200.0, 50.0));
+        styles.insert(leaf, block(20.0, 20.0));
+
+        let coordinator = LayoutCoordinator::new();
+        let viewport = Size::new(200.0, 1000.0);
+
+        // scroll (0,0): sticky_lower = 0 + 10 = 10 <= static a.y = 50 → used = 50
+        // (still below its threshold) → BYTE-IDENTICAL to static.
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &ComputedStyles::new(),
+            &GridTemplates::new(),
+            viewport,
+            (0.0, 0.0),
+            &test_paragraph(),
+        );
+        assert_eq!(boxes[&a].origin(), Point::new(0.0, 50.0), "scroll 0: a at static");
+        assert_eq!(boxes[&leaf].origin(), Point::new(0.0, 50.0));
+        assert_eq!(boxes[&b].origin(), Point::new(0.0, 100.0), "sibling in flow");
+
+        // scroll (0,100): sticky_lower = 100 + 10 = 110 > static 50, clamp upper =
+        // cb.bottom(1000) - h(50) = 950 → a sticks at y=110; its leaf rides along;
+        // `b` stays at its unchanged flow position (0, 100).
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &ComputedStyles::new(),
+            &GridTemplates::new(),
+            viewport,
+            (0.0, 100.0),
+            &test_paragraph(),
+        );
+        assert_eq!(boxes[&a].origin(), Point::new(0.0, 110.0), "sticks at scrollport+inset");
+        assert_eq!(boxes[&leaf].origin(), Point::new(0.0, 110.0), "subtree rides along");
+        assert_eq!(boxes[&b].origin(), Point::new(0.0, 100.0), "sibling unmoved (in flow)");
+
+        // Huge scroll: sticky_lower far below cb → pinned at cb.bottom - h = 950.
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &ComputedStyles::new(),
+            &GridTemplates::new(),
+            viewport,
+            (0.0, 5000.0),
+            &test_paragraph(),
+        );
+        assert_eq!(boxes[&a].origin(), Point::new(0.0, 950.0), "pinned within CB");
+        assert_eq!(boxes[&b].origin(), Point::new(0.0, 100.0), "sibling still unmoved");
     }
 
     #[test]
@@ -1688,6 +1821,7 @@ mod tests {
             &ComputedStyles::new(),
             &GridTemplates::new(),
             Size::new(200.0, 200.0),
+            (0.0, 0.0),
             &test_paragraph(),
         );
 
@@ -1741,6 +1875,7 @@ mod tests {
             &ComputedStyles::new(),
             &GridTemplates::new(),
             Size::new(300.0, 300.0),
+            (0.0, 0.0),
             &test_paragraph(),
         );
 
@@ -1795,6 +1930,7 @@ mod tests {
             &ComputedStyles::new(),
             &GridTemplates::new(),
             Size::new(400.0, 400.0),
+            (0.0, 0.0),
             &test_paragraph(),
         );
 
@@ -1835,6 +1971,7 @@ mod tests {
             &ComputedStyles::new(),
             &GridTemplates::new(),
             Size::new(300.0, 300.0),
+            (0.0, 0.0),
             &test_paragraph(),
         );
 
@@ -1884,6 +2021,7 @@ mod tests {
             &ComputedStyles::new(),
             &GridTemplates::new(),
             Size::new(400.0, 400.0),
+            (0.0, 0.0),
             &test_paragraph(),
         );
 
@@ -2200,6 +2338,7 @@ mod tests {
             &computed,
             &GridTemplates::new(),
             Size::new(200.0, 100.0),
+            (0.0, 0.0),
             &test_paragraph(),
         );
 
@@ -2254,6 +2393,7 @@ mod tests {
             &computed,
             &templates,
             Size::new(150.0, 100.0),
+            (0.0, 0.0),
             &test_paragraph(),
         );
 
@@ -2304,6 +2444,7 @@ mod tests {
             &computed,
             &GridTemplates::new(),
             Size::new(width, height),
+            (0.0, 0.0),
             &test_paragraph(),
         );
         boxes[&text]
@@ -2336,6 +2477,7 @@ mod tests {
             &computed,
             &GridTemplates::new(),
             Size::new(width, height),
+            (0.0, 0.0),
             paragraph,
         );
         boxes[&text]
@@ -2425,6 +2567,7 @@ mod tests {
             &computed,
             &GridTemplates::new(),
             Size::new(1000.0, 200.0),
+            (0.0, 0.0),
             &test_paragraph(),
         );
         let text_box = boxes[&text];
@@ -2452,6 +2595,7 @@ mod tests {
             &ComputedStyles::new(),
             &GridTemplates::new(),
             Size::new(100.0, 100.0),
+            (0.0, 0.0),
             &test_paragraph(),
         );
         // A `None` root produces no box at all.

@@ -152,6 +152,9 @@ pub const POSITION_ABSOLUTE: InternedSymbol = InternedSymbol::from_raw(0x0000_1A
 /// The `position: fixed` keyword. Out-of-flow; treated as `static` for layout
 /// until out-of-flow positioning lands.
 pub const POSITION_FIXED: InternedSymbol = InternedSymbol::from_raw(0x0000_1A04);
+/// The `position: sticky` keyword (in flow like `relative`, but its used position
+/// is scroll-clamped to the scrollport edge within its containing block).
+pub const POSITION_STICKY: InternedSymbol = InternedSymbol::from_raw(0x0000_1A05);
 
 // ---- `z-index` keyword values ----
 
@@ -180,7 +183,8 @@ pub fn display_from_name(name: &str) -> Option<InternedSymbol> {
 /// Maps a `position` keyword string to its reserved [`InternedSymbol`].
 ///
 /// The input is ASCII-lowercased before matching. Returns [`None`] for any
-/// keyword outside the closed `static` / `relative` / `absolute` / `fixed` set.
+/// keyword outside the closed `static` / `relative` / `absolute` / `fixed` /
+/// `sticky` set.
 #[must_use]
 pub fn position_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
@@ -188,6 +192,7 @@ pub fn position_from_name(name: &str) -> Option<InternedSymbol> {
         "relative" => Some(POSITION_RELATIVE),
         "absolute" => Some(POSITION_ABSOLUTE),
         "fixed" => Some(POSITION_FIXED),
+        "sticky" => Some(POSITION_STICKY),
         _ => None,
     }
 }
@@ -408,6 +413,7 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         POSITION_RELATIVE => Some("relative"),
         POSITION_ABSOLUTE => Some("absolute"),
         POSITION_FIXED => Some("fixed"),
+        POSITION_STICKY => Some("sticky"),
         Z_INDEX_AUTO => Some("auto"),
         FLEX_ROW => Some("row"),
         FLEX_ROW_REVERSE => Some("row-reverse"),
@@ -461,6 +467,7 @@ mod tests {
         POSITION_RELATIVE,
         POSITION_ABSOLUTE,
         POSITION_FIXED,
+        POSITION_STICKY,
         Z_INDEX_AUTO,
         FLEX_ROW,
         FLEX_ROW_REVERSE,
@@ -517,10 +524,13 @@ mod tests {
         assert_eq!(position_from_name("relative"), Some(POSITION_RELATIVE));
         assert_eq!(position_from_name("absolute"), Some(POSITION_ABSOLUTE));
         assert_eq!(position_from_name("Fixed"), Some(POSITION_FIXED));
-        assert_eq!(position_from_name("sticky"), None);
+        assert_eq!(position_from_name("sticky"), Some(POSITION_STICKY));
+        assert_eq!(position_from_name("Sticky"), Some(POSITION_STICKY));
+        assert_eq!(position_from_name("subgrid"), None);
         // Round-trips through `name_of`.
         assert_eq!(name_of(POSITION_RELATIVE), Some("relative"));
         assert_eq!(name_of(POSITION_STATIC), Some("static"));
+        assert_eq!(name_of(POSITION_STICKY), Some("sticky"));
     }
 
     #[test]

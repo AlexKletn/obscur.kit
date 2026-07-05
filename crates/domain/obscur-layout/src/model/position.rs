@@ -17,12 +17,22 @@
 ///   padding box of its nearest positioned ancestor (its *containing block*).
 /// * [`Fixed`](Self::Fixed) — out of flow like [`Absolute`](Self::Absolute), but
 ///   its containing block is always the viewport, ignoring ancestors.
+/// * [`Sticky`](Self::Sticky) — a **hybrid**. The node stays **in flow** exactly
+///   like [`Relative`](Self::Relative) (its flow box and its siblings are
+///   unchanged), but its *used* position is then clamped so that, once its scroll
+///   container has scrolled past its inset threshold, the node sticks to the
+///   scrollport edge — never moving above its static position and never past its
+///   containing block. With a zero scroll offset (or before the threshold is
+///   reached) its used position equals its static position, so it is transparent.
+///   The single scroll container is currently the **viewport**; per-container
+///   overflow scroll containers are a follow-up.
 ///
-/// [`Relative`](Self::Relative), [`Absolute`](Self::Absolute), and
-/// [`Fixed`](Self::Fixed) each *establish a containing block* for their
-/// positioned descendants ([`is_positioned`](Self::is_positioned)); only
-/// [`Absolute`](Self::Absolute) and [`Fixed`](Self::Fixed) are *out of flow*
-/// ([`is_out_of_flow`](Self::is_out_of_flow)).
+/// [`Relative`](Self::Relative), [`Absolute`](Self::Absolute),
+/// [`Fixed`](Self::Fixed), and [`Sticky`](Self::Sticky) each *establish a
+/// containing block* for their positioned descendants
+/// ([`is_positioned`](Self::is_positioned)); only [`Absolute`](Self::Absolute) and
+/// [`Fixed`](Self::Fixed) are *out of flow* ([`is_out_of_flow`](Self::is_out_of_flow)).
+/// [`Sticky`](Self::Sticky), like [`Relative`](Self::Relative), is **in flow**.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Position {
     /// The node is laid out in normal flow; insets are ignored (CSS `static`).
@@ -36,6 +46,10 @@ pub enum Position {
     Absolute,
     /// Out-of-flow, positioned against the viewport (CSS `fixed`).
     Fixed,
+    /// In flow like [`Relative`](Self::Relative), but its used position is
+    /// scroll-clamped to stick to the scrollport edge within its containing block
+    /// (CSS `sticky`).
+    Sticky,
 }
 
 impl Position {
@@ -60,6 +74,19 @@ impl Position {
     #[must_use]
     pub const fn is_out_of_flow(self) -> bool {
         matches!(self, Self::Absolute | Self::Fixed)
+    }
+
+    /// Returns `true` only for [`Sticky`](Self::Sticky) — the one **in-flow**
+    /// scheme whose used position is scroll-clamped to the scrollport edge.
+    ///
+    /// A sticky node is *not* [`is_relative`](Self::is_relative) (it is not
+    /// offset by a fixed inset delta) and is *not*
+    /// [`is_out_of_flow`](Self::is_out_of_flow) (it keeps its flow box and never
+    /// perturbs its siblings); the coordinator recognises it here and applies the
+    /// per-axis sticky clamp instead of the relative offset.
+    #[must_use]
+    pub const fn is_sticky(self) -> bool {
+        matches!(self, Self::Sticky)
     }
 
     /// Returns `true` for any *positioned* scheme — everything except
@@ -90,6 +117,8 @@ mod tests {
         // Absolute/Fixed are out of flow, not offset in flow.
         assert!(!Position::Absolute.is_relative());
         assert!(!Position::Fixed.is_relative());
+        // Sticky is in flow, but is NOT a plain relative offset.
+        assert!(!Position::Sticky.is_relative());
     }
 
     #[test]
@@ -98,6 +127,17 @@ mod tests {
         assert!(Position::Fixed.is_out_of_flow());
         assert!(!Position::Static.is_out_of_flow());
         assert!(!Position::Relative.is_out_of_flow());
+        // Sticky stays IN flow (siblings unaffected), like relative.
+        assert!(!Position::Sticky.is_out_of_flow());
+    }
+
+    #[test]
+    fn only_sticky_is_sticky() {
+        assert!(Position::Sticky.is_sticky());
+        assert!(!Position::Static.is_sticky());
+        assert!(!Position::Relative.is_sticky());
+        assert!(!Position::Absolute.is_sticky());
+        assert!(!Position::Fixed.is_sticky());
     }
 
     #[test]
@@ -106,5 +146,7 @@ mod tests {
         assert!(Position::Relative.is_positioned());
         assert!(Position::Absolute.is_positioned());
         assert!(Position::Fixed.is_positioned());
+        // Sticky establishes a containing block for its descendants, like relative.
+        assert!(Position::Sticky.is_positioned());
     }
 }

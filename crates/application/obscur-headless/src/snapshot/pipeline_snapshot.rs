@@ -165,6 +165,9 @@ impl PipelineSnapshot {
             &computed,
             &grid_templates,
             viewport,
+            // Headless snapshots have no live scroll: the viewport is unscrolled,
+            // so `position: sticky` nodes resolve to their static positions.
+            (0.0, 0.0),
             scene_coordinator.paragraph(),
         );
 

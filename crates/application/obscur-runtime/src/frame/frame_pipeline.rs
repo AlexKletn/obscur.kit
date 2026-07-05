@@ -217,6 +217,9 @@ impl FramePipeline {
             &computed,
             &grid_templates,
             ctx.viewport(),
+            // No live scroll system yet: the viewport is unscrolled, so every
+            // `position: sticky` node lays out at its static position.
+            (0.0, 0.0),
             self.scene.paragraph(),
         );
         let relaid_out = !boxes.is_empty();

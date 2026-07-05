@@ -136,6 +136,15 @@ pub struct UiRuntime {
     next_frame: FrameId,
     /// The viewport frames are laid out under.
     viewport: Size,
+    /// The viewport scroll offset `(x, y)` in logical pixels — the document-
+    /// coordinate point currently at the top-left of the viewport (spec §4.1).
+    ///
+    /// The single scroll container is the viewport; there is no live scroll-gesture
+    /// system yet, so this is driven by tests / hosts through
+    /// [`set_viewport_scroll`](Self::set_viewport_scroll) and defaults to
+    /// `(0.0, 0.0)`. It is consumed only by `position: sticky` layout: at `(0, 0)`
+    /// every sticky node lays out at its static flow position.
+    viewport_scroll: (f32, f32),
     /// The domain motion scheduler owning every active timeline (spec §4.17).
     ///
     /// The runtime *owns* the scheduler and its timelines; each frame it samples
@@ -230,6 +239,7 @@ impl UiRuntime {
             modifiers: Modifiers::new(),
             next_frame: FrameId::FIRST,
             viewport,
+            viewport_scroll: (0.0, 0.0),
             motion: MotionScheduler::new(),
             animations: Vec::new(),
             next_timeline: TimelineId::from_raw(0),
@@ -271,6 +281,26 @@ impl UiRuntime {
     #[must_use]
     pub fn frame_budget(&self) -> FrameBudget {
         self.budget
+    }
+
+    /// Sets the viewport scroll offset `(x, y)` in logical pixels — the
+    /// document-coordinate point at the top-left of the viewport (spec §4.1).
+    ///
+    /// The single scroll container is the viewport. There is no live scroll-gesture
+    /// system yet, so this is the test/host-driven input that engages
+    /// `position: sticky` clamping on the next frame: at `(0.0, 0.0)` (the default)
+    /// every sticky node lays out at its static flow position; a non-zero offset
+    /// scrolls the document under the viewport, so a sticky node sticks to the
+    /// scrollport edge once scrolled past its inset threshold. Wiring a real scroll
+    /// gesture to this setter is a separate, later step.
+    pub fn set_viewport_scroll(&mut self, x: f32, y: f32) {
+        self.viewport_scroll = (x, y);
+    }
+
+    /// Returns the current viewport scroll offset `(x, y)` in logical pixels.
+    #[must_use]
+    pub fn viewport_scroll(&self) -> (f32, f32) {
+        self.viewport_scroll
     }
 
     /// Installs the CSS-authored motion (`transition`/`@keyframes`) the runtime
@@ -643,6 +673,9 @@ impl UiRuntime {
                 &computed,
                 &grid_templates,
                 ctx.viewport(),
+                // The viewport scroll offset (test/host-driven; `(0, 0)` by
+                // default) engages `position: sticky` clamping this frame.
+                self.viewport_scroll,
                 self.scene_composer.paragraph(),
                 self.scene_composer.hyphenator(),
             );

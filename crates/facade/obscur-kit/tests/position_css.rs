@@ -228,6 +228,59 @@ fn absolute_resolves_against_positioned_ancestor() {
     approx(box_size(&rt, abs).1, 20.0, "abs.height explicit");
 }
 
+// End-to-end: a `position: sticky; top: 10px` child in a block-flow container is
+// scroll-clamped by the test-driven viewport scroll offset. With scroll (0, 0) it
+// sits at its static flow position; after `set_viewport_scroll(0, 100)` its used
+// top sticks to the scrollport edge (100 + 10 = 110), its subtree rides along, and
+// the following sibling — which stays IN flow — is unmoved. This drives the full
+// pipeline twice on one runtime, engaging the sticky clamp only via the scroll
+// input the second frame.
+#[test]
+fn sticky_child_clamps_on_scroll_leaving_sibling_in_flow() {
+    // A block-flow container: a 50px `.spacer`, then a `position:sticky; top:10px`
+    // `.a` (holding a `.leaf`), then a `.b` sibling. `.a`'s static flow top is 50,
+    // which is BELOW its 10px inset, so at scroll 0 it is at its static position.
+    let leaf = tag(el(23), "leaf");
+    let spacer = tag(el(24), "spacer");
+    let a = tag(el(21), "a").with_children(ViewFragment::from_nodes(vec![leaf]));
+    let b = tag(el(22), "b");
+    let container = tag(el(20), "row").with_children(ViewFragment::from_nodes(vec![spacer, a, b]));
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![container]));
+
+    let css = ".row{width:300px} \
+               .spacer{width:300px;height:50px} \
+               .a{position:sticky;top:10px;width:300px;height:40px} \
+               .leaf{width:20px;height:20px} \
+               .b{width:300px;height:40px}";
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(css);
+
+    let kids = |rt: &UiRuntime| {
+        let c = container_node(rt);
+        rt.tree().get(c).unwrap().children().to_vec()
+    };
+
+    // Frame 1: no scroll — the sticky child lays out at its static flow position.
+    let r1 = rt.render_now(&view, std::slice::from_ref(&sheet));
+    assert!(r1.relaid_out(), "first frame arranged boxes");
+    let k = kids(&rt);
+    let (a_node, b_node) = (k[1], k[2]);
+    let leaf_node = rt.tree().get(a_node).unwrap().children().to_vec()[0];
+    approx(origin(&rt, a_node).1, 50.0, "scroll 0: sticky a at static y=50");
+    approx(origin(&rt, leaf_node).1, 50.0, "scroll 0: leaf at a's content origin");
+    approx(origin(&rt, b_node).1, 90.0, "scroll 0: sibling b below a (flow)");
+
+    // Frame 2: scroll the viewport 100px down — the sticky child sticks to the
+    // scrollport top plus its `top:10px` inset (used top 110), within its CB.
+    rt.set_viewport_scroll(0.0, 100.0);
+    let r2 = rt.render_now(&view, std::slice::from_ref(&sheet));
+    assert!(r2.relaid_out(), "second frame re-arranged boxes");
+    approx(origin(&rt, a_node).1, 110.0, "scroll 100: a sticks at scrollport+inset (110)");
+    approx(origin(&rt, leaf_node).1, 110.0, "scroll 100: the sticky subtree rides along");
+    approx(origin(&rt, b_node).1, 90.0, "scroll 100: sibling b unmoved (stays in flow)");
+    approx(origin(&rt, a_node).0, 0.0, "no horizontal inset → a.x unchanged");
+}
+
 // End-to-end: two overlapping `position: absolute` boxes with `background-color`
 // and different `z-index` paint in STACKING order, not tree order. `.boxa` is
 // FIRST in the tree but carries the HIGHER `z-index` (5) and `.boxb` is second

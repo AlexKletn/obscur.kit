@@ -2072,6 +2072,10 @@ mod tests {
             value_of("position: fixed"),
             PropertyValue::Keyword(layout_keyword::POSITION_FIXED)
         );
+        assert_eq!(
+            value_of("position: sticky"),
+            PropertyValue::Keyword(layout_keyword::POSITION_STICKY)
+        );
     }
 
     #[test]
