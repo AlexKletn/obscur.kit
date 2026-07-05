@@ -10,7 +10,9 @@ mod violation;
 use std::path::Path;
 use std::process::ExitCode;
 
-use rule::{dependency_direction, forbidden_file_name, module_layout, unsafe_boundary};
+use rule::{
+    dependency_direction, dependency_graph, forbidden_file_name, module_layout, unsafe_boundary,
+};
 use violation::Violation;
 
 fn main() -> ExitCode {
@@ -33,6 +35,7 @@ fn main() -> ExitCode {
     violations.extend(forbidden_file_name::check(&root));
     violations.extend(unsafe_boundary::check(&root));
     violations.extend(dependency_direction::check(&root));
+    violations.extend(dependency_graph::check(&root));
 
     if violations.is_empty() {
         println!("architecture checks passed");
