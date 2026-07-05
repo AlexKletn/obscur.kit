@@ -19,12 +19,21 @@
 ///   count. Named lines are out of scope.
 /// * [`Span`](GridLineValue::Span) — `span N`: the edge is placed `N` tracks away
 ///   from the opposite edge.
+/// * [`Named`](GridLineValue::Named) — a `<custom-ident>` line name
+///   (`grid-column: sidebar-start`). The name cannot be resolved on the item
+///   alone: it refers to a line named on the item's **container**'s
+///   `grid-template-columns` / `grid-template-rows` (or an implicit
+///   `<area>-start` / `<area>-end` line), so the runtime resolves it against the
+///   parent's computed line-name map, exactly as `grid-area: <name>` is resolved
+///   against the parent's `grid-template-areas` (spec §4.13).
 ///
 /// # Determinism
 ///
-/// `GridLineValue` is a plain `Copy` value with no interior mutability, so
-/// placement resolves deterministically from the item styles alone.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// `GridLineValue` has no interior mutability, so placement resolves
+/// deterministically from the item styles (and, for [`Named`](GridLineValue::Named),
+/// the parent's computed template) alone. The [`Named`](GridLineValue::Named)
+/// variant carries an owned name, so this is [`Clone`] but not [`Copy`].
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GridLineValue {
     /// No explicit line on this edge; the item is auto-placed here.
     Auto,
@@ -32,6 +41,9 @@ pub enum GridLineValue {
     Line(i32),
     /// `span N`: this edge is `N` tracks from the opposite edge.
     Span(u16),
+    /// A `<custom-ident>` line name, resolved against the container's named lines
+    /// in the runtime (spec §4.13).
+    Named(Box<str>),
 }
 
 impl Default for GridLineValue {
@@ -55,5 +67,13 @@ mod tests {
         assert_eq!(GridLineValue::Line(3), GridLineValue::Line(3));
         assert_eq!(GridLineValue::Span(2), GridLineValue::Span(2));
         assert_ne!(GridLineValue::Line(1), GridLineValue::Span(1));
+        assert_eq!(
+            GridLineValue::Named("main".into()),
+            GridLineValue::Named("main".into())
+        );
+        assert_ne!(
+            GridLineValue::Named("main".into()),
+            GridLineValue::Named("side".into())
+        );
     }
 }

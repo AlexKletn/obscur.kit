@@ -29,8 +29,10 @@
 //! cell, negative (from-end) lines (`grid-column: 1 / -1` spanning the whole row),
 //! the `grid-area` four-line shorthand, and **named-area placement**
 //! (`grid-template-areas` on the container + `grid-area: <name>` on the items,
-//! resolved in the runtime against the parent's parsed template). Still out of
-//! scope (not exercised here): named grid *lines* (`[name]` in a track list).
+//! resolved in the runtime against the parent's parsed template), and **named grid
+//! lines** (`[name]` groups in the container's `grid-template-columns` +
+//! `grid-column: <name> / <name>` on the item, resolved in the runtime against the
+//! parent's per-axis line-name map).
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -335,6 +337,25 @@ fn named_grid_areas_place_children_by_name() {
     approx(zx, 100.0, "z.x (area c → col 1)");
     approx(zy, 10.0, "z.y (area c → row 1)");
     approx(zw, 100.0, "z.width (single column 1)");
+}
+
+// 12. named grid lines: the container names its column lines
+//     `[a] 100px [b] 100px [c] 100px [d]` (a=1, b=2, c=3, d=4). A child
+//     `.a{grid-column:a / c}` resolves, in the runtime, against the parent's
+//     line-name map to line 1 / line 3 → columns 0-1 (x=0, width 200).
+#[test]
+fn named_grid_lines_place_child_by_line_name() {
+    let css = ".grid{display:grid;width:300px;\
+               grid-template-columns:[a] 100px [b] 100px [c] 100px [d]} \
+               .a{grid-column:a / c;height:10px} .b{height:10px}";
+    let (rt, k) = drive(css, 2, 400.0, 200.0);
+    let (ax, ay, aw, _) = geom(&rt, k[0]);
+    let (bx, _, bw, _) = geom(&rt, k[1]);
+    approx(ax, 0.0, "a.x (line a=1 → col 0)");
+    approx(ay, 0.0, "a.y (row 0)");
+    approx(aw, 200.0, "a.width (lines a→c span cols 0-1 = 100+100)");
+    approx(bx, 200.0, "b.x (auto flows to the free col 2)");
+    approx(bw, 100.0, "b.width (single col)");
 }
 
 // ---- Grid item alignment within a cell (`justify-self` / `align-self` and the

@@ -9,6 +9,8 @@ mod grid_line_value;
 pub use grid_line_value::GridLineValue;
 mod grid_track;
 pub use grid_track::GridTrack;
+mod grid_track_list;
+pub use grid_track_list::GridTrackList;
 mod inheritance;
 pub use inheritance::Inheritance;
 mod inherited_property;

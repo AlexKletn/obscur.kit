@@ -7,6 +7,8 @@ mod font_families;
 pub(crate) use font_families::families_for;
 mod grid_areas;
 pub use grid_areas::resolve_named_grid_areas;
+mod grid_lines;
+pub use grid_lines::resolve_named_grid_lines;
 mod grid_templates;
 pub use grid_templates::{grid_template_for, grid_templates_from, GridTemplates};
 mod layout_coordinator;

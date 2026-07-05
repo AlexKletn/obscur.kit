@@ -1056,14 +1056,14 @@ mod tests {
                 .get(PropertyId::GridColumnStart)
                 .map(ComputedValue::value)
                 .and_then(PropertyValue::as_grid_line),
-            Some(GridLineValue::Line(1))
+            Some(&GridLineValue::Line(1))
         );
         assert_eq!(
             computed
                 .get(PropertyId::GridColumnEnd)
                 .map(ComputedValue::value)
                 .and_then(PropertyValue::as_grid_line),
-            Some(GridLineValue::Span(2))
+            Some(&GridLineValue::Span(2))
         );
     }
 

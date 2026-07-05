@@ -195,6 +195,12 @@ impl FramePipeline {
         // freshly built styles here; items with no named area are left untouched.
         self.layout
             .resolve_named_grid_areas(&mut layout_styles, tree, &computed);
+        // Named grid *lines* (`grid-column: <name>` against the container's
+        // `[name]` track-list lines) resolve the same way — after the styles table
+        // is built and against the parent's template; items with no named line are
+        // left untouched.
+        self.layout
+            .resolve_named_grid_lines(&mut layout_styles, tree, &computed);
         // Authored grid templates (`grid-template-columns`/`-rows`) become a
         // per-node side-table so a grid container dispatches the real track-sizing
         // algorithm; a grid node with no template falls back to a single column.

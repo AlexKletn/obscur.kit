@@ -27,7 +27,8 @@ use obscur_tree::tree::RetainedTree;
 
 use super::{
     alignment_for, attributes_for, direction_for, families_for, grid_templates_from,
-    overflow_for, resolve_named_grid_areas, ComputedStyles, GridTemplates,
+    overflow_for, resolve_named_grid_areas, resolve_named_grid_lines, ComputedStyles,
+    GridTemplates,
 };
 
 /// The initial `font-size` (spec / CSS default), used as the `em`/`rem` base
@@ -206,6 +207,26 @@ impl LayoutCoordinator {
         computed: &ComputedStyles,
     ) {
         resolve_named_grid_areas(styles, tree, computed);
+    }
+
+    /// Resolves every grid item's named `grid-column` / `grid-row` line reference
+    /// against its container's `grid-template-columns` / `grid-template-rows`
+    /// `[name]` line names, patching the item's [`LayoutStyle`] placement in
+    /// `styles` (spec §4.13).
+    ///
+    /// Like named-area placement, a named line (`grid-column: sidebar-start`) is
+    /// declared on the item's **container**'s track list, so this runs after
+    /// [`layout_styles_from`](Self::layout_styles_from) and only overwrites the
+    /// named edges of items that reference one (looked up against the parent's
+    /// per-axis line-name map); every non-named layout is left byte-for-byte
+    /// identical.
+    pub fn resolve_named_grid_lines(
+        &self,
+        styles: &mut LayoutStyles,
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+    ) {
+        resolve_named_grid_lines(styles, tree, computed);
     }
 
     /// Lays out like [`layout`](Self::layout) but wraps text-leaf nodes through an
@@ -534,15 +555,21 @@ fn grid_placement_of(computed: &ComputedStyle) -> GridPlacement {
 /// Reads one grid-line longhand and converts the style-local [`GridLineValue`] into
 /// an `obscur_layout` [`GridLine`], defaulting to [`GridLine::Auto`] when the
 /// property is absent or is not a grid-line value.
+///
+/// A [`GridLineValue::Named`] line cannot be resolved on the item alone (its name
+/// is defined on the container's template), so it maps to [`GridLine::Auto`] here
+/// and is patched to a concrete line afterwards by
+/// [`resolve_named_grid_lines`](super::resolve_named_grid_lines), mirroring how
+/// `grid-area: <name>` is resolved against the parent's `grid-template-areas`.
 fn grid_line_of(computed: &ComputedStyle, property: PropertyId) -> GridLine {
     match computed
         .get(property)
         .map(ComputedValue::value)
         .and_then(PropertyValue::as_grid_line)
     {
-        Some(GridLineValue::Line(index)) => GridLine::Line(index),
-        Some(GridLineValue::Span(n)) => GridLine::Span(n),
-        Some(GridLineValue::Auto) | None => GridLine::Auto,
+        Some(GridLineValue::Line(index)) => GridLine::Line(*index),
+        Some(GridLineValue::Span(n)) => GridLine::Span(*n),
+        Some(GridLineValue::Named(_) | GridLineValue::Auto) | None => GridLine::Auto,
     }
 }
 

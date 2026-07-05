@@ -23,8 +23,8 @@ use crate::parser::{ParsedDeclaration, ParsedValue};
 use obscur_identity::InternedSymbol;
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{
-    layout_keyword, CustomProperty, GridAreaTemplate, GridLineValue, GridTrack, Length, PropertyId,
-    PropertyValue, StyleColor,
+    layout_keyword, CustomProperty, GridAreaTemplate, GridLineValue, GridTrack, GridTrackList,
+    Length, PropertyId, PropertyValue, StyleColor,
 };
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
@@ -479,11 +479,13 @@ fn expand_grid_area_shorthand(
         }
     }
     // Fill omitted edges: `[row-start, column-start, row-end, column-end]`.
+    // `GridLineValue` is no longer `Copy` (its `Named` variant owns a name), so
+    // clone the reused edges.
     let [row_start, column_start, row_end, column_end] = match edges.as_slice() {
-        [a] => [*a, *a, *a, *a],
-        [a, b] => [*a, *b, GridLineValue::Auto, GridLineValue::Auto],
-        [a, b, c] => [*a, *b, *c, GridLineValue::Auto],
-        [a, b, c, d] => [*a, *b, *c, *d],
+        [a] => [a.clone(), a.clone(), a.clone(), a.clone()],
+        [a, b] => [a.clone(), b.clone(), GridLineValue::Auto, GridLineValue::Auto],
+        [a, b, c] => [a.clone(), b.clone(), c.clone(), GridLineValue::Auto],
+        [a, b, c, d] => [a.clone(), b.clone(), c.clone(), d.clone()],
         _ => return unsupported(),
     };
     [
@@ -508,12 +510,22 @@ fn expand_grid_area_shorthand(
 }
 
 /// Lowers one `<grid-line>` edge from a component group: `auto`, a non-zero
-/// integer line index (`3`, `-1`), or `span N` (`N` a positive integer, in either
-/// order `span 2` / `2 span`). Returns [`None`] for anything else.
+/// integer line index (`3`, `-1`), `span N` (`N` a positive integer, in either
+/// order `span 2` / `2 span`), or a `<custom-ident>` line name
+/// (`sidebar-start`). Returns [`None`] for anything else.
 fn grid_line_edge(group: &[ParsedValue]) -> Option<GridLineValue> {
     match group {
         [ParsedValue::Keyword(keyword)] if keyword.eq_ignore_ascii_case("auto") => {
             Some(GridLineValue::Auto)
+        }
+        // A lone `<custom-ident>` (not `auto`, not a CSS-wide keyword) is a named
+        // line, resolved against the container's named lines in the runtime. `span`
+        // alone is not a valid edge, so exclude it (a bare `span` is not a line).
+        [ParsedValue::Keyword(keyword)]
+            if css_wide_keyword(keyword).is_none()
+                && !keyword.eq_ignore_ascii_case("span") =>
+        {
+            Some(GridLineValue::Named((**keyword).into()))
         }
         [one] => grid_line_integer(one).map(GridLineValue::Line),
         // `span N` / `N span`: exactly one `span` keyword and one positive integer.
@@ -891,11 +903,68 @@ const MAX_REPEAT: usize = 1024;
 /// degrades to an unsupported-feature diagnostic) when the list is empty or any
 /// component is not a recognised track.
 fn lower_grid_template(values: &[ParsedValue]) -> Option<PropertyValue> {
-    let tracks = tracks_from_components(values)?;
+    let (tracks, line_names) = track_list_from_components(values)?;
     if tracks.is_empty() {
         return None;
     }
-    Some(PropertyValue::grid_tracks(tracks))
+    // A template with no authored `[name]` group carries an empty `line_names`,
+    // keeping the value byte-identical to the pre-named-lines list; otherwise the
+    // buckets are one per grid line (`tracks.len() + 1`).
+    let line_names = if line_names.iter().all(Vec::is_empty) {
+        Box::from([])
+    } else {
+        line_names
+            .into_iter()
+            .map(Vec::into_boxed_slice)
+            .collect::<Vec<_>>()
+            .into_boxed_slice()
+    };
+    Some(PropertyValue::grid_track_list(GridTrackList::new(
+        tracks.into_boxed_slice(),
+        line_names,
+    )))
+}
+
+/// The parsed track list of a `grid-template-*` value: the flat [`GridTrack`]
+/// sizing functions plus one name bucket per grid line (`tracks.len() + 1`).
+type ParsedTrackList = (Vec<GridTrack>, Vec<Vec<Box<str>>>);
+
+/// Parses a `grid-template-columns` / `-rows` value into its flat [`GridTrack`]
+/// list **and** the `[name]` names on each grid line (spec §4.1, §4.13).
+///
+/// This walks the same track grammar as [`tracks_from_components`], but also
+/// threads a per-line name accumulator: a [`ParsedValue::LineNames`] group names
+/// the line at the current boundary (before the next track), so
+/// `[a] 100px [b] 1fr [c]` yields tracks `[100px, 1fr]` and line names
+/// `[[a], [b], [c]]` — one bucket per grid line (`tracks.len() + 1`). Names
+/// inside a `repeat(…)` are not tracked (its tracks expand, its names are
+/// dropped) — a documented limitation. Returns [`None`] on any unparseable track.
+fn track_list_from_components(values: &[ParsedValue]) -> Option<ParsedTrackList> {
+    let mut tracks = Vec::new();
+    // Start with the bucket for line 0 (before the first track).
+    let mut line_names: Vec<Vec<Box<str>>> = vec![Vec::new()];
+    for value in values {
+        match value {
+            // A comma has no meaning inside a track list; reject rather than drop.
+            ParsedValue::Comma => return None,
+            ParsedValue::LineNames(names) => {
+                if let Some(bucket) = line_names.last_mut() {
+                    bucket.extend(names.iter().cloned());
+                }
+            }
+            ParsedValue::Function { name, args } if name.eq_ignore_ascii_case("repeat") => {
+                for track in expand_repeat(args)? {
+                    tracks.push(track);
+                    line_names.push(Vec::new());
+                }
+            }
+            other => {
+                tracks.push(grid_track_scalar(other)?);
+                line_names.push(Vec::new());
+            }
+        }
+    }
+    Some((tracks, line_names))
 }
 
 /// Lowers a `grid-auto-columns` / `grid-auto-rows` value into a
@@ -963,6 +1032,10 @@ fn tracks_from_components(values: &[ParsedValue]) -> Option<Vec<GridTrack>> {
         match value {
             // A comma has no meaning inside a track list; reject rather than drop.
             ParsedValue::Comma => return None,
+            // `[name]` line-name groups carry no sizing; they are captured by
+            // `track_list_from_components` on the `grid-template-*` path and simply
+            // skipped here (the `grid-auto-*` / inner-`repeat` paths keep no names).
+            ParsedValue::LineNames(_) => {}
             ParsedValue::Function { name, args } if name.eq_ignore_ascii_case("repeat") => {
                 out.extend(expand_repeat(args)?);
             }
@@ -1102,7 +1175,10 @@ fn lower_component(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
         ParsedValue::Dimension { value, unit } => lower_dimension(*value, unit),
         ParsedValue::Hash(hex) => parse_hex_color(hex).map(PropertyValue::Color),
         ParsedValue::Function { name, args } => lower_function(name, args, interner),
-        ParsedValue::String(_) | ParsedValue::Comma | ParsedValue::Delimiter(_) => None,
+        ParsedValue::String(_)
+        | ParsedValue::Comma
+        | ParsedValue::Delimiter(_)
+        | ParsedValue::LineNames(_) => None,
     }
 }
 
@@ -2117,7 +2193,7 @@ mod tests {
     /// Extracts the lowered [`GridTrack`] list for a `grid-template-*` value.
     fn tracks(text: &str) -> Vec<GridTrack> {
         match value_of(text) {
-            PropertyValue::GridTracks(list) => list.into_vec(),
+            PropertyValue::GridTracks(list) => list.into_tracks().into_vec(),
             other => panic!("expected grid tracks, got {other:?}"),
         }
     }
@@ -2193,6 +2269,88 @@ mod tests {
                 GridTrack::Fixed(Length::px(20.0)),
                 GridTrack::Fr(1.0),
                 GridTrack::Fr(1.0),
+            ]
+        );
+    }
+
+    /// The full track list (tracks + line names) for a `grid-template-*` value.
+    fn track_list(text: &str) -> GridTrackList {
+        match value_of(text) {
+            PropertyValue::GridTracks(list) => list,
+            other => panic!("expected grid tracks, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lowers_line_names_interleaved_with_tracks() {
+        // `[a] 100px [b] 1fr [c]` -> tracks [Fixed(100), Fr(1)] with one name bucket
+        // per grid line: [[a], [b], [c]].
+        let list = track_list("grid-template-columns: [a] 100px [b] 1fr [c]");
+        assert_eq!(
+            list.tracks(),
+            &[GridTrack::Fixed(Length::px(100.0)), GridTrack::Fr(1.0)]
+        );
+        let names: Vec<Vec<&str>> = list
+            .line_names()
+            .iter()
+            .map(|b| b.iter().map(|n| &**n).collect())
+            .collect();
+        assert_eq!(names, vec![vec!["a"], vec!["b"], vec!["c"]]);
+    }
+
+    #[test]
+    fn line_can_carry_multiple_names() {
+        // `[sidebar-end main-start]` names one line twice.
+        let list =
+            track_list("grid-template-columns: [s-start] 200px [s-end main-start] 1fr [main-end]");
+        let names: Vec<Vec<&str>> = list
+            .line_names()
+            .iter()
+            .map(|b| b.iter().map(|n| &**n).collect())
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                vec!["s-start"],
+                vec!["s-end", "main-start"],
+                vec!["main-end"]
+            ]
+        );
+    }
+
+    #[test]
+    fn track_list_without_names_has_empty_line_names() {
+        // A no-`[name]` template stays byte-identical: no line-name buckets.
+        let list = track_list("grid-template-columns: 100px 1fr");
+        assert!(list.line_names().is_empty());
+    }
+
+    #[test]
+    fn grid_column_named_lines_lower_to_named_edges() {
+        // `grid-column: b / c` -> start = Named("b"), end = Named("c").
+        assert_eq!(
+            grid_lines(&compile_all("grid-column: b / c")),
+            vec![
+                (
+                    PropertyId::GridColumnStart,
+                    GridLineValue::Named("b".into())
+                ),
+                (PropertyId::GridColumnEnd, GridLineValue::Named("c".into())),
+            ]
+        );
+    }
+
+    #[test]
+    fn grid_column_single_named_line_sets_end_auto() {
+        // `grid-column: main` -> start = Named("main"), end = auto.
+        assert_eq!(
+            grid_lines(&compile_all("grid-column: main")),
+            vec![
+                (
+                    PropertyId::GridColumnStart,
+                    GridLineValue::Named("main".into())
+                ),
+                (PropertyId::GridColumnEnd, GridLineValue::Auto),
             ]
         );
     }
@@ -2332,7 +2490,7 @@ mod tests {
                 let PropertyValue::GridLine(edge) = decl.value() else {
                     panic!("expected grid line value, got {:?}", decl.value());
                 };
-                (decl.property(), *edge)
+                (decl.property(), edge.clone())
             })
             .collect()
     }
@@ -2461,8 +2619,9 @@ mod tests {
 
     #[test]
     fn invalid_grid_line_is_unsupported() {
-        // A bare colour is not a valid grid line.
-        let decls = compile_all("grid-column: red");
+        // A bare length is not a valid grid line (an integer, `span N`, `auto`, or
+        // a `<custom-ident>` name are; a `px` value is not).
+        let decls = compile_all("grid-column: 50px");
         assert_eq!(decls.len(), 1);
         assert!(matches!(decls[0], CompiledDeclaration::Unsupported(_)));
         // A zero line index is invalid.

@@ -21,7 +21,7 @@
 //! [`LengthContext`](crate::property::LengthContext) (spec §4.5, §4.13).
 
 use crate::property::{
-    GridAreaTemplate, GridLineValue, GridTrack, Length, LengthExpr, StyleColor,
+    GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length, LengthExpr, StyleColor,
 };
 use obscur_identity::InternedSymbol;
 
@@ -55,12 +55,13 @@ pub enum PropertyValue {
     /// shared interner.
     FontFamilies(Box<[Box<str>]>),
     /// A grid track list, in author order: the value of `grid-template-columns`
-    /// or `grid-template-rows`. Each entry is a [`GridTrack`] sizing function
-    /// (`100px`, `1fr`, `auto`, `minmax(…)`); `repeat(…)` is expanded to its flat
-    /// track list before this value is built, so this list is already flat. The
-    /// runtime converts each [`GridTrack`] to `obscur_layout`'s `TrackSize` when
-    /// it bridges the computed style into a grid layout input (spec §4.1).
-    GridTracks(Box<[GridTrack]>),
+    /// or `grid-template-rows`. The [`GridTrackList`] carries the [`GridTrack`]
+    /// sizing functions (`100px`, `1fr`, `auto`, `minmax(…)`; `repeat(…)` already
+    /// expanded to a flat list) plus the `[name]` names on each grid line. The
+    /// runtime converts each [`GridTrack`] to `obscur_layout`'s `TrackSize`, and
+    /// resolves a child's named-line placement against the line names, when it
+    /// bridges the computed style into a grid layout input (spec §4.1, §4.13).
+    GridTracks(GridTrackList),
     /// A single grid line placement edge: the value of one `grid-column-start` /
     /// `grid-column-end` / `grid-row-start` / `grid-row-end` longhand. The
     /// [`GridLineValue`] is a style-local line edge (`auto`, a 1-based line index,
@@ -128,30 +129,50 @@ impl PropertyValue {
     }
 
     /// Builds a [`PropertyValue::GridTracks`] from an ordered iterator of
-    /// [`GridTrack`]s, preserving author order.
+    /// [`GridTrack`]s (with no line names), preserving author order.
     #[must_use]
     pub fn grid_tracks<I>(tracks: I) -> Self
     where
         I: IntoIterator<Item = GridTrack>,
     {
-        Self::GridTracks(tracks.into_iter().collect())
+        Self::GridTracks(GridTrackList::from_tracks(tracks))
     }
 
-    /// Returns the ordered grid track list if this value is a
+    /// Builds a [`PropertyValue::GridTracks`] from a [`GridTrackList`] (tracks +
+    /// `[name]` line names).
+    #[must_use]
+    pub const fn grid_track_list(list: GridTrackList) -> Self {
+        Self::GridTracks(list)
+    }
+
+    /// Returns the ordered grid track slice if this value is a
     /// [`PropertyValue::GridTracks`].
     #[must_use]
     pub fn as_grid_tracks(&self) -> Option<&[GridTrack]> {
         match self {
-            Self::GridTracks(tracks) => Some(tracks),
+            Self::GridTracks(list) => Some(list.tracks()),
+            _ => None,
+        }
+    }
+
+    /// Returns the full grid track list (tracks + line names) if this value is a
+    /// [`PropertyValue::GridTracks`].
+    #[must_use]
+    pub const fn as_grid_track_list(&self) -> Option<&GridTrackList> {
+        match self {
+            Self::GridTracks(list) => Some(list),
             _ => None,
         }
     }
 
     /// Returns the grid line edge if this value is a [`PropertyValue::GridLine`].
+    ///
+    /// Returns a borrow so a [`GridLineValue::Named`] name is read without an
+    /// allocation; numeric / span / auto edges are the common case.
     #[must_use]
-    pub const fn as_grid_line(&self) -> Option<GridLineValue> {
+    pub fn as_grid_line(&self) -> Option<&GridLineValue> {
         match self {
-            Self::GridLine(line) => Some(*line),
+            Self::GridLine(line) => Some(line),
             _ => None,
         }
     }
@@ -260,8 +281,10 @@ mod tests {
     fn as_grid_line_extracts_only_grid_lines() {
         use crate::property::GridLineValue;
         let value = PropertyValue::GridLine(GridLineValue::Line(3));
-        assert_eq!(value.as_grid_line(), Some(GridLineValue::Line(3)));
+        assert_eq!(value.as_grid_line(), Some(&GridLineValue::Line(3)));
         assert_eq!(PropertyValue::Number(1.0).as_grid_line(), None);
+        let named = PropertyValue::GridLine(GridLineValue::Named("main".into()));
+        assert_eq!(named.as_grid_line(), Some(&GridLineValue::Named("main".into())));
     }
 
     #[test]

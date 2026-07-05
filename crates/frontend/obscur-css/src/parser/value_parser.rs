@@ -55,6 +55,12 @@ pub enum ParsedValue {
     /// A bare operator/delimiter character (for example `+`, `-`, `*`, `/`
     /// inside `calc()`).
     Delimiter(char),
+    /// A bracketed line-name group `[ a b … ]` from a grid track list
+    /// (`grid-template-columns: [sidebar-start] 200px [main]`). The names are the
+    /// `<custom-ident>`s inside the brackets, in author order; an empty group
+    /// (`[]`) carries no names. Only the grid track-list compiler reads this; any
+    /// other property degrades to an unsupported-feature diagnostic (spec §4.13).
+    LineNames(Box<[Box<str>]>),
 }
 
 /// Parses a declaration's value tokens into a component-value list.
@@ -189,11 +195,47 @@ fn parse_component(cursor: &mut TokenCursor<'_>) -> Result<ParsedValue, CssParse
             cursor.advance();
             Ok(ParsedValue::Delimiter(c))
         }
+        Some(CssTokenKind::LBracket) => {
+            cursor.advance(); // consume '['
+            parse_line_names(cursor)
+        }
         _ => Err(CssParseError::new(
             CssParseErrorKind::InvalidValue,
             "unexpected token in value",
             span,
         )),
+    }
+}
+
+/// Parses a bracketed line-name group `[ a b … ]` after its opening `[` has been
+/// consumed, up to and including the closing `]`.
+///
+/// Each name is a `<custom-ident>` (an `Ident` token); whitespace between names
+/// is skipped. An unterminated group (EOF before `]`) or a non-ident token inside
+/// the brackets is an error, so a malformed group degrades the declaration rather
+/// than being silently accepted.
+fn parse_line_names(cursor: &mut TokenCursor<'_>) -> Result<ParsedValue, CssParseError> {
+    let mut names: Vec<Box<str>> = Vec::new();
+    loop {
+        cursor.skip_ws();
+        match cursor.peek_kind().cloned() {
+            None => return Err(CssParseError::unexpected_eof(cursor.eof())),
+            Some(CssTokenKind::RBracket) => {
+                cursor.advance();
+                return Ok(ParsedValue::LineNames(names.into_boxed_slice()));
+            }
+            Some(CssTokenKind::Ident(name)) => {
+                cursor.advance();
+                names.push(name);
+            }
+            Some(_) => {
+                return Err(CssParseError::new(
+                    CssParseErrorKind::InvalidValue,
+                    "expected a line name or ']' in a grid line-name group",
+                    cursor.here_span(),
+                ));
+            }
+        }
     }
 }
 
@@ -384,5 +426,40 @@ mod tests {
     #[test]
     fn empty_value_is_empty_list() {
         assert_eq!(parse_str("").unwrap(), vec![]);
+    }
+
+    #[test]
+    fn parses_line_name_groups_between_tracks() {
+        let v = parse_str("[sidebar-start] 200px [sidebar-end main-start] 1fr [main-end]").unwrap();
+        assert_eq!(v.len(), 5);
+        assert_eq!(
+            v[0],
+            ParsedValue::LineNames(Box::from([Box::<str>::from("sidebar-start")]))
+        );
+        assert_eq!(
+            v[2],
+            ParsedValue::LineNames(Box::from([
+                Box::<str>::from("sidebar-end"),
+                Box::<str>::from("main-start")
+            ]))
+        );
+        assert_eq!(
+            v[4],
+            ParsedValue::LineNames(Box::from([Box::<str>::from("main-end")]))
+        );
+    }
+
+    #[test]
+    fn empty_line_name_group_carries_no_names() {
+        assert_eq!(
+            parse_str("[]").unwrap(),
+            vec![ParsedValue::LineNames(Box::from([]))]
+        );
+    }
+
+    #[test]
+    fn unterminated_line_name_group_errors() {
+        let err = parse_str("[a b").unwrap_err();
+        assert_eq!(err.kind(), CssParseErrorKind::UnexpectedEof);
     }
 }
