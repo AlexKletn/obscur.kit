@@ -3257,6 +3257,45 @@ mod tests {
         assert_eq!(runs[1].1, vec![u32::from('В'), u32::from('Г')]);
     }
 
+    /// An itemizer that counts every `itemize` call into a shared cell (readable
+    /// after it is boxed into the runtime) and delegates to a single-run
+    /// itemizer. Proves how often a frame reaches the underlying pipeline.
+    struct CountingItemizer(std::rc::Rc<std::cell::Cell<usize>>);
+
+    impl obscur_text::shaping::TextItemizer for CountingItemizer {
+        fn itemize(
+            &self,
+            text: &str,
+            base: obscur_text::shaping::TextDirection,
+        ) -> Vec<obscur_text::shaping::TextItem> {
+            self.0.set(self.0.get() + 1);
+            obscur_text::shaping::SingleRunItemizer::new().itemize(text, base)
+        }
+    }
+
+    #[test]
+    fn one_frame_itemizes_a_text_node_once_across_measure_arrange_compose() {
+        // Requirement (d): a text node is shaped in the layout pass (measure +
+        // arrange) AND again in the scene pass (compose), every frame. The
+        // paragraph cache — shared because both passes borrow the same
+        // `ParagraphShaper` — must collapse all of that to a single itemization.
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(14))
+                .with_children(ViewFragment::from_nodes(vec![ViewNode::text("hello")])),
+        ]));
+
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_text_itemizer(Box::new(CountingItemizer(calls.clone())));
+
+        let _ = runtime.render_now(&view, &[]);
+        assert_eq!(
+            calls.get(),
+            1,
+            "measure + arrange + compose must share one cached itemization"
+        );
+    }
+
     #[test]
     fn default_single_font_text_stays_one_primary_run() {
         // Requirement (a): with no ports installed the default single-run path

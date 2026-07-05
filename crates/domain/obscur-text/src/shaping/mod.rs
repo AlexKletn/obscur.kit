@@ -1,10 +1,12 @@
 //! Shaping module.
 mod caching_shaper;
 pub use caching_shaper::CachingShaper;
+mod face_source_key;
 mod glyph_run;
 pub use glyph_run::GlyphRun;
 mod line_metrics;
 pub use line_metrics::LineMetrics;
+mod paragraph_key;
 mod paragraph_shaper;
 pub use paragraph_shaper::ParagraphShaper;
 mod script_tag;

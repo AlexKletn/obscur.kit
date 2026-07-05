@@ -3,47 +3,9 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use crate::font::{FontAttributes, FontFamily, FontSource};
+use crate::font::{FontAttributes, FontFamily};
+use crate::shaping::face_source_key::FaceSourceKey;
 use crate::shaping::{GlyphRun, LineMetrics, ShapingRequest, TextDirection, TextShaper};
-
-/// The stable identity of a [`FontSource`] used inside a cache key.
-///
-/// System and bundled sources are keyed by their name (tagged so a `System`
-/// name never collides with an identical `Bundled` name). In-memory font bytes
-/// are keyed by the backing allocation's pointer and length — a cheap, stable
-/// identity — instead of hashing the whole byte buffer on every lookup. Two
-/// `Memory` sources that share the same `Arc<[u8]>` (the common case: one face
-/// shaped repeatedly) therefore hit the cache, and distinct allocations never
-/// collide even if their lengths match.
-#[derive(Clone, PartialEq, Eq, Hash)]
-enum FaceSourceKey {
-    /// A system face, keyed by its resolver name.
-    System(Box<str>),
-    /// A bundled fallback face, keyed by its bundle key.
-    Bundled(Box<str>),
-    /// In-memory bytes, keyed by allocation pointer and length.
-    Memory { ptr: usize, len: usize },
-}
-
-impl FaceSourceKey {
-    /// Builds a stable, cheap key from a [`FontSource`] without copying font
-    /// bytes.
-    fn from_source(source: &FontSource) -> Self {
-        match source {
-            FontSource::System(name) => Self::System(name.clone()),
-            FontSource::Bundled(name) => Self::Bundled(name.clone()),
-            FontSource::Memory(data) => {
-                // Thin the fat `*const [u8]` to a byte pointer, then to an integer
-                // identity — a cheap, stable key that never hashes the font bytes.
-                let ptr = std::sync::Arc::as_ptr(data).cast::<u8>() as usize;
-                Self::Memory {
-                    ptr,
-                    len: data.len(),
-                }
-            }
-        }
-    }
-}
 
 /// The full cache key: everything a [`ShapingRequest`] carries that can change
 /// the shaped output.
@@ -182,7 +144,7 @@ impl TextShaper for CachingShaper {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::font::{FontFace, FontMetrics, GenericFamily};
+    use crate::font::{FontFace, FontMetrics, FontSource, GenericFamily};
     use crate::shaping::MockTextShaper;
     use std::cell::Cell;
 
