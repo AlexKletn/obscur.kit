@@ -801,7 +801,48 @@ fn lower_for_property(
             None => PropertyValue::Keyword(interner.intern(keyword)),
         });
     }
+    // A unitless `0` is a valid length for any length-typed longhand — `0` means
+    // `0px` (CSS Values §4.5.3, "the unit may be omitted for zero lengths"). The
+    // generic `lower_value` path would otherwise lower it to a `PropertyValue::
+    // Number`, which a length property ignores (so `top: 0` would read as unset
+    // instead of `0px`, unlike `top: 0px` or the `inset: 0` shorthand which the
+    // box-shorthand path already handles via `box_side_length`).
+    if is_length_longhand(property)
+        && let [ParsedValue::Number(n)] = values
+        && *n == 0.0
+    {
+        return Some(PropertyValue::Length(Length::px(0.0)));
+    }
     lower_value(values, interner)
+}
+
+/// Whether `property` takes a `<length>`/`<length-percentage>` value, for which a
+/// unitless `0` is accepted as `0px`.
+fn is_length_longhand(property: PropertyId) -> bool {
+    matches!(
+        property,
+        PropertyId::Top
+            | PropertyId::Right
+            | PropertyId::Bottom
+            | PropertyId::Left
+            | PropertyId::Width
+            | PropertyId::Height
+            | PropertyId::MinWidth
+            | PropertyId::MinHeight
+            | PropertyId::MaxWidth
+            | PropertyId::MaxHeight
+            | PropertyId::MarginTop
+            | PropertyId::MarginRight
+            | PropertyId::MarginBottom
+            | PropertyId::MarginLeft
+            | PropertyId::PaddingTop
+            | PropertyId::PaddingRight
+            | PropertyId::PaddingBottom
+            | PropertyId::PaddingLeft
+            | PropertyId::Gap
+            | PropertyId::FlexBasis
+            | PropertyId::FontSize
+    )
 }
 
 /// Lowers a `font-family` value list into an ordered
@@ -1437,6 +1478,22 @@ mod tests {
 
     fn value_of(text: &str) -> PropertyValue {
         standard(text).0.value().clone()
+    }
+
+    #[test]
+    fn unitless_zero_is_a_zero_length_for_length_longhands() {
+        let zero = PropertyValue::Length(Length::px(0.0));
+        // Positioning insets, box model, sizing, gap, flex-basis, font-size.
+        assert_eq!(value_of("top: 0"), zero);
+        assert_eq!(value_of("right: 0"), zero);
+        assert_eq!(value_of("width: 0"), zero);
+        assert_eq!(value_of("margin-top: 0"), zero);
+        assert_eq!(value_of("padding-left: 0"), zero);
+        assert_eq!(value_of("gap: 0"), zero);
+        // An explicit `0px` is unchanged, and a non-length property keeps a
+        // unitless number as a `Number` (so `opacity: 0` is not a length).
+        assert_eq!(value_of("top: 0px"), zero);
+        assert_eq!(value_of("opacity: 0"), PropertyValue::Number(0.0));
     }
 
     fn compile_all(text: &str) -> Vec<CompiledDeclaration> {
