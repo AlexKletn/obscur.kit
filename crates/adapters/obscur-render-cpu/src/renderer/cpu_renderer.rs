@@ -31,7 +31,11 @@
 //!   rasterized here.
 //! - **Box shadows** ([`DrawShadow`]) rasterize as a flat, offset rounded rect at
 //!   reduced alpha (no gaussian blur; the `blur` radius is ignored) — a documented
-//!   approximation of the soft shadow the GPU backend blurs.
+//!   approximation of the soft shadow the GPU backend blurs. A CSS
+//!   `filter: drop-shadow(...)` reaches the same [`DrawShadow`] path (the
+//!   coordinator emits a drop shadow of the border box), so it rasterizes
+//!   identically; the rest of `filter` / `backdrop-filter` (content blur,
+//!   color-matrix) remain absent.
 //! - **Text runs** ([`DrawText`]) consume the same pre-shaped
 //!   [`GlyphRun`](obscur_scene::text::GlyphRun) the GPU backend does — text is
 //!   shaped once in `obscur-text`, never here — so both backends agree on glyph
@@ -412,13 +416,17 @@ impl Renderer for CpuRenderer {
     /// `effect` (spec §5.2).
     ///
     /// A CPU rasterizer emulates the common 2D effects, so `"blur"`, `"shadow"`,
-    /// `"gradient"`, and `"clip"` report [`SupportLevel::Emulated`]. A GPU-only
-    /// effect such as `"backdrop-filter"` reports [`SupportLevel::Unavailable`].
-    /// Any other name defaults to [`SupportLevel::Emulated`]: a software renderer
-    /// can approximate most 2D marks.
+    /// `"gradient"`, and `"clip"` report [`SupportLevel::Emulated`]. A
+    /// `filter: drop-shadow(...)` renders through the same `DrawShadow` path as a
+    /// `box-shadow` (a flat offset reduced-alpha rect), so `"drop-shadow"` is also
+    /// [`SupportLevel::Emulated`]. The general `filter` / `backdrop-filter`
+    /// (content blur, color-matrix) have no software approximation here and report
+    /// [`SupportLevel::Unavailable`]. Any other name defaults to
+    /// [`SupportLevel::Emulated`]: a software renderer can approximate most 2D
+    /// marks.
     fn supports_effect(&self, effect: &str) -> SupportLevel {
         match effect {
-            "backdrop-filter" => SupportLevel::Unavailable,
+            "filter" | "backdrop-filter" => SupportLevel::Unavailable,
             _ => SupportLevel::Emulated,
         }
     }
@@ -1108,6 +1116,13 @@ mod tests {
         assert_eq!(renderer.supports_effect("blur"), SupportLevel::Emulated);
         assert_eq!(renderer.supports_effect("shadow"), SupportLevel::Emulated);
         assert_eq!(renderer.supports_effect("gradient"), SupportLevel::Emulated);
+        // `filter: drop-shadow(...)` rides the `box-shadow` DrawShadow path.
+        assert_eq!(
+            renderer.supports_effect("drop-shadow"),
+            SupportLevel::Emulated
+        );
+        // The general `filter` / `backdrop-filter` have no software approximation.
+        assert_eq!(renderer.supports_effect("filter"), SupportLevel::Unavailable);
         assert_eq!(
             renderer.supports_effect("backdrop-filter"),
             SupportLevel::Unavailable

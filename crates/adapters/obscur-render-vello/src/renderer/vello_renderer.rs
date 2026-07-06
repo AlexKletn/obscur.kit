@@ -300,11 +300,14 @@ impl Renderer for VelloRenderer {
         match effect {
             // Vello rasterizes fills/strokes and clips natively.
             "clip" | "gradient" => SupportLevel::Native,
-            // Blur, drop-shadow, and backdrop filters are expressible via
-            // Vello's layer/blend machinery but not a single native primitive.
-            "blur" | "shadow" | "backdrop-filter" => SupportLevel::Emulated,
-            // Anything unrecognised is honestly unavailable rather than a
-            // silent no-op (spec §5.2 explicit diagnostics).
+            // A `box-shadow` and a `filter: drop-shadow(...)` both render through
+            // `Scene::draw_blurred_rounded_rect` — a real gaussian, but built from
+            // Vello's primitives rather than a single native shadow op.
+            "blur" | "shadow" | "drop-shadow" => SupportLevel::Emulated,
+            // The general `filter` / `backdrop-filter` (content blur, color-matrix)
+            // have no primitive on Vello 0.9 — only the `drop-shadow` subset is
+            // expressible — so they are honestly unavailable rather than a silent
+            // no-op (spec §5.2 explicit diagnostics).
             _ => SupportLevel::Unavailable,
         }
     }
@@ -392,9 +395,20 @@ mod tests {
         assert_eq!(renderer.supports_effect("gradient"), SupportLevel::Native);
         assert_eq!(renderer.supports_effect("blur"), SupportLevel::Emulated);
         assert_eq!(renderer.supports_effect("shadow"), SupportLevel::Emulated);
+        // `filter: drop-shadow(...)` renders through the real gaussian shadow path.
+        assert_eq!(
+            renderer.supports_effect("drop-shadow"),
+            SupportLevel::Emulated
+        );
+        // The general `filter` / `backdrop-filter` (content blur, color-matrix)
+        // have no Vello 0.9 primitive — honestly unavailable, not a silent no-op.
+        assert_eq!(
+            renderer.supports_effect("filter"),
+            SupportLevel::Unavailable
+        );
         assert_eq!(
             renderer.supports_effect("backdrop-filter"),
-            SupportLevel::Emulated
+            SupportLevel::Unavailable
         );
         assert_eq!(
             renderer.supports_effect("time-travel"),

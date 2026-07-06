@@ -1001,7 +1001,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 73] = [
+    const ALL: [PropertyId; 74] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::BackgroundImage,
@@ -1041,6 +1041,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::BorderBottomRightRadius,
         PropertyId::BorderBottomLeftRadius,
         PropertyId::BoxShadow,
+        PropertyId::Filter,
         PropertyId::Transform,
         PropertyId::TransformOrigin,
         PropertyId::MinWidth,
@@ -1135,6 +1136,15 @@ fn lower_for_property(
             return Some(wide);
         }
         return lower_box_shadow(values);
+    }
+    if property == PropertyId::Filter {
+        if let Some(ParsedValue::Keyword(keyword)) = values.first()
+            && let Some(wide) = css_wide_keyword(keyword)
+            && values.len() == 1
+        {
+            return Some(wide);
+        }
+        return lower_filter(values);
     }
     if property == PropertyId::Transform {
         if let Some(ParsedValue::Keyword(keyword)) = values.first()
@@ -2033,6 +2043,89 @@ fn shadow_length(value: &ParsedValue) -> Option<Length> {
     }
 }
 
+/// Lowers a `filter` value into a [`PropertyValue::Filter`] drop-shadow list.
+///
+/// The `filter` property takes a space-separated `<filter-function-list>`. Only
+/// the single GPU-expressible function on vello 0.9, `drop-shadow(...)`, is
+/// modelled: each is lowered by [`lower_one_drop_shadow`] and kept in author
+/// order. Any **non-drop-shadow** function (`blur()`, `brightness()`, `contrast()`,
+/// `grayscale()`, …) is **silently dropped** — it has no GPU-expressible
+/// approximation here, so faking it would be dishonest (documented). `filter: none`
+/// and an empty value both lower to an **empty** list (painting nothing). Returns
+/// [`None`] (degrading to an unsupported-feature diagnostic) when a `drop-shadow(…)`
+/// is present but malformed, so the author sees the mistake rather than a silent
+/// no-op.
+fn lower_filter(values: &[ParsedValue]) -> Option<PropertyValue> {
+    // `none` → an empty drop-shadow list.
+    if let [ParsedValue::Keyword(keyword)] = values
+        && keyword.eq_ignore_ascii_case("none")
+    {
+        return Some(PropertyValue::Filter(Box::new([])));
+    }
+    let mut shadows: Vec<BoxShadow> = Vec::new();
+    for value in values {
+        let ParsedValue::Function { name, args } = value else {
+            // A bare token in the filter list is not a filter function; the value
+            // is malformed.
+            return None;
+        };
+        if name.eq_ignore_ascii_case("drop-shadow") {
+            shadows.push(lower_one_drop_shadow(args)?);
+        }
+        // Every other filter function (`blur()`, `brightness()`, …) is out of
+        // scope on vello 0.9 and silently dropped — not faked.
+    }
+    Some(PropertyValue::Filter(shadows.into_boxed_slice()))
+}
+
+/// Lowers one `drop-shadow(<offset-x> <offset-y> <blur>? <color>?)` into a drop
+/// [`BoxShadow`] (`spread == 0`, `inset == false`).
+///
+/// A drop-shadow is the `box-shadow` DROP subset: two required `<length>` offsets,
+/// an optional third `<length>` blur radius (spread and `inset` are not part of the
+/// `drop-shadow()` grammar), and an optional `<color>` defaulting to `currentColor`
+/// (kept as [`None`], resolved at paint time — mirroring `box-shadow`). The
+/// arguments are **space-separated** (not comma-separated). Returns [`None`] for a
+/// duplicate color, a stray comma, an unparseable component, or fewer than two /
+/// more than three lengths.
+fn lower_one_drop_shadow(args: &[ParsedValue]) -> Option<BoxShadow> {
+    let mut lengths: Vec<Length> = Vec::new();
+    let mut color: Option<StyleColor> = None;
+    for value in args {
+        if let Some(length) = shadow_length(value) {
+            if lengths.len() == 3 {
+                return None;
+            }
+            lengths.push(length);
+            continue;
+        }
+        if let Some(parsed) = parse_stop_color(value) {
+            if color.is_some() {
+                return None;
+            }
+            color = Some(parsed);
+            continue;
+        }
+        // A comma (or any other token) is invalid inside `drop-shadow()`.
+        return None;
+    }
+    // Two required offsets, then an optional blur; spread is fixed at `0` and the
+    // shadow is never inset (a drop-shadow is a drop-only box-shadow).
+    let (offset_x, offset_y, blur) = match lengths.as_slice() {
+        [x, y] => (*x, *y, Length::px(0.0)),
+        [x, y, b] => (*x, *y, *b),
+        _ => return None,
+    };
+    Some(BoxShadow::new(
+        offset_x,
+        offset_y,
+        blur,
+        Length::px(0.0),
+        color,
+        false,
+    ))
+}
+
 /// Lowers a CSS 2D `transform` value into a [`PropertyValue::Transform`] carrying
 /// the composed affine (spec §5.2).
 ///
@@ -2797,6 +2890,76 @@ mod tests {
     fn box_shadow_none_is_an_empty_list() {
         let list = shadows_of("box-shadow: none");
         assert!(list.is_empty());
+    }
+
+    /// Extracts the lowered `filter` drop-shadow list from a declaration.
+    fn drop_shadows_of(text: &str) -> Box<[BoxShadow]> {
+        match value_of(text) {
+            PropertyValue::Filter(list) => list,
+            other => panic!("expected a filter drop-shadow list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn filter_drop_shadow_offset_blur_color() {
+        // `drop-shadow(4px 4px 8px rgba(0,0,0,0.5))` → one drop shadow: offset
+        // (4,4), blur 8, spread 0, the color, not inset.
+        let list = drop_shadows_of("filter: drop-shadow(4px 4px 8px rgba(0,0,0,0.5))");
+        assert_eq!(list.len(), 1);
+        let s = &list[0];
+        assert_eq!(s.offset_x(), Length::px(4.0));
+        assert_eq!(s.offset_y(), Length::px(4.0));
+        assert_eq!(s.blur(), Length::px(8.0));
+        assert_eq!(s.spread(), Length::px(0.0));
+        assert_eq!(s.color(), Some(StyleColor::rgba(0.0, 0.0, 0.0, 0.5)));
+        assert!(!s.is_inset());
+    }
+
+    #[test]
+    fn filter_multiple_drop_shadows_preserve_order() {
+        // `drop-shadow(2px 2px) drop-shadow(-2px -2px 4px red)` → two shadows.
+        let list = drop_shadows_of("filter: drop-shadow(2px 2px) drop-shadow(-2px -2px 4px red)");
+        assert_eq!(list.len(), 2);
+        // First: no blur, currentColor default.
+        assert_eq!(list[0].offset_x(), Length::px(2.0));
+        assert_eq!(list[0].offset_y(), Length::px(2.0));
+        assert_eq!(list[0].blur(), Length::px(0.0));
+        assert_eq!(list[0].color(), None);
+        assert!(!list[0].is_inset());
+        // Second: negative offsets, blur, red.
+        assert_eq!(list[1].offset_x(), Length::px(-2.0));
+        assert_eq!(list[1].offset_y(), Length::px(-2.0));
+        assert_eq!(list[1].blur(), Length::px(4.0));
+        assert_eq!(list[1].color(), Some(color(1.0, 0.0, 0.0)));
+    }
+
+    #[test]
+    fn filter_non_drop_shadow_function_is_dropped() {
+        // `blur(4px)` is out of scope on vello 0.9 and is silently dropped: the
+        // lowered filter is an empty list (no drop-shadows), not an error.
+        let list = drop_shadows_of("filter: blur(4px)");
+        assert!(list.is_empty());
+        // A drop-shadow mixed with an out-of-scope function keeps only the shadow.
+        let mixed = drop_shadows_of("filter: blur(4px) drop-shadow(1px 1px 2px black)");
+        assert_eq!(mixed.len(), 1);
+        assert_eq!(mixed[0].offset_x(), Length::px(1.0));
+        assert_eq!(mixed[0].color(), Some(StyleColor::BLACK));
+    }
+
+    #[test]
+    fn filter_none_is_an_empty_list() {
+        let list = drop_shadows_of("filter: none");
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn filter_malformed_drop_shadow_is_unsupported() {
+        // A `drop-shadow()` with a single offset is malformed → unsupported, not a
+        // silent empty filter.
+        assert!(matches!(
+            compile("filter: drop-shadow(4px)").0,
+            CompiledDeclaration::Unsupported(_)
+        ));
     }
 
     /// Extracts the lowered resolved affine `[a,b,c,d,e,f]` from a `transform`.

@@ -127,6 +127,15 @@ pub enum PropertyId {
     /// `box-shadow: none` lowers to an empty list. The scene coordinator paints a
     /// drop shadow behind the box's background and an inset shadow on top of it.
     BoxShadow,
+    /// The `filter` property (a `BoxShadow` list value carrying only the
+    /// `drop-shadow(...)` functions; NOT inherited). Only the single
+    /// GPU-expressible filter function, `drop-shadow(<ox> <oy> <blur>? <color>?)`,
+    /// is modelled — it lowers to a drop [`BoxShadow`](crate::property::BoxShadow)
+    /// (spread `0`, not inset) that the scene coordinator paints BEHIND the
+    /// element like a `box-shadow` drop shadow. Non-drop-shadow functions
+    /// (`blur()`, `brightness()`, …) are out of scope on vello 0.9 and are
+    /// silently dropped; `filter: none` / empty lowers to an empty list.
+    Filter,
 
     // ---- 2D transform (not inherited) ----
     /// The `transform` property (a resolved `Transform` affine; NOT inherited).
@@ -300,6 +309,7 @@ impl PropertyId {
             Self::BorderBottomRightRadius => "border-bottom-right-radius",
             Self::BorderBottomLeftRadius => "border-bottom-left-radius",
             Self::BoxShadow => "box-shadow",
+            Self::Filter => "filter",
             Self::Transform => "transform",
             Self::TransformOrigin => "transform-origin",
             Self::MinWidth => "min-width",
@@ -392,6 +402,7 @@ impl PropertyId {
             | Self::BorderBottomRightRadius
             | Self::BorderBottomLeftRadius
             | Self::BoxShadow
+            | Self::Filter
             | Self::Transform
             | Self::TransformOrigin
             | Self::MinWidth
@@ -779,6 +790,14 @@ mod tests {
     fn box_shadow_name_and_not_inherited() {
         assert_eq!(PropertyId::BoxShadow.name(), "box-shadow");
         assert!(!PropertyId::BoxShadow.default_inheritance().is_inherited());
+    }
+
+    #[test]
+    fn filter_name_and_not_inherited() {
+        assert_eq!(PropertyId::Filter.name(), "filter");
+        // Like `box-shadow` and the other paint effects, `filter` resets per
+        // element rather than inheriting.
+        assert!(!PropertyId::Filter.default_inheritance().is_inherited());
     }
 
     #[test]

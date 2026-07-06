@@ -49,6 +49,7 @@ impl ComputedValue {
             | PropertyValue::RadialGradient(_)
             | PropertyValue::ConicGradient(_)
             | PropertyValue::BoxShadow(_)
+            | PropertyValue::Filter(_)
             | PropertyValue::FontFamilies(_)
             | PropertyValue::GridTracks(_)
             | PropertyValue::GridLine(_)
@@ -140,6 +141,12 @@ impl ComputedValue {
     #[must_use]
     pub fn as_box_shadows(&self) -> Option<&[BoxShadow]> {
         self.0.as_box_shadows()
+    }
+
+    /// Returns the `filter` drop-shadow list if this computed value is a `filter`.
+    #[must_use]
+    pub fn as_drop_shadows(&self) -> Option<&[BoxShadow]> {
+        self.0.as_drop_shadows()
     }
 
     /// Returns the resolved 2D `transform` if this computed value is a transform.

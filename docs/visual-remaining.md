@@ -5,6 +5,7 @@ The visual paint layer is now substantial and verified end-to-end (see
 `background-image: {linear,radial,conic}-gradient(...)`,
 `border-{side}-{width,style,color}`
 (painted), `border-radius` (rounded fill + clip), `box-shadow` (drop + inset),
+`filter: drop-shadow(...)` (via the box-shadow `DrawShadow` path),
 2D `transform` (translate/scale/rotate/skew/matrix + transform-origin), plus a
 named-color table. Rendering is real on the Vello backend and headless-
 approximated on the CPU (tiny-skia) backend.
@@ -47,6 +48,12 @@ The following are deferred. Each is documented at its site in code.
   interior (approximate).
 - **Shadow on a rounded element** — a drop shadow sits inside the element's own
   subtree clip (documented approximation of the paint order).
+- **`filter: drop-shadow(...)`** — DONE. Lowered to a drop `BoxShadow` (spread `0`,
+  not inset) and painted BEHIND the element via the same `DrawShadow` path as
+  `box-shadow` (Vello real gaussian, CPU flat offset approx), emitted after the
+  box-shadow drop shadows. The shadow follows the element's border BOX, not its
+  content alpha (a documented approximation — real CSS drop-shadow follows the
+  rendered content's alpha, including its `box-shadow`).
 
 ## Transform
 - **Percentage `translate`** — `translate(50%)` is treated as `0` (the box size
@@ -65,7 +72,13 @@ The following are deferred. Each is documented at its site in code.
   / effects are still approximated on the CPU backend (only opacity is honored).
 
 ## Not started
-- **`filter` / `backdrop-filter`** (blur, brightness, drop-shadow, …).
+- **`filter` / `backdrop-filter`** — the general property is BLOCKED on Vello 0.9,
+  which has no content-blur or color-matrix primitive: `blur()`, `brightness()`,
+  `contrast()`, `grayscale()`, `backdrop-filter`, … cannot be expressed and are
+  **silently dropped** at CSS lower time (not faked). Only the single
+  GPU-expressible function, `filter: drop-shadow(...)`, is implemented (see the
+  Shadow section above); `supports_effect("filter" / "backdrop-filter")` reports
+  `Unavailable` on both backends, `"drop-shadow"` reports `Emulated`.
 - **`outline` / `outline-offset`** — an outline that does not affect layout.
 - **`clip-path`** — arbitrary clip shapes (the scene has path clips).
 - **`mix-blend-mode` / `background-blend-mode`** — the scene has blend on layers.

@@ -618,6 +618,26 @@ impl SceneCoordinator {
                 }
             }
 
+            // CSS `filter: drop-shadow(...)`: each drop-shadow paints BEHIND the
+            // node like a `box-shadow` DROP shadow (spread 0, never inset), reusing
+            // the same `DrawShadow` path — the GPU backend blurs it with a real
+            // gaussian, the CPU backend approximates a flat offset rect. In real
+            // CSS `filter` applies to the already-rendered element (including its
+            // `box-shadow`); we approximate the shadow as the element's border box,
+            // and emit the filter drop-shadows AFTER the `box-shadow` drop shadows
+            // (so they sit just in front of them) but still behind the element's own
+            // background / border / text. Only the drop-shadow filter functions
+            // reach here; `blur()` / color-matrix / `backdrop-filter` are dropped at
+            // CSS lower time (out of scope on vello 0.9). No filter emits nothing —
+            // byte-for-byte identical to before.
+            let drop_shadows = filter_drop_shadows_of(computed, node);
+            if let (Some(drop_shadows), Some(layout_box)) = (drop_shadows, boxes.get(&node)) {
+                let current = current_color_of(computed, node);
+                for shadow in drop_shadows.iter().rev() {
+                    emit_box_shadow(&mut node_paint, layout_box.bounds, radii, shadow, current);
+                }
+            }
+
             // The background fill brush: an authored `background-image` gradient
             // (linear / radial / conic) wins over `background-color` (the gradient
             // paints over the color), otherwise a non-transparent
@@ -1109,6 +1129,20 @@ fn box_shadows_of(computed: &ComputedStyles, node: NodeId) -> Option<&[BoxShadow
         .get(&node)
         .and_then(|style| style.get(PropertyId::BoxShadow))
         .and_then(ComputedValue::as_box_shadows)
+}
+
+/// Reads a node's computed `filter` drop-shadow list, if present.
+///
+/// Returns [`None`] when the node has no computed style, no `filter` property, or
+/// a non-filter value — the common (unauthored) case, which emits no shadows.
+/// `filter: none` (and a filter with only out-of-scope functions) is an **empty**
+/// list (also nothing to emit). Each entry is a drop [`BoxShadow`] (`spread == 0`,
+/// not inset) painted behind the node like a `box-shadow` drop shadow.
+fn filter_drop_shadows_of(computed: &ComputedStyles, node: NodeId) -> Option<&[BoxShadow]> {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::Filter))
+        .and_then(ComputedValue::as_drop_shadows)
 }
 
 /// Emits one [`BoxShadow`] as a scene
@@ -2057,6 +2091,163 @@ mod tests {
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         assert!(shadow_commands(&list).is_empty());
+    }
+
+    /// A `ComputedStyle` carrying a `background-color` and a `filter` drop-shadow
+    /// list.
+    fn with_background_and_filter(bg: StyleColor, shadows: Vec<BoxShadow>) -> ComputedStyle {
+        let mut style = ComputedStyle::new();
+        style.set(PropertyId::BackgroundColor, ComputedValue::color(bg));
+        style.set(
+            PropertyId::Filter,
+            ComputedValue::from_concrete(PropertyValue::Filter(shadows.into_boxed_slice()))
+                .expect("a filter drop-shadow list is a concrete computed value"),
+        );
+        style
+    }
+
+    #[test]
+    fn filter_drop_shadow_emits_draw_shadow_behind_background() {
+        // A node with `filter: drop-shadow(4px 4px 8px black)` over its background.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let shadow = BoxShadow::new(
+            Length::px(4.0),
+            Length::px(4.0),
+            Length::px(8.0),
+            Length::px(0.0),
+            Some(StyleColor::BLACK),
+            false,
+        );
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(
+            a,
+            with_background_and_filter(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), vec![shadow]),
+        );
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 20.0, 10.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+
+        // Exactly one DrawShadow, carrying the authored params (spread 0, not inset).
+        let shadows = shadow_commands(&list);
+        assert_eq!(shadows.len(), 1);
+        let PaintCommand::DrawShadow {
+            rect,
+            color,
+            blur,
+            spread,
+            offset,
+            inset,
+            ..
+        } = shadows[0]
+        else {
+            panic!("expected a DrawShadow");
+        };
+        assert_eq!(*rect, Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 10.0)));
+        assert_eq!(*color, obscur_scene::color::Color::BLACK);
+        assert_eq!(*blur, 8.0);
+        assert_eq!(*spread, 0.0);
+        assert_eq!(*offset, (4.0, 4.0));
+        assert!(!*inset, "a drop-shadow is never inset");
+
+        // The filter drop-shadow paints BEFORE (behind) the background fill.
+        let shadow_pos = list
+            .commands()
+            .iter()
+            .position(|c| matches!(c, PaintCommand::DrawShadow { .. }))
+            .expect("shadow present");
+        let fill_pos = list
+            .commands()
+            .iter()
+            .position(|c| matches!(c, PaintCommand::DrawPath { .. }))
+            .expect("background present");
+        assert!(shadow_pos < fill_pos, "filter drop-shadow paints behind the background");
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn no_filter_emits_no_draw_shadow() {
+        // Regression: a node with a background but no `filter` emits no shadow.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(a, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        assert!(shadow_commands(&list).is_empty());
+    }
+
+    #[test]
+    fn box_shadow_and_filter_drop_shadow_both_emit() {
+        // A node carrying BOTH a `box-shadow` and a `filter: drop-shadow(...)`
+        // emits two DrawShadows, both behind the background.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let box_shadow = BoxShadow::new(
+            Length::px(2.0),
+            Length::px(2.0),
+            Length::px(4.0),
+            Length::px(0.0),
+            Some(StyleColor::BLACK),
+            false,
+        );
+        let filter_shadow = BoxShadow::new(
+            Length::px(6.0),
+            Length::px(6.0),
+            Length::px(12.0),
+            Length::px(0.0),
+            Some(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
+            false,
+        );
+        let mut style =
+            with_background_and_shadow(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), vec![box_shadow]);
+        style.set(
+            PropertyId::Filter,
+            ComputedValue::from_concrete(PropertyValue::Filter(
+                vec![filter_shadow].into_boxed_slice(),
+            ))
+            .expect("a filter drop-shadow list is a concrete computed value"),
+        );
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(a, style);
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 20.0, 10.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+
+        let shadows = shadow_commands(&list);
+        assert_eq!(shadows.len(), 2, "box-shadow and filter drop-shadow both paint");
+        // Both shadows paint before the background fill.
+        let fill_pos = list
+            .commands()
+            .iter()
+            .position(|c| matches!(c, PaintCommand::DrawPath { .. }))
+            .expect("background present");
+        for (i, c) in list.commands().iter().enumerate() {
+            if matches!(c, PaintCommand::DrawShadow { .. }) {
+                assert!(i < fill_pos, "shadows paint behind the background");
+            }
+        }
+        assert!(list.is_balanced());
     }
 
     /// A `ComputedStyle` with a `background-color`, `position: absolute`, and an

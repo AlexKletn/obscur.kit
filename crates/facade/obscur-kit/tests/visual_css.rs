@@ -417,6 +417,82 @@ fn no_box_shadow_authored_emits_no_draw_shadow() {
     );
 }
 
+// An authored `filter: drop-shadow(4px 4px 8px black)` reaches paint through the
+// real pipeline: the display list carries a `DrawShadow` (spread 0, not inset)
+// with the authored offset, blur, and color, painted BEHIND the background — the
+// same DrawShadow path a `box-shadow` uses (GPU gaussian, CPU flat approx).
+#[test]
+fn authored_filter_drop_shadow_paints_draw_shadow_behind_background() {
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(
+        ".box{width:100px;height:50px;background-color:#00ff00;filter:drop-shadow(4px 4px 8px black)}",
+    );
+    let result = rt.render_now(&one_box_view(), std::slice::from_ref(&sheet));
+    assert!(result.restyled(), "authored CSS resolved computed styles");
+    assert!(result.relaid_out(), "the styled tree arranged a layout box");
+    assert!(result.is_balanced(), "the display list is well-formed");
+
+    let bounds = rt
+        .layout_boxes()
+        .get(&box_node(&rt))
+        .copied()
+        .expect("the box has a layout box")
+        .bounds;
+
+    let commands = result.snapshot().display_list().commands();
+
+    // Exactly one DrawShadow, carrying the authored params over the border box.
+    let shadow_idx = commands
+        .iter()
+        .position(|c| matches!(c, PaintCommand::DrawShadow { .. }))
+        .expect("an authored filter drop-shadow emits a DrawShadow");
+    let PaintCommand::DrawShadow {
+        rect,
+        color,
+        blur,
+        spread,
+        offset,
+        inset,
+        ..
+    } = &commands[shadow_idx]
+    else {
+        unreachable!("matched DrawShadow above");
+    };
+    assert!(rect_approx_eq(*rect, bounds), "shadow over the border box");
+    assert_eq!(*color, Color::rgba(0.0, 0.0, 0.0, 1.0), "authored black");
+    assert_eq!(*blur, 8.0);
+    assert_eq!(*spread, 0.0, "drop-shadow has no spread");
+    assert_eq!(*offset, (4.0, 4.0));
+    assert!(!*inset, "a drop-shadow is never inset");
+
+    // The drop shadow paints BEFORE the background fill (behind the box).
+    let fill_idx = commands
+        .iter()
+        .position(|c| matches!(c, PaintCommand::DrawPath { .. }))
+        .expect("the background fill is present");
+    assert!(
+        shadow_idx < fill_idx,
+        "filter drop-shadow paints behind the background"
+    );
+}
+
+// Regression guard: an out-of-scope filter function (`blur(...)`) is dropped and
+// emits no DrawShadow — it is not faked.
+#[test]
+fn filter_blur_only_emits_no_draw_shadow() {
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(".box{width:40px;height:40px;background-color:#00ff00;filter:blur(4px)}");
+    let result = rt.render_now(&one_box_view(), std::slice::from_ref(&sheet));
+
+    let commands = result.snapshot().display_list().commands();
+    assert!(
+        !commands
+            .iter()
+            .any(|c| matches!(c, PaintCommand::DrawShadow { .. })),
+        "an out-of-scope blur() filter emits no DrawShadow (dropped, not faked)"
+    );
+}
+
 // An authored `transform: translate(30px, 40px)` reaches paint through the real
 // pipeline: the element's whole subtree paint is bracketed by a `PushTransform` /
 // `PopTransform` carrying the composed affine (a pure translation, so the

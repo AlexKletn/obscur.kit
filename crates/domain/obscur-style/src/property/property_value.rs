@@ -72,6 +72,15 @@ pub enum PropertyValue {
     /// the first-listed shadow on top, so the scene coordinator emits the list in
     /// reverse order (spec §5.2).
     BoxShadow(Box<[BoxShadow]>),
+    /// An ordered `filter` drop-shadow list, in author order: the value of
+    /// `filter` reduced to its `drop-shadow(...)` functions. A `drop-shadow` is a
+    /// `box-shadow` subset, so each entry reuses [`BoxShadow`] with `spread == 0`
+    /// and `inset == false`; the coordinator paints it BEHIND the element exactly
+    /// like a `box-shadow` drop shadow. Non-drop-shadow filter functions
+    /// (`blur()`, `brightness()`, …) are out of scope on vello 0.9 and are dropped
+    /// at lower time, so this list holds only the drop-shadows; `filter: none` /
+    /// empty lowers to an **empty** list (painting nothing).
+    Filter(Box<[BoxShadow]>),
     /// An ordered `font-family` list, in author order. Each entry is either a
     /// concrete family name (for example `"Helvetica Neue"`) or a generic
     /// keyword (`"serif"`, `"sans-serif"`, `"monospace"`, `"cursive"`,
@@ -178,6 +187,18 @@ impl PropertyValue {
     pub fn as_box_shadows(&self) -> Option<&[BoxShadow]> {
         match self {
             Self::BoxShadow(shadows) => Some(shadows),
+            _ => None,
+        }
+    }
+
+    /// Returns the ordered `filter` drop-shadow list if this value is a
+    /// [`PropertyValue::Filter`] (an empty slice for `filter: none` or a filter
+    /// with no `drop-shadow(...)` functions). Each entry is a drop
+    /// [`BoxShadow`] (`spread == 0`, `inset == false`).
+    #[must_use]
+    pub fn as_drop_shadows(&self) -> Option<&[BoxShadow]> {
+        match self {
+            Self::Filter(shadows) => Some(shadows),
             _ => None,
         }
     }
@@ -398,6 +419,28 @@ mod tests {
         let none = PropertyValue::BoxShadow(Box::new([]));
         assert_eq!(none.as_box_shadows(), Some(&[][..]));
         assert_eq!(PropertyValue::Number(1.0).as_box_shadows(), None);
+    }
+
+    #[test]
+    fn as_drop_shadows_extracts_only_filter_lists() {
+        use crate::property::{BoxShadow, Length};
+        let shadows: Box<[BoxShadow]> = Box::new([BoxShadow::new(
+            Length::px(4.0),
+            Length::px(4.0),
+            Length::px(8.0),
+            Length::px(0.0),
+            Some(StyleColor::rgba(0.0, 0.0, 0.0, 0.5)),
+            false,
+        )]);
+        let value = PropertyValue::Filter(shadows.clone());
+        assert_eq!(value.as_drop_shadows(), Some(&*shadows));
+        // `none` / no drop-shadow functions lowers to an empty list.
+        let none = PropertyValue::Filter(Box::new([]));
+        assert_eq!(none.as_drop_shadows(), Some(&[][..]));
+        // A filter list is not a box-shadow list, and vice versa.
+        assert_eq!(value.as_box_shadows(), None);
+        assert_eq!(PropertyValue::BoxShadow(shadows).as_drop_shadows(), None);
+        assert_eq!(PropertyValue::Number(1.0).as_drop_shadows(), None);
     }
 
     #[test]
