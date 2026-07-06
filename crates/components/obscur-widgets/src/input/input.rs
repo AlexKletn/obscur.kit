@@ -4,7 +4,8 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_text::editing::{EditCommand, TextBuffer};
 use obscur_view::view::{
-    EVENT_CHANGE, EVENT_INPUT, View, ViewEventBinding, ViewNode, ViewProperty, ViewValue,
+    EVENT_CHANGE, EVENT_INPUT, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
+    ViewValue,
 };
 
 /// A headless text-input control (spec §2.6).
@@ -142,12 +143,29 @@ impl Input {
     /// event bindings to `command`: a per-keystroke [`EVENT_INPUT`] (each typed
     /// character / `Backspace` drives the runtime's editing session, which
     /// delivers the resulting field text to the app) and a
-    /// commit-on-blur/Enter [`EVENT_CHANGE`]. An input has no child structure —
-    /// its text is carried as the value property, not a text node.
+    /// commit-on-blur/Enter [`EVENT_CHANGE`].
+    ///
+    /// The current text is carried *both* as the [`PROP_VALUE`] property (the
+    /// semantic / accessibility surface) *and* as a single [`Text`] child node,
+    /// so the field renders visibly and the runtime's editing-session
+    /// auto-seeding — which reads the focused editable's descendant
+    /// [`ViewNode::Text`] content — picks up the value. A non-empty value always
+    /// shows the value; an empty value falls back to showing the `placeholder`
+    /// as the child (so an empty field is not blank on screen).
     ///
     /// [`COMPONENT_ID`]: Self::COMPONENT_ID
+    /// [`PROP_VALUE`]: Self::PROP_VALUE
+    /// [`Text`]: obscur_view::view::ViewNode::text
     #[must_use]
     pub fn view(&self) -> View {
+        // Value else placeholder: a non-empty value always displays the value;
+        // only an empty field shows the placeholder text.
+        let value = self.buffer.text();
+        let child_text: &str = if value.is_empty() {
+            &self.placeholder
+        } else {
+            value
+        };
         let node = ViewNode::element(Self::COMPONENT_ID)
             .with_prop(ViewProperty::new(
                 Self::PROP_ROLE,
@@ -159,14 +177,15 @@ impl Input {
             ))
             .with_prop(ViewProperty::new(
                 Self::PROP_VALUE,
-                ViewValue::from(self.buffer.text()),
+                ViewValue::from(value),
             ))
             .with_prop(ViewProperty::new(
                 Self::PROP_PLACEHOLDER,
                 ViewValue::from(&*self.placeholder),
             ))
             .with_event(ViewEventBinding::new(EVENT_INPUT, self.command))
-            .with_event(ViewEventBinding::new(EVENT_CHANGE, self.command));
+            .with_event(ViewEventBinding::new(EVENT_CHANGE, self.command))
+            .with_children(ViewFragment::from_nodes(vec![ViewNode::text(child_text)]));
         View::single(node)
     }
 }
@@ -228,7 +247,64 @@ mod tests {
                     .expect("placeholder prop present");
                 assert_eq!(*placeholder.value(), ViewValue::from("type here"));
                 assert_eq!(events[0].command(), cmd());
-                assert!(children.is_empty());
+                // A non-empty value is rendered as a single Text child (in
+                // addition to the PROP_VALUE prop): visible + runtime-seedable.
+                assert_eq!(children.len(), 1);
+                match &children.nodes()[0] {
+                    ViewNode::Text { content, .. } => assert_eq!(&**content, "abc"),
+                    ViewNode::Element { .. } => panic!("expected text child"),
+                }
+            }
+            ViewNode::Text { .. } => panic!("expected element root"),
+        }
+    }
+
+    #[test]
+    fn view_renders_value_as_text_child() {
+        // The buffer text is carried both as PROP_VALUE and as a Text child so
+        // the field displays and the runtime's editing-session auto-seeding
+        // (which reads descendant Text content) picks it up.
+        let i = Input::with_value(cmd(), "hi");
+        let view = i.view();
+        match &view.root().nodes()[0] {
+            ViewNode::Element {
+                props, children, ..
+            } => {
+                let value = props
+                    .iter()
+                    .find(|p| p.name() == Input::PROP_VALUE)
+                    .expect("value prop present");
+                assert_eq!(*value.value(), ViewValue::from("hi"));
+                assert_eq!(children.len(), 1);
+                match &children.nodes()[0] {
+                    ViewNode::Text { content, .. } => assert_eq!(&**content, "hi"),
+                    ViewNode::Element { .. } => panic!("expected text child"),
+                }
+            }
+            ViewNode::Text { .. } => panic!("expected element root"),
+        }
+    }
+
+    #[test]
+    fn empty_input_renders_placeholder_as_text_child() {
+        // An empty field falls back to showing the placeholder as its child so
+        // it is not blank on screen; the value prop is still the empty value.
+        let i = Input::new(cmd()).placeholder("type here");
+        let view = i.view();
+        match &view.root().nodes()[0] {
+            ViewNode::Element {
+                props, children, ..
+            } => {
+                let value = props
+                    .iter()
+                    .find(|p| p.name() == Input::PROP_VALUE)
+                    .expect("value prop present");
+                assert_eq!(*value.value(), ViewValue::from(""));
+                assert_eq!(children.len(), 1);
+                match &children.nodes()[0] {
+                    ViewNode::Text { content, .. } => assert_eq!(&**content, "type here"),
+                    ViewNode::Element { .. } => panic!("expected text child"),
+                }
             }
             ViewNode::Text { .. } => panic!("expected element root"),
         }
