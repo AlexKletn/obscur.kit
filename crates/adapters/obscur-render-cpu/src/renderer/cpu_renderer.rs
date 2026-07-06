@@ -36,6 +36,16 @@
 //!   coordinator emits a drop shadow of the border box), so it rasterizes
 //!   identically; the rest of `filter` / `backdrop-filter` (content blur,
 //!   color-matrix) remain absent.
+//! - **Images** ([`DrawImage`]) blit the real decoded RGBA8 pixels: the buffer is
+//!   premultiplied (as `tiny-skia` stores) if the [`SceneImage`] is straight-alpha,
+//!   wrapped into a source [`tiny_skia::Pixmap`], and drawn with `draw_pixmap` under
+//!   a transform that stretches the image's intrinsic size to the destination rect.
+//!   This is a genuine sampled bitmap, not an approximation, so both backends show
+//!   the same picture. Only a stretch-to-`dst` draw is modeled (no source-rect,
+//!   `repeat` tiling, nine-slice, or `background-size` yet).
+//!
+//! [`DrawImage`]: obscur_scene::command::PaintCommand::DrawImage
+//!
 //! - **Text runs** ([`DrawText`]) consume the same pre-shaped
 //!   [`GlyphRun`](obscur_scene::text::GlyphRun) the GPU backend does — text is
 //!   shaped once in `obscur-text`, never here — so both backends agree on glyph
@@ -68,9 +78,9 @@ use obscur_render::frame::{FrameSubmission, PresentResult};
 use obscur_render::target::RenderTarget;
 use obscur_render::{Renderer, RendererCapabilities, RendererError, RendererId};
 use obscur_scene::clip::{Clip, ClipShape};
-use obscur_scene::color::Color;
+use obscur_scene::color::{AlphaMode, Color};
 use obscur_scene::command::PaintCommand;
-use obscur_scene::paint::{Brush, Paint};
+use obscur_scene::paint::{Brush, Paint, SceneImage};
 use obscur_scene::path::{FillRule, Path, PathSegment};
 use obscur_scene::text::GlyphRun;
 
@@ -385,6 +395,13 @@ impl Renderer for CpuRenderer {
                         current,
                     );
                 }
+                PaintCommand::DrawImage { image, dst } => {
+                    let clip = clip_stack.last().and_then(Option::as_ref);
+                    let Some(pixmap) = targets.last_mut() else {
+                        continue;
+                    };
+                    draw_image(pixmap, image, *dst, clip, current);
+                }
             }
         }
 
@@ -427,6 +444,10 @@ impl Renderer for CpuRenderer {
     fn supports_effect(&self, effect: &str) -> SupportLevel {
         match effect {
             "filter" | "backdrop-filter" => SupportLevel::Unavailable,
+            // A `DrawImage` blits the real decoded pixels (a genuine sampled
+            // bitmap via `draw_pixmap`), not an approximation, so images are
+            // natively supported here.
+            "image" => SupportLevel::Native,
             _ => SupportLevel::Emulated,
         }
     }
@@ -609,6 +630,79 @@ fn draw_shadow_approx(
         transform,
         clip,
     );
+}
+
+/// Blits a decoded [`SceneImage`] stretched to fill `dst`, honoring the active
+/// `clip` and `transform` (spec §5.16).
+///
+/// `tiny-skia` stores **premultiplied** RGBA, so a [`AlphaMode::Straight`] image is
+/// premultiplied per pixel here (a [`AlphaMode::Premultiplied`] image is used as-is)
+/// before being wrapped into a source [`tiny_skia::Pixmap`]. The source is then
+/// drawn with [`draw_pixmap`](tiny_skia::Pixmap::draw_pixmap) under a transform that
+/// scales the image's intrinsic `width × height` to `dst`'s size and translates it
+/// to `dst`'s origin, composed with the running `transform`. The default nearest
+/// sampling keeps the blit crisp and deterministic. A zero-sized image or
+/// destination, or a source pixmap that fails to allocate, draws nothing.
+#[allow(clippy::cast_precision_loss)]
+fn draw_image(
+    pixmap: &mut tiny_skia::Pixmap,
+    image: &SceneImage,
+    dst: Rect,
+    clip: Option<&tiny_skia::Mask>,
+    transform: tiny_skia::Transform,
+) {
+    let (iw, ih) = (image.width(), image.height());
+    if iw == 0 || ih == 0 || dst.size.width <= 0.0 || dst.size.height <= 0.0 {
+        return;
+    }
+    // tiny-skia stores premultiplied RGBA: premultiply a straight image, pass a
+    // premultiplied one through unchanged, so both backends show the same picture.
+    let premultiplied = match image.alpha_mode() {
+        AlphaMode::Premultiplied => image.pixels().to_vec(),
+        AlphaMode::Straight => premultiply_rgba(image.pixels()),
+    };
+    let Some(size) = tiny_skia::IntSize::from_wh(iw, ih) else {
+        return;
+    };
+    let Some(src) = tiny_skia::Pixmap::from_vec(premultiplied, size) else {
+        return;
+    };
+    // Intrinsic → dst: scale the natural `iw × ih` to the destination size, then
+    // translate to its origin, all under the running transform. `draw_pixmap`'s
+    // sprite offset stays `(0, 0)` — the placement lives entirely in the transform.
+    let place = transform
+        .pre_concat(tiny_skia::Transform::from_translate(dst.origin.x, dst.origin.y))
+        .pre_concat(tiny_skia::Transform::from_scale(
+            dst.size.width / iw as f32,
+            dst.size.height / ih as f32,
+        ));
+    pixmap.draw_pixmap(
+        0,
+        0,
+        src.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        place,
+        clip,
+    );
+}
+
+/// Premultiplies straight-alpha RGBA8 bytes into the premultiplied form
+/// `tiny-skia` expects: each color channel is scaled by `alpha / 255` (rounded),
+/// the alpha channel kept. The input length must be a multiple of four.
+#[allow(clippy::cast_possible_truncation)]
+fn premultiply_rgba(straight: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(straight.len());
+    for px in straight.chunks_exact(4) {
+        let a = u16::from(px[3]);
+        // Rounded `c * a / 255` per channel (a == 255 is an exact identity).
+        // The result is always `<= 255`, so the `as u8` never truncates.
+        let mul = |c: u8| -> u8 { ((u16::from(c) * a + 127) / 255) as u8 };
+        out.push(mul(px[0]));
+        out.push(mul(px[1]));
+        out.push(mul(px[2]));
+        out.push(px[3]);
+    }
+    out
 }
 
 /// Lowers a geometric [`ClipShape`] to a domain [`Path`] this backend can
@@ -1127,6 +1221,126 @@ mod tests {
             renderer.supports_effect("backdrop-filter"),
             SupportLevel::Unavailable
         );
+    }
+
+    /// A white background rect covering `0..16 × 0..16`, drawn first so images
+    /// composite over an opaque white canvas.
+    fn white_bg() -> PaintCommand {
+        PaintCommand::DrawPath {
+            path: Path::rect(Rect::new(Point::new(0.0, 0.0), Size::new(16.0, 16.0))),
+            paint: Paint::solid_fill(Color::WHITE),
+        }
+    }
+
+    /// A 2×2 image whose four pixels are all `(r, g, b, a)`.
+    fn solid_image(r: u8, g: u8, b: u8, a: u8, alpha: AlphaMode) -> SceneImage {
+        let px: Vec<u8> = std::iter::repeat_n([r, g, b, a], 4).flatten().collect();
+        SceneImage::new(2, 2, Arc::from(px), alpha).expect("2x2 image")
+    }
+
+    #[test]
+    fn draw_image_fills_dst_with_red_over_white() {
+        // A 2×2 opaque-red image stretched to the dst rect (4,4)..(12,12) over a
+        // white canvas: dst interior is red, outside stays white.
+        let image = solid_image(255, 0, 0, 255, AlphaMode::Straight);
+        let dst = Rect::new(Point::new(4.0, 4.0), Size::new(8.0, 8.0));
+        let list = DisplayList::from_commands(vec![
+            white_bg(),
+            PaintCommand::DrawImage { image, dst },
+        ]);
+        let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(11));
+        let frame = RenderFrame::new(snapshot, Size::new(16.0, 16.0));
+        let submission = FrameSubmission::new(frame);
+
+        let mut renderer = CpuRenderer::default();
+        renderer
+            .render(&submission, &bitmap_target(16.0, 16.0))
+            .expect("renders");
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+
+        // A pixel inside the dst rect is opaque red.
+        let inside = pixmap.pixel(8, 8).expect("center pixel exists");
+        assert!(inside.red() > 200, "red high: {}", inside.red());
+        assert!(inside.green() < 40, "green low: {}", inside.green());
+        assert!(inside.blue() < 40, "blue low: {}", inside.blue());
+        assert!(inside.alpha() > 200, "alpha high: {}", inside.alpha());
+
+        // A pixel outside the dst rect stays white.
+        let outside = pixmap.pixel(1, 1).expect("corner pixel exists");
+        assert!(outside.red() > 200 && outside.green() > 200 && outside.blue() > 200);
+    }
+
+    #[test]
+    fn half_alpha_image_blends_over_white() {
+        // A 2×2 straight-alpha red at 50% alpha over white → pink: red stays high,
+        // green/blue rise toward mid as the white shows through (proves the
+        // straight→premultiplied conversion and SrcOver blend).
+        let image = solid_image(255, 0, 0, 128, AlphaMode::Straight);
+        let dst = Rect::new(Point::new(4.0, 4.0), Size::new(8.0, 8.0));
+        let list = DisplayList::from_commands(vec![
+            white_bg(),
+            PaintCommand::DrawImage { image, dst },
+        ]);
+        let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(12));
+        let frame = RenderFrame::new(snapshot, Size::new(16.0, 16.0));
+        let submission = FrameSubmission::new(frame);
+
+        let mut renderer = CpuRenderer::default();
+        renderer
+            .render(&submission, &bitmap_target(16.0, 16.0))
+            .expect("renders");
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+
+        let blended = pixmap.pixel(8, 8).expect("center pixel exists");
+        // Red still dominates, but green/blue are mid-range (white showing through)
+        // — a pink, not pure red and not white.
+        assert!(blended.red() > 200, "red high: {}", blended.red());
+        assert!(
+            (90..=180).contains(&blended.green()),
+            "green mid (white bleed): {}",
+            blended.green()
+        );
+        assert!(
+            (90..=180).contains(&blended.blue()),
+            "blue mid (white bleed): {}",
+            blended.blue()
+        );
+    }
+
+    #[test]
+    fn image_under_opacity_layer_composites() {
+        // The image is nested inside a 0.5-opacity layer over white: it reuses the
+        // layer stack (offscreen + composite) and must not panic, and the dst pixel
+        // is a half-strength red (the group opacity applied once).
+        let image = solid_image(255, 0, 0, 255, AlphaMode::Straight);
+        let dst = Rect::new(Point::new(4.0, 4.0), Size::new(8.0, 8.0));
+        let layer = obscur_scene::layer::SceneLayer::new().with_opacity(0.5);
+        let list = DisplayList::from_commands(vec![
+            white_bg(),
+            PaintCommand::PushLayer(layer),
+            PaintCommand::DrawImage { image, dst },
+            PaintCommand::PopLayer,
+        ]);
+        let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(13));
+        let frame = RenderFrame::new(snapshot, Size::new(16.0, 16.0));
+        let submission = FrameSubmission::new(frame);
+
+        let mut renderer = CpuRenderer::default();
+        renderer
+            .render(&submission, &bitmap_target(16.0, 16.0))
+            .expect("renders");
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+
+        // Half-opacity red over white → pink (red high, green/blue mid).
+        let px = pixmap.pixel(8, 8).expect("center pixel exists");
+        assert!(px.red() > 200, "red high: {}", px.red());
+        assert!(px.green() > 90 && px.green() < 180, "green mid: {}", px.green());
+    }
+
+    #[test]
+    fn supports_effect_reports_images_native() {
+        let renderer = CpuRenderer::default();
+        assert_eq!(renderer.supports_effect("image"), SupportLevel::Native);
     }
 
     #[test]

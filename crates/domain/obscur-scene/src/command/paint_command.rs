@@ -5,7 +5,7 @@ use obscur_geometry::{AffineTransform, CornerRadii, Rect};
 use crate::clip::Clip;
 use crate::color::Color;
 use crate::layer::SceneLayer;
-use crate::paint::Paint;
+use crate::paint::{Paint, SceneImage};
 use crate::path::Path;
 
 /// One drawing operation in a display list (spec §5.1).
@@ -83,6 +83,26 @@ pub enum PaintCommand {
         /// than a drop shadow (painted behind it).
         inset: bool,
     },
+    /// Draw a decoded raster [`SceneImage`] stretched to fill `dst`. A LEAF
+    /// command (no nesting effect).
+    ///
+    /// The image's intrinsic `width × height` is scaled to the destination
+    /// rectangle `dst` (in absolute scene coordinates) and drawn there; a renderer
+    /// composes this with any active transform / clip / layer exactly like every
+    /// other leaf paint. The image carries its own [`AlphaMode`](crate::color::AlphaMode),
+    /// so each backend converts to its native premultiplied form honestly and both
+    /// show the same picture (spec §5.16).
+    ///
+    /// This is the primitive CSS `background-image: url()` lowers onto. Only a
+    /// stretch-to-`dst` draw is modeled today: a source sub-rectangle, `repeat`
+    /// tiling, nine-slice, and `background-size` keywords are future additions.
+    DrawImage {
+        /// The decoded RGBA8 image to draw.
+        image: SceneImage,
+        /// The destination rectangle the image is stretched to fill, in absolute
+        /// scene coordinates.
+        dst: Rect,
+    },
     /// Push an affine transform onto the transform stack (CSS 2D `transform`,
     /// spec §5.2). Subsequent drawing — up to the matching
     /// [`PaintCommand::PopTransform`] — is mapped by the composition of every
@@ -136,7 +156,10 @@ impl PaintCommand {
         match self {
             Self::PushClip(_) | Self::PushLayer(_) | Self::PushTransform(_) => 1,
             Self::PopClip | Self::PopLayer | Self::PopTransform => -1,
-            Self::DrawPath { .. } | Self::DrawText { .. } | Self::DrawShadow { .. } => 0,
+            Self::DrawPath { .. }
+            | Self::DrawText { .. }
+            | Self::DrawShadow { .. }
+            | Self::DrawImage { .. } => 0,
         }
     }
 }
@@ -213,6 +236,23 @@ mod tests {
         assert_eq!(PaintCommand::PopTransform.nesting_delta(), -1);
         assert!(PaintCommand::PopTransform.is_pop());
         assert!(!PaintCommand::PopTransform.is_push());
+    }
+
+    #[test]
+    fn draw_image_is_a_leaf() {
+        use crate::color::AlphaMode;
+        use crate::paint::SceneImage;
+        use std::sync::Arc;
+
+        let image = SceneImage::new(1, 1, Arc::from(vec![255u8, 0, 0, 255]), AlphaMode::Straight)
+            .expect("1x1 image");
+        let cmd = PaintCommand::DrawImage {
+            image,
+            dst: Rect::new(Point::new(0.0, 0.0), Size::new(4.0, 4.0)),
+        };
+        assert_eq!(cmd.nesting_delta(), 0);
+        assert!(!cmd.is_push());
+        assert!(!cmd.is_pop());
     }
 
     #[test]

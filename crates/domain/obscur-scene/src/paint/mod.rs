@@ -19,6 +19,8 @@ mod paint;
 pub use paint::Paint;
 mod radial_gradient;
 pub use radial_gradient::RadialGradient;
+mod scene_image;
+pub use scene_image::SceneImage;
 mod solid_brush;
 pub use solid_brush::SolidBrush;
 mod stroke;

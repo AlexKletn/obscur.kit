@@ -11,11 +11,12 @@ use std::collections::HashMap;
 
 use obscur_scene::clip::Clip;
 use obscur_scene::command::{DisplayList, PaintCommand};
+use obscur_scene::color::AlphaMode;
 use obscur_scene::layer::{CompositionMode, SceneLayer};
-use obscur_scene::paint::{BlendMode, Brush, Paint};
+use obscur_scene::paint::{BlendMode, Brush, Paint, SceneImage};
 use obscur_scene::text::GlyphRun;
 use vello::kurbo::{Affine, Diagonal2, Rect as KurboRect};
-use vello::peniko::{self, FontData};
+use vello::peniko::{self, Blob, FontData, ImageAlphaType, ImageData, ImageFormat};
 use vello::{FontEmbolden, Scene};
 
 use super::brush_converter::BrushConverter;
@@ -49,6 +50,10 @@ const FAUX_BOLD_EMBOLDEN_FRACTION: f64 = 0.02;
 /// - [`PaintCommand::DrawPath`] → [`Scene::fill`] (for a
 ///   [`Paint::Fill`], using the path's own fill rule) or [`Scene::stroke`] (for a
 ///   [`Paint::Stroke`]), each with the identity transform.
+/// - [`PaintCommand::DrawImage`] → [`Scene::draw_image`]: the decoded RGBA8 pixels
+///   become a [`peniko::ImageData`] (zero-copy from the image's `Arc<[u8]>`, tagged
+///   with its own alpha encoding) drawn at its intrinsic size, with a transform
+///   that scales it to fill the destination rect.
 /// - [`PaintCommand::PushClip`] → [`Scene::push_layer`] with a neutral blend and
 ///   the clip's shape, which Vello treats as a clip region.
 /// - [`PaintCommand::PushLayer`] → [`Scene::push_layer`] with the layer's blend,
@@ -202,6 +207,9 @@ impl SceneConverter {
                     draw_shadow(
                         &mut scene, rect, radii, *color, *blur, *spread, *offset, *inset, current,
                     );
+                }
+                PaintCommand::DrawImage { image, dst } => {
+                    draw_image(&mut scene, image, dst, current);
                 }
             }
         }
@@ -400,6 +408,62 @@ fn draw_shadow(
     scene.draw_blurred_rounded_rect(transform, kurbo_rect, peniko_color, radius, std_dev);
 }
 
+/// A `Sized` wrapper over a shared `Arc<[u8]>` pixel buffer so it can back a
+/// peniko [`Blob`] without copying: `Arc<[u8]>` is an unsized fat pointer that
+/// cannot coerce to `Arc<dyn AsRef<[u8]>>`, but `Arc<SharedPixels>` can.
+struct SharedPixels(std::sync::Arc<[u8]>);
+
+impl AsRef<[u8]> for SharedPixels {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+/// Draws a decoded [`SceneImage`] stretched to fill `dst` (spec §5.16).
+///
+/// The RGBA8 pixels are wrapped into a [`peniko::ImageData`] — zero-copy, since
+/// the [`SceneImage`]'s `Arc<[u8]>` becomes the image [`Blob`] directly — tagged
+/// with the image's own alpha encoding ([`AlphaMode::Straight`] →
+/// [`ImageAlphaType::Alpha`], [`AlphaMode::Premultiplied`] →
+/// [`ImageAlphaType::AlphaPremultiplied`]), so Vello premultiplies honestly rather
+/// than this adapter double-premultiplying. [`Scene::draw_image`] draws the image
+/// at its intrinsic `width × height`; the transform scales that to `dst`'s size and
+/// translates it to `dst`'s origin, composed under the active `transform`. A
+/// zero-sized image or destination is skipped (nothing to sample).
+fn draw_image(
+    scene: &mut Scene,
+    image: &SceneImage,
+    dst: &obscur_geometry::Rect,
+    transform: Affine,
+) {
+    let (iw, ih) = (image.width(), image.height());
+    if iw == 0 || ih == 0 || dst.size.width <= 0.0 || dst.size.height <= 0.0 {
+        return;
+    }
+    let alpha_type = match image.alpha_mode() {
+        AlphaMode::Straight => ImageAlphaType::Alpha,
+        AlphaMode::Premultiplied => ImageAlphaType::AlphaPremultiplied,
+    };
+    let data = ImageData {
+        // Zero-copy: wrap the image's shared `Arc<[u8]>` in a `Sized` newtype so it
+        // coerces to the `Arc<dyn AsRef<[u8]>>` a `Blob` holds — only a refcount
+        // bump, never a pixel copy.
+        data: Blob::new(std::sync::Arc::new(SharedPixels(image.pixels_arc()))),
+        format: ImageFormat::Rgba8,
+        alpha_type,
+        width: iw,
+        height: ih,
+    };
+    // Intrinsic → dst: scale the natural `iw × ih` down/up to the destination
+    // size, then translate to its origin, all under the running transform.
+    let scale = Affine::scale_non_uniform(
+        f64::from(dst.size.width) / f64::from(iw),
+        f64::from(dst.size.height) / f64::from(ih),
+    );
+    let place = Affine::translate((f64::from(dst.origin.x), f64::from(dst.origin.y)));
+    scene.draw_image(&data, transform * place * scale);
+}
+
 /// Maps an obscur-scene [`BlendMode`] to a peniko [`Mix`](peniko::Mix) blend.
 fn mix(mode: BlendMode) -> peniko::Mix {
     match mode {
@@ -505,6 +569,40 @@ mod tests {
         ]);
         // Must not panic; balanced push/pop.
         let _scene = SceneConverter::new().convert(&list);
+    }
+
+    #[test]
+    fn draw_image_produces_non_empty_scene() {
+        use obscur_scene::color::AlphaMode;
+        use obscur_scene::paint::SceneImage;
+        use std::sync::Arc;
+
+        // A 2×2 opaque image stretched to an 8×8 destination rect.
+        let image = SceneImage::new(2, 2, Arc::from(vec![255u8; 16]), AlphaMode::Straight)
+            .expect("2x2 image");
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawImage {
+            image,
+            dst: Rect::new(Point::new(1.0, 1.0), Size::new(8.0, 8.0)),
+        }]);
+        let scene = SceneConverter::new().convert(&list);
+        assert!(!scene.encoding().is_empty());
+    }
+
+    #[test]
+    fn zero_sized_image_encodes_nothing() {
+        use obscur_scene::color::AlphaMode;
+        use obscur_scene::paint::SceneImage;
+        use std::sync::Arc;
+
+        // A 0×0 image has no pixels to sample: it is skipped, not encoded.
+        let image = SceneImage::new(0, 0, Arc::from(Vec::new()), AlphaMode::Straight)
+            .expect("0x0 image");
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawImage {
+            image,
+            dst: Rect::new(Point::new(0.0, 0.0), Size::new(8.0, 8.0)),
+        }]);
+        let scene = SceneConverter::new().convert(&list);
+        assert!(scene.encoding().is_empty());
     }
 
     #[test]

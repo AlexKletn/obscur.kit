@@ -5,7 +5,7 @@ use obscur_geometry::{AffineTransform, CornerRadii, Point, Rect};
 use crate::clip::Clip;
 use crate::color::Color;
 use crate::layer::SceneLayer;
-use crate::paint::{Brush, Paint, Stroke};
+use crate::paint::{Brush, Paint, SceneImage, Stroke};
 use crate::path::Path;
 use crate::text::GlyphRun;
 
@@ -69,6 +69,15 @@ impl DisplayListBuilder {
     /// `obscur-text` domain. Returns `&mut Self` for chaining.
     pub fn draw_text(&mut self, origin: Point, run: GlyphRun, brush: Brush) -> &mut Self {
         self.commands.push(PaintCommand::DrawText { origin, run, brush });
+        self
+    }
+
+    /// Appends a [`PaintCommand::DrawImage`] drawing the decoded `image` stretched
+    /// to fill the destination rectangle `dst`. This is a leaf command (no nesting
+    /// effect); the image is stretched from its intrinsic size to `dst`. Returns
+    /// `&mut Self` for chaining.
+    pub fn draw_image(&mut self, image: SceneImage, dst: Rect) -> &mut Self {
+        self.commands.push(PaintCommand::DrawImage { image, dst });
         self
     }
 
@@ -304,6 +313,33 @@ mod tests {
             }
         );
         // A list containing DrawText is still balanced (it is a leaf).
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn draw_image_appends_a_leaf_image_command_with_the_given_dst() {
+        use crate::color::AlphaMode;
+        use crate::paint::SceneImage;
+        use std::sync::Arc;
+
+        let image = SceneImage::new(2, 2, Arc::from(vec![0u8; 16]), AlphaMode::Straight)
+            .expect("2x2 image");
+        let dst = Rect::new(Point::new(1.0, 2.0), Size::new(8.0, 6.0));
+        let mut builder = DisplayListBuilder::new();
+        // Ordering: a fill precedes the image, so the image is command index 1.
+        builder
+            .fill_rect(rect(), Brush::solid(Color::WHITE))
+            .draw_image(image.clone(), dst);
+
+        assert!(builder.is_balanced());
+        let list = builder.build();
+        assert_eq!(list.len(), 2);
+        assert!(matches!(list.commands()[0], PaintCommand::DrawPath { .. }));
+        assert_eq!(
+            list.commands()[1],
+            PaintCommand::DrawImage { image, dst }
+        );
+        // A DrawImage is a leaf, so the list stays balanced.
         assert!(list.is_balanced());
     }
 

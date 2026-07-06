@@ -298,8 +298,10 @@ impl Renderer for VelloRenderer {
     fn supports_effect(&self, effect: &str) -> SupportLevel {
         // Honest per-effect support for the Vello GPU backend (spec §5.2).
         match effect {
-            // Vello rasterizes fills/strokes and clips natively.
-            "clip" | "gradient" => SupportLevel::Native,
+            // Vello rasterizes fills/strokes, clips, and images natively — a
+            // `DrawImage` becomes a real `Scene::draw_image` (a sampled bitmap),
+            // not an approximation.
+            "clip" | "gradient" | "image" => SupportLevel::Native,
             // A `box-shadow` and a `filter: drop-shadow(...)` both render through
             // `Scene::draw_blurred_rounded_rect` — a real gaussian, but built from
             // Vello's primitives rather than a single native shadow op.
@@ -393,6 +395,8 @@ mod tests {
         let renderer = VelloRenderer::new(RendererId::from_raw(4));
         assert_eq!(renderer.supports_effect("clip"), SupportLevel::Native);
         assert_eq!(renderer.supports_effect("gradient"), SupportLevel::Native);
+        // Images draw as a real sampled bitmap, not an approximation.
+        assert_eq!(renderer.supports_effect("image"), SupportLevel::Native);
         assert_eq!(renderer.supports_effect("blur"), SupportLevel::Emulated);
         assert_eq!(renderer.supports_effect("shadow"), SupportLevel::Emulated);
         // `filter: drop-shadow(...)` renders through the real gaussian shadow path.
