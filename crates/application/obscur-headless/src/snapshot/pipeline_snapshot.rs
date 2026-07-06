@@ -171,7 +171,9 @@ impl PipelineSnapshot {
             scene_coordinator.paragraph(),
         );
 
-        let display_list = scene_coordinator.compose(tree, &computed, &boxes);
+        // The headless snapshot host owns no editing session, so it paints no
+        // caret or selection highlight (`None`).
+        let display_list = scene_coordinator.compose(tree, &computed, &boxes, None);
         let mut scene = Scene::new();
         scene.set_root(display_list);
         let scene_snapshot = scene.snapshot();

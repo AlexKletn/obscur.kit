@@ -35,8 +35,17 @@ use obscur_tree::tree::RetainedTree;
 use super::stacking::{effective_stacking_z, PaintUnit};
 use super::{
     alignment_for, attributes_for, direction_for, families_for, overflow_for, ComputedStyles,
-    LayoutBoxes,
+    EditingView, LayoutBoxes,
 };
+
+/// The width, in logical pixels, of the caret rectangle painted at the collapsed
+/// selection of the focused editable (a thin vertical bar over the text baseline).
+const CARET_WIDTH: f32 = 1.0;
+
+/// The default selection-highlight color: a semi-transparent blue painted behind
+/// the selected span so the glyphs show through it (spec §5.11). A host has no
+/// hook to override this yet; it is a documented fixed default.
+const SELECTION_COLOR: Color = Color::rgba(0.20, 0.45, 0.90, 0.35);
 
 /// Default font size (in pixels) used to emit text runs.
 ///
@@ -373,6 +382,39 @@ impl SceneCoordinator {
             .next()
     }
 
+    /// Returns the caret's pen x (logical pixels) at byte `index` in `content`:
+    /// the sum of the shaped glyph advances whose source **cluster** falls before
+    /// `index` — i.e. the pen x just left of the glyph the caret sits before (spec
+    /// §5.11). A caret at `0` yields `0`; a caret at the text length yields the
+    /// whole run advance.
+    ///
+    /// The text is shaped through the **same** paragraph orchestrator (and default
+    /// face) the runs are drawn with, unwrapped, so a caret x on the first line is
+    /// exact. Multi-line wrapping and RTL reordering are not modeled here — the
+    /// caret is placed by the logical (source-order) advance sum, a documented
+    /// single-line, left-to-right approximation.
+    // The shaping inputs mirror `shape_lines`/`shape_hyphen`: cohesive positional
+    // arguments of a leaf helper, `attributes` by reference to match the
+    // `shape_paragraph` convention this pass uses throughout.
+    #[allow(clippy::too_many_arguments, clippy::trivially_copy_pass_by_ref)]
+    fn caret_offset_x(
+        &self,
+        content: &str,
+        fallback: &FontFallback,
+        attributes: &FontAttributes,
+        direction: TextDirection,
+        font_size: f32,
+        index: usize,
+    ) -> f32 {
+        self.paragraph
+            .shape_paragraph(content, fallback, attributes, &self.default_face, font_size, direction)
+            .iter()
+            .flat_map(|run| run.run().glyphs().iter().copied())
+            .filter(|glyph| glyph.cluster() < index)
+            .map(|glyph| glyph.x_advance())
+            .sum()
+    }
+
     /// Composes a paint-ordered [`DisplayList`] of background fills from the
     /// styled + laid-out tree.
     ///
@@ -386,12 +428,23 @@ impl SceneCoordinator {
     /// (typically produced by the style coordinator) and `boxes` supplies each
     /// node's absolute layout rectangle (produced by the layout coordinator). A
     /// node missing from either map simply contributes no fill.
+    ///
+    /// `editing` is the runtime's active text-editing session, or [`None`] when no
+    /// editable is focused. For the editing field's text (its
+    /// [`node`](EditingView::node) or that field's `Text` descendant) the compose
+    /// draws the session [`text`](EditingView::text) instead of the retained
+    /// content — so a just-typed character is visible immediately — and paints a
+    /// caret line (collapsed selection) on top of the glyphs plus a selection
+    /// highlight (non-empty selection) behind them. With `editing` = [`None`] every
+    /// text node paints its retained content with no caret or highlight, exactly as
+    /// before (the byte-identical regression path).
     #[must_use]
     pub fn compose(
         &self,
         tree: &RetainedTree,
         computed: &ComputedStyles,
         boxes: &LayoutBoxes,
+        editing: Option<EditingView<'_>>,
     ) -> DisplayList {
         let Some(root) = tree.root() else {
             return DisplayListBuilder::new().build();
@@ -550,10 +603,18 @@ impl SceneCoordinator {
                 // — and each line is drawn at `(origin.x + x_offset, origin.y +
                 // top)` with its glyphs on that line's baseline. A text node with
                 // no arranged box is skipped.
-                if let Some(content) = retained.kind().text()
+                if let Some(retained_content) = retained.kind().text()
                     && let Some(layout_box) = boxes.get(&node)
                 {
-                    let brush = Brush::solid(text_color_of(computed, node));
+                    // Is this text node the focused editable's text? Then paint the
+                    // live SESSION text (not the possibly-lagging retained content)
+                    // and, below, the caret + selection highlight. `editing` is
+                    // `None` on every non-editing frame, so this whole override
+                    // path is inert and the retained content is drawn unchanged.
+                    let active = editing.filter(|view| is_editing_text_node(tree, node, view.node));
+                    let content: &str = active.map_or(retained_content, |view| view.text);
+                    let text_color = text_color_of(computed, node);
+                    let brush = Brush::solid(text_color);
                     // Same per-node font size the layout phase measured with, so
                     // the drawn advances and baseline match the sized box.
                     let font_size = font_size_of(computed, node);
@@ -567,6 +628,42 @@ impl SceneCoordinator {
                     let alignment = alignment_for(computed.get(&node));
                     let overflow = overflow_for(computed.get(&node));
                     let origin = layout_box.origin();
+                    // Selection highlight, painted BEHIND the glyphs (emitted before
+                    // the runs so the text shows over it): a rect from x(start) to
+                    // x(end) spanning the first line's height, in the documented
+                    // semi-transparent selection color. Only for the editing field
+                    // and only when the selection actually covers a span (a
+                    // collapsed caret paints no highlight). Single-line only — a
+                    // multi-line span highlights just the first line's extent
+                    // (documented limitation).
+                    if let Some(view) = active
+                        && !view.selection.is_empty()
+                    {
+                        let line_height = self.paragraph.line_metrics(font_size).line_height();
+                        let x0 = self.caret_offset_x(
+                            content,
+                            &fallback,
+                            &attributes,
+                            direction,
+                            font_size,
+                            view.selection.start(),
+                        );
+                        let x1 = self.caret_offset_x(
+                            content,
+                            &fallback,
+                            &attributes,
+                            direction,
+                            font_size,
+                            view.selection.end(),
+                        );
+                        node_paint.fill_rect(
+                            Rect::new(
+                                Point::new(origin.x + x0, origin.y),
+                                Size::new(x1 - x0, line_height),
+                            ),
+                            Brush::solid(SELECTION_COLOR),
+                        );
+                    }
                     let layout = self.shape_lines(
                         content,
                         &fallback,
@@ -610,6 +707,31 @@ impl SceneCoordinator {
                             node_paint.draw_text(seg_origin, run, brush.clone());
                             seg_x += segment.run().advance();
                         }
+                    }
+                    // Caret, painted ON TOP of the glyphs (emitted after the runs):
+                    // a thin vertical bar at the caret's pen x, spanning the first
+                    // line's height, in the text color. Only for the editing field
+                    // and only when the selection is collapsed (a caret) — a
+                    // non-empty selection shows the highlight above instead.
+                    if let Some(view) = active
+                        && view.selection.is_collapsed()
+                    {
+                        let line_height = self.paragraph.line_metrics(font_size).line_height();
+                        let caret_x = self.caret_offset_x(
+                            content,
+                            &fallback,
+                            &attributes,
+                            direction,
+                            font_size,
+                            view.selection.focus(),
+                        );
+                        node_paint.fill_rect(
+                            Rect::new(
+                                Point::new(origin.x + caret_x, origin.y),
+                                Size::new(CARET_WIDTH, line_height),
+                            ),
+                            Brush::solid(text_color),
+                        );
                     }
                 }
 
@@ -1113,6 +1235,32 @@ fn scene_color_from(c: StyleColor) -> Color {
     Color::rgba(c.r, c.g, c.b, c.a)
 }
 
+/// Whether `node` is the text painted for the editing field `field`: either the
+/// field node itself (if it directly carries the text) or any descendant of it,
+/// found by walking `node`'s logical-parent chain toward the root.
+///
+/// The editing session is bound to the editable *field* (the ancestor that binds
+/// `EVENT_INPUT`), but the glyphs live on a `Text` descendant; this maps that
+/// descendant back to its field so the compose phase can override its content and
+/// paint the caret/selection there. The walk is bounded by the tree size, so a
+/// malformed (cyclic) parent chain terminates deterministically instead of
+/// looping.
+fn is_editing_text_node(tree: &RetainedTree, node: NodeId, field: NodeId) -> bool {
+    let mut current = node;
+    // At most `len` hops reach the root from any node in a well-formed tree; the
+    // inclusive bound tolerates a self-parent without looping.
+    for _ in 0..=tree.len() {
+        if current == field {
+            return true;
+        }
+        match tree.get(current).and_then(|n| n.logical_parent().parent()) {
+            Some(parent) => current = parent,
+            None => return false,
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1121,6 +1269,7 @@ mod tests {
     use obscur_layout::model::LayoutBox;
     use obscur_scene::command::PaintCommand;
     use obscur_style::computed::ComputedStyle;
+    use obscur_text::selection::TextSelection;
     use obscur_tree::node::{LogicalParent, NodeKind};
 
     /// Allocates an element node under `parent`, wiring the child link and the
@@ -1239,7 +1388,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(a, box_at(0.0, 0.0, 100.0, 50.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         let brushes = fill_brushes(&list);
         assert_eq!(brushes.len(), 1, "one gradient fill");
         let Brush::Linear(g) = &brushes[0] else {
@@ -1291,7 +1440,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(a, box_at(0.0, 0.0, 40.0, 20.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         assert!(list.is_balanced(), "the transform bracket is well-formed");
         let commands = list.commands();
 
@@ -1326,7 +1475,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         assert!(
             !list
                 .commands()
@@ -1360,7 +1509,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         assert!(
             !list
                 .commands()
@@ -1386,7 +1535,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         let brushes = fill_brushes(&list);
         assert_eq!(brushes, vec![Brush::solid(Color::rgba(0.0, 1.0, 0.0, 1.0))]);
     }
@@ -1448,7 +1597,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(a, box_at(0.0, 0.0, 20.0, 10.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
 
         // Exactly one DrawShadow, carrying the authored params.
         let shadows = shadow_commands(&list);
@@ -1502,7 +1651,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         assert!(shadow_commands(&list).is_empty());
     }
 
@@ -1544,7 +1693,7 @@ mod tests {
         boxes.insert(b, box_at(1.0, 1.0, 10.0, 10.0));
         boxes.insert(c, box_at(2.0, 2.0, 10.0, 10.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         let rects = fill_rects(&list);
         assert_eq!(rects.len(), 3);
         // c (z=-1) first, b (z=0) middle, a (z=2) last (topmost).
@@ -1576,7 +1725,7 @@ mod tests {
         boxes.insert(b, box_at(1.0, 1.0, 10.0, 10.0));
         boxes.insert(c, box_at(2.0, 2.0, 10.0, 10.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         let rects = fill_rects(&list);
         assert_eq!(
             rects,
@@ -1612,7 +1761,7 @@ mod tests {
         boxes.insert(panel, box_at(5.0, 5.0, 20.0, 20.0));
         boxes.insert(text, box_at(6.0, 6.0, 20.0, 16.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
 
         // Command kinds in paint order: sib fill, panel fill, then the text run.
         let kinds: Vec<&str> = list
@@ -1644,7 +1793,7 @@ mod tests {
         let computed = ComputedStyles::new();
         let boxes = LayoutBoxes::new();
 
-        let list = coordinator.compose(&tree, &computed, &boxes);
+        let list = coordinator.compose(&tree, &computed, &boxes, None);
         assert!(list.is_empty());
         assert!(list.is_balanced());
     }
@@ -1673,7 +1822,7 @@ mod tests {
         boxes.insert(child_b, box_at(0.0, 50.0, 100.0, 50.0));
 
         let coordinator = SceneCoordinator::new();
-        let list = coordinator.compose(&tree, &computed, &boxes);
+        let list = coordinator.compose(&tree, &computed, &boxes, None);
 
         // Two nodes have a non-transparent background -> two fills.
         assert_eq!(fill_count(&list), 2);
@@ -1715,7 +1864,7 @@ mod tests {
         boxes.insert(root, box_at(0.0, 0.0, 10.0, 10.0));
 
         let coordinator = SceneCoordinator::new();
-        let list = coordinator.compose(&tree, &computed, &boxes);
+        let list = coordinator.compose(&tree, &computed, &boxes, None);
 
         assert!(list.is_empty());
         assert!(list.is_balanced());
@@ -1734,7 +1883,7 @@ mod tests {
         let boxes = LayoutBoxes::new();
 
         let coordinator = SceneCoordinator::new();
-        let list = coordinator.compose(&tree, &computed, &boxes);
+        let list = coordinator.compose(&tree, &computed, &boxes, None);
         assert!(list.is_empty());
     }
 
@@ -1757,7 +1906,7 @@ mod tests {
         // policy has nothing to truncate — this test exercises shaping, not overflow.
         boxes.insert(text, box_at(5.0, 12.0, 60.0, 16.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
 
         // Background element still fills.
         assert_eq!(fill_count(&list), 1);
@@ -1789,7 +1938,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(text, box_at(0.0, 0.0, 40.0, 16.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         let runs = text_runs(&list);
         assert_eq!(runs.len(), 1);
         let run = &runs[0].1;
@@ -1821,7 +1970,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(text, box_at(0.0, 0.0, 40.0, 16.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         let runs = text_runs(&list);
         let run = &runs[0].1;
         let ascent = DEFAULT_FONT_SIZE * 0.8; // 12.8
@@ -1846,8 +1995,8 @@ mod tests {
         boxes.insert(text, box_at(2.0, 3.0, 80.0, 16.0));
 
         let coordinator = SceneCoordinator::new();
-        let first = text_runs(&coordinator.compose(&tree, &computed, &boxes));
-        let second = text_runs(&coordinator.compose(&tree, &computed, &boxes));
+        let first = text_runs(&coordinator.compose(&tree, &computed, &boxes, None));
+        let second = text_runs(&coordinator.compose(&tree, &computed, &boxes, None));
         assert_eq!(first, second);
     }
 
@@ -1866,7 +2015,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(text, box_at(1.0, 2.0, 10.0, 10.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
 
         let runs = text_runs(&list);
         assert_eq!(runs.len(), 1);
@@ -1886,7 +2035,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(text, box_at(3.0, 4.0, 0.0, 0.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
 
         let runs = text_runs(&list);
         assert_eq!(runs.len(), 1);
@@ -1908,7 +2057,7 @@ mod tests {
         // No arranged box for the text node.
         let boxes = LayoutBoxes::new();
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         assert!(text_runs(&list).is_empty());
         assert!(list.is_empty());
     }
@@ -1931,7 +2080,7 @@ mod tests {
         // Box as the layout phase would size it: 50px wide, 3·16 = 48 tall.
         boxes.insert(text, box_at(10.0, 20.0, 50.0, 48.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         let runs = text_runs(&list);
         assert_eq!(runs.len(), 3, "one DrawText per wrapped line");
         // Line count · line_height (16) equals the arranged box height (48).
@@ -1972,7 +2121,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(text, box_at(3.0, 4.0, 0.0, 16.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         let runs = text_runs(&list);
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].0, Point::new(3.0, 4.0));
@@ -2040,7 +2189,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(root, box_at(10.0, 20.0, 100.0, 50.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         let fills = path_fills(&list);
         assert_eq!(fills.len(), 4, "four side rects, no background");
         // Every side is red.
@@ -2074,7 +2223,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(root, box_at(0.0, 0.0, 20.0, 20.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         let fills = path_fills(&list);
         assert_eq!(fills.len(), 5, "one background + four border edges");
         // The background is emitted first, covering the whole border box.
@@ -2100,7 +2249,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(root, box_at(0.0, 0.0, 30.0, 30.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         assert_eq!(fill_count(&list), 1, "only the background, no border rects");
     }
 
@@ -2137,7 +2286,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(root, box_at(0.0, 0.0, 40.0, 40.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         let fills = path_fills(&list);
         assert_eq!(fills.len(), 4);
         for (_, color) in &fills {
@@ -2162,7 +2311,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(root, box_at(0.0, 0.0, 10.0, 10.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         assert_eq!(fill_count(&list), 0, "no solid style ⇒ no border painted");
     }
 
@@ -2208,7 +2357,7 @@ mod tests {
         boxes.insert(root, box_at(0.0, 0.0, 100.0, 100.0));
         boxes.insert(child, box_at(10.0, 10.0, 20.0, 20.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         let cmds = list.commands();
         // PushClip, rounded root fill, child fill, PopClip — the clip brackets the
         // whole subtree.
@@ -2251,7 +2400,7 @@ mod tests {
         let mut boxes = LayoutBoxes::new();
         boxes.insert(root, box_at(0.0, 0.0, 30.0, 30.0));
 
-        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         let cmds = list.commands();
         assert_eq!(cmds.len(), 1, "just the background, no clip");
         match &cmds[0] {
@@ -2328,7 +2477,7 @@ mod tests {
         // Default mock shaper: glyph ids are the Unicode scalars, one segment on
         // the primary face (font 0).
         let mut coordinator = SceneCoordinator::new();
-        let mock_runs = text_runs(&coordinator.compose(&tree, &computed, &boxes));
+        let mock_runs = text_runs(&coordinator.compose(&tree, &computed, &boxes, None));
         assert_eq!(mock_runs.len(), 1);
         assert_eq!(mock_runs[0].1.font(), 0);
         let mock_ids: Vec<u32> = mock_runs[0].1.glyphs().iter().map(|g| g.glyph_id()).collect();
@@ -2337,7 +2486,7 @@ mod tests {
         // Install a fixed-id shaper through the runtime seam: the emitted run
         // reflects it (ids all 42), still one primary-face segment.
         coordinator.set_text_shaper(Box::new(FixedIdShaper(42)));
-        let stub_runs = text_runs(&coordinator.compose(&tree, &computed, &boxes));
+        let stub_runs = text_runs(&coordinator.compose(&tree, &computed, &boxes, None));
         assert_eq!(stub_runs.len(), 1);
         assert_eq!(stub_runs[0].1.font(), 0);
         let stub_ids: Vec<u32> = stub_runs[0].1.glyphs().iter().map(|g| g.glyph_id()).collect();
@@ -2396,7 +2545,7 @@ mod tests {
         resolver.register(ScriptTag::CYRILLIC, FontId::new(1), face);
         coordinator.set_font_resolver(Box::new(resolver));
 
-        let runs = text_runs(&coordinator.compose(&tree, &computed, &boxes));
+        let runs = text_runs(&coordinator.compose(&tree, &computed, &boxes, None));
         // Two font-tagged runs on a single line: fonts 0 then 1.
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].1.font(), 0);
@@ -2411,7 +2560,7 @@ mod tests {
         // Each segment carries its own script's glyphs.
         assert_eq!(runs[0].1.text(), "ab");
         assert_eq!(runs[1].1.text(), "ВГ");
-        assert!(coordinator.compose(&tree, &computed, &boxes).is_balanced());
+        assert!(coordinator.compose(&tree, &computed, &boxes, None).is_balanced());
     }
 
     /// A stub [`Hyphenator`] that proposes one fixed byte offset in any word long
@@ -2448,10 +2597,10 @@ mod tests {
 
         let mut coordinator = SceneCoordinator::new();
         // Default (no hyphenator): the over-wide word stays on one line.
-        assert_eq!(text_runs(&coordinator.compose(&tree, &computed, &boxes)).len(), 1);
+        assert_eq!(text_runs(&coordinator.compose(&tree, &computed, &boxes, None)).len(), 1);
 
         coordinator.set_hyphenator(Box::new(StubHyphenator { offset: 5 }));
-        let runs = text_runs(&coordinator.compose(&tree, &computed, &boxes));
+        let runs = text_runs(&coordinator.compose(&tree, &computed, &boxes, None));
         assert_eq!(runs.len(), 2, "the word breaks into a head and a tail line");
         // The head line ("hyphe" + hyphen) ends with the mock hyphen glyph (id 45)
         // and fits the 60px box.
@@ -2462,6 +2611,163 @@ mod tests {
         // The tail line ("nation") starts on the next line, no hyphen.
         assert!(runs[1].0.y > runs[0].0.y);
         assert!(!runs[1].1.glyphs().iter().any(|g| g.glyph_id() == 45));
-        assert!(coordinator.compose(&tree, &computed, &boxes).is_balanced());
+        assert!(coordinator.compose(&tree, &computed, &boxes, None).is_balanced());
+    }
+
+    // ---- Text caret + selection highlight (this step) ------------------------
+
+    /// Collects the fill rects (path bounds + brush) of a display list, in paint
+    /// order — the caret and selection highlight are the fills over a text node
+    /// that carries no background.
+    fn caret_fills(list: &DisplayList) -> Vec<(Rect, Brush)> {
+        list.commands()
+            .iter()
+            .filter_map(|c| match c {
+                PaintCommand::DrawPath { path, paint } => {
+                    path.bounds().map(|r| (r, paint.brush().clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A tree with a single text node carrying `content` under the root, its box
+    /// at the origin (a wide 200x16 line so the text never wraps), and a red text
+    /// color so the caret brush is identifiable — the caret/selection fixture.
+    fn editing_fixture(content: &str) -> (RetainedTree, ComputedStyles, LayoutBoxes, NodeId) {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, content);
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(text, with_color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(text, box_at(0.0, 0.0, 200.0, 16.0));
+        (tree, computed, boxes, text)
+    }
+
+    #[test]
+    fn collapsed_caret_paints_a_thin_bar_at_the_pen_x() {
+        // (a) A collapsed caret over "hi" paints one thin vertical bar at the sum
+        // of the advances before the caret index: 0 at index 0, one advance at 1,
+        // two at 2 (the end). Advance is the mock's fixed 16·0.6 = 9.6.
+        let advance = 16.0 * MockTextShaper::ADVANCE_RATIO;
+        for (index, expected_x) in [(0_usize, 0.0_f32), (1, advance), (2, advance * 2.0)] {
+            let (tree, computed, boxes, text) = editing_fixture("hi");
+            let view = EditingView::new(text, "hi", TextSelection::caret(index));
+            let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, Some(view));
+
+            let fills = caret_fills(&list);
+            assert_eq!(fills.len(), 1, "a collapsed caret paints exactly one fill");
+            let (rect, brush) = &fills[0];
+            assert!(
+                (rect.origin.x - expected_x).abs() < 1e-4,
+                "caret x at index {index}: {} != {expected_x}",
+                rect.origin.x
+            );
+            assert_eq!(rect.size.width, CARET_WIDTH, "the caret is a thin bar");
+            assert_eq!(rect.size.height, 16.0, "the caret spans the line height");
+            assert_eq!(
+                *brush,
+                Brush::solid(Color::rgba(1.0, 0.0, 0.0, 1.0)),
+                "the caret is painted in the text color"
+            );
+            // The caret paints ON TOP: it is the last command (after the DrawText).
+            assert!(
+                matches!(list.commands().last(), Some(PaintCommand::DrawPath { .. })),
+                "the caret is the last (topmost) command"
+            );
+            assert_eq!(text_runs(&list).len(), 1, "the glyphs still render");
+        }
+    }
+
+    #[test]
+    fn nonempty_selection_paints_a_highlight_behind_the_text() {
+        // (b) A non-empty selection [0,1) paints one highlight rect spanning x
+        // 0..advance behind the glyphs (no caret).
+        let advance = 16.0 * MockTextShaper::ADVANCE_RATIO;
+        let (tree, computed, boxes, text) = editing_fixture("hi");
+        let view = EditingView::new(text, "hi", TextSelection::new(0, 1));
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, Some(view));
+
+        let fills = caret_fills(&list);
+        assert_eq!(fills.len(), 1, "a non-empty selection paints one highlight, no caret");
+        let (rect, brush) = &fills[0];
+        assert!((rect.origin.x - 0.0).abs() < 1e-4, "highlight starts at x(start)=0");
+        assert!(
+            (rect.size.width - advance).abs() < 1e-4,
+            "highlight spans x(start)..x(end) = one advance"
+        );
+        assert_eq!(rect.size.height, 16.0, "highlight spans the line height");
+        assert_eq!(*brush, Brush::solid(SELECTION_COLOR), "documented selection color");
+
+        // The highlight paints BEHIND the text: its fill is emitted before the run.
+        let fill_idx = list
+            .commands()
+            .iter()
+            .position(|c| matches!(c, PaintCommand::DrawPath { .. }))
+            .expect("a highlight fill");
+        let text_idx = list
+            .commands()
+            .iter()
+            .position(|c| matches!(c, PaintCommand::DrawText { .. }))
+            .expect("a text run");
+        assert!(fill_idx < text_idx, "the highlight is emitted before the glyphs");
+    }
+
+    #[test]
+    fn session_text_overrides_retained_content() {
+        // (c) The retained node carries "old" but the session says "new"; compose
+        // draws the session text so a just-typed character is visible immediately.
+        let (tree, computed, boxes, text) = editing_fixture("old");
+        let view = EditingView::new(text, "new", TextSelection::caret(3));
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, Some(view));
+
+        let drawn: String = text_runs(&list)
+            .iter()
+            .map(|(_, run, _)| run.text().to_owned())
+            .collect();
+        assert_eq!(drawn, "new", "the scene shows the session text, not the retained content");
+    }
+
+    #[test]
+    fn no_editing_session_shows_retained_content_with_no_caret() {
+        // (d) Regression: with `editing: None` the retained content renders and no
+        // caret/highlight fill is emitted — byte-identical to the pre-caret path.
+        let (tree, computed, boxes, _text) = editing_fixture("old");
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+
+        assert!(caret_fills(&list).is_empty(), "no caret or highlight without a session");
+        let drawn: String = text_runs(&list)
+            .iter()
+            .map(|(_, run, _)| run.text().to_owned())
+            .collect();
+        assert_eq!(drawn, "old", "the retained content renders unchanged");
+    }
+
+    #[test]
+    fn caret_only_paints_on_the_editing_field_not_other_text() {
+        // A second, non-editing text node emits no caret even while a session is
+        // active for a different node.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let editing_text = add_text_child(&mut tree, root, "hi");
+        let other_text = add_text_child(&mut tree, root, "yo");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(editing_text, with_color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
+        computed.insert(other_text, with_color(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(editing_text, box_at(0.0, 0.0, 200.0, 16.0));
+        boxes.insert(other_text, box_at(0.0, 20.0, 200.0, 16.0));
+
+        let view = EditingView::new(editing_text, "hi", TextSelection::caret(1));
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, Some(view));
+        // Exactly one caret, over the editing node only.
+        assert_eq!(caret_fills(&list).len(), 1, "only the editing field gets a caret");
+        assert_eq!(text_runs(&list).len(), 2, "both text nodes still render");
     }
 }

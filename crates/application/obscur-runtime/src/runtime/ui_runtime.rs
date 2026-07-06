@@ -41,9 +41,9 @@ use super::{
 };
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::orchestration::{
-    root_font_size, AnimatedKind, AnimationBinding, ComputedStyles, CssMotionRules, LayoutBoxes,
-    LayoutCoordinator, MotionCoordinator, PseudoStates, SceneCoordinator, StyleCoordinator,
-    StyleInputs, StyleMatchingCoordinator, TreeElement,
+    root_font_size, AnimatedKind, AnimationBinding, ComputedStyles, CssMotionRules, EditingView,
+    LayoutBoxes, LayoutCoordinator, MotionCoordinator, PseudoStates, SceneCoordinator,
+    StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement,
 };
 use crate::scheduler::{BackpressureDecision, FrameScheduler};
 use crate::transaction::ReconcileEnactor;
@@ -870,7 +870,17 @@ impl UiRuntime {
         // 5. Compose: build the display list, install it, publish a snapshot.
         //    When skipped, the retained scene's current snapshot is republished.
         if plan.compose() {
-            let display_list = self.scene_composer.compose(&self.tree, &computed, &self.boxes);
+            // Thread the runtime-owned editing session into compose so the focused
+            // editable paints its live session text plus a caret + selection
+            // highlight (spec §5.11). `scene_composer`, `tree`, `boxes` and
+            // `editing` are disjoint fields, so this shared borrow is legal; with no
+            // session the view is `None` and compose is byte-identical.
+            let editing = self
+                .editing
+                .as_ref()
+                .map(|session| EditingView::new(session.node(), session.text(), session.selection()));
+            let display_list =
+                self.scene_composer.compose(&self.tree, &computed, &self.boxes, editing);
             // Telemetry: mark the compose phase and count paint commands (§7.9).
             let count = display_list.len() as u64;
             record_phase(
@@ -4040,6 +4050,65 @@ mod tests {
         assert_eq!(dispatch.target(), Some(a), "routed to the focused node");
         assert_eq!(dispatch.command(), None);
         assert!(runtime.editing_text().is_none(), "still no session");
+    }
+
+    #[test]
+    fn typing_renders_session_text_and_a_caret_in_the_frame() {
+        // End-to-end (step 2): focus an editable "hi", type 'x' so the session is
+        // "hix" with the caret at index 3, render a frame, and confirm the display
+        // list paints the SESSION text "hix" plus a caret rect at 3·advance past
+        // the text origin. The retained view still carries "hi" — the session
+        // override is what makes the typed 'x' visible.
+        let (mut runtime, _mirror) = focused_editable("hi");
+        runtime.handle_key(char_press('x'));
+        assert_eq!(runtime.editing_text(), Some("hix"));
+        assert_eq!(runtime.editing_selection().unwrap().focus(), 3);
+
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let result = runtime.render_now(&input_reactive_view("hi"), sheets);
+        let list = result.snapshot().display_list();
+
+        // The painted text is the live session text "hix" (concatenated across any
+        // wrapped runs), not the retained "hi".
+        let drawn: String = list
+            .commands()
+            .iter()
+            .filter_map(|c| match c {
+                obscur_scene::command::PaintCommand::DrawText { run, .. } => Some(run.text()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(drawn, "hix", "the frame paints the live session text");
+
+        // The first text run's origin x is the editing text box's left edge; the
+        // caret (the thin width-1 fill) sits 3 advances (3·9.6) past it.
+        let advance = 16.0_f32 * obscur_text::shaping::MockTextShaper::ADVANCE_RATIO;
+        let text_origin_x = list
+            .commands()
+            .iter()
+            .find_map(|c| match c {
+                obscur_scene::command::PaintCommand::DrawText { origin, .. } => Some(origin.x),
+                _ => None,
+            })
+            .expect("a text run");
+        let caret = list
+            .commands()
+            .iter()
+            .find_map(|c| match c {
+                obscur_scene::command::PaintCommand::DrawPath { path, .. } => path
+                    .bounds()
+                    .filter(|r| (r.size.width - 1.0).abs() < 1e-6),
+                _ => None,
+            })
+            .expect("a thin caret fill");
+        assert!(
+            (caret.origin.x - (text_origin_x + advance * 3.0)).abs() < 1e-3,
+            "caret at {} != text_origin {text_origin_x} + 3·advance {}",
+            caret.origin.x,
+            advance * 3.0
+        );
+        assert!(list.is_balanced(), "the display list stays balanced");
     }
 
     // ---- Phase 4 final step: motion orchestration (style → motion → paint) ----

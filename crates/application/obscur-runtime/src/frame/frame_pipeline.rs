@@ -225,7 +225,9 @@ impl FramePipeline {
         let relaid_out = !boxes.is_empty();
 
         // Compose: build the display list, install it, and publish a snapshot.
-        let display_list = self.scene.compose(tree, &computed, &boxes);
+        // The stateless pipeline owns no editing session, so it never paints a
+        // caret or selection highlight (`None`).
+        let display_list = self.scene.compose(tree, &computed, &boxes, None);
         scene.set_root(display_list);
         let snapshot = scene.snapshot();
         let composed = true;
