@@ -1,6 +1,6 @@
 //! A single entry in a [`DisplayList`](crate::command::DisplayList).
 
-use obscur_geometry::{CornerRadii, Rect};
+use obscur_geometry::{AffineTransform, CornerRadii, Rect};
 
 use crate::clip::Clip;
 use crate::color::Color;
@@ -83,6 +83,17 @@ pub enum PaintCommand {
         /// than a drop shadow (painted behind it).
         inset: bool,
     },
+    /// Push an affine transform onto the transform stack (CSS 2D `transform`,
+    /// spec §5.2). Subsequent drawing — up to the matching
+    /// [`PaintCommand::PopTransform`] — is mapped by the composition of every
+    /// transform on the stack, applied to absolute scene coordinates. The affine
+    /// is already resolved **about its transform origin** by the coordinator
+    /// (`translate(origin) · matrix · translate(-origin)`), so a renderer just
+    /// multiplies it into its current transform. This half of the pair opens the
+    /// nested region; a well-formed list balances it with a `PopTransform`.
+    PushTransform(AffineTransform),
+    /// Pop the most recently pushed transform, ending its region.
+    PopTransform,
     /// Push a clip onto the clip stack. Subsequent drawing is confined to the
     /// clip until the matching [`PaintCommand::PopClip`].
     PushClip(Clip),
@@ -101,14 +112,17 @@ impl PaintCommand {
     /// [`PaintCommand::PushClip`] or [`PaintCommand::PushLayer`].
     #[must_use]
     pub const fn is_push(&self) -> bool {
-        matches!(self, Self::PushClip(_) | Self::PushLayer(_))
+        matches!(
+            self,
+            Self::PushClip(_) | Self::PushLayer(_) | Self::PushTransform(_)
+        )
     }
 
     /// Returns whether this command closes a nested region, i.e. it is a
     /// [`PaintCommand::PopClip`] or [`PaintCommand::PopLayer`].
     #[must_use]
     pub const fn is_pop(&self) -> bool {
-        matches!(self, Self::PopClip | Self::PopLayer)
+        matches!(self, Self::PopClip | Self::PopLayer | Self::PopTransform)
     }
 
     /// The command's effect on nesting depth: `+1` for a push, `-1` for a pop,
@@ -120,8 +134,8 @@ impl PaintCommand {
     #[must_use]
     pub const fn nesting_delta(&self) -> i32 {
         match self {
-            Self::PushClip(_) | Self::PushLayer(_) => 1,
-            Self::PopClip | Self::PopLayer => -1,
+            Self::PushClip(_) | Self::PushLayer(_) | Self::PushTransform(_) => 1,
+            Self::PopClip | Self::PopLayer | Self::PopTransform => -1,
             Self::DrawPath { .. } | Self::DrawText { .. } | Self::DrawShadow { .. } => 0,
         }
     }
@@ -188,6 +202,17 @@ mod tests {
         assert_eq!(text.nesting_delta(), 0);
         assert!(!text.is_push());
         assert!(!text.is_pop());
+    }
+
+    #[test]
+    fn push_and_pop_transform_nest() {
+        let push = PaintCommand::PushTransform(AffineTransform::translate(10.0, 0.0));
+        assert_eq!(push.nesting_delta(), 1);
+        assert!(push.is_push());
+        assert!(!push.is_pop());
+        assert_eq!(PaintCommand::PopTransform.nesting_delta(), -1);
+        assert!(PaintCommand::PopTransform.is_pop());
+        assert!(!PaintCommand::PopTransform.is_push());
     }
 
     #[test]

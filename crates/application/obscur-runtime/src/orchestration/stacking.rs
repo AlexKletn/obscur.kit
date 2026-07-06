@@ -62,6 +62,11 @@ pub(super) struct PaintUnit {
 }
 
 impl PaintUnit {
+    /// A subtree's opening `PushTransform`, sorted before even the `PushClip` at
+    /// the same document position so a CSS 2D `transform` brackets the whole
+    /// subtree *outside* any rounded-corner clip (the transform is the outermost
+    /// wrapper). Below [`CLIP_PUSH_ORDER`](Self::CLIP_PUSH_ORDER).
+    pub(super) const TRANSFORM_PUSH_ORDER: i64 = -2;
     /// A subtree's opening `PushClip`, sorted before the node's own paint at the
     /// same document position. Pre-order enter indices are unique per node, so
     /// pushes never collide; any value below [`PAINT_ORDER`](Self::PAINT_ORDER)
@@ -77,6 +82,16 @@ impl PaintUnit {
     /// (descending `depth`), so nested clips unwind in the correct order.
     #[must_use]
     pub(super) const fn clip_pop_order(depth: u32) -> i64 {
+        i64::MAX - depth as i64
+    }
+
+    /// The phase for a subtree's closing `PopTransform` at its *exit* index. Uses
+    /// the same depth-descending schedule as [`clip_pop_order`](Self::clip_pop_order)
+    /// so nested transforms unwind deepest-first; a transform and a clip that end
+    /// at the same index and depth tie, broken by emitting the transform bracket
+    /// **after** the clip bracket (so the clip closes first, inside the transform).
+    #[must_use]
+    pub(super) const fn transform_pop_order(depth: u32) -> i64 {
         i64::MAX - depth as i64
     }
 }

@@ -128,6 +128,16 @@ pub enum PropertyId {
     /// drop shadow behind the box's background and an inset shadow on top of it.
     BoxShadow,
 
+    // ---- 2D transform (not inherited) ----
+    /// The `transform` property (a resolved `Transform` affine; NOT inherited).
+    /// `transform: none` lowers to an absent value. The scene coordinator
+    /// brackets the element's whole subtree paint with the composed affine,
+    /// resolved about [`TransformOrigin`](Self::TransformOrigin).
+    Transform,
+    /// The `transform-origin` property (a `TransformOrigin`; NOT inherited).
+    /// Initial `50% 50%` (the box center).
+    TransformOrigin,
+
     // ---- Sizing constraints (Length-valued, not inherited) ----
     /// The `min-width` property.
     MinWidth,
@@ -290,6 +300,8 @@ impl PropertyId {
             Self::BorderBottomRightRadius => "border-bottom-right-radius",
             Self::BorderBottomLeftRadius => "border-bottom-left-radius",
             Self::BoxShadow => "box-shadow",
+            Self::Transform => "transform",
+            Self::TransformOrigin => "transform-origin",
             Self::MinWidth => "min-width",
             Self::MinHeight => "min-height",
             Self::MaxWidth => "max-width",
@@ -380,6 +392,8 @@ impl PropertyId {
             | Self::BorderBottomRightRadius
             | Self::BorderBottomLeftRadius
             | Self::BoxShadow
+            | Self::Transform
+            | Self::TransformOrigin
             | Self::MinWidth
             | Self::MinHeight
             | Self::MaxWidth
@@ -765,6 +779,19 @@ mod tests {
     fn box_shadow_name_and_not_inherited() {
         assert_eq!(PropertyId::BoxShadow.name(), "box-shadow");
         assert!(!PropertyId::BoxShadow.default_inheritance().is_inherited());
+    }
+
+    #[test]
+    fn transform_names_and_not_inherited() {
+        assert_eq!(PropertyId::Transform.name(), "transform");
+        assert_eq!(PropertyId::TransformOrigin.name(), "transform-origin");
+        // Like the other box / paint properties, transforms reset per element.
+        assert!(!PropertyId::Transform.default_inheritance().is_inherited());
+        assert!(
+            !PropertyId::TransformOrigin
+                .default_inheritance()
+                .is_inherited()
+        );
     }
 
     #[test]

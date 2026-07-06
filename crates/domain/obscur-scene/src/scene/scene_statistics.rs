@@ -85,7 +85,12 @@ impl SceneStatistics {
                 }
                 PaintCommand::PushLayer(_) => stats.layer_count += 1,
                 PaintCommand::PushClip(_) => stats.clip_count += 1,
-                PaintCommand::PopClip | PaintCommand::PopLayer => {}
+                // Transform brackets are counted only towards `command_count`
+                // (they are neither a draw, a layer, nor a clip).
+                PaintCommand::PopClip
+                | PaintCommand::PopLayer
+                | PaintCommand::PushTransform(_)
+                | PaintCommand::PopTransform => {}
             }
         }
         stats

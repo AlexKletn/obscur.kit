@@ -106,6 +106,9 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::BorderBottomLeftRadius,
     // Box effects.
     PropertyId::BoxShadow,
+    // 2D transform.
+    PropertyId::Transform,
+    PropertyId::TransformOrigin,
     // Flex container / item.
     PropertyId::Display,
     PropertyId::FlexDirection,
@@ -192,6 +195,15 @@ impl StyleResolver {
             // absent value paints nothing all the same, so it is left unresolved —
             // byte-for-byte identical to before box-shadow existed.
             PropertyId::BoxShadow => None,
+            // `transform` initial is `none` (no transform). There is no
+            // `Transform` value for `none` other than the identity, and an absent
+            // value brackets nothing all the same, so it is left unresolved —
+            // byte-for-byte identical to before transforms existed.
+            PropertyId::Transform => None,
+            // `transform-origin` initial is `50% 50%` (the box center). An absent
+            // value is left unresolved and the coordinator defaults to the center,
+            // so no value need be minted here.
+            PropertyId::TransformOrigin => None,
             PropertyId::Opacity => Some(ComputedValue::number(1.0)),
             PropertyId::Width | PropertyId::Height => Some(ComputedValue::length(Length::Auto)),
             // Box-model spacing: initial `0`.
@@ -994,6 +1006,8 @@ mod tests {
                 | PropertyId::BorderBottomRightRadius
                 | PropertyId::BorderBottomLeftRadius
                 | PropertyId::BoxShadow
+                | PropertyId::Transform
+                | PropertyId::TransformOrigin
                 | PropertyId::MinWidth
                 | PropertyId::MinHeight
                 | PropertyId::MaxWidth
@@ -1069,6 +1083,8 @@ mod tests {
             PropertyId::BorderBottomRightRadius,
             PropertyId::BorderBottomLeftRadius,
             PropertyId::BoxShadow,
+            PropertyId::Transform,
+            PropertyId::TransformOrigin,
             PropertyId::MinWidth,
             PropertyId::MinHeight,
             PropertyId::MaxWidth,

@@ -1,6 +1,6 @@
 //! An incremental builder for [`DisplayList`]s.
 
-use obscur_geometry::{CornerRadii, Point, Rect};
+use obscur_geometry::{AffineTransform, CornerRadii, Point, Rect};
 
 use crate::clip::Clip;
 use crate::color::Color;
@@ -103,6 +103,24 @@ impl DisplayListBuilder {
     /// `Paint::stroke(stroke)`. Returns `&mut Self` for chaining.
     pub fn stroke(&mut self, path: Path, stroke: Stroke) -> &mut Self {
         self.draw(path, Paint::stroke(stroke))
+    }
+
+    /// Appends a [`PaintCommand::PushTransform`] and increments the nesting depth.
+    /// Everything drawn until the matching [`pop_transform`](Self::pop_transform)
+    /// is mapped by `transform`. Returns `&mut Self` for chaining.
+    pub fn push_transform(&mut self, transform: AffineTransform) -> &mut Self {
+        self.commands.push(PaintCommand::PushTransform(transform));
+        self.depth = self.depth.saturating_add(1);
+        self
+    }
+
+    /// Appends a [`PaintCommand::PopTransform`] and decrements the nesting depth
+    /// (saturating at zero). The command is always recorded, even if the stack is
+    /// already empty. Returns `&mut Self` for chaining.
+    pub fn pop_transform(&mut self) -> &mut Self {
+        self.commands.push(PaintCommand::PopTransform);
+        self.depth = self.depth.saturating_sub(1);
+        self
     }
 
     /// Appends a [`PaintCommand::PushClip`] and increments the nesting depth.
@@ -286,6 +304,26 @@ mod tests {
             }
         );
         // A list containing DrawText is still balanced (it is a leaf).
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn push_and_pop_transform_balance() {
+        let mut builder = DisplayListBuilder::new();
+        builder
+            .push_transform(AffineTransform::translate(10.0, 20.0))
+            .fill_rect(rect(), Brush::solid(Color::WHITE))
+            .pop_transform();
+        assert_eq!(builder.depth(), 0);
+        assert!(builder.is_balanced());
+        let list = builder.build();
+        let commands = list.commands();
+        assert_eq!(commands.len(), 3);
+        assert!(matches!(
+            commands[0],
+            PaintCommand::PushTransform(t) if t == AffineTransform::translate(10.0, 20.0)
+        ));
+        assert_eq!(commands[2], PaintCommand::PopTransform);
         assert!(list.is_balanced());
     }
 

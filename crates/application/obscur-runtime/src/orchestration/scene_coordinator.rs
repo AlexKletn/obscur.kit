@@ -4,7 +4,7 @@
 use std::collections::HashSet;
 use std::fmt;
 
-use obscur_geometry::{CornerRadii, Point, Rect, Size};
+use obscur_geometry::{AffineTransform, CornerRadii, Point, Rect, Size};
 use obscur_identity::NodeId;
 use obscur_scene::clip::Clip;
 use obscur_scene::color::Color;
@@ -17,6 +17,7 @@ use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::ComputedValue;
 use obscur_style::property::{
     layout_keyword, BoxShadow, Length, LinearGradient, PropertyId, PropertyValue, StyleColor,
+    Transform, TransformOrigin,
 };
 use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontResolver, FontSource,
@@ -431,6 +432,11 @@ impl SceneCoordinator {
             std::collections::HashMap::new();
         let mut preorder: Vec<NodeId> = Vec::new();
         let mut clip_brackets: Vec<(NodeId, Clip)> = Vec::new();
+        // A CSS 2D `transform` brackets a node's WHOLE subtree paint with a
+        // `PushTransform` … `PopTransform` around (outside) any rounded clip. The
+        // affine is resolved about the node's transform origin; the bracket is
+        // recorded here and sorted into place in the same second pass as clips.
+        let mut transform_brackets: Vec<(NodeId, AffineTransform)> = Vec::new();
         while let Some((node, parent, depth)) = stack.pop() {
             if !visited.insert(node) {
                 // Already painted (cycle or shared child): do not revisit.
@@ -454,6 +460,16 @@ impl SceneCoordinator {
             // recorded for a second pass once every descendant's exit index is known.
             if has_radius && let Some(layout_box) = boxes.get(&node) {
                 clip_brackets.push((node, Clip::rounded_rect(layout_box.bounds, radii)));
+            }
+
+            // A non-identity CSS 2D `transform` brackets this node's subtree. The
+            // affine is resolved about the node's transform origin (border-box
+            // position + `transform-origin`, default center). No transform (or an
+            // identity one) records nothing — byte-for-byte identical to before.
+            if let Some(layout_box) = boxes.get(&node)
+                && let Some(affine) = resolved_transform(computed, node, layout_box.bounds)
+            {
+                transform_brackets.push((node, affine));
             }
 
             // This node's own paint accumulates into a private builder so it can be
@@ -624,7 +640,7 @@ impl SceneCoordinator {
         // it sorts after every descendant. The exit index is the running max of
         // each node's own enter index propagated up to its parent, walking the
         // pre-order sequence in reverse (descendants before ancestors).
-        if !clip_brackets.is_empty() {
+        if !clip_brackets.is_empty() || !transform_brackets.is_empty() {
             let mut exit_index = enter_index.clone();
             for &node in preorder.iter().rev() {
                 if let (Some(&enter), Some(Some(parent))) =
@@ -652,6 +668,31 @@ impl SceneCoordinator {
                     tree_index: exit,
                     order: PaintUnit::clip_pop_order(depth),
                     commands: vec![PaintCommand::PopClip],
+                });
+            }
+            // Transform brackets are emitted AFTER the clip brackets so that when
+            // a node carries both, the tie at the shared `(z, exit, MAX - depth)`
+            // key resolves — via the stable sort — with the clip's `PopClip`
+            // before the transform's `PopTransform` (the clip closes inside the
+            // transform). The `PushTransform` sorts before the `PushClip`
+            // (TRANSFORM_PUSH_ORDER < CLIP_PUSH_ORDER), so the transform is the
+            // outermost wrapper of the subtree.
+            for (node, affine) in transform_brackets {
+                let z = zmap.get(&node).copied().unwrap_or(0);
+                let enter = enter_index.get(&node).copied().unwrap_or(0);
+                let exit = exit_index.get(&node).copied().unwrap_or(enter);
+                let depth = depth_of.get(&node).copied().unwrap_or(0);
+                units.push(PaintUnit {
+                    z,
+                    tree_index: enter,
+                    order: PaintUnit::TRANSFORM_PUSH_ORDER,
+                    commands: vec![PaintCommand::PushTransform(affine)],
+                });
+                units.push(PaintUnit {
+                    z,
+                    tree_index: exit,
+                    order: PaintUnit::transform_pop_order(depth),
+                    commands: vec![PaintCommand::PopTransform],
                 });
             }
         }
@@ -783,6 +824,69 @@ fn emit_box_shadow(
         (px(shadow.offset_x()), px(shadow.offset_y())),
         shadow.is_inset(),
     );
+}
+
+/// Resolves a node's CSS 2D `transform` into the absolute-space affine that
+/// brackets its subtree paint (spec §5.2), or [`None`] when there is no authored
+/// transform (or it is the identity — the byte-identical no-op path).
+///
+/// The authored functions are already composed into a single matrix `M` by the CSS
+/// lowering; here it is wrapped about the element's **transform origin**: the
+/// border-box position plus the resolved `transform-origin` (defaulting to the box
+/// center). The returned affine is `translate(origin) · M · translate(-origin)`, so
+/// a point in the box's untransformed absolute space is mapped about the origin —
+/// exactly the CSS `transform` behaviour. A renderer multiplies it into its current
+/// transform for the bracketed region.
+fn resolved_transform(
+    computed: &ComputedStyles,
+    node: NodeId,
+    bounds: Rect,
+) -> Option<AffineTransform> {
+    let transform = transform_of(computed, node)?;
+    if transform.is_identity() {
+        return None;
+    }
+    let origin = transform_origin_of(computed, node);
+    let ox = bounds.origin.x + resolve_origin_length(origin.x(), bounds.size.width);
+    let oy = bounds.origin.y + resolve_origin_length(origin.y(), bounds.size.height);
+    let matrix = AffineTransform {
+        coeffs: transform.matrix(),
+    };
+    Some(
+        AffineTransform::translate(ox, oy)
+            .multiply(matrix)
+            .multiply(AffineTransform::translate(-ox, -oy)),
+    )
+}
+
+/// Reads a node's computed `transform`, if present and a resolved affine.
+fn transform_of(computed: &ComputedStyles, node: NodeId) -> Option<Transform> {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::Transform))
+        .and_then(ComputedValue::as_transform)
+}
+
+/// Reads a node's computed `transform-origin`, defaulting to the box center
+/// (`50% 50%`) when unauthored (the CSS initial).
+fn transform_origin_of(computed: &ComputedStyles, node: NodeId) -> TransformOrigin {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::TransformOrigin))
+        .and_then(ComputedValue::as_transform_origin)
+        .unwrap_or(TransformOrigin::CENTER)
+}
+
+/// Resolves one `transform-origin` component to a logical-pixel offset within a
+/// box axis of length `basis`: an absolute `px` directly, a `Percent` as a
+/// fraction of `basis`. Any other (context-dependent) length falls back to the
+/// center of the axis (a documented approximation).
+fn resolve_origin_length(length: Length, basis: f32) -> f32 {
+    match length {
+        Length::Px(px) => px.0,
+        Length::Percent(pct) => pct / 100.0 * basis,
+        _ => basis / 2.0,
+    }
 }
 
 /// Builds a scene [`SceneLinearGradient`] fill brush for a style
@@ -1152,6 +1256,118 @@ mod tests {
         assert_eq!(g.stops()[1].offset(), 1.0);
         assert_eq!(g.stops()[1].color(), Color::rgba(0.0, 0.0, 1.0, 1.0));
         assert!(list.is_balanced());
+    }
+
+    /// A `ComputedStyle` carrying a `background-color` and a resolved `transform`.
+    fn with_background_and_transform(bg: StyleColor, matrix: [f32; 6]) -> ComputedStyle {
+        let mut style = ComputedStyle::new();
+        style.set(PropertyId::BackgroundColor, ComputedValue::color(bg));
+        style.set(
+            PropertyId::Transform,
+            ComputedValue::from_concrete(PropertyValue::Transform(Transform::new(matrix)))
+                .expect("a transform is a concrete computed value"),
+        );
+        style
+    }
+
+    #[test]
+    fn transformed_node_brackets_subtree_with_push_pop_transform() {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        // `transform: translate(10px, 0)` over a background box.
+        computed.insert(
+            a,
+            with_background_and_transform(
+                StyleColor::rgba(0.0, 1.0, 0.0, 1.0),
+                [1.0, 0.0, 0.0, 1.0, 10.0, 0.0],
+            ),
+        );
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 40.0, 20.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        assert!(list.is_balanced(), "the transform bracket is well-formed");
+        let commands = list.commands();
+
+        // The transform opens first (outermost) and closes last, bracketing the
+        // node's whole subtree paint.
+        let Some(PaintCommand::PushTransform(affine)) = commands.first() else {
+            panic!("expected a leading PushTransform, got {:?}", commands.first());
+        };
+        // A pure translation commutes with the origin wrapping, so the affine is
+        // exactly translate(10, 0) regardless of the (default center) origin.
+        assert_eq!(affine.coeffs, [1.0, 0.0, 0.0, 1.0, 10.0, 0.0]);
+        assert!(
+            matches!(commands.last(), Some(PaintCommand::PopTransform)),
+            "the subtree closes with a PopTransform"
+        );
+        // The background fill still paints inside the bracket.
+        assert_eq!(fill_count(&list), 1);
+    }
+
+    #[test]
+    fn untransformed_node_emits_no_transform_bracket() {
+        // Regression: a plain background (no transform) emits no PushTransform.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(a, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        assert!(
+            !list
+                .commands()
+                .iter()
+                .any(|c| matches!(
+                    c,
+                    PaintCommand::PushTransform(_) | PaintCommand::PopTransform
+                )),
+            "no transform authored ⇒ no transform bracket"
+        );
+    }
+
+    #[test]
+    fn identity_transform_emits_no_bracket() {
+        // An explicit identity transform (e.g. `transform: none`) brackets nothing.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(
+            a,
+            with_background_and_transform(
+                StyleColor::rgba(0.0, 1.0, 0.0, 1.0),
+                [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            ),
+        );
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        assert!(
+            !list
+                .commands()
+                .iter()
+                .any(|c| matches!(c, PaintCommand::PushTransform(_))),
+            "an identity transform is a no-op bracket"
+        );
     }
 
     #[test]

@@ -328,6 +328,64 @@ fn no_box_shadow_authored_emits_no_draw_shadow() {
     );
 }
 
+// An authored `transform: translate(30px, 40px)` reaches paint through the real
+// pipeline: the element's whole subtree paint is bracketed by a `PushTransform` /
+// `PopTransform` carrying the composed affine (a pure translation, so the
+// transform-origin wrapping cancels), with the background fill drawn inside.
+#[test]
+fn authored_transform_brackets_subtree_with_push_pop_transform() {
+    use obscur_kit::geometry::AffineTransform;
+
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(
+        ".box{width:100px;height:50px;background-color:#00ff00;transform:translate(30px, 40px)}",
+    );
+    let result = rt.render_now(&one_box_view(), std::slice::from_ref(&sheet));
+    assert!(result.restyled(), "authored CSS resolved computed styles");
+    assert!(result.relaid_out(), "the styled tree arranged a layout box");
+    assert!(result.is_balanced(), "the transform bracket is well-formed");
+
+    let commands = result.snapshot().display_list().commands();
+
+    // The transform opens first (outermost) and closes last.
+    let Some(PaintCommand::PushTransform(affine)) = commands.first() else {
+        panic!("expected a leading PushTransform, got {:?}", commands.first());
+    };
+    // A pure translation commutes with the origin wrapping: exactly translate(30, 40).
+    assert_eq!(*affine, AffineTransform::translate(30.0, 40.0));
+    assert!(
+        matches!(commands.last(), Some(PaintCommand::PopTransform)),
+        "the subtree closes with a PopTransform"
+    );
+
+    // The background fill paints inside the bracket (after the push, before the pop).
+    let push_idx = 0;
+    let pop_idx = commands.len() - 1;
+    let fill_idx = commands
+        .iter()
+        .position(|c| matches!(c, PaintCommand::DrawPath { .. }))
+        .expect("the background fill is present");
+    assert!(push_idx < fill_idx && fill_idx < pop_idx, "fill is inside the transform");
+}
+
+// Regression guard: an element with no authored `transform` emits no transform
+// bracket (byte-identical to before transforms existed).
+#[test]
+fn no_transform_authored_emits_no_transform_bracket() {
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(".box{width:40px;height:40px;background-color:#00ff00}");
+    let result = rt.render_now(&one_box_view(), std::slice::from_ref(&sheet));
+
+    let commands = result.snapshot().display_list().commands();
+    assert!(
+        !commands.iter().any(|c| matches!(
+            c,
+            PaintCommand::PushTransform(_) | PaintCommand::PopTransform
+        )),
+        "no transform authored ⇒ no transform bracket"
+    );
+}
+
 #[test]
 fn per_side_border_paints_only_that_edge() {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));

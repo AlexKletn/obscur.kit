@@ -22,7 +22,7 @@
 
 use crate::property::{
     BoxShadow, GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length, LengthExpr,
-    LinearGradient, StyleColor,
+    LinearGradient, StyleColor, Transform, TransformOrigin,
 };
 use obscur_identity::InternedSymbol;
 
@@ -96,6 +96,15 @@ pub enum PropertyValue {
     /// a / b / c / d` line form does not produce this value; it expands to the four
     /// [`GridLine`](PropertyValue::GridLine) longhands instead.
     GridAreaName(Box<str>),
+    /// A resolved CSS 2D `transform`: the authored `<transform-function>+` list
+    /// composed left-to-right into a single 2x3 affine (see [`Transform`]).
+    /// `transform: none` lowers to an absent value, not this. The scene
+    /// coordinator wraps the affine about the element's `transform-origin` and
+    /// brackets the subtree's paint with it (spec §5.2).
+    Transform(Transform),
+    /// A resolved CSS `transform-origin` (see [`TransformOrigin`]): the point a
+    /// `transform` pivots about, defaulting to the box center (`50% 50%`).
+    TransformOrigin(TransformOrigin),
     /// An unresolved `var(--name)` reference to a custom property, named by its
     /// interned symbol. This is a pre-resolution placeholder: it is substituted
     /// with the referenced custom property's value before computed-value
@@ -226,6 +235,26 @@ impl PropertyValue {
     pub fn as_grid_area_name(&self) -> Option<&str> {
         match self {
             Self::GridAreaName(name) => Some(name),
+            _ => None,
+        }
+    }
+
+    /// Returns the resolved transform if this value is a
+    /// [`PropertyValue::Transform`].
+    #[must_use]
+    pub const fn as_transform(&self) -> Option<Transform> {
+        match self {
+            Self::Transform(transform) => Some(*transform),
+            _ => None,
+        }
+    }
+
+    /// Returns the transform origin if this value is a
+    /// [`PropertyValue::TransformOrigin`].
+    #[must_use]
+    pub const fn as_transform_origin(&self) -> Option<TransformOrigin> {
+        match self {
+            Self::TransformOrigin(origin) => Some(*origin),
             _ => None,
         }
     }

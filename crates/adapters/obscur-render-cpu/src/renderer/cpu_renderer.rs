@@ -50,7 +50,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use obscur_capability::SupportLevel;
-use obscur_geometry::{CornerRadii, Point, Rect, Size};
+use obscur_geometry::{AffineTransform, CornerRadii, Point, Rect, Size};
 use skrifa::instance::{LocationRef, Size as SkrifaSize};
 use skrifa::outline::DrawSettings;
 use skrifa::{FontRef, GlyphId, MetadataProvider};
@@ -209,8 +209,15 @@ impl Renderer for CpuRenderer {
         // pops balanced regardless of what a clip could be rasterized into.
         let mut clip_stack: Vec<Option<tiny_skia::Mask>> = Vec::new();
         let identity = tiny_skia::Transform::identity();
+        // The active CSS 2D `transform` stack: each `PushTransform` composes its
+        // affine onto the running transform, and every path / glyph / shadow drawn
+        // (and every clip mask built) until the matching `PopTransform` is mapped
+        // by the top of the stack. Empty (identity) when no transform is active, so
+        // an untransformed scene rasterizes byte-for-byte as before.
+        let mut transform_stack: Vec<tiny_skia::Transform> = Vec::new();
 
         for command in submission.frame().scene().display_list().commands() {
+            let current = transform_stack.last().copied().unwrap_or(identity);
             match command {
                 PaintCommand::DrawPath { path, paint } => {
                     let Some(sk_path) = to_sk_path(path) else {
@@ -229,7 +236,7 @@ impl Renderer for CpuRenderer {
                                 &sk_path,
                                 &sk_paint,
                                 to_sk_fill_rule(path.fill_rule()),
-                                identity,
+                                current,
                                 clip,
                             );
                         }
@@ -244,9 +251,15 @@ impl Renderer for CpuRenderer {
                                 width: stroke.width(),
                                 ..Default::default()
                             };
-                            pixmap.stroke_path(&sk_path, &sk_paint, &sk_stroke, identity, clip);
+                            pixmap.stroke_path(&sk_path, &sk_paint, &sk_stroke, current, clip);
                         }
                     }
+                }
+                PaintCommand::PushTransform(transform) => {
+                    transform_stack.push(current.pre_concat(to_sk_transform(transform)));
+                }
+                PaintCommand::PopTransform => {
+                    let _ = transform_stack.pop();
                 }
                 PaintCommand::PushClip(clip) => {
                     let parent = clip_stack.last().and_then(Option::as_ref);
@@ -260,6 +273,7 @@ impl Renderer for CpuRenderer {
                                     &sk_path,
                                     to_sk_fill_rule(domain_path.fill_rule()),
                                     parent,
+                                    current,
                                 )
                                 .or_else(|| parent.cloned()),
                                 // A degenerate/empty clip shape cannot be
@@ -283,7 +297,7 @@ impl Renderer for CpuRenderer {
                 PaintCommand::PushLayer(_) | PaintCommand::PopLayer => {}
                 PaintCommand::DrawText { origin, run, brush } => {
                     let clip = clip_stack.last().and_then(Option::as_ref);
-                    draw_text_run(&mut pixmap, *origin, run, brush, clip, identity, &self.fonts);
+                    draw_text_run(&mut pixmap, *origin, run, brush, clip, current, &self.fonts);
                 }
                 PaintCommand::DrawShadow {
                     rect,
@@ -304,7 +318,7 @@ impl Renderer for CpuRenderer {
                         *offset,
                         *inset,
                         clip,
-                        identity,
+                        current,
                     );
                 }
             }
@@ -362,6 +376,15 @@ fn to_sk_path(path: &Path) -> Option<tiny_skia::Path> {
         }
     }
     builder.finish()
+}
+
+/// Converts an obscur-geometry [`AffineTransform`] into a
+/// [`tiny_skia::Transform`]. The obscur coefficients `[a, b, c, d, tx, ty]` map to
+/// tiny-skia's row order `(sx, ky, kx, sy, tx, ty)` one-to-one (both map a point
+/// `(x, y)` to `(a·x + c·y + tx, b·x + d·y + ty)`).
+fn to_sk_transform(t: &AffineTransform) -> tiny_skia::Transform {
+    let m = t.coeffs;
+    tiny_skia::Transform::from_row(m[0], m[1], m[2], m[3], m[4], m[5])
 }
 
 /// Maps a domain [`FillRule`] onto the `tiny-skia` equivalent.
@@ -488,15 +511,15 @@ fn build_clip_mask(
     sk_path: &tiny_skia::Path,
     fill_rule: tiny_skia::FillRule,
     parent: Option<&tiny_skia::Mask>,
+    transform: tiny_skia::Transform,
 ) -> Option<tiny_skia::Mask> {
-    let identity = tiny_skia::Transform::identity();
     if let Some(parent) = parent {
         let mut mask = parent.clone();
-        mask.intersect_path(sk_path, fill_rule, true, identity);
+        mask.intersect_path(sk_path, fill_rule, true, transform);
         Some(mask)
     } else {
         let mut mask = tiny_skia::Mask::new(width, height)?;
-        mask.fill_path(sk_path, fill_rule, true, identity);
+        mask.fill_path(sk_path, fill_rule, true, transform);
         Some(mask)
     }
 }
@@ -1049,6 +1072,43 @@ mod tests {
         assert!(inside.alpha() < 200, "shadow is reduced alpha: {}", inside.alpha());
         // A pixel outside the offset rect (top-left corner) is untouched.
         assert_eq!(pixmap.pixel(0, 0).expect("pixel exists").alpha(), 0);
+    }
+
+    #[test]
+    fn push_transform_translates_the_rasterized_rect() {
+        // A red rect at (2,2)-(10,10) drawn inside a PushTransform(translate(10, 0))
+        // rasterizes shifted 10px right: the pre-transform pixel (5,5) is now empty
+        // and (15,5) is painted.
+        let mut path = Path::new();
+        path.move_to(Point::new(2.0, 2.0))
+            .line_to(Point::new(10.0, 2.0))
+            .line_to(Point::new(10.0, 10.0))
+            .line_to(Point::new(2.0, 10.0))
+            .close();
+        let list = DisplayList::from_commands(vec![
+            PaintCommand::PushTransform(AffineTransform::translate(10.0, 0.0)),
+            PaintCommand::DrawPath {
+                path,
+                paint: Paint::solid_fill(Color::rgba(1.0, 0.0, 0.0, 1.0)),
+            },
+            PaintCommand::PopTransform,
+        ]);
+        assert!(list.is_balanced());
+        let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(11));
+        let frame = RenderFrame::new(snapshot, Size::new(32.0, 32.0));
+        let submission = FrameSubmission::new(frame);
+
+        let mut renderer = CpuRenderer::default();
+        renderer
+            .render(&submission, &bitmap_target(32.0, 32.0))
+            .expect("renders");
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+
+        // The shifted rect covers (12,2)-(20,10): (15,5) is opaque red.
+        let shifted = pixmap.pixel(15, 5).expect("pixel exists");
+        assert!(shifted.red() > 200 && shifted.alpha() > 200, "translated rect painted");
+        // The untransformed position (5,5) is now empty.
+        assert_eq!(pixmap.pixel(5, 5).expect("pixel exists").alpha(), 0);
     }
 
     #[test]

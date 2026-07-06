@@ -8,7 +8,10 @@
 //! resolution. Only concrete leaf values (keyword / length / number / color)
 //! remain.
 
-use crate::property::{BoxShadow, Length, LengthExpr, LinearGradient, PropertyValue, StyleColor};
+use crate::property::{
+    BoxShadow, Length, LengthExpr, LinearGradient, PropertyValue, StyleColor, Transform,
+    TransformOrigin,
+};
 use obscur_identity::InternedSymbol;
 
 /// A fully-resolved, concrete computed value for a single property.
@@ -48,7 +51,9 @@ impl ComputedValue {
             | PropertyValue::GridTracks(_)
             | PropertyValue::GridLine(_)
             | PropertyValue::GridAreas(_)
-            | PropertyValue::GridAreaName(_) => Some(Self(value)),
+            | PropertyValue::GridAreaName(_)
+            | PropertyValue::Transform(_)
+            | PropertyValue::TransformOrigin(_) => Some(Self(value)),
             PropertyValue::CustomRef(_)
             | PropertyValue::Inherit
             | PropertyValue::Initial
@@ -121,6 +126,19 @@ impl ComputedValue {
     #[must_use]
     pub fn as_box_shadows(&self) -> Option<&[BoxShadow]> {
         self.0.as_box_shadows()
+    }
+
+    /// Returns the resolved 2D `transform` if this computed value is a transform.
+    #[must_use]
+    pub const fn as_transform(&self) -> Option<Transform> {
+        self.0.as_transform()
+    }
+
+    /// Returns the `transform-origin` if this computed value is a transform
+    /// origin.
+    #[must_use]
+    pub const fn as_transform_origin(&self) -> Option<TransformOrigin> {
+        self.0.as_transform_origin()
     }
 }
 

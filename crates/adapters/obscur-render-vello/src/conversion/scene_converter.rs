@@ -154,16 +154,31 @@ impl SceneConverter {
     pub fn convert(&self, list: &DisplayList) -> Scene {
         let mut scene = Scene::new();
         let mut depth: u32 = 0;
+        // The active CSS 2D `transform` stack: each `PushTransform` composes its
+        // affine onto the running transform, and every draw between it and the
+        // matching `PopTransform` is mapped by the top of the stack. Empty (the
+        // identity) when no transform is active, so an untransformed scene draws
+        // exactly as before.
+        let mut transforms: Vec<Affine> = Vec::new();
 
         for command in list.commands() {
+            let current = transforms.last().copied().unwrap_or(Affine::IDENTITY);
             match command {
-                PaintCommand::DrawPath { path, paint } => self.draw_path(&mut scene, path, paint),
+                PaintCommand::DrawPath { path, paint } => {
+                    self.draw_path(&mut scene, path, paint, current);
+                }
+                PaintCommand::PushTransform(transform) => {
+                    transforms.push(current * to_kurbo_affine(transform));
+                }
+                PaintCommand::PopTransform => {
+                    transforms.pop();
+                }
                 PaintCommand::PushClip(clip) => {
-                    self.push_clip(&mut scene, clip);
+                    self.push_clip(&mut scene, clip, current);
                     depth += 1;
                 }
                 PaintCommand::PushLayer(layer) => {
-                    self.push_layer(&mut scene, layer);
+                    self.push_layer(&mut scene, layer, current);
                     depth += 1;
                 }
                 PaintCommand::PopClip | PaintCommand::PopLayer => {
@@ -173,7 +188,7 @@ impl SceneConverter {
                     }
                 }
                 PaintCommand::DrawText { origin, run, brush } => {
-                    self.draw_text(&mut scene, *origin, run, brush);
+                    self.draw_text(&mut scene, *origin, run, brush, current);
                 }
                 PaintCommand::DrawShadow {
                     rect,
@@ -184,7 +199,9 @@ impl SceneConverter {
                     offset,
                     inset,
                 } => {
-                    draw_shadow(&mut scene, rect, radii, *color, *blur, *spread, *offset, *inset);
+                    draw_shadow(
+                        &mut scene, rect, radii, *color, *blur, *spread, *offset, *inset, current,
+                    );
                 }
             }
         }
@@ -214,6 +231,7 @@ impl SceneConverter {
         origin: obscur_geometry::Point,
         run: &GlyphRun,
         brush: &Brush,
+        transform: Affine,
     ) {
         // Pick the run's font by its handle (`0` = primary); fall back to id 0,
         // else skip. No matching font → no text (documented graceful
@@ -246,6 +264,7 @@ impl SceneConverter {
         let mut draw = scene
             .draw_glyphs(font)
             .font_size(run.font_size())
+            .transform(transform)
             .brush(&peniko_brush);
         // Synthetic styling (spec §5.18): when the run resolved to an upright /
         // lighter face because no true italic / bold cut was registered, fake the
@@ -261,47 +280,49 @@ impl SceneConverter {
         draw.draw(peniko::Fill::NonZero, glyphs.into_iter());
     }
 
-    /// Fills or strokes a single path.
-    fn draw_path(&self, scene: &mut Scene, path: &obscur_scene::path::Path, paint: &Paint) {
+    /// Fills or strokes a single path under the active `transform`.
+    fn draw_path(
+        &self,
+        scene: &mut Scene,
+        path: &obscur_scene::path::Path,
+        paint: &Paint,
+        transform: Affine,
+    ) {
         let bez = self.path.convert(path);
         let brush = self.brush.convert(paint.brush());
         match paint {
             Paint::Fill(_) => {
                 let fill = self.path.fill_rule(path.fill_rule());
-                scene.fill(fill, Affine::IDENTITY, &brush, None, &bez);
+                scene.fill(fill, transform, &brush, None, &bez);
             }
             Paint::Stroke(stroke) => {
                 let style = self.brush.stroke(stroke);
-                scene.stroke(&style, Affine::IDENTITY, &brush, None, &bez);
+                scene.stroke(&style, transform, &brush, None, &bez);
             }
         }
     }
 
-    /// Pushes a clip as a neutral-blend layer bounded by the clip's shape.
-    fn push_clip(&self, scene: &mut Scene, clip: &Clip) {
+    /// Pushes a clip as a neutral-blend layer bounded by the clip's shape, mapped
+    /// by the active `transform`.
+    fn push_clip(&self, scene: &mut Scene, clip: &Clip, transform: Affine) {
         let shape = self.clip.shape(clip);
         scene.push_layer(
             peniko::Fill::NonZero,
             peniko::BlendMode::default(),
             1.0,
-            Affine::IDENTITY,
+            transform,
             &shape,
         );
     }
 
-    /// Pushes a compositing layer with its opacity, blend, and clip shape.
-    fn push_layer(&self, scene: &mut Scene, layer: &SceneLayer) {
+    /// Pushes a compositing layer with its opacity, blend, and clip shape, the
+    /// shape mapped by the active `transform`.
+    fn push_layer(&self, scene: &mut Scene, layer: &SceneLayer, transform: Affine) {
         let blend = peniko::BlendMode::new(mix(layer.blend_mode()), compose(layer.composition()));
         let alpha = layer.opacity();
         if let Some(clip @ Clip::Shape(_)) = layer.clip() {
             let shape = self.clip.shape(clip);
-            scene.push_layer(
-                peniko::Fill::NonZero,
-                blend,
-                alpha,
-                Affine::IDENTITY,
-                &shape,
-            );
+            scene.push_layer(peniko::Fill::NonZero, blend, alpha, transform, &shape);
         } else {
             let unbounded = KurboRect::new(
                 -UNBOUNDED_HALF_EXTENT,
@@ -309,15 +330,24 @@ impl SceneConverter {
                 UNBOUNDED_HALF_EXTENT,
                 UNBOUNDED_HALF_EXTENT,
             );
-            scene.push_layer(
-                peniko::Fill::NonZero,
-                blend,
-                alpha,
-                Affine::IDENTITY,
-                &unbounded,
-            );
+            scene.push_layer(peniko::Fill::NonZero, blend, alpha, transform, &unbounded);
         }
     }
+}
+
+/// Converts an obscur-geometry [`AffineTransform`](obscur_geometry::AffineTransform)
+/// into a kurbo [`Affine`]. Both store the six coefficients `[a, b, c, d, e, f]`
+/// in the identical layout, so the conversion is a straight widening to `f64`.
+fn to_kurbo_affine(t: &obscur_geometry::AffineTransform) -> Affine {
+    let m = t.coeffs;
+    Affine::new([
+        f64::from(m[0]),
+        f64::from(m[1]),
+        f64::from(m[2]),
+        f64::from(m[3]),
+        f64::from(m[4]),
+        f64::from(m[5]),
+    ])
 }
 
 /// Rasterizes a CSS `box-shadow` as a gaussian-blurred rounded rectangle
@@ -342,6 +372,7 @@ fn draw_shadow(
     spread: f32,
     offset: (f32, f32),
     inset: bool,
+    transform: Affine,
 ) {
     // Drop shadows inflate by `spread`; inset shadows deflate by it.
     let inflate = f64::from(if inset { -spread } else { spread });
@@ -366,7 +397,7 @@ fn draw_shadow(
     // Map the CSS blur radius to a gaussian standard deviation.
     let std_dev = f64::from(blur.max(0.0)) / 2.0;
     let peniko_color = ColorConverter::new().convert(color);
-    scene.draw_blurred_rounded_rect(Affine::IDENTITY, kurbo_rect, peniko_color, radius, std_dev);
+    scene.draw_blurred_rounded_rect(transform, kurbo_rect, peniko_color, radius, std_dev);
 }
 
 /// Maps an obscur-scene [`BlendMode`] to a peniko [`Mix`](peniko::Mix) blend.
