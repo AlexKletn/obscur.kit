@@ -1,6 +1,6 @@
 //! The outcome of dispatching one pointer event: [`PointerDispatch`].
 
-use obscur_identity::NodeId;
+use obscur_identity::{InternedSymbol, NodeId};
 
 /// The result of routing a pointer event through
 /// [`UiRuntime::handle_pointer`](super::UiRuntime::handle_pointer).
@@ -19,16 +19,27 @@ pub struct PointerDispatch {
     pub hover_changed: bool,
     /// Whether the focus target changed (only a press can move focus).
     pub focus_changed: bool,
+    /// The command dispatched by this event, if it completed a click on a node
+    /// with an `on-click` binding (a release on the same node a prior press
+    /// landed on). `None` for every non-click event, and for a click on a node
+    /// with no click binding in its ancestor chain.
+    pub command: Option<InternedSymbol>,
 }
 
 impl PointerDispatch {
     /// Constructs a dispatch outcome.
     #[must_use]
-    pub const fn new(target: Option<NodeId>, hover_changed: bool, focus_changed: bool) -> Self {
+    pub const fn new(
+        target: Option<NodeId>,
+        hover_changed: bool,
+        focus_changed: bool,
+        command: Option<InternedSymbol>,
+    ) -> Self {
         Self {
             target,
             hover_changed,
             focus_changed,
+            command,
         }
     }
 
@@ -48,6 +59,12 @@ impl PointerDispatch {
     #[must_use]
     pub const fn focus_changed(&self) -> bool {
         self.focus_changed
+    }
+
+    /// The command a completed click dispatched, if any.
+    #[must_use]
+    pub const fn command(&self) -> Option<InternedSymbol> {
+        self.command
     }
 
     /// Whether this event changed anything (hover or focus) — i.e. whether it

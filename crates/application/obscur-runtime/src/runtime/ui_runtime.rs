@@ -10,7 +10,7 @@ use obscur_diagnostics::{
     TelemetrySink,
 };
 use obscur_geometry::Size;
-use obscur_identity::{NodeId, RuntimeId};
+use obscur_identity::{InternedSymbol, NodeId, RuntimeId};
 use obscur_interaction::command::{CommandRouter, KeyEvent, Modifiers, Shortcut};
 use obscur_interaction::hover::{HoverChain, HoverTransition};
 use obscur_interaction::pointer::{PointerEvent, PointerEventKind};
@@ -30,7 +30,7 @@ use obscur_text::layout::Hyphenator;
 use obscur_text::shaping::{TextItemizer, TextShaper};
 use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
-use obscur_view::view::View;
+use obscur_view::view::{View, EVENT_CLICK};
 
 use super::{FrameBudget, FramePlan, KeyDispatch, PointerDispatch, SemanticTreeBuilder};
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
@@ -125,6 +125,24 @@ pub struct UiRuntime {
     /// does not yet do, so a plain `Option<NodeId>` is the simpler correct model
     /// for pointer-press focus (documented fallback).
     focused: Option<NodeId>,
+    /// The node the most recent [`PointerEventKind::Down`] press landed on, if
+    /// any — the anchor for click detection. A [`PointerEventKind::Up`] whose
+    /// hit-test target equals this node completes a *click* on it; the field is
+    /// then cleared. `None` between clicks (no press outstanding).
+    press_target: Option<NodeId>,
+    /// The command-handler registry: application logic to run when a dispatched
+    /// command fires, keyed by the command's [`InternedSymbol`] (spec §2.3,
+    /// §3.1 — events flow up to a command, the command runs a handler).
+    ///
+    /// The app owns its command symbols: it binds `on-click → command` in the
+    /// View (via [`ViewEventBinding`](obscur_view::view::ViewEventBinding)) and
+    /// registers the *same* symbol here via
+    /// [`on_command`](Self::on_command); the runtime only *compares* symbols, so
+    /// no interner coherence is needed. A handler is a `FnMut()` that typically
+    /// captures app state through an `Rc<RefCell<_>>`/`Rc<Cell<_>>`. Exactly one
+    /// handler per command (a later registration replaces an earlier one), so
+    /// dispatch is a deterministic single lookup — no iteration order observed.
+    handlers: HashMap<InternedSymbol, Box<dyn FnMut()>>,
     /// The shortcut→command-id binding table keyboard input resolves against
     /// (spec §6.7). Populated by [`bind_command`](Self::bind_command); consulted
     /// by [`handle_key`](Self::handle_key) on each key press.
@@ -235,6 +253,8 @@ impl UiRuntime {
             spatial: SpatialIndex::new(),
             hover: HoverChain::new(),
             focused: None,
+            press_target: None,
+            handlers: HashMap::new(),
             commands: CommandRouter::new(),
             modifiers: Modifiers::new(),
             next_frame: FrameId::FIRST,
@@ -1136,11 +1156,33 @@ impl UiRuntime {
         let hover_changed = transition.has_changes();
         self.hover = new_hover;
 
-        // 3. Focus: only a press moves focus.
+        // 3. Focus: only a press moves focus. A press also anchors click
+        //    detection on the pressed node.
         let mut focus_changed = false;
-        if event.kind() == PointerEventKind::Down && self.focused != target {
-            self.focused = target;
-            focus_changed = true;
+        if event.kind() == PointerEventKind::Down {
+            if self.focused != target {
+                self.focused = target;
+                focus_changed = true;
+            }
+            self.press_target = target;
+        }
+
+        // 3b. Click: a release on the *same* node the press landed on is a click
+        //    on that node. Resolve the `on-click` command by bubbling up the
+        //    node's logical-element ancestors (the first ancestor with a click
+        //    binding wins) and dispatch its registered handler. The press anchor
+        //    is cleared on every release, click or not.
+        let mut command = None;
+        if event.kind() == PointerEventKind::Up {
+            if let Some(pressed) = self.press_target
+                && Some(pressed) == target
+            {
+                command = self.click_command_for(pressed);
+                if let Some(command) = command {
+                    self.dispatch_command(command);
+                }
+            }
+            self.press_target = None;
         }
 
         // 4. Recompute the interaction pseudo-states from the new hover/focus.
@@ -1150,7 +1192,65 @@ impl UiRuntime {
             self.request_frame(FrameReason::Input);
         }
 
-        PointerDispatch::new(target, hover_changed, focus_changed)
+        PointerDispatch::new(target, hover_changed, focus_changed, command)
+    }
+
+    /// Resolves the click command for a clicked `target` by walking its
+    /// logical-element ancestor chain (target first, then toward the root) and
+    /// returning the first [`EVENT_CLICK`] binding found — so a click on a child
+    /// of a bound element still fires that element's command (event bubbling,
+    /// spec §2.3). Returns `None` when no node in the chain binds click.
+    ///
+    /// Reuses [`hover_chain_for`](Self::hover_chain_for) for the ancestor walk,
+    /// which is the same target-plus-ancestors sequence hover already computes.
+    fn click_command_for(&self, target: NodeId) -> Option<InternedSymbol> {
+        self.hover_chain_for(Some(target)).into_iter().find_map(|node| {
+            self.tree
+                .get(node)
+                .and_then(|n| n.command_for_event(EVENT_CLICK))
+        })
+    }
+
+    /// Registers `handler` as the application logic to run when `command` is
+    /// dispatched, replacing any handler previously registered for that command
+    /// (spec §2.3, §3.1 — a resolved command runs a handler).
+    ///
+    /// The `command` symbol is app-owned and must be the **same** symbol the
+    /// application binds its `on-click` event to in the View (via
+    /// [`ViewEventBinding`](obscur_view::view::ViewEventBinding)); the runtime
+    /// only compares symbols, so no interner is shared. The handler is a
+    /// `FnMut()` that typically captures mutable app state through an
+    /// `Rc<RefCell<_>>`/`Rc<Cell<_>>`. Registering does not itself schedule a
+    /// frame.
+    pub fn on_command(&mut self, command: InternedSymbol, handler: impl FnMut() + 'static) {
+        self.handlers.insert(command, Box::new(handler));
+    }
+
+    /// Returns whether a handler is registered for `command`.
+    #[must_use]
+    pub fn has_command_handler(&self, command: InternedSymbol) -> bool {
+        self.handlers.contains_key(&command)
+    }
+
+    /// Runs the handler registered for `command` (if any) and, when one ran,
+    /// requests a [`FrameReason::Input`] frame — a handler likely mutated app
+    /// state, so the next `run_due_frame`/`render_now` rebuilds from it. Returns
+    /// whether a handler actually ran.
+    ///
+    /// With no handler registered this is a no-op that returns `false` and
+    /// schedules no frame, so an unbound command (or one whose handler the app
+    /// never registered) can never panic or perturb runtime state.
+    fn dispatch_command(&mut self, command: InternedSymbol) -> bool {
+        let ran = if let Some(handler) = self.handlers.get_mut(&command) {
+            handler();
+            true
+        } else {
+            false
+        };
+        if ran {
+            self.request_frame(FrameReason::Input);
+        }
+        ran
     }
 
     /// Builds the hover chain for `target`: the target followed by its element
@@ -1509,7 +1609,14 @@ mod tests {
     use obscur_style::matching::{BlockDeclaration, StyleRule};
     use obscur_style::property::{Length, PropertyId, PropertyValue, StyleColor};
     use obscur_style::selector::{ComplexSelector, CompoundSelector, SelectorList, SimpleSelector};
-    use obscur_view::view::{CLASS, ViewFragment, ViewNode, ViewProperty, ViewValue};
+    use obscur_view::view::{
+        CLASS, EVENT_CLICK, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
+    };
+    use std::cell::Cell;
+
+    /// App-owned command symbols the click tests bind and register against.
+    const CMD_PANEL: InternedSymbol = InternedSymbol::from_raw(0xC0DE);
+    const CMD_B: InternedSymbol = InternedSymbol::from_raw(0xB0B0);
 
     fn runtime_id() -> RuntimeId {
         RuntimeId::from_raw(1)
@@ -2483,6 +2590,149 @@ mod tests {
         let state = runtime.pseudo_state(a);
         assert!(state.contains(PseudoState::HOVER));
         assert!(state.contains(PseudoState::FOCUS));
+    }
+
+    /// The `panel` view (same geometry as [`panel_view`]) but with click
+    /// bindings: the panel binds `on-click → CMD_PANEL`, its child `a` is
+    /// unbound (so a click on it bubbles to the panel), and its child `b` binds
+    /// `on-click → CMD_B` (so a click on it fires directly).
+    fn bound_view() -> View {
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(200))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+                .with_event(ViewEventBinding::new(EVENT_CLICK, CMD_PANEL))
+                .with_children(ViewFragment::from_nodes(vec![
+                    ViewNode::element(ComponentId::from_raw(201))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("a".into()))),
+                    ViewNode::element(ComponentId::from_raw(202))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("b".into())))
+                        .with_event(ViewEventBinding::new(EVENT_CLICK, CMD_B)),
+                ])),
+        ]))
+    }
+
+    #[test]
+    fn click_on_bound_node_runs_its_registered_handler() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&bound_view(), sheets);
+        let (_panel, _a, b) = panel_nodes(&runtime);
+
+        // Register the handler for `b`'s command with the SAME symbol the View
+        // bound `on-click` to — the runtime only compares symbols.
+        let counter = Rc::new(Cell::new(0));
+        {
+            let c = counter.clone();
+            runtime.on_command(CMD_B, move || c.set(c.get() + 1));
+        }
+        assert!(runtime.has_command_handler(CMD_B));
+
+        // Down then Up on `b` (50, 75) is a click on `b`.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0));
+        let up = runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 75.0));
+
+        assert_eq!(up.target(), Some(b));
+        assert_eq!(up.command(), Some(CMD_B), "the click resolved b's command");
+        assert_eq!(counter.get(), 1, "the registered handler RAN exactly once");
+    }
+
+    #[test]
+    fn press_and_release_on_different_nodes_do_not_dispatch() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&bound_view(), sheets);
+
+        let counter = Rc::new(Cell::new(0));
+        {
+            let c = counter.clone();
+            runtime.on_command(CMD_B, move || c.set(c.get() + 1));
+        }
+        {
+            let c = counter.clone();
+            runtime.on_command(CMD_PANEL, move || c.set(c.get() + 1));
+        }
+
+        // Press on `a` (50, 25), release on `b` (50, 75): not a click on either.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let up = runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 75.0));
+
+        assert_eq!(up.command(), None, "a drag across nodes is not a click");
+        assert_eq!(counter.get(), 0, "no handler ran");
+    }
+
+    #[test]
+    fn click_on_unbound_child_bubbles_to_the_bound_ancestor() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&bound_view(), sheets);
+        let (_panel, a, _b) = panel_nodes(&runtime);
+
+        let counter = Rc::new(Cell::new(0));
+        {
+            let c = counter.clone();
+            runtime.on_command(CMD_PANEL, move || c.set(c.get() + 1));
+        }
+
+        // `a` (50, 25) has no click binding; the click bubbles up to the panel.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let up = runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 25.0));
+
+        assert_eq!(up.target(), Some(a));
+        assert_eq!(
+            up.command(),
+            Some(CMD_PANEL),
+            "the click bubbled to the bound ancestor"
+        );
+        assert_eq!(counter.get(), 1, "the ancestor's handler ran");
+    }
+
+    #[test]
+    fn click_with_no_registered_handler_is_a_harmless_noop() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&bound_view(), sheets);
+
+        // `b` binds a command in the View, but NO handler is registered for it.
+        assert!(!runtime.has_command_handler(CMD_B));
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0));
+        let up = runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 75.0));
+
+        // The command still resolves (it is bound on the node), but nothing ran
+        // and nothing panicked.
+        assert_eq!(up.command(), Some(CMD_B));
+    }
+
+    #[test]
+    fn dispatching_a_click_requests_a_frame() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&bound_view(), sheets);
+
+        let counter = Rc::new(Cell::new(0));
+        {
+            let c = counter.clone();
+            runtime.on_command(CMD_B, move || c.set(c.get() + 1));
+        }
+
+        // The press moves focus → requests a frame; drain it so the pending
+        // state is clean before the release.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0));
+        let _ = runtime.run_due_frame(&bound_view(), sheets);
+        assert!(!runtime.has_pending_frame(), "the press frame drained");
+
+        // The release completes the click: the dispatch alone requests a frame
+        // (hover and focus are unchanged from the press on the same node).
+        runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 75.0));
+        assert!(
+            runtime.has_pending_frame(),
+            "dispatching the click requested a re-render frame"
+        );
+        assert_eq!(counter.get(), 1);
     }
 
     #[test]

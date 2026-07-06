@@ -9,6 +9,8 @@ mod view_key;
 pub use view_key::ViewKey;
 mod view_node;
 pub use view_node::ViewNode;
+mod event_name;
+pub use event_name::{EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT};
 mod style_attribute;
 pub use style_attribute::{CLASS, ID, StyleAttributes, TYPE};
 mod view_property;
