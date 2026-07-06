@@ -21,7 +21,8 @@
 //! [`LengthContext`](crate::property::LengthContext) (spec §4.5, §4.13).
 
 use crate::property::{
-    GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length, LengthExpr, StyleColor,
+    GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length, LengthExpr, LinearGradient,
+    StyleColor,
 };
 use obscur_identity::InternedSymbol;
 
@@ -46,6 +47,12 @@ pub enum PropertyValue {
     Number(f32),
     /// A color value (see [`StyleColor`]).
     Color(StyleColor),
+    /// A `linear-gradient(...)` background image (see [`LinearGradient`]): the
+    /// value of `background-image` when it is an authored linear gradient. The
+    /// gradient carries its angle (CSS convention) and resolved color stops; the
+    /// scene coordinator turns the angle plus the painted box's bounds into the
+    /// concrete gradient axis when it builds the fill brush (spec §5.2).
+    LinearGradient(LinearGradient),
     /// An ordered `font-family` list, in author order. Each entry is either a
     /// concrete family name (for example `"Helvetica Neue"`) or a generic
     /// keyword (`"serif"`, `"sans-serif"`, `"monospace"`, `"cursive"`,
@@ -103,6 +110,16 @@ impl PropertyValue {
     pub const fn as_color(&self) -> Option<StyleColor> {
         match self {
             Self::Color(color) => Some(*color),
+            _ => None,
+        }
+    }
+
+    /// Returns the linear gradient if this value is a
+    /// [`PropertyValue::LinearGradient`].
+    #[must_use]
+    pub const fn as_linear_gradient(&self) -> Option<&LinearGradient> {
+        match self {
+            Self::LinearGradient(gradient) => Some(gradient),
             _ => None,
         }
     }
@@ -232,6 +249,21 @@ mod tests {
         let value = PropertyValue::Color(StyleColor::BLACK);
         assert_eq!(value.as_color(), Some(StyleColor::BLACK));
         assert_eq!(PropertyValue::Number(1.0).as_color(), None);
+    }
+
+    #[test]
+    fn as_linear_gradient_extracts_only_gradients() {
+        use crate::property::{GradientStop, LinearGradient};
+        let gradient = LinearGradient::new(
+            90.0,
+            vec![
+                GradientStop::new(StyleColor::BLACK, 0.0),
+                GradientStop::new(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 1.0),
+            ],
+        );
+        let value = PropertyValue::LinearGradient(gradient.clone());
+        assert_eq!(value.as_linear_gradient(), Some(&gradient));
+        assert_eq!(PropertyValue::Number(1.0).as_linear_gradient(), None);
     }
 
     #[test]

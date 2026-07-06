@@ -23,8 +23,8 @@ use crate::parser::{ParsedDeclaration, ParsedValue};
 use obscur_identity::InternedSymbol;
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{
-    layout_keyword, CustomProperty, GridAreaTemplate, GridLineValue, GridTrack, GridTrackList,
-    Length, PropertyId, PropertyValue, StyleColor,
+    layout_keyword, CustomProperty, GradientStop, GridAreaTemplate, GridLineValue, GridTrack,
+    GridTrackList, Length, LinearGradient, PropertyId, PropertyValue, StyleColor,
 };
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
@@ -144,6 +144,9 @@ impl PropertyCompiler {
                 selector,
                 interner,
             );
+        }
+        if decl.name.eq_ignore_ascii_case("background") {
+            return expand_background(decl, specificity, origin, source_order, selector, interner);
         }
         if decl.name.eq_ignore_ascii_case("border-color") {
             return expand_border_color(decl, specificity, origin, source_order, selector, interner);
@@ -996,9 +999,10 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 69] = [
+    const ALL: [PropertyId; 70] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
+        PropertyId::BackgroundImage,
         PropertyId::Opacity,
         PropertyId::Width,
         PropertyId::Height,
@@ -1108,6 +1112,15 @@ fn lower_for_property(
     }
     if property == PropertyId::FontWeight {
         return lower_font_weight(values);
+    }
+    if property == PropertyId::BackgroundImage {
+        if let Some(ParsedValue::Keyword(keyword)) = values.first()
+            && let Some(wide) = css_wide_keyword(keyword)
+            && values.len() == 1
+        {
+            return Some(wide);
+        }
+        return lower_background_image(values);
     }
     if property == PropertyId::ZIndex {
         return lower_z_index(values);
@@ -1845,6 +1858,285 @@ fn parse_hex_color(hex: &str) -> Option<StyleColor> {
     }
 }
 
+/// Expands the `background` shorthand — the minimal image / color subset the
+/// domain models today (spec CSS Backgrounds and Borders §3).
+///
+/// Only two authored forms are recognised: a single `linear-gradient(...)` maps
+/// to `background-image`, and a single `<color>` maps to `background-color`.
+/// Every other `background` value — a `url(...)` image, position / size / repeat /
+/// attachment components, or multiple comma-separated layers — is out of scope and
+/// degrades the whole declaration to a single [`CompiledDeclaration::Unsupported`]
+/// rather than being dropped silently.
+fn expand_background(
+    decl: &ParsedDeclaration,
+    specificity: SelectorSpecificity,
+    origin: CascadeOrigin,
+    source_order: u32,
+    selector: Option<SelectorId>,
+    _interner: &mut CssSymbolInterner,
+) -> Vec<CompiledDeclaration> {
+    let important = if decl.important {
+        ImportantFlag::Important
+    } else {
+        ImportantFlag::Normal
+    };
+    let standard = |property, value| {
+        vec![CompiledDeclaration::Standard(Declaration::new(
+            property,
+            value,
+            important,
+            origin,
+            specificity,
+            source_order,
+            selector,
+        ))]
+    };
+    // `background: linear-gradient(...)` → background-image.
+    if let Some(value) = lower_background_image(&decl.value) {
+        return standard(PropertyId::BackgroundImage, value);
+    }
+    // `background: <color>` → background-color.
+    if let [one] = decl.value.as_slice()
+        && let Some(color) = parse_stop_color(one)
+    {
+        return standard(PropertyId::BackgroundColor, PropertyValue::Color(color));
+    }
+    vec![CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
+        value_unsupported_kind(&decl.value),
+        &*decl.name,
+        decl.span,
+    ))]
+}
+
+/// Lowers a `background-image` value into a [`PropertyValue::LinearGradient`].
+///
+/// Only the `linear-gradient(...)` image form is modelled; `none`, `url(...)`,
+/// the radial / conic gradient functions, and multiple comma-separated images are
+/// out of scope and yield [`None`] (degrading to an unsupported-feature
+/// diagnostic).
+fn lower_background_image(values: &[ParsedValue]) -> Option<PropertyValue> {
+    match values {
+        [ParsedValue::Function { name, args }] if name.eq_ignore_ascii_case("linear-gradient") => {
+            lower_linear_gradient(args).map(PropertyValue::LinearGradient)
+        }
+        _ => None,
+    }
+}
+
+/// Lowers `linear-gradient( [<angle> | to <side-or-corner>]? , <color-stop>{2,} )`
+/// into a style-local [`LinearGradient`] (spec §5.2).
+///
+/// The optional first argument is the gradient direction: a `<angle>` (`45deg`,
+/// and the `grad` / `rad` / `turn` units) or a `to <side>` / `to <corner>` keyword
+/// form folded to its CSS-convention angle (`to top` = 0, `to right` = 90, `to
+/// bottom` = 180, `to left` = 270; corners map to the 45° diagonals, a documented
+/// approximation of CSS's aspect-ratio-aware corner angle). When it is omitted the
+/// direction defaults to `to bottom` (180°). At least two comma-separated
+/// `<color> [<percentage>]?` stops follow; missing positions are auto-distributed
+/// to explicit `0.0..=1.0` values ([`resolve_stop_positions`]). Returns [`None`]
+/// (so the declaration degrades to an unsupported feature) for a malformed
+/// direction, an unparseable stop, or fewer than two stops.
+fn lower_linear_gradient(args: &[ParsedValue]) -> Option<LinearGradient> {
+    let parts: Vec<&[ParsedValue]> = args.split(|v| matches!(v, ParsedValue::Comma)).collect();
+    if parts.is_empty() {
+        return None;
+    }
+    // The optional leading direction; when the first part is not a direction it is
+    // a color stop and the direction defaults to `to bottom` (180°).
+    let (angle, stop_parts) = match parse_gradient_direction(parts[0]) {
+        Some(angle) => (angle, &parts[1..]),
+        None => (180.0, &parts[..]),
+    };
+    if stop_parts.len() < 2 {
+        return None;
+    }
+    let mut stops: Vec<GradientStop> = Vec::with_capacity(stop_parts.len());
+    for part in stop_parts {
+        stops.push(parse_color_stop(part)?);
+    }
+    resolve_stop_positions(&mut stops);
+    Some(LinearGradient::new(angle, stops))
+}
+
+/// Parses the optional leading direction argument of a `linear-gradient`: a single
+/// `<angle>` dimension, or a `to <side>` / `to <corner>` keyword form. Returns
+/// [`None`] when the part is not a direction (so it is treated as the first color
+/// stop instead).
+fn parse_gradient_direction(part: &[ParsedValue]) -> Option<f32> {
+    match part {
+        [ParsedValue::Dimension { value, unit }] => angle_to_degrees(*value, unit),
+        [ParsedValue::Keyword(to), rest @ ..] if to.eq_ignore_ascii_case("to") => {
+            to_side_angle(rest)
+        }
+        _ => None,
+    }
+}
+
+/// Converts an `<angle>` dimension into degrees on the CSS convention, accepting
+/// `deg` / `grad` / `rad` / `turn`; any other unit yields [`None`].
+fn angle_to_degrees(value: f64, unit: &str) -> Option<f32> {
+    let v = narrow_f32(value);
+    if unit.eq_ignore_ascii_case("deg") {
+        Some(v)
+    } else if unit.eq_ignore_ascii_case("grad") {
+        // 400 grad = 360 deg.
+        Some(v * 0.9)
+    } else if unit.eq_ignore_ascii_case("rad") {
+        Some(v.to_degrees())
+    } else if unit.eq_ignore_ascii_case("turn") {
+        Some(v * 360.0)
+    } else {
+        None
+    }
+}
+
+/// Folds a `to <side>` / `to <corner>` keyword list (the tokens after `to`) into
+/// its CSS-convention angle. A single side maps to its axis angle; a two-keyword
+/// corner maps to the nearest 45° diagonal. Returns [`None`] for an empty or
+/// unrecognised list.
+fn to_side_angle(sides: &[ParsedValue]) -> Option<f32> {
+    let mut names: Vec<String> = Vec::new();
+    for side in sides {
+        match side {
+            ParsedValue::Keyword(keyword) => names.push(keyword.to_ascii_lowercase()),
+            _ => return None,
+        }
+    }
+    match names.as_slice() {
+        [a] => single_side_angle(a),
+        [a, b] => corner_angle(a, b),
+        _ => None,
+    }
+}
+
+/// The CSS-convention angle of a single `to <side>` keyword.
+fn single_side_angle(side: &str) -> Option<f32> {
+    match side {
+        "top" => Some(0.0),
+        "right" => Some(90.0),
+        "bottom" => Some(180.0),
+        "left" => Some(270.0),
+        _ => None,
+    }
+}
+
+/// The (approximate) CSS-convention angle of a `to <corner>` keyword pair, mapped
+/// to the corner's 45° diagonal. The two keywords must name one vertical
+/// (`top` / `bottom`) and one horizontal (`left` / `right`) edge, in either order.
+fn corner_angle(a: &str, b: &str) -> Option<f32> {
+    if a == b {
+        return None;
+    }
+    let has = |name: &str| a == name || b == name;
+    if has("top") && has("right") {
+        Some(45.0)
+    } else if has("bottom") && has("right") {
+        Some(135.0)
+    } else if has("bottom") && has("left") {
+        Some(225.0)
+    } else if has("top") && has("left") {
+        Some(315.0)
+    } else {
+        None
+    }
+}
+
+/// Parses one `<color> [<percentage>]?` color stop from a comma-delimited part: a
+/// lone color (auto-positioned) or a color followed by a `<percentage>` position.
+/// Returns [`None`] for an unparseable color or an extra component.
+fn parse_color_stop(part: &[ParsedValue]) -> Option<GradientStop> {
+    match part {
+        [color] => Some(GradientStop::auto(parse_stop_color(color)?)),
+        [color, position] => {
+            let color = parse_stop_color(color)?;
+            let position = stop_position(position)?;
+            Some(GradientStop::new(color, position))
+        }
+        _ => None,
+    }
+}
+
+/// Reads one color-stop color: a hex hash, a modelled named color, or an
+/// `rgb()` / `rgba()` function; [`None`] for anything else.
+fn parse_stop_color(value: &ParsedValue) -> Option<StyleColor> {
+    match value {
+        ParsedValue::Hash(hex) => parse_hex_color(hex),
+        ParsedValue::Keyword(keyword) => named_color(keyword),
+        ParsedValue::Function { name, args }
+            if name.eq_ignore_ascii_case("rgb") || name.eq_ignore_ascii_case("rgba") =>
+        {
+            parse_rgb(args)
+        }
+        _ => None,
+    }
+}
+
+/// Reads a color-stop position as a normalized `0.0..=1.0` value from a
+/// `<percentage>`; other value shapes (lengths, bare numbers) are out of scope and
+/// yield [`None`].
+fn stop_position(value: &ParsedValue) -> Option<f32> {
+    match value {
+        ParsedValue::Percentage(p) => Some(narrow_f32(*p) / 100.0),
+        _ => None,
+    }
+}
+
+/// Resolves every stop's used position to an explicit `0.0..=1.0` value (spec
+/// §5.2 color-stop placement).
+///
+/// The first stop defaults to `0.0` and the last to `1.0` when unauthored;
+/// authored positions are clamped to be non-decreasing (a position is at least the
+/// previous stop's); and each run of unpositioned stops is spread evenly between
+/// its surrounding positioned neighbours. After this, every stop carries a `Some`
+/// position.
+fn resolve_stop_positions(stops: &mut [GradientStop]) {
+    let n = stops.len();
+    if n == 0 {
+        return;
+    }
+    // Anchor the endpoints.
+    if stops[0].position.is_none() {
+        stops[0].position = Some(0.0);
+    }
+    if stops[n - 1].position.is_none() {
+        stops[n - 1].position = Some(1.0);
+    }
+    // Clamp authored positions to be non-decreasing.
+    let mut running = 0.0_f32;
+    for stop in stops.iter_mut() {
+        if let Some(p) = stop.position {
+            let clamped = p.max(running);
+            stop.position = Some(clamped);
+            running = clamped;
+        }
+    }
+    // Fill runs of unpositioned stops by even interpolation between the known
+    // positions bounding the run. Both endpoints are known (set above), so every
+    // run is bounded on both sides.
+    let mut i = 0;
+    while i < n {
+        if stops[i].position.is_some() {
+            i += 1;
+            continue;
+        }
+        let start = i - 1;
+        let prev = stops[start].position.unwrap_or(0.0);
+        let mut j = i;
+        while j < n && stops[j].position.is_none() {
+            j += 1;
+        }
+        let next = stops[j].position.unwrap_or(1.0);
+        #[allow(clippy::cast_precision_loss)]
+        let span = (j - start) as f32;
+        for (offset, k) in (i..j).enumerate() {
+            #[allow(clippy::cast_precision_loss)]
+            let t = (offset + 1) as f32 / span;
+            stops[k].position = Some(prev + (next - prev) * t);
+        }
+        i = j;
+    }
+}
+
 /// Picks the unsupported-feature category to report when a value cannot be
 /// lowered, based on the shape of its first component.
 fn value_unsupported_kind(values: &[ParsedValue]) -> UnsupportedFeatureKind {
@@ -1905,6 +2197,102 @@ mod tests {
         // unitless number as a `Number` (so `opacity: 0` is not a length).
         assert_eq!(value_of("top: 0px"), zero);
         assert_eq!(value_of("opacity: 0"), PropertyValue::Number(0.0));
+    }
+
+    /// Extracts the lowered [`LinearGradient`] from a `background-image`
+    /// declaration.
+    fn gradient_of(text: &str) -> LinearGradient {
+        match value_of(text) {
+            PropertyValue::LinearGradient(g) => g,
+            other => panic!("expected a linear gradient, got {other:?}"),
+        }
+    }
+
+    fn color(r: f32, g: f32, b: f32) -> StyleColor {
+        StyleColor::rgba(r, g, b, 1.0)
+    }
+
+    #[test]
+    fn linear_gradient_angle_and_two_stops() {
+        // `linear-gradient(90deg, red, blue)` → angle 90, stops [red@0, blue@1].
+        let g = gradient_of("background-image: linear-gradient(90deg, red, blue)");
+        assert_eq!(g.angle_deg(), 90.0);
+        assert_eq!(g.stops().len(), 2);
+        assert_eq!(g.stops()[0].color(), color(1.0, 0.0, 0.0));
+        assert_eq!(g.stops()[0].position(), Some(0.0));
+        assert_eq!(g.stops()[1].color(), color(0.0, 0.0, 1.0));
+        assert_eq!(g.stops()[1].position(), Some(1.0));
+    }
+
+    #[test]
+    fn linear_gradient_to_right_with_explicit_positions() {
+        // `to right` = 90deg; explicit 0% / 100% positions are honored.
+        let g = gradient_of("background-image: linear-gradient(to right, #000 0%, #fff 100%)");
+        assert_eq!(g.angle_deg(), 90.0);
+        assert_eq!(g.stops()[0].color(), StyleColor::BLACK);
+        assert_eq!(g.stops()[0].position(), Some(0.0));
+        assert_eq!(g.stops()[1].color(), color(1.0, 1.0, 1.0));
+        assert_eq!(g.stops()[1].position(), Some(1.0));
+    }
+
+    #[test]
+    fn linear_gradient_three_stops_with_mid_position() {
+        // A middle stop at 30%; the endpoints auto-distribute to 0 / 1.
+        let g = gradient_of("background-image: linear-gradient(red, lime 30%, blue)");
+        assert_eq!(g.stops().len(), 3);
+        assert_eq!(g.stops()[0].position(), Some(0.0));
+        assert_eq!(g.stops()[1].position(), Some(0.3));
+        assert_eq!(g.stops()[2].position(), Some(1.0));
+    }
+
+    #[test]
+    fn linear_gradient_default_direction_is_to_bottom() {
+        // No angle / `to <side>` → the direction defaults to `to bottom` (180°),
+        // and the two unpositioned stops distribute to 0 / 1.
+        let g = gradient_of("background-image: linear-gradient(red, blue)");
+        assert_eq!(g.angle_deg(), 180.0);
+        assert_eq!(g.stops()[0].position(), Some(0.0));
+        assert_eq!(g.stops()[1].position(), Some(1.0));
+    }
+
+    #[test]
+    fn linear_gradient_auto_distributes_interior_stops() {
+        // Four unpositioned stops distribute evenly to 0 / 1/3 / 2/3 / 1.
+        let g = gradient_of("background-image: linear-gradient(red, lime, blue, black)");
+        let positions: Vec<f32> = g.stops().iter().map(|s| s.position().unwrap()).collect();
+        assert!((positions[0] - 0.0).abs() < 1e-6);
+        assert!((positions[1] - 1.0 / 3.0).abs() < 1e-6);
+        assert!((positions[2] - 2.0 / 3.0).abs() < 1e-6);
+        assert!((positions[3] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn linear_gradient_single_stop_is_unsupported() {
+        // Fewer than two stops is not a valid gradient.
+        assert!(matches!(
+            compile("background-image: linear-gradient(red)").0,
+            CompiledDeclaration::Unsupported(_)
+        ));
+    }
+
+    #[test]
+    fn background_shorthand_maps_gradient_to_image() {
+        let compiled = compile_all("background: linear-gradient(45deg, red, blue)");
+        assert_eq!(compiled.len(), 1);
+        let d = standard_of(&compiled[0]);
+        assert_eq!(d.property(), PropertyId::BackgroundImage);
+        match d.value() {
+            PropertyValue::LinearGradient(g) => assert_eq!(g.angle_deg(), 45.0),
+            other => panic!("expected a linear gradient, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn background_shorthand_maps_color_to_background_color() {
+        let compiled = compile_all("background: #ff0000");
+        let d = standard_of(&compiled[0]);
+        assert_eq!(d.property(), PropertyId::BackgroundColor);
+        assert_eq!(d.value(), &PropertyValue::Color(color(1.0, 0.0, 0.0)));
     }
 
     fn compile_all(text: &str) -> Vec<CompiledDeclaration> {

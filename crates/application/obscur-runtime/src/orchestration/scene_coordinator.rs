@@ -9,11 +9,15 @@ use obscur_identity::NodeId;
 use obscur_scene::clip::Clip;
 use obscur_scene::color::Color;
 use obscur_scene::command::{DisplayList, DisplayListBuilder, PaintCommand};
-use obscur_scene::paint::Brush;
+use obscur_scene::paint::{
+    Brush, GradientStop as SceneGradientStop, LinearGradient as SceneLinearGradient,
+};
 use obscur_scene::path::Path;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::ComputedValue;
-use obscur_style::property::{layout_keyword, Length, PropertyId, PropertyValue, StyleColor};
+use obscur_style::property::{
+    layout_keyword, Length, LinearGradient, PropertyId, PropertyValue, StyleColor,
+};
 use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontResolver, FontSource,
     GenericFamily, MockFontResolver,
@@ -457,12 +461,24 @@ impl SceneCoordinator {
             // balanced.
             let mut node_paint = DisplayListBuilder::new();
 
-            if let Some(color) = background_color_of(computed, node) {
-                // Skip fully transparent backgrounds: they paint nothing.
-                if color.a > 0.0
-                    && let Some(layout_box) = boxes.get(&node)
-                {
-                    let brush = Brush::solid(scene_color_from(color));
+            // The background fill brush: an authored `background-image` linear
+            // gradient wins over `background-color` (the gradient paints over the
+            // color), otherwise a non-transparent `background-color` fills solid.
+            // With neither authored the block emits nothing — byte-for-byte
+            // identical to before backgrounds existed.
+            if let Some(layout_box) = boxes.get(&node) {
+                let brush = if let Some(gradient) = background_gradient_of(computed, node) {
+                    // A stop-less gradient (never produced by the CSS lowering, but
+                    // guarded here) paints nothing.
+                    (!gradient.stops().is_empty())
+                        .then(|| Brush::Linear(linear_gradient_brush(gradient, layout_box.bounds)))
+                } else {
+                    background_color_of(computed, node)
+                        // Skip fully transparent backgrounds: they paint nothing.
+                        .filter(|color| color.a > 0.0)
+                        .map(|color| Brush::solid(scene_color_from(color)))
+                };
+                if let Some(brush) = brush {
                     if has_radius {
                         // A rounded element fills a rounded-rect outline of its
                         // border box instead of a plain rectangle.
@@ -691,6 +707,63 @@ fn background_color_of(computed: &ComputedStyles, node: NodeId) -> Option<StyleC
         .get(&node)
         .and_then(|style| style.get(PropertyId::BackgroundColor))
         .and_then(ComputedValue::as_color)
+}
+
+/// Reads a node's computed `background-image`, if present and a linear gradient.
+///
+/// Returns [`None`] when the node has no computed style, no `background-image`
+/// property, or a non-gradient value for it — the common (unauthored) case, which
+/// falls back to the solid `background-color` path.
+fn background_gradient_of(computed: &ComputedStyles, node: NodeId) -> Option<&LinearGradient> {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::BackgroundImage))
+        .and_then(ComputedValue::as_linear_gradient)
+}
+
+/// Builds a scene [`SceneLinearGradient`] fill brush for a style
+/// [`LinearGradient`] over the box `bounds` (spec §5.2).
+///
+/// The CSS `angle_deg` (0 = to top, increasing clockwise) plus the box size define
+/// the gradient *line*: a line through the box center at that angle, with its `0%`
+/// / `100%` endpoints at the projections of the box that the line covers. The
+/// endpoints are `center ∓ dir · half_len`, where `dir = (sin θ, −cos θ)` (screen
+/// space, y down) and `half_len = (|w·sin θ| + |h·cos θ|) / 2`. Each style stop's
+/// authored (resolved) `0.0..=1.0` position becomes the scene stop's offset, and
+/// its [`StyleColor`] becomes the scene paint [`Color`]; an unpositioned stop
+/// (never produced by the CSS lowering, which resolves all positions) falls back
+/// to its index-proportional offset. The brush keeps the default
+/// [`ExtendMode::Pad`](obscur_scene::paint::ExtendMode::Pad).
+fn linear_gradient_brush(gradient: &LinearGradient, bounds: Rect) -> SceneLinearGradient {
+    let theta = gradient.angle_deg().to_radians();
+    let (sin, cos) = (theta.sin(), theta.cos());
+    let w = bounds.size.width;
+    let h = bounds.size.height;
+    let cx = bounds.origin.x + w / 2.0;
+    let cy = bounds.origin.y + h / 2.0;
+    // Direction of increasing gradient offset (0% → 100%). y is down, so `to top`
+    // (θ = 0) points to smaller y.
+    let dir_x = sin;
+    let dir_y = -cos;
+    let half_len = (w * sin).abs().mul_add(0.5, (h * cos).abs() * 0.5);
+    let start = Point::new(cx - dir_x * half_len, cy - dir_y * half_len);
+    let end = Point::new(cx + dir_x * half_len, cy + dir_y * half_len);
+    let stops = gradient
+        .stops()
+        .iter()
+        .enumerate()
+        .map(|(index, stop)| {
+            let offset = stop.position().unwrap_or_else(|| {
+                let last = gradient.stops().len().saturating_sub(1).max(1);
+                #[allow(clippy::cast_precision_loss)]
+                {
+                    index as f32 / last as f32
+                }
+            });
+            SceneGradientStop::new(offset, scene_color_from(stop.color()))
+        })
+        .collect();
+    SceneLinearGradient::new(start, end, stops)
 }
 
 /// Computes the filled rectangles painting a node's border, in top/right/bottom/
@@ -950,6 +1023,92 @@ mod tests {
             .iter()
             .filter(|c| matches!(c, PaintCommand::DrawPath { .. }))
             .count()
+    }
+
+    /// Collects the `DrawPath` (fill) brushes of a display list, in paint order.
+    fn fill_brushes(list: &DisplayList) -> Vec<Brush> {
+        list.commands()
+            .iter()
+            .filter_map(|c| match c {
+                PaintCommand::DrawPath { paint, .. } => Some(paint.brush().clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A `ComputedStyle` carrying a single `background-image` linear gradient.
+    fn with_background_gradient(gradient: LinearGradient) -> ComputedStyle {
+        let mut style = ComputedStyle::new();
+        style.set(
+            PropertyId::BackgroundImage,
+            ComputedValue::from_concrete(PropertyValue::LinearGradient(gradient))
+                .expect("a gradient is a concrete computed value"),
+        );
+        style
+    }
+
+    #[test]
+    fn linear_gradient_background_emits_gradient_brush() {
+        use obscur_style::property::GradientStop as StyleStop;
+
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        // `linear-gradient(90deg, red, blue)` = to right.
+        let gradient = LinearGradient::new(
+            90.0,
+            vec![
+                StyleStop::new(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 0.0),
+                StyleStop::new(StyleColor::rgba(0.0, 0.0, 1.0, 1.0), 1.0),
+            ],
+        );
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(a, with_background_gradient(gradient));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 100.0, 50.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let brushes = fill_brushes(&list);
+        assert_eq!(brushes.len(), 1, "one gradient fill");
+        let Brush::Linear(g) = &brushes[0] else {
+            panic!("expected a linear gradient brush, got {:?}", brushes[0]);
+        };
+        // 90deg (to right): the line runs left→right through the box center.
+        let near = |a: Point, b: Point| (a.x - b.x).abs() < 1e-3 && (a.y - b.y).abs() < 1e-3;
+        assert!(near(g.start(), Point::new(0.0, 25.0)), "start {:?}", g.start());
+        assert!(near(g.end(), Point::new(100.0, 25.0)), "end {:?}", g.end());
+        // The authored stops, in order, with their colors and offsets.
+        assert_eq!(g.stops().len(), 2);
+        assert_eq!(g.stops()[0].offset(), 0.0);
+        assert_eq!(g.stops()[0].color(), Color::rgba(1.0, 0.0, 0.0, 1.0));
+        assert_eq!(g.stops()[1].offset(), 1.0);
+        assert_eq!(g.stops()[1].color(), Color::rgba(0.0, 0.0, 1.0, 1.0));
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn solid_background_still_emits_solid_brush() {
+        // Regression: a plain `background-color` (no image) still emits a solid
+        // brush, byte-identical to before background images existed.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(a, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        let brushes = fill_brushes(&list);
+        assert_eq!(brushes, vec![Brush::solid(Color::rgba(0.0, 1.0, 0.0, 1.0))]);
     }
 
     /// Collects the `DrawPath` (fill) rectangles of a display list, in paint order.

@@ -22,6 +22,10 @@ pub enum PropertyId {
     Color,
     /// The `background-color` property.
     BackgroundColor,
+    /// The `background-image` property (a `LinearGradient` value; NOT inherited).
+    /// Only the `linear-gradient(...)` image form is modelled; when present it
+    /// paints the element's background fill over the `background-color`.
+    BackgroundImage,
     /// The `opacity` property.
     Opacity,
     /// The `width` property.
@@ -243,6 +247,7 @@ impl PropertyId {
         match self {
             Self::Color => "color",
             Self::BackgroundColor => "background-color",
+            Self::BackgroundImage => "background-image",
             Self::Opacity => "opacity",
             Self::Width => "width",
             Self::Height => "height",
@@ -332,6 +337,7 @@ impl PropertyId {
             | Self::TextAlign => Inheritance::Inherited,
             // Box / paint / layout properties reset on each element.
             Self::BackgroundColor
+            | Self::BackgroundImage
             | Self::Opacity
             | Self::Width
             | Self::Height
@@ -407,7 +413,19 @@ mod tests {
     fn names_are_stable() {
         assert_eq!(PropertyId::Color.name(), "color");
         assert_eq!(PropertyId::BackgroundColor.name(), "background-color");
+        assert_eq!(PropertyId::BackgroundImage.name(), "background-image");
         assert_eq!(PropertyId::Opacity.name(), "opacity");
+    }
+
+    #[test]
+    fn background_image_name_and_not_inherited() {
+        assert_eq!(PropertyId::BackgroundImage.name(), "background-image");
+        // Like `background-color`, `background-image` resets per element.
+        assert!(
+            !PropertyId::BackgroundImage
+                .default_inheritance()
+                .is_inherited()
+        );
     }
 
     #[test]

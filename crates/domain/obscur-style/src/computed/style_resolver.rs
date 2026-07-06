@@ -59,6 +59,7 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     // Paint.
     PropertyId::Color,
     PropertyId::BackgroundColor,
+    PropertyId::BackgroundImage,
     PropertyId::Opacity,
     PropertyId::Visibility,
     // Positioning.
@@ -179,6 +180,11 @@ impl StyleResolver {
         match property {
             PropertyId::Color => Some(ComputedValue::color(StyleColor::BLACK)),
             PropertyId::BackgroundColor => Some(ComputedValue::color(StyleColor::TRANSPARENT)),
+            // `background-image` initial is `none` (no image). There is no
+            // `LinearGradient` value for `none`, so an absent value is left
+            // unresolved and the scene paints no gradient fill — byte-for-byte
+            // identical to before background images existed.
+            PropertyId::BackgroundImage => None,
             PropertyId::Opacity => Some(ComputedValue::number(1.0)),
             PropertyId::Width | PropertyId::Height => Some(ComputedValue::length(Length::Auto)),
             // Box-model spacing: initial `0`.
@@ -944,6 +950,7 @@ mod tests {
             match id {
                 PropertyId::Color
                 | PropertyId::BackgroundColor
+                | PropertyId::BackgroundImage
                 | PropertyId::Opacity
                 | PropertyId::Width
                 | PropertyId::Height
@@ -1017,6 +1024,7 @@ mod tests {
         let all = [
             PropertyId::Color,
             PropertyId::BackgroundColor,
+            PropertyId::BackgroundImage,
             PropertyId::Opacity,
             PropertyId::Width,
             PropertyId::Height,

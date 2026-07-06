@@ -8,7 +8,7 @@
 //! resolution. Only concrete leaf values (keyword / length / number / color)
 //! remain.
 
-use crate::property::{Length, LengthExpr, PropertyValue, StyleColor};
+use crate::property::{Length, LengthExpr, LinearGradient, PropertyValue, StyleColor};
 use obscur_identity::InternedSymbol;
 
 /// A fully-resolved, concrete computed value for a single property.
@@ -42,6 +42,7 @@ impl ComputedValue {
             | PropertyValue::Calc(_)
             | PropertyValue::Number(_)
             | PropertyValue::Color(_)
+            | PropertyValue::LinearGradient(_)
             | PropertyValue::FontFamilies(_)
             | PropertyValue::GridTracks(_)
             | PropertyValue::GridLine(_)
@@ -100,6 +101,12 @@ impl ComputedValue {
     #[must_use]
     pub const fn as_length(&self) -> Option<Length> {
         self.0.as_length()
+    }
+
+    /// Returns the linear gradient if this computed value is a `linear-gradient`.
+    #[must_use]
+    pub const fn as_linear_gradient(&self) -> Option<&LinearGradient> {
+        self.0.as_linear_gradient()
     }
 
     /// Returns the length expression if this computed value is a `calc()` /

@@ -1,6 +1,8 @@
 //! Property module.
 mod custom_property;
 pub use custom_property::CustomProperty;
+mod gradient_stop;
+pub use gradient_stop::GradientStop;
 mod grid_area_rect;
 pub use grid_area_rect::GridAreaRect;
 mod grid_area_template;
@@ -22,6 +24,8 @@ mod length_context;
 pub use length_context::LengthContext;
 mod length_expr;
 pub use length_expr::LengthExpr;
+mod linear_gradient;
+pub use linear_gradient::LinearGradient;
 mod property_id;
 pub use property_id::PropertyId;
 mod property_value;

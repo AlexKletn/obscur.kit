@@ -21,6 +21,7 @@ use obscur_kit::identity::{ComponentId, NodeId, RuntimeId};
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::scene::color::Color;
 use obscur_kit::scene::command::PaintCommand;
+use obscur_kit::scene::paint::Brush;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue, CLASS};
 
@@ -203,6 +204,57 @@ fn authored_border_radius_rounds_background_and_clips_subtree() {
 
     let green = fills_colored(commands, Color::rgba(0.0, 1.0, 0.0, 1.0));
     assert_eq!(green.len(), 1, "the clipped child still paints its background");
+}
+
+// An authored `background: linear-gradient(...)` reaches paint through the real
+// pipeline: the element's background fill carries a *gradient* brush with the
+// authored color stops (spec §5.2), and the gradient axis spans the arranged box.
+#[test]
+fn authored_linear_gradient_background_paints_gradient_fill() {
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet =
+        compile(".box{width:100px;height:50px;background:linear-gradient(90deg, red, blue)}");
+    let result = rt.render_now(&one_box_view(), std::slice::from_ref(&sheet));
+    assert!(result.restyled(), "authored CSS resolved computed styles");
+    assert!(result.relaid_out(), "the styled tree arranged a layout box");
+    assert!(result.is_balanced(), "the display list is well-formed");
+
+    let bounds = rt
+        .layout_boxes()
+        .get(&box_node(&rt))
+        .copied()
+        .expect("the box has a layout box")
+        .bounds;
+
+    let commands = result.snapshot().display_list().commands();
+    // Exactly one background fill, and it is a linear-gradient brush (not solid).
+    let gradients: Vec<_> = commands
+        .iter()
+        .filter_map(|c| match c {
+            PaintCommand::DrawPath { paint, .. } => match paint.brush() {
+                Brush::Linear(g) => Some(g),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(gradients.len(), 1, "one linear-gradient background fill");
+    let g = gradients[0];
+
+    // The authored stops: red at 0.0, blue at 1.0.
+    assert_eq!(g.stops().len(), 2);
+    assert_eq!(g.stops()[0].offset(), 0.0);
+    assert_eq!(g.stops()[0].color(), Color::rgba(1.0, 0.0, 0.0, 1.0));
+    assert_eq!(g.stops()[1].offset(), 1.0);
+    assert_eq!(g.stops()[1].color(), Color::rgba(0.0, 0.0, 1.0, 1.0));
+
+    // 90deg (to right): the gradient axis runs horizontally across the box at its
+    // vertical center.
+    let cy = bounds.origin.y + bounds.size.height / 2.0;
+    assert!((g.start().x - bounds.origin.x).abs() < 1e-2, "start at left edge");
+    assert!((g.start().y - cy).abs() < 1e-2);
+    assert!((g.end().x - bounds.right()).abs() < 1e-2, "end at right edge");
+    assert!((g.end().y - cy).abs() < 1e-2);
 }
 
 #[test]
