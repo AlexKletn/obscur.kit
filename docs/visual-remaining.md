@@ -3,6 +3,8 @@
 The visual paint layer is now substantial and verified end-to-end (see
 `crates/facade/obscur-kit/tests/visual_css.rs`). Implemented: `background-color`,
 `background-image: {linear,radial,conic}-gradient(...)`,
+`background-image: url(...)` (load + decode via the ResourceHub into a
+`DrawImage`, stretch-to-box),
 `border-{side}-{width,style,color}`
 (painted), `border-radius` (rounded fill + clip), `box-shadow` (drop + inset),
 `filter: drop-shadow(...)` (via the box-shadow `DrawShadow` path),
@@ -13,9 +15,14 @@ approximated on the CPU (tiny-skia) backend.
 The following are deferred. Each is documented at its site in code.
 
 ## Gradients & backgrounds
-- **`background-image: url(...)`** — no image backgrounds. The decoder adapter
-  (`obscur-resource-decode`, image/svg/font) exists; wiring a decoded image into
-  a `Brush`/paint + the ResourceHub load is the work.
+- ~~**`background-image: url(...)`**~~ — DONE. A `url()` background loads (via the
+  injected `ResourceLoader`) + decodes (via the injected `ResourceDecoder`)
+  through the runtime-owned `ResourceHub` into a cached `SceneImage`, which the
+  scene coordinator paints as a `DrawImage` over the node's box (above
+  `background-color`, below the border/content). Remaining: the image is
+  **stretched** to the box — no `background-size` / `repeat` / `position`, no
+  multiple layers, and the fs resolve is synchronous (an unready URL simply paints
+  a later frame).
 - **Multiple background layers** — a comma list of backgrounds; only a single
   gradient/color is honored.
 - **Non-percentage (length) gradient stop positions** — stops take `%` only
@@ -93,5 +100,5 @@ The following are deferred. Each is documented at its site in code.
 
 ---
 
-Ranked by likely value: `background-image: url()` > transformed hit-testing >
-`outline` > the rest.
+Ranked by likely value: transformed hit-testing > `outline` >
+`background-size`/`repeat`/`position` for `url()` images > the rest.

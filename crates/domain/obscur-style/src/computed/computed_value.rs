@@ -48,6 +48,7 @@ impl ComputedValue {
             | PropertyValue::LinearGradient(_)
             | PropertyValue::RadialGradient(_)
             | PropertyValue::ConicGradient(_)
+            | PropertyValue::BackgroundImageUrl(_)
             | PropertyValue::BoxShadow(_)
             | PropertyValue::Filter(_)
             | PropertyValue::FontFamilies(_)
@@ -137,6 +138,13 @@ impl ComputedValue {
         self.0.as_calc()
     }
 
+    /// Returns the raw `url(...)` string if this computed value is a
+    /// `background-image: url(...)` reference (unresolved).
+    #[must_use]
+    pub fn as_background_image_url(&self) -> Option<&str> {
+        self.0.as_background_image_url()
+    }
+
     /// Returns the `box-shadow` list if this computed value is a `box-shadow`.
     #[must_use]
     pub fn as_box_shadows(&self) -> Option<&[BoxShadow]> {
@@ -176,6 +184,14 @@ mod tests {
             ComputedValue::from_concrete(PropertyValue::Keyword(InternedSymbol::from_raw(3)))
                 .is_some()
         );
+    }
+
+    #[test]
+    fn background_image_url_is_concrete_and_readable() {
+        let value =
+            ComputedValue::from_concrete(PropertyValue::BackgroundImageUrl("logo.png".into()))
+                .expect("a url background-image is a concrete computed value");
+        assert_eq!(value.as_background_image_url(), Some("logo.png"));
     }
 
     #[test]

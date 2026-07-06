@@ -2330,13 +2330,18 @@ fn origin_component(value: &ParsedValue) -> Option<(Length, OriginAxis)> {
     }
 }
 
-/// Lowers a `background-image` value into a gradient property value.
+/// Lowers a `background-image` value into a gradient or `url(...)` property value.
 ///
 /// The `linear-gradient(...)`, `radial-gradient(...)`, and `conic-gradient(...)`
 /// image forms are modelled (into [`PropertyValue::LinearGradient`],
 /// [`PropertyValue::RadialGradient`], and [`PropertyValue::ConicGradient`]
-/// respectively); `none`, `url(...)`, and multiple comma-separated images are out
-/// of scope and yield [`None`] (degrading to an unsupported-feature diagnostic).
+/// respectively); a `url(...)` image lowers to a
+/// [`PropertyValue::BackgroundImageUrl`] carrying the **raw** authored URL/path
+/// string (quotes stripped for `url("…")`, or the reconstructed body for the
+/// unquoted `url(…)` form). The URL is *not* resolved here — the runtime hands it
+/// to a resource loader/decoder. `none` and multiple comma-separated images are
+/// out of scope and yield [`None`] (degrading to an unsupported-feature
+/// diagnostic).
 fn lower_background_image(values: &[ParsedValue]) -> Option<PropertyValue> {
     match values {
         [ParsedValue::Function { name, args }] if name.eq_ignore_ascii_case("linear-gradient") => {
@@ -2348,7 +2353,58 @@ fn lower_background_image(values: &[ParsedValue]) -> Option<PropertyValue> {
         [ParsedValue::Function { name, args }] if name.eq_ignore_ascii_case("conic-gradient") => {
             lower_conic_gradient(args).map(PropertyValue::ConicGradient)
         }
+        [ParsedValue::Function { name, args }] if name.eq_ignore_ascii_case("url") => {
+            lower_url(args).map(PropertyValue::BackgroundImageUrl)
+        }
         _ => None,
+    }
+}
+
+/// Lowers the argument list of a `url(...)` component into its raw URL/path
+/// string, or [`None`] when it is empty.
+///
+/// A quoted `url("foo.png")` arrives as a single [`ParsedValue::String`] whose
+/// text is used verbatim. An unquoted `url(bar.png)` arrives as a run of
+/// components (the tokenizer has no dedicated URL token), so its body is
+/// reconstructed by concatenating each component's textual form in author order
+/// (`bar` + `.` + `png` = `bar.png`). Leading/trailing whitespace was already
+/// dropped by the value parser. An empty `url()` yields [`None`].
+fn lower_url(args: &[ParsedValue]) -> Option<Box<str>> {
+    if let [ParsedValue::String(s)] = args {
+        // The clean, quoted form: the string content is the URL verbatim.
+        return (!s.is_empty()).then(|| s.clone());
+    }
+    let mut url = String::new();
+    for arg in args {
+        append_url_component(&mut url, arg);
+    }
+    (!url.is_empty()).then(|| url.into_boxed_str())
+}
+
+/// Appends one component of an unquoted `url(...)` body to `out` in its authored
+/// textual form (a best-effort reconstruction, since the tokenizer splits an
+/// unquoted URL into ident/number/delimiter pieces).
+fn append_url_component(out: &mut String, value: &ParsedValue) {
+    use std::fmt::Write as _;
+    match value {
+        ParsedValue::Keyword(text) | ParsedValue::String(text) => out.push_str(text),
+        ParsedValue::Hash(text) => {
+            out.push('#');
+            out.push_str(text);
+        }
+        ParsedValue::Number(n) => {
+            let _ = write!(out, "{n}");
+        }
+        ParsedValue::Percentage(p) => {
+            let _ = write!(out, "{p}%");
+        }
+        ParsedValue::Dimension { value, unit } => {
+            let _ = write!(out, "{value}{unit}");
+        }
+        ParsedValue::Delimiter(ch) => out.push(*ch),
+        // Commas separate multiple images (out of scope) and bracketed line-name
+        // groups never appear in a URL; both contribute nothing.
+        ParsedValue::Comma | ParsedValue::LineNames(_) | ParsedValue::Function { .. } => {}
     }
 }
 
@@ -3137,6 +3193,48 @@ mod tests {
             compile("background-image: linear-gradient(red)").0,
             CompiledDeclaration::Unsupported(_)
         ));
+    }
+
+    #[test]
+    fn quoted_url_background_image_lowers_to_url() {
+        assert_eq!(
+            value_of(r#"background-image: url("foo.png")"#),
+            PropertyValue::BackgroundImageUrl("foo.png".into())
+        );
+        // Single quotes work the same way.
+        assert_eq!(
+            value_of("background-image: url('bar/baz.png')"),
+            PropertyValue::BackgroundImageUrl("bar/baz.png".into())
+        );
+    }
+
+    #[test]
+    fn unquoted_url_background_image_lowers_to_url() {
+        assert_eq!(
+            value_of("background-image: url(bar.png)"),
+            PropertyValue::BackgroundImageUrl("bar.png".into())
+        );
+        // A relative path with directory separators round-trips too.
+        assert_eq!(
+            value_of("background-image: url(assets/logo.png)"),
+            PropertyValue::BackgroundImageUrl("assets/logo.png".into())
+        );
+    }
+
+    #[test]
+    fn empty_url_background_image_is_unsupported() {
+        assert!(matches!(
+            compile("background-image: url()").0,
+            CompiledDeclaration::Unsupported(_)
+        ));
+    }
+
+    #[test]
+    fn gradient_background_image_still_lowers_alongside_url_support() {
+        // Regression: adding url() support must not disturb gradient lowering.
+        let g = gradient_of("background-image: linear-gradient(90deg, red, blue)");
+        assert!((g.angle_deg() - 90.0).abs() < 1e-6);
+        assert_eq!(g.stops().len(), 2);
     }
 
     /// Extracts the lowered [`RadialGradient`] from a `background-image`

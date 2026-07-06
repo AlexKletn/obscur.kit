@@ -23,4 +23,5 @@ obscur-text = { workspace = true }
 obscur-motion = { workspace = true }
 obscur-layout = { workspace = true }
 obscur-scene = { workspace = true }
+obscur-resources = { workspace = true }
 obscur-interaction = { workspace = true }

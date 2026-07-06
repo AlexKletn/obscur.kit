@@ -12,8 +12,8 @@ workspace = true
 
 [features]
 # The portable default adapter set: works on any target with no display/GPU
-# (software renderer + smol executor + filesystem resources).
-default = ["resource-fs", "cache-fs", "task-smol", "render-cpu"]
+# (software renderer + smol executor + filesystem resources + image decode).
+default = ["resource-fs", "resource-decode", "cache-fs", "task-smol", "render-cpu"]
 # Convenience: every optional adapter (needs a display/GPU/AT at runtime).
 full = [
     "resource-fs",

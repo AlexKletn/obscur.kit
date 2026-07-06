@@ -1,7 +1,7 @@
 //! Composes a paint-ordered display list from the styled + laid-out tree:
 //! [`SceneCoordinator`].
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use obscur_geometry::{AffineTransform, CornerRadii, Point, Rect, Size};
@@ -12,7 +12,7 @@ use obscur_scene::command::{DisplayList, DisplayListBuilder, PaintCommand};
 use obscur_scene::layer::SceneLayer;
 use obscur_scene::paint::{
     Brush, ConicGradient as SceneConicGradient, GradientStop as SceneGradientStop,
-    LinearGradient as SceneLinearGradient, RadialGradient as SceneRadialGradient,
+    LinearGradient as SceneLinearGradient, RadialGradient as SceneRadialGradient, SceneImage,
 };
 use obscur_scene::path::Path;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
@@ -503,6 +503,34 @@ impl SceneCoordinator {
         boxes: &LayoutBoxes,
         editing: Option<EditingView<'_>>,
     ) -> DisplayList {
+        // The image-free path: no `background-image: url(...)` resolves to a
+        // painted image, so this is byte-identical to before image backgrounds.
+        self.compose_with_images(tree, computed, boxes, editing, &HashMap::new())
+    }
+
+    /// Composes a paint-ordered [`DisplayList`] like [`compose`](Self::compose),
+    /// additionally painting `background-image: url(...)` images that have already
+    /// been resolved into the `images` lookup.
+    ///
+    /// `images` maps a computed `background-image` URL (the raw authored string) to
+    /// its decoded [`SceneImage`]. The runtime resolves URLs to images *outside*
+    /// this pure coordinator (through a resource loader/decoder) and hands the
+    /// ready map in, so composition stays deterministic and IO-free: a node whose
+    /// `background-image` is a URL present in `images` emits a
+    /// [`DrawImage`](obscur_scene::command::PaintCommand::DrawImage) stretched over
+    /// its box (painted OVER `background-color`, UNDER its border and content); a
+    /// URL absent from the map (not yet loaded, or failed) paints nothing — exactly
+    /// the [`compose`](Self::compose) behaviour. An empty map reproduces
+    /// [`compose`](Self::compose) byte-for-byte.
+    #[must_use]
+    pub fn compose_with_images(
+        &self,
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+        boxes: &LayoutBoxes,
+        editing: Option<EditingView<'_>>,
+        images: &HashMap<Box<str>, SceneImage>,
+    ) -> DisplayList {
         let Some(root) = tree.root() else {
             return DisplayListBuilder::new().build();
         };
@@ -662,6 +690,20 @@ impl SceneCoordinator {
                     } else {
                         node_paint.fill_rect(layout_box.bounds, brush);
                     }
+                }
+
+                // An authored `background-image: url(...)` whose image has been
+                // resolved paints OVER the `background-color` fill and UNDER the
+                // border/content — matching CSS background paint order. The image
+                // is stretched over the node's border box (sub-step 1's model;
+                // `background-size`/`repeat`/`position` and multiple layers are
+                // future work). A URL not present in `images` (unloaded or failed)
+                // emits nothing, so the color background shows through — the
+                // regression-safe path (byte-identical when `images` is empty).
+                if let Some(image) = background_image_url_of(computed, node)
+                    .and_then(|url| images.get(url))
+                {
+                    node_paint.draw_image(image.clone(), layout_box.bounds);
                 }
             }
 
@@ -1117,6 +1159,19 @@ fn background_gradient_brush(
             .then(|| Brush::Conic(conic_gradient_brush(gradient, bounds)));
     }
     None
+}
+
+/// Reads a node's computed `background-image: url(...)` raw URL/path string, if
+/// present.
+///
+/// Returns [`None`] when the node has no computed style, no `background-image`, or
+/// a non-`url()` `background-image` (a gradient) — none of which paints an image.
+/// The URL is the key the runtime resolves against its image cache.
+fn background_image_url_of(computed: &ComputedStyles, node: NodeId) -> Option<&str> {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::BackgroundImage))
+        .and_then(ComputedValue::as_background_image_url)
 }
 
 /// Reads a node's computed `box-shadow` list, if present.
@@ -1739,6 +1794,98 @@ mod tests {
         assert_eq!(g.stops()[1].offset(), 1.0);
         assert_eq!(g.stops()[1].color(), Color::rgba(0.0, 0.0, 1.0, 1.0));
         assert!(list.is_balanced());
+    }
+
+    /// A solid 2×2 opaque RGBA image, for the `background-image: url(...)` tests.
+    fn canned_image() -> SceneImage {
+        use obscur_scene::color::AlphaMode;
+        let pixels: std::sync::Arc<[u8]> = std::sync::Arc::from(vec![0u8; 2 * 2 * 4]);
+        SceneImage::new(2, 2, pixels, AlphaMode::Straight).expect("2x2 rgba is valid")
+    }
+
+    /// Collects the `DrawImage` destination rects of a display list, in paint order.
+    fn image_dsts(list: &DisplayList) -> Vec<Rect> {
+        list.commands()
+            .iter()
+            .filter_map(|c| match c {
+                PaintCommand::DrawImage { dst, .. } => Some(*dst),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn url_background_image_emits_draw_image_over_the_box() {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(
+            a,
+            with_background_image(PropertyValue::BackgroundImageUrl("x.png".into())),
+        );
+
+        let mut boxes = LayoutBoxes::new();
+        let node_box = box_at(5.0, 7.0, 100.0, 50.0);
+        boxes.insert(a, node_box);
+
+        // Without the URL in the map: no DrawImage (regression-safe).
+        let empty = HashMap::new();
+        let bare = SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &empty);
+        assert!(image_dsts(&bare).is_empty(), "no image resolved → no DrawImage");
+        assert!(bare.is_balanced());
+
+        // With the URL resolved: one DrawImage stretched over the node's box.
+        let mut images = HashMap::new();
+        images.insert(Box::<str>::from("x.png"), canned_image());
+        let list =
+            SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
+        let dsts = image_dsts(&list);
+        assert_eq!(dsts.len(), 1, "one resolved image paints one DrawImage");
+        assert_eq!(dsts[0], node_box.bounds, "image stretches over the node box");
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn url_background_image_paints_over_background_color() {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        // A node with BOTH a background-color and a background-image url.
+        let mut style = with_background_image(PropertyValue::BackgroundImageUrl("x.png".into()));
+        style.set(
+            PropertyId::BackgroundColor,
+            ComputedValue::color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
+        );
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(a, style);
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 20.0, 20.0));
+
+        let mut images = HashMap::new();
+        images.insert(Box::<str>::from("x.png"), canned_image());
+        let list =
+            SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
+
+        // Paint order: the background-color fill (DrawPath) comes BEFORE the image
+        // (DrawImage) so the image sits on top of the color.
+        let kinds: Vec<&str> = list
+            .commands()
+            .iter()
+            .filter_map(|c| match c {
+                PaintCommand::DrawPath { .. } => Some("fill"),
+                PaintCommand::DrawImage { .. } => Some("image"),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(kinds, vec!["fill", "image"], "color fills, image paints over it");
     }
 
     /// A `ComputedStyle` carrying a single `background-image` computed value.

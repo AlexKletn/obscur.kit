@@ -66,6 +66,15 @@ pub enum PropertyValue {
     /// box's bounds into the concrete center and sweep start angle when it builds
     /// the fill brush (spec §5.2).
     ConicGradient(ConicGradient),
+    /// A `url(...)` background image: the value of `background-image` when it is
+    /// an authored image reference. The payload is the **raw** URL/path string
+    /// exactly as authored (unquoted or with its quotes stripped), *not* resolved
+    /// against any base — the runtime hands it to a `ResourceLoader` /
+    /// `ResourceDecoder` and, once decoded, the scene coordinator paints the
+    /// resulting image stretched over the node's box (spec §5.2, §5.16). A URL
+    /// whose image is not yet loaded simply paints nothing (the background-color
+    /// shows through).
+    BackgroundImageUrl(Box<str>),
     /// An ordered `box-shadow` list, in author order: the value of `box-shadow`.
     /// Each [`BoxShadow`] carries its offsets, blur, spread, optional color, and
     /// `inset` flag; `box-shadow: none` lowers to an **empty** list. CSS paints
@@ -177,6 +186,16 @@ impl PropertyValue {
     pub const fn as_conic_gradient(&self) -> Option<&ConicGradient> {
         match self {
             Self::ConicGradient(gradient) => Some(gradient),
+            _ => None,
+        }
+    }
+
+    /// Returns the raw `url(...)` string if this value is a
+    /// [`PropertyValue::BackgroundImageUrl`] (the authored URL/path, unresolved).
+    #[must_use]
+    pub fn as_background_image_url(&self) -> Option<&str> {
+        match self {
+            Self::BackgroundImageUrl(url) => Some(url),
             _ => None,
         }
     }
@@ -400,6 +419,15 @@ mod tests {
         assert_eq!(value.as_conic_gradient(), Some(&gradient));
         assert_eq!(PropertyValue::Number(1.0).as_conic_gradient(), None);
         assert_eq!(value.as_radial_gradient(), None);
+    }
+
+    #[test]
+    fn as_background_image_url_extracts_only_urls() {
+        let value = PropertyValue::BackgroundImageUrl("foo.png".into());
+        assert_eq!(value.as_background_image_url(), Some("foo.png"));
+        assert_eq!(PropertyValue::Number(1.0).as_background_image_url(), None);
+        // A url value is not a gradient, and vice versa.
+        assert_eq!(value.as_linear_gradient(), None);
     }
 
     #[test]

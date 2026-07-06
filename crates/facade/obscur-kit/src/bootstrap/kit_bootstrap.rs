@@ -74,6 +74,47 @@ impl KitBootstrap {
         crate::resource_fs::loader::FsResourceLoader::new()
     }
 
+    /// Builds the default raster-image decoder (the `image`-crate adapter that
+    /// turns encoded PNG/JPEG bytes into RGBA8 pixels + intrinsic size, spec
+    /// §5.16).
+    ///
+    /// Pair it with [`Self::default_resource_loader`] and inject both into a
+    /// [`UiRuntime`](crate::runtime::UiRuntime) via
+    /// [`set_resource_providers`](crate::runtime::UiRuntime::set_resource_providers)
+    /// (or use [`Self::install_image_resources`]) to make `background-image:
+    /// url(...)` resolve against the filesystem.
+    #[cfg(feature = "resource-decode")]
+    #[must_use]
+    pub fn default_image_decoder(&self) -> crate::resource_decode::decoder::ImageDecoder {
+        crate::resource_decode::decoder::ImageDecoder::new()
+    }
+
+    /// Injects a filesystem image loader + the raster-image decoder into `runtime`
+    /// so its `background-image: url(...)` backgrounds resolve against files under
+    /// `sandbox_root` (spec §5.15 file loader, §5.16 decode, §2.7 adapters keep
+    /// host reach explicit).
+    ///
+    /// The facade constructs the concrete adapters (a sandbox-rooted
+    /// [`FsResourceLoader`](crate::resource_fs::loader::FsResourceLoader) + the
+    /// [`ImageDecoder`](crate::resource_decode::decoder::ImageDecoder)) and hands
+    /// them to the runtime as domain ports, so the application layer depends only
+    /// on the ports — never on these adapter crates. A `url()` path resolves
+    /// relative to `sandbox_root` and cannot escape it. Not calling this leaves the
+    /// runtime's honest-capability default: `url()` backgrounds paint nothing.
+    #[cfg(all(feature = "resource-fs", feature = "resource-decode"))]
+    pub fn install_image_resources(
+        &self,
+        runtime: &mut crate::runtime::UiRuntime,
+        sandbox_root: impl Into<std::path::PathBuf>,
+    ) {
+        runtime.set_resource_providers(
+            Box::new(crate::resource_fs::loader::FsResourceLoader::with_root(
+                sandbox_root,
+            )),
+            Box::new(crate::resource_decode::decoder::ImageDecoder::new()),
+        );
+    }
+
     /// Builds the default filesystem persistent cache store, if a cache root was
     /// configured (otherwise `None` — persistence is opt-in).
     #[cfg(feature = "cache-fs")]

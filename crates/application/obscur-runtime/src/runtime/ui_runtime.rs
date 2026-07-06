@@ -22,6 +22,13 @@ use obscur_motion::timeline::{Timeline, TimelineId};
 use obscur_motion::track::{Keyframe, KeyframeTrack};
 use obscur_motion::transition::TransitionInterruption;
 use obscur_motion::value::MotionValue;
+use obscur_resources::handle::{ResourceHandle, ResourceKind};
+use obscur_resources::hub::{ResourceHub, ResourceRequest};
+use obscur_resources::port::{ResourceDecoder, ResourceLoader};
+use obscur_resources::source::ResourceSource;
+use obscur_resources::state::{ResourceError, ResourceMetadata};
+use obscur_scene::color::AlphaMode;
+use obscur_scene::paint::SceneImage;
 use obscur_scene::scene::{Scene, SceneSnapshot};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::matching::{MediaEnvironment, Stylesheet};
@@ -285,6 +292,32 @@ pub struct UiRuntime {
     /// held [`root_view`](Self::root_view). Empty by default; the explicit
     /// `&[Stylesheet]`-taking render paths ignore this field.
     stylesheets: Vec<Stylesheet>,
+    /// The injected loader that resolves a `background-image: url(...)` source's
+    /// raw encoded bytes (spec §5.15), or [`None`] when no loader was installed —
+    /// in which case `url()` backgrounds silently resolve to nothing (the
+    /// honest-capability contract). The runtime holds only the domain
+    /// [`ResourceLoader`] port; the facade injects a concrete adapter (e.g. an
+    /// `FsResourceLoader`) via [`set_resource_providers`](Self::set_resource_providers).
+    resource_loader: Option<Box<dyn ResourceLoader>>,
+    /// The injected decoder that turns a loaded image's encoded bytes into RGBA8
+    /// pixels + intrinsic size (spec §5.16), or [`None`] when none was installed.
+    /// Both a loader and a decoder are required to resolve an image; either absent
+    /// means `url()` backgrounds paint nothing.
+    resource_decoder: Option<Box<dyn ResourceDecoder>>,
+    /// The pure lifecycle/versioning registry for requested image resources (spec
+    /// §5.15). It stores only lifecycle + metadata, never the decoded pixels — the
+    /// pixels live in [`image_cache`](Self::image_cache) — so the two are kept in
+    /// step by URL.
+    resource_hub: ResourceHub,
+    /// The decoded images resolved from `background-image: url(...)`, keyed by the
+    /// raw authored URL/path string, handed to the scene coordinator each compose.
+    /// A URL is inserted once its bytes load and decode; a failed load caches
+    /// nothing (the image simply is not painted).
+    image_cache: HashMap<Box<str>, SceneImage>,
+    /// The [`ResourceHandle`] minted for each requested image URL, retained so the
+    /// hub lifecycle (begin_load → complete/fail) is driven per resource and a URL
+    /// is requested at most once.
+    image_handles: HashMap<Box<str>, ResourceHandle>,
 }
 
 impl UiRuntime {
@@ -335,6 +368,96 @@ impl UiRuntime {
             serviced_background: 0,
             root_view: None,
             stylesheets: Vec::new(),
+            resource_loader: None,
+            resource_decoder: None,
+            resource_hub: ResourceHub::new(),
+            image_cache: HashMap::new(),
+            image_handles: HashMap::new(),
+        }
+    }
+
+    /// Installs the resource `loader` + `decoder` the runtime uses to resolve
+    /// `background-image: url(...)` images (spec §5.15, §5.16), replacing any
+    /// previously installed pair and clearing the resolved-image cache so the new
+    /// providers re-resolve every URL from scratch.
+    ///
+    /// Resource loading/decoding are hexagonal ports: the runtime (application
+    /// layer) depends only on the domain [`ResourceLoader`] / [`ResourceDecoder`]
+    /// traits, never on a concrete adapter. The **facade** builds real adapters
+    /// (e.g. a sandbox-rooted `FsResourceLoader` + the `image`-crate `ImageDecoder`)
+    /// and injects them here. Leaving them unset is the honest-capability default:
+    /// a `url()` background then resolves to nothing and paints nothing — never a
+    /// crash.
+    pub fn set_resource_providers(
+        &mut self,
+        loader: Box<dyn ResourceLoader>,
+        decoder: Box<dyn ResourceDecoder>,
+    ) {
+        self.resource_loader = Some(loader);
+        self.resource_decoder = Some(decoder);
+        self.image_cache.clear();
+        self.image_handles.clear();
+    }
+
+    /// Resolves every not-yet-cached `background-image: url(...)` referenced by the
+    /// freshly `computed` styles into a decoded [`SceneImage`] in
+    /// [`image_cache`](Self::image_cache) (spec §5.15 load → §5.16 decode).
+    ///
+    /// For each new URL this drives the full hub lifecycle: `request` a handle for
+    /// a [`ResourceKind::Image`] source built from the URL, `begin_load`, then
+    /// `loader.load` → `decoder.decode` → build a `SceneImage` from the decoded
+    /// RGBA8 + intrinsic size, and `complete` the handle. A loader/decoder error
+    /// (or a malformed decoded buffer) `fail`s the handle and caches nothing, so
+    /// the image is simply not painted — no panic. With no loader/decoder installed
+    /// this is a no-op (the cache stays empty). Synchronous with the filesystem
+    /// loader (ready the same frame); the design is async-friendly — an unready URL
+    /// is just absent from the cache and paints on a later frame once decoded.
+    fn resolve_background_images(&mut self, computed: &ComputedStyles) {
+        // Both a loader and a decoder are required; without either, `url()`
+        // backgrounds honestly resolve to nothing.
+        let (Some(loader), Some(decoder)) =
+            (self.resource_loader.as_deref(), self.resource_decoder.as_deref())
+        else {
+            return;
+        };
+        // Disjoint field borrows: `loader`/`decoder` borrow their fields while the
+        // hub and caches are mutated through their own distinct fields.
+        for style in computed.values() {
+            let Some(url) = style
+                .get(PropertyId::BackgroundImage)
+                .and_then(ComputedValue::as_background_image_url)
+            else {
+                continue;
+            };
+            if self.image_cache.contains_key(url) || self.image_handles.contains_key(url) {
+                // Already resolved, or already attempted (and failed): do not retry.
+                continue;
+            }
+            let key: Box<str> = url.into();
+            // A `url()` is resolved by the loader port from a plain path/source.
+            let source = ResourceSource::file(key.clone());
+            let handle = self
+                .resource_hub
+                .request(ResourceRequest::new(source.clone(), ResourceKind::Image));
+            self.image_handles.insert(key.clone(), handle);
+            let Some(version) = self.resource_hub.begin_load(handle) else {
+                continue;
+            };
+            // Load → decode → build the SceneImage; any failure fails the handle
+            // and caches nothing (the image is not painted).
+            match load_and_decode_image(loader, decoder, &source) {
+                Ok(image) => {
+                    let metadata = ResourceMetadata::new().with_intrinsic_size(Size::new(
+                        image.width() as f32,
+                        image.height() as f32,
+                    ));
+                    self.resource_hub.complete(handle, version, metadata);
+                    self.image_cache.insert(key, image);
+                }
+                Err(error) => {
+                    self.resource_hub.fail(handle, version, error);
+                }
+            }
         }
     }
 
@@ -880,6 +1003,11 @@ impl UiRuntime {
         // 5. Compose: build the display list, install it, publish a snapshot.
         //    When skipped, the retained scene's current snapshot is republished.
         if plan.compose() {
+            // Resolve any `background-image: url(...)` referenced by this frame's
+            // computed styles into decoded images (load → decode → cache) BEFORE
+            // composing, so the coordinator can paint the ready ones. A no-op when
+            // no loader/decoder is installed or no URL is authored.
+            self.resolve_background_images(&computed);
             // Thread the runtime-owned editing session into compose so the focused
             // editable paints its live session text plus a caret + selection
             // highlight (spec §5.11). `scene_composer`, `tree`, `boxes` and
@@ -899,8 +1027,13 @@ impl UiRuntime {
                     None => view,
                 }
             });
-            let display_list =
-                self.scene_composer.compose(&self.tree, &computed, &self.boxes, editing);
+            let display_list = self.scene_composer.compose_with_images(
+                &self.tree,
+                &computed,
+                &self.boxes,
+                editing,
+                &self.image_cache,
+            );
             // Telemetry: mark the compose phase and count paint commands (§7.9).
             let count = display_list.len() as u64;
             record_phase(
@@ -2272,6 +2405,46 @@ fn is_activation_key(key: Option<LogicalKey>) -> bool {
     )
 }
 
+/// Loads and decodes a `background-image: url(...)` `source` into a drawable
+/// [`SceneImage`] (spec §5.15 load → §5.16 decode).
+///
+/// `loader.load` fetches the raw encoded bytes; `decoder.decode` turns them into
+/// RGBA8 pixels plus the intrinsic pixel size in the returned
+/// [`ResourceMetadata`]; a [`SceneImage`] is built from that size and buffer. The
+/// decoder yields non-premultiplied RGBA8, so the image is
+/// [`AlphaMode::Straight`]. A free function (not a method) so the caller can hold
+/// disjoint borrows of its loader/decoder fields while mutating the hub/cache.
+///
+/// # Errors
+///
+/// Propagates any [`ResourceError`] from the loader or decoder, and returns
+/// [`ResourceError::DecodeFailed`] when the decoded buffer's length does not match
+/// its reported intrinsic size (so [`SceneImage::new`]'s byte-length guard fails).
+fn load_and_decode_image(
+    loader: &dyn ResourceLoader,
+    decoder: &dyn ResourceDecoder,
+    source: &ResourceSource,
+) -> Result<SceneImage, ResourceError> {
+    let loaded = loader.load(source)?;
+    let decoded = decoder.decode(ResourceKind::Image, loaded.bytes())?;
+    // The decoder records the intrinsic pixel size in its metadata; the buffer is
+    // width*height*4 RGBA8 bytes.
+    let size = decoded.metadata().intrinsic_size().ok_or_else(|| {
+        ResourceError::DecodeFailed("decoded image carries no intrinsic size".into())
+    })?;
+    // The decoder records the intrinsic size as whole-pixel counts stored in an
+    // `f32` (exact for any real image dimension); truncating back to `u32` is
+    // lossless, and clamping at 0 rejects a nonsensical negative. A wrong count is
+    // caught by `SceneImage::new`'s byte-length guard below, not silently accepted.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let width = size.width.max(0.0) as u32;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let height = size.height.max(0.0) as u32;
+    SceneImage::new(width, height, decoded.data().clone(), AlphaMode::Straight).ok_or_else(|| {
+        ResourceError::DecodeFailed("decoded image bytes do not match its intrinsic size".into())
+    })
+}
+
 /// Records one frame phase's telemetry into `sink` (spec §7.9): a
 /// [`PerformanceSpan`] marker for the phase, a [`PerformanceCounter`] carrying
 /// the phase's deterministic cost `metric`, and — when the phase's optional
@@ -2442,6 +2615,140 @@ mod tests {
         assert!(!runtime.has_pending_frame());
         assert_eq!(runtime.pending_frames(), 0);
         assert!(runtime.layout_boxes().is_empty());
+    }
+
+    /// A mock [`ResourceLoader`] that returns fixed encoded bytes for any File
+    /// source, or fails every source (for the error path).
+    #[derive(Debug, Clone)]
+    struct MockLoader {
+        fails: bool,
+    }
+
+    impl ResourceLoader for MockLoader {
+        fn can_load(&self, source: &ResourceSource) -> bool {
+            source.is_file()
+        }
+
+        fn load(
+            &self,
+            _source: &ResourceSource,
+        ) -> Result<obscur_resources::port::LoadedBytes, ResourceError> {
+            if self.fails {
+                return Err(ResourceError::NotFound);
+            }
+            let bytes: std::sync::Arc<[u8]> = std::sync::Arc::from(vec![1u8, 2, 3, 4]);
+            Ok(obscur_resources::port::LoadedBytes::new(
+                bytes,
+                ResourceMetadata::new().with_byte_size(4),
+            ))
+        }
+    }
+
+    /// A mock [`ResourceDecoder`] that decodes any Image into a canned 2×2 opaque
+    /// RGBA buffer with a 2×2 intrinsic size.
+    #[derive(Debug, Clone)]
+    struct MockDecoder;
+
+    impl ResourceDecoder for MockDecoder {
+        fn supports(&self, kind: ResourceKind) -> bool {
+            kind == ResourceKind::Image
+        }
+
+        fn decode(
+            &self,
+            _kind: ResourceKind,
+            _bytes: &[u8],
+        ) -> Result<obscur_resources::port::DecodedResource, ResourceError> {
+            let rgba: std::sync::Arc<[u8]> = std::sync::Arc::from(vec![255u8; 2 * 2 * 4]);
+            Ok(obscur_resources::port::DecodedResource::new(
+                rgba,
+                ResourceMetadata::new().with_intrinsic_size(Size::new(2.0, 2.0)),
+            ))
+        }
+    }
+
+    /// A view whose single element carries the `img` class.
+    fn img_view() -> View {
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(11))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("img".into()))),
+        ]))
+    }
+
+    /// `.img { background-image: url("x"); width: 40px; height: 30px }`.
+    fn img_stylesheet() -> Stylesheet {
+        let selectors = SelectorList::new(vec![ComplexSelector::new(
+            CompoundSelector::new(vec![SimpleSelector::Class("img".into())]),
+            Vec::new(),
+        )]);
+        Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![StyleRule::new(
+                selectors,
+                vec![
+                    BlockDeclaration::normal(
+                        PropertyId::BackgroundImage,
+                        PropertyValue::BackgroundImageUrl("x".into()),
+                    ),
+                    BlockDeclaration::normal(
+                        PropertyId::Width,
+                        PropertyValue::Length(Length::px(40.0)),
+                    ),
+                    BlockDeclaration::normal(
+                        PropertyId::Height,
+                        PropertyValue::Length(Length::px(30.0)),
+                    ),
+                ],
+            )],
+        )
+    }
+
+    /// Counts the `DrawImage` commands in a display list.
+    fn draw_image_count(list: &DisplayList) -> usize {
+        list.commands()
+            .iter()
+            .filter(|c| matches!(c, obscur_scene::command::PaintCommand::DrawImage { .. }))
+            .count()
+    }
+
+    #[test]
+    fn url_background_image_resolves_and_paints_a_draw_image() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_resource_providers(Box::new(MockLoader { fails: false }), Box::new(MockDecoder));
+
+        let sheet = img_stylesheet();
+        let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        let list = result.snapshot().display_list();
+        assert_eq!(
+            draw_image_count(list),
+            1,
+            "the resolved url() image paints one DrawImage"
+        );
+        assert!(result.is_balanced());
+    }
+
+    #[test]
+    fn url_background_image_with_no_providers_paints_no_image() {
+        // Honest-capability default: no loader/decoder installed → no image.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = img_stylesheet();
+        let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        assert_eq!(draw_image_count(result.snapshot().display_list()), 0);
+    }
+
+    #[test]
+    fn url_background_image_loader_error_paints_no_image_and_does_not_panic() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_resource_providers(Box::new(MockLoader { fails: true }), Box::new(MockDecoder));
+
+        let sheet = img_stylesheet();
+        let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        assert_eq!(
+            draw_image_count(result.snapshot().display_list()),
+            0,
+            "a failed load caches nothing → no DrawImage"
+        );
+        assert!(result.is_balanced());
     }
 
     #[test]
