@@ -13,3 +13,5 @@ mod physical_key;
 pub use physical_key::PhysicalKey;
 mod shortcut;
 pub use shortcut::{Modifier, Modifiers, Shortcut};
+mod text_edit;
+pub use text_edit::TextEdit;

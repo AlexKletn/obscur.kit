@@ -12,7 +12,7 @@ use obscur_diagnostics::{
 use obscur_geometry::Size;
 use obscur_identity::{InternedSymbol, NodeId, RuntimeId};
 use obscur_interaction::command::{
-    CommandRouter, KeyEvent, LogicalKey, Modifiers, NamedKey, Shortcut,
+    CommandRouter, KeyEvent, LogicalKey, Modifier, Modifiers, NamedKey, Shortcut, TextEdit,
 };
 use obscur_interaction::hover::{HoverChain, HoverTransition};
 use obscur_interaction::pointer::{PointerEvent, PointerEventKind};
@@ -32,7 +32,7 @@ use obscur_text::layout::Hyphenator;
 use obscur_text::shaping::{TextItemizer, TextShaper};
 use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
-use obscur_view::view::{View, EVENT_CHANGE, EVENT_CLICK};
+use obscur_view::view::{View, EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT};
 
 use super::{FrameBudget, FramePlan, KeyDispatch, PointerDispatch, SemanticTreeBuilder};
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
@@ -145,6 +145,21 @@ pub struct UiRuntime {
     /// handler per command (a later registration replaces an earlier one), so
     /// dispatch is a deterministic single lookup — no iteration order observed.
     handlers: HashMap<InternedSymbol, Box<dyn FnMut()>>,
+    /// The text-input handler registry: application logic to run when a focused
+    /// editable receives a per-keystroke [`TextEdit`] (spec §6.7). Keyed, like
+    /// [`handlers`](Self::handlers), by the command symbol the app binds
+    /// `on-input → command` to in the View (via
+    /// [`EVENT_INPUT`](obscur_view::view::EVENT_INPUT)) and registers the *same*
+    /// symbol for via [`on_text_input`](Self::on_text_input).
+    ///
+    /// Distinct from `handlers` because a text-input handler takes the delivered
+    /// edit (`FnMut(&TextEdit)`), whereas a command handler takes nothing. The
+    /// app applies the edit to its *own* text state (typically an
+    /// `Rc<RefCell<String>>` the reactive view builder reads back), so the
+    /// runtime never owns the field's buffer — avoiding a seed/divergence
+    /// problem. Exactly one handler per command (a later registration replaces
+    /// an earlier one).
+    text_input_handlers: HashMap<InternedSymbol, Box<dyn FnMut(&TextEdit)>>,
     /// The shortcut→command-symbol binding table keyboard input resolves against
     /// (spec §6.7). Populated by [`bind_command`](Self::bind_command); consulted
     /// by [`handle_key`](Self::handle_key) on each key press, which dispatches
@@ -278,6 +293,7 @@ impl UiRuntime {
             focused: None,
             press_target: None,
             handlers: HashMap::new(),
+            text_input_handlers: HashMap::new(),
             commands: CommandRouter::new(),
             modifiers: Modifiers::new(),
             next_frame: FrameId::FIRST,
@@ -1409,6 +1425,99 @@ impl UiRuntime {
         ran
     }
 
+    /// Registers `handler` as the application logic to run when a focused
+    /// editable bound to `command` receives a per-keystroke
+    /// [`TextEdit`](obscur_interaction::command::TextEdit) (spec §6.7), replacing
+    /// any handler previously registered for that command.
+    ///
+    /// The `command` symbol is app-owned and must be the **same** symbol the
+    /// application binds its `on-input` event to in the View (via
+    /// [`EVENT_INPUT`](obscur_view::view::EVENT_INPUT) — an
+    /// [`Input`](../../obscur_widgets/input/struct.Input.html) does this). Each
+    /// printable character (or `Backspace`) typed while that editable is focused
+    /// delivers a [`TextEdit`] to `handler`, which applies it to the app's *own*
+    /// text state (typically an `Rc<RefCell<String>>` the reactive view builder
+    /// reads back) — the runtime never owns the field's buffer. Registering does
+    /// not itself schedule a frame.
+    ///
+    /// [`TextEdit`]: obscur_interaction::command::TextEdit
+    pub fn on_text_input(
+        &mut self,
+        command: InternedSymbol,
+        handler: impl FnMut(&TextEdit) + 'static,
+    ) {
+        self.text_input_handlers.insert(command, Box::new(handler));
+    }
+
+    /// Returns whether a text-input handler is registered for `command`.
+    #[must_use]
+    pub fn has_text_input_handler(&self, command: InternedSymbol) -> bool {
+        self.text_input_handlers.contains_key(&command)
+    }
+
+    /// Runs the text-input handler registered for `command` (if any) with `edit`
+    /// and, when one ran, requests a [`FrameReason::Input`] frame so the app's
+    /// mutated text state reaches paint on the next reactive frame. Returns
+    /// whether a handler actually ran.
+    ///
+    /// With no handler registered this is a no-op that returns `false` and
+    /// schedules no frame — a bound `on-input` whose handler the app never
+    /// registered can never panic or perturb runtime state.
+    fn dispatch_text_input(&mut self, command: InternedSymbol, edit: &TextEdit) -> bool {
+        let ran = if let Some(handler) = self.text_input_handlers.get_mut(&command) {
+            handler(edit);
+            true
+        } else {
+            false
+        };
+        if ran {
+            self.request_frame(FrameReason::Input);
+        }
+        ran
+    }
+
+    /// Attempts to consume a key press as **text input** into the focused
+    /// editable `target` (spec §6.7): a plain (no command modifier) printable
+    /// character or `Backspace` typed while an ancestor of `target` binds
+    /// [`EVENT_INPUT`] is text, not a shortcut. Returns whether the key was
+    /// consumed as text.
+    ///
+    /// Gating (in order): a held **command** modifier (`Ctrl`/`Alt`/`Meta` —
+    /// `Shift` is fine) makes the key a potential shortcut, so it is *not* text;
+    /// only a [`LogicalKey::Character`] (→ [`TextEdit::Insert`]) or
+    /// [`NamedKey::Backspace`] (→ [`TextEdit::DeleteBackward`]) is a text edit;
+    /// and only a `target` whose ancestor chain binds `on-input` is editable.
+    /// When all hold the edit is dispatched to the app and the key is consumed
+    /// (so [`handle_key`](Self::handle_key) does *not* also treat it as a
+    /// shortcut or activation). Any miss returns `false`, leaving the existing
+    /// shortcut/activation path byte-identical.
+    fn try_text_input(&mut self, target: NodeId, logical: Option<LogicalKey>) -> bool {
+        // A command modifier means the app may have bound a shortcut (Ctrl+A);
+        // Shift is a normal text modifier, so it does not disqualify.
+        if self.modifiers.contains(Modifier::Ctrl)
+            || self.modifiers.contains(Modifier::Alt)
+            || self.modifiers.contains(Modifier::Meta)
+        {
+            return false;
+        }
+        // Map the produced key to a text edit; a non-text key is not consumed.
+        let edit = match logical {
+            Some(LogicalKey::Character(c)) => TextEdit::Insert(c),
+            Some(LogicalKey::Named(NamedKey::Backspace)) => TextEdit::DeleteBackward,
+            _ => return false,
+        };
+        // Only a focused editable — one whose ancestor chain binds EVENT_INPUT —
+        // consumes text. A plain 'a' over a non-editable node falls through to
+        // the shortcut path unchanged.
+        let Some(command) = self.command_for_event_bubbling(target, EVENT_INPUT) else {
+            return false;
+        };
+        // The edit was consumed as text even if no handler is registered (the
+        // node is still editable), so it is never re-read as a shortcut.
+        self.dispatch_text_input(command, &edit);
+        true
+    }
+
     /// Builds the hover chain for `target`: the target followed by its element
     /// (and root) ancestors, topmost-first toward the root.
     ///
@@ -1532,20 +1641,32 @@ impl UiRuntime {
         //    held modifiers and DISPATCH it, so a keyboard shortcut runs the same
         //    handler a pointer click would (a release never triggers a shortcut).
         let command = if event.pressed() {
-            let resolved = event
-                .logical()
-                .and_then(|key| self.commands.resolve(key, self.modifiers));
-            if let Some(command) = resolved {
-                self.dispatch_command(command);
+            // 3a. Text input takes precedence for a focused editable: a plain
+            //     (no command modifier) printable character or Backspace typed
+            //     into a node that binds `on-input` is TEXT, not a shortcut. When
+            //     consumed, it is neither resolved as a shortcut nor treated as
+            //     activation — a bare 'a' in a field edits the field.
+            if self.try_text_input(target, event.logical()) {
+                None
+            } else {
+                // Not text: resolve a bound command from the produced logical key
+                // + held modifiers and DISPATCH it, so a keyboard shortcut runs
+                // the same handler a pointer click would.
+                let resolved = event
+                    .logical()
+                    .and_then(|key| self.commands.resolve(key, self.modifiers));
+                if let Some(command) = resolved {
+                    self.dispatch_command(command);
+                }
+                // 3b. Enter/Space activates the focused control regardless of any
+                //     bound shortcut: a button fires its click command, a checkbox
+                //     its change command. Both the shortcut above and this
+                //     activation can fire on the same keypress.
+                if is_activation_key(event.logical()) {
+                    self.activate(target);
+                }
+                resolved
             }
-            // 3b. Enter/Space activates the focused control regardless of any
-            //     bound shortcut: a button fires its click command, a checkbox
-            //     its change command. Both the shortcut above and this activation
-            //     can fire on the same keypress.
-            if is_activation_key(event.logical()) {
-                self.activate(target);
-            }
-            resolved
         } else {
             None
         };
@@ -3415,6 +3536,179 @@ mod tests {
         assert_eq!(up.target(), Some(b));
         assert_eq!(up.command(), Some(CMD_B), "click still resolves EVENT_CLICK");
         assert_eq!(counter.get(), 1);
+    }
+
+    // ---- EVENT_INPUT: per-keystroke text input dispatch (this step) ----------
+
+    /// App-owned command an editable binds `on-input` to and registers a
+    /// text-input handler for.
+    const CMD_INPUT: InternedSymbol = InternedSymbol::from_raw(0x1247);
+
+    /// A reactive editable view: a `panel` (100x100) holding a single `b`
+    /// (100x50, at y∈[0,50)) that binds `on-input → CMD_INPUT` (per-keystroke)
+    /// and contains a text node showing the current `text`. Pressing inside `b`
+    /// focuses the editable; the text node is what the reactive assertions read
+    /// back (via [`tree_text`]).
+    fn input_reactive_view(text: &str) -> View {
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(500))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+                .with_children(ViewFragment::from_nodes(vec![
+                    ViewNode::element(ComponentId::from_raw(501))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("b".into())))
+                        .with_event(ViewEventBinding::new(EVENT_INPUT, CMD_INPUT))
+                        .with_children(ViewFragment::from_nodes(vec![ViewNode::text(
+                            text.to_string(),
+                        )])),
+                ])),
+        ]))
+    }
+
+    /// A plain (no-modifier) character key press. The physical key is irrelevant
+    /// to text entry (only modifier folding reads it), so any non-modifier
+    /// physical stands in.
+    fn char_press(c: char) -> KeyEvent {
+        KeyEvent::press(PhysicalKey::KeyA, Some(LogicalKey::character(c)))
+    }
+
+    #[test]
+    fn typing_into_a_focused_editable_edits_app_state_and_re_renders() {
+        // (b) End-to-end: typing 'h' then 'i' into a focused `on-input` editable
+        // delivers each keystroke as a TextEdit to the app, which owns the text
+        // (an Rc<RefCell<String>>); the reactive builder reads it back so the
+        // re-render shows "hi", and Backspace deletes back to "h".
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+
+        let text = Rc::new(RefCell::new(String::new()));
+        {
+            let s = text.clone();
+            runtime.on_text_input(CMD_INPUT, move |edit| match edit {
+                TextEdit::Insert(c) => s.borrow_mut().push(*c),
+                TextEdit::DeleteBackward => {
+                    s.borrow_mut().pop();
+                }
+            });
+        }
+        {
+            let s = text.clone();
+            runtime.set_root_view(move || {
+                let current = s.borrow().clone();
+                input_reactive_view(&current)
+            });
+        }
+        runtime.set_stylesheets(vec![interaction_sheet()]);
+
+        // First reactive frame populates the tree/boxes so the press can focus.
+        runtime.request_frame(FrameReason::UiCommit);
+        runtime.run_due_frame_reactive().expect("first frame due");
+
+        // Focus the editable by pressing inside `b`, drain the focus frame.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        runtime.run_due_frame_reactive().expect("focus frame due");
+        assert!(runtime.focused().is_some(), "the press focused a node");
+
+        // Type 'h' then 'i': each keystroke edits the app's own string.
+        let h = runtime.handle_key(char_press('h'));
+        assert_eq!(h.command(), None, "a plain char resolves no shortcut command");
+        runtime.handle_key(char_press('i'));
+        assert_eq!(&*text.borrow(), "hi", "typing edited the app's string");
+
+        // The reactive re-render reflects the edited string.
+        runtime.run_due_frame_reactive().expect("re-render frame due");
+        assert_eq!(tree_text(&runtime), "hi", "the rebuilt view shows the text");
+
+        // Backspace deletes the last character; the re-render follows.
+        runtime.handle_key(KeyEvent::press(
+            PhysicalKey::Backspace,
+            Some(LogicalKey::named(NamedKey::Backspace)),
+        ));
+        assert_eq!(&*text.borrow(), "h", "Backspace deleted the last char");
+        runtime.run_due_frame_reactive().expect("re-render frame due");
+        assert_eq!(tree_text(&runtime), "h", "the rebuilt view shows the deletion");
+    }
+
+    #[test]
+    fn ctrl_char_on_a_focused_editable_is_not_inserted_as_text() {
+        // (c) A command modifier makes a char a potential shortcut, not text:
+        // Ctrl+'a' on a focused editable inserts nothing.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let text = Rc::new(RefCell::new(String::new()));
+        {
+            let s = text.clone();
+            runtime.on_text_input(CMD_INPUT, move |edit| {
+                if let TextEdit::Insert(c) = edit {
+                    s.borrow_mut().push(*c);
+                }
+            });
+        }
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&input_reactive_view(""), sheets);
+
+        // Focus the editable.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let _ = runtime.run_due_frame(&input_reactive_view(""), sheets);
+        assert!(runtime.focused().is_some());
+
+        // Hold Ctrl, then press 'a': it is treated as a (possible) shortcut.
+        runtime.handle_key(KeyEvent::press(PhysicalKey::ControlLeft, None));
+        runtime.handle_key(KeyEvent::press(
+            PhysicalKey::KeyA,
+            Some(LogicalKey::character('a')),
+        ));
+        assert_eq!(&*text.borrow(), "", "Ctrl+a was not inserted as text");
+    }
+
+    #[test]
+    fn char_press_with_no_focused_editable_does_not_dispatch_text() {
+        // (d) A char over a focused NON-editable node (no `on-input` in its
+        // ancestor chain) is not text — the shortcut/activation path is
+        // byte-identical and no TextEdit is dispatched.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&panel_view(), sheets);
+        let (_panel, a, _b) = panel_nodes(&runtime);
+
+        let text = Rc::new(RefCell::new(String::new()));
+        {
+            let s = text.clone();
+            runtime.on_text_input(CMD_INPUT, move |edit| {
+                if let TextEdit::Insert(c) = edit {
+                    s.borrow_mut().push(*c);
+                }
+            });
+        }
+
+        // Focus `a`, which binds no `on-input`.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let _ = runtime.run_due_frame(&panel_view(), sheets);
+        assert_eq!(runtime.focused(), Some(a));
+
+        let dispatch = runtime.handle_key(char_press('a'));
+        assert_eq!(dispatch.target(), Some(a), "routed to the focused node");
+        assert_eq!(dispatch.command(), None);
+        assert_eq!(&*text.borrow(), "", "no editable → no text dispatched");
+    }
+
+    #[test]
+    fn text_input_with_no_registered_handler_is_a_harmless_noop() {
+        // (e) A focused editable bound to `on-input` but with NO handler
+        // registered: typing consumes the key as text (so it is not re-read as a
+        // shortcut) yet dispatches nothing and never panics.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&input_reactive_view(""), sheets);
+
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let _ = runtime.run_due_frame(&input_reactive_view(""), sheets);
+        assert!(runtime.focused().is_some());
+        assert!(!runtime.has_text_input_handler(CMD_INPUT));
+
+        let dispatch = runtime.handle_key(char_press('h'));
+        assert!(dispatch.is_handled(), "the key still routed to the focused node");
+        assert_eq!(dispatch.command(), None, "no shortcut resolved");
     }
 
     // ---- Phase 4 final step: motion orchestration (style → motion → paint) ----

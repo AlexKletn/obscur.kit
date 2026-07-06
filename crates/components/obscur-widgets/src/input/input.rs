@@ -3,7 +3,9 @@
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_text::editing::{EditCommand, TextBuffer};
-use obscur_view::view::{EVENT_CHANGE, View, ViewEventBinding, ViewNode, ViewProperty, ViewValue};
+use obscur_view::view::{
+    EVENT_CHANGE, EVENT_INPUT, View, ViewEventBinding, ViewNode, ViewProperty, ViewValue,
+};
 
 /// A headless text-input control (spec §2.6).
 ///
@@ -136,9 +138,12 @@ impl Input {
     }
 
     /// Derives the semantic view: a [`COMPONENT_ID`] element carrying the role,
-    /// disabled state, current value, and placeholder as properties, plus a
-    /// change event bound to `command`. An input has no child structure — its
-    /// text is carried as the value property, not a text node.
+    /// disabled state, current value, and placeholder as properties, plus two
+    /// event bindings to `command`: a per-keystroke [`EVENT_INPUT`] (each typed
+    /// character / `Backspace` delivers a
+    /// [`TextEdit`](obscur_interaction::command::TextEdit) to the app) and a
+    /// commit-on-blur/Enter [`EVENT_CHANGE`]. An input has no child structure —
+    /// its text is carried as the value property, not a text node.
     ///
     /// [`COMPONENT_ID`]: Self::COMPONENT_ID
     #[must_use]
@@ -160,6 +165,7 @@ impl Input {
                 Self::PROP_PLACEHOLDER,
                 ViewValue::from(&*self.placeholder),
             ))
+            .with_event(ViewEventBinding::new(EVENT_INPUT, self.command))
             .with_event(ViewEventBinding::new(EVENT_CHANGE, self.command));
         View::single(node)
     }
@@ -223,6 +229,30 @@ mod tests {
                 assert_eq!(*placeholder.value(), ViewValue::from("type here"));
                 assert_eq!(events[0].command(), cmd());
                 assert!(children.is_empty());
+            }
+            ViewNode::Text { .. } => panic!("expected element root"),
+        }
+    }
+
+    #[test]
+    fn view_binds_both_input_and_change_to_the_command() {
+        // The input fires per-keystroke EVENT_INPUT *and* commit EVENT_CHANGE,
+        // both to its `command`, so the runtime's text-input dispatch and its
+        // activation/change dispatch reach the same app handler.
+        let i = Input::new(cmd());
+        let view = i.view();
+        match &view.root().nodes()[0] {
+            ViewNode::Element { events, .. } => {
+                let input = events
+                    .iter()
+                    .find(|b| b.event() == EVENT_INPUT)
+                    .expect("EVENT_INPUT binding present");
+                assert_eq!(input.command(), cmd());
+                let change = events
+                    .iter()
+                    .find(|b| b.event() == EVENT_CHANGE)
+                    .expect("EVENT_CHANGE binding present");
+                assert_eq!(change.command(), cmd());
             }
             ViewNode::Text { .. } => panic!("expected element root"),
         }
