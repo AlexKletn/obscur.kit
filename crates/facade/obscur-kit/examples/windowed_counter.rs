@@ -127,6 +127,7 @@ use obscur_kit::runtime::UiRuntime;
 use obscur_kit::runtime::frame::FrameReason;
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::text::font::{FontAttributes, FontFamily, GenericFamily};
+use obscur_kit::text::ime::{CompositionEvent, Preedit};
 use obscur_kit::text_harfrust::{FontRegistry, HarfrustShaper};
 use obscur_kit::text_unicode::UnicodeTextItemizer;
 use obscur_kit::view::view::{CLASS, View, ViewNode, ViewProperty, ViewValue};
@@ -134,7 +135,7 @@ use obscur_kit::widgets::button::Button;
 use obscur_kit::window_winit::conversion::{KeyboardConverter, PointerConverter};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::{ElementState, Ime, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::PhysicalKey as WinitPhysicalKey;
 use winit::window::{Window, WindowAttributes, WindowId};
@@ -335,6 +336,11 @@ impl ApplicationHandler for WindowedCounter {
                 return;
             }
         };
+        // Allow the platform IME to deliver composition events for this window
+        // (spec §5.12). A real app toggles this per focused editable; the counter
+        // has no text field, so it is enabled once here — the `WindowEvent::Ime`
+        // arm below then drives `UiRuntime::handle_ime` end-to-end.
+        window.set_ime_allowed(true);
 
         // 2. Initialise wgpu + the swapchain surface and build the Vello
         //    renderer on top of the host-provided device/queue.
@@ -465,6 +471,34 @@ impl ApplicationHandler for WindowedCounter {
                         if let Some(window) = self.window.as_ref() {
                             window.request_redraw();
                         }
+                    }
+                }
+            }
+            WindowEvent::Ime(ime) => {
+                // Feed the *real* IME composition path: winit's `Ime` events map
+                // 1:1 onto the domain `CompositionEvent`s the runtime consumes
+                // (spec §5.12). `Enabled` starts a composition, `Preedit` carries
+                // the uncommitted (shown-but-not-inserted) preedit, `Commit`
+                // finalizes the composed text into the focused editable as one
+                // edit, and `Disabled` cancels. `handle_ime` is a no-op when no
+                // editable is focused. The winit preedit cursor is a byte range
+                // within the preedit; its start seats the display caret.
+                let event = match ime {
+                    Ime::Enabled => Some(CompositionEvent::Start),
+                    Ime::Preedit(text, cursor) => {
+                        let mut preedit = Preedit::new(text);
+                        if let Some((start, _end)) = cursor {
+                            preedit = preedit.with_caret(start);
+                        }
+                        Some(CompositionEvent::Update(preedit))
+                    }
+                    Ime::Commit(text) => Some(CompositionEvent::Commit(text.into())),
+                    Ime::Disabled => Some(CompositionEvent::Cancel),
+                };
+                if let Some(event) = event {
+                    self.runtime.handle_ime(event);
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
                     }
                 }
             }

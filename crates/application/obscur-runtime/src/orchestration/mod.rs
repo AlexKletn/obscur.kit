@@ -4,7 +4,7 @@ pub use animation_binding::{AnimatedKind, AnimationBinding};
 mod css_motion_rules;
 pub use css_motion_rules::{CssKeyframeRule, CssMotionRules, CssTransitionRule};
 mod editing_view;
-pub use editing_view::EditingView;
+pub use editing_view::{EditingView, PreeditView};
 mod font_families;
 pub(crate) use font_families::families_for;
 mod grid_areas;

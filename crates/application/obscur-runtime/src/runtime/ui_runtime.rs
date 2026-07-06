@@ -29,6 +29,7 @@ use obscur_style::property::{Length, PropertyId, PropertyValue};
 use obscur_style::selector::{PseudoState, SelectorMatcher};
 use obscur_text::editing::{DeletionUnit, EditCommand, EditDirection, NavigationUnit};
 use obscur_text::font::FontResolver;
+use obscur_text::ime::CompositionEvent;
 use obscur_text::layout::Hyphenator;
 use obscur_text::selection::TextSelection;
 use obscur_text::shaping::{TextItemizer, TextShaper};
@@ -42,7 +43,7 @@ use super::{
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::orchestration::{
     root_font_size, AnimatedKind, AnimationBinding, ComputedStyles, CssMotionRules, EditingView,
-    LayoutBoxes, LayoutCoordinator, MotionCoordinator, PseudoStates, SceneCoordinator,
+    LayoutBoxes, LayoutCoordinator, MotionCoordinator, PreeditView, PseudoStates, SceneCoordinator,
     StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement,
 };
 use crate::scheduler::{BackpressureDecision, FrameScheduler};
@@ -884,10 +885,20 @@ impl UiRuntime {
             // highlight (spec §5.11). `scene_composer`, `tree`, `boxes` and
             // `editing` are disjoint fields, so this shared borrow is legal; with no
             // session the view is `None` and compose is byte-identical.
-            let editing = self
-                .editing
-                .as_ref()
-                .map(|session| EditingView::new(session.node(), session.text(), session.selection()));
+            let editing = self.editing.as_ref().map(|session| {
+                let view = EditingView::new(session.node(), session.text(), session.selection());
+                // While composing, attach the live preedit so compose splices it
+                // into the field for DISPLAY (underlined) with the caret at the
+                // preedit's caret — the buffer text is untouched (spec §5.12).
+                match session.composition().filter(|c| c.is_active()) {
+                    Some(comp) => view.with_preedit(PreeditView::new(
+                        comp.preedit().text(),
+                        comp.anchor().start,
+                        comp.preedit().caret(),
+                    )),
+                    None => view,
+                }
+            });
             let display_list =
                 self.scene_composer.compose(&self.tree, &computed, &self.boxes, editing);
             // Telemetry: mark the compose phase and count paint commands (§7.9).
@@ -1556,6 +1567,108 @@ impl UiRuntime {
     #[must_use]
     pub fn editing_selection(&self) -> Option<TextSelection> {
         self.editing.as_ref().map(TextEditSession::selection)
+    }
+
+    /// Applies an IME composition `event` against the focused editable's editing
+    /// session (spec §5.12 IME), returning whether it was applied.
+    ///
+    /// A composition lets the user compose text (a *preedit*, shown inline but
+    /// **not** inserted into the buffer) then commit it — the standard path for
+    /// CJK and other complex input. The event maps 1:1 onto the session's
+    /// composition lifecycle:
+    ///
+    /// * [`Start`](CompositionEvent::Start) anchors a fresh composition at the
+    ///   current caret/selection; the preedit begins empty.
+    /// * [`Update`](CompositionEvent::Update) stores a new preedit on the
+    ///   composition. The preedit is shown (spliced for display, underlined) but
+    ///   is **never** written into the buffer, so [`editing_text`](Self::editing_text)
+    ///   is unchanged while composing (spec §5.12 "preedit is separate from
+    ///   committed text").
+    /// * [`Commit`](CompositionEvent::Commit) replaces the composition's anchor
+    ///   span in the buffer with the committed text as a **single** edit (one
+    ///   composition = one undo unit) and fires the field's
+    ///   [`EVENT_INPUT`](obscur_view::view::EVENT_INPUT) handler with the resulting
+    ///   text. Because the preedit was never inserted, an empty anchor makes this
+    ///   an insert at the caret.
+    /// * [`Cancel`](CompositionEvent::Cancel) drops the preedit with no buffer
+    ///   change.
+    ///
+    /// Returns `false` (a no-op) when no editing session is active, or on an
+    /// out-of-order event (an `Update`/`Cancel`/`Commit` with no live composition).
+    /// Every applied event requests a [`FrameReason::Input`] frame so the preedit
+    /// (or the commit) reaches paint.
+    pub fn handle_ime(&mut self, event: CompositionEvent) -> bool {
+        // The follow-up the runtime owes after mutating the session — resolved
+        // while the `session` borrow is live, then acted on below so the
+        // `&mut self` calls (`request_frame`/`apply_edit`) do not overlap it.
+        enum ImeFollowUp {
+            /// Applied a preedit/state change: just request a paint frame.
+            Frame,
+            /// Committed: replace the anchor span with the text as one edit.
+            Commit(obscur_text::span::TextRange, Box<str>),
+            /// Out-of-order or no-op: nothing applied.
+            None,
+        }
+
+        // No focused editable → nothing to compose against.
+        let Some(session) = self.editing.as_mut() else {
+            return false;
+        };
+        let follow_up = match event {
+            CompositionEvent::Start => {
+                session.start_composition();
+                ImeFollowUp::Frame
+            }
+            CompositionEvent::Update(preedit) => {
+                if session.is_composing() {
+                    session.update_composition(preedit);
+                    ImeFollowUp::Frame
+                } else {
+                    ImeFollowUp::None
+                }
+            }
+            CompositionEvent::Commit(text) => match session.commit_composition() {
+                Some(anchor) => ImeFollowUp::Commit(anchor, text),
+                None => ImeFollowUp::None,
+            },
+            CompositionEvent::Cancel => {
+                if session.is_composing() {
+                    session.cancel_composition();
+                    ImeFollowUp::Frame
+                } else {
+                    ImeFollowUp::None
+                }
+            }
+        };
+        match follow_up {
+            ImeFollowUp::Frame => {
+                self.request_frame(FrameReason::Input);
+                true
+            }
+            ImeFollowUp::Commit(anchor, text) => {
+                // `apply_edit` runs `after_edit`: it fires the field's `on-input`
+                // with the resulting text and requests an input frame. The preedit
+                // was never inserted, so an empty anchor makes this an insert.
+                self.apply_edit(EditCommand::Replace { range: anchor, text });
+                true
+            }
+            ImeFollowUp::None => false,
+        }
+    }
+
+    /// Returns the active IME preedit text, if a composition is live (spec §5.12).
+    ///
+    /// This is *uncommitted* composition text shown inline (spliced for display,
+    /// underlined) but deliberately kept OUT of the buffer — so it is distinct
+    /// from [`editing_text`](Self::editing_text), which returns only committed
+    /// content. `None` when no composition is active.
+    #[must_use]
+    pub fn composition_preedit(&self) -> Option<&str> {
+        self.editing
+            .as_ref()
+            .and_then(TextEditSession::composition)
+            .filter(|composition| composition.is_active())
+            .map(|composition| composition.preedit().text())
     }
 
     /// Resolves the nearest editable ancestor of `target` (target first, toward
@@ -4228,6 +4341,167 @@ mod tests {
             advance * 3.0
         );
         assert!(list.is_balanced(), "the display list stays balanced");
+    }
+
+    // ---- IME composition: preedit (shown, not committed) + commit (§5.12) -----
+
+    /// Collects the composed text (concatenated across every `DrawText` run) of a
+    /// freshly rendered frame — the DISPLAYED text, including any spliced preedit.
+    fn composed_text(runtime: &mut UiRuntime, seed: &str) -> String {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let result = runtime.render_now(&input_reactive_view(seed), sheets);
+        result
+            .snapshot()
+            .display_list()
+            .commands()
+            .iter()
+            .filter_map(|c| match c {
+                obscur_scene::command::PaintCommand::DrawText { run, .. } => Some(run.text()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn ime_preedit_is_shown_but_not_committed_then_commit_folds_it_in() {
+        // (a) Focus "ab" (caret at end). Start a composition, then update it with
+        // the preedit "ni": the BUFFER stays "ab" (preedit is not committed text,
+        // §5.12), `composition_preedit` is "ni", and the DISPLAYED text splices it
+        // to "abni". Committing "に" replaces the (empty) composition span, so the
+        // buffer becomes "abに", the composition is cleared, and the field's
+        // `on-input` fires with the resulting text.
+        let (mut runtime, mirror) = focused_editable("ab");
+        assert_eq!(runtime.editing_selection().unwrap().focus(), 2, "caret at end");
+
+        assert!(runtime.handle_ime(CompositionEvent::Start), "start applied");
+        assert!(
+            runtime.handle_ime(CompositionEvent::Update(obscur_text::ime::Preedit::new("ni"))),
+            "update applied"
+        );
+
+        assert_eq!(runtime.editing_text(), Some("ab"), "buffer unchanged by preedit");
+        assert_eq!(runtime.composition_preedit(), Some("ni"), "preedit is shown");
+        assert_eq!(composed_text(&mut runtime, "ab"), "abni", "preedit spliced for display");
+
+        assert!(
+            runtime.handle_ime(CompositionEvent::Commit(Box::from("に"))),
+            "commit applied"
+        );
+        assert_eq!(runtime.editing_text(), Some("abに"), "commit folded the text in");
+        assert_eq!(runtime.composition_preedit(), None, "composition cleared");
+        assert_eq!(&*mirror.borrow(), "abに", "EVENT_INPUT fired with the committed text");
+    }
+
+    #[test]
+    fn ime_cancel_after_update_drops_the_preedit_with_no_buffer_change() {
+        // (b) Cancel after an Update discards the preedit and leaves the buffer
+        // untouched: "ab" in, "ab" out, no preedit.
+        let (mut runtime, mirror) = focused_editable("ab");
+        runtime.handle_ime(CompositionEvent::Start);
+        runtime.handle_ime(CompositionEvent::Update(obscur_text::ime::Preedit::new("ni")));
+        assert_eq!(runtime.composition_preedit(), Some("ni"));
+
+        assert!(runtime.handle_ime(CompositionEvent::Cancel), "cancel applied");
+        assert_eq!(runtime.editing_text(), Some("ab"), "buffer unchanged by cancel");
+        assert_eq!(runtime.composition_preedit(), None, "preedit dropped");
+        assert_eq!(&*mirror.borrow(), "", "cancel fires no EVENT_INPUT");
+        assert_eq!(composed_text(&mut runtime, "ab"), "ab", "display back to buffer text");
+    }
+
+    #[test]
+    fn ime_with_no_active_session_is_a_noop() {
+        // (c) With no focused editable there is no session, so every composition
+        // event is a no-op returning false — and no session springs into being.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        assert!(!runtime.handle_ime(CompositionEvent::Start), "start no-op with no session");
+        assert!(
+            !runtime.handle_ime(CompositionEvent::Update(obscur_text::ime::Preedit::new("x"))),
+            "update no-op with no session"
+        );
+        assert!(
+            !runtime.handle_ime(CompositionEvent::Commit(Box::from("x"))),
+            "commit no-op with no session"
+        );
+        assert!(runtime.editing_text().is_none(), "still no editing session");
+        assert!(runtime.composition_preedit().is_none(), "no preedit");
+    }
+
+    #[test]
+    fn ime_preedit_renders_an_underline_over_its_x_range() {
+        // (d) An active preedit paints a thin underline (height ~1) beneath the
+        // composing glyphs, spanning the preedit's x-range in the spliced display
+        // text: "ab" (caret at 2) + preedit "ni" underlines x∈[2·adv, 4·adv) past
+        // the text origin. The caret (width ~1) is a separate fill.
+        let (mut runtime, _mirror) = focused_editable("ab");
+        runtime.handle_ime(CompositionEvent::Start);
+        runtime.handle_ime(CompositionEvent::Update(obscur_text::ime::Preedit::new("ni")));
+
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let result = runtime.render_now(&input_reactive_view("ab"), sheets);
+        let list = result.snapshot().display_list();
+
+        let advance = 16.0_f32 * obscur_text::shaping::MockTextShaper::ADVANCE_RATIO;
+        let text_origin_x = list
+            .commands()
+            .iter()
+            .find_map(|c| match c {
+                obscur_scene::command::PaintCommand::DrawText { origin, .. } => Some(origin.x),
+                _ => None,
+            })
+            .expect("a text run");
+        // The underline: a thin (height ~1) horizontal fill spanning two advances.
+        let underline = list
+            .commands()
+            .iter()
+            .find_map(|c| match c {
+                obscur_scene::command::PaintCommand::DrawPath { path, .. } => path
+                    .bounds()
+                    .filter(|r| (r.size.height - 1.0).abs() < 1e-6 && r.size.width > 1.0),
+                _ => None,
+            })
+            .expect("a thin preedit underline fill");
+        assert!(
+            (underline.origin.x - (text_origin_x + advance * 2.0)).abs() < 1e-3,
+            "underline starts at the preedit's left edge (2·advance)"
+        );
+        assert!(
+            (underline.size.width - advance * 2.0).abs() < 1e-3,
+            "underline spans the two preedit glyphs"
+        );
+        assert!(list.is_balanced(), "the display list stays balanced");
+    }
+
+    #[test]
+    fn no_ime_keystroke_path_is_byte_identical() {
+        // (e) The ordinary (no-composition) keystroke path is unaffected: a runtime
+        // that types 'x' produces the exact same display list as one that runs a
+        // full Start→Cancel composition cycle (leaving no preedit) before typing.
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+
+        let (mut plain, _m1) = focused_editable("hi");
+        plain.handle_key(char_press('x'));
+        let plain_cmds: Vec<_> = plain
+            .render_now(&input_reactive_view("hi"), sheets)
+            .snapshot()
+            .display_list()
+            .commands()
+            .to_vec();
+
+        let (mut cycled, _m2) = focused_editable("hi");
+        cycled.handle_ime(CompositionEvent::Start);
+        cycled.handle_ime(CompositionEvent::Cancel);
+        cycled.handle_key(char_press('x'));
+        let cycled_cmds: Vec<_> = cycled
+            .render_now(&input_reactive_view("hi"), sheets)
+            .snapshot()
+            .display_list()
+            .commands()
+            .to_vec();
+
+        assert_eq!(plain_cmds, cycled_cmds, "a cancelled composition leaves paint byte-identical");
     }
 
     // ---- Mouse caret positioning + drag selection (this step) ----------------

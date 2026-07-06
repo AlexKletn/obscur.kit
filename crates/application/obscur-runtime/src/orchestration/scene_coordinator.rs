@@ -26,6 +26,7 @@ use obscur_text::font::{
 use obscur_text::layout::{
     Hyphenator, NullHyphenator, ParagraphLayout, TextAlignment, TextOverflow,
 };
+use obscur_text::selection::TextSelection;
 use obscur_text::shaping::{
     CachingShaper, MockTextShaper, ParagraphShaper, ShapedGlyph, ShapedRun, SingleRunItemizer,
     TextDirection, TextItemizer, TextShaper,
@@ -41,6 +42,11 @@ use super::{
 /// The width, in logical pixels, of the caret rectangle painted at the collapsed
 /// selection of the focused editable (a thin vertical bar over the text baseline).
 const CARET_WIDTH: f32 = 1.0;
+
+/// The thickness, in logical pixels, of the underline painted beneath an active
+/// IME preedit (spec §5.12) — the visual mark distinguishing the uncommitted
+/// composing text from committed glyphs.
+const PREEDIT_UNDERLINE_THICKNESS: f32 = 1.0;
 
 /// The default selection-highlight color: a semi-transparent blue painted behind
 /// the selected span so the glyphs show through it (spec §5.11). A host has no
@@ -661,7 +667,36 @@ impl SceneCoordinator {
                     // `None` on every non-editing frame, so this whole override
                     // path is inert and the retained content is drawn unchanged.
                     let active = editing.filter(|view| is_editing_text_node(tree, node, view.node));
-                    let content: &str = active.map_or(retained_content, |view| view.text);
+                    // The displayed text. While composing, the IME preedit is
+                    // spliced into the session text at its anchor for DISPLAY only
+                    // (the buffer is untouched, spec §5.12); otherwise it is the
+                    // session text (editing) or the retained content (idle). The
+                    // spliced string is owned here so it outlives the shaping below.
+                    let mut spliced = String::new();
+                    let content: &str = match active {
+                        Some(view) => match view.preedit {
+                            Some(preedit) => {
+                                let at = preedit.at.min(view.text.len());
+                                spliced.push_str(&view.text[..at]);
+                                spliced.push_str(preedit.text);
+                                spliced.push_str(&view.text[at..]);
+                                &spliced
+                            }
+                            None => view.text,
+                        },
+                        None => retained_content,
+                    };
+                    // The rendered caret/selection: while composing, the caret sits
+                    // at the preedit's caret within the SPLICED display text; with
+                    // no preedit it is the session's own selection (buffer offsets
+                    // equal display offsets). `None` on a non-editing text node.
+                    let display_selection = active.map(|view| match view.preedit {
+                        Some(preedit) => {
+                            let at = preedit.at.min(view.text.len());
+                            TextSelection::caret(at + preedit.caret)
+                        }
+                        None => view.selection,
+                    });
                     let text_color = text_color_of(computed, node);
                     let brush = Brush::solid(text_color);
                     // Same per-node font size the layout phase measured with, so
@@ -685,8 +720,8 @@ impl SceneCoordinator {
                     // collapsed caret paints no highlight). Single-line only — a
                     // multi-line span highlights just the first line's extent
                     // (documented limitation).
-                    if let Some(view) = active
-                        && !view.selection.is_empty()
+                    if let Some(selection) = display_selection
+                        && !selection.is_empty()
                     {
                         let line_height = self.paragraph.line_metrics(font_size).line_height();
                         let x0 = self.caret_offset_x(
@@ -695,7 +730,7 @@ impl SceneCoordinator {
                             &attributes,
                             direction,
                             font_size,
-                            view.selection.start(),
+                            selection.start(),
                         );
                         let x1 = self.caret_offset_x(
                             content,
@@ -703,7 +738,7 @@ impl SceneCoordinator {
                             &attributes,
                             direction,
                             font_size,
-                            view.selection.end(),
+                            selection.end(),
                         );
                         node_paint.fill_rect(
                             Rect::new(
@@ -757,13 +792,52 @@ impl SceneCoordinator {
                             seg_x += segment.run().advance();
                         }
                     }
+                    // IME preedit underline (spec §5.12): a thin bar beneath the
+                    // composing text, distinguishing the uncommitted preedit from
+                    // committed glyphs. The preedit's x-range is bounded with the
+                    // SAME caret advance-walk the caret/selection use, over the
+                    // spliced display `content`: from x(at) to x(at + preedit len).
+                    // Only for the editing field with a live, non-empty preedit.
+                    if let Some(preedit) = active.and_then(|view| view.preedit)
+                        && !preedit.text.is_empty()
+                    {
+                        let at = preedit.at.min(content.len());
+                        let line_height = self.paragraph.line_metrics(font_size).line_height();
+                        let x0 = self.caret_offset_x(
+                            content,
+                            &fallback,
+                            &attributes,
+                            direction,
+                            font_size,
+                            at,
+                        );
+                        let x1 = self.caret_offset_x(
+                            content,
+                            &fallback,
+                            &attributes,
+                            direction,
+                            font_size,
+                            at + preedit.text.len(),
+                        );
+                        node_paint.fill_rect(
+                            Rect::new(
+                                Point::new(
+                                    origin.x + x0,
+                                    origin.y + line_height - PREEDIT_UNDERLINE_THICKNESS,
+                                ),
+                                Size::new(x1 - x0, PREEDIT_UNDERLINE_THICKNESS),
+                            ),
+                            Brush::solid(text_color),
+                        );
+                    }
                     // Caret, painted ON TOP of the glyphs (emitted after the runs):
                     // a thin vertical bar at the caret's pen x, spanning the first
                     // line's height, in the text color. Only for the editing field
-                    // and only when the selection is collapsed (a caret) — a
-                    // non-empty selection shows the highlight above instead.
-                    if let Some(view) = active
-                        && view.selection.is_collapsed()
+                    // and only when the (display) selection is collapsed (a caret) —
+                    // a non-empty selection shows the highlight above instead. While
+                    // composing, the display selection is the preedit's caret.
+                    if let Some(selection) = display_selection
+                        && selection.is_collapsed()
                     {
                         let line_height = self.paragraph.line_metrics(font_size).line_height();
                         let caret_x = self.caret_offset_x(
@@ -772,7 +846,7 @@ impl SceneCoordinator {
                             &attributes,
                             direction,
                             font_size,
-                            view.selection.focus(),
+                            selection.focus(),
                         );
                         node_paint.fill_rect(
                             Rect::new(
@@ -2770,6 +2844,51 @@ mod tests {
             .position(|c| matches!(c, PaintCommand::DrawText { .. }))
             .expect("a text run");
         assert!(fill_idx < text_idx, "the highlight is emitted before the glyphs");
+    }
+
+    #[test]
+    fn active_preedit_splices_display_text_and_underlines_it() {
+        // (IME §5.12) A composition over "ab" (caret at end, at=2) with preedit
+        // "ni": compose SPLICES the preedit for display ("abni"), underlines the
+        // preedit's x-range with a thin (height 1) horizontal fill spanning two
+        // advances at x∈[2·adv, 4·adv), and places the caret at the preedit caret
+        // (end of "ni" → display offset 4). The buffer text ("ab") is untouched.
+        let advance = 16.0 * MockTextShaper::ADVANCE_RATIO;
+        let (tree, computed, boxes, text) = editing_fixture("ab");
+        let view = EditingView::new(text, "ab", TextSelection::caret(2))
+            .with_preedit(crate::orchestration::PreeditView::new("ni", 2, 2));
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, Some(view));
+
+        // The displayed text is the spliced "abni", not the buffer "ab".
+        let drawn: String = text_runs(&list)
+            .iter()
+            .map(|(_, run, _)| run.text().to_owned())
+            .collect();
+        assert_eq!(drawn, "abni", "the preedit is spliced into the display text");
+
+        let fills = caret_fills(&list);
+        // Exactly two fills: the preedit underline and the caret.
+        let underline = fills
+            .iter()
+            .find(|(r, _)| (r.size.height - PREEDIT_UNDERLINE_THICKNESS).abs() < 1e-4 && r.size.width > 1.0)
+            .expect("a thin preedit underline");
+        assert!(
+            (underline.0.origin.x - advance * 2.0).abs() < 1e-4,
+            "underline starts at the preedit left edge (2·advance)"
+        );
+        assert!(
+            (underline.0.size.width - advance * 2.0).abs() < 1e-4,
+            "underline spans the two preedit glyphs"
+        );
+        let caret = fills
+            .iter()
+            .find(|(r, _)| (r.size.width - CARET_WIDTH).abs() < 1e-4)
+            .expect("a caret bar");
+        assert!(
+            (caret.0.origin.x - advance * 4.0).abs() < 1e-4,
+            "caret sits at the preedit caret (display offset 4)"
+        );
+        assert!(list.is_balanced(), "the display list stays balanced");
     }
 
     #[test]

@@ -32,16 +32,60 @@ pub struct EditingView<'a> {
     /// The session's current caret/selection: collapsed is a caret, non-empty is
     /// a highlighted span.
     pub selection: TextSelection,
+    /// The active IME preedit spliced into the field for DISPLAY when a
+    /// composition is live (spec §5.12), or `None` when the field is not
+    /// composing. When present, the compose phase draws `text` with the preedit
+    /// spliced at [`PreeditView::at`], underlines the preedit span, and places the
+    /// caret at the preedit's caret — none of which touches the buffer.
+    pub preedit: Option<PreeditView<'a>>,
+}
+
+/// A borrowed snapshot of the active IME preedit spliced into the editing field
+/// for DISPLAY (spec §5.12 IME).
+///
+/// The preedit is *not* committed text: it is the uncommitted composition string
+/// shown inline at [`at`](Self::at) (a byte offset into the field's buffer text,
+/// the composition anchor's start) and rendered distinctly (an underline), but it
+/// is **never** inserted into the buffer until the composition commits. The
+/// compose phase splices `text` into the buffer text only to paint it.
+#[derive(Debug, Clone, Copy)]
+pub struct PreeditView<'a> {
+    /// The uncommitted composition text shown inline.
+    pub text: &'a str,
+    /// The byte offset in the field's buffer text where the preedit is spliced for
+    /// display — the composition anchor's start.
+    pub at: usize,
+    /// The caret byte offset *within* [`text`](Self::text): where the IME wants
+    /// the insertion point drawn inside the preedit.
+    pub caret: usize,
+}
+
+impl<'a> PreeditView<'a> {
+    /// Creates a preedit view for `text` spliced at byte offset `at` with its
+    /// caret at byte `caret` within `text`.
+    #[must_use]
+    pub(crate) const fn new(text: &'a str, at: usize, caret: usize) -> Self {
+        Self { text, at, caret }
+    }
 }
 
 impl<'a> EditingView<'a> {
-    /// Creates an editing view for `node` painting `text` with `selection`.
+    /// Creates an editing view for `node` painting `text` with `selection` and no
+    /// active preedit.
     #[must_use]
     pub(crate) const fn new(node: NodeId, text: &'a str, selection: TextSelection) -> Self {
         Self {
             node,
             text,
             selection,
+            preedit: None,
         }
+    }
+
+    /// Returns a copy with the active IME `preedit` attached (spec §5.12).
+    #[must_use]
+    pub(crate) const fn with_preedit(mut self, preedit: PreeditView<'a>) -> Self {
+        self.preedit = Some(preedit);
+        self
     }
 }
