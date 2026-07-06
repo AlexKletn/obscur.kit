@@ -11,7 +11,9 @@ use obscur_diagnostics::{
 };
 use obscur_geometry::Size;
 use obscur_identity::{InternedSymbol, NodeId, RuntimeId};
-use obscur_interaction::command::{CommandRouter, KeyEvent, Modifiers, Shortcut};
+use obscur_interaction::command::{
+    CommandRouter, KeyEvent, LogicalKey, Modifiers, NamedKey, Shortcut,
+};
 use obscur_interaction::hover::{HoverChain, HoverTransition};
 use obscur_interaction::pointer::{PointerEvent, PointerEventKind};
 use obscur_interaction::spatial::{HitTest, SpatialIndex};
@@ -30,7 +32,7 @@ use obscur_text::layout::Hyphenator;
 use obscur_text::shaping::{TextItemizer, TextShaper};
 use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
-use obscur_view::view::{View, EVENT_CLICK};
+use obscur_view::view::{View, EVENT_CHANGE, EVENT_CLICK};
 
 use super::{FrameBudget, FramePlan, KeyDispatch, PointerDispatch, SemanticTreeBuilder};
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
@@ -143,9 +145,11 @@ pub struct UiRuntime {
     /// handler per command (a later registration replaces an earlier one), so
     /// dispatch is a deterministic single lookup — no iteration order observed.
     handlers: HashMap<InternedSymbol, Box<dyn FnMut()>>,
-    /// The shortcut→command-id binding table keyboard input resolves against
+    /// The shortcut→command-symbol binding table keyboard input resolves against
     /// (spec §6.7). Populated by [`bind_command`](Self::bind_command); consulted
-    /// by [`handle_key`](Self::handle_key) on each key press.
+    /// by [`handle_key`](Self::handle_key) on each key press, which dispatches
+    /// the resolved command through the same handler registry a pointer click
+    /// uses.
     commands: CommandRouter,
     /// The modifier keys currently held, folded from physical modifier-key
     /// press/release transitions so shortcut matching sees the live chord.
@@ -1282,19 +1286,19 @@ impl UiRuntime {
         }
 
         // 3b. Click: a release on the *same* node the press landed on is a click
-        //    on that node. Resolve the `on-click` command by bubbling up the
-        //    node's logical-element ancestors (the first ancestor with a click
-        //    binding wins) and dispatch its registered handler. The press anchor
-        //    is cleared on every release, click or not.
+        //    on that node — it **activates** that control. Activation dispatches
+        //    the node's `on-click` command if one is bound (bubbling up its
+        //    logical-element ancestors, first match wins), else its `on-change`
+        //    command — so a checkbox/input bound to `on-change` fires on click
+        //    just as a button bound to `on-click` does. The resolved command is
+        //    reported back; the press anchor is cleared on every release.
         let mut command = None;
         if event.kind() == PointerEventKind::Up {
             if let Some(pressed) = self.press_target
                 && Some(pressed) == target
             {
-                command = self.click_command_for(pressed);
-                if let Some(command) = command {
-                    self.dispatch_command(command);
-                }
+                command = self.activation_command_for(pressed);
+                self.activate(pressed);
             }
             self.press_target = None;
         }
@@ -1309,20 +1313,58 @@ impl UiRuntime {
         PointerDispatch::new(target, hover_changed, focus_changed, command)
     }
 
-    /// Resolves the click command for a clicked `target` by walking its
-    /// logical-element ancestor chain (target first, then toward the root) and
-    /// returning the first [`EVENT_CLICK`] binding found — so a click on a child
-    /// of a bound element still fires that element's command (event bubbling,
-    /// spec §2.3). Returns `None` when no node in the chain binds click.
+    /// Resolves `event`'s command for a `target` by walking its logical-element
+    /// ancestor chain (target first, then toward the root) and returning the
+    /// first binding for that `event` found — so an event on a child of a bound
+    /// element still fires that element's command (event bubbling, spec §2.3).
+    /// Returns `None` when no node in the chain binds `event`.
     ///
     /// Reuses [`hover_chain_for`](Self::hover_chain_for) for the ancestor walk,
     /// which is the same target-plus-ancestors sequence hover already computes.
-    fn click_command_for(&self, target: NodeId) -> Option<InternedSymbol> {
-        self.hover_chain_for(Some(target)).into_iter().find_map(|node| {
-            self.tree
-                .get(node)
-                .and_then(|n| n.command_for_event(EVENT_CLICK))
-        })
+    fn command_for_event_bubbling(&self, target: NodeId, event: InternedSymbol) -> Option<InternedSymbol> {
+        self.hover_chain_for(Some(target))
+            .into_iter()
+            .find_map(|node| self.tree.get(node).and_then(|n| n.command_for_event(event)))
+    }
+
+    /// Resolves the **activation** command for `target`: a control is activated
+    /// by a click or an Enter/Space keypress, and activation fires its
+    /// [`EVENT_CLICK`] command if one is bound (bubbling up its ancestors), else
+    /// its [`EVENT_CHANGE`] command (spec §2.3, §3.1).
+    ///
+    /// This is the single mapping both pointer and keyboard activation share: a
+    /// button (bound to `on-click`) fires its click command; a checkbox/input
+    /// (bound to `on-change`) fires its change command. Click binds are checked
+    /// first, so a node carrying both prefers its click command, and the pre-
+    /// existing pointer behavior (a button click fires `EVENT_CLICK`) is
+    /// unchanged. Returns `None` when neither event is bound in the chain.
+    ///
+    /// Finer-grained editing events — per-keystroke [`EVENT_INPUT`] text entry
+    /// and change-on-blur — are deliberately *not* activation and are a separate
+    /// follow-up.
+    ///
+    /// [`EVENT_INPUT`]: obscur_view::view::EVENT_INPUT
+    fn activation_command_for(&self, target: NodeId) -> Option<InternedSymbol> {
+        self.command_for_event_bubbling(target, EVENT_CLICK)
+            .or_else(|| self.command_for_event_bubbling(target, EVENT_CHANGE))
+    }
+
+    /// Activates the control at `node`: dispatches its
+    /// [`activation_command_for`](Self::activation_command_for) command
+    /// (`EVENT_CLICK` else `EVENT_CHANGE`), running the registered handler.
+    /// Returns whether a handler actually ran.
+    ///
+    /// This is the shared entry point for both a pointer click (in
+    /// [`handle_pointer`](Self::handle_pointer)) and an Enter/Space keypress on
+    /// the focused control (in [`handle_key`](Self::handle_key)). With no
+    /// activation binding in the node's ancestor chain — or no handler
+    /// registered for the resolved command — it is a harmless no-op that returns
+    /// `false` and never panics.
+    fn activate(&mut self, node: NodeId) -> bool {
+        match self.activation_command_for(node) {
+            Some(command) => self.dispatch_command(command),
+            None => false,
+        }
     }
 
     /// Registers `handler` as the application logic to run when `command` is
@@ -1410,18 +1452,23 @@ impl UiRuntime {
         }
     }
 
-    /// Binds `shortcut` to `command_id` in the runtime's command router, so a
-    /// matching key press at [`handle_key`](Self::handle_key) resolves to that
+    /// Binds `shortcut` to the app-owned command symbol `command` in the
+    /// runtime's command router, so a matching key press at
+    /// [`handle_key`](Self::handle_key) resolves to — and dispatches — that
     /// command (spec §6.7).
     ///
-    /// Registration order is priority: an earlier binding shadows a later one
-    /// with the same shortcut (see [`CommandRouter::bind`]). Binding does not
-    /// itself schedule a frame.
-    pub fn bind_command(&mut self, shortcut: Shortcut, command_id: impl Into<Box<str>>) {
-        self.commands.bind(shortcut, command_id);
+    /// `command` is the **same** [`InternedSymbol`] the application registers a
+    /// handler for via [`on_command`](Self::on_command) (and may also bind an
+    /// `on-click`/`on-change` event to in the View): keyboard and pointer input
+    /// share one command identity, so a bound shortcut runs the same handler a
+    /// click would. Registration order is priority: an earlier binding shadows a
+    /// later one with the same shortcut (see [`CommandRouter::bind`]). Binding
+    /// does not itself schedule a frame.
+    pub fn bind_command(&mut self, shortcut: Shortcut, command: InternedSymbol) {
+        self.commands.bind(shortcut, command);
     }
 
-    /// Returns the shortcut→command-id binding table keyboard input resolves
+    /// Returns the shortcut→command-symbol binding table keyboard input resolves
     /// against.
     #[must_use]
     pub const fn command_router(&self) -> &CommandRouter {
@@ -1448,17 +1495,24 @@ impl UiRuntime {
     /// 2. **Route** — the event is aimed at the [`focused`](Self::focused) node.
     ///    With nothing focused the key routes nowhere: the method is a no-op that
     ///    returns [`KeyDispatch::unhandled`] and schedules no frame.
-    /// 3. **Resolve** — on a **press**, the event's layout-dependent
+    /// 3. **Resolve + dispatch** — on a **press**, the event's layout-dependent
     ///    [`LogicalKey`](obscur_interaction::command::LogicalKey) plus the held
     ///    modifiers are looked up in the [`CommandRouter`]; a match yields the
-    ///    bound command id. A release, an event with no logical key, or an
-    ///    unbound chord resolves to no command.
+    ///    bound command [`InternedSymbol`], whose registered handler is
+    ///    **run** via the same [`dispatch_command`](Self::dispatch_command) path
+    ///    a pointer click uses. A release, an event with no logical key, or an
+    ///    unbound chord resolves to (and dispatches) no command.
+    /// 3b. **Activate** — *in addition*, a press whose logical key is Enter or
+    ///    Space [`activate`](Self::activate)s the focused control, so a plain
+    ///    Enter/Space with no bound shortcut still fires the focused node's
+    ///    `on-click` (button) or `on-change` (checkbox) command. Both steps can
+    ///    apply on one keypress.
     /// 4. **Schedule** — because the key reached a focused node, a
     ///    [`FrameReason::Input`] frame is requested so any focus/command-driven
     ///    visual reaches paint on the next `run_due_frame`/`render_now`.
     ///
     /// Returns a [`KeyDispatch`] describing the routed target and any resolved
-    /// command.
+    /// (and dispatched) shortcut command.
     pub fn handle_key(&mut self, event: KeyEvent) -> KeyDispatch {
         // 1. Fold a physical modifier transition into the held modifier set.
         if let Some(modifier) = event.physical().modifier() {
@@ -1474,13 +1528,24 @@ impl UiRuntime {
             return KeyDispatch::unhandled();
         };
 
-        // 3. Resolve a bound command from the produced logical key + modifiers,
-        //    but only on a press (a release never triggers a shortcut).
+        // 3. On a press, resolve a bound command from the produced logical key +
+        //    held modifiers and DISPATCH it, so a keyboard shortcut runs the same
+        //    handler a pointer click would (a release never triggers a shortcut).
         let command = if event.pressed() {
-            event
+            let resolved = event
                 .logical()
-                .and_then(|key| self.commands.resolve(key, self.modifiers))
-                .map(Box::<str>::from)
+                .and_then(|key| self.commands.resolve(key, self.modifiers));
+            if let Some(command) = resolved {
+                self.dispatch_command(command);
+            }
+            // 3b. Enter/Space activates the focused control regardless of any
+            //     bound shortcut: a button fires its click command, a checkbox
+            //     its change command. Both the shortcut above and this activation
+            //     can fire on the same keypress.
+            if is_activation_key(event.logical()) {
+                self.activate(target);
+            }
+            resolved
         } else {
             None
         };
@@ -1625,6 +1690,20 @@ struct AnimationStart {
     kind: AnimatedKind,
 }
 
+/// Returns whether `key` is an **activation** key — Enter or Space — the two
+/// keystrokes that activate a focused control (spec §3.1, §6.7).
+///
+/// Space is accepted both as the [`NamedKey::Space`] key and as a produced `' '`
+/// [`LogicalKey::Character`], since a layout may surface it either way. (A space
+/// press over a scroll container would conventionally scroll rather than
+/// activate; disambiguating activation from scrolling is a later follow-up.)
+fn is_activation_key(key: Option<LogicalKey>) -> bool {
+    matches!(
+        key,
+        Some(LogicalKey::Named(NamedKey::Enter | NamedKey::Space) | LogicalKey::Character(' '))
+    )
+}
+
 /// Records one frame phase's telemetry into `sink` (spec §7.9): a
 /// [`PerformanceSpan`] marker for the phase, a [`PerformanceCounter`] carrying
 /// the phase's deterministic cost `metric`, and — when the phase's optional
@@ -1724,13 +1803,18 @@ mod tests {
     use obscur_style::property::{Length, PropertyId, PropertyValue, StyleColor};
     use obscur_style::selector::{ComplexSelector, CompoundSelector, SelectorList, SimpleSelector};
     use obscur_view::view::{
-        CLASS, EVENT_CLICK, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
+        CLASS, EVENT_CHANGE, EVENT_CLICK, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
+        ViewValue,
     };
     use std::cell::Cell;
 
     /// App-owned command symbols the click tests bind and register against.
     const CMD_PANEL: InternedSymbol = InternedSymbol::from_raw(0xC0DE);
     const CMD_B: InternedSymbol = InternedSymbol::from_raw(0xB0B0);
+    /// A keyboard-shortcut command symbol the key tests bind and dispatch.
+    const CMD_SAVE: InternedSymbol = InternedSymbol::from_raw(0x5A7E);
+    /// A checkbox `on-change` command symbol the change-activation tests use.
+    const CMD_CHECK: InternedSymbol = InternedSymbol::from_raw(0xC4EC);
 
     fn runtime_id() -> RuntimeId {
         RuntimeId::from_raw(1)
@@ -3096,10 +3180,10 @@ mod tests {
         let _ = runtime.render_now(&panel_view(), sheets);
         let (_panel, a, _b) = panel_nodes(&runtime);
 
-        // Ctrl+S → "file.save".
+        // Ctrl+S → CMD_SAVE.
         runtime.bind_command(
             Shortcut::new(LogicalKey::character('s')).with(Modifier::Ctrl),
-            "file.save",
+            CMD_SAVE,
         );
 
         // Focus a, then hold Ctrl and press S.
@@ -3117,7 +3201,7 @@ mod tests {
             Some(LogicalKey::character('s')),
         ));
         assert_eq!(save.target(), Some(a));
-        assert_eq!(save.command(), Some("file.save"));
+        assert_eq!(save.command(), Some(CMD_SAVE));
         assert!(save.resolved_command());
 
         // Releasing Ctrl clears the modifier: S alone no longer resolves.
@@ -3135,7 +3219,7 @@ mod tests {
         let sheet = interaction_sheet();
         let sheets = std::slice::from_ref(&sheet);
         let _ = runtime.render_now(&panel_view(), sheets);
-        runtime.bind_command(Shortcut::new(LogicalKey::character('a')), "noop");
+        runtime.bind_command(Shortcut::new(LogicalKey::character('a')), CMD_SAVE);
 
         // Nothing focused: even a bound key resolves to nothing and schedules
         // no frame — the runtime state is unchanged.
@@ -3155,7 +3239,7 @@ mod tests {
             let _ = runtime.render_now(&panel_view(), sheets);
             runtime.bind_command(
                 Shortcut::new(LogicalKey::character('s')).with(Modifier::Ctrl),
-                "file.save",
+                CMD_SAVE,
             );
             runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
             let _ = runtime.run_due_frame(&panel_view(), sheets);
@@ -3166,6 +3250,171 @@ mod tests {
             ))
         };
         assert_eq!(build(), build());
+    }
+
+    // ---- Keyboard command + activation dispatch (this step) ----------------
+
+    /// A `panel` (100x100) holding a single child `b` (100x50, at y∈[0,50)) that
+    /// binds `on-change → CMD_CHECK` — a checkbox-like control that fires its
+    /// *change* command (not a click command) when activated.
+    fn checkbox_view() -> View {
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(400))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+                .with_children(ViewFragment::from_nodes(vec![
+                    ViewNode::element(ComponentId::from_raw(401))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("b".into())))
+                        .with_event(ViewEventBinding::new(EVENT_CHANGE, CMD_CHECK)),
+                ])),
+        ]))
+    }
+
+    #[test]
+    fn bound_shortcut_key_press_runs_its_registered_handler() {
+        // (b) A keyboard shortcut resolves to a command symbol AND runs the
+        // handler registered for that same symbol — keyboard now dispatches.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&panel_view(), sheets);
+
+        // Bind Ctrl+S to CMD_SAVE and register the handler for the SAME symbol.
+        runtime.bind_command(
+            Shortcut::new(LogicalKey::character('s')).with(Modifier::Ctrl),
+            CMD_SAVE,
+        );
+        let counter = Rc::new(Cell::new(0));
+        {
+            let c = counter.clone();
+            runtime.on_command(CMD_SAVE, move || c.set(c.get() + 1));
+        }
+
+        // Focus a node so the key routes, then hold Ctrl and press S.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let _ = runtime.run_due_frame(&panel_view(), sheets);
+        runtime.handle_key(KeyEvent::press(PhysicalKey::ControlLeft, None));
+        let save = runtime.handle_key(KeyEvent::press(
+            PhysicalKey::KeyS,
+            Some(LogicalKey::character('s')),
+        ));
+
+        assert_eq!(save.command(), Some(CMD_SAVE), "the shortcut resolved");
+        assert_eq!(counter.get(), 1, "the bound shortcut RAN its handler once");
+    }
+
+    #[test]
+    fn clicking_a_checkbox_fires_its_change_command_via_activate() {
+        // (c) A checkbox-like node bound only to EVENT_CHANGE fires that change
+        // command when clicked (Down+Up) — activation resolves click ELSE change.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&checkbox_view(), sheets);
+
+        let counter = Rc::new(Cell::new(0));
+        {
+            let c = counter.clone();
+            runtime.on_command(CMD_CHECK, move || c.set(c.get() + 1));
+        }
+
+        // The single child `b` occupies y∈[0,50); click at (50, 25).
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let up = runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 25.0));
+
+        assert_eq!(
+            up.command(),
+            Some(CMD_CHECK),
+            "the click resolved the change command"
+        );
+        assert_eq!(counter.get(), 1, "the change handler RAN once on click");
+    }
+
+    #[test]
+    fn enter_on_focused_button_fires_its_click_command_via_activate() {
+        // (d) Enter on a focused button (bound to EVENT_CLICK) runs the click
+        // handler even with no keyboard shortcut bound.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&bound_view(), sheets);
+        let (_panel, _a, b) = panel_nodes(&runtime);
+
+        let counter = Rc::new(Cell::new(0));
+        {
+            let c = counter.clone();
+            runtime.on_command(CMD_B, move || c.set(c.get() + 1));
+        }
+
+        // Focus `b` (bound to EVENT_CLICK → CMD_B) via a press at (50, 75), drain
+        // the focus frame, then press Enter: activation fires b's click command.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0));
+        let _ = runtime.run_due_frame(&bound_view(), sheets);
+        assert_eq!(runtime.focused(), Some(b));
+
+        let enter = runtime.handle_key(KeyEvent::press(
+            PhysicalKey::Enter,
+            Some(LogicalKey::named(NamedKey::Enter)),
+        ));
+        assert_eq!(enter.target(), Some(b));
+        // No shortcut is bound, so nothing resolved through the router...
+        assert_eq!(enter.command(), None);
+        // ...but Enter activated the focused button's click command.
+        assert_eq!(counter.get(), 1, "Enter activated the button's click handler");
+    }
+
+    #[test]
+    fn space_on_focused_checkbox_fires_change_and_missing_handler_is_a_noop() {
+        // (e-adjacent) Space activates too, firing the checkbox's change command;
+        // and an activation whose command has no registered handler never panics.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&checkbox_view(), sheets);
+
+        // Focus the checkbox with NO handler registered: Space must not panic.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let _ = runtime.run_due_frame(&checkbox_view(), sheets);
+        let space_noop = runtime.handle_key(KeyEvent::press(
+            PhysicalKey::Space,
+            Some(LogicalKey::named(NamedKey::Space)),
+        ));
+        assert!(space_noop.is_handled());
+
+        // Now register the handler; a Space keypress fires the change command.
+        let counter = Rc::new(Cell::new(0));
+        {
+            let c = counter.clone();
+            runtime.on_command(CMD_CHECK, move || c.set(c.get() + 1));
+        }
+        runtime.handle_key(KeyEvent::press(
+            PhysicalKey::Space,
+            Some(LogicalKey::named(NamedKey::Space)),
+        ));
+        assert_eq!(counter.get(), 1, "Space activated the change handler");
+    }
+
+    #[test]
+    fn button_click_still_fires_event_click_after_activation_change() {
+        // (e) Regression: a button click still dispatches EVENT_CLICK (activation
+        // prefers the click binding over any change binding).
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&bound_view(), sheets);
+        let (_panel, _a, b) = panel_nodes(&runtime);
+
+        let counter = Rc::new(Cell::new(0));
+        {
+            let c = counter.clone();
+            runtime.on_command(CMD_B, move || c.set(c.get() + 1));
+        }
+
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0));
+        let up = runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 75.0));
+
+        assert_eq!(up.target(), Some(b));
+        assert_eq!(up.command(), Some(CMD_B), "click still resolves EVENT_CLICK");
+        assert_eq!(counter.get(), 1);
     }
 
     // ---- Phase 4 final step: motion orchestration (style → motion → paint) ----

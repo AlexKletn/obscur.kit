@@ -1,18 +1,23 @@
 //! The [`CommandRouter`] shortcut-to-command binding table (spec §6.7).
 
+use obscur_identity::InternedSymbol;
+
 use crate::command::{LogicalKey, Modifiers, Shortcut};
 
-/// Maps shortcuts to command ids and resolves key input (spec §6.7).
+/// Maps shortcuts to command symbols and resolves key input (spec §6.7).
 ///
-/// A `CommandRouter` holds an ordered list of shortcut→command-id bindings.
+/// A `CommandRouter` holds an ordered list of shortcut→command-symbol bindings.
 /// Registration order is priority: [`resolve`](CommandRouter::resolve) returns
-/// the command id of the *first* binding whose shortcut matches the key input,
-/// so earlier bindings shadow later ones. The router stores only ids; it does
-/// not own the [`Command`](crate::command::Command)s themselves.
-#[derive(Debug, Clone, Default, PartialEq)]
+/// the command symbol of the *first* binding whose shortcut matches the key
+/// input, so earlier bindings shadow later ones. The router stores only the
+/// app-owned command [`InternedSymbol`]s — the *same* symbols the application
+/// registers handlers for and binds `on-click`/`on-change` events to — so
+/// keyboard input and pointer input dispatch through one command identity. It
+/// does not own the [`Command`](crate::command::Command)s themselves.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CommandRouter {
-    /// Ordered shortcut→command-id bindings; index order is priority.
-    bindings: Vec<(Shortcut, Box<str>)>,
+    /// Ordered shortcut→command-symbol bindings; index order is priority.
+    bindings: Vec<(Shortcut, InternedSymbol)>,
 }
 
 impl CommandRouter {
@@ -24,25 +29,25 @@ impl CommandRouter {
         }
     }
 
-    /// Binds `shortcut` to `command_id`, appending it at the lowest priority.
+    /// Binds `shortcut` to `command`, appending it at the lowest priority.
     ///
     /// Duplicate shortcuts are allowed; the earliest-registered one wins during
     /// [`resolve`](CommandRouter::resolve).
-    pub fn bind(&mut self, shortcut: Shortcut, command_id: impl Into<Box<str>>) {
-        self.bindings.push((shortcut, command_id.into()));
+    pub fn bind(&mut self, shortcut: Shortcut, command: InternedSymbol) {
+        self.bindings.push((shortcut, command));
     }
 
-    /// Resolves key input to a command id.
+    /// Resolves key input to a command symbol.
     ///
-    /// Returns the id of the first bound command whose shortcut matches `key`
-    /// with exactly `modifiers` held, in registration order (first match wins),
-    /// or `None` if nothing matches.
+    /// Returns the symbol of the first bound command whose shortcut matches
+    /// `key` with exactly `modifiers` held, in registration order (first match
+    /// wins), or `None` if nothing matches.
     #[must_use]
-    pub fn resolve(&self, key: LogicalKey, modifiers: Modifiers) -> Option<&str> {
+    pub fn resolve(&self, key: LogicalKey, modifiers: Modifiers) -> Option<InternedSymbol> {
         self.bindings
             .iter()
             .find(|(shortcut, _)| shortcut.matches(key, modifiers))
-            .map(|(_, id)| id.as_ref())
+            .map(|(_, command)| *command)
     }
 
     /// Removes the first binding with this exact `shortcut`.
@@ -57,12 +62,12 @@ impl CommandRouter {
         }
     }
 
-    /// Returns every shortcut bound to `command_id`, in registration order.
+    /// Returns every shortcut bound to `command`, in registration order.
     #[must_use]
-    pub fn bindings_for(&self, command_id: &str) -> Vec<Shortcut> {
+    pub fn bindings_for(&self, command: InternedSymbol) -> Vec<Shortcut> {
         self.bindings
             .iter()
-            .filter(|(_, id)| id.as_ref() == command_id)
+            .filter(|(_, bound)| *bound == command)
             .map(|(sc, _)| *sc)
             .collect()
     }
@@ -90,6 +95,11 @@ mod tests {
     use super::*;
     use crate::command::Modifier;
 
+    /// App-owned command symbols the bindings resolve to.
+    const CMD_SAVE: InternedSymbol = InternedSymbol::from_raw(0x5A7E);
+    const CMD_SAVE_SHADOWED: InternedSymbol = InternedSymbol::from_raw(0x5A70);
+    const CMD_OPEN: InternedSymbol = InternedSymbol::from_raw(0x0BE1);
+
     fn ctrl(c: char) -> Shortcut {
         Shortcut::new(LogicalKey::character(c)).with(Modifier::Ctrl)
     }
@@ -99,19 +109,19 @@ mod tests {
         let mut router = CommandRouter::new();
         assert!(router.is_empty());
 
-        router.bind(ctrl('s'), "file.save");
-        router.bind(ctrl('s'), "file.save_shadowed");
-        router.bind(ctrl('o'), "file.open");
+        router.bind(ctrl('s'), CMD_SAVE);
+        router.bind(ctrl('s'), CMD_SAVE_SHADOWED);
+        router.bind(ctrl('o'), CMD_OPEN);
 
         assert_eq!(router.len(), 3);
         let ctrl_mod = Modifiers::new().with(Modifier::Ctrl);
         assert_eq!(
             router.resolve(LogicalKey::character('s'), ctrl_mod),
-            Some("file.save")
+            Some(CMD_SAVE)
         );
         assert_eq!(
             router.resolve(LogicalKey::character('o'), ctrl_mod),
-            Some("file.open")
+            Some(CMD_OPEN)
         );
         // No match: missing modifier.
         assert_eq!(
@@ -125,8 +135,8 @@ mod tests {
     #[test]
     fn unbind_removes_first_matching_shortcut() {
         let mut router = CommandRouter::new();
-        router.bind(ctrl('s'), "file.save");
-        router.bind(ctrl('s'), "file.save_shadowed");
+        router.bind(ctrl('s'), CMD_SAVE);
+        router.bind(ctrl('s'), CMD_SAVE_SHADOWED);
 
         assert!(router.unbind(&ctrl('s')));
         assert_eq!(router.len(), 1);
@@ -134,7 +144,7 @@ mod tests {
         // The shadowed binding is now the winner.
         assert_eq!(
             router.resolve(LogicalKey::character('s'), ctrl_mod),
-            Some("file.save_shadowed")
+            Some(CMD_SAVE_SHADOWED)
         );
         // Unbinding a missing shortcut reports false.
         assert!(!router.unbind(&ctrl('z')));
@@ -143,21 +153,22 @@ mod tests {
     #[test]
     fn bindings_for_returns_all_shortcuts() {
         let mut router = CommandRouter::new();
-        router.bind(ctrl('s'), "file.save");
-        router.bind(Shortcut::new(LogicalKey::character('w')), "file.save");
-        router.bind(ctrl('o'), "file.open");
+        router.bind(ctrl('s'), CMD_SAVE);
+        router.bind(Shortcut::new(LogicalKey::character('w')), CMD_SAVE);
+        router.bind(ctrl('o'), CMD_OPEN);
 
-        let saves = router.bindings_for("file.save");
+        let saves = router.bindings_for(CMD_SAVE);
         assert_eq!(saves.len(), 2);
         assert!(saves.contains(&ctrl('s')));
         assert!(saves.contains(&Shortcut::new(LogicalKey::character('w'))));
-        assert!(router.bindings_for("missing").is_empty());
+        assert!(router.bindings_for(CMD_OPEN).len() == 1);
+        assert!(router.bindings_for(InternedSymbol::from_raw(0xDEAD)).is_empty());
     }
 
     #[test]
     fn clear_empties_the_router() {
         let mut router = CommandRouter::new();
-        router.bind(ctrl('s'), "file.save");
+        router.bind(ctrl('s'), CMD_SAVE);
         router.clear();
         assert!(router.is_empty());
         assert_eq!(router.len(), 0);
