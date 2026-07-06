@@ -1,7 +1,7 @@
 //! A retained tree node — the anchor of UI identity.
 
-use obscur_identity::{NodeId, StableKey};
-use obscur_view::view::StyleAttributes;
+use obscur_identity::{InternedSymbol, NodeId, StableKey};
+use obscur_view::view::{StyleAttributes, ViewEventBinding};
 
 use super::{LogicalParent, NodeFlags, NodeGeneration, NodeKind, VisualParent};
 
@@ -38,6 +38,12 @@ pub struct RetainedNode {
     /// extracted from the desired node's props during reconciliation. Empty for
     /// non-element nodes and elements that carry no style attributes.
     pub attributes: StyleAttributes,
+    /// Event bindings (`event → command`) carried on element nodes, copied from
+    /// the desired node's events during reconciliation. Actions flow *up*: the
+    /// runtime looks a fired event up here to find the command it dispatches
+    /// (spec §2.3, §3.1). Empty for non-element nodes and elements with no
+    /// events.
+    pub event_bindings: Box<[ViewEventBinding]>,
 }
 
 impl RetainedNode {
@@ -55,6 +61,7 @@ impl RetainedNode {
             children: Vec::new(),
             key: None,
             attributes: StyleAttributes::new(),
+            event_bindings: Box::default(),
         }
     }
 
@@ -107,6 +114,23 @@ impl RetainedNode {
         &self.attributes
     }
 
+    /// Returns this node's event bindings (`event → command`). Empty for
+    /// non-element nodes and elements that carry no events.
+    #[must_use]
+    pub fn event_bindings(&self) -> &[ViewEventBinding] {
+        &self.event_bindings
+    }
+
+    /// Returns the command bound to `event` on this node, if any — the first
+    /// matching binding wins.
+    #[must_use]
+    pub fn command_for_event(&self, event: InternedSymbol) -> Option<InternedSymbol> {
+        self.event_bindings
+            .iter()
+            .find(|binding| binding.event() == event)
+            .map(ViewEventBinding::command)
+    }
+
     /// Advances the generation, marking the arena slot as reused for a new
     /// occupant so that stale references can be detected.
     pub fn bump_generation(&mut self) {
@@ -134,6 +158,11 @@ impl RetainedNode {
     /// value.
     pub fn set_attributes(&mut self, attributes: StyleAttributes) {
         self.attributes = attributes;
+    }
+
+    /// Sets this node's event bindings, replacing any previous value.
+    pub fn set_event_bindings(&mut self, event_bindings: Box<[ViewEventBinding]>) {
+        self.event_bindings = event_bindings;
     }
 
     /// Returns the ordered child links.
@@ -279,5 +308,26 @@ mod tests {
 
         n.set_attributes(StyleAttributes::new());
         assert!(n.attributes().is_empty());
+    }
+
+    #[test]
+    fn new_starts_with_no_event_bindings() {
+        let n = element(1);
+        assert!(n.event_bindings().is_empty());
+        assert_eq!(n.command_for_event(InternedSymbol::from_raw(1)), None);
+    }
+
+    #[test]
+    fn set_event_bindings_roundtrips_and_resolves_command() {
+        let click = InternedSymbol::from_raw(10);
+        let increment = InternedSymbol::from_raw(20);
+        let mut n = element(1);
+        n.set_event_bindings(Box::from([ViewEventBinding::new(click, increment)]));
+        assert_eq!(n.event_bindings().len(), 1);
+        assert_eq!(n.command_for_event(click), Some(increment));
+        assert_eq!(n.command_for_event(InternedSymbol::from_raw(99)), None);
+
+        n.set_event_bindings(Box::default());
+        assert!(n.event_bindings().is_empty());
     }
 }

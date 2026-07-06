@@ -3,7 +3,9 @@
 use std::collections::HashMap;
 
 use obscur_identity::{NodeId, StableKey};
-use obscur_view::view::{StyleAttributes, View, ViewFragment, ViewNode, ViewProperty};
+use obscur_view::view::{
+    StyleAttributes, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
+};
 
 use crate::node::{LogicalParent, NodeKind, VisualParent};
 use crate::tree::{RetainedTree, Subtree};
@@ -20,10 +22,11 @@ use super::{ChildMatcher, IdentityMatch, ReconciliationOp, ReconciliationPlan};
 /// is compatible with an existing one (matching by key across reorders, per spec
 /// §2.11), and mints a fresh id only when it must.
 ///
-/// Only **structure**, **identity**, **text content**, and the CSS-relevant
-/// **style attributes** (local name, id, class list) are reconciled here. The
-/// remaining element props and events flow to style/components downstream and
-/// are *not* stored on the retained node by this crate.
+/// Only **structure**, **identity**, **text content**, the CSS-relevant
+/// **style attributes** (local name, id, class list), and the element's
+/// **event bindings** (`event → command`) are reconciled here. The remaining
+/// element props flow to style/components downstream and are *not* stored on the
+/// retained node by this crate.
 ///
 /// Every pass returns a [`ReconciliationPlan`] describing what it did. The engine
 /// is deterministic and panic-free, and is defensive about stale ids.
@@ -125,8 +128,13 @@ impl Reconciler {
                                 plan.push(ReconciliationOp::Update { id });
                             }
                         }
-                        ViewNode::Element { props, .. } => {
-                            if apply_attributes(tree, id, props) {
+                        ViewNode::Element { props, events, .. } => {
+                            // Refresh both CSS-relevant attributes and the event
+                            // bindings from the latest desired node. Combine into
+                            // a single Update op so a node yields at most one.
+                            let attrs_changed = apply_attributes(tree, id, props);
+                            let events_changed = apply_events(tree, id, events);
+                            if attrs_changed || events_changed {
                                 plan.push(ReconciliationOp::Update { id });
                             }
                         }
@@ -136,9 +144,11 @@ impl Reconciler {
                 }
                 IdentityMatch::Create => {
                     let id = tree.alloc(node_kind_of(node));
-                    // Newly created element nodes carry their style attributes.
-                    if let ViewNode::Element { props, .. } = node {
+                    // Newly created element nodes carry their style attributes
+                    // and event bindings.
+                    if let ViewNode::Element { props, events, .. } = node {
                         apply_attributes(tree, id, props);
+                        apply_events(tree, id, events);
                     }
                     plan.push(ReconciliationOp::Insert { id, parent, index });
                     id
@@ -251,6 +261,20 @@ fn apply_attributes(tree: &mut RetainedTree, id: NodeId, props: &[ViewProperty])
         return false;
     }
     node.set_attributes(attributes);
+    true
+}
+
+/// Refreshes a node's event bindings from a desired element's events, returning
+/// `true` if they actually changed. A no-op (returning `false`) if `id` is stale
+/// or the events equal the current bindings.
+fn apply_events(tree: &mut RetainedTree, id: NodeId, events: &[ViewEventBinding]) -> bool {
+    let Some(node) = tree.get_mut(id) else {
+        return false;
+    };
+    if node.event_bindings() == events {
+        return false;
+    }
+    node.set_event_bindings(Box::from(events));
     true
 }
 
@@ -545,6 +569,102 @@ mod tests {
         assert!(
             plan.is_empty(),
             "identical props must not report a change, got {:?}",
+            plan.ops()
+        );
+    }
+
+    #[test]
+    fn element_carries_event_bindings_after_reconcile() {
+        use obscur_identity::InternedSymbol;
+
+        let click = InternedSymbol::from_raw(0x00E0_0001);
+        let increment = InternedSymbol::from_raw(0x00C0_0001);
+
+        let (mut tree, root) = tree_with_root();
+        let bound = el(1).with_event(ViewEventBinding::new(click, increment));
+        let _ =
+            Reconciler::new().reconcile(&mut tree, root, &ViewFragment::from_nodes(vec![bound]));
+        let id = child_ids(&tree, root)[0];
+        let node = tree.get(id).expect("live");
+        assert_eq!(
+            node.event_bindings(),
+            &[ViewEventBinding::new(click, increment)]
+        );
+        assert_eq!(node.command_for_event(click), Some(increment));
+        assert_eq!(node.command_for_event(InternedSymbol::from_raw(0xDEAD)), None);
+    }
+
+    #[test]
+    fn bare_element_and_text_carry_no_event_bindings() {
+        let (mut tree, root) = tree_with_root();
+        let _ = Reconciler::new().reconcile(
+            &mut tree,
+            root,
+            &ViewFragment::from_nodes(vec![el(1), ViewNode::text("hi")]),
+        );
+        let ids = child_ids(&tree, root);
+        // (c) a Text node has no bindings; a bare element has none either.
+        assert!(tree.get(ids[0]).expect("live").event_bindings().is_empty());
+        assert!(tree.get(ids[1]).expect("live").event_bindings().is_empty());
+    }
+
+    #[test]
+    fn changed_event_binding_is_refreshed_in_place() {
+        use obscur_identity::InternedSymbol;
+
+        let click = InternedSymbol::from_raw(0x00E0_0001);
+        let increment = InternedSymbol::from_raw(0x00C0_0001);
+        let decrement = InternedSymbol::from_raw(0x00C0_0002);
+
+        let (mut tree, root) = tree_with_root();
+        let recon = Reconciler::new();
+        let bound = |command| {
+            keyed_el(1, "e").with_event(ViewEventBinding::new(click, command))
+        };
+
+        let _ = recon.reconcile(
+            &mut tree,
+            root,
+            &ViewFragment::from_nodes(vec![bound(increment)]),
+        );
+        let id = child_ids(&tree, root)[0];
+        assert_eq!(
+            tree.get(id).expect("live").command_for_event(click),
+            Some(increment)
+        );
+
+        // (b) Same key → same NodeId; changing the bound command refreshes the
+        // binding on that node and emits one Update op.
+        let plan = recon.reconcile(
+            &mut tree,
+            root,
+            &ViewFragment::from_nodes(vec![bound(decrement)]),
+        );
+        assert_eq!(child_ids(&tree, root)[0], id);
+        assert_eq!(
+            tree.get(id).expect("live").command_for_event(click),
+            Some(decrement)
+        );
+        assert!(plan.iter().any(|op| op.is_update()));
+        assert!(!plan.iter().any(|op| op.is_insert()));
+        assert!(!plan.iter().any(|op| op.is_remove()));
+    }
+
+    #[test]
+    fn identical_event_bindings_yield_no_update() {
+        use obscur_identity::InternedSymbol;
+
+        let click = InternedSymbol::from_raw(0x00E0_0001);
+        let increment = InternedSymbol::from_raw(0x00C0_0001);
+
+        let (mut tree, root) = tree_with_root();
+        let recon = Reconciler::new();
+        let bound = || keyed_el(1, "e").with_event(ViewEventBinding::new(click, increment));
+        let _ = recon.reconcile(&mut tree, root, &ViewFragment::from_nodes(vec![bound()]));
+        let plan = recon.reconcile(&mut tree, root, &ViewFragment::from_nodes(vec![bound()]));
+        assert!(
+            plan.is_empty(),
+            "identical events must not report a change, got {:?}",
             plan.ops()
         );
     }
