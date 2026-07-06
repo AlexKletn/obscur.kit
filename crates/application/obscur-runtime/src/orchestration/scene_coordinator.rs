@@ -14,7 +14,7 @@ use obscur_scene::paint::{
 };
 use obscur_scene::path::Path;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
-use obscur_style::computed::ComputedValue;
+use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{
     layout_keyword, BoxShadow, Length, LinearGradient, PropertyId, PropertyValue, StyleColor,
     Transform, TransformOrigin,
@@ -413,6 +413,55 @@ impl SceneCoordinator {
             .filter(|glyph| glyph.cluster() < index)
             .map(|glyph| glyph.x_advance())
             .sum()
+    }
+
+    /// Resolves a run-local pen x (`local_x`, logical pixels measured from the
+    /// text run's left edge) to the nearest cluster byte offset in `content` —
+    /// the **inverse** of [`caret_offset_x`](Self::caret_offset_x), used to place
+    /// the caret at a pointer click within the focused editable (spec §5.11).
+    ///
+    /// `style` is the text node's computed style: its `font-family` /
+    /// `font-weight` / `font-style` / `direction` / `font-size` drive the fallback
+    /// chain, shaping attributes, base direction, and size — the **same** inputs
+    /// the compose pass shapes the drawn run with (and the same
+    /// [`caret_offset_x`](Self::caret_offset_x) measures with), so a click at the
+    /// rendered caret x of offset `i` resolves back to `i`.
+    ///
+    /// The text is shaped **once** through the same paragraph orchestrator (and
+    /// default face) the runs are drawn with, then the glyph advances are walked:
+    /// the boundary whose horizontal midpoint `local_x` falls at or before is
+    /// chosen (so a tie resolves to the earlier boundary). A `local_x` at or before
+    /// the run start clamps to `0`; a `local_x` past the last glyph clamps to the
+    /// content length. Single-line, left-to-right — the same documented
+    /// approximation as [`caret_offset_x`](Self::caret_offset_x).
+    #[must_use]
+    pub(crate) fn caret_offset_at_x(
+        &self,
+        content: &str,
+        style: Option<&ComputedStyle>,
+        local_x: f32,
+    ) -> usize {
+        let fallback = families_for(style);
+        let attributes = attributes_for(style);
+        let direction = direction_for(style);
+        let font_size = font_size_of_style(style);
+        let mut pen = 0.0_f32;
+        for glyph in self
+            .paragraph
+            .shape_paragraph(content, &fallback, &attributes, &self.default_face, font_size, direction)
+            .iter()
+            .flat_map(|run| run.run().glyphs().iter().copied())
+        {
+            let advance = glyph.x_advance();
+            // The boundary just left of this glyph sits at `pen`; cross to the next
+            // boundary only once `local_x` is past this glyph's midpoint.
+            if local_x <= pen + advance / 2.0 {
+                return glyph.cluster();
+            }
+            pen += advance;
+        }
+        // Past every glyph: the caret lands at the end of the text.
+        content.len()
     }
 
     /// Composes a paint-ordered [`DisplayList`] of background fills from the
@@ -1217,8 +1266,15 @@ fn text_color_of(computed: &ComputedStyles, node: NodeId) -> Color {
 /// absolute `px` is honored here; relative `font-size` units are a later
 /// extension, matching layout).
 fn font_size_of(computed: &ComputedStyles, node: NodeId) -> f32 {
-    computed
-        .get(&node)
+    font_size_of_style(computed.get(&node))
+}
+
+/// Reads a computed `font-size` in logical pixels from a single node's style,
+/// defaulting to [`DEFAULT_FONT_SIZE`] when absent or not an absolute pixel
+/// length — the by-style form [`font_size_of`] delegates to, shared with the
+/// click-caret hit-test so it sizes text identically to the drawn run.
+fn font_size_of_style(style: Option<&ComputedStyle>) -> f32 {
+    style
         .and_then(|style| style.get(PropertyId::FontSize))
         .and_then(ComputedValue::as_length)
         .and_then(Length::as_px)

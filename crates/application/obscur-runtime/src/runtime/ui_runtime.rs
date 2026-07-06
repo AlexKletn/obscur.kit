@@ -9,7 +9,7 @@ use obscur_diagnostics::{
     BudgetViolation, DiagnosticSubsystem, NullTelemetrySink, PerformanceCounter, PerformanceSpan,
     TelemetrySink,
 };
-use obscur_geometry::Size;
+use obscur_geometry::{Point, Size};
 use obscur_identity::{InternedSymbol, NodeId, RuntimeId};
 use obscur_interaction::command::{
     CommandRouter, KeyEvent, LogicalKey, Modifier, Modifiers, NamedKey, Shortcut,
@@ -136,6 +136,14 @@ pub struct UiRuntime {
     /// hit-test target equals this node completes a *click* on it; the field is
     /// then cleared. `None` between clicks (no press outstanding).
     press_target: Option<NodeId>,
+    /// The in-flight pointer drag-selection over the focused editable, if any:
+    /// `(field node, anchor byte offset)`. Armed by a
+    /// [`PointerEventKind::Down`] whose editable ancestor has an active editing
+    /// session — the anchor is the click's byte offset, the fixed end of the
+    /// selection a subsequent drag extends from. A [`PointerEventKind::Move`]
+    /// while this is set re-selects `[anchor, current]` over the same field; a
+    /// [`PointerEventKind::Up`] clears it. `None` between presses (spec §5.11).
+    text_drag: Option<(NodeId, usize)>,
     /// The command-handler registry: application logic to run when a dispatched
     /// command fires, keyed by the command's [`InternedSymbol`] (spec §2.3,
     /// §3.1 — events flow up to a command, the command runs a handler).
@@ -305,6 +313,7 @@ impl UiRuntime {
             hover: HoverChain::new(),
             focused: None,
             press_target: None,
+            text_drag: None,
             handlers: HashMap::new(),
             text_input_handlers: HashMap::new(),
             editing: None,
@@ -1327,6 +1336,19 @@ impl UiRuntime {
                 self.sync_editing_to_focus();
             }
             self.press_target = target;
+            // Click → caret: after `sync_editing_to_focus` has (re)seated the
+            // session for the clicked editable, place the caret at the click point
+            // and arm a potential drag-selection anchored there. A press on a
+            // non-editable clears any armed drag and leaves the session untouched.
+            self.begin_text_pointer(target, event.position());
+        }
+
+        // 3a-drag. While a drag is armed, a pointer move re-selects the range from
+        //    the press anchor to the current pointer offset over the same field —
+        //    live drag-selection (spec §5.11). Not a press/release, so it never
+        //    perturbs focus or click detection.
+        if event.kind() == PointerEventKind::Move {
+            self.update_text_drag(event.position());
         }
 
         // 3b. Click: a release on the *same* node the press landed on is a click
@@ -1345,6 +1367,9 @@ impl UiRuntime {
                 self.activate(pressed);
             }
             self.press_target = None;
+            // A release ends any in-flight drag-selection: the selection stays
+            // wherever the last move left it.
+            self.text_drag = None;
         }
 
         // 4. Recompute the interaction pseudo-states from the new hover/focus.
@@ -1585,6 +1610,100 @@ impl UiRuntime {
             }
             None => self.editing = None,
         }
+    }
+
+    /// On a pointer press: if it landed on the active editable, places the caret
+    /// at the click point and arms drag-selection anchored there (spec §5.11).
+    ///
+    /// Resolves `target`'s editable ancestor and acts only when the active editing
+    /// session already covers it (it was just (re)seeded by
+    /// [`sync_editing_to_focus`](Self::sync_editing_to_focus)). The click's byte
+    /// offset — [`caret_offset_at`](Self::caret_offset_at), the inverse of the
+    /// caret-render advance walk — collapses the selection to a caret there and
+    /// becomes the drag anchor. A press on a non-editable (or one whose text box is
+    /// not laid out) clears any armed drag and leaves the session byte-identical.
+    fn begin_text_pointer(&mut self, target: Option<NodeId>, point: Point) {
+        // A new press always ends any prior drag; it is re-armed only below.
+        self.text_drag = None;
+        let Some(target) = target else {
+            return;
+        };
+        let Some(field) = self.editable_ancestor(target) else {
+            return;
+        };
+        // The session must already cover this field (sync runs on focus change; on
+        // a repeat click into the already-focused field the session persists).
+        if self.editing.as_ref().map(TextEditSession::node) != Some(field) {
+            return;
+        }
+        let Some(offset) = self.caret_offset_at(field, point) else {
+            return;
+        };
+        // A collapsed caret at the click; `SetSelection` is non-mutating, so
+        // `after_edit` (inside `apply_edit`) fires no `on-input`, only a frame.
+        self.apply_edit(EditCommand::SetSelection(TextSelection::caret(offset)));
+        self.text_drag = Some((field, offset));
+    }
+
+    /// While a drag is armed, extends the selection from the press anchor to the
+    /// pointer's current byte offset over the **same** field — live drag-selection
+    /// (spec §5.11).
+    ///
+    /// The offset is resolved at `point` against the anchored field (clamped to
+    /// that field's text regardless of where the pointer currently is, mirroring
+    /// how [`caret_offset_at`](Self::caret_offset_at) clamps before/after the run),
+    /// then the selection is set to the range `[anchor, current]` — anchor fixed,
+    /// focus tracking the pointer, so dragging left of the anchor selects backward.
+    /// A no-op when no drag is armed or the field's text box has gone.
+    fn update_text_drag(&mut self, point: Point) {
+        let Some((field, anchor)) = self.text_drag else {
+            return;
+        };
+        let Some(current) = self.caret_offset_at(field, point) else {
+            return;
+        };
+        self.apply_edit(EditCommand::SetSelection(TextSelection::new(anchor, current)));
+    }
+
+    /// Resolves the byte offset in the focused editable `field`'s text at pointer
+    /// `point` (spec §5.11): finds `field`'s text leaf, maps `point.x` into that
+    /// run's local x (`point.x − text-origin.x`), and asks the scene coordinator
+    /// for the nearest cluster boundary — the inverse of the caret-render advance
+    /// walk, so a click at the rendered caret x of offset `i` returns `i`.
+    ///
+    /// The live **session** text is the source of truth for the field's glyphs
+    /// (matching what compose paints), and the retained box origin + computed style
+    /// (from the last produced frame) supply the run's position and shaping inputs.
+    /// Returns `None` when no active session covers `field`, the field has no text
+    /// descendant, or no box was retained for it.
+    fn caret_offset_at(&self, field: NodeId, point: Point) -> Option<usize> {
+        let session = self.editing.as_ref().filter(|s| s.node() == field)?;
+        let text_node = self.first_text_descendant(field)?;
+        let origin = self.boxes.get(&text_node)?.origin();
+        let local_x = point.x - origin.x;
+        Some(self.scene_composer.caret_offset_at_x(
+            session.text(),
+            self.computed.get(&text_node),
+            local_x,
+        ))
+    }
+
+    /// Returns `field`'s first text leaf (depth-first, in child order) — the node
+    /// the session text is painted on, whose box origin the click-caret x is
+    /// measured from. Mirrors the compose walk's editing-text selection: the field
+    /// itself if it directly carries text, else its first `Text` descendant. `None`
+    /// when the subtree has no text node.
+    fn first_text_descendant(&self, node: NodeId) -> Option<NodeId> {
+        let n = self.tree.get(node)?;
+        if n.kind().text().is_some() {
+            return Some(node);
+        }
+        for &child in n.children() {
+            if let Some(found) = self.first_text_descendant(child) {
+                return Some(found);
+            }
+        }
+        None
     }
 
     /// Attempts to consume a key press as an **edit** into the runtime-owned
@@ -4109,6 +4228,127 @@ mod tests {
             advance * 3.0
         );
         assert!(list.is_balanced(), "the display list stays balanced");
+    }
+
+    // ---- Mouse caret positioning + drag selection (this step) ----------------
+
+    /// The per-glyph advance the mock shaper emits at the default 16px font size
+    /// (`font_size * ADVANCE_RATIO` = 9.6): every ASCII glyph in "hello" is this
+    /// wide, so the caret x of boundary `i` is exactly `i * ADVANCE`.
+    const ADVANCE: f32 = 16.0 * obscur_text::shaping::MockTextShaper::ADVANCE_RATIO;
+
+    /// The layout-box origin x of the focused editable's text leaf — the left edge
+    /// the click-caret local x is measured from.
+    fn editing_text_origin_x(runtime: &UiRuntime) -> f32 {
+        let text_node = runtime
+            .tree()
+            .iter()
+            .find_map(|(id, node)| node.kind().text().map(|_| id))
+            .expect("a text node after a frame");
+        runtime
+            .layout_boxes()
+            .get(&text_node)
+            .expect("the text leaf has a box")
+            .origin()
+            .x
+    }
+
+    #[test]
+    fn click_places_caret_at_nearest_character_boundary() {
+        // (a) A pointer click in the focused field places the caret at the nearest
+        // cluster boundary: mid-way between offsets 2 and 3 snaps to 2, a click at
+        // the start snaps to 0, and a click past the last glyph snaps to the end.
+        let (mut runtime, _mirror) = focused_editable("hello");
+        let ox = editing_text_origin_x(&runtime);
+
+        runtime.handle_pointer(mouse(PointerEventKind::Down, ox + ADVANCE * 2.5, 25.0));
+        runtime.handle_pointer(mouse(PointerEventKind::Up, ox + ADVANCE * 2.5, 25.0));
+        let sel = runtime.editing_selection().expect("session active");
+        assert!(sel.is_collapsed(), "a plain click collapses to a caret");
+        assert_eq!(sel.focus(), 2, "click at 2.5·advance snaps to boundary 2");
+
+        runtime.handle_pointer(mouse(PointerEventKind::Down, ox, 25.0));
+        runtime.handle_pointer(mouse(PointerEventKind::Up, ox, 25.0));
+        assert_eq!(runtime.editing_selection().unwrap().focus(), 0, "click at the start → 0");
+
+        runtime.handle_pointer(mouse(PointerEventKind::Down, ox + ADVANCE * 6.0, 25.0));
+        runtime.handle_pointer(mouse(PointerEventKind::Up, ox + ADVANCE * 6.0, 25.0));
+        assert_eq!(runtime.editing_selection().unwrap().focus(), 5, "click past the end → 5");
+    }
+
+    #[test]
+    fn click_up_on_a_field_fires_no_activation_command() {
+        // A Down+Up on a text field sets a caret but must NOT spuriously fire a
+        // click/change command: the field binds only `on-input`, so activation's
+        // click/change lookup finds nothing.
+        let (mut runtime, _mirror) = focused_editable("hello");
+        let ox = editing_text_origin_x(&runtime);
+        runtime.handle_pointer(mouse(PointerEventKind::Down, ox + ADVANCE * 3.0, 25.0));
+        let up = runtime.handle_pointer(mouse(PointerEventKind::Up, ox + ADVANCE * 3.0, 25.0));
+        assert_eq!(up.command(), None, "a click on a text field resolves no activation command");
+        assert_eq!(runtime.editing_selection().unwrap().focus(), 3, "the caret still moved to 3");
+    }
+
+    #[test]
+    fn drag_selects_a_range_from_press_anchor_to_pointer() {
+        // (b) Press at offset 1 (anchor), drag to the offset-4 position → the
+        // selection is the range [1, 4) anchored at the press; releasing clears the
+        // drag so a later move no longer extends it.
+        let (mut runtime, _mirror) = focused_editable("hello");
+        let ox = editing_text_origin_x(&runtime);
+
+        runtime.handle_pointer(mouse(PointerEventKind::Down, ox + ADVANCE * 1.0, 25.0));
+        assert_eq!(runtime.editing_selection().unwrap().focus(), 1, "press caret at 1");
+
+        runtime.handle_pointer(mouse(PointerEventKind::Move, ox + ADVANCE * 4.0, 25.0));
+        let sel = runtime.editing_selection().unwrap();
+        assert!(!sel.is_collapsed(), "the drag opened a selection");
+        assert_eq!((sel.anchor(), sel.focus()), (1, 4), "range [1,4) anchored at the press");
+
+        runtime.handle_pointer(mouse(PointerEventKind::Up, ox + ADVANCE * 4.0, 25.0));
+        runtime.handle_pointer(mouse(PointerEventKind::Move, ox + ADVANCE * 2.0, 25.0));
+        let sel = runtime.editing_selection().unwrap();
+        assert_eq!(
+            (sel.anchor(), sel.focus()),
+            (1, 4),
+            "no drag armed after Up → the selection is unchanged"
+        );
+    }
+
+    #[test]
+    fn click_on_a_non_editable_does_not_open_a_session() {
+        // (c) A click on a NON-editable node opens no editing session and never
+        // panics — the caret/drag path is inert when nothing editable is clicked.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&panel_view(), sheets);
+        let (_panel, a, _b) = panel_nodes(&runtime);
+
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 25.0));
+        assert_eq!(runtime.focused(), Some(a));
+        assert!(runtime.editing_text().is_none(), "no editable clicked → no session");
+    }
+
+    #[test]
+    fn click_offset_is_the_inverse_of_the_render_caret_x() {
+        // (d) The click-caret offset is the exact inverse of the render caret x:
+        // the rendered caret x of boundary `i` is `i·advance` past the text origin,
+        // and clicking there returns `i`.
+        let (mut runtime, _mirror) = focused_editable("hello");
+        let ox = editing_text_origin_x(&runtime);
+        for i in 0..=5usize {
+            #[allow(clippy::cast_precision_loss)]
+            let x = ox + ADVANCE * i as f32;
+            runtime.handle_pointer(mouse(PointerEventKind::Down, x, 25.0));
+            runtime.handle_pointer(mouse(PointerEventKind::Up, x, 25.0));
+            assert_eq!(
+                runtime.editing_selection().unwrap().focus(),
+                i,
+                "click at the caret x of offset {i} returns {i}",
+            );
+        }
     }
 
     // ---- Phase 4 final step: motion orchestration (style → motion → paint) ----
