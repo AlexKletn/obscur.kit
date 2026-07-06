@@ -3,7 +3,9 @@
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
-use obscur_view::view::{View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue};
+use obscur_view::view::{
+    EVENT_CLICK, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
+};
 
 /// A headless single-choice dropdown control (spec §2.6).
 ///
@@ -11,7 +13,7 @@ use obscur_view::view::{View, ViewEventBinding, ViewFragment, ViewNode, ViewProp
 /// [`selected`](Self::selected_index) option (if any), whether the popup is
 /// [`open`](Self::is_open), and a disabled flag. It bakes in **no** visual
 /// theme — [`view`](Self::view) derives a semantic element carrying the open
-/// and selected state as properties, an activate event bound to `command`, and
+/// and selected state as properties, a click event bound to `command`, and
 /// each option as a [`Text`] child, rendered by the style layer keyed on
 /// [`COMPONENT_ID`](Self::COMPONENT_ID).
 ///
@@ -50,9 +52,6 @@ impl Select {
     /// Interned name of the `selected` index property (`-1` = no selection).
     const PROP_SELECTED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0403);
 
-    /// Interned name of the activate event a select reports when a choice is
-    /// committed.
-    const EVENT_ACTIVATE: InternedSymbol = InternedSymbol::from_raw(0x00D2_0004);
 
     /// Creates an enabled, closed, option-less select that fires `command` when
     /// a choice is committed.
@@ -184,7 +183,7 @@ impl Select {
 
     /// Derives the semantic view: a [`COMPONENT_ID`] element carrying the role,
     /// disabled and open state, the selected index as an integer property
-    /// (`-1` when nothing is selected), an activate event bound to `command`,
+    /// (`-1` when nothing is selected), a click event bound to `command`,
     /// and each option as a [`Text`] child in order.
     ///
     /// [`COMPONENT_ID`]: Self::COMPONENT_ID
@@ -210,7 +209,7 @@ impl Select {
                 Self::PROP_SELECTED,
                 ViewValue::Int(selected),
             ))
-            .with_event(ViewEventBinding::new(Self::EVENT_ACTIVATE, self.command))
+            .with_event(ViewEventBinding::new(EVENT_CLICK, self.command))
             .with_children(ViewFragment::from_nodes(children));
         View::single(node)
     }

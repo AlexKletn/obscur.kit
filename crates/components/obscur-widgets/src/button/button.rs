@@ -3,7 +3,9 @@
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
-use obscur_view::view::{View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue};
+use obscur_view::view::{
+    EVENT_CLICK, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
+};
 
 /// A headless push-button control (spec §2.6).
 ///
@@ -46,9 +48,6 @@ impl Button {
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0101);
     /// Interned name of the `pressed` state property.
     const PROP_PRESSED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0102);
-
-    /// Interned name of the click event a button reports when activated.
-    const EVENT_CLICK: InternedSymbol = InternedSymbol::from_raw(0x00D2_0001);
 
     /// Creates an enabled, un-pressed button showing `label` that fires
     /// `command` on activation.
@@ -139,7 +138,7 @@ impl Button {
                 Self::PROP_PRESSED,
                 ViewValue::Bool(self.pressed),
             ))
-            .with_event(ViewEventBinding::new(Self::EVENT_CLICK, self.command))
+            .with_event(ViewEventBinding::new(EVENT_CLICK, self.command))
             .with_children(ViewFragment::from_nodes(vec![
                 Text::new(self.label.clone()).into_view_node(),
             ]));
@@ -215,6 +214,11 @@ mod tests {
                         && *p.value() == ViewValue::Bool(false))
                 );
                 assert_eq!(events.len(), 1);
+                // The binding uses the RESERVED click event symbol the runtime's
+                // click resolver looks up (`obscur_view::EVENT_CLICK`), not a
+                // widget-local one, so a runtime click on the button dispatches
+                // its command.
+                assert_eq!(events[0].event(), EVENT_CLICK);
                 assert_eq!(events[0].command(), cmd());
                 assert_eq!(children.len(), 1);
                 match &children.nodes()[0] {

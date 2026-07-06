@@ -3,7 +3,9 @@
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
-use obscur_view::view::{View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue};
+use obscur_view::view::{
+    EVENT_CHANGE, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
+};
 
 /// A headless tri-state checkbox control (spec §2.6).
 ///
@@ -41,9 +43,6 @@ impl Checkbox {
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0301);
     /// Interned name of the tri-state `checked` property (see [`view`](Self::view)).
     const PROP_CHECKED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0302);
-
-    /// Interned name of the change event a checkbox reports when toggled.
-    const EVENT_CHANGE: InternedSymbol = InternedSymbol::from_raw(0x00D2_0003);
 
     /// Creates an enabled, *unchecked* (`Some(false)`) checkbox showing `label`
     /// that fires `command` on change.
@@ -173,7 +172,7 @@ impl Checkbox {
                 Self::PROP_CHECKED,
                 ViewValue::Int(checked),
             ))
-            .with_event(ViewEventBinding::new(Self::EVENT_CHANGE, self.command))
+            .with_event(ViewEventBinding::new(EVENT_CHANGE, self.command))
             .with_children(ViewFragment::from_nodes(vec![
                 Text::new(self.label.clone()).into_view_node(),
             ]));

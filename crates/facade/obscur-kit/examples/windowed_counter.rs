@@ -57,16 +57,24 @@
 //!   dispatched; the runtime hit-tests it against the retained layout boxes,
 //!   updates the hover chain, and (on a change) schedules an `Input` frame — so
 //!   hovering a bar visibly swaps to its lighter `:hover` background.
-//! - `MouseInput` (left press) builds a
-//!   [`Down`](obscur_kit::interaction::pointer::PointerEventKind::Down) event —
+//! - `MouseInput` (left press *and* release) builds
+//!   [`Down`](obscur_kit::interaction::pointer::PointerEventKind::Down) /
+//!   [`Up`](obscur_kit::interaction::pointer::PointerEventKind::Up) events —
 //!   assembled directly with [`PointerConverter::kind`] mapping the winit state,
 //!   since the converter has no public builder for a button transition *at a
-//!   position* — and dispatches it to drive focus.
+//!   position* — and dispatches both. The `Down` anchors the click; the `Up` on
+//!   the same node completes it, and [`UiRuntime::handle_pointer`] resolves it to
+//!   the hit button's command.
 //!
-//! The counter *value* is still changed geometrically (the node→"which button"
-//! mapping needs component instances this example does not carry), so a left
-//! press on the lower `.decrement`/`.increment` region also nudges `count`; the
-//! hover/focus **visuals** are what the real input path now drives.
+//! The counter *value* is now driven through this **real command path** — no
+//! geometric hack. Each [`Button`] binds its click to the reserved `EVENT_CLICK`
+//! symbol carrying its own command (`CMD_INCREMENT` / `CMD_DECREMENT`); a
+//! registered [`UiRuntime::on_command`] handler mutates a shared
+//! `Rc<Cell<i32>>`, and the runtime's held view builder
+//! ([`UiRuntime::set_root_view`]) rebuilds the counter from the new value on the
+//! next reactive frame. So clicking the green bar increments the on-screen count
+//! and the red bar decrements it, and hovering a bar lights its `:hover` style —
+//! both through the same domain input path.
 //!
 //! # Text (multi-font fallback stack)
 //!
@@ -100,6 +108,8 @@
 //! a window, presents the painted counter, and responds to clicks until closed.
 #![forbid(unsafe_code)]
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -149,19 +159,19 @@ struct WindowedCounter {
     renderer: Option<VelloRenderer>,
     /// The embeddable runtime that owns the retained tree, scene, scheduler, and
     /// live interaction (hover/focus) state, and runs the real pipeline when a
-    /// frame is due. Pointer input is dispatched into it via `handle_pointer`.
+    /// frame is due. Pointer input is dispatched into it via `handle_pointer`,
+    /// which resolves a click on a button to its bound command and runs the
+    /// registered handler; the reactive builder then rebuilds the view.
     runtime: UiRuntime,
-    /// The compiled stylesheet matched against the tree each frame so the
-    /// `.counter` container paints a real fill.
-    style_sheet: Stylesheet,
-    /// The "-" button (fixed; drives the decrement command symbol).
-    decrement: Button,
-    /// The "+" button whose headless state machine we drive each frame.
-    increment: Button,
-    /// The current counter value shown by the label.
-    count: i64,
-    /// Last known cursor position in physical pixels, tracked for hit-testing
-    /// clicks against the stacked bars.
+    /// The counter value, shared between the click handlers (which mutate it) and
+    /// the reactive view builder (which reads it) — the canonical `Rc<Cell<i32>>`
+    /// bridge. Registered handlers for `CMD_INCREMENT`/`CMD_DECREMENT` bump it,
+    /// and the [`UiRuntime::set_root_view`] builder rebuilds the counter view from
+    /// its current value each reactive frame.
+    count: Rc<Cell<i32>>,
+    /// Last known cursor position in physical pixels, tracked so a `MouseInput`
+    /// (which carries no position) can be dispatched as a pointer event at the
+    /// cursor.
     cursor: (f64, f64),
 }
 
@@ -172,51 +182,40 @@ impl WindowedCounter {
     /// initial window size; [`sync_viewport`](Self::sync_viewport) sets the real
     /// physical extent once the surface exists.
     fn new() -> Self {
+        let count = Rc::new(Cell::new(0));
+        let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(480.0, 240.0));
+
+        // Wire the interactive counter through the runtime's real command +
+        // reactive-render path (no geometric hack):
+        //  - register a handler per button command that mutates the shared count;
+        //  - install a view BUILDER that rebuilds the counter view from the
+        //    current count each reactive frame;
+        //  - install the stylesheet the reactive path matches against.
+        // A click on a button then resolves (via the reserved `EVENT_CLICK`
+        // symbol the button binds) to its command, runs the handler, and the next
+        // reactive frame rebuilds the view with the new value.
+        {
+            let c = count.clone();
+            runtime.on_command(CMD_INCREMENT, move || c.set(c.get() + 1));
+        }
+        {
+            let c = count.clone();
+            runtime.on_command(CMD_DECREMENT, move || c.set(c.get() - 1));
+        }
+        {
+            let c = count.clone();
+            runtime.set_root_view(move || build_counter_view(c.get()));
+        }
+        runtime.set_stylesheets(vec![counter_stylesheet()]);
+
         Self {
             window: None,
             surface: None,
             device: None,
             renderer: None,
-            runtime: UiRuntime::new(RuntimeId::from_raw(1), Size::new(480.0, 240.0)),
-            style_sheet: counter_stylesheet(),
-            decrement: Button::new("-", CMD_DECREMENT),
-            increment: Button::new("+", CMD_INCREMENT),
-            count: 0,
+            runtime,
+            count,
             cursor: (0.0, 0.0),
-        }
-    }
-
-    /// Maps a click at the tracked cursor position onto a bar and updates the
-    /// counter: the lower `.increment` quarter of the window increments, the
-    /// `.decrement` quarter above it decrements, and the top `.label` half is
-    /// inert. Region boundaries mirror the `counter_stylesheet` percentages.
-    fn handle_click(&mut self) {
-        let Some(height) = self.surface.as_ref().map(|s| f64::from(s.config().height)) else {
-            return;
-        };
-        let y = self.cursor.1;
-        if y >= 0.75 * height {
-            self.increment.press();
-            if self.increment.release() {
-                self.count += 1;
-            }
-            println!("[+] clicked -> count = {}", self.count);
-        } else if y >= 0.5 * height {
-            self.decrement.press();
-            if self.decrement.release() {
-                self.count -= 1;
-            }
-            println!("[-] clicked -> count = {}", self.count);
-        } else {
-            return; // Click landed on the label bar: nothing to do.
-        }
-        // The counter value changed: commit a fresh frame through the runtime so
-        // the new label is reconciled, styled, laid out, and painted on the next
-        // redraw. (A press that doesn't move focus schedules no frame on its own,
-        // so this explicit request is what carries the new value to paint.)
-        self.runtime.request_frame(FrameReason::UiCommit);
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
         }
     }
 
@@ -255,21 +254,16 @@ impl WindowedCounter {
     /// the runtime, read the committed scene, package it, and present it
     /// on-screen via the Vello surface path.
     fn render_frame(&mut self) {
-        // --- Stage 1: rebuild the counter view from the current state. --------
-        // `run_due_frame` needs a `&View`; the state (`count`, button state)
-        // changes on user input, so rebuild it each redraw. Building it first
-        // ends the `&self.decrement`/`&self.increment` borrows before the runtime
-        // is mutated below.
-        let view = build_counter_view(self.count, &self.decrement, &self.increment);
-        let sheets = std::slice::from_ref(&self.style_sheet);
-
-        // --- Stage 2: run a frame only if one is due (§3.5). ------------------
-        // First paint, input (hover/focus), resize, and counter changes each
-        // `request_frame` a reason; `run_due_frame` produces at most one frame
-        // per redraw and returns `None` when nothing is pending. We still present
-        // the (unchanged) snapshot on a `None` so a bare `RedrawRequested` — e.g.
-        // an OS expose — repaints the last committed scene rather than a blank.
-        let produced = self.runtime.run_due_frame(&view, sheets);
+        // --- Stage 1+2: run a REACTIVE frame only if one is due (§3.5). -------
+        // The runtime holds the view BUILDER (installed in `new`) and its
+        // stylesheets, so it rebuilds the counter view from the current `count`
+        // itself — no `&View` is threaded here. First paint, input (hover/focus),
+        // resize, and each click-dispatched command `request_frame` a reason;
+        // `run_due_frame_reactive` produces at most one frame per redraw and
+        // returns `None` when nothing is pending. We still present the (unchanged)
+        // snapshot on a `None` so a bare `RedrawRequested` — e.g. an OS expose —
+        // repaints the last committed scene rather than a blank.
+        let produced = self.runtime.run_due_frame_reactive();
         let snapshot = self.runtime.snapshot();
 
         // Nothing to present until the surface and renderer exist.
@@ -431,14 +425,26 @@ impl ApplicationHandler for WindowedCounter {
                     window.request_redraw();
                 }
             }
-            WindowEvent::MouseInput { state, button, .. }
-                if state == ElementState::Pressed && button == MouseButton::Left =>
-            {
-                // Dispatch a domain `Down` at the cursor to drive focus through
-                // the runtime, then keep the geometric counter update.
-                let down = self.pointer_button_event(state);
-                self.runtime.handle_pointer(down);
-                self.handle_click();
+            WindowEvent::MouseInput { state, button, .. } if button == MouseButton::Left => {
+                // Feed the *real* domain pointer path for BOTH transitions: a
+                // `Down` at the cursor anchors the click and drives focus; the
+                // matching `Up` on the same node completes the click, and
+                // `handle_pointer` resolves it (via the button's reserved
+                // `EVENT_CLICK` binding) to `CMD_INCREMENT`/`CMD_DECREMENT` and
+                // runs the registered handler, which mutates the shared count.
+                // The dispatch itself requests a frame; the next redraw's
+                // `run_due_frame_reactive` rebuilds the view with the new value.
+                let event = self.pointer_button_event(state);
+                let dispatch = self.runtime.handle_pointer(event);
+                if let Some(command) = dispatch.command() {
+                    println!(
+                        "[click] resolved command {command:?} -> count = {}",
+                        self.count.get()
+                    );
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 // Feed the *real* domain keyboard path, mirroring `CursorMoved`
@@ -454,7 +460,7 @@ impl ApplicationHandler for WindowedCounter {
                         let dispatch =
                             self.runtime.handle_key(KeyEvent::new(physical, logical, pressed));
                         if let Some(command) = dispatch.command() {
-                            println!("[key] resolved command: {command}");
+                            println!("[key] resolved command: {command:?}");
                         }
                         if let Some(window) = self.window.as_ref() {
                             window.request_redraw();
@@ -656,9 +662,14 @@ fn tagged(class: &str, children: Vec<ViewNode>) -> ViewNode {
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
-/// Builds the counter UI: a dark `.counter` panel stacking a label bar and the
-/// two buttons, each wrapped so it carries a class the stylesheet paints.
-fn build_counter_view(count: i64, decrement: &Button, increment: &Button) -> View {
+/// Builds the counter UI from `count`: a dark `.counter` panel stacking a label
+/// bar showing the value and the two real [`Button`]s, each rendered as a bar
+/// that decrements/increments on click.
+///
+/// This is the reactive view BUILDER the runtime holds (installed in `new` via
+/// [`UiRuntime::set_root_view`]); the runtime re-invokes it each reactive frame,
+/// so passing the current `count` rebuilds the label after a click bumps it.
+fn build_counter_view(count: i32) -> View {
     // Mixed-script label (Latin + CJK): on a machine with both a Latin primary
     // and a CJK fallback registered, each script renders from its covering font
     // via the coverage resolver; with only the primary, the CJK part is .notdef.
@@ -666,8 +677,8 @@ fn build_counter_view(count: i64, decrement: &Button, increment: &Button) -> Vie
         "bar label",
         vec![Text::new(format!("Count 数字: {count}")).into_view_node()],
     );
-    let minus = tagged("bar decrement", button_nodes(decrement));
-    let plus = tagged("bar increment", button_nodes(increment));
+    let minus = button_bar("bar decrement", "-", CMD_DECREMENT);
+    let plus = button_bar("bar increment", "+", CMD_INCREMENT);
     let container = Container::new()
         .child(label)
         .child(minus)
@@ -677,10 +688,23 @@ fn build_counter_view(count: i64, decrement: &Button, increment: &Button) -> Vie
     View::single(container)
 }
 
-/// Extracts a button's desired [`ViewNode`]s from the [`View`] it renders, so
-/// they can be composed as children of another element.
-fn button_nodes(button: &Button) -> Vec<ViewNode> {
-    button.view().into_fragment().nodes().to_vec()
+/// Builds a real [`Button`] bound to `command` and rendered as a sizing bar.
+///
+/// The sizing `class` is placed on the **button's own element node** (not a
+/// wrapping container) for a reason: the runtime resolves a click by bubbling
+/// from the hit node up its *ancestors* to the first `EVENT_CLICK` binding. If
+/// the button were wrapped in the sized container, the pointer would hit the
+/// container and the button (a descendant) would never be on that ancestor
+/// chain, so the click would resolve to nothing. Sizing the button node itself
+/// makes it the hit target, so its own `EVENT_CLICK → command` binding fires.
+fn button_bar(class: &str, label: &str, command: InternedSymbol) -> ViewNode {
+    Button::new(label, command)
+        .view()
+        .into_fragment()
+        .nodes()
+        .to_vec()
+        .remove(0)
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
 /// Builds the winit event loop and runs the application to completion.

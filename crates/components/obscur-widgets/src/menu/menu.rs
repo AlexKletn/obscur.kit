@@ -3,7 +3,9 @@
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
-use obscur_view::view::{View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue};
+use obscur_view::view::{
+    EVENT_CLICK, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
+};
 
 /// A single entry in a [`Menu`].
 ///
@@ -102,9 +104,6 @@ impl Menu {
     const PROP_HIGHLIGHTED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0502);
     /// Interned name of the per-item `disabled` state property.
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0503);
-
-    /// Interned name of the click event a menu item reports when activated.
-    const EVENT_CLICK: InternedSymbol = InternedSymbol::from_raw(0x00D2_0005);
 
     /// Creates a closed, empty menu with no highlighted item.
     #[must_use]
@@ -270,7 +269,7 @@ impl Menu {
                         Self::PROP_DISABLED,
                         ViewValue::Bool(!item.enabled),
                     ))
-                    .with_event(ViewEventBinding::new(Self::EVENT_CLICK, item.command))
+                    .with_event(ViewEventBinding::new(EVENT_CLICK, item.command))
                     .with_children(ViewFragment::from_nodes(vec![
                         Text::new(item.label.clone()).into_view_node(),
                     ]))

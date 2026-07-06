@@ -3,7 +3,7 @@
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_text::editing::{EditCommand, TextBuffer};
-use obscur_view::view::{View, ViewEventBinding, ViewNode, ViewProperty, ViewValue};
+use obscur_view::view::{EVENT_CHANGE, View, ViewEventBinding, ViewNode, ViewProperty, ViewValue};
 
 /// A headless text-input control (spec §2.6).
 ///
@@ -47,8 +47,6 @@ impl Input {
     /// Interned name of the `placeholder` property.
     const PROP_PLACEHOLDER: InternedSymbol = InternedSymbol::from_raw(0x00D1_0203);
 
-    /// Interned name of the change event an input reports as its value edits.
-    const EVENT_CHANGE: InternedSymbol = InternedSymbol::from_raw(0x00D2_0002);
 
     /// Creates an empty, enabled input with no placeholder that fires `command`
     /// on change.
@@ -162,7 +160,7 @@ impl Input {
                 Self::PROP_PLACEHOLDER,
                 ViewValue::from(&*self.placeholder),
             ))
-            .with_event(ViewEventBinding::new(Self::EVENT_CHANGE, self.command));
+            .with_event(ViewEventBinding::new(EVENT_CHANGE, self.command));
         View::single(node)
     }
 }
