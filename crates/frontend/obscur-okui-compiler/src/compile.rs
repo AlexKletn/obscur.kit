@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use obscur_capability::CapabilityId;
 use obscur_okui_syntax::ast::{Document, Element};
+use obscur_view::contract::ComponentSurface;
 use obscur_ui_ir::document::UiIrDocument;
 use obscur_ui_ir::source::SourceMap;
 
@@ -70,6 +71,29 @@ impl ContractRegistry {
     /// component name, if any.
     pub fn register(&mut self, contract: ComponentContract) -> Option<ComponentContract> {
         self.contracts.insert(contract.component().into(), contract)
+    }
+
+    /// Registers a user component's string [`ComponentSurface`] (bridged into a
+    /// string [`ComponentContract`]), so the `.okui` compiler enforces §2.13 for
+    /// that component just as it does for the built-ins.
+    ///
+    /// A real build wires user components in explicitly, e.g.
+    /// `registry.register_surface(&MyProps::contract_surface())`, where
+    /// `contract_surface()` is emitted by `#[derive(Contract)]`. Automatic,
+    /// inventory-style collection of every derived surface is a possible future
+    /// follow-up; there is no auto-discovery today.
+    ///
+    /// Returns the contract it displaced for the same component name, if any.
+    pub fn register_surface(&mut self, surface: &ComponentSurface) -> Option<ComponentContract> {
+        self.register(surface.into())
+    }
+
+    /// Registers a user component's [`ComponentSurface`] and returns the
+    /// registry (fluent); see [`register_surface`](Self::register_surface).
+    #[must_use]
+    pub fn with_surface(mut self, surface: &ComponentSurface) -> Self {
+        self.register_surface(surface);
+        self
     }
 
     /// Returns the contract registered for `component`, if any.
@@ -576,6 +600,106 @@ mod tests {
     fn default_compile_accepts_valid_builtin_usage() {
         let doc = document("<Image src=\"logo.png\" alt=\"logo\"/>");
         let result = Compiler::new("app.okui").compile(&doc);
+        assert!(
+            !result.has_errors(),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
+        assert!(result.document().is_some());
+    }
+
+    // --- audit V5: user components registered via a ComponentSurface (as
+    // `#[derive(Contract)]` emits) are enforced by a real compile, exactly like
+    // the built-ins. ---
+
+    fn tabs_registry() -> ContractRegistry {
+        // Mirrors what `MyProps::contract_surface()` yields for a `Tabs`
+        // component with a required `selected` prop, an optional `orientation`
+        // prop, a `change` event and `Tab`-only children.
+        let surface = ComponentSurface::new("Tabs")
+            .requiring_prop("selected")
+            .allowing_prop("orientation")
+            .allowing_event("change")
+            .allowing_child("Tab");
+        ContractRegistry::builtins().with_surface(&surface)
+    }
+
+    #[test]
+    fn user_surface_rejects_bogus_attribute() {
+        let doc = document("<Tabs selected=\"0\" bogus=\"x\"><Tab/></Tabs>");
+        let result = Compiler::new("app.okui")
+            .with_registry(tabs_registry())
+            .compile(&doc);
+        assert!(
+            result.diagnostics().iter().any(|d| matches!(
+                d,
+                CompileDiagnostic::Validation(v)
+                    if v.message() == "unknown attribute 'bogus' on component 'Tabs'"
+            )),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
+    }
+
+    #[test]
+    fn user_surface_reports_missing_required_prop() {
+        let doc = document("<Tabs><Tab/></Tabs>");
+        let result = Compiler::new("app.okui")
+            .with_registry(tabs_registry())
+            .compile(&doc);
+        assert!(
+            result.diagnostics().iter().any(|d| matches!(
+                d,
+                CompileDiagnostic::Validation(v)
+                    if v.message() == "component 'Tabs' requires prop 'selected'"
+            )),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
+    }
+
+    #[test]
+    fn user_surface_rejects_disallowed_child() {
+        let doc = document("<Tabs selected=\"0\"><Panel/></Tabs>");
+        let result = Compiler::new("app.okui")
+            .with_registry(tabs_registry())
+            .compile(&doc);
+        assert!(
+            result.diagnostics().iter().any(|d| matches!(
+                d,
+                CompileDiagnostic::Validation(v)
+                    if v.message() == "'Panel' is not an allowed child of 'Tabs'"
+            )),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
+    }
+
+    #[test]
+    fn user_surface_rejects_unknown_event() {
+        let doc = document("<Tabs selected=\"0\" on:hover=go><Tab/></Tabs>");
+        let result = Compiler::new("app.okui")
+            .with_registry(tabs_registry())
+            .defining(Symbol::prop("go"))
+            .compile(&doc);
+        assert!(
+            result.diagnostics().iter().any(|d| matches!(
+                d,
+                CompileDiagnostic::Validation(v)
+                    if v.message() == "unknown event 'hover' on component 'Tabs'"
+            )),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
+    }
+
+    #[test]
+    fn user_surface_accepts_fully_correct_usage() {
+        let doc = document("<Tabs selected=\"0\" orientation=\"vertical\" on:change=go><Tab/></Tabs>");
+        let result = Compiler::new("app.okui")
+            .with_registry(tabs_registry())
+            .defining(Symbol::prop("go"))
+            .compile(&doc);
         assert!(
             !result.has_errors(),
             "diagnostics: {:?}",

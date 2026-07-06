@@ -5,6 +5,8 @@ mod capability_requirement;
 pub use capability_requirement::CapabilityRequirement;
 mod child_contract;
 pub use child_contract::ChildContract;
+mod component_surface;
+pub use component_surface::{ChildrenSurface, ComponentSurface};
 mod event_contract;
 pub use event_contract::EventContract;
 mod prop_contract;

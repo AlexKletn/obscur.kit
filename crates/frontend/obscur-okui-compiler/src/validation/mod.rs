@@ -19,3 +19,4 @@ mod contract_validator;
 pub use contract_validator::{ComponentContract, ContractValidator};
 mod expression_validator;
 pub use expression_validator::{ExpressionValidator, ValidationDiagnostic};
+mod surface_bridge;
