@@ -62,11 +62,19 @@ pub(super) struct PaintUnit {
 }
 
 impl PaintUnit {
-    /// A subtree's opening `PushTransform`, sorted before even the `PushClip` at
-    /// the same document position so a CSS 2D `transform` brackets the whole
-    /// subtree *outside* any rounded-corner clip (the transform is the outermost
-    /// wrapper). Below [`CLIP_PUSH_ORDER`](Self::CLIP_PUSH_ORDER).
-    pub(super) const TRANSFORM_PUSH_ORDER: i64 = -2;
+    /// A subtree's opening `PushTransform`, sorted before both the `PushLayer`
+    /// and the `PushClip` at the same document position so a CSS 2D `transform`
+    /// brackets the whole subtree *outside* any opacity group layer or
+    /// rounded-corner clip (the transform is the outermost wrapper). Below
+    /// [`LAYER_PUSH_ORDER`](Self::LAYER_PUSH_ORDER).
+    pub(super) const TRANSFORM_PUSH_ORDER: i64 = -3;
+    /// A subtree's opening `PushLayer` (a CSS `opacity` group layer), sorted
+    /// *after* the `PushTransform` but *before* the `PushClip` at the same
+    /// document position, so the opacity layer nests inside the transform and
+    /// outside the rounded clip (transform → layer → clip). Between
+    /// [`TRANSFORM_PUSH_ORDER`](Self::TRANSFORM_PUSH_ORDER) and
+    /// [`CLIP_PUSH_ORDER`](Self::CLIP_PUSH_ORDER).
+    pub(super) const LAYER_PUSH_ORDER: i64 = -2;
     /// A subtree's opening `PushClip`, sorted before the node's own paint at the
     /// same document position. Pre-order enter indices are unique per node, so
     /// pushes never collide; any value below [`PAINT_ORDER`](Self::PAINT_ORDER)
@@ -82,6 +90,18 @@ impl PaintUnit {
     /// (descending `depth`), so nested clips unwind in the correct order.
     #[must_use]
     pub(super) const fn clip_pop_order(depth: u32) -> i64 {
+        i64::MAX - depth as i64
+    }
+
+    /// The phase for a subtree's closing `PopLayer` (a CSS `opacity` group
+    /// layer) at its *exit* index. Uses the same depth-descending schedule as
+    /// [`clip_pop_order`](Self::clip_pop_order) so nested layers unwind
+    /// deepest-first; a layer, a clip, and a transform that end at the same index
+    /// and depth tie, broken by emitting the brackets in `clip, layer, transform`
+    /// order so the clip closes first (innermost), then the layer, then the
+    /// transform (outermost).
+    #[must_use]
+    pub(super) const fn layer_pop_order(depth: u32) -> i64 {
         i64::MAX - depth as i64
     }
 

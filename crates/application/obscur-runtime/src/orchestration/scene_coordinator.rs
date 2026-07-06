@@ -9,6 +9,7 @@ use obscur_identity::NodeId;
 use obscur_scene::clip::Clip;
 use obscur_scene::color::Color;
 use obscur_scene::command::{DisplayList, DisplayListBuilder, PaintCommand};
+use obscur_scene::layer::SceneLayer;
 use obscur_scene::paint::{
     Brush, GradientStop as SceneGradientStop, LinearGradient as SceneLinearGradient,
 };
@@ -545,6 +546,13 @@ impl SceneCoordinator {
         // affine is resolved about the node's transform origin; the bracket is
         // recorded here and sorted into place in the same second pass as clips.
         let mut transform_brackets: Vec<(NodeId, AffineTransform)> = Vec::new();
+        // A CSS `opacity` below `1.0` establishes a stacking context and composites
+        // the node's WHOLE subtree as one group: the subtree paint is bracketed by
+        // a `PushLayer(SceneLayer::with_opacity(a))` … `PopLayer`, nested *inside*
+        // any transform and *outside* the rounded clip (transform → layer → clip).
+        // A fully opaque (or absent) opacity records nothing — byte-for-byte
+        // identical to before opacity layers existed.
+        let mut opacity_brackets: Vec<(NodeId, f32)> = Vec::new();
         while let Some((node, parent, depth)) = stack.pop() {
             if !visited.insert(node) {
                 // Already painted (cycle or shared child): do not revisit.
@@ -578,6 +586,15 @@ impl SceneCoordinator {
                 && let Some(affine) = resolved_transform(computed, node, layout_box.bounds)
             {
                 transform_brackets.push((node, affine));
+            }
+
+            // A CSS `opacity` below `1.0` brackets this node's subtree with an
+            // opacity group layer. It needs no geometry (the layer applies to the
+            // group as a whole), so — unlike the transform — it is recorded even
+            // for a node with no arranged box. `opacity: 1` or an absent opacity
+            // records nothing (byte-for-byte identical to before).
+            if let Some(alpha) = opacity_of(computed, node) {
+                opacity_brackets.push((node, alpha));
             }
 
             // This node's own paint accumulates into a private builder so it can be
@@ -885,7 +902,10 @@ impl SceneCoordinator {
         // it sorts after every descendant. The exit index is the running max of
         // each node's own enter index propagated up to its parent, walking the
         // pre-order sequence in reverse (descendants before ancestors).
-        if !clip_brackets.is_empty() || !transform_brackets.is_empty() {
+        if !clip_brackets.is_empty()
+            || !transform_brackets.is_empty()
+            || !opacity_brackets.is_empty()
+        {
             let mut exit_index = enter_index.clone();
             for &node in preorder.iter().rev() {
                 if let (Some(&enter), Some(Some(parent))) =
@@ -913,6 +933,35 @@ impl SceneCoordinator {
                     tree_index: exit,
                     order: PaintUnit::clip_pop_order(depth),
                     commands: vec![PaintCommand::PopClip],
+                });
+            }
+            // Opacity group layers are emitted AFTER the clip brackets and BEFORE
+            // the transform brackets. On enter the `PushLayer` sorts between the
+            // `PushTransform` (LAYER_PUSH_ORDER > TRANSFORM_PUSH_ORDER) and the
+            // `PushClip` (LAYER_PUSH_ORDER < CLIP_PUSH_ORDER), so the layer wraps
+            // the subtree inside the transform and outside the rounded clip. On
+            // exit the `PopLayer` ties with the clip's/transform's pop at the same
+            // `(z, exit, MAX - depth)` key; emitting it after the clip bracket but
+            // before the transform bracket makes the stable sort close the clip
+            // first (innermost), then the layer, then the transform (outermost).
+            for (node, alpha) in opacity_brackets {
+                let z = zmap.get(&node).copied().unwrap_or(0);
+                let enter = enter_index.get(&node).copied().unwrap_or(0);
+                let exit = exit_index.get(&node).copied().unwrap_or(enter);
+                let depth = depth_of.get(&node).copied().unwrap_or(0);
+                units.push(PaintUnit {
+                    z,
+                    tree_index: enter,
+                    order: PaintUnit::LAYER_PUSH_ORDER,
+                    commands: vec![PaintCommand::PushLayer(
+                        SceneLayer::new().with_opacity(alpha),
+                    )],
+                });
+                units.push(PaintUnit {
+                    z,
+                    tree_index: exit,
+                    order: PaintUnit::layer_pop_order(depth),
+                    commands: vec![PaintCommand::PopLayer],
                 });
             }
             // Transform brackets are emitted AFTER the clip brackets so that when
@@ -1102,6 +1151,23 @@ fn resolved_transform(
             .multiply(matrix)
             .multiply(AffineTransform::translate(-ox, -oy)),
     )
+}
+
+/// Reads a node's effective CSS `opacity` as a group-layer alpha, or [`None`]
+/// when the subtree needs no opacity layer (spec §5.1).
+///
+/// Reads [`PropertyId::Opacity`] (via [`ComputedStyle::opacity`]) and clamps it to
+/// `0.0..=1.0`. Returns `Some(a)` **only** when `a < 1.0`: a fully-opaque (or
+/// absent) opacity returns [`None`] so nothing is bracketed and the emitted
+/// command stream is byte-for-byte identical to before opacity layers existed. A
+/// partially-transparent value brackets the node's whole subtree with a
+/// `PushLayer(SceneLayer::with_opacity(a))` … `PopLayer`, compositing the group as
+/// one (CSS `opacity` establishes a stacking context and composites the group,
+/// not each descendant independently).
+fn opacity_of(computed: &ComputedStyles, node: NodeId) -> Option<f32> {
+    let alpha = computed.get(&node).and_then(ComputedStyle::opacity)?;
+    let alpha = alpha.clamp(0.0, 1.0);
+    (alpha < 1.0).then_some(alpha)
 }
 
 /// Reads a node's computed `transform`, if present and a resolved affine.
@@ -2553,6 +2619,159 @@ mod tests {
                 PaintCommand::PushClip(_) | PaintCommand::PopClip
             )),
             "no clip commands with no radius"
+        );
+    }
+
+    /// A `ComputedStyle` carrying a `background-color` and an `opacity`.
+    fn with_background_and_opacity(color: StyleColor, opacity: f32) -> ComputedStyle {
+        let mut style = with_background(color);
+        style.set(PropertyId::Opacity, ComputedValue::number(opacity));
+        style
+    }
+
+    #[test]
+    fn opacity_below_one_brackets_subtree_with_push_pop_layer() {
+        // root (bg + opacity 0.5) -> child (bg). The subtree is bracketed by a
+        // PushLayer(opacity=0.5) … PopLayer wrapping BOTH fills as one group.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let child = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(
+            root,
+            with_background_and_opacity(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 0.5),
+        );
+        computed.insert(child, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 100.0, 100.0));
+        boxes.insert(child, box_at(10.0, 10.0, 20.0, 20.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        let cmds = list.commands();
+        assert!(list.is_balanced(), "the layer bracket is balanced");
+        // PushLayer opens first, PopLayer closes last, with both fills between.
+        match &cmds[0] {
+            PaintCommand::PushLayer(layer) => {
+                assert!(
+                    (layer.opacity() - 0.5).abs() < 1e-6,
+                    "layer opacity is 0.5, got {}",
+                    layer.opacity()
+                );
+            }
+            other => panic!("expected a leading PushLayer, got {other:?}"),
+        }
+        assert!(
+            matches!(cmds.last(), Some(PaintCommand::PopLayer)),
+            "layer closes last"
+        );
+        // Exactly one layer pair wraps the whole group (not one per descendant).
+        assert_eq!(
+            cmds.iter()
+                .filter(|c| matches!(c, PaintCommand::PushLayer(_)))
+                .count(),
+            1,
+            "one group layer for the subtree"
+        );
+        assert_eq!(fill_count(&list), 2, "both fills are inside the one group");
+    }
+
+    #[test]
+    fn opacity_one_and_absent_emit_no_layer() {
+        // Regression: opacity 1.0 (and an absent opacity) emit NO PushLayer, so the
+        // command stream is byte-identical to before opacity layers existed.
+        for opacity in [None, Some(1.0_f32)] {
+            let mut tree = RetainedTree::new();
+            let root = tree.alloc(NodeKind::Root);
+            tree.set_root(root);
+
+            let mut computed = ComputedStyles::new();
+            let style = match opacity {
+                Some(a) => with_background_and_opacity(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), a),
+                None => with_background(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
+            };
+            computed.insert(root, style);
+
+            let mut boxes = LayoutBoxes::new();
+            boxes.insert(root, box_at(0.0, 0.0, 30.0, 30.0));
+
+            let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+            let cmds = list.commands();
+            assert!(
+                !cmds.iter().any(|c| matches!(
+                    c,
+                    PaintCommand::PushLayer(_) | PaintCommand::PopLayer
+                )),
+                "opacity {opacity:?} emits no layer commands"
+            );
+            assert_eq!(cmds.len(), 1, "just the one background fill for {opacity:?}");
+        }
+    }
+
+    #[test]
+    fn opacity_nests_transform_outer_layer_middle_clip_inner() {
+        // A single node carrying transform + border-radius + opacity 0.5. The three
+        // wrappers must nest transform (outer) → opacity layer → rounded clip
+        // (inner) on enter, and unwind clip → layer → transform on exit.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+
+        let mut style = with_background_and_radius(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 8.0);
+        // translate(10, 0) — a non-identity transform.
+        style.set(
+            PropertyId::Transform,
+            ComputedValue::from_concrete(PropertyValue::Transform(Transform::new([
+                1.0, 0.0, 0.0, 1.0, 10.0, 0.0,
+            ])))
+            .expect("a transform is a concrete computed value"),
+        );
+        style.set(PropertyId::Opacity, ComputedValue::number(0.5));
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, style);
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 100.0, 100.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        let cmds = list.commands();
+        assert!(list.is_balanced(), "the three brackets are balanced");
+
+        // Enter order: transform (outer), layer (middle), clip (inner).
+        assert!(
+            matches!(cmds[0], PaintCommand::PushTransform(_)),
+            "transform opens outermost, got {:?}",
+            cmds[0]
+        );
+        assert!(
+            matches!(cmds[1], PaintCommand::PushLayer(_)),
+            "layer opens inside the transform, got {:?}",
+            cmds[1]
+        );
+        assert!(
+            matches!(cmds[2], PaintCommand::PushClip(_)),
+            "clip opens innermost, got {:?}",
+            cmds[2]
+        );
+        // Exit order (reversed): clip closes first, then layer, then transform.
+        let n = cmds.len();
+        assert!(
+            matches!(cmds[n - 3], PaintCommand::PopClip),
+            "clip closes first, got {:?}",
+            cmds[n - 3]
+        );
+        assert!(
+            matches!(cmds[n - 2], PaintCommand::PopLayer),
+            "layer closes after the clip, got {:?}",
+            cmds[n - 2]
+        );
+        assert!(
+            matches!(cmds[n - 1], PaintCommand::PopTransform),
+            "transform closes outermost, got {:?}",
+            cmds[n - 1]
         );
     }
 

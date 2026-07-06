@@ -17,9 +17,15 @@
 //! - **Gradient brushes** rasterize as a flat solid of the gradient's first stop
 //!   color (spec §5.2 permits rasterization to differ). A stop-less gradient is
 //!   skipped.
-//! - **Layer compositing** ([`PushLayer`]/[`PopLayer`]) is passthrough: children
-//!   are drawn directly, without an offscreen pass. Honoring layer opacity, blend
-//!   mode, and effects is a future refinement.
+//! - **Layer compositing** ([`PushLayer`]/[`PopLayer`]) honors **group opacity**:
+//!   a layer with opacity `< 1.0` (a CSS `opacity` group) rasterizes its whole
+//!   subtree into a fresh offscreen [`tiny_skia::Pixmap`] and composites it back
+//!   at that opacity, so overlapping opaque children blend as one group (not
+//!   double-darkened per element) and nested layers multiply. A trivial layer
+//!   (opacity `1.0`) stays a cheap passthrough — children draw directly, so the
+//!   plain path is byte-identical. The layer's **clip, blend mode, transform, and
+//!   effects** are still *not* honored here (only its opacity) — a documented
+//!   approximation; `filter` / `backdrop-filter` remain absent.
 //! - **Mask clips** (as opposed to geometric shape clips) inherit the current
 //!   effective clip, since coverage from separate source content is not
 //!   rasterized here.
@@ -199,9 +205,24 @@ impl Renderer for CpuRenderer {
             return Err(CpuRenderError::EmptyTarget.into_renderer_error());
         }
 
-        let mut pixmap = tiny_skia::Pixmap::new(width, height).ok_or_else(|| {
+        let root_pixmap = tiny_skia::Pixmap::new(width, height).ok_or_else(|| {
             CpuRenderError::PixmapAllocationFailed { width, height }.into_renderer_error()
         })?;
+
+        // The layer/target stack: every fill / text / shadow op draws into the
+        // *top* target. The root frame buffer is the bottom entry; a non-trivial
+        // `PushLayer` (a CSS `opacity` group) pushes a fresh transparent target of
+        // the same size, so the whole group rasterizes offscreen, and the matching
+        // `PopLayer` composites it back onto the parent at the layer's opacity —
+        // one group blend, so overlapping opaque children are NOT double-darkened
+        // (real group compositing, not per-element alpha). Trivial layers stay a
+        // cheap passthrough (no offscreen), keeping the plain path byte-identical.
+        let mut targets: Vec<tiny_skia::Pixmap> = vec![root_pixmap];
+        // One entry per open `PushLayer`: the layer's opacity when it pushed an
+        // offscreen target to composite on `PopLayer`, or `None` for a trivial
+        // (passthrough) layer that pushed nothing. Keeps pushes and pops balanced
+        // regardless of whether a layer needed an offscreen pass.
+        let mut layer_stack: Vec<Option<f32>> = Vec::new();
 
         // The clip stack: each entry is the effective clip mask in force after a
         // `PushClip`, or `None` when no representable clip is active at that depth.
@@ -224,6 +245,9 @@ impl Renderer for CpuRenderer {
                         continue;
                     };
                     let clip = clip_stack.last().and_then(Option::as_ref);
+                    let Some(pixmap) = targets.last_mut() else {
+                        continue;
+                    };
                     match paint {
                         Paint::Fill(brush) => {
                             let Some(color) = brush_color(brush) else {
@@ -292,12 +316,45 @@ impl Renderer for CpuRenderer {
                     // Guard against an unbalanced list: a stray pop is ignored.
                     let _ = clip_stack.pop();
                 }
-                // Layers are passthrough: children are drawn directly, without an
-                // offscreen compositing pass (documented future refinement).
-                PaintCommand::PushLayer(_) | PaintCommand::PopLayer => {}
+                // A CSS `opacity` group layer. A layer with reduced opacity pushes
+                // a fresh transparent offscreen target the whole group rasterizes
+                // into; `PopLayer` composites it back at that opacity, so the group
+                // blends as one (overlapping opaque children are not double-
+                // darkened). A trivial layer (opacity `1.0`) stays a passthrough:
+                // it pushes no offscreen, so the plain path is byte-identical. The
+                // layer's own clip / blend-mode / transform / effect fields are not
+                // honored here (only its opacity) — a documented approximation.
+                PaintCommand::PushLayer(layer) => {
+                    if layer.opacity() < 1.0 {
+                        match targets.last().and_then(|top| {
+                            tiny_skia::Pixmap::new(top.width(), top.height())
+                        }) {
+                            Some(offscreen) => {
+                                targets.push(offscreen);
+                                layer_stack.push(Some(layer.opacity().clamp(0.0, 1.0)));
+                            }
+                            // Allocation failed: fall back to passthrough so the
+                            // group still paints (at full opacity) and the list
+                            // stays balanced.
+                            None => layer_stack.push(None),
+                        }
+                    } else {
+                        layer_stack.push(None);
+                    }
+                }
+                PaintCommand::PopLayer => {
+                    // Balance a stray pop; composite the offscreen when this layer
+                    // opened one.
+                    if let Some(Some(opacity)) = layer_stack.pop() {
+                        composite_top_layer(&mut targets, opacity);
+                    }
+                }
                 PaintCommand::DrawText { origin, run, brush } => {
                     let clip = clip_stack.last().and_then(Option::as_ref);
-                    draw_text_run(&mut pixmap, *origin, run, brush, clip, current, &self.fonts);
+                    let Some(pixmap) = targets.last_mut() else {
+                        continue;
+                    };
+                    draw_text_run(pixmap, *origin, run, brush, clip, current, &self.fonts);
                 }
                 PaintCommand::DrawShadow {
                     rect,
@@ -309,8 +366,11 @@ impl Renderer for CpuRenderer {
                     inset,
                 } => {
                     let clip = clip_stack.last().and_then(Option::as_ref);
+                    let Some(pixmap) = targets.last_mut() else {
+                        continue;
+                    };
                     draw_shadow_approx(
-                        &mut pixmap,
+                        pixmap,
                         *rect,
                         *radii,
                         *color,
@@ -323,6 +383,23 @@ impl Renderer for CpuRenderer {
                 }
             }
         }
+
+        // Unwind any layer left open by an unbalanced list: composite each dangling
+        // offscreen back at its opacity so its content is not lost, leaving only the
+        // root frame buffer.
+        while let Some(entry) = layer_stack.pop() {
+            if let Some(opacity) = entry {
+                composite_top_layer(&mut targets, opacity);
+            }
+        }
+        // The root frame buffer is the only remaining target (a well-formed list
+        // leaves exactly one; the unwind above guarantees it for a malformed one).
+        let pixmap = targets.pop().unwrap_or_else(|| {
+            // Unreachable in practice (the root is never popped), but keep the
+            // renderer panic-free: fall back to a fresh empty buffer.
+            tiny_skia::Pixmap::new(width, height)
+                .unwrap_or_else(|| tiny_skia::Pixmap::new(1, 1).expect("1x1 pixmap allocates"))
+        });
 
         self.last_pixmap = Some(pixmap);
         self.frames_rendered += 1;
@@ -345,6 +422,43 @@ impl Renderer for CpuRenderer {
             _ => SupportLevel::Emulated,
         }
     }
+}
+
+/// Composites the top layer target of `targets` back onto the target beneath it
+/// at `opacity`, then drops it — the group-opacity blend for a CSS `opacity`
+/// layer (spec §5.1).
+///
+/// The offscreen (which already holds the whole group's paint at full opacity) is
+/// drawn onto the parent with a [`tiny_skia::PixmapPaint`] at `opacity` and
+/// `SrcOver`, so the group blends **as one**: two overlapping opaque children
+/// composite once, not twice (real group compositing, not per-element alpha).
+/// Does nothing when only the root target remains (a stray pop), so the root is
+/// never consumed.
+fn composite_top_layer(targets: &mut Vec<tiny_skia::Pixmap>, opacity: f32) {
+    // Only composite an actual layer: never pop the root frame buffer.
+    if targets.len() < 2 {
+        return;
+    }
+    let Some(child) = targets.pop() else {
+        return;
+    };
+    let Some(parent) = targets.last_mut() else {
+        // Cannot happen (len was >= 2), but keep the buffer to avoid data loss.
+        targets.push(child);
+        return;
+    };
+    let paint = tiny_skia::PixmapPaint {
+        opacity: opacity.clamp(0.0, 1.0),
+        ..Default::default()
+    };
+    parent.draw_pixmap(
+        0,
+        0,
+        child.as_ref(),
+        &paint,
+        tiny_skia::Transform::identity(),
+        None,
+    );
 }
 
 /// Computes the integer pixel dimensions of a target from its logical [`Size`],
@@ -1109,6 +1223,131 @@ mod tests {
         assert!(shifted.red() > 200 && shifted.alpha() > 200, "translated rect painted");
         // The untransformed position (5,5) is now empty.
         assert_eq!(pixmap.pixel(5, 5).expect("pixel exists").alpha(), 0);
+    }
+
+    /// A filled rectangle `(x,y)..(x+w,y+h)` in `color`, as one `DrawPath`.
+    fn rect_fill_cmd(x: f32, y: f32, w: f32, h: f32, color: Color) -> PaintCommand {
+        let mut path = Path::new();
+        path.move_to(Point::new(x, y))
+            .line_to(Point::new(x + w, y))
+            .line_to(Point::new(x + w, y + h))
+            .line_to(Point::new(x, y + h))
+            .close();
+        PaintCommand::DrawPath {
+            path,
+            paint: Paint::solid_fill(color),
+        }
+    }
+
+    /// Renders `commands` into a `size × size` bitmap and returns the pixmap.
+    fn render_commands(commands: Vec<PaintCommand>, size: f32) -> tiny_skia::Pixmap {
+        let list = DisplayList::from_commands(commands);
+        let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(1));
+        let frame = RenderFrame::new(snapshot, Size::new(size, size));
+        let submission = FrameSubmission::new(frame);
+        let mut renderer = CpuRenderer::default();
+        renderer
+            .render(&submission, &bitmap_target(size, size))
+            .expect("renders");
+        renderer.pixmap().expect("a frame was rendered").clone()
+    }
+
+    #[test]
+    fn half_opaque_layer_blends_solid_box_over_white() {
+        use obscur_scene::layer::SceneLayer;
+        // A white backdrop, then an opaque black box inside an opacity-0.5 layer.
+        // The composited pixel is ~50% grey — neither fully black nor white.
+        let cmds = vec![
+            rect_fill_cmd(0.0, 0.0, 16.0, 16.0, Color::WHITE),
+            PaintCommand::PushLayer(SceneLayer::new().with_opacity(0.5)),
+            rect_fill_cmd(4.0, 4.0, 8.0, 8.0, Color::rgba(0.0, 0.0, 0.0, 1.0)),
+            PaintCommand::PopLayer,
+        ];
+        let pixmap = render_commands(cmds, 16.0);
+        let px = pixmap.pixel(8, 8).expect("center pixel");
+        // Black at 0.5 over white ⇒ mid-grey (~128), not 0 and not 255.
+        assert!(px.red() > 90 && px.red() < 170, "mid-grey red: {}", px.red());
+        assert!(px.green() > 90 && px.green() < 170, "mid-grey green: {}", px.green());
+        assert!(px.blue() > 90 && px.blue() < 170, "mid-grey blue: {}", px.blue());
+    }
+
+    #[test]
+    fn group_opacity_does_not_double_darken_overlap() {
+        use obscur_scene::layer::SceneLayer;
+        // Two overlapping opaque black boxes inside ONE opacity-0.5 layer. The
+        // overlap region must be the SAME color as a non-overlap region of either
+        // box — group compositing blends the whole group once, so the overlap is
+        // not darkened twice (the distinction from per-element alpha).
+        let cmds = vec![
+            rect_fill_cmd(0.0, 0.0, 32.0, 32.0, Color::WHITE),
+            PaintCommand::PushLayer(SceneLayer::new().with_opacity(0.5)),
+            // Box A: (4,4)..(20,20). Box B: (12,12)..(28,28). Overlap: (12,12)..(20,20).
+            rect_fill_cmd(4.0, 4.0, 16.0, 16.0, Color::rgba(0.0, 0.0, 0.0, 1.0)),
+            rect_fill_cmd(12.0, 12.0, 16.0, 16.0, Color::rgba(0.0, 0.0, 0.0, 1.0)),
+            PaintCommand::PopLayer,
+        ];
+        let pixmap = render_commands(cmds, 32.0);
+        // A non-overlap pixel of box A (e.g. (6,6)) and an overlap pixel (e.g.
+        // (16,16)) must match: the overlap is not double-darkened.
+        let non_overlap = pixmap.pixel(6, 6).expect("box-A-only pixel");
+        let overlap = pixmap.pixel(16, 16).expect("overlap pixel");
+        assert_eq!(
+            non_overlap.red(),
+            overlap.red(),
+            "overlap ({}) equals non-overlap ({}) — group blend, not per-box alpha",
+            overlap.red(),
+            non_overlap.red()
+        );
+        // And it really is a group blend (grey, not opaque black).
+        assert!(overlap.red() > 90, "group blended to grey, not black: {}", overlap.red());
+    }
+
+    #[test]
+    fn nested_opacity_layers_multiply() {
+        use obscur_scene::layer::SceneLayer;
+        // A black box under two nested 0.5 layers composites at ~0.25 alpha over
+        // white: lighter than a single 0.5 layer (~0.5), proving nested layers
+        // (stack depth > 1) multiply.
+        let single = vec![
+            rect_fill_cmd(0.0, 0.0, 16.0, 16.0, Color::WHITE),
+            PaintCommand::PushLayer(SceneLayer::new().with_opacity(0.5)),
+            rect_fill_cmd(4.0, 4.0, 8.0, 8.0, Color::rgba(0.0, 0.0, 0.0, 1.0)),
+            PaintCommand::PopLayer,
+        ];
+        let nested = vec![
+            rect_fill_cmd(0.0, 0.0, 16.0, 16.0, Color::WHITE),
+            PaintCommand::PushLayer(SceneLayer::new().with_opacity(0.5)),
+            PaintCommand::PushLayer(SceneLayer::new().with_opacity(0.5)),
+            rect_fill_cmd(4.0, 4.0, 8.0, 8.0, Color::rgba(0.0, 0.0, 0.0, 1.0)),
+            PaintCommand::PopLayer,
+            PaintCommand::PopLayer,
+        ];
+        let single_red = render_commands(single, 16.0).pixel(8, 8).expect("px").red();
+        let nested_red = render_commands(nested, 16.0).pixel(8, 8).expect("px").red();
+        // ~0.25 black over white ≈ 191; ~0.5 ≈ 128. Nested is LIGHTER.
+        assert!(
+            nested_red > single_red,
+            "nested 0.5*0.5 (~0.25, red {nested_red}) is lighter than single 0.5 (~0.5, red {single_red})"
+        );
+        assert!(nested_red > 160, "nested ~0.25 over white ≈ 191: {nested_red}");
+    }
+
+    #[test]
+    fn trivial_layer_is_byte_identical_passthrough() {
+        use obscur_scene::layer::SceneLayer;
+        // A trivial (opacity 1.0) layer must not change any pixel vs. drawing the
+        // box directly — the passthrough regression guard.
+        let plain = vec![rect_fill_cmd(4.0, 4.0, 8.0, 8.0, Color::rgba(1.0, 0.0, 0.0, 1.0))];
+        let layered = vec![
+            PaintCommand::PushLayer(SceneLayer::new()),
+            rect_fill_cmd(4.0, 4.0, 8.0, 8.0, Color::rgba(1.0, 0.0, 0.0, 1.0)),
+            PaintCommand::PopLayer,
+        ];
+        assert_eq!(
+            render_commands(plain, 16.0).data(),
+            render_commands(layered, 16.0).data(),
+            "a trivial layer is a byte-identical passthrough"
+        );
     }
 
     #[test]

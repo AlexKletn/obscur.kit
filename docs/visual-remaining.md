@@ -47,10 +47,16 @@ The following are deferred. Each is documented at its site in code.
   a transformed element's interactive region is still its untransformed box.
 - **3D transforms** — `translate3d`/`perspective`/`rotateX`… unsupported (2D only).
 
+## Done
+- ~~**`opacity` as a composited layer**~~ — DONE. `opacity < 1` now brackets the
+  element's whole subtree with `PushLayer(SceneLayer::with_opacity(a))` … `PopLayer`
+  in the scene coordinator (nested transform → opacity layer → rounded clip), and
+  is honored end-to-end: Vello via `scene.push_layer(alpha)`, and the CPU backend
+  via a real offscreen-pixmap group blend (overlapping opaque children composite as
+  one group, nested layers multiply). The layer's own clip / blend-mode / transform
+  / effects are still approximated on the CPU backend (only opacity is honored).
+
 ## Not started
-- **`opacity` as a composited layer** — `opacity` is a computed property but is
-  not applied as a group opacity layer (`PushLayer`); a partially-transparent
-  subtree is not composited. The scene has `PushLayer(SceneLayer)` for this.
 - **`filter` / `backdrop-filter`** (blur, brightness, drop-shadow, …).
 - **`outline` / `outline-offset`** — an outline that does not affect layout.
 - **`clip-path`** — arbitrary clip shapes (the scene has path clips).
@@ -66,5 +72,5 @@ The following are deferred. Each is documented at its site in code.
 
 ---
 
-Ranked by likely value: `opacity` layer > `background-image: url()` >
-transformed hit-testing > radial-gradient > `outline` > the rest.
+Ranked by likely value: `background-image: url()` > transformed hit-testing >
+radial-gradient > `outline` > the rest.

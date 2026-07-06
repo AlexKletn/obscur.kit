@@ -406,3 +406,73 @@ fn per_side_border_paints_only_that_edge() {
         Rect::new(bounds.origin, Size::new(bounds.size.width, 3.0))
     ));
 }
+
+// An authored `opacity: 0.5` brackets the element's subtree with a group opacity
+// layer through the real live pipeline, and the published snapshot composites at
+// half opacity on the CPU/headless backend (spec §5.1). This exercises the whole
+// chain: CSS `opacity` lowering → computed value → scene coordinator PushLayer →
+// CPU offscreen group compositing.
+#[test]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn authored_opacity_brackets_group_layer_and_composites_on_cpu() {
+    use obscur_kit::render::frame::{FrameSubmission, RenderFrame};
+    use obscur_kit::render::target::{BitmapTarget, RenderTarget};
+    use obscur_kit::render::{Renderer, RendererId};
+    use obscur_kit::render_cpu::renderer::CpuRenderer;
+
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(".box{width:40px;height:40px;background-color:#000000;opacity:0.5}");
+    let result = rt.render_now(&one_box_view(), std::slice::from_ref(&sheet));
+    assert!(result.restyled(), "authored CSS resolved computed styles");
+    assert!(result.is_balanced(), "the display list is well-formed");
+
+    // The pipeline brackets the box's subtree with one group opacity layer.
+    let commands = result.snapshot().display_list().commands();
+    let layer = commands
+        .iter()
+        .find_map(|c| match c {
+            PaintCommand::PushLayer(layer) => Some(layer),
+            _ => None,
+        })
+        .expect("an opacity group layer was emitted");
+    assert!(
+        (layer.opacity() - 0.5).abs() < 1e-6,
+        "group layer opacity is 0.5, got {}",
+        layer.opacity()
+    );
+    assert!(
+        commands
+            .iter()
+            .any(|c| matches!(c, PaintCommand::PopLayer)),
+        "the group layer is balanced by a PopLayer"
+    );
+
+    // Render the published snapshot on the CPU backend: the opaque black box under
+    // the 0.5 group layer composites over the transparent backdrop at ~half alpha.
+    let bounds = rt
+        .layout_boxes()
+        .get(&box_node(&rt))
+        .copied()
+        .expect("the box has a layout box")
+        .bounds;
+    let frame = RenderFrame::new(result.snapshot().clone(), Size::new(VIEWPORT, VIEWPORT));
+    let mut renderer = CpuRenderer::new(RendererId::from_raw(1));
+    renderer
+        .render(
+            &FrameSubmission::new(frame),
+            &RenderTarget::bitmap(BitmapTarget::new(Size::new(VIEWPORT, VIEWPORT))),
+        )
+        .expect("the CPU backend renders the frame");
+    let pixmap = renderer.pixmap().expect("a frame was rendered");
+    let cx = (bounds.origin.x + bounds.size.width / 2.0).round().max(0.0) as u32;
+    let cy = (bounds.origin.y + bounds.size.height / 2.0).round().max(0.0) as u32;
+    let px = pixmap.pixel(cx, cy).expect("the box's center pixel");
+    // Opaque black at group opacity 0.5 over transparent ⇒ premultiplied alpha
+    // ~128: composited, neither fully opaque (per-element would keep 255 for an
+    // opaque box drawn directly) nor absent.
+    assert!(
+        px.alpha() > 90 && px.alpha() < 170,
+        "group opacity ~0.5 composite, alpha {}",
+        px.alpha()
+    );
+}
