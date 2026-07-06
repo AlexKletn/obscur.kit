@@ -122,6 +122,12 @@ pub enum PropertyId {
     /// The `border-bottom-left-radius` longhand.
     BorderBottomLeftRadius,
 
+    // ---- Box effects (not inherited) ----
+    /// The `box-shadow` property (a `BoxShadow` list value; NOT inherited).
+    /// `box-shadow: none` lowers to an empty list. The scene coordinator paints a
+    /// drop shadow behind the box's background and an inset shadow on top of it.
+    BoxShadow,
+
     // ---- Sizing constraints (Length-valued, not inherited) ----
     /// The `min-width` property.
     MinWidth,
@@ -283,6 +289,7 @@ impl PropertyId {
             Self::BorderTopRightRadius => "border-top-right-radius",
             Self::BorderBottomRightRadius => "border-bottom-right-radius",
             Self::BorderBottomLeftRadius => "border-bottom-left-radius",
+            Self::BoxShadow => "box-shadow",
             Self::MinWidth => "min-width",
             Self::MinHeight => "min-height",
             Self::MaxWidth => "max-width",
@@ -372,6 +379,7 @@ impl PropertyId {
             | Self::BorderTopRightRadius
             | Self::BorderBottomRightRadius
             | Self::BorderBottomLeftRadius
+            | Self::BoxShadow
             | Self::MinWidth
             | Self::MinHeight
             | Self::MaxWidth
@@ -751,6 +759,12 @@ mod tests {
                 id.name()
             );
         }
+    }
+
+    #[test]
+    fn box_shadow_name_and_not_inherited() {
+        assert_eq!(PropertyId::BoxShadow.name(), "box-shadow");
+        assert!(!PropertyId::BoxShadow.default_inheritance().is_inherited());
     }
 
     #[test]

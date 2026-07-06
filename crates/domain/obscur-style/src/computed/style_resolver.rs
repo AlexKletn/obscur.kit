@@ -104,6 +104,8 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::BorderTopRightRadius,
     PropertyId::BorderBottomRightRadius,
     PropertyId::BorderBottomLeftRadius,
+    // Box effects.
+    PropertyId::BoxShadow,
     // Flex container / item.
     PropertyId::Display,
     PropertyId::FlexDirection,
@@ -185,6 +187,11 @@ impl StyleResolver {
             // unresolved and the scene paints no gradient fill — byte-for-byte
             // identical to before background images existed.
             PropertyId::BackgroundImage => None,
+            // `box-shadow` initial is `none` (no shadows). There is no
+            // `BoxShadow` list value for `none` other than an empty one, and an
+            // absent value paints nothing all the same, so it is left unresolved —
+            // byte-for-byte identical to before box-shadow existed.
+            PropertyId::BoxShadow => None,
             PropertyId::Opacity => Some(ComputedValue::number(1.0)),
             PropertyId::Width | PropertyId::Height => Some(ComputedValue::length(Length::Auto)),
             // Box-model spacing: initial `0`.
@@ -986,6 +993,7 @@ mod tests {
                 | PropertyId::BorderTopRightRadius
                 | PropertyId::BorderBottomRightRadius
                 | PropertyId::BorderBottomLeftRadius
+                | PropertyId::BoxShadow
                 | PropertyId::MinWidth
                 | PropertyId::MinHeight
                 | PropertyId::MaxWidth
@@ -1060,6 +1068,7 @@ mod tests {
             PropertyId::BorderTopRightRadius,
             PropertyId::BorderBottomRightRadius,
             PropertyId::BorderBottomLeftRadius,
+            PropertyId::BoxShadow,
             PropertyId::MinWidth,
             PropertyId::MinHeight,
             PropertyId::MaxWidth,

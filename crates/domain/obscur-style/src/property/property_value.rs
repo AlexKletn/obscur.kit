@@ -21,8 +21,8 @@
 //! [`LengthContext`](crate::property::LengthContext) (spec §4.5, §4.13).
 
 use crate::property::{
-    GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length, LengthExpr, LinearGradient,
-    StyleColor,
+    BoxShadow, GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length, LengthExpr,
+    LinearGradient, StyleColor,
 };
 use obscur_identity::InternedSymbol;
 
@@ -53,6 +53,12 @@ pub enum PropertyValue {
     /// scene coordinator turns the angle plus the painted box's bounds into the
     /// concrete gradient axis when it builds the fill brush (spec §5.2).
     LinearGradient(LinearGradient),
+    /// An ordered `box-shadow` list, in author order: the value of `box-shadow`.
+    /// Each [`BoxShadow`] carries its offsets, blur, spread, optional color, and
+    /// `inset` flag; `box-shadow: none` lowers to an **empty** list. CSS paints
+    /// the first-listed shadow on top, so the scene coordinator emits the list in
+    /// reverse order (spec §5.2).
+    BoxShadow(Box<[BoxShadow]>),
     /// An ordered `font-family` list, in author order. Each entry is either a
     /// concrete family name (for example `"Helvetica Neue"`) or a generic
     /// keyword (`"serif"`, `"sans-serif"`, `"monospace"`, `"cursive"`,
@@ -120,6 +126,16 @@ impl PropertyValue {
     pub const fn as_linear_gradient(&self) -> Option<&LinearGradient> {
         match self {
             Self::LinearGradient(gradient) => Some(gradient),
+            _ => None,
+        }
+    }
+
+    /// Returns the ordered `box-shadow` list if this value is a
+    /// [`PropertyValue::BoxShadow`] (an empty slice for `box-shadow: none`).
+    #[must_use]
+    pub fn as_box_shadows(&self) -> Option<&[BoxShadow]> {
+        match self {
+            Self::BoxShadow(shadows) => Some(shadows),
             _ => None,
         }
     }
@@ -264,6 +280,25 @@ mod tests {
         let value = PropertyValue::LinearGradient(gradient.clone());
         assert_eq!(value.as_linear_gradient(), Some(&gradient));
         assert_eq!(PropertyValue::Number(1.0).as_linear_gradient(), None);
+    }
+
+    #[test]
+    fn as_box_shadows_extracts_only_shadow_lists() {
+        use crate::property::{BoxShadow, Length};
+        let shadows: Box<[BoxShadow]> = Box::new([BoxShadow::new(
+            Length::px(2.0),
+            Length::px(4.0),
+            Length::px(6.0),
+            Length::px(0.0),
+            Some(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
+            false,
+        )]);
+        let value = PropertyValue::BoxShadow(shadows.clone());
+        assert_eq!(value.as_box_shadows(), Some(&*shadows));
+        // `none` lowers to an empty list, still a shadow value.
+        let none = PropertyValue::BoxShadow(Box::new([]));
+        assert_eq!(none.as_box_shadows(), Some(&[][..]));
+        assert_eq!(PropertyValue::Number(1.0).as_box_shadows(), None);
     }
 
     #[test]

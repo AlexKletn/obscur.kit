@@ -23,6 +23,9 @@
 //! - **Mask clips** (as opposed to geometric shape clips) inherit the current
 //!   effective clip, since coverage from separate source content is not
 //!   rasterized here.
+//! - **Box shadows** ([`DrawShadow`]) rasterize as a flat, offset rounded rect at
+//!   reduced alpha (no gaussian blur; the `blur` radius is ignored) — a documented
+//!   approximation of the soft shadow the GPU backend blurs.
 //! - **Text runs** ([`DrawText`]) consume the same pre-shaped
 //!   [`GlyphRun`](obscur_scene::text::GlyphRun) the GPU backend does — text is
 //!   shaped once in `obscur-text`, never here — so both backends agree on glyph
@@ -38,6 +41,8 @@
 //!
 //! [`DrawText`]: obscur_scene::command::PaintCommand::DrawText
 //!
+//! [`DrawShadow`]: obscur_scene::command::PaintCommand::DrawShadow
+//!
 //! [`PushLayer`]: obscur_scene::command::PaintCommand::PushLayer
 //! [`PopLayer`]: obscur_scene::command::PaintCommand::PopLayer
 
@@ -45,7 +50,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use obscur_capability::SupportLevel;
-use obscur_geometry::{Point, Size};
+use obscur_geometry::{CornerRadii, Point, Rect, Size};
 use skrifa::instance::{LocationRef, Size as SkrifaSize};
 use skrifa::outline::DrawSettings;
 use skrifa::{FontRef, GlyphId, MetadataProvider};
@@ -280,6 +285,28 @@ impl Renderer for CpuRenderer {
                     let clip = clip_stack.last().and_then(Option::as_ref);
                     draw_text_run(&mut pixmap, *origin, run, brush, clip, identity, &self.fonts);
                 }
+                PaintCommand::DrawShadow {
+                    rect,
+                    radii,
+                    color,
+                    blur: _,
+                    spread,
+                    offset,
+                    inset,
+                } => {
+                    let clip = clip_stack.last().and_then(Option::as_ref);
+                    draw_shadow_approx(
+                        &mut pixmap,
+                        *rect,
+                        *radii,
+                        *color,
+                        *spread,
+                        *offset,
+                        *inset,
+                        clip,
+                        identity,
+                    );
+                }
             }
         }
 
@@ -380,6 +407,63 @@ fn solid_paint(color: Color) -> Option<tiny_skia::Paint<'static>> {
         anti_alias: true,
         ..Default::default()
     })
+}
+
+/// The alpha multiplier the software backend applies to a `box-shadow` fill to
+/// fake the softness a real gaussian blur would give (this backend has no blur).
+/// A documented approximation (spec §5.2): the offset rounded rect is filled at
+/// half the shadow color's alpha rather than blurred.
+const SHADOW_APPROX_ALPHA: f32 = 0.5;
+
+/// Rasterizes a CSS `box-shadow` as a **flat**, offset rounded rectangle at
+/// reduced alpha — the software backend's blur-free approximation (spec §5.2).
+///
+/// The box's border box `rect` is translated by `offset` and inflated (a drop
+/// shadow) or deflated (an inset shadow) by `spread`, then filled as a rounded
+/// rect (`radii`) in the shadow `color` at [`SHADOW_APPROX_ALPHA`] of its alpha.
+/// The `blur` radius is **ignored** (this backend has no gaussian blur), so the
+/// mark is a hard-edged, semi-transparent rounded rect rather than a soft shadow —
+/// a documented approximation that keeps device-free callers deterministic. An
+/// inset shadow is drawn at its deflated geometry (inside the box); a degenerate
+/// (non-positive) rect draws nothing.
+#[allow(clippy::too_many_arguments)]
+fn draw_shadow_approx(
+    pixmap: &mut tiny_skia::Pixmap,
+    rect: Rect,
+    radii: CornerRadii,
+    color: Color,
+    spread: f32,
+    offset: (f32, f32),
+    inset: bool,
+    clip: Option<&tiny_skia::Mask>,
+    transform: tiny_skia::Transform,
+) {
+    // Drop shadows inflate by `spread`; inset shadows deflate by it.
+    let inflate = if inset { -spread } else { spread };
+    let (ox, oy) = offset;
+    let x = rect.origin.x + ox - inflate;
+    let y = rect.origin.y + oy - inflate;
+    let w = 2.0f32.mul_add(inflate, rect.size.width);
+    let h = 2.0f32.mul_add(inflate, rect.size.height);
+    if w <= 0.0 || h <= 0.0 {
+        return;
+    }
+    let shadow_rect = Rect::new(Point::new(x, y), Size::new(w, h));
+    let path = Path::rounded_rect(shadow_rect, radii);
+    let Some(sk_path) = to_sk_path(&path) else {
+        return;
+    };
+    let faded = Color::rgba(color.r, color.g, color.b, color.a * SHADOW_APPROX_ALPHA);
+    let Some(sk_paint) = solid_paint(faded) else {
+        return;
+    };
+    pixmap.fill_path(
+        &sk_path,
+        &sk_paint,
+        tiny_skia::FillRule::Winding,
+        transform,
+        clip,
+    );
 }
 
 /// Lowers a geometric [`ClipShape`] to a domain [`Path`] this backend can
@@ -932,6 +1016,39 @@ mod tests {
             pixmap.pixels().iter().all(|p| p.alpha() == 0),
             "whitespace glyph must paint nothing"
         );
+    }
+
+    #[test]
+    fn draw_shadow_fills_offset_rect_at_reduced_alpha() {
+        // A drop shadow of the box (2,2)-(10,10) offset by (4,4): the software
+        // backend fills the offset rounded rect at half the color's alpha (no
+        // blur). A pixel inside the offset rect is painted but semi-transparent.
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawShadow {
+            rect: obscur_geometry::Rect::new(Point::new(2.0, 2.0), Size::new(8.0, 8.0)),
+            radii: CornerRadii::default(),
+            color: Color::rgba(0.0, 0.0, 0.0, 1.0),
+            blur: 4.0,
+            spread: 0.0,
+            offset: (4.0, 4.0),
+            inset: false,
+        }]);
+        let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(7));
+        let frame = RenderFrame::new(snapshot, Size::new(24.0, 24.0));
+        let submission = FrameSubmission::new(frame);
+
+        let mut renderer = CpuRenderer::default();
+        renderer
+            .render(&submission, &bitmap_target(24.0, 24.0))
+            .expect("renders");
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+
+        // The offset rect spans (6,6)-(14,14); a pixel inside is painted at ~half
+        // alpha (0.5 of opaque black), not fully opaque.
+        let inside = pixmap.pixel(9, 9).expect("pixel exists");
+        assert!(inside.alpha() > 60, "shadow painted: {}", inside.alpha());
+        assert!(inside.alpha() < 200, "shadow is reduced alpha: {}", inside.alpha());
+        // A pixel outside the offset rect (top-left corner) is untouched.
+        assert_eq!(pixmap.pixel(0, 0).expect("pixel exists").alpha(), 0);
     }
 
     #[test]

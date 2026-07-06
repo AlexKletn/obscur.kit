@@ -257,6 +257,77 @@ fn authored_linear_gradient_background_paints_gradient_fill() {
     assert!((g.end().y - cy).abs() < 1e-2);
 }
 
+// An authored `box-shadow: 4px 4px 8px black` reaches paint through the real
+// pipeline: the display list carries a `DrawShadow` with the authored offset,
+// blur, and color, painted BEFORE (behind) the element's background fill.
+#[test]
+fn authored_box_shadow_paints_draw_shadow_behind_background() {
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(
+        ".box{width:100px;height:50px;background-color:#00ff00;box-shadow:4px 4px 8px black}",
+    );
+    let result = rt.render_now(&one_box_view(), std::slice::from_ref(&sheet));
+    assert!(result.restyled(), "authored CSS resolved computed styles");
+    assert!(result.relaid_out(), "the styled tree arranged a layout box");
+    assert!(result.is_balanced(), "the display list is well-formed");
+
+    let bounds = rt
+        .layout_boxes()
+        .get(&box_node(&rt))
+        .copied()
+        .expect("the box has a layout box")
+        .bounds;
+
+    let commands = result.snapshot().display_list().commands();
+
+    // Exactly one DrawShadow, carrying the authored params over the border box.
+    let shadow_idx = commands
+        .iter()
+        .position(|c| matches!(c, PaintCommand::DrawShadow { .. }))
+        .expect("an authored box-shadow emits a DrawShadow");
+    let PaintCommand::DrawShadow {
+        rect,
+        color,
+        blur,
+        spread,
+        offset,
+        inset,
+        ..
+    } = &commands[shadow_idx]
+    else {
+        unreachable!("matched DrawShadow above");
+    };
+    assert!(rect_approx_eq(*rect, bounds), "shadow over the border box");
+    assert_eq!(*color, Color::rgba(0.0, 0.0, 0.0, 1.0), "authored black");
+    assert_eq!(*blur, 8.0);
+    assert_eq!(*spread, 0.0);
+    assert_eq!(*offset, (4.0, 4.0));
+    assert!(!*inset, "a drop shadow, not inset");
+
+    // The drop shadow paints BEFORE the background fill (behind the box).
+    let fill_idx = commands
+        .iter()
+        .position(|c| matches!(c, PaintCommand::DrawPath { .. }))
+        .expect("the background fill is present");
+    assert!(shadow_idx < fill_idx, "drop shadow paints behind the background");
+}
+
+// Regression guard: an element with no authored `box-shadow` emits no DrawShadow.
+#[test]
+fn no_box_shadow_authored_emits_no_draw_shadow() {
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(".box{width:40px;height:40px;background-color:#00ff00}");
+    let result = rt.render_now(&one_box_view(), std::slice::from_ref(&sheet));
+
+    let commands = result.snapshot().display_list().commands();
+    assert!(
+        !commands
+            .iter()
+            .any(|c| matches!(c, PaintCommand::DrawShadow { .. })),
+        "no box-shadow authored ⇒ no DrawShadow emitted"
+    );
+}
+
 #[test]
 fn per_side_border_paints_only_that_edge() {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));

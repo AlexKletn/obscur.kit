@@ -175,6 +175,17 @@ impl SceneConverter {
                 PaintCommand::DrawText { origin, run, brush } => {
                     self.draw_text(&mut scene, *origin, run, brush);
                 }
+                PaintCommand::DrawShadow {
+                    rect,
+                    radii,
+                    color,
+                    blur,
+                    spread,
+                    offset,
+                    inset,
+                } => {
+                    draw_shadow(&mut scene, rect, radii, *color, *blur, *spread, *offset, *inset);
+                }
             }
         }
 
@@ -309,6 +320,55 @@ impl SceneConverter {
     }
 }
 
+/// Rasterizes a CSS `box-shadow` as a gaussian-blurred rounded rectangle
+/// (spec §5.2).
+///
+/// The box's border box is translated by `offset` and inflated (a drop shadow) or
+/// deflated (an inset shadow) by `spread`; Vello's
+/// [`Scene::draw_blurred_rounded_rect`] then blurs it, mapping the CSS blur
+/// *radius* to a gaussian standard deviation of `blur / 2`. Vello takes a single
+/// corner radius, so the four `radii` collapse to their maximum (a documented
+/// approximation for non-uniform corners). An **inset** shadow is approximated by
+/// the same blurred rounded rect at the deflated geometry — Vello does not clip it
+/// to the box interior here, so inset fidelity is approximate (documented). A
+/// degenerate (non-positive) rect is skipped.
+#[allow(clippy::too_many_arguments)]
+fn draw_shadow(
+    scene: &mut Scene,
+    rect: &obscur_geometry::Rect,
+    radii: &obscur_geometry::CornerRadii,
+    color: obscur_scene::color::Color,
+    blur: f32,
+    spread: f32,
+    offset: (f32, f32),
+    inset: bool,
+) {
+    // Drop shadows inflate by `spread`; inset shadows deflate by it.
+    let inflate = f64::from(if inset { -spread } else { spread });
+    let (ox, oy) = (f64::from(offset.0), f64::from(offset.1));
+    let x0 = f64::from(rect.origin.x) + ox - inflate;
+    let y0 = f64::from(rect.origin.y) + oy - inflate;
+    let x1 = f64::from(rect.origin.x + rect.size.width) + ox + inflate;
+    let y1 = f64::from(rect.origin.y + rect.size.height) + oy + inflate;
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let kurbo_rect = KurboRect::new(x0, y0, x1, y1);
+    // A single corner radius: the max of the four (documented approximation).
+    let radius = f64::from(
+        radii
+            .top_left
+            .max(radii.top_right)
+            .max(radii.bottom_right)
+            .max(radii.bottom_left)
+            .max(0.0),
+    );
+    // Map the CSS blur radius to a gaussian standard deviation.
+    let std_dev = f64::from(blur.max(0.0)) / 2.0;
+    let peniko_color = ColorConverter::new().convert(color);
+    scene.draw_blurred_rounded_rect(Affine::IDENTITY, kurbo_rect, peniko_color, radius, std_dev);
+}
+
 /// Maps an obscur-scene [`BlendMode`] to a peniko [`Mix`](peniko::Mix) blend.
 fn mix(mode: BlendMode) -> peniko::Mix {
     match mode {
@@ -413,6 +473,38 @@ mod tests {
             PaintCommand::PopLayer,
         ]);
         // Must not panic; balanced push/pop.
+        let _scene = SceneConverter::new().convert(&list);
+    }
+
+    #[test]
+    fn draw_shadow_produces_non_empty_scene() {
+        use obscur_geometry::CornerRadii;
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawShadow {
+            rect: Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 10.0)),
+            radii: CornerRadii::uniform(4.0),
+            color: Color::BLACK,
+            blur: 8.0,
+            spread: 0.0,
+            offset: (4.0, 4.0),
+            inset: false,
+        }]);
+        let scene = SceneConverter::new().convert(&list);
+        assert!(!scene.encoding().is_empty());
+    }
+
+    #[test]
+    fn inset_shadow_converts_without_panicking() {
+        use obscur_geometry::CornerRadii;
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawShadow {
+            rect: Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 20.0)),
+            radii: CornerRadii::default(),
+            color: Color::rgba(0.0, 0.0, 0.0, 0.5),
+            blur: 2.0,
+            spread: 2.0,
+            offset: (0.0, 0.0),
+            inset: true,
+        }]);
+        // Must not panic (inset is approximated).
         let _scene = SceneConverter::new().convert(&list);
     }
 

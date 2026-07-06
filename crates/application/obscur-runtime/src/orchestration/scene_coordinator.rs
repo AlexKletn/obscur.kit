@@ -16,7 +16,7 @@ use obscur_scene::path::Path;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::ComputedValue;
 use obscur_style::property::{
-    layout_keyword, Length, LinearGradient, PropertyId, PropertyValue, StyleColor,
+    layout_keyword, BoxShadow, Length, LinearGradient, PropertyId, PropertyValue, StyleColor,
 };
 use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontResolver, FontSource,
@@ -461,6 +461,21 @@ impl SceneCoordinator {
             // balanced.
             let mut node_paint = DisplayListBuilder::new();
 
+            // CSS `box-shadow`: a **drop** shadow paints BEHIND the node's
+            // background (emitted first), an **inset** shadow ON TOP of it
+            // (emitted after the background fill, below). CSS paints the
+            // first-listed shadow on top, so each group is emitted in reverse
+            // order. The shadow color falls back to the computed `color`
+            // (`currentColor`) when the author omitted it. No `box-shadow` emits
+            // nothing — byte-for-byte identical to before.
+            let shadows = box_shadows_of(computed, node);
+            if let (Some(shadows), Some(layout_box)) = (shadows, boxes.get(&node)) {
+                let current = current_color_of(computed, node);
+                for shadow in shadows.iter().rev().filter(|s| !s.is_inset()) {
+                    emit_box_shadow(&mut node_paint, layout_box.bounds, radii, shadow, current);
+                }
+            }
+
             // The background fill brush: an authored `background-image` linear
             // gradient wins over `background-color` (the gradient paints over the
             // color), otherwise a non-transparent `background-color` fills solid.
@@ -486,6 +501,15 @@ impl SceneCoordinator {
                     } else {
                         node_paint.fill_rect(layout_box.bounds, brush);
                     }
+                }
+            }
+
+            // Inset shadows paint on top of the background (clipped to the box,
+            // approximated by the renderer), under the border and text.
+            if let (Some(shadows), Some(layout_box)) = (shadows, boxes.get(&node)) {
+                let current = current_color_of(computed, node);
+                for shadow in shadows.iter().rev().filter(|s| s.is_inset()) {
+                    emit_box_shadow(&mut node_paint, layout_box.bounds, radii, shadow, current);
                 }
             }
 
@@ -719,6 +743,46 @@ fn background_gradient_of(computed: &ComputedStyles, node: NodeId) -> Option<&Li
         .get(&node)
         .and_then(|style| style.get(PropertyId::BackgroundImage))
         .and_then(ComputedValue::as_linear_gradient)
+}
+
+/// Reads a node's computed `box-shadow` list, if present.
+///
+/// Returns [`None`] when the node has no computed style, no `box-shadow`
+/// property, or a non-shadow value — the common (unauthored) case, which emits
+/// no shadows. `box-shadow: none` is an **empty** list (also nothing to emit).
+fn box_shadows_of(computed: &ComputedStyles, node: NodeId) -> Option<&[BoxShadow]> {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::BoxShadow))
+        .and_then(ComputedValue::as_box_shadows)
+}
+
+/// Emits one [`BoxShadow`] as a scene
+/// [`DrawShadow`](obscur_scene::command::PaintCommand::DrawShadow) over the border
+/// box `bounds` with corner `radii` (spec §5.2).
+///
+/// The shadow's lengths are resolved to logical pixels (only absolute `px` is
+/// honored, mirroring [`border_width_of`]); its color falls back to `current` (the
+/// node's computed `color`, i.e. CSS `currentColor`) when the author omitted it.
+/// The renderer applies the offset / spread / blur when it rasterizes.
+fn emit_box_shadow(
+    builder: &mut DisplayListBuilder,
+    bounds: Rect,
+    radii: CornerRadii,
+    shadow: &BoxShadow,
+    current: StyleColor,
+) {
+    let px = |length: Length| length.as_px().map_or(0.0, |px| px.0);
+    let color = scene_color_from(shadow.color().unwrap_or(current));
+    builder.draw_shadow(
+        bounds,
+        radii,
+        color,
+        px(shadow.blur()),
+        px(shadow.spread()),
+        (px(shadow.offset_x()), px(shadow.offset_y())),
+        shadow.is_inset(),
+    );
 }
 
 /// Builds a scene [`SceneLinearGradient`] fill brush for a style
@@ -1120,6 +1184,110 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Collects the `DrawShadow` commands in a display list, in paint order.
+    fn shadow_commands(list: &DisplayList) -> Vec<&PaintCommand> {
+        list.commands()
+            .iter()
+            .filter(|c| matches!(c, PaintCommand::DrawShadow { .. }))
+            .collect()
+    }
+
+    /// A `ComputedStyle` carrying a `background-color` and a `box-shadow` list.
+    fn with_background_and_shadow(bg: StyleColor, shadows: Vec<BoxShadow>) -> ComputedStyle {
+        let mut style = ComputedStyle::new();
+        style.set(PropertyId::BackgroundColor, ComputedValue::color(bg));
+        style.set(
+            PropertyId::BoxShadow,
+            ComputedValue::from_concrete(PropertyValue::BoxShadow(shadows.into_boxed_slice()))
+                .expect("a box-shadow list is a concrete computed value"),
+        );
+        style
+    }
+
+    #[test]
+    fn box_shadow_emits_draw_shadow_behind_background() {
+        // A node with `box-shadow: 4px 4px 8px black` over its background.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let shadow = BoxShadow::new(
+            Length::px(4.0),
+            Length::px(4.0),
+            Length::px(8.0),
+            Length::px(0.0),
+            Some(StyleColor::BLACK),
+            false,
+        );
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(
+            a,
+            with_background_and_shadow(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), vec![shadow]),
+        );
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 20.0, 10.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+
+        // Exactly one DrawShadow, carrying the authored params.
+        let shadows = shadow_commands(&list);
+        assert_eq!(shadows.len(), 1);
+        let PaintCommand::DrawShadow {
+            rect,
+            color,
+            blur,
+            spread,
+            offset,
+            inset,
+            ..
+        } = shadows[0]
+        else {
+            panic!("expected a DrawShadow");
+        };
+        assert_eq!(*rect, Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 10.0)));
+        assert_eq!(*color, obscur_scene::color::Color::BLACK);
+        assert_eq!(*blur, 8.0);
+        assert_eq!(*spread, 0.0);
+        assert_eq!(*offset, (4.0, 4.0));
+        assert!(!*inset);
+
+        // The shadow paints BEFORE (behind) the background fill.
+        let shadow_pos = list
+            .commands()
+            .iter()
+            .position(|c| matches!(c, PaintCommand::DrawShadow { .. }))
+            .expect("shadow present");
+        let fill_pos = list
+            .commands()
+            .iter()
+            .position(|c| matches!(c, PaintCommand::DrawPath { .. }))
+            .expect("background present");
+        assert!(shadow_pos < fill_pos, "drop shadow paints behind the background");
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn no_box_shadow_emits_no_draw_shadow() {
+        // Regression: a node with a background but no `box-shadow` emits no shadow.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(a, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes);
+        assert!(shadow_commands(&list).is_empty());
     }
 
     /// A `ComputedStyle` with a `background-color`, `position: absolute`, and an

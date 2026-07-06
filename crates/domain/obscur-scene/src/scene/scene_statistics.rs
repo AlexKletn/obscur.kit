@@ -69,7 +69,8 @@ impl SceneStatistics {
     ///
     /// `command_count` is the total command count; `draw_count`, `layer_count`,
     /// and `clip_count` count the drawing leaf commands
-    /// ([`PaintCommand::DrawPath`] and [`PaintCommand::DrawText`]),
+    /// ([`PaintCommand::DrawPath`], [`PaintCommand::DrawText`], and
+    /// [`PaintCommand::DrawShadow`]),
     /// [`PaintCommand::PushLayer`], and [`PaintCommand::PushClip`] respectively.
     /// Pops are counted only towards `command_count`.
     #[must_use]
@@ -77,7 +78,9 @@ impl SceneStatistics {
         let mut stats = Self::new(list.len(), 0, 0, 0);
         for command in list {
             match command {
-                PaintCommand::DrawPath { .. } | PaintCommand::DrawText { .. } => {
+                PaintCommand::DrawPath { .. }
+                | PaintCommand::DrawText { .. }
+                | PaintCommand::DrawShadow { .. } => {
                     stats.draw_count += 1;
                 }
                 PaintCommand::PushLayer(_) => stats.layer_count += 1,

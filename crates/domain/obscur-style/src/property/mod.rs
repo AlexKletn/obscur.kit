@@ -1,4 +1,6 @@
 //! Property module.
+mod box_shadow;
+pub use box_shadow::BoxShadow;
 mod custom_property;
 pub use custom_property::CustomProperty;
 mod gradient_stop;

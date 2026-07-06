@@ -1,8 +1,9 @@
 //! An incremental builder for [`DisplayList`]s.
 
-use obscur_geometry::{Point, Rect};
+use obscur_geometry::{CornerRadii, Point, Rect};
 
 use crate::clip::Clip;
+use crate::color::Color;
 use crate::layer::SceneLayer;
 use crate::paint::{Brush, Paint, Stroke};
 use crate::path::Path;
@@ -68,6 +69,33 @@ impl DisplayListBuilder {
     /// `obscur-text` domain. Returns `&mut Self` for chaining.
     pub fn draw_text(&mut self, origin: Point, run: GlyphRun, brush: Brush) -> &mut Self {
         self.commands.push(PaintCommand::DrawText { origin, run, brush });
+        self
+    }
+
+    /// Appends a [`PaintCommand::DrawShadow`] painting a CSS `box-shadow` for the
+    /// border box `rect` with corner `radii`, the resolved `color`, blur radius
+    /// `blur`, `spread`, `offset`, and the `inset` flag. This is a leaf command
+    /// (no nesting effect). Returns `&mut Self` for chaining.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_shadow(
+        &mut self,
+        rect: Rect,
+        radii: CornerRadii,
+        color: Color,
+        blur: f32,
+        spread: f32,
+        offset: (f32, f32),
+        inset: bool,
+    ) -> &mut Self {
+        self.commands.push(PaintCommand::DrawShadow {
+            rect,
+            radii,
+            color,
+            blur,
+            spread,
+            offset,
+            inset,
+        });
         self
     }
 
@@ -258,6 +286,37 @@ mod tests {
             }
         );
         // A list containing DrawText is still balanced (it is a leaf).
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn draw_shadow_appends_a_balanced_leaf_shadow() {
+        let mut builder = DisplayListBuilder::new();
+        builder.draw_shadow(
+            rect(),
+            CornerRadii::uniform(3.0),
+            Color::BLACK,
+            6.0,
+            1.0,
+            (2.0, 4.0),
+            false,
+        );
+        assert!(builder.is_balanced());
+        let list = builder.build();
+        assert_eq!(list.len(), 1);
+        assert_eq!(
+            list.commands()[0],
+            PaintCommand::DrawShadow {
+                rect: rect(),
+                radii: CornerRadii::uniform(3.0),
+                color: Color::BLACK,
+                blur: 6.0,
+                spread: 1.0,
+                offset: (2.0, 4.0),
+                inset: false,
+            }
+        );
+        // A DrawShadow is a leaf, so the list stays balanced.
         assert!(list.is_balanced());
     }
 }

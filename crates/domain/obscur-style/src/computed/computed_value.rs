@@ -8,7 +8,7 @@
 //! resolution. Only concrete leaf values (keyword / length / number / color)
 //! remain.
 
-use crate::property::{Length, LengthExpr, LinearGradient, PropertyValue, StyleColor};
+use crate::property::{BoxShadow, Length, LengthExpr, LinearGradient, PropertyValue, StyleColor};
 use obscur_identity::InternedSymbol;
 
 /// A fully-resolved, concrete computed value for a single property.
@@ -43,6 +43,7 @@ impl ComputedValue {
             | PropertyValue::Number(_)
             | PropertyValue::Color(_)
             | PropertyValue::LinearGradient(_)
+            | PropertyValue::BoxShadow(_)
             | PropertyValue::FontFamilies(_)
             | PropertyValue::GridTracks(_)
             | PropertyValue::GridLine(_)
@@ -114,6 +115,12 @@ impl ComputedValue {
     #[must_use]
     pub const fn as_calc(&self) -> Option<&LengthExpr> {
         self.0.as_calc()
+    }
+
+    /// Returns the `box-shadow` list if this computed value is a `box-shadow`.
+    #[must_use]
+    pub fn as_box_shadows(&self) -> Option<&[BoxShadow]> {
+        self.0.as_box_shadows()
     }
 }
 

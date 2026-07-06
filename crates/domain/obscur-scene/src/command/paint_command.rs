@@ -1,6 +1,9 @@
 //! A single entry in a [`DisplayList`](crate::command::DisplayList).
 
+use obscur_geometry::{CornerRadii, Rect};
+
 use crate::clip::Clip;
+use crate::color::Color;
 use crate::layer::SceneLayer;
 use crate::paint::Paint;
 use crate::path::Path;
@@ -49,6 +52,37 @@ pub enum PaintCommand {
         /// The brush the glyphs are painted with.
         brush: crate::paint::Brush,
     },
+    /// Paint a CSS `box-shadow` (spec §5.2). A LEAF command (no nesting effect).
+    ///
+    /// The shadow is a gaussian-blurred rounded rectangle derived from the box's
+    /// border box `rect` and corner `radii`: it is translated by `offset`,
+    /// inflated (a **drop** shadow, `inset = false`) or deflated (an **inset**
+    /// shadow, `inset = true`) by `spread`, and blurred by `blur` (the CSS blur
+    /// *radius*, which each renderer maps to a gaussian standard deviation).
+    ///
+    /// The coordinator emits a drop shadow **before** (behind) the box's
+    /// background and an inset shadow **after** it; the renderer decides the
+    /// geometry from these fields so both backends consume identical parameters
+    /// and only rasterization differs. `color` is already resolved (the CSS
+    /// `currentColor` default having been substituted by the coordinator).
+    DrawShadow {
+        /// The box's border-box rectangle, before offset / spread are applied.
+        rect: Rect,
+        /// The border box's per-corner radii (all zero for a square box).
+        radii: CornerRadii,
+        /// The (already resolved) shadow color.
+        color: Color,
+        /// The CSS blur *radius* in logical pixels (`0` = a hard edge).
+        blur: f32,
+        /// The spread distance in logical pixels: a drop shadow grows by this,
+        /// an inset shadow shrinks by it.
+        spread: f32,
+        /// The shadow's `(x, y)` offset from the box, in logical pixels.
+        offset: (f32, f32),
+        /// Whether this is an **inset** shadow (painted inside the box) rather
+        /// than a drop shadow (painted behind it).
+        inset: bool,
+    },
     /// Push a clip onto the clip stack. Subsequent drawing is confined to the
     /// clip until the matching [`PaintCommand::PopClip`].
     PushClip(Clip),
@@ -88,7 +122,7 @@ impl PaintCommand {
         match self {
             Self::PushClip(_) | Self::PushLayer(_) => 1,
             Self::PopClip | Self::PopLayer => -1,
-            Self::DrawPath { .. } | Self::DrawText { .. } => 0,
+            Self::DrawPath { .. } | Self::DrawText { .. } | Self::DrawShadow { .. } => 0,
         }
     }
 }
@@ -154,5 +188,21 @@ mod tests {
         assert_eq!(text.nesting_delta(), 0);
         assert!(!text.is_push());
         assert!(!text.is_pop());
+    }
+
+    #[test]
+    fn draw_shadow_is_a_leaf() {
+        let shadow = PaintCommand::DrawShadow {
+            rect: Rect::new(Point::new(1.0, 2.0), Size::new(10.0, 20.0)),
+            radii: CornerRadii::uniform(4.0),
+            color: Color::BLACK,
+            blur: 8.0,
+            spread: 0.0,
+            offset: (4.0, 4.0),
+            inset: false,
+        };
+        assert_eq!(shadow.nesting_delta(), 0);
+        assert!(!shadow.is_push());
+        assert!(!shadow.is_pop());
     }
 }
