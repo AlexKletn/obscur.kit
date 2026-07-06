@@ -3,6 +3,10 @@ mod ui_runtime;
 
 pub use ui_runtime::UiRuntime;
 
+mod text_edit_session;
+
+pub(crate) use text_edit_session::TextEditSession;
+
 mod pointer_dispatch;
 
 pub use pointer_dispatch::PointerDispatch;

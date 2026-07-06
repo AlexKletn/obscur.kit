@@ -140,8 +140,8 @@ impl Input {
     /// Derives the semantic view: a [`COMPONENT_ID`] element carrying the role,
     /// disabled state, current value, and placeholder as properties, plus two
     /// event bindings to `command`: a per-keystroke [`EVENT_INPUT`] (each typed
-    /// character / `Backspace` delivers a
-    /// [`TextEdit`](obscur_interaction::command::TextEdit) to the app) and a
+    /// character / `Backspace` drives the runtime's editing session, which
+    /// delivers the resulting field text to the app) and a
     /// commit-on-blur/Enter [`EVENT_CHANGE`]. An input has no child structure —
     /// its text is carried as the value property, not a text node.
     ///
