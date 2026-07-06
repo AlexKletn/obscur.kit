@@ -225,6 +225,25 @@ pub struct UiRuntime {
     /// path, so a host (and the wiring tests) can observe that background work
     /// made progress even under a stream of higher-priority frames.
     serviced_background: u64,
+    /// The host-installed view **builder** — the keystone of the reactive
+    /// re-render loop (spec §3.1). When set (via
+    /// [`set_root_view`](Self::set_root_view)), the reactive frame path
+    /// [`run_due_frame_reactive`](Self::run_due_frame_reactive) calls it each due
+    /// frame to *rebuild* the desired [`View`] from whatever application state a
+    /// command handler just mutated, closing the loop
+    /// click → handler mutates state → `request_frame` → rebuild → reconcile →
+    /// paint. It is a `FnMut() -> View` that typically captures the same
+    /// `Rc<RefCell<_>>`/`Rc<Cell<_>>` app state the command handlers do, so the
+    /// view it produces reflects the latest state. `None` until installed, in
+    /// which case the reactive path is a no-op — the explicit
+    /// [`run_frame`](Self::run_frame)/[`run_due_frame`](Self::run_due_frame)
+    /// callers that pass a `&View` directly are entirely unaffected.
+    root_view: Option<Box<dyn FnMut() -> View>>,
+    /// The stylesheets the reactive frame path matches against the rebuilt view
+    /// (installed via [`set_stylesheets`](Self::set_stylesheets)), parallel to the
+    /// held [`root_view`](Self::root_view). Empty by default; the explicit
+    /// `&[Stylesheet]`-taking render paths ignore this field.
+    stylesheets: Vec<Stylesheet>,
 }
 
 impl UiRuntime {
@@ -270,6 +289,8 @@ impl UiRuntime {
             budget: FrameBudget::unbounded(),
             background_work: 0,
             serviced_background: 0,
+            root_view: None,
+            stylesheets: Vec::new(),
         }
     }
 
@@ -514,6 +535,99 @@ impl UiRuntime {
         let request = self.scheduler.next_frame()?;
         let ctx = FrameContext::new(self.next_frame, request.reason(), self.viewport);
         Some(self.run_frame(ctx, desired, sheets))
+    }
+
+    /// Installs the runtime-held **view builder** that closes the reactive
+    /// re-render loop (spec §3.1), replacing any previously installed builder.
+    ///
+    /// Once installed, [`run_due_frame_reactive`](Self::run_due_frame_reactive)
+    /// calls `builder` each due frame to *rebuild* the desired [`View`] from
+    /// current application state — so a command handler that mutates app state (via
+    /// a captured `Rc<RefCell<_>>`/`Rc<Cell<_>>`) and requests a frame produces a
+    /// freshly-built, reconciled view on the next due frame with **no** view passed
+    /// in by the caller. `builder` typically captures the *same* state the
+    /// [`on_command`](Self::on_command) handlers mutate.
+    ///
+    /// This is additive: the explicit
+    /// [`run_frame`](Self::run_frame)/[`run_due_frame`](Self::run_due_frame)/[`render_now`](Self::render_now)
+    /// paths that take a `&View` are unaffected, and with no builder installed the
+    /// reactive path is a no-op.
+    pub fn set_root_view(&mut self, builder: impl FnMut() -> View + 'static) {
+        self.root_view = Some(Box::new(builder));
+    }
+
+    /// Returns whether a reactive view builder has been installed via
+    /// [`set_root_view`](Self::set_root_view).
+    #[must_use]
+    pub fn has_root_view(&self) -> bool {
+        self.root_view.is_some()
+    }
+
+    /// Installs the stylesheets the reactive frame path
+    /// ([`run_due_frame_reactive`](Self::run_due_frame_reactive)) matches against
+    /// the rebuilt view, replacing any previously installed set.
+    ///
+    /// Parallel to [`set_root_view`](Self::set_root_view); the explicit
+    /// `&[Stylesheet]`-taking render paths ignore these held sheets.
+    pub fn set_stylesheets(&mut self, sheets: Vec<Stylesheet>) {
+        self.stylesheets = sheets;
+    }
+
+    /// Runs **one** reactive frame if the scheduler has a request pending: it calls
+    /// the runtime-held [`root_view`](Self::set_root_view) builder to REBUILD the
+    /// desired [`View`] from current application state, then runs the full
+    /// deterministic core (reconcile → style → layout → compose) over it with the
+    /// held [`stylesheets`](Self::set_stylesheets). Returns the [`FrameResult`], or
+    /// [`None`] when no builder is installed or nothing is due.
+    ///
+    /// This is the keystone that closes the event loop: a pointer click runs a
+    /// registered command handler, the handler mutates app state and requests a
+    /// frame, and *this* method — on the next due frame — rebuilds the view from
+    /// that mutated state and reconciles it into the retained tree, so the paint
+    /// reflects the new state. Unlike [`run_due_frame`](Self::run_due_frame), the
+    /// caller passes no view: the builder is the single source of truth.
+    ///
+    /// A reactive frame is always classified as a **structural**
+    /// [`FrameReason::UiCommit`] regardless of which coalesced request the
+    /// scheduler drained, because the builder may have produced a *different* tree
+    /// from the mutated state and that change must be reconciled — an `Input`
+    /// (hover/focus) or `Animation` reason would skip the reconcile phase and never
+    /// pick up the rebuilt view. Reconcile is an idempotent no-op when the rebuilt
+    /// view is structurally unchanged, so a hover-only reactive frame still costs
+    /// only the (cheap) diff.
+    ///
+    /// Borrow handling: the builder is a `&mut` field and the render is `&mut
+    /// self`, so the builder and the held stylesheets are *taken out* for the
+    /// duration of the render and restored afterward, keeping the `FnMut` call and
+    /// the `run_frame` borrow disjoint.
+    pub fn run_due_frame_reactive(&mut self) -> Option<FrameResult> {
+        // No builder installed: the reactive path is a no-op and leaves any
+        // pending request untouched (a `&View`-taking caller can still drain it).
+        self.root_view.as_ref()?;
+        // Starvation prevention (§3.6), identical to `run_due_frame`.
+        if self.scheduler.background_starved() {
+            self.service_background_unit();
+        }
+        // Nothing due: no side effects, no rebuild.
+        self.scheduler.next_frame()?;
+
+        // Take the builder and the held stylesheets out so the `FnMut` call and
+        // the `&mut self` render below do not overlap the `&mut`/`&` field borrows;
+        // both are restored before returning. `take()` yields `Some` here (the
+        // builder was just observed present, and nothing above removes it).
+        let mut builder = self.root_view.take()?;
+        let view = builder();
+        let sheets = std::mem::take(&mut self.stylesheets);
+
+        // A reactive frame rebuilt the view from current state, so it is a UI
+        // transaction commit: classify it structurally so the rebuilt view is
+        // reconciled into the tree (see the doc comment).
+        let ctx = FrameContext::new(self.next_frame, FrameReason::UiCommit, self.viewport);
+        let result = self.run_frame(ctx, &view, &sheets);
+
+        self.stylesheets = sheets;
+        self.root_view = Some(builder);
+        Some(result)
     }
 
     /// Force-renders one frame **ignoring the scheduler**, returning its
@@ -2733,6 +2847,165 @@ mod tests {
             "dispatching the click requested a re-render frame"
         );
         assert_eq!(counter.get(), 1);
+    }
+
+    // ---- Phase 2 step 3: the reactive re-render loop (held view builder) -----
+
+    /// App-owned increment command the reactive counter binds and registers.
+    const CMD_INC: InternedSymbol = InternedSymbol::from_raw(0x1C0);
+
+    /// A reactive counter view: a `panel` (100x100) holding a single `b`
+    /// (100x50, at y∈[0,50)) that binds `on-click → CMD_INC` and contains a text
+    /// node showing `count`. A click anywhere in `b` (e.g. `(50, 25)`) fires the
+    /// increment command; the text node is what the assertions read back.
+    fn counter_reactive_view(count: i32) -> View {
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(300))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+                .with_children(ViewFragment::from_nodes(vec![
+                    ViewNode::element(ComponentId::from_raw(301))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("b".into())))
+                        .with_event(ViewEventBinding::new(EVENT_CLICK, CMD_INC))
+                        .with_children(ViewFragment::from_nodes(vec![ViewNode::text(
+                            count.to_string(),
+                        )])),
+                ])),
+        ]))
+    }
+
+    /// Returns the content of the first text node in the retained tree — the
+    /// rendered counter value the reactive loop rebuilt.
+    fn tree_text(runtime: &UiRuntime) -> String {
+        runtime
+            .tree()
+            .iter()
+            .find_map(|(_, node)| node.kind().text().map(str::to_owned))
+            .expect("the retained tree has a text node after a frame")
+    }
+
+    #[test]
+    fn reactive_loop_rebuilds_view_on_click_end_to_end() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+
+        // The counter state shared between the click handler (which mutates it)
+        // and the view builder (which reads it) — an `Rc<Cell<i32>>`.
+        let count = Rc::new(Cell::new(0));
+        {
+            let c = count.clone();
+            runtime.on_command(CMD_INC, move || c.set(c.get() + 1));
+        }
+        {
+            let c = count.clone();
+            runtime.set_root_view(move || counter_reactive_view(c.get()));
+        }
+        runtime.set_stylesheets(vec![interaction_sheet()]);
+
+        // First reactive frame: schedule one, run it, the tree shows "0".
+        runtime.request_frame(FrameReason::UiCommit);
+        let first = runtime
+            .run_due_frame_reactive()
+            .expect("the first reactive frame is due");
+        assert!(first.reconciled(), "the first reactive frame reconciles");
+        assert_eq!(tree_text(&runtime), "0", "the counter starts at 0");
+
+        // Click on `b` (50, 25): Down then Up on the same node dispatches the
+        // increment command, which bumps the state and requests a frame.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let up = runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 25.0));
+        assert_eq!(up.command(), Some(CMD_INC), "the click fired the increment");
+        assert_eq!(count.get(), 1, "the handler mutated the shared state");
+        assert!(runtime.has_pending_frame(), "the click requested a frame");
+
+        // Second reactive frame: the builder REBUILDS from the mutated state, so
+        // the reconciled tree now shows "1" — proving click→state→re-render.
+        runtime
+            .run_due_frame_reactive()
+            .expect("the click-requested reactive frame is due");
+        assert_eq!(tree_text(&runtime), "1", "the rebuilt view shows 1");
+
+        // A second click → the loop runs again → the tree shows "2".
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 25.0));
+        assert_eq!(count.get(), 2);
+        runtime
+            .run_due_frame_reactive()
+            .expect("the second click's reactive frame is due");
+        assert_eq!(tree_text(&runtime), "2", "the loop is repeatable");
+    }
+
+    #[test]
+    fn reactive_frame_re_renders_a_changed_builder_output() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        // Drive the builder's output directly (no click) to prove the reactive
+        // frame reflects whatever the builder returns each time it is called.
+        let value = Rc::new(Cell::new(7));
+        {
+            let v = value.clone();
+            runtime.set_root_view(move || counter_reactive_view(v.get()));
+        }
+        runtime.set_stylesheets(vec![interaction_sheet()]);
+
+        runtime.request_frame(FrameReason::UiCommit);
+        runtime.run_due_frame_reactive().expect("first frame due");
+        assert_eq!(tree_text(&runtime), "7");
+
+        // Mutate the state the builder reads, request another frame, run it: the
+        // rebuilt tree reflects the new value.
+        value.set(42);
+        runtime.request_frame(FrameReason::UiCommit);
+        runtime.run_due_frame_reactive().expect("second frame due");
+        assert_eq!(tree_text(&runtime), "42", "the builder's new output rendered");
+    }
+
+    #[test]
+    fn reactive_frame_with_no_builder_returns_none() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        assert!(!runtime.has_root_view());
+        // A frame is pending, but with no builder the reactive path is a no-op
+        // that returns None and leaves the pending request untouched.
+        runtime.request_frame(FrameReason::UiCommit);
+        assert!(runtime.run_due_frame_reactive().is_none());
+        assert!(
+            runtime.has_pending_frame(),
+            "the no-op reactive path did not drain the pending frame"
+        );
+    }
+
+    #[test]
+    fn reactive_frame_returns_none_when_nothing_is_due() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_root_view(|| counter_reactive_view(0));
+        runtime.set_stylesheets(vec![interaction_sheet()]);
+        // No frame requested → nothing due → None, no rebuild, no side effects.
+        assert!(!runtime.has_pending_frame());
+        assert!(runtime.run_due_frame_reactive().is_none());
+        assert!(runtime.tree().root().is_none(), "no frame ran");
+    }
+
+    #[test]
+    fn explicit_view_path_is_unaffected_by_an_installed_builder() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        // Install a builder that would render "99", then drive the EXPLICIT
+        // `&View` path with a different view: the explicit path must ignore the
+        // held builder entirely and render what it was handed.
+        runtime.set_root_view(|| counter_reactive_view(99));
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+
+        let result = runtime.render_now(&counter_reactive_view(3), sheets);
+        assert!(result.reconciled());
+        assert_eq!(
+            tree_text(&runtime),
+            "3",
+            "render_now rendered the passed view, not the builder's"
+        );
+
+        // The scheduler-gated `&View` path is likewise unaffected.
+        runtime.request_frame(FrameReason::UiCommit);
+        runtime
+            .run_due_frame(&counter_reactive_view(5), sheets)
+            .expect("frame due");
+        assert_eq!(tree_text(&runtime), "5", "run_due_frame used the passed view");
     }
 
     #[test]
