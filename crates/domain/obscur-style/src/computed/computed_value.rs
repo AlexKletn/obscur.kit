@@ -9,8 +9,8 @@
 //! remain.
 
 use crate::property::{
-    BoxShadow, Length, LengthExpr, LinearGradient, PropertyValue, StyleColor, Transform,
-    TransformOrigin,
+    BoxShadow, ConicGradient, Length, LengthExpr, LinearGradient, PropertyValue, RadialGradient,
+    StyleColor, Transform, TransformOrigin,
 };
 use obscur_identity::InternedSymbol;
 
@@ -46,6 +46,8 @@ impl ComputedValue {
             | PropertyValue::Number(_)
             | PropertyValue::Color(_)
             | PropertyValue::LinearGradient(_)
+            | PropertyValue::RadialGradient(_)
+            | PropertyValue::ConicGradient(_)
             | PropertyValue::BoxShadow(_)
             | PropertyValue::FontFamilies(_)
             | PropertyValue::GridTracks(_)
@@ -113,6 +115,18 @@ impl ComputedValue {
     #[must_use]
     pub const fn as_linear_gradient(&self) -> Option<&LinearGradient> {
         self.0.as_linear_gradient()
+    }
+
+    /// Returns the radial gradient if this computed value is a `radial-gradient`.
+    #[must_use]
+    pub const fn as_radial_gradient(&self) -> Option<&RadialGradient> {
+        self.0.as_radial_gradient()
+    }
+
+    /// Returns the conic gradient if this computed value is a `conic-gradient`.
+    #[must_use]
+    pub const fn as_conic_gradient(&self) -> Option<&ConicGradient> {
+        self.0.as_conic_gradient()
     }
 
     /// Returns the length expression if this computed value is a `calc()` /

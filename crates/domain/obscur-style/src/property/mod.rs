@@ -1,6 +1,8 @@
 //! Property module.
 mod box_shadow;
 pub use box_shadow::BoxShadow;
+mod conic_gradient;
+pub use conic_gradient::ConicGradient;
 mod custom_property;
 pub use custom_property::CustomProperty;
 mod gradient_stop;
@@ -32,6 +34,12 @@ mod property_id;
 pub use property_id::PropertyId;
 mod property_value;
 pub use property_value::PropertyValue;
+mod radial_gradient;
+pub use radial_gradient::RadialGradient;
+mod radial_shape;
+pub use radial_shape::RadialShape;
+mod radial_size;
+pub use radial_size::RadialSize;
 mod style_color;
 pub use style_color::StyleColor;
 mod transform;

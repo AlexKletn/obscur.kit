@@ -21,8 +21,8 @@
 //! [`LengthContext`](crate::property::LengthContext) (spec §4.5, §4.13).
 
 use crate::property::{
-    BoxShadow, GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length, LengthExpr,
-    LinearGradient, StyleColor, Transform, TransformOrigin,
+    BoxShadow, ConicGradient, GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length,
+    LengthExpr, LinearGradient, RadialGradient, StyleColor, Transform, TransformOrigin,
 };
 use obscur_identity::InternedSymbol;
 
@@ -53,6 +53,19 @@ pub enum PropertyValue {
     /// scene coordinator turns the angle plus the painted box's bounds into the
     /// concrete gradient axis when it builds the fill brush (spec §5.2).
     LinearGradient(LinearGradient),
+    /// A `radial-gradient(...)` background image (see [`RadialGradient`]): the
+    /// value of `background-image` when it is an authored radial gradient. The
+    /// gradient carries its box-relative shape / size / center and resolved color
+    /// stops; the scene coordinator turns those plus the painted box's bounds into
+    /// the concrete center and radius when it builds the fill brush (spec §5.2).
+    RadialGradient(RadialGradient),
+    /// A `conic-gradient(...)` background image (see [`ConicGradient`]): the value
+    /// of `background-image` when it is an authored conic gradient. The gradient
+    /// carries its starting angle (CSS convention), box-relative center, and
+    /// resolved color stops; the scene coordinator turns those plus the painted
+    /// box's bounds into the concrete center and sweep start angle when it builds
+    /// the fill brush (spec §5.2).
+    ConicGradient(ConicGradient),
     /// An ordered `box-shadow` list, in author order: the value of `box-shadow`.
     /// Each [`BoxShadow`] carries its offsets, blur, spread, optional color, and
     /// `inset` flag; `box-shadow: none` lowers to an **empty** list. CSS paints
@@ -135,6 +148,26 @@ impl PropertyValue {
     pub const fn as_linear_gradient(&self) -> Option<&LinearGradient> {
         match self {
             Self::LinearGradient(gradient) => Some(gradient),
+            _ => None,
+        }
+    }
+
+    /// Returns the radial gradient if this value is a
+    /// [`PropertyValue::RadialGradient`].
+    #[must_use]
+    pub const fn as_radial_gradient(&self) -> Option<&RadialGradient> {
+        match self {
+            Self::RadialGradient(gradient) => Some(gradient),
+            _ => None,
+        }
+    }
+
+    /// Returns the conic gradient if this value is a
+    /// [`PropertyValue::ConicGradient`].
+    #[must_use]
+    pub const fn as_conic_gradient(&self) -> Option<&ConicGradient> {
+        match self {
+            Self::ConicGradient(gradient) => Some(gradient),
             _ => None,
         }
     }
@@ -309,6 +342,43 @@ mod tests {
         let value = PropertyValue::LinearGradient(gradient.clone());
         assert_eq!(value.as_linear_gradient(), Some(&gradient));
         assert_eq!(PropertyValue::Number(1.0).as_linear_gradient(), None);
+    }
+
+    #[test]
+    fn as_radial_gradient_extracts_only_radial_gradients() {
+        use crate::property::{GradientStop, RadialGradient, RadialShape, RadialSize};
+        let gradient = RadialGradient::new(
+            RadialShape::Ellipse,
+            RadialSize::FarthestCorner,
+            Length::Percent(50.0),
+            Length::Percent(50.0),
+            vec![
+                GradientStop::new(StyleColor::BLACK, 0.0),
+                GradientStop::new(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 1.0),
+            ],
+        );
+        let value = PropertyValue::RadialGradient(gradient.clone());
+        assert_eq!(value.as_radial_gradient(), Some(&gradient));
+        assert_eq!(PropertyValue::Number(1.0).as_radial_gradient(), None);
+        assert_eq!(value.as_linear_gradient(), None);
+    }
+
+    #[test]
+    fn as_conic_gradient_extracts_only_conic_gradients() {
+        use crate::property::{ConicGradient, GradientStop};
+        let gradient = ConicGradient::new(
+            90.0,
+            Length::Percent(50.0),
+            Length::Percent(50.0),
+            vec![
+                GradientStop::new(StyleColor::BLACK, 0.0),
+                GradientStop::new(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 1.0),
+            ],
+        );
+        let value = PropertyValue::ConicGradient(gradient.clone());
+        assert_eq!(value.as_conic_gradient(), Some(&gradient));
+        assert_eq!(PropertyValue::Number(1.0).as_conic_gradient(), None);
+        assert_eq!(value.as_radial_gradient(), None);
     }
 
     #[test]

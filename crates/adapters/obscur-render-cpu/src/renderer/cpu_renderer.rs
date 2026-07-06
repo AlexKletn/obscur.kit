@@ -843,6 +843,28 @@ mod tests {
     use obscur_scene::scene::{SceneGeneration, SceneSnapshot};
     use obscur_scene::text::{GlyphRun, PositionedGlyph};
 
+    #[test]
+    fn radial_and_conic_brushes_flatten_to_first_stop() {
+        use obscur_scene::paint::{ConicGradient, GradientStop, RadialGradient};
+
+        let red = Color::rgba(1.0, 0.0, 0.0, 1.0);
+        let blue = Color::rgba(0.0, 0.0, 1.0, 1.0);
+        let stops = || {
+            vec![
+                GradientStop::new(0.0, red),
+                GradientStop::new(1.0, blue),
+            ]
+        };
+        // Both approximate to the first stop (red), per the effect-split policy.
+        let radial = Brush::Radial(RadialGradient::new(Point::new(5.0, 5.0), 10.0, stops()));
+        assert_eq!(brush_color(&radial), Some(red));
+        let conic = Brush::Conic(ConicGradient::new(Point::new(5.0, 5.0), 0.0, stops()));
+        assert_eq!(brush_color(&conic), Some(red));
+        // A stop-less gradient resolves to no color (the command is skipped).
+        let empty = Brush::Radial(RadialGradient::new(Point::ORIGIN, 1.0, Vec::new()));
+        assert_eq!(brush_color(&empty), None);
+    }
+
     /// Builds a hermetic sfnt (1000 upem, 2 glyphs) whose glyph 1 is a real
     /// filled square contour spanning font units `x∈[100,900]`, `y∈[0,700]`;
     /// glyph 0 is the empty `.notdef`. Unlike the harfrust adapter's test font

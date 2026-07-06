@@ -166,6 +166,46 @@ mod tests {
     }
 
     #[test]
+    fn radial_gradient_maps_to_peniko_gradient() {
+        use obscur_scene::paint::RadialGradient;
+        let g = RadialGradient::new(
+            Point::new(50.0, 25.0),
+            40.0,
+            vec![
+                GradientStop::new(0.0, Color::rgba(1.0, 0.0, 0.0, 1.0)),
+                GradientStop::new(1.0, Color::rgba(0.0, 0.0, 1.0, 1.0)),
+            ],
+        );
+        match BrushConverter::default().convert(&Brush::Radial(g)) {
+            peniko::Brush::Gradient(gradient) => {
+                assert_eq!(gradient.stops.len(), 2);
+                assert!(matches!(gradient.kind, peniko::GradientKind::Radial(_)));
+            }
+            other => panic!("expected Gradient, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn conic_gradient_maps_to_peniko_sweep() {
+        use obscur_scene::paint::ConicGradient;
+        let g = ConicGradient::new(
+            Point::new(50.0, 25.0),
+            0.0,
+            vec![
+                GradientStop::new(0.0, Color::rgba(1.0, 0.0, 0.0, 1.0)),
+                GradientStop::new(1.0, Color::rgba(0.0, 0.0, 1.0, 1.0)),
+            ],
+        );
+        match BrushConverter::default().convert(&Brush::Conic(g)) {
+            peniko::Brush::Gradient(gradient) => {
+                assert_eq!(gradient.stops.len(), 2);
+                assert!(matches!(gradient.kind, peniko::GradientKind::Sweep(_)));
+            }
+            other => panic!("expected Gradient, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn stroke_preserves_width_and_style() {
         let stroke = Stroke::new(Brush::solid(Color::BLACK), 3.5)
             .with_line_cap(LineCap::Round)

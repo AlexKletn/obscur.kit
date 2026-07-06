@@ -2,7 +2,8 @@
 
 The visual paint layer is now substantial and verified end-to-end (see
 `crates/facade/obscur-kit/tests/visual_css.rs`). Implemented: `background-color`,
-`background-image: linear-gradient(...)`, `border-{side}-{width,style,color}`
+`background-image: {linear,radial,conic}-gradient(...)`,
+`border-{side}-{width,style,color}`
 (painted), `border-radius` (rounded fill + clip), `box-shadow` (drop + inset),
 2D `transform` (translate/scale/rotate/skew/matrix + transform-origin), plus a
 named-color table. Rendering is real on the Vello backend and headless-
@@ -11,15 +12,22 @@ approximated on the CPU (tiny-skia) backend.
 The following are deferred. Each is documented at its site in code.
 
 ## Gradients & backgrounds
-- **radial-gradient / conic-gradient** — only `linear-gradient` is lowered; the
-  scene `Brush` already models radial/conic, so this is a CSS-lowering + endpoint
-  task.
 - **`background-image: url(...)`** — no image backgrounds. The decoder adapter
   (`obscur-resource-decode`, image/svg/font) exists; wiring a decoded image into
   a `Brush`/paint + the ResourceHub load is the work.
 - **Multiple background layers** — a comma list of backgrounds; only a single
   gradient/color is honored.
-- **Non-percentage (length) gradient stop positions** — stops take `%` only.
+- **Non-percentage (length) gradient stop positions** — stops take `%` only
+  (applies to linear / radial / conic alike).
+- **Radial/conic gradient fidelity** — `radial-gradient` and `conic-gradient` are
+  lowered and reach `Brush::Radial` / `Brush::Conic` (real on Vello, first-stop
+  flatten on CPU). Accepted subset: radial `[circle|ellipse]? [<extent-keyword> |
+  <length|%> radius]? [at <position>]?`; conic `[from <angle>]? [at <position>]?`.
+  An `ellipse` shape is collapsed to a single radius (the scene models a
+  concentric circle); a `%` radius is approximated against the box's smaller
+  half-extent; `at <position>` accepts the same keyword/`px`/`%` grammar as
+  `transform-origin`. Angular color hints and per-stop `<angle>` positions
+  (conic), and interpolation color spaces, are unsupported.
 - **Corner gradient directions** — `to top left` etc. use the 45° diagonal, not
   CSS's aspect-ratio-aware corner angle.
 
@@ -73,4 +81,4 @@ The following are deferred. Each is documented at its site in code.
 ---
 
 Ranked by likely value: `background-image: url()` > transformed hit-testing >
-radial-gradient > `outline` > the rest.
+`outline` > the rest.

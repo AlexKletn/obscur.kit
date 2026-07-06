@@ -11,14 +11,15 @@ use obscur_scene::color::Color;
 use obscur_scene::command::{DisplayList, DisplayListBuilder, PaintCommand};
 use obscur_scene::layer::SceneLayer;
 use obscur_scene::paint::{
-    Brush, GradientStop as SceneGradientStop, LinearGradient as SceneLinearGradient,
+    Brush, ConicGradient as SceneConicGradient, GradientStop as SceneGradientStop,
+    LinearGradient as SceneLinearGradient, RadialGradient as SceneRadialGradient,
 };
 use obscur_scene::path::Path;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{
-    layout_keyword, BoxShadow, Length, LinearGradient, PropertyId, PropertyValue, StyleColor,
-    Transform, TransformOrigin,
+    layout_keyword, BoxShadow, ConicGradient, Length, LinearGradient, PropertyId, PropertyValue,
+    RadialGradient, RadialSize, StyleColor, Transform, TransformOrigin,
 };
 use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontResolver, FontSource,
@@ -617,17 +618,16 @@ impl SceneCoordinator {
                 }
             }
 
-            // The background fill brush: an authored `background-image` linear
-            // gradient wins over `background-color` (the gradient paints over the
-            // color), otherwise a non-transparent `background-color` fills solid.
-            // With neither authored the block emits nothing — byte-for-byte
-            // identical to before backgrounds existed.
+            // The background fill brush: an authored `background-image` gradient
+            // (linear / radial / conic) wins over `background-color` (the gradient
+            // paints over the color), otherwise a non-transparent
+            // `background-color` fills solid. With neither authored the block emits
+            // nothing — byte-for-byte identical to before backgrounds existed.
             if let Some(layout_box) = boxes.get(&node) {
-                let brush = if let Some(gradient) = background_gradient_of(computed, node) {
-                    // A stop-less gradient (never produced by the CSS lowering, but
-                    // guarded here) paints nothing.
-                    (!gradient.stops().is_empty())
-                        .then(|| Brush::Linear(linear_gradient_brush(gradient, layout_box.bounds)))
+                let brush = if let Some(brush) =
+                    background_gradient_brush(computed, node, layout_box.bounds)
+                {
+                    Some(brush)
                 } else {
                     background_color_of(computed, node)
                         // Skip fully transparent backgrounds: they paint nothing.
@@ -1068,16 +1068,35 @@ fn background_color_of(computed: &ComputedStyles, node: NodeId) -> Option<StyleC
         .and_then(ComputedValue::as_color)
 }
 
-/// Reads a node's computed `background-image`, if present and a linear gradient.
+/// Builds the fill [`Brush`] for a node's computed `background-image` gradient
+/// (linear / radial / conic), resolved over the box `bounds`, or [`None`] when the
+/// node has no gradient background — the common (unauthored) case, which falls
+/// back to the solid `background-color` path.
 ///
-/// Returns [`None`] when the node has no computed style, no `background-image`
-/// property, or a non-gradient value for it — the common (unauthored) case, which
-/// falls back to the solid `background-color` path.
-fn background_gradient_of(computed: &ComputedStyles, node: NodeId) -> Option<&LinearGradient> {
-    computed
+/// A stop-less gradient (never produced by the CSS lowering, but guarded here)
+/// paints nothing. Exactly one of the three gradient kinds is present at a time
+/// (`background-image` holds a single computed value).
+fn background_gradient_brush(
+    computed: &ComputedStyles,
+    node: NodeId,
+    bounds: Rect,
+) -> Option<Brush> {
+    let value = computed
         .get(&node)
-        .and_then(|style| style.get(PropertyId::BackgroundImage))
-        .and_then(ComputedValue::as_linear_gradient)
+        .and_then(|style| style.get(PropertyId::BackgroundImage))?;
+    if let Some(gradient) = value.as_linear_gradient() {
+        return (!gradient.stops().is_empty())
+            .then(|| Brush::Linear(linear_gradient_brush(gradient, bounds)));
+    }
+    if let Some(gradient) = value.as_radial_gradient() {
+        return (!gradient.stops().is_empty())
+            .then(|| Brush::Radial(radial_gradient_brush(gradient, bounds)));
+    }
+    if let Some(gradient) = value.as_conic_gradient() {
+        return (!gradient.stops().is_empty())
+            .then(|| Brush::Conic(conic_gradient_brush(gradient, bounds)));
+    }
+    None
 }
 
 /// Reads a node's computed `box-shadow` list, if present.
@@ -1227,13 +1246,58 @@ fn linear_gradient_brush(gradient: &LinearGradient, bounds: Rect) -> SceneLinear
     let half_len = (w * sin).abs().mul_add(0.5, (h * cos).abs() * 0.5);
     let start = Point::new(cx - dir_x * half_len, cy - dir_y * half_len);
     let end = Point::new(cx + dir_x * half_len, cy + dir_y * half_len);
-    let stops = gradient
-        .stops()
+    SceneLinearGradient::new(start, end, gradient_stops(gradient.stops()))
+}
+
+/// Builds a scene [`SceneRadialGradient`] fill brush for a style
+/// [`RadialGradient`] over the box `bounds` (spec §5.2).
+///
+/// The box-relative center (`center_x` / `center_y`) resolves to an absolute point
+/// against the box; the ending [`RadialSize`] resolves to a single radius —
+/// `farthest-corner` (the default) is the maximum distance from the center to the
+/// four box corners, and the other extents / an explicit length follow suit (see
+/// [`resolve_radius`]). The scene models a concentric single-radius circle, so an
+/// `ellipse` shape is collapsed to that radius (a documented approximation). Each
+/// style stop's resolved `0.0..=1.0` position becomes the scene stop's offset; the
+/// brush keeps the default [`ExtendMode::Pad`](obscur_scene::paint::ExtendMode::Pad).
+fn radial_gradient_brush(gradient: &RadialGradient, bounds: Rect) -> SceneRadialGradient {
+    let cx = resolve_center(gradient.center_x(), bounds.origin.x, bounds.size.width);
+    let cy = resolve_center(gradient.center_y(), bounds.origin.y, bounds.size.height);
+    let radius = resolve_radius(gradient.size(), cx, cy, bounds);
+    SceneRadialGradient::new(Point::new(cx, cy), radius, gradient_stops(gradient.stops()))
+}
+
+/// Builds a scene [`SceneConicGradient`] fill brush for a style
+/// [`ConicGradient`] over the box `bounds` (spec §5.2).
+///
+/// The box-relative center resolves to an absolute point against the box. CSS's
+/// `from` angle is measured from *up* (12 o'clock) increasing clockwise, while the
+/// scene sweep's `0` offset lies along `+x` (3 o'clock) advancing clockwise in
+/// screen space (y down), so the start angle is `from − 90°` in radians. Each
+/// style stop's resolved `0.0..=1.0` position becomes the scene stop's offset; the
+/// brush keeps the default [`ExtendMode::Pad`](obscur_scene::paint::ExtendMode::Pad).
+fn conic_gradient_brush(gradient: &ConicGradient, bounds: Rect) -> SceneConicGradient {
+    let cx = resolve_center(gradient.center_x(), bounds.origin.x, bounds.size.width);
+    let cy = resolve_center(gradient.center_y(), bounds.origin.y, bounds.size.height);
+    let start_angle = (gradient.from_angle_deg() - 90.0).to_radians();
+    SceneConicGradient::new(
+        Point::new(cx, cy),
+        start_angle,
+        gradient_stops(gradient.stops()),
+    )
+}
+
+/// Maps a style gradient's color stops to scene [`SceneGradientStop`]s: each stop's
+/// resolved `0.0..=1.0` position becomes the scene offset and its [`StyleColor`]
+/// the scene paint color. An unpositioned stop (never produced by the CSS lowering,
+/// which resolves every position) falls back to its index-proportional offset.
+fn gradient_stops(stops: &[obscur_style::property::GradientStop]) -> Vec<SceneGradientStop> {
+    stops
         .iter()
         .enumerate()
         .map(|(index, stop)| {
             let offset = stop.position().unwrap_or_else(|| {
-                let last = gradient.stops().len().saturating_sub(1).max(1);
+                let last = stops.len().saturating_sub(1).max(1);
                 #[allow(clippy::cast_precision_loss)]
                 {
                     index as f32 / last as f32
@@ -1241,8 +1305,48 @@ fn linear_gradient_brush(gradient: &LinearGradient, bounds: Rect) -> SceneLinear
             });
             SceneGradientStop::new(offset, scene_color_from(stop.color()))
         })
-        .collect();
-    SceneLinearGradient::new(start, end, stops)
+        .collect()
+}
+
+/// Resolves a gradient's box-relative center [`Length`] on one axis to an absolute
+/// coordinate: an absolute `px` offset from `origin`, a `Percent` as a fraction of
+/// the axis `extent` from `origin`. Any other (context-dependent) length falls back
+/// to the axis center (a documented approximation).
+fn resolve_center(length: Length, origin: f32, extent: f32) -> f32 {
+    match length {
+        Length::Px(px) => origin + px.0,
+        Length::Percent(pct) => origin + pct / 100.0 * extent,
+        _ => origin + extent / 2.0,
+    }
+}
+
+/// Resolves a [`RadialGradient`] ending [`RadialSize`] to a single scene radius,
+/// given the gradient's absolute center `(cx, cy)` and the box `bounds`.
+///
+/// The extent keywords use the center's distances to the box sides (near/far per
+/// axis) and corners (hypotenuse of the per-axis distances). An explicit `px`
+/// length is used directly; a percentage radius resolves against the box's smaller
+/// half-extent (a documented approximation, since the scene models one radius);
+/// any other length falls back to `farthest-corner`.
+fn resolve_radius(size: RadialSize, cx: f32, cy: f32, bounds: Rect) -> f32 {
+    let (left, top, right, bottom) = (bounds.origin.x, bounds.origin.y, bounds.right(), bounds.bottom());
+    let dx_near = (cx - left).abs().min((right - cx).abs());
+    let dx_far = (cx - left).abs().max((right - cx).abs());
+    let dy_near = (cy - top).abs().min((bottom - cy).abs());
+    let dy_far = (cy - top).abs().max((bottom - cy).abs());
+    match size {
+        RadialSize::ClosestSide => dx_near.min(dy_near),
+        RadialSize::FarthestSide => dx_far.max(dy_far),
+        RadialSize::ClosestCorner => dx_near.hypot(dy_near),
+        RadialSize::FarthestCorner => dx_far.hypot(dy_far),
+        RadialSize::Length(len) => match len {
+            Length::Px(px) => px.0,
+            Length::Percent(pct) => {
+                pct / 100.0 * bounds.size.width.min(bounds.size.height) / 2.0
+            }
+            _ => dx_far.hypot(dy_far),
+        },
+    }
 }
 
 /// Computes the filled rectangles painting a node's border, in top/right/bottom/
@@ -1600,6 +1704,110 @@ mod tests {
         assert_eq!(g.stops()[0].color(), Color::rgba(1.0, 0.0, 0.0, 1.0));
         assert_eq!(g.stops()[1].offset(), 1.0);
         assert_eq!(g.stops()[1].color(), Color::rgba(0.0, 0.0, 1.0, 1.0));
+        assert!(list.is_balanced());
+    }
+
+    /// A `ComputedStyle` carrying a single `background-image` computed value.
+    fn with_background_image(value: PropertyValue) -> ComputedStyle {
+        let mut style = ComputedStyle::new();
+        style.set(
+            PropertyId::BackgroundImage,
+            ComputedValue::from_concrete(value).expect("a gradient is a concrete computed value"),
+        );
+        style
+    }
+
+    #[test]
+    fn radial_gradient_background_emits_radial_brush() {
+        use obscur_style::property::{
+            GradientStop as StyleStop, RadialGradient, RadialShape, RadialSize,
+        };
+
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        // `radial-gradient(circle farthest-corner at center, red, blue)`.
+        let gradient = RadialGradient::new(
+            RadialShape::Circle,
+            RadialSize::FarthestCorner,
+            Length::Percent(50.0),
+            Length::Percent(50.0),
+            vec![
+                StyleStop::new(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 0.0),
+                StyleStop::new(StyleColor::rgba(0.0, 0.0, 1.0, 1.0), 1.0),
+            ],
+        );
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(
+            a,
+            with_background_image(PropertyValue::RadialGradient(gradient)),
+        );
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 100.0, 50.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        let brushes = fill_brushes(&list);
+        assert_eq!(brushes.len(), 1, "one radial gradient fill");
+        let Brush::Radial(g) = &brushes[0] else {
+            panic!("expected a radial gradient brush, got {:?}", brushes[0]);
+        };
+        // Center at the box center; farthest-corner radius = distance to a corner.
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+        assert!(near(g.center().x, 50.0), "center x {:?}", g.center());
+        assert!(near(g.center().y, 25.0), "center y {:?}", g.center());
+        assert!(near(g.radius(), 50.0_f32.hypot(25.0)), "radius {}", g.radius());
+        assert_eq!(g.stops().len(), 2);
+        assert_eq!(g.stops()[0].color(), Color::rgba(1.0, 0.0, 0.0, 1.0));
+        assert_eq!(g.stops()[1].offset(), 1.0);
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn conic_gradient_background_emits_conic_brush() {
+        use obscur_style::property::{ConicGradient, GradientStop as StyleStop};
+
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        // `conic-gradient(from 90deg at center, red, blue)`.
+        let gradient = ConicGradient::new(
+            90.0,
+            Length::Percent(50.0),
+            Length::Percent(50.0),
+            vec![
+                StyleStop::new(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 0.0),
+                StyleStop::new(StyleColor::rgba(0.0, 0.0, 1.0, 1.0), 1.0),
+            ],
+        );
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(
+            a,
+            with_background_image(PropertyValue::ConicGradient(gradient)),
+        );
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 100.0, 50.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        let brushes = fill_brushes(&list);
+        assert_eq!(brushes.len(), 1, "one conic gradient fill");
+        let Brush::Conic(g) = &brushes[0] else {
+            panic!("expected a conic gradient brush, got {:?}", brushes[0]);
+        };
+        let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
+        assert!(near(g.center().x, 50.0), "center x {:?}", g.center());
+        assert!(near(g.center().y, 25.0), "center y {:?}", g.center());
+        // from 90deg → start_angle = (90 − 90)° = 0 rad (scene +x reference).
+        assert!(near(g.start_angle(), 0.0), "start_angle {}", g.start_angle());
+        assert_eq!(g.stops().len(), 2);
+        assert_eq!(g.stops()[0].color(), Color::rgba(1.0, 0.0, 0.0, 1.0));
         assert!(list.is_balanced());
     }
 

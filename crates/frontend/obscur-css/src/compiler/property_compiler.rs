@@ -24,9 +24,9 @@ use obscur_geometry::AffineTransform;
 use obscur_identity::InternedSymbol;
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{
-    layout_keyword, BoxShadow, CustomProperty, GradientStop, GridAreaTemplate, GridLineValue,
-    GridTrack, GridTrackList, Length, LinearGradient, PropertyId, PropertyValue, StyleColor,
-    Transform, TransformOrigin,
+    layout_keyword, BoxShadow, ConicGradient, CustomProperty, GradientStop, GridAreaTemplate,
+    GridLineValue, GridTrack, GridTrackList, Length, LinearGradient, PropertyId, PropertyValue,
+    RadialGradient, RadialShape, RadialSize, StyleColor, Transform, TransformOrigin,
 };
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
@@ -2237,16 +2237,23 @@ fn origin_component(value: &ParsedValue) -> Option<(Length, OriginAxis)> {
     }
 }
 
-/// Lowers a `background-image` value into a [`PropertyValue::LinearGradient`].
+/// Lowers a `background-image` value into a gradient property value.
 ///
-/// Only the `linear-gradient(...)` image form is modelled; `none`, `url(...)`,
-/// the radial / conic gradient functions, and multiple comma-separated images are
-/// out of scope and yield [`None`] (degrading to an unsupported-feature
-/// diagnostic).
+/// The `linear-gradient(...)`, `radial-gradient(...)`, and `conic-gradient(...)`
+/// image forms are modelled (into [`PropertyValue::LinearGradient`],
+/// [`PropertyValue::RadialGradient`], and [`PropertyValue::ConicGradient`]
+/// respectively); `none`, `url(...)`, and multiple comma-separated images are out
+/// of scope and yield [`None`] (degrading to an unsupported-feature diagnostic).
 fn lower_background_image(values: &[ParsedValue]) -> Option<PropertyValue> {
     match values {
         [ParsedValue::Function { name, args }] if name.eq_ignore_ascii_case("linear-gradient") => {
             lower_linear_gradient(args).map(PropertyValue::LinearGradient)
+        }
+        [ParsedValue::Function { name, args }] if name.eq_ignore_ascii_case("radial-gradient") => {
+            lower_radial_gradient(args).map(PropertyValue::RadialGradient)
+        }
+        [ParsedValue::Function { name, args }] if name.eq_ignore_ascii_case("conic-gradient") => {
+            lower_conic_gradient(args).map(PropertyValue::ConicGradient)
         }
         _ => None,
     }
@@ -2285,6 +2292,197 @@ fn lower_linear_gradient(args: &[ParsedValue]) -> Option<LinearGradient> {
     }
     resolve_stop_positions(&mut stops);
     Some(LinearGradient::new(angle, stops))
+}
+
+/// Lowers `radial-gradient( [<shape>? <size>? [at <position>]?]? , <color-stop>{2,} )`
+/// into a style-local [`RadialGradient`] (spec §5.2).
+///
+/// The optional leading argument is the gradient prelude: an ending shape
+/// (`circle` / `ellipse`, default `ellipse`), an ending size (one of the four
+/// extent keywords `closest-side` / `closest-corner` / `farthest-side` /
+/// `farthest-corner`, default `farthest-corner`, or an explicit `<length>` /
+/// `<percentage>` radius), and an `at <position>` center (default `50% 50%`). When
+/// the first comma part is not a prelude it is a color stop and the prelude
+/// defaults apply. At least two comma-separated `<color> [<percentage>]?` stops
+/// follow. Returns [`None`] (so the declaration degrades to an unsupported
+/// feature) for a malformed prelude, an unparseable stop, or fewer than two stops.
+fn lower_radial_gradient(args: &[ParsedValue]) -> Option<RadialGradient> {
+    let parts: Vec<&[ParsedValue]> = args.split(|v| matches!(v, ParsedValue::Comma)).collect();
+    if parts.is_empty() {
+        return None;
+    }
+    let center = Length::Percent(50.0);
+    let (shape, size, cx, cy, stop_parts) = match parse_radial_prelude(parts[0]) {
+        Some((shape, size, cx, cy)) => (shape, size, cx, cy, &parts[1..]),
+        None => (
+            RadialShape::default(),
+            RadialSize::default(),
+            center,
+            center,
+            &parts[..],
+        ),
+    };
+    if stop_parts.len() < 2 {
+        return None;
+    }
+    let mut stops: Vec<GradientStop> = Vec::with_capacity(stop_parts.len());
+    for part in stop_parts {
+        stops.push(parse_color_stop(part)?);
+    }
+    resolve_stop_positions(&mut stops);
+    Some(RadialGradient::new(shape, size, cx, cy, stops))
+}
+
+/// Parses the optional leading prelude of a `radial-gradient`: an ending shape,
+/// an ending size, and an `at <position>` center, in any order (`at` last).
+/// Returns [`None`] when the part contains no prelude token (so it is treated as
+/// the first color stop instead) **or** when it contains an unrecognised token (a
+/// malformed prelude, which drops the whole gradient once stop parsing then also
+/// fails).
+fn parse_radial_prelude(part: &[ParsedValue]) -> Option<(RadialShape, RadialSize, Length, Length)> {
+    let at_index = part.iter().position(
+        |v| matches!(v, ParsedValue::Keyword(k) if k.eq_ignore_ascii_case("at")),
+    );
+    let (dims, position): (&[ParsedValue], Option<&[ParsedValue]>) = match at_index {
+        Some(i) => (&part[..i], Some(&part[i + 1..])),
+        None => (part, None),
+    };
+    let mut shape: Option<RadialShape> = None;
+    let mut size: Option<RadialSize> = None;
+    let mut saw_any = position.is_some();
+    for token in dims {
+        match token {
+            ParsedValue::Keyword(keyword) => match keyword.to_ascii_lowercase().as_str() {
+                "circle" => shape = Some(RadialShape::Circle),
+                "ellipse" => shape = Some(RadialShape::Ellipse),
+                "closest-side" => size = Some(RadialSize::ClosestSide),
+                "closest-corner" => size = Some(RadialSize::ClosestCorner),
+                "farthest-side" => size = Some(RadialSize::FarthestSide),
+                "farthest-corner" => size = Some(RadialSize::FarthestCorner),
+                // Not a prelude keyword (e.g. a named color): treat as a stop.
+                _ => return None,
+            },
+            ParsedValue::Dimension { value, unit } => {
+                size = Some(RadialSize::Length(dimension_length(*value, unit)?));
+            }
+            ParsedValue::Percentage(p) => {
+                size = Some(RadialSize::Length(Length::Percent(narrow_f32(*p))));
+            }
+            ParsedValue::Number(n) if *n == 0.0 => {
+                size = Some(RadialSize::Length(Length::px(0.0)));
+            }
+            _ => return None,
+        }
+        saw_any = true;
+    }
+    if !saw_any {
+        return None;
+    }
+    let center = Length::Percent(50.0);
+    let (cx, cy) = match position {
+        Some(tokens) => parse_at_position(tokens)?,
+        None => (center, center),
+    };
+    Some((shape.unwrap_or_default(), size.unwrap_or_default(), cx, cy))
+}
+
+/// Lowers `conic-gradient( [[from <angle>]? [at <position>]?]? , <color-stop>{2,} )`
+/// into a style-local [`ConicGradient`] (spec §5.2).
+///
+/// The optional leading argument is the gradient prelude: a `from <angle>`
+/// starting angle (CSS convention: `0` = up, increasing clockwise, default `0`)
+/// and an `at <position>` center (default `50% 50%`). When the first comma part is
+/// not a prelude it is a color stop and the prelude defaults apply. At least two
+/// comma-separated `<color> [<percentage>]?` stops follow. Returns [`None`] for a
+/// malformed prelude, an unparseable stop, or fewer than two stops.
+fn lower_conic_gradient(args: &[ParsedValue]) -> Option<ConicGradient> {
+    let parts: Vec<&[ParsedValue]> = args.split(|v| matches!(v, ParsedValue::Comma)).collect();
+    if parts.is_empty() {
+        return None;
+    }
+    let center = Length::Percent(50.0);
+    let (angle, cx, cy, stop_parts) = match parse_conic_prelude(parts[0]) {
+        Some((angle, cx, cy)) => (angle, cx, cy, &parts[1..]),
+        None => (0.0, center, center, &parts[..]),
+    };
+    if stop_parts.len() < 2 {
+        return None;
+    }
+    let mut stops: Vec<GradientStop> = Vec::with_capacity(stop_parts.len());
+    for part in stop_parts {
+        stops.push(parse_color_stop(part)?);
+    }
+    resolve_stop_positions(&mut stops);
+    Some(ConicGradient::new(angle, cx, cy, stops))
+}
+
+/// Parses the optional leading prelude of a `conic-gradient`: an optional
+/// `from <angle>` followed by an optional `at <position>`. Returns [`None`] when
+/// the part carries neither `from` nor `at` (so it is treated as the first color
+/// stop) or when it is malformed (leftover tokens, bad angle/position).
+fn parse_conic_prelude(part: &[ParsedValue]) -> Option<(f32, Length, Length)> {
+    let center = Length::Percent(50.0);
+    let mut angle = 0.0_f32;
+    let mut saw_any = false;
+    let mut idx = 0;
+    // Optional `from <angle>`.
+    if let Some(ParsedValue::Keyword(keyword)) = part.first()
+        && keyword.eq_ignore_ascii_case("from")
+    {
+        angle = match part.get(1)? {
+            ParsedValue::Dimension { value, unit } => angle_to_degrees(*value, unit)?,
+            ParsedValue::Number(n) if *n == 0.0 => 0.0,
+            _ => return None,
+        };
+        idx = 2;
+        saw_any = true;
+    }
+    // Optional `at <position>` (consumes the remainder).
+    let (cx, cy) = if let Some(ParsedValue::Keyword(keyword)) = part.get(idx)
+        && keyword.eq_ignore_ascii_case("at")
+    {
+        saw_any = true;
+        parse_at_position(&part[idx + 1..])?
+    } else if idx == part.len() {
+        (center, center)
+    } else {
+        // Leftover tokens with no `at`: a malformed prelude.
+        return None;
+    };
+    if !saw_any {
+        return None;
+    }
+    Some((angle, cx, cy))
+}
+
+/// Parses a gradient `at <position>` list (the tokens after `at`) into a
+/// box-relative `(x, y)` center. Reuses the `transform-origin` component grammar:
+/// a one-token form sets the axis its keyword names (the other axis defaults to
+/// `50%`), a two-token `<x> <y>` form accepts the `top left`-style keyword order
+/// (a vertical-first / horizontal-second pair is swapped). Returns [`None`] for an
+/// empty, unparseable, or over-long list.
+fn parse_at_position(tokens: &[ParsedValue]) -> Option<(Length, Length)> {
+    let center = Length::Percent(50.0);
+    match tokens {
+        [a] => {
+            let (len, axis) = origin_component(a)?;
+            Some(match axis {
+                OriginAxis::Y => (center, len),
+                _ => (len, center),
+            })
+        }
+        [a, b] => {
+            let ac = origin_component(a)?;
+            let bc = origin_component(b)?;
+            let (x, y) = if ac.1 == OriginAxis::Y || bc.1 == OriginAxis::X {
+                (bc.0, ac.0)
+            } else {
+                (ac.0, bc.0)
+            };
+            Some((x, y))
+        }
+        _ => None,
+    }
 }
 
 /// Parses the optional leading direction argument of a `linear-gradient`: a single
@@ -2776,6 +2974,116 @@ mod tests {
             compile("background-image: linear-gradient(red)").0,
             CompiledDeclaration::Unsupported(_)
         ));
+    }
+
+    /// Extracts the lowered [`RadialGradient`] from a `background-image`
+    /// declaration.
+    fn radial_of(text: &str) -> RadialGradient {
+        match value_of(text) {
+            PropertyValue::RadialGradient(g) => g,
+            other => panic!("expected a radial gradient, got {other:?}"),
+        }
+    }
+
+    /// Extracts the lowered [`ConicGradient`] from a `background-image`
+    /// declaration.
+    fn conic_of(text: &str) -> ConicGradient {
+        match value_of(text) {
+            PropertyValue::ConicGradient(g) => g,
+            other => panic!("expected a conic gradient, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn radial_gradient_bare_two_stops_defaults() {
+        let g = radial_of("background-image: radial-gradient(red, blue)");
+        assert_eq!(g.shape(), RadialShape::Ellipse);
+        assert_eq!(g.size(), RadialSize::FarthestCorner);
+        assert_eq!(g.center_x(), Length::Percent(50.0));
+        assert_eq!(g.center_y(), Length::Percent(50.0));
+        assert_eq!(g.stops().len(), 2);
+        assert_eq!(g.stops()[0].color(), color(1.0, 0.0, 0.0));
+        assert_eq!(g.stops()[0].position(), Some(0.0));
+        assert_eq!(g.stops()[1].color(), color(0.0, 0.0, 1.0));
+        assert_eq!(g.stops()[1].position(), Some(1.0));
+    }
+
+    #[test]
+    fn radial_gradient_circle_at_position_with_explicit_stops() {
+        let g = radial_of(
+            "background-image: radial-gradient(circle at 30% 40%, red 0%, blue 100%)",
+        );
+        assert_eq!(g.shape(), RadialShape::Circle);
+        assert_eq!(g.center_x(), Length::Percent(30.0));
+        assert_eq!(g.center_y(), Length::Percent(40.0));
+        assert_eq!(g.stops().len(), 2);
+        assert_eq!(g.stops()[0].position(), Some(0.0));
+        assert_eq!(g.stops()[1].position(), Some(1.0));
+    }
+
+    #[test]
+    fn radial_gradient_extent_and_explicit_radius() {
+        let g = radial_of("background-image: radial-gradient(closest-side, red, blue)");
+        assert_eq!(g.size(), RadialSize::ClosestSide);
+        let g2 = radial_of("background-image: radial-gradient(40px at center, red, blue)");
+        assert_eq!(g2.size(), RadialSize::Length(Length::px(40.0)));
+        assert_eq!(g2.center_x(), Length::Percent(50.0));
+    }
+
+    #[test]
+    fn radial_gradient_malformed_is_unsupported() {
+        // A single stop and an unrecognised prelude token both drop.
+        assert!(matches!(
+            compile("background-image: radial-gradient(red)").0,
+            CompiledDeclaration::Unsupported(_)
+        ));
+        assert!(matches!(
+            compile("background-image: radial-gradient(bogus at center, red, blue)").0,
+            CompiledDeclaration::Unsupported(_)
+        ));
+    }
+
+    #[test]
+    fn conic_gradient_from_angle_at_center() {
+        let g = conic_of("background-image: conic-gradient(from 90deg at center, red, blue)");
+        assert_eq!(g.from_angle_deg(), 90.0);
+        assert_eq!(g.center_x(), Length::Percent(50.0));
+        assert_eq!(g.center_y(), Length::Percent(50.0));
+        assert_eq!(g.stops().len(), 2);
+        assert_eq!(g.stops()[0].color(), color(1.0, 0.0, 0.0));
+        assert_eq!(g.stops()[1].color(), color(0.0, 0.0, 1.0));
+    }
+
+    #[test]
+    fn conic_gradient_bare_two_stops_defaults() {
+        let g = conic_of("background-image: conic-gradient(red, blue)");
+        assert_eq!(g.from_angle_deg(), 0.0);
+        assert_eq!(g.center_x(), Length::Percent(50.0));
+        assert_eq!(g.stops().len(), 2);
+    }
+
+    #[test]
+    fn conic_gradient_malformed_is_unsupported() {
+        assert!(matches!(
+            compile("background-image: conic-gradient(red)").0,
+            CompiledDeclaration::Unsupported(_)
+        ));
+    }
+
+    #[test]
+    fn background_shorthand_maps_radial_and_conic_to_image() {
+        let radial = compile_all("background: radial-gradient(red, blue)");
+        let d = standard_of(&radial[0]);
+        assert_eq!(d.property(), PropertyId::BackgroundImage);
+        assert!(matches!(d.value(), PropertyValue::RadialGradient(_)));
+
+        let conic = compile_all("background: conic-gradient(from 45deg, red, blue)");
+        let d = standard_of(&conic[0]);
+        assert_eq!(d.property(), PropertyId::BackgroundImage);
+        match d.value() {
+            PropertyValue::ConicGradient(g) => assert_eq!(g.from_angle_deg(), 45.0),
+            other => panic!("expected a conic gradient, got {other:?}"),
+        }
     }
 
     #[test]

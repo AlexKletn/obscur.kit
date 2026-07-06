@@ -257,6 +257,95 @@ fn authored_linear_gradient_background_paints_gradient_fill() {
     assert!((g.end().y - cy).abs() < 1e-2);
 }
 
+// An authored `background: radial-gradient(...)` reaches paint through the real
+// pipeline: the element's background fill carries a *radial* gradient brush whose
+// center/radius are resolved against the arranged box (spec §5.2).
+#[test]
+fn authored_radial_gradient_background_paints_radial_fill() {
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(
+        ".box{width:100px;height:50px;background:radial-gradient(circle at center, red, blue)}",
+    );
+    let result = rt.render_now(&one_box_view(), std::slice::from_ref(&sheet));
+    assert!(result.restyled(), "authored CSS resolved computed styles");
+    assert!(result.relaid_out(), "the styled tree arranged a layout box");
+    assert!(result.is_balanced(), "the display list is well-formed");
+
+    let bounds = rt
+        .layout_boxes()
+        .get(&box_node(&rt))
+        .copied()
+        .expect("the box has a layout box")
+        .bounds;
+
+    let commands = result.snapshot().display_list().commands();
+    let radials: Vec<_> = commands
+        .iter()
+        .filter_map(|c| match c {
+            PaintCommand::DrawPath { paint, .. } => match paint.brush() {
+                Brush::Radial(g) => Some(g),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(radials.len(), 1, "one radial-gradient background fill");
+    let g = radials[0];
+    // The center resolves to the box center.
+    let cx = bounds.origin.x + bounds.size.width / 2.0;
+    let cy = bounds.origin.y + bounds.size.height / 2.0;
+    assert!((g.center().x - cx).abs() < 1e-2, "center x at box center");
+    assert!((g.center().y - cy).abs() < 1e-2, "center y at box center");
+    assert!(g.radius() > 0.0, "a positive resolved radius");
+    // The authored stops: red at 0.0, blue at 1.0.
+    assert_eq!(g.stops().len(), 2);
+    assert_eq!(g.stops()[0].color(), Color::rgba(1.0, 0.0, 0.0, 1.0));
+    assert_eq!(g.stops()[1].color(), Color::rgba(0.0, 0.0, 1.0, 1.0));
+}
+
+// An authored `background: conic-gradient(...)` reaches paint through the real
+// pipeline: the element's background fill carries a *conic* gradient brush whose
+// center is resolved against the arranged box (spec §5.2).
+#[test]
+fn authored_conic_gradient_background_paints_conic_fill() {
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(
+        ".box{width:100px;height:50px;background:conic-gradient(from 90deg at center, red, blue)}",
+    );
+    let result = rt.render_now(&one_box_view(), std::slice::from_ref(&sheet));
+    assert!(result.restyled(), "authored CSS resolved computed styles");
+    assert!(result.relaid_out(), "the styled tree arranged a layout box");
+    assert!(result.is_balanced(), "the display list is well-formed");
+
+    let bounds = rt
+        .layout_boxes()
+        .get(&box_node(&rt))
+        .copied()
+        .expect("the box has a layout box")
+        .bounds;
+
+    let commands = result.snapshot().display_list().commands();
+    let conics: Vec<_> = commands
+        .iter()
+        .filter_map(|c| match c {
+            PaintCommand::DrawPath { paint, .. } => match paint.brush() {
+                Brush::Conic(g) => Some(g),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    assert_eq!(conics.len(), 1, "one conic-gradient background fill");
+    let g = conics[0];
+    let cx = bounds.origin.x + bounds.size.width / 2.0;
+    let cy = bounds.origin.y + bounds.size.height / 2.0;
+    assert!((g.center().x - cx).abs() < 1e-2, "center x at box center");
+    assert!((g.center().y - cy).abs() < 1e-2, "center y at box center");
+    assert_eq!(g.stops().len(), 2);
+    assert_eq!(g.stops()[0].color(), Color::rgba(1.0, 0.0, 0.0, 1.0));
+    assert_eq!(g.stops()[1].color(), Color::rgba(0.0, 0.0, 1.0, 1.0));
+}
+
 // An authored `box-shadow: 4px 4px 8px black` reaches paint through the real
 // pipeline: the display list carries a `DrawShadow` with the authored offset,
 // blur, and color, painted BEFORE (behind) the element's background fill.
