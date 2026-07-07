@@ -96,9 +96,9 @@ obscur-system-linux = { workspace = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 obscur-system-web = { workspace = true }
 
-# Real platform backends for the `windowed_counter` example only. Versions match
-# the adapters the `full` feature re-exports (obscur-window-winit pins winit
-# 0.30; obscur-render-vello pins wgpu 29).
+# Real platform backends for the `windowed_counter` / `showcase_window` examples
+# only. Versions match the adapters the `full` feature re-exports
+# (obscur-window-winit pins winit 0.30; obscur-render-vello pins wgpu 29).
 [dev-dependencies]
 winit = "0.30"
 wgpu = "29"
@@ -115,6 +115,21 @@ required-features = ["full"]
 name = "showcase_png"
 required-features = [
     "render-cpu",
+    "resource-fs",
+    "resource-decode",
+    "text-harfrust",
+    "text-unicode",
+]
+
+# The windowed GPU capability showcase: the SAME shared scene as `showcase_png`,
+# rendered through winit + Vello at full effect fidelity and made interactive.
+# Needs the window + GPU adapters plus image loading/decode and the text stack,
+# so it is gated on the full backend set (a display/GPU are required at runtime).
+[[example]]
+name = "showcase_window"
+required-features = [
+    "render-vello",
+    "window-winit",
     "resource-fs",
     "resource-decode",
     "text-harfrust",
