@@ -662,15 +662,25 @@ impl LayoutAlgorithm for GridLayout {
         // `fr` distribution, and percentages all resolve against the authored size;
         // an `Auto` dimension falls back to the available content extent, which is
         // byte-identical to the previous fill-available behaviour.
+        // `box-sizing` governs how an explicit container size maps to the content
+        // extent the tracks size against: `content-box` (the default) takes it
+        // as-is, `border-box` subtracts the axis padding (floored at `0`). The
+        // `Auto` branch already subtracts padding, so both modes are consistent
+        // with the flex container — an explicitly-sized grid stays at its authored
+        // (border-box) size with no phantom inflation.
         let content_width = style
             .width
             .resolve(constraints.max.width)
-            .unwrap_or(constraints.max.width - pad_x)
+            .map_or(constraints.max.width - pad_x, |w| {
+                style.box_sizing.content_extent(w, pad_x)
+            })
             .max(0.0);
         let content_height = style
             .height
             .resolve(constraints.max.height)
-            .unwrap_or(constraints.max.height - pad_y)
+            .map_or(constraints.max.height - pad_y, |h| {
+                style.box_sizing.content_extent(h, pad_y)
+            })
             .max(0.0);
 
         // Expand each axis's track list into a concrete track vector against the

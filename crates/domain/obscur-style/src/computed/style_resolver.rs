@@ -76,6 +76,7 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     // Box model: sizing.
     PropertyId::Width,
     PropertyId::Height,
+    PropertyId::BoxSizing,
     PropertyId::MinWidth,
     PropertyId::MinHeight,
     PropertyId::MaxWidth,
@@ -316,6 +317,10 @@ impl StyleResolver {
             // Keyword initials need the interner; deferred to a later phase.
             | PropertyId::Display
             | PropertyId::Visibility
+            // `box-sizing` initial is `content-box`; its keyword initial likewise
+            // falls back to the runtime's default (`BoxSizing::ContentBox`) when
+            // absent — byte-for-byte identical to today's behaviour.
+            | PropertyId::BoxSizing
             // `position` initial is `static`; its keyword initial likewise needs
             // the interner, so an absent value falls back to the runtime's default
             // (`Position::Static`) — byte-for-byte identical to today.
@@ -1020,6 +1025,7 @@ mod tests {
                 | PropertyId::Opacity
                 | PropertyId::Width
                 | PropertyId::Height
+                | PropertyId::BoxSizing
                 | PropertyId::Display
                 | PropertyId::Visibility
                 | PropertyId::Position
@@ -1102,6 +1108,7 @@ mod tests {
             PropertyId::Opacity,
             PropertyId::Width,
             PropertyId::Height,
+            PropertyId::BoxSizing,
             PropertyId::Display,
             PropertyId::Visibility,
             PropertyId::Position,

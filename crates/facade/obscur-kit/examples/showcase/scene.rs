@@ -92,6 +92,7 @@ impl Default for ShowcaseState {
 #[must_use]
 pub fn stylesheet() -> &'static str {
     "\
+* { box-sizing: border-box; }\n\
 #app { display: flex; flex-direction: column; gap: 14px; padding: 20px; \
        background-color: #12151f; }\n\
 .header { display: flex; flex-direction: column; gap: 4px; height: 62px; }\n\

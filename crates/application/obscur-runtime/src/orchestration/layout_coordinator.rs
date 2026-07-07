@@ -9,7 +9,7 @@ use obscur_layout::algorithm::{
     LayoutAlgorithm, LayoutChild,
 };
 use obscur_layout::model::{
-    AlignItems, AlignSelf, Dimension, FlexDirection, Inset, JustifyContent, LayoutBox,
+    AlignItems, AlignSelf, BoxSizing, Dimension, FlexDirection, Inset, JustifyContent, LayoutBox,
     LayoutDisplay, LayoutStyle, Position,
 };
 use obscur_style::computed::{ComputedStyle, ComputedValue};
@@ -513,6 +513,9 @@ fn layout_style_from(computed: &ComputedStyle, viewport: Size, root_font_size: f
         ),
         width: dimension_of(computed, PropertyId::Width, &ctx),
         height: dimension_of(computed, PropertyId::Height, &ctx),
+        // `box-sizing`: an unauthored value stays `content-box` (the CSS default),
+        // so a node that never sets it is byte-for-byte identical to before.
+        box_sizing: box_sizing_of(computed),
         min_width: dimension_of(computed, PropertyId::MinWidth, &ctx),
         min_height: dimension_of(computed, PropertyId::MinHeight, &ctx),
         max_width: dimension_of(computed, PropertyId::MaxWidth, &ctx),
@@ -772,6 +775,19 @@ fn display_of(computed: &ComputedStyle) -> LayoutDisplay {
         Some(sym) if sym == layout_keyword::DISPLAY_GRID => LayoutDisplay::Grid,
         Some(sym) if sym == layout_keyword::DISPLAY_NONE => LayoutDisplay::None,
         _ => LayoutDisplay::Block,
+    }
+}
+
+/// Resolves the computed `box-sizing` keyword to a [`BoxSizing`], defaulting to
+/// [`BoxSizing::ContentBox`] (the CSS initial).
+///
+/// Compares the interned symbol against the reserved [`layout_keyword`]
+/// `BOX_SIZING_*` handles; an absent or unrecognized value maps to
+/// [`BoxSizing::ContentBox`] (which also covers `BOX_SIZING_CONTENT_BOX`).
+fn box_sizing_of(computed: &ComputedStyle) -> BoxSizing {
+    match keyword_sym(computed, PropertyId::BoxSizing) {
+        Some(sym) if sym == layout_keyword::BOX_SIZING_BORDER_BOX => BoxSizing::BorderBox,
+        _ => BoxSizing::ContentBox,
     }
 }
 

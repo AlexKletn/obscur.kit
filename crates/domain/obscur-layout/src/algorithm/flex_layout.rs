@@ -118,15 +118,26 @@ impl LayoutAlgorithm for FlexLayout {
         // available max, so a fixed px or a percentage of it both work); an `Auto`
         // dimension falls back to the available content extent, so the common
         // fill-available case is byte-identical to before.
+        //
+        // `box-sizing` governs how an explicit size maps to the content extent:
+        // `content-box` (the default) takes it as-is, `border-box` subtracts the
+        // axis border + padding (floored at `0`). The `Auto` branch already
+        // subtracts border + padding, so both modes are consistent — no phantom
+        // inflation and no clamp mismatch when an explicitly-sized container is
+        // arranged at its authored (border-box) size by its parent.
         let content_width = style
             .width
             .resolve(constraints.max.width)
-            .unwrap_or(constraints.max.width - bp_x)
+            .map_or(constraints.max.width - bp_x, |w| {
+                style.box_sizing.content_extent(w, bp_x)
+            })
             .max(0.0);
         let content_height = style
             .height
             .resolve(constraints.max.height)
-            .unwrap_or(constraints.max.height - bp_y)
+            .map_or(constraints.max.height - bp_y, |h| {
+                style.box_sizing.content_extent(h, bp_y)
+            })
             .max(0.0);
         let (container_main, container_cross) = if is_row {
             (content_width, content_height)
@@ -341,9 +352,9 @@ mod tests {
     use super::FlexLayout;
     use crate::algorithm::{FixedChildMeasurer, LayoutAlgorithm, LayoutChild};
     use crate::model::{
-        AlignItems, Dimension, FlexDirection, JustifyContent, LayoutDisplay, LayoutStyle,
+        AlignItems, BoxSizing, Dimension, FlexDirection, JustifyContent, LayoutDisplay, LayoutStyle,
     };
-    use obscur_geometry::{BoxConstraints, Point, Size};
+    use obscur_geometry::{BoxConstraints, Insets, Point, Size};
     use obscur_identity::NodeId;
 
     /// Container style with the given direction/justify/align and gap.
@@ -699,6 +710,80 @@ mod tests {
         // flex-end within the full 500: remaining = 500 - 100 = 400.
         approx(b[0].origin().x, 400.0);
         approx(b[1].origin().x, 450.0);
+    }
+
+    #[test]
+    fn border_box_centers_child_in_padded_toolbar() {
+        // Regression (the "chips pressed to the bottom" toolbar bug): a
+        // `height: 52; padding: 8; align-items: center` flex row with
+        // `box-sizing: border-box` and a 28px-tall child. The parent arranges the
+        // container tight at its authored (border-box) 52px, so the container's
+        // own layout must derive its content region as `52 - 16 = 36` and centre
+        // the child within it — NOT centre against the full 52 and then overflow
+        // the bottom when the box is clamped back to 52.
+        let style = LayoutStyle {
+            display: LayoutDisplay::Flex,
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::FlexStart,
+            align_items: AlignItems::Center,
+            height: Dimension::Px(52.0),
+            padding: Insets::uniform(8.0),
+            box_sizing: BoxSizing::BorderBox,
+            ..LayoutStyle::default()
+        };
+        let children = [fixed_basis(1, 96.0)];
+        // The child measures 28px tall on the cross axis.
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            // The parent arranges an explicitly-sized flex item tight at its
+            // authored border-box size (52px tall here).
+            BoxConstraints::tight(Size::new(300.0, 52.0)),
+            &mut FixedChildMeasurer::new(vec![Size::new(96.0, 28.0)]),
+        );
+        // The container's own border box is exactly the authored 52 (no phantom
+        // inflation to 68, no clamp mismatch).
+        approx(out.size().height, 52.0);
+        let child = out.child_boxes()[0];
+        // Content region is `padding.top .. padding.top + 36` = 8..44; the 28px
+        // child is centred there: top = 8 + (36 - 28) / 2 = 12.
+        approx(child.origin().y, 12.0);
+        approx(child.size().height, 28.0);
+        // Equal gap above and below (12 - 8 == 44 - 40 == 4), and no overflow of
+        // the container's border box.
+        let gap_above = child.origin().y - style.padding.top;
+        let content_bottom = style.padding.top + 36.0;
+        let gap_below = content_bottom - (child.origin().y + child.size().height);
+        approx(gap_above, gap_below);
+        assert!(
+            child.origin().y + child.size().height <= out.size().height,
+            "child overflows the container's border box",
+        );
+    }
+
+    #[test]
+    fn content_box_default_keeps_authored_content_extent() {
+        // The CSS default (`content-box`) is unchanged: an explicit `height: 52`
+        // with `padding: 8` treats 52 as the CONTENT extent, so under a loose
+        // constraint the border box grows to `52 + 16 = 68` (no subtraction).
+        let style = LayoutStyle {
+            display: LayoutDisplay::Flex,
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            height: Dimension::Px(52.0),
+            padding: Insets::uniform(8.0),
+            // box_sizing defaults to ContentBox.
+            ..LayoutStyle::default()
+        };
+        let children = [fixed_basis(1, 96.0)];
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(300.0, 1000.0)),
+            &mut FixedChildMeasurer::new(vec![Size::new(96.0, 28.0)]),
+        );
+        // Content extent 52 + border/padding 16 = 68.
+        approx(out.size().height, 68.0);
     }
 
     #[test]

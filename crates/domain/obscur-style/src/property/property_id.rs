@@ -46,6 +46,11 @@ pub enum PropertyId {
     Width,
     /// The `height` property.
     Height,
+    /// The `box-sizing` property (Keyword-valued: `content-box` (initial) /
+    /// `border-box`; NOT inherited). Governs whether an explicit `width` /
+    /// `height` sizes the content box or the border box. See the reserved
+    /// `BOX_SIZING_*` handles in [`crate::property::layout_keyword`].
+    BoxSizing,
     /// The `display` property.
     Display,
     /// The `visibility` property.
@@ -294,6 +299,7 @@ impl PropertyId {
             Self::Opacity => "opacity",
             Self::Width => "width",
             Self::Height => "height",
+            Self::BoxSizing => "box-sizing",
             Self::Display => "display",
             Self::Visibility => "visibility",
             Self::Position => "position",
@@ -392,6 +398,7 @@ impl PropertyId {
             | Self::Opacity
             | Self::Width
             | Self::Height
+            | Self::BoxSizing
             | Self::Display
             | Self::Position
             | Self::Top
@@ -859,6 +866,13 @@ mod tests {
                 .default_inheritance()
                 .is_inherited()
         );
+    }
+
+    #[test]
+    fn box_sizing_name_and_not_inherited() {
+        assert_eq!(PropertyId::BoxSizing.name(), "box-sizing");
+        // Like the other box-model properties, `box-sizing` resets per element.
+        assert!(!PropertyId::BoxSizing.default_inheritance().is_inherited());
     }
 
     #[test]

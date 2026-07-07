@@ -177,6 +177,15 @@ pub const BORDER_STYLE_NONE: InternedSymbol = InternedSymbol::from_raw(0x0000_1C
 /// The `border-*-style: solid` value. Every visible line style folds here.
 pub const BORDER_STYLE_SOLID: InternedSymbol = InternedSymbol::from_raw(0x0000_1C02);
 
+// ---- `box-sizing` keyword values ----
+
+/// The `box-sizing: content-box` value (the initial): an explicit `width` /
+/// `height` sizes the content box.
+pub const BOX_SIZING_CONTENT_BOX: InternedSymbol = InternedSymbol::from_raw(0x0000_1D01);
+/// The `box-sizing: border-box` value: an explicit `width` / `height` sizes the
+/// border box.
+pub const BOX_SIZING_BORDER_BOX: InternedSymbol = InternedSymbol::from_raw(0x0000_1D02);
+
 /// Maps a `display` keyword string to its reserved [`InternedSymbol`].
 ///
 /// The input is ASCII-lowercased before matching, so callers may pass authored
@@ -238,6 +247,19 @@ pub fn border_style_from_name(name: &str) -> Option<InternedSymbol> {
         "solid" | "dashed" | "dotted" | "double" | "groove" | "ridge" | "inset" | "outset" => {
             Some(BORDER_STYLE_SOLID)
         }
+        _ => None,
+    }
+}
+
+/// Maps a `box-sizing` keyword string to its reserved [`InternedSymbol`].
+///
+/// The input is ASCII-lowercased before matching. Returns [`None`] for any
+/// keyword outside the closed `content-box` / `border-box` set.
+#[must_use]
+pub fn box_sizing_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "content-box" => Some(BOX_SIZING_CONTENT_BOX),
+        "border-box" => Some(BOX_SIZING_BORDER_BOX),
         _ => None,
     }
 }
@@ -448,6 +470,8 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         Z_INDEX_AUTO => Some("auto"),
         BORDER_STYLE_NONE => Some("none"),
         BORDER_STYLE_SOLID => Some("solid"),
+        BOX_SIZING_CONTENT_BOX => Some("content-box"),
+        BOX_SIZING_BORDER_BOX => Some("border-box"),
         FLEX_ROW => Some("row"),
         FLEX_ROW_REVERSE => Some("row-reverse"),
         FLEX_COLUMN => Some("column"),
@@ -504,6 +528,8 @@ mod tests {
         Z_INDEX_AUTO,
         BORDER_STYLE_NONE,
         BORDER_STYLE_SOLID,
+        BOX_SIZING_CONTENT_BOX,
+        BOX_SIZING_BORDER_BOX,
         FLEX_ROW,
         FLEX_ROW_REVERSE,
         FLEX_COLUMN,
@@ -786,6 +812,27 @@ mod tests {
         // Round-trips through `name_of`.
         assert_eq!(name_of(GRID_AUTO_FLOW_COLUMN_DENSE), Some("column dense"));
         assert_eq!(name_of(GRID_AUTO_FLOW_ROW), Some("row"));
+    }
+
+    #[test]
+    fn box_sizing_maps_known_keywords() {
+        assert_eq!(
+            box_sizing_from_name("content-box"),
+            Some(BOX_SIZING_CONTENT_BOX)
+        );
+        assert_eq!(
+            box_sizing_from_name("border-box"),
+            Some(BOX_SIZING_BORDER_BOX)
+        );
+        // Case-insensitive.
+        assert_eq!(
+            box_sizing_from_name("Border-Box"),
+            Some(BOX_SIZING_BORDER_BOX)
+        );
+        assert_eq!(box_sizing_from_name("padding-box"), None);
+        // Round-trips through `name_of`.
+        assert_eq!(name_of(BOX_SIZING_CONTENT_BOX), Some("content-box"));
+        assert_eq!(name_of(BOX_SIZING_BORDER_BOX), Some("border-box"));
     }
 
     #[test]

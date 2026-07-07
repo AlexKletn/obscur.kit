@@ -2,7 +2,8 @@
 
 use crate::algorithm::{GridAutoFlow, GridPlacement};
 use crate::model::{
-    AlignItems, AlignSelf, Dimension, FlexDirection, Inset, JustifyContent, LayoutDisplay, Position,
+    AlignItems, AlignSelf, BoxSizing, Dimension, FlexDirection, Inset, JustifyContent,
+    LayoutDisplay, Position,
 };
 use obscur_geometry::Insets;
 
@@ -49,6 +50,15 @@ pub struct LayoutStyle {
     pub max_width: Dimension,
     /// Upper bound on the resolved height.
     pub max_height: Dimension,
+
+    /// How an explicit [`width`](Self::width) / [`height`](Self::height) is
+    /// interpreted against the box model (`box-sizing`).
+    ///
+    /// [`BoxSizing::ContentBox`] (the CSS default) treats an explicit size as the
+    /// content extent (border box = size + border + padding);
+    /// [`BoxSizing::BorderBox`] treats it as the border box (content extent =
+    /// size − border − padding, floored at `0`). An `Auto` size is unaffected.
+    pub box_sizing: BoxSizing,
 
     /// Space reserved outside the border box (margin edges).
     pub margin: Insets,
@@ -141,6 +151,7 @@ impl Default for LayoutStyle {
             min_height: Dimension::Auto,
             max_width: Dimension::Auto,
             max_height: Dimension::Auto,
+            box_sizing: BoxSizing::ContentBox,
             margin: Insets::uniform(0.0),
             padding: Insets::uniform(0.0),
             border: Insets::uniform(0.0),

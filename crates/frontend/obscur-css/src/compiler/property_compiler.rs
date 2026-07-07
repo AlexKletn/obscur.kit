@@ -1002,7 +1002,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 78] = [
+    const ALL: [PropertyId; 79] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::BackgroundImage,
@@ -1013,6 +1013,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::Opacity,
         PropertyId::Width,
         PropertyId::Height,
+        PropertyId::BoxSizing,
         PropertyId::Display,
         PropertyId::Visibility,
         PropertyId::Position,
@@ -1364,6 +1365,7 @@ fn font_family_name(group: &[ParsedValue]) -> Option<Box<str>> {
 fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<InternedSymbol>> {
     match property {
         PropertyId::Display => Some(layout_keyword::display_from_name),
+        PropertyId::BoxSizing => Some(layout_keyword::box_sizing_from_name),
         PropertyId::Position => Some(layout_keyword::position_from_name),
         PropertyId::FlexDirection => Some(layout_keyword::flex_direction_from_name),
         PropertyId::JustifyContent => Some(layout_keyword::justify_content_from_name),

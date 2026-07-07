@@ -53,11 +53,15 @@ impl LayoutAlgorithm for FlowLayout {
         let bp_y = bp_top + border.bottom + padding.bottom;
 
         // Content width: explicit width (resolved against the max width) else the
-        // available content width. Never negative.
+        // available content width. Never negative. `box-sizing: border-box`
+        // subtracts the horizontal border + padding from an explicit width (the
+        // `Auto` branch already does), keeping the two consistent.
         let content_width = style
             .width
             .resolve(constraints.max.width)
-            .unwrap_or(constraints.max.width - bp_x)
+            .map_or(constraints.max.width - bp_x, |w| {
+                style.box_sizing.content_extent(w, bp_x)
+            })
             .max(0.0);
 
         // Available content height for measuring children under (may be infinite).
@@ -79,11 +83,13 @@ impl LayoutAlgorithm for FlowLayout {
             y += child_size.height;
         }
 
-        // Content height: explicit height else the accumulated children height.
+        // Content height: explicit height (mapped through `box-sizing`) else the
+        // accumulated children height. `border-box` subtracts the vertical border
+        // + padding so the box ends up at its authored size.
         let content_height = style
             .height
             .resolve(constraints.max.height)
-            .unwrap_or(y)
+            .map_or(y, |h| style.box_sizing.content_extent(h, bp_y))
             .max(0.0);
 
         let border_box = Size::new(content_width + bp_x, content_height + bp_y);

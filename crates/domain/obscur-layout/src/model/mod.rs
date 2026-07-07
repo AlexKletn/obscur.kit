@@ -3,6 +3,8 @@ mod align_items;
 pub use align_items::AlignItems;
 mod align_self;
 pub use align_self::AlignSelf;
+mod box_sizing;
+pub use box_sizing::BoxSizing;
 mod dimension;
 pub use dimension::Dimension;
 mod flex_direction;
