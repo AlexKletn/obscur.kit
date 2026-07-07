@@ -98,12 +98,25 @@ fn url_background_image_reaches_paint_and_the_cpu_backend() {
         .filter(|c| matches!(c, PaintCommand::DrawImage { .. }))
         .collect();
     assert_eq!(draw_images.len(), 1, "the loaded+decoded image paints one DrawImage");
-    let PaintCommand::DrawImage { dst, image } = draw_images[0] else {
+    let PaintCommand::DrawImage {
+        tile,
+        region,
+        image,
+        ..
+    } = draw_images[0]
+    else {
         unreachable!("filtered to DrawImage");
     };
+    // With no authored size/position/repeat, the CSS initials apply: the region is
+    // the 40×30 border box and the tile is the intrinsic 2×2 image at its top-left
+    // (repeated to fill — the CSS-correct default, not a full-box stretch).
     assert!(
-        (dst.size.width - 40.0).abs() < 1e-3 && (dst.size.height - 30.0).abs() < 1e-3,
-        "image stretches over the 40x30 element box, got {dst:?}"
+        (region.size.width - 40.0).abs() < 1e-3 && (region.size.height - 30.0).abs() < 1e-3,
+        "region is the 40x30 element box, got {region:?}"
+    );
+    assert!(
+        (tile.size.width - 2.0).abs() < 1e-3 && (tile.size.height - 2.0).abs() < 1e-3,
+        "auto size draws the intrinsic 2x2 tile, got {tile:?}"
     );
     assert_eq!(image.width(), 2, "the decoded intrinsic width is 2px");
     assert_eq!(image.height(), 2, "the decoded intrinsic height is 2px");
@@ -123,6 +136,78 @@ fn url_background_image_reaches_paint_and_the_cpu_backend() {
     assert!(px.red() > 200, "center pixel is red (image), got r={}", px.red());
     assert!(px.blue() < 60, "center pixel is not blue (background), got b={}", px.blue());
     assert!(px.alpha() > 200, "center pixel is opaque, got a={}", px.alpha());
+}
+
+#[test]
+fn background_size_position_repeat_flow_through_to_paint() {
+    let dir = temp_asset_dir();
+
+    // `no-repeat` + `center` + `contain` on a 40×30 box with a 2×2 image:
+    // `contain` scales the square image to 30×30 (min fit), `center` places it at
+    // x=(40−30)/2=5, y=0, and `no-repeat` clears both axis flags.
+    let sheet = compile(
+        r#".img { background-image: url("logo.png");
+                 background-repeat: no-repeat;
+                 background-position: center;
+                 background-size: contain;
+                 background-color: blue;
+                 width: 40px; height: 30px }"#,
+    );
+
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    KitBootstrap::new().install_image_resources(&mut runtime, &dir);
+
+    let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+    let snapshot = result.snapshot().clone();
+
+    let draw_images: Vec<&PaintCommand> = snapshot
+        .display_list()
+        .commands()
+        .iter()
+        .filter(|c| matches!(c, PaintCommand::DrawImage { .. }))
+        .collect();
+    assert_eq!(draw_images.len(), 1, "one DrawImage for the single background layer");
+    let PaintCommand::DrawImage {
+        tile,
+        region,
+        repeat_x,
+        repeat_y,
+        ..
+    } = draw_images[0]
+    else {
+        unreachable!("filtered to DrawImage");
+    };
+    assert!(
+        (region.size.width - 40.0).abs() < 1e-3 && (region.size.height - 30.0).abs() < 1e-3,
+        "region is the 40x30 border box, got {region:?}"
+    );
+    // `contain` of a 2×2 image into 40×30 = 30×30 (min scale, aspect preserved).
+    assert!(
+        (tile.size.width - 30.0).abs() < 1e-3 && (tile.size.height - 30.0).abs() < 1e-3,
+        "contain tile is 30x30, got {tile:?}"
+    );
+    // `center`: x offset (40−30)/2 = 5 from the region's left; y offset 0.
+    assert!(
+        (tile.origin.x - (region.origin.x + 5.0)).abs() < 1e-3,
+        "center x offset is 5, got {tile:?}"
+    );
+    assert!(
+        (tile.origin.y - region.origin.y).abs() < 1e-3,
+        "center y offset is 0 (tile fills the height), got {tile:?}"
+    );
+    assert!(!repeat_x && !repeat_y, "no-repeat clears both axis flags");
+
+    // The CPU backend paints the image's red inside the tile (over the blue).
+    let mut renderer = CpuRenderer::new(RendererId::from_raw(2));
+    let frame = RenderFrame::new(snapshot, Size::new(VIEWPORT, VIEWPORT));
+    let submission = FrameSubmission::new(frame);
+    let target = RenderTarget::bitmap(BitmapTarget::new(Size::new(VIEWPORT, VIEWPORT)));
+    renderer.render(&submission, &target).expect("cpu render");
+    let pixmap = renderer.pixmap().expect("a rasterized frame");
+    // A pixel inside the centered 30×30 tile is red (image), not blue.
+    let px = pixmap.pixel(20, 15).expect("pixel inside the tile");
+    assert!(px.red() > 200, "tile pixel is red (image), got r={}", px.red());
+    assert!(px.blue() < 60, "tile pixel is not blue (background), got b={}", px.blue());
 }
 
 #[test]

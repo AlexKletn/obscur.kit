@@ -24,9 +24,10 @@ use obscur_geometry::AffineTransform;
 use obscur_identity::InternedSymbol;
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{
-    layout_keyword, BoxShadow, ConicGradient, CustomProperty, GradientStop, GridAreaTemplate,
-    GridLineValue, GridTrack, GridTrackList, Length, LinearGradient, PropertyId, PropertyValue,
-    RadialGradient, RadialShape, RadialSize, StyleColor, Transform, TransformOrigin,
+    layout_keyword, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow, ConicGradient,
+    CustomProperty, GradientStop, GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length,
+    LinearGradient, PropertyId, PropertyValue, RadialGradient, RadialShape, RadialSize, StyleColor,
+    Transform, TransformOrigin,
 };
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
@@ -1001,10 +1002,13 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 74] = [
+    const ALL: [PropertyId; 77] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::BackgroundImage,
+        PropertyId::BackgroundSize,
+        PropertyId::BackgroundPosition,
+        PropertyId::BackgroundRepeat,
         PropertyId::Opacity,
         PropertyId::Width,
         PropertyId::Height,
@@ -1127,6 +1131,33 @@ fn lower_for_property(
             return Some(wide);
         }
         return lower_background_image(values);
+    }
+    if property == PropertyId::BackgroundSize {
+        if let Some(ParsedValue::Keyword(keyword)) = values.first()
+            && let Some(wide) = css_wide_keyword(keyword)
+            && values.len() == 1
+        {
+            return Some(wide);
+        }
+        return lower_background_size(values);
+    }
+    if property == PropertyId::BackgroundPosition {
+        if let Some(ParsedValue::Keyword(keyword)) = values.first()
+            && let Some(wide) = css_wide_keyword(keyword)
+            && values.len() == 1
+        {
+            return Some(wide);
+        }
+        return lower_background_position(values);
+    }
+    if property == PropertyId::BackgroundRepeat {
+        if let Some(ParsedValue::Keyword(keyword)) = values.first()
+            && let Some(wide) = css_wide_keyword(keyword)
+            && values.len() == 1
+        {
+            return Some(wide);
+        }
+        return lower_background_repeat(values);
     }
     if property == PropertyId::BoxShadow {
         if let Some(ParsedValue::Keyword(keyword)) = values.first()
@@ -2330,6 +2361,216 @@ fn origin_component(value: &ParsedValue) -> Option<(Length, OriginAxis)> {
     }
 }
 
+/// Lowers a `background-size` value into a [`PropertyValue::BackgroundSize`]
+/// (spec §5.2, CSS Backgrounds §3.9).
+///
+/// Accepts `cover`, `contain`, a single `auto`, or one/two
+/// `[ <length-percentage> | auto ]` components (a single component leaves the
+/// other axis `auto`). A component of `auto` (both axes) collapses to
+/// [`BackgroundSize::Auto`]. Any other syntax yields [`None`] (the declaration
+/// degrades to an unsupported-feature diagnostic and the initial `auto` applies).
+fn lower_background_size(values: &[ParsedValue]) -> Option<PropertyValue> {
+    // Single keyword: `cover` / `contain` / `auto`.
+    if let [ParsedValue::Keyword(keyword)] = values {
+        if keyword.eq_ignore_ascii_case("cover") {
+            return Some(PropertyValue::BackgroundSize(BackgroundSize::Cover));
+        }
+        if keyword.eq_ignore_ascii_case("contain") {
+            return Some(PropertyValue::BackgroundSize(BackgroundSize::Contain));
+        }
+        if keyword.eq_ignore_ascii_case("auto") {
+            return Some(PropertyValue::BackgroundSize(BackgroundSize::Auto));
+        }
+    }
+    // One or two `<length-percentage> | auto` components.
+    let components: Vec<&ParsedValue> = values.iter().collect();
+    let (w, h) = match components.as_slice() {
+        [a] => (background_size_component(a)?, Length::Auto),
+        [a, b] => (background_size_component(a)?, background_size_component(b)?),
+        _ => return None,
+    };
+    // Both axes `auto` is exactly the intrinsic-size initial.
+    if w.is_auto() && h.is_auto() {
+        return Some(PropertyValue::BackgroundSize(BackgroundSize::Auto));
+    }
+    Some(PropertyValue::BackgroundSize(BackgroundSize::Explicit {
+        width: w,
+        height: h,
+    }))
+}
+
+/// Lowers one `background-size` component into a [`Length`]: `auto` →
+/// [`Length::Auto`], a percentage / dimension → its length, a unitless `0` →
+/// `0px`. Any other component (including `cover` / `contain`, which are only
+/// valid alone) yields [`None`].
+fn background_size_component(value: &ParsedValue) -> Option<Length> {
+    match value {
+        ParsedValue::Keyword(keyword) if keyword.eq_ignore_ascii_case("auto") => Some(Length::Auto),
+        ParsedValue::Percentage(p) => Some(Length::Percent(narrow_f32(*p))),
+        ParsedValue::Dimension { value, unit } => dimension_length(*value, unit),
+        ParsedValue::Number(n) if *n == 0.0 => Some(Length::px(0.0)),
+        _ => None,
+    }
+}
+
+/// Lowers a `background-position` value into a [`PropertyValue::BackgroundPosition`]
+/// (spec §5.2, CSS Backgrounds §3.6).
+///
+/// Accepts one or two components from
+/// `[ left | center | right | top | bottom | <length-percentage> ]`. The edge
+/// keywords lower to percentages (`left`/`top` = 0%, `center` = 50%,
+/// `right`/`bottom` = 100%); axis keywords are assigned to their axis regardless
+/// of order (`bottom right` == `right bottom`), and lengths / `center` fill the
+/// remaining axes in component order. A single component leaves the other axis
+/// centered. Any other syntax yields [`None`].
+fn lower_background_position(values: &[ParsedValue]) -> Option<PropertyValue> {
+    let components: Vec<PositionComponent> = values
+        .iter()
+        .map(position_component)
+        .collect::<Option<Vec<_>>>()?;
+    let (x, y) = match components.as_slice() {
+        [only] => match only {
+            PositionComponent::Horizontal(p) => (Length::Percent(*p), Length::Percent(50.0)),
+            PositionComponent::Vertical(p) => (Length::Percent(50.0), Length::Percent(*p)),
+            PositionComponent::Center => (Length::Percent(50.0), Length::Percent(50.0)),
+            PositionComponent::Length(l) => (*l, Length::Percent(50.0)),
+        },
+        [_, _] => {
+            let mut x: Option<Length> = None;
+            let mut y: Option<Length> = None;
+            // First pass: explicit-axis keywords claim their axis (order-free).
+            for comp in &components {
+                match comp {
+                    PositionComponent::Horizontal(p) => x = Some(Length::Percent(*p)),
+                    PositionComponent::Vertical(p) => y = Some(Length::Percent(*p)),
+                    PositionComponent::Center | PositionComponent::Length(_) => {}
+                }
+            }
+            // Second pass: `center` / lengths fill the remaining axes in order.
+            for comp in &components {
+                let value = match comp {
+                    PositionComponent::Center => Length::Percent(50.0),
+                    PositionComponent::Length(l) => *l,
+                    // Axis keywords were placed above.
+                    PositionComponent::Horizontal(_) | PositionComponent::Vertical(_) => continue,
+                };
+                if x.is_none() {
+                    x = Some(value);
+                } else if y.is_none() {
+                    y = Some(value);
+                }
+            }
+            (
+                x.unwrap_or(Length::Percent(50.0)),
+                y.unwrap_or(Length::Percent(50.0)),
+            )
+        }
+        _ => return None,
+    };
+    Some(PropertyValue::BackgroundPosition(BackgroundPosition::new(
+        x, y,
+    )))
+}
+
+/// One classified `background-position` component.
+enum PositionComponent {
+    /// A horizontal edge keyword resolved to a percentage (`left` 0, `right` 100).
+    Horizontal(f32),
+    /// A vertical edge keyword resolved to a percentage (`top` 0, `bottom` 100).
+    Vertical(f32),
+    /// The `center` keyword (either axis, 50%).
+    Center,
+    /// An explicit `<length-percentage>`.
+    Length(Length),
+}
+
+/// Classifies one `background-position` component, or [`None`] when it is not a
+/// valid position keyword / length.
+fn position_component(value: &ParsedValue) -> Option<PositionComponent> {
+    match value {
+        ParsedValue::Keyword(keyword) => {
+            if keyword.eq_ignore_ascii_case("left") {
+                Some(PositionComponent::Horizontal(0.0))
+            } else if keyword.eq_ignore_ascii_case("right") {
+                Some(PositionComponent::Horizontal(100.0))
+            } else if keyword.eq_ignore_ascii_case("top") {
+                Some(PositionComponent::Vertical(0.0))
+            } else if keyword.eq_ignore_ascii_case("bottom") {
+                Some(PositionComponent::Vertical(100.0))
+            } else if keyword.eq_ignore_ascii_case("center") {
+                Some(PositionComponent::Center)
+            } else {
+                None
+            }
+        }
+        ParsedValue::Percentage(p) => Some(PositionComponent::Length(Length::Percent(narrow_f32(*p)))),
+        ParsedValue::Dimension { value, unit } => {
+            dimension_length(*value, unit).map(PositionComponent::Length)
+        }
+        ParsedValue::Number(n) if *n == 0.0 => Some(PositionComponent::Length(Length::px(0.0))),
+        _ => None,
+    }
+}
+
+/// Lowers a `background-repeat` value into a [`PropertyValue::BackgroundRepeat`]
+/// (spec §5.2, CSS Backgrounds §3.4).
+///
+/// Accepts the single keywords `repeat` / `no-repeat` / `repeat-x` / `repeat-y`,
+/// the folded `space` / `round` (→ `repeat`, a documented approximation), or the
+/// two-value `<repeat-style>{2}` axis form (each `repeat`/`space`/`round` = tile,
+/// `no-repeat` = no tile). Any other syntax yields [`None`].
+fn lower_background_repeat(values: &[ParsedValue]) -> Option<PropertyValue> {
+    match values {
+        [ParsedValue::Keyword(keyword)] => {
+            let repeat = if keyword.eq_ignore_ascii_case("repeat-x") {
+                BackgroundRepeat::RepeatX
+            } else if keyword.eq_ignore_ascii_case("repeat-y") {
+                BackgroundRepeat::RepeatY
+            } else if keyword.eq_ignore_ascii_case("no-repeat") {
+                BackgroundRepeat::NoRepeat
+            } else if keyword.eq_ignore_ascii_case("repeat")
+                // `space` / `round` fold to `repeat` (documented approximation).
+                || keyword.eq_ignore_ascii_case("space")
+                || keyword.eq_ignore_ascii_case("round")
+            {
+                BackgroundRepeat::Repeat
+            } else {
+                return None;
+            };
+            Some(PropertyValue::BackgroundRepeat(repeat))
+        }
+        [ParsedValue::Keyword(x), ParsedValue::Keyword(y)] => {
+            let rx = repeat_axis_tiles(x)?;
+            let ry = repeat_axis_tiles(y)?;
+            let repeat = match (rx, ry) {
+                (true, true) => BackgroundRepeat::Repeat,
+                (false, false) => BackgroundRepeat::NoRepeat,
+                (true, false) => BackgroundRepeat::RepeatX,
+                (false, true) => BackgroundRepeat::RepeatY,
+            };
+            Some(PropertyValue::BackgroundRepeat(repeat))
+        }
+        _ => None,
+    }
+}
+
+/// Whether one axis keyword of the two-value `background-repeat` form tiles that
+/// axis: `repeat` / `space` / `round` tile, `no-repeat` does not. [`None`] for the
+/// single-axis-only `repeat-x` / `repeat-y` (invalid in the two-value form) or any
+/// other keyword.
+fn repeat_axis_tiles(keyword: &str) -> Option<bool> {
+    if keyword.eq_ignore_ascii_case("repeat")
+        || keyword.eq_ignore_ascii_case("space")
+        || keyword.eq_ignore_ascii_case("round")
+    {
+        Some(true)
+    } else if keyword.eq_ignore_ascii_case("no-repeat") {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// Lowers a `background-image` value into a gradient or `url(...)` property value.
 ///
 /// The `linear-gradient(...)`, `radial-gradient(...)`, and `conic-gradient(...)`
@@ -3225,6 +3466,117 @@ mod tests {
     fn empty_url_background_image_is_unsupported() {
         assert!(matches!(
             compile("background-image: url()").0,
+            CompiledDeclaration::Unsupported(_)
+        ));
+    }
+
+    #[test]
+    fn background_size_keywords_and_lengths() {
+        assert_eq!(
+            value_of("background-size: cover"),
+            PropertyValue::BackgroundSize(BackgroundSize::Cover)
+        );
+        assert_eq!(
+            value_of("background-size: contain"),
+            PropertyValue::BackgroundSize(BackgroundSize::Contain)
+        );
+        assert_eq!(
+            value_of("background-size: auto"),
+            PropertyValue::BackgroundSize(BackgroundSize::Auto)
+        );
+        // Two explicit percentages.
+        assert_eq!(
+            value_of("background-size: 50% 100%"),
+            PropertyValue::BackgroundSize(BackgroundSize::Explicit {
+                width: Length::Percent(50.0),
+                height: Length::Percent(100.0),
+            })
+        );
+        // A single length leaves the other axis `auto`.
+        assert_eq!(
+            value_of("background-size: 40px"),
+            PropertyValue::BackgroundSize(BackgroundSize::Explicit {
+                width: Length::px(40.0),
+                height: Length::Auto,
+            })
+        );
+        // Both axes `auto` collapses to the intrinsic-size initial.
+        assert_eq!(
+            value_of("background-size: auto auto"),
+            PropertyValue::BackgroundSize(BackgroundSize::Auto)
+        );
+        // Malformed → dropped (unsupported), so the initial applies.
+        assert!(matches!(
+            compile("background-size: bogus").0,
+            CompiledDeclaration::Unsupported(_)
+        ));
+    }
+
+    #[test]
+    fn background_position_keywords_and_lengths() {
+        // `right bottom` → x=100%, y=100% (order-free keyword axes).
+        assert_eq!(
+            value_of("background-position: right bottom"),
+            PropertyValue::BackgroundPosition(BackgroundPosition::new(
+                Length::Percent(100.0),
+                Length::Percent(100.0)
+            ))
+        );
+        // `bottom right` resolves identically (axis keywords are order-free).
+        assert_eq!(
+            value_of("background-position: bottom right"),
+            value_of("background-position: right bottom")
+        );
+        // A single `center` centers both axes.
+        assert_eq!(
+            value_of("background-position: center"),
+            PropertyValue::BackgroundPosition(BackgroundPosition::new(
+                Length::Percent(50.0),
+                Length::Percent(50.0)
+            ))
+        );
+        // Two lengths, x then y.
+        assert_eq!(
+            value_of("background-position: 10px 20px"),
+            PropertyValue::BackgroundPosition(BackgroundPosition::new(
+                Length::px(10.0),
+                Length::px(20.0)
+            ))
+        );
+        // Malformed → dropped.
+        assert!(matches!(
+            compile("background-position: nope").0,
+            CompiledDeclaration::Unsupported(_)
+        ));
+    }
+
+    #[test]
+    fn background_repeat_keywords() {
+        assert_eq!(
+            value_of("background-repeat: no-repeat"),
+            PropertyValue::BackgroundRepeat(BackgroundRepeat::NoRepeat)
+        );
+        assert_eq!(
+            value_of("background-repeat: repeat-x"),
+            PropertyValue::BackgroundRepeat(BackgroundRepeat::RepeatX)
+        );
+        assert_eq!(
+            value_of("background-repeat: repeat"),
+            PropertyValue::BackgroundRepeat(BackgroundRepeat::Repeat)
+        );
+        // `space` / `round` fold to `repeat` (documented approximation).
+        assert_eq!(
+            value_of("background-repeat: space"),
+            PropertyValue::BackgroundRepeat(BackgroundRepeat::Repeat)
+        );
+        // Two-value axis form: `repeat no-repeat` → repeat-x.
+        assert_eq!(
+            value_of("background-repeat: repeat no-repeat"),
+            PropertyValue::BackgroundRepeat(BackgroundRepeat::RepeatX)
+        );
+        // Malformed → dropped.
+        assert!(matches!(
+            compile("background-repeat: bogus").0,
             CompiledDeclaration::Unsupported(_)
         ));
     }

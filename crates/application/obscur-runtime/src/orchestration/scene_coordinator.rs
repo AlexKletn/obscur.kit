@@ -18,8 +18,9 @@ use obscur_scene::path::Path;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{
-    layout_keyword, BoxShadow, ConicGradient, Length, LinearGradient, PropertyId, PropertyValue,
-    RadialGradient, RadialSize, StyleColor, Transform, TransformOrigin,
+    layout_keyword, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow, ConicGradient,
+    Length, LinearGradient, PropertyId, PropertyValue, RadialGradient, RadialSize, StyleColor,
+    Transform, TransformOrigin,
 };
 use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontResolver, FontSource,
@@ -694,16 +695,26 @@ impl SceneCoordinator {
 
                 // An authored `background-image: url(...)` whose image has been
                 // resolved paints OVER the `background-color` fill and UNDER the
-                // border/content — matching CSS background paint order. The image
-                // is stretched over the node's border box (sub-step 1's model;
-                // `background-size`/`repeat`/`position` and multiple layers are
-                // future work). A URL not present in `images` (unloaded or failed)
-                // emits nothing, so the color background shows through — the
-                // regression-safe path (byte-identical when `images` is empty).
+                // border/content — matching CSS background paint order. The image's
+                // tile is placed (`background-position`), sized (`background-size`),
+                // and tiled (`background-repeat`) within the node's border box (the
+                // paint region), resolved by `background_image_geometry`. A URL not
+                // present in `images` (unloaded or failed) emits nothing, so the
+                // color background shows through — the regression-safe path
+                // (byte-identical when `images` is empty). Multiple background
+                // layers are still future work.
                 if let Some(image) = background_image_url_of(computed, node)
                     .and_then(|url| images.get(url))
                 {
-                    node_paint.draw_image(image.clone(), layout_box.bounds);
+                    let (tile, repeat_x, repeat_y) =
+                        background_image_geometry(computed, node, image, layout_box.bounds);
+                    node_paint.draw_image(
+                        image.clone(),
+                        tile,
+                        layout_box.bounds,
+                        repeat_x,
+                        repeat_y,
+                    );
                 }
             }
 
@@ -1172,6 +1183,137 @@ fn background_image_url_of(computed: &ComputedStyles, node: NodeId) -> Option<&s
         .get(&node)
         .and_then(|style| style.get(PropertyId::BackgroundImage))
         .and_then(ComputedValue::as_background_image_url)
+}
+
+/// Reads a node's computed `background-size`, defaulting to the CSS initial
+/// `auto` when absent (an unauthored / unresolved property).
+fn background_size_of(computed: &ComputedStyles, node: NodeId) -> BackgroundSize {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::BackgroundSize))
+        .and_then(ComputedValue::as_background_size)
+        .unwrap_or(BackgroundSize::Auto)
+}
+
+/// Reads a node's computed `background-position`, defaulting to the CSS initial
+/// `0% 0%` (top-left) when absent.
+fn background_position_of(computed: &ComputedStyles, node: NodeId) -> BackgroundPosition {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::BackgroundPosition))
+        .and_then(ComputedValue::as_background_position)
+        .unwrap_or_default()
+}
+
+/// Reads a node's computed `background-repeat`, defaulting to the CSS initial
+/// `repeat` (tile both axes) when absent.
+fn background_repeat_of(computed: &ComputedStyles, node: NodeId) -> BackgroundRepeat {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::BackgroundRepeat))
+        .and_then(ComputedValue::as_background_repeat)
+        .unwrap_or(BackgroundRepeat::Repeat)
+}
+
+/// Resolves the CSS background placement geometry for a node's resolved image
+/// into `(tile, repeat_x, repeat_y)` — the fields the
+/// [`DrawImage`](obscur_scene::command::PaintCommand::DrawImage) command carries
+/// (spec §5.2, CSS Backgrounds §3).
+///
+/// The `tile` is one copy of the image: its size comes from `background-size`
+/// against the image's intrinsic pixel size and the paint `region` (the border
+/// box), and its origin comes from `background-position` (the CSS position
+/// formula). `repeat_x` / `repeat_y` are the `background-repeat` axis flags.
+fn background_image_geometry(
+    computed: &ComputedStyles,
+    node: NodeId,
+    image: &SceneImage,
+    region: Rect,
+) -> (Rect, bool, bool) {
+    #[allow(clippy::cast_precision_loss)]
+    let (iw, ih) = (image.width() as f32, image.height() as f32);
+    let bw = region.size.width;
+    let bh = region.size.height;
+    let size = background_size_of(computed, node);
+    let position = background_position_of(computed, node);
+    let repeat = background_repeat_of(computed, node);
+    let (tw, th) = resolve_background_tile_size(size, iw, ih, bw, bh);
+    let ox = region.origin.x + resolve_background_position(position.x(), bw, tw);
+    let oy = region.origin.y + resolve_background_position(position.y(), bh, th);
+    (
+        Rect::new(Point::new(ox, oy), Size::new(tw, th)),
+        repeat.repeat_x(),
+        repeat.repeat_y(),
+    )
+}
+
+/// Resolves the drawn tile width/height (logical px) from `background-size`, the
+/// image's intrinsic size `(iw, ih)`, and the box size `(bw, bh)`.
+///
+/// * `auto` → intrinsic pixel size; `cover` → the smallest size that fully covers
+///   the box (max scale, aspect preserved); `contain` → the largest that fits
+///   (min scale, aspect preserved); explicit → each axis resolved against the box,
+///   a single `auto` axis derived from the other to preserve the intrinsic aspect
+///   ratio (both `auto` = intrinsic). A degenerate intrinsic size falls back to a
+///   full-box stretch.
+fn resolve_background_tile_size(
+    size: BackgroundSize,
+    iw: f32,
+    ih: f32,
+    bw: f32,
+    bh: f32,
+) -> (f32, f32) {
+    // A degenerate intrinsic size cannot preserve an aspect ratio; stretch to fill.
+    if iw <= 0.0 || ih <= 0.0 {
+        return (bw, bh);
+    }
+    match size {
+        BackgroundSize::Auto => (iw, ih),
+        BackgroundSize::Cover => {
+            let scale = (bw / iw).max(bh / ih);
+            (iw * scale, ih * scale)
+        }
+        BackgroundSize::Contain => {
+            let scale = (bw / iw).min(bh / ih);
+            (iw * scale, ih * scale)
+        }
+        BackgroundSize::Explicit { width, height } => {
+            let w = resolve_background_size_length(width, bw);
+            let h = resolve_background_size_length(height, bh);
+            match (w, h) {
+                (Some(w), Some(h)) => (w, h),
+                // A single `auto` axis preserves the intrinsic aspect ratio.
+                (Some(w), None) => (w, w * ih / iw),
+                (None, Some(h)) => (h * iw / ih, h),
+                (None, None) => (iw, ih),
+            }
+        }
+    }
+}
+
+/// Resolves one explicit `background-size` component against a box extent: an
+/// absolute `px` directly, a `Percent` as a fraction of the box extent. `auto`
+/// (and any context-dependent unit, a documented approximation) yields [`None`]
+/// so the axis is derived from the other.
+fn resolve_background_size_length(length: Length, basis: f32) -> Option<f32> {
+    match length {
+        Length::Px(px) => Some(px.0),
+        Length::Percent(pct) => Some(pct / 100.0 * basis),
+        _ => None,
+    }
+}
+
+/// Resolves one `background-position` component to the tile's origin offset from
+/// the box edge, following the CSS position formula: an absolute `px` is that
+/// offset directly; a `Percent` aligns the image's `pct` point to the box's `pct`
+/// point, i.e. `(box_extent − tile_extent) × pct`. Any other (context-dependent)
+/// length falls back to `0` (the top/left edge, a documented approximation).
+fn resolve_background_position(length: Length, box_extent: f32, tile_extent: f32) -> f32 {
+    match length {
+        Length::Px(px) => px.0,
+        Length::Percent(pct) => (box_extent - tile_extent) * pct / 100.0,
+        _ => 0.0,
+    }
 }
 
 /// Reads a node's computed `box-shadow` list, if present.
@@ -1803,15 +1945,48 @@ mod tests {
         SceneImage::new(2, 2, pixels, AlphaMode::Straight).expect("2x2 rgba is valid")
     }
 
-    /// Collects the `DrawImage` destination rects of a display list, in paint order.
-    fn image_dsts(list: &DisplayList) -> Vec<Rect> {
+    /// Collects the `DrawImage` `(tile, region, repeat_x, repeat_y)` tuples of a
+    /// display list, in paint order.
+    fn image_draws(list: &DisplayList) -> Vec<(Rect, Rect, bool, bool)> {
         list.commands()
             .iter()
             .filter_map(|c| match c {
-                PaintCommand::DrawImage { dst, .. } => Some(*dst),
+                PaintCommand::DrawImage {
+                    tile,
+                    region,
+                    repeat_x,
+                    repeat_y,
+                    ..
+                } => Some((*tile, *region, *repeat_x, *repeat_y)),
                 _ => None,
             })
             .collect()
+    }
+
+    /// A `ComputedStyle` carrying a `background-image: url(...)` plus explicit
+    /// `background-size` / `-position` / `-repeat` computed values.
+    fn with_background_layer(
+        url: &str,
+        size: BackgroundSize,
+        position: BackgroundPosition,
+        repeat: BackgroundRepeat,
+    ) -> ComputedStyle {
+        let mut style =
+            with_background_image(PropertyValue::BackgroundImageUrl(url.into()));
+        style.set(
+            PropertyId::BackgroundSize,
+            ComputedValue::from_concrete(PropertyValue::BackgroundSize(size)).expect("concrete"),
+        );
+        style.set(
+            PropertyId::BackgroundPosition,
+            ComputedValue::from_concrete(PropertyValue::BackgroundPosition(position))
+                .expect("concrete"),
+        );
+        style.set(
+            PropertyId::BackgroundRepeat,
+            ComputedValue::from_concrete(PropertyValue::BackgroundRepeat(repeat)).expect("concrete"),
+        );
+        style
     }
 
     #[test]
@@ -1835,18 +2010,157 @@ mod tests {
         // Without the URL in the map: no DrawImage (regression-safe).
         let empty = HashMap::new();
         let bare = SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &empty);
-        assert!(image_dsts(&bare).is_empty(), "no image resolved → no DrawImage");
+        assert!(image_draws(&bare).is_empty(), "no image resolved → no DrawImage");
         assert!(bare.is_balanced());
 
-        // With the URL resolved: one DrawImage stretched over the node's box.
+        // With the URL resolved: one DrawImage. With NO authored size/position/
+        // repeat, the CSS initials apply (auto size = the intrinsic 2×2 tile at the
+        // box's top-left, repeat both axes) — the CSS-correct default, NOT a
+        // full-box stretch. The region is the node's border box.
         let mut images = HashMap::new();
         images.insert(Box::<str>::from("x.png"), canned_image());
         let list =
             SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
-        let dsts = image_dsts(&list);
-        assert_eq!(dsts.len(), 1, "one resolved image paints one DrawImage");
-        assert_eq!(dsts[0], node_box.bounds, "image stretches over the node box");
+        let draws = image_draws(&list);
+        assert_eq!(draws.len(), 1, "one resolved image paints one DrawImage");
+        let (tile, region, rx, ry) = draws[0];
+        assert_eq!(region, node_box.bounds, "region is the node's border box");
+        // Intrinsic 2×2 tile at the box origin (top-left).
+        assert_eq!(tile.origin, node_box.bounds.origin);
+        assert!((tile.size.width - 2.0).abs() < 1e-3);
+        assert!((tile.size.height - 2.0).abs() < 1e-3);
+        assert!(rx && ry, "CSS initial background-repeat is repeat on both axes");
         assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn background_no_repeat_contain_fits_one_tile() {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(
+            a,
+            with_background_layer(
+                "x.png",
+                BackgroundSize::Contain,
+                BackgroundPosition::default(),
+                BackgroundRepeat::NoRepeat,
+            ),
+        );
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
+
+        let mut images = HashMap::new();
+        images.insert(Box::<str>::from("x.png"), canned_image());
+        let list =
+            SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
+        let draws = image_draws(&list);
+        assert_eq!(draws.len(), 1);
+        let (tile, _region, rx, ry) = draws[0];
+        // `contain` of a 2×2 image into a 10×10 box scales to 10×10 (aspect kept).
+        assert!((tile.size.width - 10.0).abs() < 1e-3, "contain width, got {tile:?}");
+        assert!((tile.size.height - 10.0).abs() < 1e-3, "contain height");
+        assert_eq!(tile.origin, Point::new(0.0, 0.0), "top-left position");
+        assert!(!rx && !ry, "no-repeat clears both axis flags");
+    }
+
+    #[test]
+    fn background_cover_scales_to_cover_the_box() {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(
+            a,
+            with_background_layer(
+                "x.png",
+                BackgroundSize::Cover,
+                BackgroundPosition::default(),
+                BackgroundRepeat::NoRepeat,
+            ),
+        );
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
+
+        let mut images = HashMap::new();
+        images.insert(Box::<str>::from("x.png"), canned_image());
+        let list =
+            SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
+        let (tile, _region, _rx, _ry) = image_draws(&list)[0];
+        // `cover` scales to at least the box on both axes (≥ 10×10). The region
+        // clips any overflow at paint time.
+        assert!(tile.size.width >= 10.0 - 1e-3, "cover width ≥ box, got {tile:?}");
+        assert!(tile.size.height >= 10.0 - 1e-3, "cover height ≥ box");
+    }
+
+    #[test]
+    fn background_position_right_bottom_places_tile_at_far_corner() {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(
+            a,
+            with_background_layer(
+                "x.png",
+                BackgroundSize::Auto,
+                // `right bottom` == 100% / 100%.
+                BackgroundPosition::new(Length::Percent(100.0), Length::Percent(100.0)),
+                BackgroundRepeat::NoRepeat,
+            ),
+        );
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
+
+        let mut images = HashMap::new();
+        images.insert(Box::<str>::from("x.png"), canned_image());
+        let list =
+            SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
+        let (tile, _region, _rx, _ry) = image_draws(&list)[0];
+        // Intrinsic 2×2 tile positioned bottom-right: origin = box − tile = (8, 8).
+        assert!((tile.origin.x - 8.0).abs() < 1e-3, "x at box right − tile, got {tile:?}");
+        assert!((tile.origin.y - 8.0).abs() < 1e-3, "y at box bottom − tile");
+        assert!((tile.size.width - 2.0).abs() < 1e-3);
+        assert!((tile.size.height - 2.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn background_default_repeat_sets_both_axis_flags() {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(
+            a,
+            with_background_layer(
+                "x.png",
+                BackgroundSize::Auto,
+                BackgroundPosition::default(),
+                BackgroundRepeat::Repeat,
+            ),
+        );
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
+
+        let mut images = HashMap::new();
+        images.insert(Box::<str>::from("x.png"), canned_image());
+        let list =
+            SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
+        let (_tile, _region, rx, ry) = image_draws(&list)[0];
+        assert!(rx && ry, "repeat sets both axis flags");
     }
 
     #[test]

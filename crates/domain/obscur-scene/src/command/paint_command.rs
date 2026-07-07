@@ -83,25 +83,41 @@ pub enum PaintCommand {
         /// than a drop shadow (painted behind it).
         inset: bool,
     },
-    /// Draw a decoded raster [`SceneImage`] stretched to fill `dst`. A LEAF
-    /// command (no nesting effect).
+    /// Draw a decoded raster [`SceneImage`], placed and (optionally) tiled within
+    /// `region`. A LEAF command (no nesting effect).
     ///
-    /// The image's intrinsic `width × height` is scaled to the destination
-    /// rectangle `dst` (in absolute scene coordinates) and drawn there; a renderer
+    /// This is the CSS background placement model (`background-position` /
+    /// `background-size` / `background-repeat`):
+    ///
+    /// * `tile` is the rectangle of **one** copy of the image, in absolute scene
+    ///   coordinates — its position (`background-position`) *and* size
+    ///   (`background-size`) already resolved by the coordinator. The image's
+    ///   intrinsic `width × height` is scaled to `tile`'s size and drawn at
+    ///   `tile`'s origin.
+    /// * `region` is the background paint area (the node's border box). It acts as
+    ///   a **clip**: no image pixel paints outside it.
+    /// * `repeat_x` / `repeat_y` tile the image along that axis, stepping by
+    ///   `tile`'s width / height from `tile`'s origin (both directions) until
+    ///   `region` is covered.
+    ///
+    /// A plain full-box stretch is `tile == region` with `repeat_x == repeat_y ==
+    /// false` — visually identical to a stretch-to-`region` draw. A renderer
     /// composes this with any active transform / clip / layer exactly like every
     /// other leaf paint. The image carries its own [`AlphaMode`](crate::color::AlphaMode),
     /// so each backend converts to its native premultiplied form honestly and both
     /// show the same picture (spec §5.16).
-    ///
-    /// This is the primitive CSS `background-image: url()` lowers onto. Only a
-    /// stretch-to-`dst` draw is modeled today: a source sub-rectangle, `repeat`
-    /// tiling, nine-slice, and `background-size` keywords are future additions.
     DrawImage {
         /// The decoded RGBA8 image to draw.
         image: SceneImage,
-        /// The destination rectangle the image is stretched to fill, in absolute
-        /// scene coordinates.
-        dst: Rect,
+        /// The rectangle of one image copy (position + size), in absolute scene
+        /// coordinates. The image is scaled from its intrinsic size to this rect.
+        tile: Rect,
+        /// The background paint area (border box) the image(s) are clipped to.
+        region: Rect,
+        /// Whether to tile the image horizontally to fill `region`.
+        repeat_x: bool,
+        /// Whether to tile the image vertically to fill `region`.
+        repeat_y: bool,
     },
     /// Push an affine transform onto the transform stack (CSS 2D `transform`,
     /// spec §5.2). Subsequent drawing — up to the matching
@@ -246,9 +262,13 @@ mod tests {
 
         let image = SceneImage::new(1, 1, Arc::from(vec![255u8, 0, 0, 255]), AlphaMode::Straight)
             .expect("1x1 image");
+        let rect = Rect::new(Point::new(0.0, 0.0), Size::new(4.0, 4.0));
         let cmd = PaintCommand::DrawImage {
             image,
-            dst: Rect::new(Point::new(0.0, 0.0), Size::new(4.0, 4.0)),
+            tile: rect,
+            region: rect,
+            repeat_x: false,
+            repeat_y: false,
         };
         assert_eq!(cmd.nesting_delta(), 0);
         assert!(!cmd.is_push());

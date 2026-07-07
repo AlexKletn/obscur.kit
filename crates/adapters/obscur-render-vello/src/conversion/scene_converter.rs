@@ -53,7 +53,10 @@ const FAUX_BOLD_EMBOLDEN_FRACTION: f64 = 0.02;
 /// - [`PaintCommand::DrawImage`] → [`Scene::draw_image`]: the decoded RGBA8 pixels
 ///   become a [`peniko::ImageData`] (zero-copy from the image's `Arc<[u8]>`, tagged
 ///   with its own alpha encoding) drawn at its intrinsic size, with a transform
-///   that scales it to fill the destination rect.
+///   that scales each copy to its tile rect. The tile is placed / sized
+///   (`background-position` / `-size`), clipped to the paint region (border box)
+///   with a pushed clip layer, and tiled along the `repeat_x` / `repeat_y` axes
+///   (`background-repeat`) with a bounded per-copy loop.
 /// - [`PaintCommand::PushClip`] → [`Scene::push_layer`] with a neutral blend and
 ///   the clip's shape, which Vello treats as a clip region.
 /// - [`PaintCommand::PushLayer`] → [`Scene::push_layer`] with the layer's blend,
@@ -208,8 +211,14 @@ impl SceneConverter {
                         &mut scene, rect, radii, *color, *blur, *spread, *offset, *inset, current,
                     );
                 }
-                PaintCommand::DrawImage { image, dst } => {
-                    draw_image(&mut scene, image, dst, current);
+                PaintCommand::DrawImage {
+                    image,
+                    tile,
+                    region,
+                    repeat_x,
+                    repeat_y,
+                } => {
+                    draw_image(&mut scene, image, tile, region, *repeat_x, *repeat_y, current);
                 }
             }
         }
@@ -419,7 +428,19 @@ impl AsRef<[u8]> for SharedPixels {
     }
 }
 
-/// Draws a decoded [`SceneImage`] stretched to fill `dst` (spec §5.16).
+/// The largest number of image copies drawn per axis for a tiled
+/// (`background-repeat`) background — a bounded-loop guard matching the CPU
+/// backend, so both agree. The `region` clip trims any overdraw regardless.
+const MAX_TILES_PER_AXIS: i32 = 8192;
+
+/// The smallest tile extent (logical px) that still tiles on an axis; at or below
+/// it the axis is treated as non-repeating so a degenerate size cannot spin the
+/// tile loop.
+const MIN_TILE_EXTENT: f32 = 0.5;
+
+/// Draws a decoded [`SceneImage`] as one copy scaled to `tile`, clipped to
+/// `region`, and optionally tiled along the `repeat_x` / `repeat_y` axes to fill
+/// `region` (spec §5.16, CSS Backgrounds §3).
 ///
 /// The RGBA8 pixels are wrapped into a [`peniko::ImageData`] — zero-copy, since
 /// the [`SceneImage`]'s `Arc<[u8]>` becomes the image [`Blob`] directly — tagged
@@ -427,19 +448,41 @@ impl AsRef<[u8]> for SharedPixels {
 /// [`ImageAlphaType::Alpha`], [`AlphaMode::Premultiplied`] →
 /// [`ImageAlphaType::AlphaPremultiplied`]), so Vello premultiplies honestly rather
 /// than this adapter double-premultiplying. [`Scene::draw_image`] draws the image
-/// at its intrinsic `width × height`; the transform scales that to `dst`'s size and
-/// translates it to `dst`'s origin, composed under the active `transform`. A
-/// zero-sized image or destination is skipped (nothing to sample).
+/// at its intrinsic `width × height`; a per-copy transform scales that to `tile`'s
+/// size and translates it to each copy's origin, composed under the active
+/// `transform`.
+///
+/// peniko 0.6's `ImageData` exposes `x_extend` / `y_extend`, but Vello 0.9's
+/// `Scene::draw_image` draws a single image instance (extend only pads sampling at
+/// the image's own edges, it does not tile across a larger area), so tiling is done
+/// with the SAME bounded per-copy loop as the CPU backend, and both are confined to
+/// `region` by a pushed clip layer. A single tile fully inside `region` with no
+/// tiling takes neither the loop nor the clip — visually identical to the previous
+/// stretch draw. A zero-sized image, tile, or region is skipped.
+#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
 fn draw_image(
     scene: &mut Scene,
     image: &SceneImage,
-    dst: &obscur_geometry::Rect,
+    tile: &obscur_geometry::Rect,
+    region: &obscur_geometry::Rect,
+    repeat_x: bool,
+    repeat_y: bool,
     transform: Affine,
 ) {
     let (iw, ih) = (image.width(), image.height());
-    if iw == 0 || ih == 0 || dst.size.width <= 0.0 || dst.size.height <= 0.0 {
+    if iw == 0
+        || ih == 0
+        || tile.size.width <= 0.0
+        || tile.size.height <= 0.0
+        || region.size.width <= 0.0
+        || region.size.height <= 0.0
+    {
         return;
     }
+    // A tile too small to tile safely repeats as a single copy on that axis.
+    let repeat_x = repeat_x && tile.size.width > MIN_TILE_EXTENT;
+    let repeat_y = repeat_y && tile.size.height > MIN_TILE_EXTENT;
+
     let alpha_type = match image.alpha_mode() {
         AlphaMode::Straight => ImageAlphaType::Alpha,
         AlphaMode::Premultiplied => ImageAlphaType::AlphaPremultiplied,
@@ -454,14 +497,80 @@ fn draw_image(
         width: iw,
         height: ih,
     };
-    // Intrinsic → dst: scale the natural `iw × ih` down/up to the destination
-    // size, then translate to its origin, all under the running transform.
-    let scale = Affine::scale_non_uniform(
-        f64::from(dst.size.width) / f64::from(iw),
-        f64::from(dst.size.height) / f64::from(ih),
+
+    // Confine drawing to `region` unless a single tile already sits inside it.
+    let contained = !repeat_x
+        && !repeat_y
+        && tile.origin.x >= region.origin.x - 1e-3
+        && tile.origin.y >= region.origin.y - 1e-3
+        && tile.origin.x + tile.size.width <= region.origin.x + region.size.width + 1e-3
+        && tile.origin.y + tile.size.height <= region.origin.y + region.size.height + 1e-3;
+    let clipped = !contained;
+    if clipped {
+        let clip = KurboRect::new(
+            f64::from(region.origin.x),
+            f64::from(region.origin.y),
+            f64::from(region.origin.x + region.size.width),
+            f64::from(region.origin.y + region.size.height),
+        );
+        scene.push_layer(peniko::Fill::NonZero, peniko::BlendMode::default(), 1.0, transform, &clip);
+    }
+
+    let (i0, i1) = tile_index_range(
+        repeat_x,
+        region.origin.x,
+        region.origin.x + region.size.width,
+        tile.origin.x,
+        tile.size.width,
     );
-    let place = Affine::translate((f64::from(dst.origin.x), f64::from(dst.origin.y)));
-    scene.draw_image(&data, transform * place * scale);
+    let (j0, j1) = tile_index_range(
+        repeat_y,
+        region.origin.y,
+        region.origin.y + region.size.height,
+        tile.origin.y,
+        tile.size.height,
+    );
+    // Intrinsic → tile: scale the natural `iw × ih` to the tile size (constant
+    // across copies), then translate to each copy's origin.
+    let scale = Affine::scale_non_uniform(
+        f64::from(tile.size.width) / f64::from(iw),
+        f64::from(tile.size.height) / f64::from(ih),
+    );
+    for j in j0..=j1 {
+        for i in i0..=i1 {
+            let ox = f64::from(tile.origin.x) + f64::from(i) * f64::from(tile.size.width);
+            let oy = f64::from(tile.origin.y) + f64::from(j) * f64::from(tile.size.height);
+            let place = Affine::translate((ox, oy));
+            scene.draw_image(&data, transform * place * scale);
+        }
+    }
+
+    if clipped {
+        scene.pop_layer();
+    }
+}
+
+/// Computes the inclusive tile index range `[start, end]` covering the span
+/// `[r0, r1]` with copies at `t0 + k * ts` (`ts > 0`), matching the CPU backend. A
+/// non-repeating axis is the single index `0`; the range is padded by one on each
+/// side and clamped to [`MAX_TILES_PER_AXIS`] copies (the `region` clip trims any
+/// overdraw).
+#[allow(clippy::cast_possible_truncation)]
+fn tile_index_range(repeat: bool, r0: f32, r1: f32, t0: f32, ts: f32) -> (i32, i32) {
+    if !repeat || ts <= 0.0 {
+        return (0, 0);
+    }
+    let start_f = ((r0 - t0) / ts).floor();
+    let end_f = ((r1 - t0) / ts).ceil();
+    if !start_f.is_finite() || !end_f.is_finite() {
+        return (0, 0);
+    }
+    let start = start_f as i32 - 1;
+    let mut end = end_f as i32 + 1;
+    if end - start + 1 > MAX_TILES_PER_AXIS {
+        end = start + MAX_TILES_PER_AXIS - 1;
+    }
+    (start, end)
 }
 
 /// Maps an obscur-scene [`BlendMode`] to a peniko [`Mix`](peniko::Mix) blend.
@@ -577,12 +686,38 @@ mod tests {
         use obscur_scene::paint::SceneImage;
         use std::sync::Arc;
 
-        // A 2×2 opaque image stretched to an 8×8 destination rect.
+        // A 2×2 opaque image stretched to an 8×8 tile == region rect (no repeat).
+        let image = SceneImage::new(2, 2, Arc::from(vec![255u8; 16]), AlphaMode::Straight)
+            .expect("2x2 image");
+        let rect = Rect::new(Point::new(1.0, 1.0), Size::new(8.0, 8.0));
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawImage {
+            image,
+            tile: rect,
+            region: rect,
+            repeat_x: false,
+            repeat_y: false,
+        }]);
+        let scene = SceneConverter::new().convert(&list);
+        assert!(!scene.encoding().is_empty());
+    }
+
+    #[test]
+    fn repeated_image_tiles_and_stays_balanced() {
+        use obscur_scene::color::AlphaMode;
+        use obscur_scene::paint::SceneImage;
+        use std::sync::Arc;
+
+        // A 2×2 image, a 4×4 tile, repeated across a 16×16 region: the tile loop
+        // draws several copies inside a pushed region clip layer, and the scene is
+        // non-empty. (The layer is popped, so encoding stays well-formed.)
         let image = SceneImage::new(2, 2, Arc::from(vec![255u8; 16]), AlphaMode::Straight)
             .expect("2x2 image");
         let list = DisplayList::from_commands(vec![PaintCommand::DrawImage {
             image,
-            dst: Rect::new(Point::new(1.0, 1.0), Size::new(8.0, 8.0)),
+            tile: Rect::new(Point::new(0.0, 0.0), Size::new(4.0, 4.0)),
+            region: Rect::new(Point::new(0.0, 0.0), Size::new(16.0, 16.0)),
+            repeat_x: true,
+            repeat_y: true,
         }]);
         let scene = SceneConverter::new().convert(&list);
         assert!(!scene.encoding().is_empty());
@@ -597,9 +732,13 @@ mod tests {
         // A 0×0 image has no pixels to sample: it is skipped, not encoded.
         let image = SceneImage::new(0, 0, Arc::from(Vec::new()), AlphaMode::Straight)
             .expect("0x0 image");
+        let rect = Rect::new(Point::new(0.0, 0.0), Size::new(8.0, 8.0));
         let list = DisplayList::from_commands(vec![PaintCommand::DrawImage {
             image,
-            dst: Rect::new(Point::new(0.0, 0.0), Size::new(8.0, 8.0)),
+            tile: rect,
+            region: rect,
+            repeat_x: false,
+            repeat_y: false,
         }]);
         let scene = SceneConverter::new().convert(&list);
         assert!(scene.encoding().is_empty());

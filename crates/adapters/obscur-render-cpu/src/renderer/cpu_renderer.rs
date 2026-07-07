@@ -39,10 +39,12 @@
 //! - **Images** ([`DrawImage`]) blit the real decoded RGBA8 pixels: the buffer is
 //!   premultiplied (as `tiny-skia` stores) if the [`SceneImage`] is straight-alpha,
 //!   wrapped into a source [`tiny_skia::Pixmap`], and drawn with `draw_pixmap` under
-//!   a transform that stretches the image's intrinsic size to the destination rect.
+//!   a transform that scales the image's intrinsic size to each copy's tile rect.
 //!   This is a genuine sampled bitmap, not an approximation, so both backends show
-//!   the same picture. Only a stretch-to-`dst` draw is modeled (no source-rect,
-//!   `repeat` tiling, nine-slice, or `background-size` yet).
+//!   the same picture. The tile is placed (`background-position`), sized
+//!   (`background-size`), clipped to the paint region (the border box), and tiled
+//!   along the `repeat_x` / `repeat_y` axes (`background-repeat`) with a bounded
+//!   loop; a source sub-rectangle and nine-slice are not modeled yet.
 //!
 //! [`DrawImage`]: obscur_scene::command::PaintCommand::DrawImage
 //!
@@ -395,12 +397,18 @@ impl Renderer for CpuRenderer {
                         current,
                     );
                 }
-                PaintCommand::DrawImage { image, dst } => {
+                PaintCommand::DrawImage {
+                    image,
+                    tile,
+                    region,
+                    repeat_x,
+                    repeat_y,
+                } => {
                     let clip = clip_stack.last().and_then(Option::as_ref);
                     let Some(pixmap) = targets.last_mut() else {
                         continue;
                     };
-                    draw_image(pixmap, image, *dst, clip, current);
+                    draw_image(pixmap, image, *tile, *region, *repeat_x, *repeat_y, clip, current);
                 }
             }
         }
@@ -632,29 +640,57 @@ fn draw_shadow_approx(
     );
 }
 
-/// Blits a decoded [`SceneImage`] stretched to fill `dst`, honoring the active
-/// `clip` and `transform` (spec §5.16).
+/// The largest number of image copies drawn per axis for a tiled
+/// (`background-repeat`) background — a bounded-loop guard against a pathological
+/// tiny-tile / huge-region combination. The visible output is clipped to `region`
+/// regardless, so this only caps wasted work (documented limitation).
+const MAX_TILES_PER_AXIS: i32 = 8192;
+
+/// The smallest tile extent (logical px) that still tiles: a tile at or below this
+/// on an axis is treated as non-repeating on that axis, so a degenerate size can
+/// never spin the tile loop.
+const MIN_TILE_EXTENT: f32 = 0.5;
+
+/// Blits a decoded [`SceneImage`] as one copy scaled to `tile`, clipped to
+/// `region`, and optionally tiled along the `repeat_x` / `repeat_y` axes to fill
+/// `region`, honoring the active `clip` and `transform` (spec §5.16).
 ///
 /// `tiny-skia` stores **premultiplied** RGBA, so a [`AlphaMode::Straight`] image is
 /// premultiplied per pixel here (a [`AlphaMode::Premultiplied`] image is used as-is)
-/// before being wrapped into a source [`tiny_skia::Pixmap`]. The source is then
-/// drawn with [`draw_pixmap`](tiny_skia::Pixmap::draw_pixmap) under a transform that
-/// scales the image's intrinsic `width × height` to `dst`'s size and translates it
-/// to `dst`'s origin, composed with the running `transform`. The default nearest
-/// sampling keeps the blit crisp and deterministic. A zero-sized image or
-/// destination, or a source pixmap that fails to allocate, draws nothing.
-#[allow(clippy::cast_precision_loss)]
+/// before being wrapped into a source [`tiny_skia::Pixmap`], once, and reused for
+/// every tile. Each copy is drawn with [`draw_pixmap`](tiny_skia::Pixmap::draw_pixmap)
+/// under a transform that scales the image's intrinsic `width × height` to `tile`'s
+/// size and translates it to the copy's origin (stepping by `tile`'s width/height on
+/// the repeated axes), composed with the running `transform`. When tiling — or when
+/// a single tile overflows `region` — the draw is confined to `region` by
+/// intersecting a `region` clip mask into the active `clip`. The default nearest
+/// sampling keeps the blit crisp and deterministic. A zero-sized image, tile, or
+/// region, or a source pixmap that fails to allocate, draws nothing.
+#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
 fn draw_image(
     pixmap: &mut tiny_skia::Pixmap,
     image: &SceneImage,
-    dst: Rect,
+    tile: Rect,
+    region: Rect,
+    repeat_x: bool,
+    repeat_y: bool,
     clip: Option<&tiny_skia::Mask>,
     transform: tiny_skia::Transform,
 ) {
     let (iw, ih) = (image.width(), image.height());
-    if iw == 0 || ih == 0 || dst.size.width <= 0.0 || dst.size.height <= 0.0 {
+    if iw == 0
+        || ih == 0
+        || tile.size.width <= 0.0
+        || tile.size.height <= 0.0
+        || region.size.width <= 0.0
+        || region.size.height <= 0.0
+    {
         return;
     }
+    // A tile too small to tile safely repeats as a single copy on that axis.
+    let repeat_x = repeat_x && tile.size.width > MIN_TILE_EXTENT;
+    let repeat_y = repeat_y && tile.size.height > MIN_TILE_EXTENT;
+
     // tiny-skia stores premultiplied RGBA: premultiply a straight image, pass a
     // premultiplied one through unchanged, so both backends show the same picture.
     let premultiplied = match image.alpha_mode() {
@@ -667,23 +703,88 @@ fn draw_image(
     let Some(src) = tiny_skia::Pixmap::from_vec(premultiplied, size) else {
         return;
     };
-    // Intrinsic → dst: scale the natural `iw × ih` to the destination size, then
-    // translate to its origin, all under the running transform. `draw_pixmap`'s
-    // sprite offset stays `(0, 0)` — the placement lives entirely in the transform.
-    let place = transform
-        .pre_concat(tiny_skia::Transform::from_translate(dst.origin.x, dst.origin.y))
-        .pre_concat(tiny_skia::Transform::from_scale(
-            dst.size.width / iw as f32,
-            dst.size.height / ih as f32,
-        ));
-    pixmap.draw_pixmap(
-        0,
-        0,
-        src.as_ref(),
-        &tiny_skia::PixmapPaint::default(),
-        place,
-        clip,
+
+    // The single tile fully inside `region` with no tiling needs no extra clip —
+    // the exact pre-placement stretch path. Otherwise confine drawing to `region`
+    // by intersecting a `region` mask into the active clip.
+    let contained = !repeat_x
+        && !repeat_y
+        && tile.origin.x >= region.origin.x - 1e-3
+        && tile.origin.y >= region.origin.y - 1e-3
+        && tile.origin.x + tile.size.width <= region.origin.x + region.size.width + 1e-3
+        && tile.origin.y + tile.size.height <= region.origin.y + region.size.height + 1e-3;
+    let region_mask = if contained {
+        None
+    } else {
+        let Some(region_path) = to_sk_path(&Path::rect(region)) else {
+            return;
+        };
+        build_clip_mask(
+            pixmap.width(),
+            pixmap.height(),
+            &region_path,
+            tiny_skia::FillRule::Winding,
+            clip,
+            transform,
+        )
+    };
+    let effective_clip = if contained { clip } else { region_mask.as_ref() };
+
+    // Tile index ranges: `[i0, i1] × [j0, j1]` copies stepping by tile w/h from the
+    // tile origin, covering `region`. A non-repeating axis is the single index 0.
+    let (i0, i1) = tile_index_range(
+        repeat_x,
+        region.origin.x,
+        region.origin.x + region.size.width,
+        tile.origin.x,
+        tile.size.width,
     );
+    let (j0, j1) = tile_index_range(
+        repeat_y,
+        region.origin.y,
+        region.origin.y + region.size.height,
+        tile.origin.y,
+        tile.size.height,
+    );
+
+    let paint = tiny_skia::PixmapPaint::default();
+    let (sx, sy) = (tile.size.width / iw as f32, tile.size.height / ih as f32);
+    for j in j0..=j1 {
+        for i in i0..=i1 {
+            let ox = tile.origin.x + i as f32 * tile.size.width;
+            let oy = tile.origin.y + j as f32 * tile.size.height;
+            // Intrinsic → tile: scale the natural `iw × ih` to the tile size, then
+            // translate to this copy's origin, all under the running transform.
+            let place = transform
+                .pre_concat(tiny_skia::Transform::from_translate(ox, oy))
+                .pre_concat(tiny_skia::Transform::from_scale(sx, sy));
+            pixmap.draw_pixmap(0, 0, src.as_ref(), &paint, place, effective_clip);
+        }
+    }
+}
+
+/// Computes the inclusive tile index range `[start, end]` covering the span
+/// `[r0, r1]` with copies at `t0 + k * ts` (`ts > 0`). A non-repeating axis
+/// (`repeat == false`) is the single index `0`. The range is padded by one on each
+/// side (so a partially-visible edge tile is drawn) and clamped to
+/// [`MAX_TILES_PER_AXIS`] copies — the `region` clip trims any overdraw.
+#[allow(clippy::cast_possible_truncation)]
+fn tile_index_range(repeat: bool, r0: f32, r1: f32, t0: f32, ts: f32) -> (i32, i32) {
+    if !repeat || ts <= 0.0 {
+        return (0, 0);
+    }
+    let start_f = ((r0 - t0) / ts).floor();
+    let end_f = ((r1 - t0) / ts).ceil();
+    if !start_f.is_finite() || !end_f.is_finite() {
+        return (0, 0);
+    }
+    let start = start_f as i32 - 1;
+    let mut end = end_f as i32 + 1;
+    // Bound the loop: never draw more than MAX_TILES_PER_AXIS copies on this axis.
+    if end - start + 1 > MAX_TILES_PER_AXIS {
+        end = start + MAX_TILES_PER_AXIS - 1;
+    }
+    (start, end)
 }
 
 /// Premultiplies straight-alpha RGBA8 bytes into the premultiplied form
@@ -1246,7 +1347,13 @@ mod tests {
         let dst = Rect::new(Point::new(4.0, 4.0), Size::new(8.0, 8.0));
         let list = DisplayList::from_commands(vec![
             white_bg(),
-            PaintCommand::DrawImage { image, dst },
+            PaintCommand::DrawImage {
+                image,
+                tile: dst,
+                region: dst,
+                repeat_x: false,
+                repeat_y: false,
+            },
         ]);
         let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(11));
         let frame = RenderFrame::new(snapshot, Size::new(16.0, 16.0));
@@ -1271,6 +1378,118 @@ mod tests {
     }
 
     #[test]
+    fn no_repeat_tile_paints_only_its_rect() {
+        // A 2×2 red image, no-repeat, as a 4×4 tile centered in a 16×16 white box:
+        // tile at (6,6)..(10,10). Inside is red, outside (the rest of the box) is
+        // white — proof position + size place a single clipped tile.
+        let image = solid_image(255, 0, 0, 255, AlphaMode::Straight);
+        let region = Rect::new(Point::new(0.0, 0.0), Size::new(16.0, 16.0));
+        let tile = Rect::new(Point::new(6.0, 6.0), Size::new(4.0, 4.0));
+        let list = DisplayList::from_commands(vec![
+            white_bg(),
+            PaintCommand::DrawImage {
+                image,
+                tile,
+                region,
+                repeat_x: false,
+                repeat_y: false,
+            },
+        ]);
+        let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(21));
+        let frame = RenderFrame::new(snapshot, Size::new(16.0, 16.0));
+        let submission = FrameSubmission::new(frame);
+        let mut renderer = CpuRenderer::default();
+        renderer
+            .render(&submission, &bitmap_target(16.0, 16.0))
+            .expect("renders");
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+
+        // Center of the tile is red.
+        let inside = pixmap.pixel(8, 8).expect("center pixel");
+        assert!(inside.red() > 200 && inside.green() < 40 && inside.blue() < 40);
+        // A pixel outside the tile (but inside the box) is white — no tiling.
+        let outside = pixmap.pixel(2, 2).expect("box corner pixel");
+        assert!(outside.red() > 200 && outside.green() > 200 && outside.blue() > 200);
+    }
+
+    #[test]
+    fn repeat_x_tiles_a_horizontal_band() {
+        // A 2×2 red image, repeat-x only, a 4×4 tile whose origin is the band row
+        // (6,6): red tiles fill the whole row band (y 6..10) across x, but rows
+        // outside the band stay white (no vertical tiling).
+        let image = solid_image(255, 0, 0, 255, AlphaMode::Straight);
+        let region = Rect::new(Point::new(0.0, 0.0), Size::new(16.0, 16.0));
+        let tile = Rect::new(Point::new(6.0, 6.0), Size::new(4.0, 4.0));
+        let list = DisplayList::from_commands(vec![
+            white_bg(),
+            PaintCommand::DrawImage {
+                image,
+                tile,
+                region,
+                repeat_x: true,
+                repeat_y: false,
+            },
+        ]);
+        let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(22));
+        let frame = RenderFrame::new(snapshot, Size::new(16.0, 16.0));
+        let submission = FrameSubmission::new(frame);
+        let mut renderer = CpuRenderer::default();
+        renderer
+            .render(&submission, &bitmap_target(16.0, 16.0))
+            .expect("renders");
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+
+        // Far-left and far-right of the band row are red (tiled horizontally).
+        let left = pixmap.pixel(1, 8).expect("left band pixel");
+        assert!(left.red() > 200 && left.blue() < 40, "left band is red");
+        let right = pixmap.pixel(14, 8).expect("right band pixel");
+        assert!(right.red() > 200 && right.blue() < 40, "right band is red");
+        // A pixel above the band (y=2) stays white — no vertical tiling.
+        let above = pixmap.pixel(8, 2).expect("above-band pixel");
+        assert!(above.red() > 200 && above.green() > 200 && above.blue() > 200);
+    }
+
+    #[test]
+    fn cover_overflow_is_clipped_to_region() {
+        // A 2×2 red image scaled to a tile larger than the region (a `cover`-style
+        // overflow), no-repeat: the tile origin is above/left of the region so it
+        // overflows, but the region clip keeps red only inside the region. A pixel
+        // just outside the region stays white.
+        let image = solid_image(255, 0, 0, 255, AlphaMode::Straight);
+        let region = Rect::new(Point::new(4.0, 4.0), Size::new(8.0, 8.0));
+        // Tile overflows the region on every side.
+        let tile = Rect::new(Point::new(0.0, 0.0), Size::new(16.0, 16.0));
+        let list = DisplayList::from_commands(vec![
+            white_bg(),
+            PaintCommand::DrawImage {
+                image,
+                tile,
+                region,
+                repeat_x: false,
+                repeat_y: false,
+            },
+        ]);
+        let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(23));
+        let frame = RenderFrame::new(snapshot, Size::new(16.0, 16.0));
+        let submission = FrameSubmission::new(frame);
+        let mut renderer = CpuRenderer::default();
+        renderer
+            .render(&submission, &bitmap_target(16.0, 16.0))
+            .expect("renders");
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+
+        // Inside the region: red.
+        let inside = pixmap.pixel(8, 8).expect("region center");
+        assert!(inside.red() > 200 && inside.blue() < 40, "region interior is red");
+        // Outside the region (but the tile would cover it): clipped to white.
+        let outside = pixmap.pixel(1, 1).expect("outside-region pixel");
+        assert!(
+            outside.red() > 200 && outside.green() > 200 && outside.blue() > 200,
+            "overflow clipped to region"
+        );
+    }
+
+    #[test]
     fn half_alpha_image_blends_over_white() {
         // A 2×2 straight-alpha red at 50% alpha over white → pink: red stays high,
         // green/blue rise toward mid as the white shows through (proves the
@@ -1279,7 +1498,13 @@ mod tests {
         let dst = Rect::new(Point::new(4.0, 4.0), Size::new(8.0, 8.0));
         let list = DisplayList::from_commands(vec![
             white_bg(),
-            PaintCommand::DrawImage { image, dst },
+            PaintCommand::DrawImage {
+                image,
+                tile: dst,
+                region: dst,
+                repeat_x: false,
+                repeat_y: false,
+            },
         ]);
         let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(12));
         let frame = RenderFrame::new(snapshot, Size::new(16.0, 16.0));
@@ -1318,7 +1543,13 @@ mod tests {
         let list = DisplayList::from_commands(vec![
             white_bg(),
             PaintCommand::PushLayer(layer),
-            PaintCommand::DrawImage { image, dst },
+            PaintCommand::DrawImage {
+                image,
+                tile: dst,
+                region: dst,
+                repeat_x: false,
+                repeat_y: false,
+            },
             PaintCommand::PopLayer,
         ]);
         let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(13));

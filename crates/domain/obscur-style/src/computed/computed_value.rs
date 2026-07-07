@@ -9,8 +9,9 @@
 //! remain.
 
 use crate::property::{
-    BoxShadow, ConicGradient, Length, LengthExpr, LinearGradient, PropertyValue, RadialGradient,
-    StyleColor, Transform, TransformOrigin,
+    BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow, ConicGradient, Length,
+    LengthExpr, LinearGradient, PropertyValue, RadialGradient, StyleColor, Transform,
+    TransformOrigin,
 };
 use obscur_identity::InternedSymbol;
 
@@ -49,6 +50,9 @@ impl ComputedValue {
             | PropertyValue::RadialGradient(_)
             | PropertyValue::ConicGradient(_)
             | PropertyValue::BackgroundImageUrl(_)
+            | PropertyValue::BackgroundSize(_)
+            | PropertyValue::BackgroundPosition(_)
+            | PropertyValue::BackgroundRepeat(_)
             | PropertyValue::BoxShadow(_)
             | PropertyValue::Filter(_)
             | PropertyValue::FontFamilies(_)
@@ -149,6 +153,24 @@ impl ComputedValue {
     #[must_use]
     pub fn as_box_shadows(&self) -> Option<&[BoxShadow]> {
         self.0.as_box_shadows()
+    }
+
+    /// Returns the `background-size` if this computed value is one.
+    #[must_use]
+    pub const fn as_background_size(&self) -> Option<BackgroundSize> {
+        self.0.as_background_size()
+    }
+
+    /// Returns the `background-position` if this computed value is one.
+    #[must_use]
+    pub const fn as_background_position(&self) -> Option<BackgroundPosition> {
+        self.0.as_background_position()
+    }
+
+    /// Returns the `background-repeat` if this computed value is one.
+    #[must_use]
+    pub const fn as_background_repeat(&self) -> Option<BackgroundRepeat> {
+        self.0.as_background_repeat()
     }
 
     /// Returns the `filter` drop-shadow list if this computed value is a `filter`.

@@ -1,4 +1,10 @@
 //! Property module.
+mod background_position;
+pub use background_position::BackgroundPosition;
+mod background_repeat;
+pub use background_repeat::BackgroundRepeat;
+mod background_size;
+pub use background_size::BackgroundSize;
 mod box_shadow;
 pub use box_shadow::BoxShadow;
 mod conic_gradient;

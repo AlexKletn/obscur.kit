@@ -26,6 +26,16 @@ pub enum PropertyId {
     /// Only the `linear-gradient(...)` image form is modelled; when present it
     /// paints the element's background fill over the `background-color`.
     BackgroundImage,
+    /// The `background-size` property (a `BackgroundSize` value; NOT inherited).
+    /// Sizes one copy of the `background-image` (`cover` / `contain` / `auto` /
+    /// explicit per-axis lengths); initial `auto`.
+    BackgroundSize,
+    /// The `background-position` property (a `BackgroundPosition` value; NOT
+    /// inherited). Places the sized image tile within the box; initial `0% 0%`.
+    BackgroundPosition,
+    /// The `background-repeat` property (a `BackgroundRepeat` value; NOT
+    /// inherited). Tiles the sized image tile to fill the box; initial `repeat`.
+    BackgroundRepeat,
     /// The `opacity` property.
     Opacity,
     /// The `width` property.
@@ -273,6 +283,9 @@ impl PropertyId {
             Self::Color => "color",
             Self::BackgroundColor => "background-color",
             Self::BackgroundImage => "background-image",
+            Self::BackgroundSize => "background-size",
+            Self::BackgroundPosition => "background-position",
+            Self::BackgroundRepeat => "background-repeat",
             Self::Opacity => "opacity",
             Self::Width => "width",
             Self::Height => "height",
@@ -367,6 +380,9 @@ impl PropertyId {
             // Box / paint / layout properties reset on each element.
             Self::BackgroundColor
             | Self::BackgroundImage
+            | Self::BackgroundSize
+            | Self::BackgroundPosition
+            | Self::BackgroundRepeat
             | Self::Opacity
             | Self::Width
             | Self::Height
@@ -459,6 +475,25 @@ mod tests {
                 .default_inheritance()
                 .is_inherited()
         );
+    }
+
+    #[test]
+    fn background_size_position_repeat_names_and_not_inherited() {
+        assert_eq!(PropertyId::BackgroundSize.name(), "background-size");
+        assert_eq!(PropertyId::BackgroundPosition.name(), "background-position");
+        assert_eq!(PropertyId::BackgroundRepeat.name(), "background-repeat");
+        // Like the other background / paint properties, none inherit.
+        for id in [
+            PropertyId::BackgroundSize,
+            PropertyId::BackgroundPosition,
+            PropertyId::BackgroundRepeat,
+        ] {
+            assert!(
+                !id.default_inheritance().is_inherited(),
+                "{} should not inherit",
+                id.name()
+            );
+        }
     }
 
     #[test]

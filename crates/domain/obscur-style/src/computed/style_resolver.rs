@@ -60,6 +60,9 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::Color,
     PropertyId::BackgroundColor,
     PropertyId::BackgroundImage,
+    PropertyId::BackgroundSize,
+    PropertyId::BackgroundPosition,
+    PropertyId::BackgroundRepeat,
     PropertyId::Opacity,
     PropertyId::Visibility,
     // Positioning.
@@ -191,6 +194,30 @@ impl StyleResolver {
             // unresolved and the scene paints no gradient fill — byte-for-byte
             // identical to before background images existed.
             PropertyId::BackgroundImage => None,
+            // `background-size` initial is `auto` (draw at intrinsic size),
+            // `background-position` initial is `0% 0%` (top-left), and
+            // `background-repeat` initial is `repeat` (tile both axes). All three
+            // have no-interner concrete values, so they resolve to the CSS initial
+            // directly (the scene coordinator would default to the same values for
+            // an absent property, so this is purely explicit).
+            PropertyId::BackgroundSize => Some(
+                ComputedValue::from_concrete(PropertyValue::BackgroundSize(
+                    crate::property::BackgroundSize::Auto,
+                ))
+                .expect("BackgroundSize is a concrete computed value"),
+            ),
+            PropertyId::BackgroundPosition => Some(
+                ComputedValue::from_concrete(PropertyValue::BackgroundPosition(
+                    crate::property::BackgroundPosition::default(),
+                ))
+                .expect("BackgroundPosition is a concrete computed value"),
+            ),
+            PropertyId::BackgroundRepeat => Some(
+                ComputedValue::from_concrete(PropertyValue::BackgroundRepeat(
+                    crate::property::BackgroundRepeat::Repeat,
+                ))
+                .expect("BackgroundRepeat is a concrete computed value"),
+            ),
             // `box-shadow` initial is `none` (no shadows). There is no
             // `BoxShadow` list value for `none` other than an empty one, and an
             // absent value paints nothing all the same, so it is left unresolved —
@@ -975,6 +1002,9 @@ mod tests {
                 PropertyId::Color
                 | PropertyId::BackgroundColor
                 | PropertyId::BackgroundImage
+                | PropertyId::BackgroundSize
+                | PropertyId::BackgroundPosition
+                | PropertyId::BackgroundRepeat
                 | PropertyId::Opacity
                 | PropertyId::Width
                 | PropertyId::Height
@@ -1053,6 +1083,9 @@ mod tests {
             PropertyId::Color,
             PropertyId::BackgroundColor,
             PropertyId::BackgroundImage,
+            PropertyId::BackgroundSize,
+            PropertyId::BackgroundPosition,
+            PropertyId::BackgroundRepeat,
             PropertyId::Opacity,
             PropertyId::Width,
             PropertyId::Height,

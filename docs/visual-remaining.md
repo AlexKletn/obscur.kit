@@ -4,7 +4,8 @@ The visual paint layer is now substantial and verified end-to-end (see
 `crates/facade/obscur-kit/tests/visual_css.rs`). Implemented: `background-color`,
 `background-image: {linear,radial,conic}-gradient(...)`,
 `background-image: url(...)` (load + decode via the ResourceHub into a
-`DrawImage`, stretch-to-box),
+`DrawImage`, placed + sized + tiled),
+`background-{size,position,repeat}` (tiled + placed `DrawImage`),
 `border-{side}-{width,style,color}`
 (painted), `border-radius` (rounded fill + clip), `box-shadow` (drop + inset),
 `filter: drop-shadow(...)` (via the box-shadow `DrawShadow` path),
@@ -19,10 +20,27 @@ The following are deferred. Each is documented at its site in code.
   injected `ResourceLoader`) + decodes (via the injected `ResourceDecoder`)
   through the runtime-owned `ResourceHub` into a cached `SceneImage`, which the
   scene coordinator paints as a `DrawImage` over the node's box (above
-  `background-color`, below the border/content). Remaining: the image is
-  **stretched** to the box — no `background-size` / `repeat` / `position`, no
-  multiple layers, and the fs resolve is synchronous (an unready URL simply paints
-  a later frame).
+  `background-color`, below the border/content). The `DrawImage` now carries a
+  placement model `{ image, tile, region, repeat_x, repeat_y }` (see below).
+  Remaining: multiple background layers, and the fs resolve is synchronous (an
+  unready URL simply paints a later frame).
+- ~~**`background-size` / `-position` / `-repeat`**~~ — DONE. Three new NOT-inherited
+  computed properties (`BackgroundSize` = `auto` / `cover` / `contain` / explicit
+  per-axis `<length|%|auto>`; `BackgroundPosition` = per-axis `<length|%|keyword>`,
+  CSS position formula; `BackgroundRepeat` = `repeat` / `no-repeat` / `repeat-x` /
+  `repeat-y`), fully registered (id + computed registry + coverage guard + name
+  table + initial + value/computed accessors). The scene coordinator resolves the
+  intrinsic image size + box into the `DrawImage` `tile` (position + size) and
+  `repeat_x`/`repeat_y` flags; the `region` (border box) clips the image(s). Both
+  backends honor it — the CPU backend loops copies + clips to `region`, and the
+  Vello backend uses the same bounded per-copy loop inside a pushed `region` clip
+  layer (peniko 0.6 `x_extend`/`y_extend` exist but Vello 0.9's `draw_image` draws a
+  single instance, so extend is not used for tiling). The CSS **initial** background
+  is the CSS-correct intrinsic-size tile at `0% 0%` repeated on both axes — NOT a
+  full-box stretch (a plain full-box stretch is `tile == region` + no repeat).
+  Deferred: `space` / `round` fold to `repeat` (no gap-distribution / integer-fit);
+  multiple background layers; sub-pixel tiling can show a hairline seam at some
+  scales; `em`/`vw`/… size/position units fall back (px + % are exact).
 - **Multiple background layers** — a comma list of backgrounds; only a single
   gradient/color is honored.
 - **Non-percentage (length) gradient stop positions** — stops take `%` only

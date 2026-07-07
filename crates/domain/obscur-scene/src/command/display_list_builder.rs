@@ -72,12 +72,26 @@ impl DisplayListBuilder {
         self
     }
 
-    /// Appends a [`PaintCommand::DrawImage`] drawing the decoded `image` stretched
-    /// to fill the destination rectangle `dst`. This is a leaf command (no nesting
-    /// effect); the image is stretched from its intrinsic size to `dst`. Returns
-    /// `&mut Self` for chaining.
-    pub fn draw_image(&mut self, image: SceneImage, dst: Rect) -> &mut Self {
-        self.commands.push(PaintCommand::DrawImage { image, dst });
+    /// Appends a [`PaintCommand::DrawImage`] drawing the decoded `image` as one
+    /// copy scaled to `tile`, clipped to `region`, and tiled along the `repeat_x` /
+    /// `repeat_y` axes to fill `region`. This is a leaf command (no nesting effect).
+    /// A full-box stretch is `tile == region` with both repeat flags `false`.
+    /// Returns `&mut Self` for chaining.
+    pub fn draw_image(
+        &mut self,
+        image: SceneImage,
+        tile: Rect,
+        region: Rect,
+        repeat_x: bool,
+        repeat_y: bool,
+    ) -> &mut Self {
+        self.commands.push(PaintCommand::DrawImage {
+            image,
+            tile,
+            region,
+            repeat_x,
+            repeat_y,
+        });
         self
     }
 
@@ -317,19 +331,20 @@ mod tests {
     }
 
     #[test]
-    fn draw_image_appends_a_leaf_image_command_with_the_given_dst() {
+    fn draw_image_appends_a_leaf_image_command_with_tile_region_and_repeat() {
         use crate::color::AlphaMode;
         use crate::paint::SceneImage;
         use std::sync::Arc;
 
         let image = SceneImage::new(2, 2, Arc::from(vec![0u8; 16]), AlphaMode::Straight)
             .expect("2x2 image");
-        let dst = Rect::new(Point::new(1.0, 2.0), Size::new(8.0, 6.0));
+        let tile = Rect::new(Point::new(1.0, 2.0), Size::new(2.0, 2.0));
+        let region = Rect::new(Point::new(1.0, 2.0), Size::new(8.0, 6.0));
         let mut builder = DisplayListBuilder::new();
         // Ordering: a fill precedes the image, so the image is command index 1.
         builder
             .fill_rect(rect(), Brush::solid(Color::WHITE))
-            .draw_image(image.clone(), dst);
+            .draw_image(image.clone(), tile, region, true, false);
 
         assert!(builder.is_balanced());
         let list = builder.build();
@@ -337,7 +352,13 @@ mod tests {
         assert!(matches!(list.commands()[0], PaintCommand::DrawPath { .. }));
         assert_eq!(
             list.commands()[1],
-            PaintCommand::DrawImage { image, dst }
+            PaintCommand::DrawImage {
+                image,
+                tile,
+                region,
+                repeat_x: true,
+                repeat_y: false,
+            }
         );
         // A DrawImage is a leaf, so the list stays balanced.
         assert!(list.is_balanced());

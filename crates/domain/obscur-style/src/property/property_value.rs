@@ -21,8 +21,9 @@
 //! [`LengthContext`](crate::property::LengthContext) (spec §4.5, §4.13).
 
 use crate::property::{
-    BoxShadow, ConicGradient, GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length,
-    LengthExpr, LinearGradient, RadialGradient, StyleColor, Transform, TransformOrigin,
+    BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow, ConicGradient,
+    GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length, LengthExpr, LinearGradient,
+    RadialGradient, StyleColor, Transform, TransformOrigin,
 };
 use obscur_identity::InternedSymbol;
 
@@ -75,6 +76,17 @@ pub enum PropertyValue {
     /// whose image is not yet loaded simply paints nothing (the background-color
     /// shows through).
     BackgroundImageUrl(Box<str>),
+    /// A `background-size` value (see [`BackgroundSize`]): how one copy of the
+    /// `background-image` is scaled (`cover` / `contain` / `auto` / explicit
+    /// per-axis lengths). The scene coordinator resolves it against the box and
+    /// the image's intrinsic size to a concrete tile width/height at paint time.
+    BackgroundSize(BackgroundSize),
+    /// A `background-position` value (see [`BackgroundPosition`]): where the sized
+    /// image tile's origin sits within the box, one length/percentage per axis.
+    BackgroundPosition(BackgroundPosition),
+    /// A `background-repeat` value (see [`BackgroundRepeat`]): whether the sized
+    /// image tile is tiled along each axis to fill the box.
+    BackgroundRepeat(BackgroundRepeat),
     /// An ordered `box-shadow` list, in author order: the value of `box-shadow`.
     /// Each [`BoxShadow`] carries its offsets, blur, spread, optional color, and
     /// `inset` flag; `box-shadow: none` lowers to an **empty** list. CSS paints
@@ -196,6 +208,36 @@ impl PropertyValue {
     pub fn as_background_image_url(&self) -> Option<&str> {
         match self {
             Self::BackgroundImageUrl(url) => Some(url),
+            _ => None,
+        }
+    }
+
+    /// Returns the `background-size` if this value is a
+    /// [`PropertyValue::BackgroundSize`].
+    #[must_use]
+    pub const fn as_background_size(&self) -> Option<BackgroundSize> {
+        match self {
+            Self::BackgroundSize(size) => Some(*size),
+            _ => None,
+        }
+    }
+
+    /// Returns the `background-position` if this value is a
+    /// [`PropertyValue::BackgroundPosition`].
+    #[must_use]
+    pub const fn as_background_position(&self) -> Option<BackgroundPosition> {
+        match self {
+            Self::BackgroundPosition(position) => Some(*position),
+            _ => None,
+        }
+    }
+
+    /// Returns the `background-repeat` if this value is a
+    /// [`PropertyValue::BackgroundRepeat`].
+    #[must_use]
+    pub const fn as_background_repeat(&self) -> Option<BackgroundRepeat> {
+        match self {
+            Self::BackgroundRepeat(repeat) => Some(*repeat),
             _ => None,
         }
     }
@@ -428,6 +470,31 @@ mod tests {
         assert_eq!(PropertyValue::Number(1.0).as_background_image_url(), None);
         // A url value is not a gradient, and vice versa.
         assert_eq!(value.as_linear_gradient(), None);
+    }
+
+    #[test]
+    fn background_size_position_repeat_accessors() {
+        use crate::property::{BackgroundPosition, BackgroundRepeat, BackgroundSize};
+        let size = PropertyValue::BackgroundSize(BackgroundSize::Cover);
+        assert_eq!(size.as_background_size(), Some(BackgroundSize::Cover));
+        assert_eq!(size.as_background_position(), None);
+
+        let pos = PropertyValue::BackgroundPosition(BackgroundPosition::new(
+            Length::Percent(100.0),
+            Length::Percent(100.0),
+        ));
+        assert_eq!(
+            pos.as_background_position(),
+            Some(BackgroundPosition::new(
+                Length::Percent(100.0),
+                Length::Percent(100.0)
+            ))
+        );
+        assert_eq!(pos.as_background_size(), None);
+
+        let repeat = PropertyValue::BackgroundRepeat(BackgroundRepeat::NoRepeat);
+        assert_eq!(repeat.as_background_repeat(), Some(BackgroundRepeat::NoRepeat));
+        assert_eq!(PropertyValue::Number(1.0).as_background_repeat(), None);
     }
 
     #[test]
