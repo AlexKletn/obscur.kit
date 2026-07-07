@@ -73,11 +73,24 @@ fn main() {
     let (name, css) = uikit::themes()[index];
     println!("[theme] active = {name} (index {index})");
 
+    // Supersample factor: `UIKIT_SCALE` (default 2.0, clamped 1.0..=4.0). The
+    // gallery is laid out at the LOGICAL `VIEWPORT` while the Vello offscreen
+    // texture is `VIEWPORT × scale`; `set_device_scale(scale)` brackets the scene
+    // in a root `scale()` transform so the physical texture fills crisply.
+    // `UIKIT_SCALE=1` reproduces the historical logical-1:1 output.
+    let scale = render_scale();
+    let physical = Size::new(VIEWPORT.width * scale, VIEWPORT.height * scale);
+    println!(
+        "[scale] {scale}× · logical {}×{} → physical {}×{}",
+        VIEWPORT.width, VIEWPORT.height, physical.width, physical.height,
+    );
+
     // 1. Compile the active theme through the real CSS frontend.
     let sheet = compile(css);
 
-    // 2. Boot the runtime at the fixed viewport.
+    // 2. Boot the runtime at the LOGICAL viewport and set the device scale.
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), VIEWPORT);
+    runtime.set_device_scale(scale);
 
     // 3. Acquire a headless GPU device + build the Vello renderer. No adapter → an
     //    honest diagnostic + clean exit (never a fabricated device / panic).
@@ -118,12 +131,13 @@ fn main() {
         result.is_balanced(),
     );
 
-    // 6. Render offscreen on the GPU and READ BACK to CPU pixels (the faithful path).
+    // 6. Render offscreen on the GPU at the PHYSICAL extent (logical × scale) and
+    //    READ BACK to CPU pixels (the faithful path).
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let width = VIEWPORT.width.round() as u32;
+    let width = physical.width.round() as u32;
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let height = VIEWPORT.height.round() as u32;
-    let frame = RenderFrame::new(snapshot, VIEWPORT);
+    let height = physical.height.round() as u32;
+    let frame = RenderFrame::new(snapshot, physical);
     let submission = FrameSubmission::new(frame);
     let (out_w, out_h, pixels) = renderer
         .render_to_image(&submission, width, height)
@@ -157,6 +171,17 @@ fn theme_index() -> usize {
         .and_then(|raw| raw.trim().parse::<usize>().ok())
         .filter(|index| *index < count)
         .unwrap_or(SKEUOMORPHIC_INDEX)
+}
+
+/// The supersample render scale: the `UIKIT_SCALE` env var parsed as a float and
+/// clamped to `1.0..=4.0`, defaulting to `2.0` for a crisp PNG. `1.0` reproduces
+/// the historical logical-1:1 output.
+fn render_scale() -> f32 {
+    std::env::var("UIKIT_SCALE")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<f32>().ok())
+        .filter(|s| s.is_finite())
+        .map_or(2.0, |s| s.clamp(1.0, 4.0))
 }
 
 /// A short filename slug for a theme name: `Skeuomorphic` → `skeuo`, otherwise the

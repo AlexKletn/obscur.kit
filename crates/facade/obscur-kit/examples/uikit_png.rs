@@ -54,11 +54,25 @@ fn main() {
     let (name, css) = uikit::themes()[index];
     println!("[theme] active = {name} (index {index})");
 
+    // Supersample factor: `UIKIT_SCALE` (default 2.0, clamped 1.0..=4.0). The
+    // gallery is laid out at the LOGICAL `VIEWPORT` while the CPU render target is
+    // `VIEWPORT × scale`; `set_device_scale(scale)` brackets the scene in a root
+    // `scale()` transform so the physical buffer fills crisply. `UIKIT_SCALE=1`
+    // reproduces the historical 1:1 output byte-for-byte.
+    let scale = render_scale();
+    let physical = Size::new(VIEWPORT.width * scale, VIEWPORT.height * scale);
+    println!(
+        "[scale] {scale}× · logical {}×{} → physical {}×{}",
+        VIEWPORT.width, VIEWPORT.height, physical.width, physical.height,
+    );
+
     // 1. Compile the active theme's stylesheet through the real CSS frontend.
     let sheet = compile(css);
 
-    // 2. Boot the runtime at the fixed viewport (no image resources needed).
+    // 2. Boot the runtime at the LOGICAL viewport (no image resources needed) and
+    //    set the device scale so the scene is emitted into the physical buffer.
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), VIEWPORT);
+    runtime.set_device_scale(scale);
 
     // 3. Wire the text stack: load a host font (best effort) and register the SAME
     //    bytes on the resolver and the CPU renderer so glyph handles line up. No
@@ -83,10 +97,11 @@ fn main() {
         result.is_balanced(),
     );
 
-    // 5. Rasterize the display list into a CPU pixmap sized to the viewport.
-    let frame = RenderFrame::new(snapshot, VIEWPORT);
+    // 5. Rasterize the display list into a CPU pixmap sized to the PHYSICAL extent
+    //    (logical × scale); the root scale transform fills it crisply.
+    let frame = RenderFrame::new(snapshot, physical);
     let submission = FrameSubmission::new(frame);
-    let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
+    let target = RenderTarget::bitmap(BitmapTarget::new(physical));
     renderer.render(&submission, &target).expect("cpu render succeeds");
     let pixmap = renderer.pixmap().expect("a rasterized frame");
 
@@ -117,6 +132,17 @@ fn theme_index() -> usize {
         .and_then(|raw| raw.trim().parse::<usize>().ok())
         .filter(|index| *index < count)
         .unwrap_or(uikit::MATERIAL_INDEX)
+}
+
+/// The supersample render scale: the `UIKIT_SCALE` env var parsed as a float and
+/// clamped to `1.0..=4.0`, defaulting to `2.0` for a crisp PNG. `1.0` reproduces
+/// the historical logical-1:1 output.
+fn render_scale() -> f32 {
+    std::env::var("UIKIT_SCALE")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<f32>().ok())
+        .filter(|s| s.is_finite())
+        .map_or(2.0, |s| s.clamp(1.0, 4.0))
 }
 
 /// A short filename slug for a theme name: `Skeuomorphic` → `skeuo`, otherwise the

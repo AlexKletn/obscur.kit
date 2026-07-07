@@ -63,7 +63,7 @@ fn main() {
         .ok()
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|s| s.is_finite() && *s > 0.0)
-        .unwrap_or(1.0);
+        .unwrap_or(2.0);
     let hidpi = (device_scale - 1.0).abs() > f32::EPSILON;
     let (logical_viewport, physical_size, out_name) = if hidpi {
         let logical = Size::new(720.0, 500.0);
