@@ -135,6 +135,19 @@ required-features = [
     "text-unicode",
 ]
 
+# The imported UI-Kit theme-switcher + Material 3 gallery → PNG. One
+# theme-agnostic view + a swappable per-theme stylesheet, rasterized headless.
+# Same runtime feature set as `showcase_png` (no window or GPU).
+[[example]]
+name = "uikit_png"
+required-features = [
+    "render-cpu",
+    "resource-fs",
+    "resource-decode",
+    "text-harfrust",
+    "text-unicode",
+]
+
 # The windowed GPU capability showcase: the SAME shared scene as `showcase_png`,
 # rendered through winit + Vello at full effect fidelity and made interactive.
 # Needs the window + GPU adapters plus image loading/decode and the text stack,
