@@ -281,7 +281,10 @@ impl UiKitWindow {
     /// from the active theme when due), read the committed scene, and present it via
     /// Vello.
     fn render_frame(&mut self) {
-        let produced = self.runtime.run_due_frame_reactive();
+        // Run the due frame for its side effects; the per-present firehose is
+        // intentionally silent — meaningful activity is logged as EVENTS
+        // (`[tab]`, `[theme]`, `[zoom]`, `[resize]`), not once per presented frame.
+        self.runtime.run_due_frame_reactive();
         let snapshot = self.runtime.snapshot();
 
         let (Some(surface), Some(renderer)) = (self.surface.as_ref(), self.renderer.as_mut())
@@ -297,16 +300,7 @@ impl UiKitWindow {
         let submission = FrameSubmission::new(render_frame);
 
         match renderer.present_to_surface(&submission, surface) {
-            Ok(result) => {
-                let frame_note = produced.as_ref().map_or_else(
-                    || "re-present (no new frame)".to_owned(),
-                    |f| format!("frame id={} composed={}", f.id().raw(), f.composed()),
-                );
-                println!(
-                    "present {}: {frame_note} | vello -> {result:?} (presented)",
-                    renderer.frames_rendered(),
-                );
-            }
+            Ok(_) => {}
             Err(error) => {
                 eprintln!("present failed: {error:?}");
                 if let (Some(surface), Some(device)) = (self.surface.as_ref(), self.device.as_ref())
@@ -391,6 +385,7 @@ impl ApplicationHandler for UiKitWindow {
                 {
                     surface.resize(device, new_size.width, new_size.height);
                 }
+                println!("[resize] {}×{} px", new_size.width, new_size.height);
                 self.sync_viewport();
                 self.runtime.request_frame(FrameReason::WindowChange);
                 if let Some(window) = self.window.as_ref() {

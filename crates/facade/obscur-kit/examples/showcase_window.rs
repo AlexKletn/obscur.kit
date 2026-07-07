@@ -301,7 +301,9 @@ impl ShowcaseWindow {
         // view builder + stylesheets, so it rebuilds `showcase::view` from the
         // current state itself. `None` means nothing was due — we still re-present
         // the last committed snapshot so a bare expose repaints rather than blanks.
-        let produced = self.runtime.run_due_frame_reactive();
+        // Run the due frame for its side effects; presents are silent — activity
+        // is logged as EVENTS (clicks, input, resize), not once per frame.
+        self.runtime.run_due_frame_reactive();
         let snapshot = self.runtime.snapshot();
 
         let (Some(surface), Some(renderer)) = (self.surface.as_ref(), self.renderer.as_mut())
@@ -319,16 +321,7 @@ impl ShowcaseWindow {
         // Present on-screen (offscreen render + blit-to-surface, the documented
         // Vello 0.9 pattern the counter example uses).
         match renderer.present_to_surface(&submission, surface) {
-            Ok(result) => {
-                let frame_note = produced.as_ref().map_or_else(
-                    || "re-present (no new frame)".to_owned(),
-                    |f| format!("frame id={} composed={}", f.id().raw(), f.composed()),
-                );
-                println!(
-                    "present {}: {frame_note} | vello -> {result:?} (presented)",
-                    renderer.frames_rendered(),
-                );
-            }
+            Ok(_) => {}
             Err(error) => {
                 eprintln!("present failed: {error:?}");
                 // A lost/outdated swapchain is recoverable: reconfigure, skip.
