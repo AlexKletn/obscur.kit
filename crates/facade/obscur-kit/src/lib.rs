@@ -22,7 +22,10 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 pub mod bootstrap;
+pub mod default_stylesheet;
 pub mod prelude;
+
+pub use default_stylesheet::{ua_css, ua_stylesheet};
 
 // --- foundation ---
 pub use obscur_capability as capability;

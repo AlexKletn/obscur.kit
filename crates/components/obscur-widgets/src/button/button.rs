@@ -4,7 +4,7 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
 use obscur_view::view::{
-    EVENT_CLICK, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
+    EVENT_CLICK, TYPE, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
 /// A headless push-button control (spec §2.6).
@@ -126,6 +126,10 @@ impl Button {
     #[must_use]
     pub fn view(&self) -> View {
         let node = ViewNode::element(Self::COMPONENT_ID)
+            // Stable CSS type / local name so a UA (or author) `button { … }` type
+            // selector matches this control (spec §4.13). Additive — it sits
+            // alongside the semantic-role/state props, never replacing them.
+            .with_prop(ViewProperty::new(TYPE, ViewValue::from("button")))
             .with_prop(ViewProperty::new(
                 Self::PROP_ROLE,
                 ViewValue::from("button"),

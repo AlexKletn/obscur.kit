@@ -4,7 +4,7 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_text::editing::{EditCommand, TextBuffer};
 use obscur_view::view::{
-    EVENT_CHANGE, EVENT_INPUT, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
+    EVENT_CHANGE, EVENT_INPUT, TYPE, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
     ViewValue,
 };
 
@@ -167,6 +167,9 @@ impl Input {
             value
         };
         let node = ViewNode::element(Self::COMPONENT_ID)
+            // Stable CSS type / local name so a UA (or author) `input { … }` type
+            // selector matches this control (spec §4.13). Additive.
+            .with_prop(ViewProperty::new(TYPE, ViewValue::from("input")))
             .with_prop(ViewProperty::new(
                 Self::PROP_ROLE,
                 ViewValue::from("textbox"),

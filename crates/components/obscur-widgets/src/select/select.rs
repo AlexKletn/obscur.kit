@@ -4,7 +4,7 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
 use obscur_view::view::{
-    EVENT_CLICK, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
+    EVENT_CLICK, TYPE, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
 /// A headless single-choice dropdown control (spec §2.6).
@@ -196,6 +196,9 @@ impl Select {
             .map(|label| Text::new(label.clone()).into_view_node())
             .collect();
         let node = ViewNode::element(Self::COMPONENT_ID)
+            // Stable CSS type / local name so a UA (or author) `select { … }` type
+            // selector matches this control (spec §4.13). Additive.
+            .with_prop(ViewProperty::new(TYPE, ViewValue::from("select")))
             .with_prop(ViewProperty::new(Self::PROP_ROLE, ViewValue::from("menu")))
             .with_prop(ViewProperty::new(
                 Self::PROP_DISABLED,

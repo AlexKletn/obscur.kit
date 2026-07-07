@@ -58,6 +58,30 @@ impl KitBootstrap {
         crate::headless::HeadlessHost::new(crate::identity::RuntimeId::from_raw(self.runtime_id))
     }
 
+    /// Returns the compiled built-in **user-agent (UA) default stylesheet** — the
+    /// toolkit's neutral, overridable base component look, at the lowest cascade
+    /// origin ([`CascadeOrigin::SystemDefault`](crate::style::cascade::CascadeOrigin::SystemDefault)).
+    ///
+    /// See [`crate::default_stylesheet`] for the raw CSS and the override contract.
+    #[must_use]
+    pub fn ua_stylesheet(&self) -> crate::style::matching::Stylesheet {
+        crate::default_stylesheet::ua_stylesheet()
+    }
+
+    /// Installs the built-in UA default stylesheet on `runtime` as its always-first
+    /// (lowest-origin) sheet, so bare built-in controls get the toolkit's base look
+    /// automatically.
+    ///
+    /// This is purely additive and **overridable**: the UA sheet is matched below
+    /// every author/theme sheet the app later installs
+    /// ([`set_stylesheets`](crate::runtime::UiRuntime::set_stylesheets) / the
+    /// `&[Stylesheet]` render paths), so any author rule of the same or higher
+    /// specificity wins over it (§4.14). Not calling this leaves the runtime with no
+    /// UA styling (byte-identical to before).
+    pub fn install_default_stylesheet(&self, runtime: &mut crate::runtime::UiRuntime) {
+        runtime.set_default_stylesheet(self.ua_stylesheet());
+    }
+
     /// Builds the default software [`Renderer`](crate::render::Renderer).
     #[cfg(feature = "render-cpu")]
     #[must_use]

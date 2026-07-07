@@ -4,7 +4,7 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
 use obscur_view::view::{
-    EVENT_CHANGE, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
+    EVENT_CHANGE, TYPE, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
 /// A headless tri-state checkbox control (spec §2.6).
@@ -160,6 +160,9 @@ impl Checkbox {
             Some(true) => 1,
         };
         let node = ViewNode::element(Self::COMPONENT_ID)
+            // Stable CSS type / local name so a UA (or author) `checkbox { … }`
+            // type selector matches this control (spec §4.13). Additive.
+            .with_prop(ViewProperty::new(TYPE, ViewValue::from("checkbox")))
             .with_prop(ViewProperty::new(
                 Self::PROP_ROLE,
                 ViewValue::from("checkbox"),

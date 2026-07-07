@@ -325,6 +325,16 @@ pub struct UiRuntime {
     /// held [`root_view`](Self::root_view). Empty by default; the explicit
     /// `&[Stylesheet]`-taking render paths ignore this field.
     stylesheets: Vec<Stylesheet>,
+    /// The built-in **user-agent (UA) default** stylesheet, installed via
+    /// [`set_default_stylesheet`](Self::set_default_stylesheet). When present it is
+    /// matched *first* — below every author sheet — on **all** render paths
+    /// (`run_frame`/`run_due_frame`/`render_now`/the reactive path), so its rules
+    /// form the toolkit's overridable base look. It carries the
+    /// [`CascadeOrigin::SystemDefault`](obscur_style::cascade::CascadeOrigin::SystemDefault)
+    /// origin — the lowest in the cascade — so any author/theme rule of the same or
+    /// higher specificity wins over it (§4.14). [`None`] by default, in which case
+    /// matching is byte-identical to passing the author sheets alone.
+    default_stylesheet: Option<Stylesheet>,
     /// The injected loader that resolves a `background-image: url(...)` source's
     /// raw encoded bytes (spec §5.15), or [`None`] when no loader was installed —
     /// in which case `url()` backgrounds silently resolve to nothing (the
@@ -403,6 +413,7 @@ impl UiRuntime {
             serviced_background: 0,
             root_view: None,
             stylesheets: Vec::new(),
+            default_stylesheet: None,
             resource_loader: None,
             resource_decoder: None,
             resource_hub: ResourceHub::new(),
@@ -831,6 +842,34 @@ impl UiRuntime {
         self.stylesheets = sheets;
     }
 
+    /// Installs the built-in **user-agent (UA) default** stylesheet — the
+    /// toolkit's overridable base component styles.
+    ///
+    /// Unlike [`set_stylesheets`](Self::set_stylesheets), the default sheet is a
+    /// separate slot that is matched on **every** render path (`run_frame`,
+    /// `run_due_frame`, `render_now`, and the reactive path), *always first* —
+    /// prepended below whatever author sheets that frame matches. Because it
+    /// carries the lowest cascade origin
+    /// ([`CascadeOrigin::SystemDefault`](obscur_style::cascade::CascadeOrigin::SystemDefault)),
+    /// any author/theme declaration of the same or higher specificity overrides it,
+    /// exactly like a browser's UA stylesheet (§4.14).
+    ///
+    /// Passing a sheet at any other origin still works — only the matched *order*
+    /// is fixed (default first); precedence is governed entirely by the origins
+    /// carried on the rules. Not calling this leaves the runtime with **no** UA
+    /// sheet, in which case matching is byte-identical to before (the author sheets
+    /// alone).
+    pub fn set_default_stylesheet(&mut self, sheet: Stylesheet) {
+        self.default_stylesheet = Some(sheet);
+    }
+
+    /// Returns whether a UA default stylesheet has been installed via
+    /// [`set_default_stylesheet`](Self::set_default_stylesheet).
+    #[must_use]
+    pub fn has_default_stylesheet(&self) -> bool {
+        self.default_stylesheet.is_some()
+    }
+
     /// Runs **one** reactive frame if the scheduler has a request pending: it calls
     /// the runtime-held [`root_view`](Self::set_root_view) builder to REBUILD the
     /// desired [`View`] from current application state, then runs the full
@@ -986,6 +1025,21 @@ impl UiRuntime {
             // `@container` rules by this frame's viewport (§4.13).
             let environment =
                 MediaEnvironment::viewport(ctx.viewport().width, ctx.viewport().height);
+            // Prepend the UA default sheet (if installed) so it is matched FIRST —
+            // below every author sheet. It carries the lowest cascade origin
+            // (`SystemDefault`), so any author declaration overrides it (§4.14).
+            // When absent, the author slice is passed through untouched, keeping
+            // matching byte-identical to before.
+            let matched_sheets: Vec<Stylesheet>;
+            let sheets: &[Stylesheet] = match &self.default_stylesheet {
+                Some(default) => {
+                    matched_sheets = std::iter::once(default.clone())
+                        .chain(sheets.iter().cloned())
+                        .collect();
+                    &matched_sheets
+                }
+                None => sheets,
+            };
             let inputs = self.matcher.build_inputs_with_pseudo_env(
                 &self.tree,
                 sheets,
@@ -1529,6 +1583,18 @@ impl UiRuntime {
     #[must_use]
     pub fn pseudo_state(&self, node: NodeId) -> PseudoState {
         self.pseudo.get(node)
+    }
+
+    /// Returns the [`ComputedStyle`] resolved for `node` on the last produced
+    /// frame, or [`None`] when the node was never styled (absent from the tree, or
+    /// a frame with a skipped style phase never resolved it).
+    ///
+    /// This exposes the post-cascade computed value a host (or test) can inspect —
+    /// e.g. to observe that an author sheet's declaration overrode the UA default
+    /// sheet's for the same property (§4.14).
+    #[must_use]
+    pub fn computed_style(&self, node: NodeId) -> Option<&ComputedStyle> {
+        self.computed.get(&node)
     }
 
     /// Dispatches a hit-tested pointer event: updates the hover chain and focus,
@@ -3334,6 +3400,126 @@ mod tests {
 
         // Determinism: the same live tree yields an equal snapshot.
         assert_eq!(runtime.semantic_snapshot(), snapshot);
+    }
+
+    // ---- UA default stylesheet: lowest-origin, author-overridable base look ----
+
+    /// A single `button` (CSS type) element carrying a text child (so it lays out
+    /// with an intrinsic box). Mirrors what `Button::view` now emits.
+    fn button_view() -> View {
+        use obscur_view::view::TYPE;
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(20))
+                .with_prop(ViewProperty::new(TYPE, ViewValue::Text("button".into())))
+                .with_children(ViewFragment::from_nodes(vec![ViewNode::text("Save")])),
+        ]))
+    }
+
+    /// A `button { … }` type rule at the given origin carrying `decls`.
+    fn button_type_rule(decls: Vec<BlockDeclaration>) -> StyleRule {
+        StyleRule::new(
+            SelectorList::new(vec![ComplexSelector::new(
+                CompoundSelector::new(vec![SimpleSelector::Type("button".into())]),
+                Vec::new(),
+            )]),
+            decls,
+        )
+    }
+
+    /// Returns the `button` node id after a frame has populated the tree.
+    fn button_node(runtime: &UiRuntime) -> NodeId {
+        let root = runtime.tree().root().expect("root after a frame");
+        runtime.tree().get(root).unwrap().children()[0]
+    }
+
+    /// The UA background fill the default sheet applies (a neutral `#f4f2ee`).
+    fn ua_fill() -> StyleColor {
+        StyleColor::rgba(
+            f32::from(0xf4u8) / 255.0,
+            f32::from(0xf2u8) / 255.0,
+            f32::from(0xeeu8) / 255.0,
+            1.0,
+        )
+    }
+
+    #[test]
+    fn ua_default_sheet_supplies_the_base_background_when_no_author_rule() {
+        // A UA sheet at the LOWEST origin (`SystemDefault`) installed via the
+        // default slot; NO author sheets. The button's computed background is the
+        // UA fill — the base look shows through.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_default_stylesheet(Stylesheet::new(
+            CascadeOrigin::SystemDefault,
+            vec![button_type_rule(background(
+                ua_fill().r,
+                ua_fill().g,
+                ua_fill().b,
+            ))],
+        ));
+        let view = button_view();
+        let _ = runtime.render_now(&view, &[]);
+
+        let button = button_node(&runtime);
+        let bg = runtime
+            .computed_style(button)
+            .and_then(|s| s.get(PropertyId::BackgroundColor))
+            .and_then(ComputedValue::as_color);
+        assert_eq!(bg, Some(ua_fill()), "UA default background must show through");
+    }
+
+    #[test]
+    fn author_sheet_overrides_the_ua_default_background() {
+        // The crux: with the UA sheet at `SystemDefault` AND an author sheet at
+        // `GlobalApp` both styling `button { background }`, the AUTHOR value wins by
+        // origin precedence (§4.14) — the UA sheet is a true, overridable base.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_default_stylesheet(Stylesheet::new(
+            CascadeOrigin::SystemDefault,
+            vec![button_type_rule(background(
+                ua_fill().r,
+                ua_fill().g,
+                ua_fill().b,
+            ))],
+        ));
+        // Author override: `button { background: #cc0000 }`.
+        let author = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![button_type_rule(background(0.8, 0.0, 0.0))],
+        );
+        let view = button_view();
+        let _ = runtime.render_now(&view, std::slice::from_ref(&author));
+
+        let button = button_node(&runtime);
+        let bg = runtime
+            .computed_style(button)
+            .and_then(|s| s.get(PropertyId::BackgroundColor))
+            .and_then(ComputedValue::as_color);
+        assert_eq!(
+            bg,
+            Some(StyleColor::rgba(0.8, 0.0, 0.0, 1.0)),
+            "author sheet (GlobalApp) must beat the UA default (SystemDefault)"
+        );
+        assert_ne!(bg, Some(ua_fill()), "the UA value must NOT survive the override");
+    }
+
+    #[test]
+    fn no_default_sheet_leaves_the_element_unstyled() {
+        // Absent a default sheet, a bare `button` has NO UA-derived background: it
+        // resolves to the initial transparent — byte-identical to before the slot
+        // existed.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        assert!(!runtime.has_default_stylesheet());
+        let view = button_view();
+        let _ = runtime.render_now(&view, &[]);
+
+        let button = button_node(&runtime);
+        let bg = runtime
+            .computed_style(button)
+            .and_then(|s| s.get(PropertyId::BackgroundColor))
+            .and_then(ComputedValue::as_color);
+        // The initial background is transparent, never the UA fill.
+        assert_eq!(bg, Some(StyleColor::TRANSPARENT));
+        assert_ne!(bg, Some(ua_fill()));
     }
 
     #[test]
