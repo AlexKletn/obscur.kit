@@ -289,6 +289,19 @@ impl Renderer for CpuRenderer {
                             };
                             let sk_stroke = tiny_skia::Stroke {
                                 width: stroke.width(),
+                                // A non-empty dash pattern rasterizes as dashes;
+                                // `StrokeDash::new` rejects an odd/degenerate array
+                                // (returns `None`), which leaves a solid stroke —
+                                // the same result as an un-dashed stroke. An empty
+                                // pattern skips this entirely, byte-identical.
+                                dash: if stroke.is_dashed() {
+                                    tiny_skia::StrokeDash::new(
+                                        stroke.dash().to_vec(),
+                                        stroke.dash_offset(),
+                                    )
+                                } else {
+                                    None
+                                },
                                 ..Default::default()
                             };
                             pixmap.stroke_path(&sk_path, &sk_paint, &sk_stroke, current, clip);
@@ -1279,6 +1292,40 @@ mod tests {
         // A corner pixel outside the rectangle is transparent.
         let corner = pixmap.pixel(0, 0).expect("corner pixel exists");
         assert_eq!(corner.alpha(), 0);
+    }
+
+    #[test]
+    fn dashed_stroke_leaves_gaps_along_the_path() {
+        use obscur_scene::paint::{Brush, Stroke};
+
+        // A horizontal line at y=4 stroked black, width 4, dashed [8 on, 8 off]
+        // starting at phase 0: x∈[0,8) paints, x∈[8,16) is a gap, and so on.
+        let mut path = Path::new();
+        path.move_to(Point::new(0.0, 4.0))
+            .line_to(Point::new(32.0, 4.0));
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawPath {
+            path,
+            paint: Paint::stroke(
+                Stroke::new(Brush::solid(Color::BLACK), 4.0).with_dash([8.0, 8.0], 0.0),
+            ),
+        }]);
+        let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(5));
+        let frame = RenderFrame::new(snapshot, Size::new(32.0, 8.0));
+        let submission = FrameSubmission::new(frame);
+
+        let mut renderer = CpuRenderer::new(RendererId::from_raw(1));
+        let _ = renderer.render(&submission, &bitmap_target(32.0, 8.0));
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+
+        // Inside the first dash (x=4) is painted; inside the first gap (x=12) is
+        // transparent — proving the dash actually broke the stroke.
+        let on = pixmap.pixel(4, 4).expect("on-dash pixel");
+        assert!(on.alpha() > 200, "first dash painted: alpha={}", on.alpha());
+        let off = pixmap.pixel(12, 4).expect("gap pixel");
+        assert_eq!(off.alpha(), 0, "first gap is empty");
+        // The next dash (x=20) paints again.
+        let on2 = pixmap.pixel(20, 4).expect("second on-dash pixel");
+        assert!(on2.alpha() > 200, "second dash painted: alpha={}", on2.alpha());
     }
 
     #[test]

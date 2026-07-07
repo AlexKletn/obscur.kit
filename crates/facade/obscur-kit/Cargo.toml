@@ -128,6 +128,14 @@ required-features = ["render-vello"]
 name = "backdrop_proof"
 required-features = ["render-vello"]
 
+# Proof that `border-style: dashed` renders as REAL dashes: two boxes (square +
+# rounded) with a `2px dashed` border, stroked as a dashed path and rasterized
+# headless through the CPU renderer to `target/dashed_border_proof.png`. Verifies
+# the dash/gap pattern in-process. No window or GPU; gated on the CPU backend.
+[[example]]
+name = "dashed_border_proof"
+required-features = ["render-cpu"]
+
 # The headless capability showcase → PNG. Needs the CPU renderer, filesystem
 # image loading + decode, and the real text shaping stack — but no window or GPU,
 # so it builds and runs anywhere (`cargo build --examples` stays display-free).

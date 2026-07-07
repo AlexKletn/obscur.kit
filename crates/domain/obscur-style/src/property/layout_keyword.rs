@@ -174,8 +174,13 @@ pub const Z_INDEX_AUTO: InternedSymbol = InternedSymbol::from_raw(0x0000_1B01);
 /// The `border-*-style: none` value (also covers `hidden`): the border is not
 /// painted and, when it is the used style, its width paints nothing.
 pub const BORDER_STYLE_NONE: InternedSymbol = InternedSymbol::from_raw(0x0000_1C01);
-/// The `border-*-style: solid` value. Every visible line style folds here.
+/// The `border-*-style: solid` value. The remaining continuous line styles
+/// (`double` / `groove` / `ridge` / `inset` / `outset`) fold here.
 pub const BORDER_STYLE_SOLID: InternedSymbol = InternedSymbol::from_raw(0x0000_1C02);
+/// The `border-*-style: dashed` value: painted as a dashed stroke. `dotted`
+/// folds here too (rendered as a dash rather than a distinct dot pattern — a
+/// documented simplification).
+pub const BORDER_STYLE_DASHED: InternedSymbol = InternedSymbol::from_raw(0x0000_1C03);
 
 // ---- `box-sizing` keyword values ----
 
@@ -236,17 +241,17 @@ pub fn z_index_from_name(name: &str) -> Option<InternedSymbol> {
 /// Maps a `border-*-style` keyword string to its reserved [`InternedSymbol`].
 ///
 /// The input is ASCII-lowercased before matching. `none` and `hidden` map to
-/// [`BORDER_STYLE_NONE`]; every visible line style (`solid` / `dashed` /
-/// `dotted` / `double` / `groove` / `ridge` / `inset` / `outset`) folds to the
-/// single [`BORDER_STYLE_SOLID`] handle, a documented simplification (only a
-/// solid stroke is painted). Returns [`None`] for any other keyword.
+/// [`BORDER_STYLE_NONE`]; `dashed` and `dotted` map to [`BORDER_STYLE_DASHED`]
+/// (both painted as a dashed stroke); the remaining continuous styles (`solid` /
+/// `double` / `groove` / `ridge` / `inset` / `outset`) fold to the single
+/// [`BORDER_STYLE_SOLID`] handle, a documented simplification (a solid stroke is
+/// painted). Returns [`None`] for any other keyword.
 #[must_use]
 pub fn border_style_from_name(name: &str) -> Option<InternedSymbol> {
     match name.to_ascii_lowercase().as_str() {
         "none" | "hidden" => Some(BORDER_STYLE_NONE),
-        "solid" | "dashed" | "dotted" | "double" | "groove" | "ridge" | "inset" | "outset" => {
-            Some(BORDER_STYLE_SOLID)
-        }
+        "dashed" | "dotted" => Some(BORDER_STYLE_DASHED),
+        "solid" | "double" | "groove" | "ridge" | "inset" | "outset" => Some(BORDER_STYLE_SOLID),
         _ => None,
     }
 }
@@ -470,6 +475,7 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         Z_INDEX_AUTO => Some("auto"),
         BORDER_STYLE_NONE => Some("none"),
         BORDER_STYLE_SOLID => Some("solid"),
+        BORDER_STYLE_DASHED => Some("dashed"),
         BOX_SIZING_CONTENT_BOX => Some("content-box"),
         BOX_SIZING_BORDER_BOX => Some("border-box"),
         FLEX_ROW => Some("row"),
@@ -528,6 +534,7 @@ mod tests {
         Z_INDEX_AUTO,
         BORDER_STYLE_NONE,
         BORDER_STYLE_SOLID,
+        BORDER_STYLE_DASHED,
         BOX_SIZING_CONTENT_BOX,
         BOX_SIZING_BORDER_BOX,
         FLEX_ROW,
@@ -840,14 +847,16 @@ mod tests {
         assert_eq!(border_style_from_name("none"), Some(BORDER_STYLE_NONE));
         assert_eq!(border_style_from_name("hidden"), Some(BORDER_STYLE_NONE));
         assert_eq!(border_style_from_name("solid"), Some(BORDER_STYLE_SOLID));
-        // Every visible line style folds to `solid` (documented simplification).
-        assert_eq!(border_style_from_name("dashed"), Some(BORDER_STYLE_SOLID));
-        assert_eq!(border_style_from_name("DOTTED"), Some(BORDER_STYLE_SOLID));
+        // `dashed` / `dotted` map to the dashed handle (dotted folds to dashed).
+        assert_eq!(border_style_from_name("dashed"), Some(BORDER_STYLE_DASHED));
+        assert_eq!(border_style_from_name("DOTTED"), Some(BORDER_STYLE_DASHED));
+        // The remaining continuous styles fold to `solid`.
         assert_eq!(border_style_from_name("double"), Some(BORDER_STYLE_SOLID));
         assert_eq!(border_style_from_name("wavy"), None);
         // Round-trips through `name_of`.
         assert_eq!(name_of(BORDER_STYLE_NONE), Some("none"));
         assert_eq!(name_of(BORDER_STYLE_SOLID), Some("solid"));
+        assert_eq!(name_of(BORDER_STYLE_DASHED), Some("dashed"));
     }
 
     #[test]

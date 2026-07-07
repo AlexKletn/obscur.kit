@@ -82,13 +82,24 @@ impl BrushConverter {
     /// Converts an obscur-scene [`Stroke`] style into a [`kurbo::Stroke`].
     ///
     /// Width, join, both caps, and the miter limit are carried across; the
-    /// stroke's brush is handled separately by the scene converter.
+    /// stroke's brush is handled separately by the scene converter. A non-empty
+    /// [`Stroke::dash`] is mapped onto kurbo's dash pattern (widened to `f64`)
+    /// with its phase offset, so a dashed scene stroke rasterizes as dashes; an
+    /// empty dash leaves kurbo's default (solid) dash, byte-identical to before.
     #[must_use]
     pub fn stroke(&self, stroke: &Stroke) -> kurbo::Stroke {
-        kurbo::Stroke::new(f64::from(stroke.width()))
+        let k = kurbo::Stroke::new(f64::from(stroke.width()))
             .with_join(join(stroke.line_join()))
             .with_caps(cap(stroke.line_cap()))
-            .with_miter_limit(f64::from(stroke.miter_limit()))
+            .with_miter_limit(f64::from(stroke.miter_limit()));
+        if stroke.is_dashed() {
+            k.with_dashes(
+                f64::from(stroke.dash_offset()),
+                stroke.dash().iter().map(|d| f64::from(*d)),
+            )
+        } else {
+            k
+        }
     }
 
     /// Converts obscur-scene gradient stops into peniko color stops.
@@ -216,5 +227,20 @@ mod tests {
         assert_eq!(k.end_cap, kurbo::Cap::Round);
         assert_eq!(k.join, kurbo::Join::Bevel);
         assert_eq!(k.miter_limit, 4.0);
+    }
+
+    #[test]
+    fn solid_stroke_has_no_dash_pattern() {
+        let k = BrushConverter::default().stroke(&Stroke::new(Brush::solid(Color::BLACK), 2.0));
+        assert!(k.dash_pattern.is_empty());
+        assert_eq!(k.dash_offset, 0.0);
+    }
+
+    #[test]
+    fn dashed_stroke_maps_to_kurbo_dash_pattern() {
+        let stroke = Stroke::new(Brush::solid(Color::BLACK), 2.0).with_dash([4.0, 4.0], 1.0);
+        let k = BrushConverter::default().stroke(&stroke);
+        assert_eq!(k.dash_pattern.as_slice(), &[4.0f64, 4.0]);
+        assert_eq!(k.dash_offset, 1.0);
     }
 }

@@ -9,7 +9,11 @@ use super::{Brush, LineCap, LineJoin};
 /// corners are shaped by `line_join`, and sharp miter joins longer than
 /// `miter_limit` times half the width fall back to a bevel.
 ///
-/// Dash patterns are a later addition.
+/// A `dash` pattern (with a `dash_offset` phase) breaks the stroked band into
+/// alternating on/off runs, measured along the path in user-space units — the
+/// same `[on, off, on, off, …]` convention as SVG/Canvas/CSS. An **empty**
+/// `dash` (the default from [`Stroke::new`]) is a continuous solid stroke, so
+/// every existing stroke is byte-identical.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stroke {
     /// The brush used to paint the stroked band.
@@ -23,6 +27,12 @@ pub struct Stroke {
     /// Miter length limit, as a multiple of half the stroke width, beyond which
     /// a [`LineJoin::Miter`] join is bevelled.
     pub miter_limit: f32,
+    /// The dash pattern: alternating on/off run lengths in user-space units.
+    /// Empty (the default) is a solid, continuous stroke.
+    pub dash: Box<[f32]>,
+    /// The starting phase (in user-space units) into the dash pattern. Ignored
+    /// when `dash` is empty.
+    pub dash_offset: f32,
 }
 
 impl Stroke {
@@ -30,8 +40,9 @@ impl Stroke {
     pub const DEFAULT_MITER_LIMIT: f32 = 4.0;
 
     /// Creates a stroke of the given `brush` and `width` with default join
-    /// settings: [`LineCap::Butt`], [`LineJoin::Miter`], and a miter limit of
-    /// [`Self::DEFAULT_MITER_LIMIT`].
+    /// settings: [`LineCap::Butt`], [`LineJoin::Miter`], a miter limit of
+    /// [`Self::DEFAULT_MITER_LIMIT`], and **no** dash (a solid, continuous
+    /// stroke).
     #[must_use]
     pub fn new(brush: Brush, width: f32) -> Self {
         Self {
@@ -40,6 +51,8 @@ impl Stroke {
             line_cap: LineCap::Butt,
             line_join: LineJoin::Miter,
             miter_limit: Self::DEFAULT_MITER_LIMIT,
+            dash: Box::default(),
+            dash_offset: 0.0,
         }
     }
 
@@ -61,6 +74,18 @@ impl Stroke {
     #[must_use]
     pub fn with_miter_limit(mut self, limit: f32) -> Self {
         self.miter_limit = limit;
+        self
+    }
+
+    /// Returns a copy of this stroke dashed with `pattern` (alternating on/off
+    /// run lengths in user-space units) starting at phase `offset`.
+    ///
+    /// An empty `pattern` clears any dash, leaving a solid stroke. Backends read
+    /// this back verbatim and map it onto their native dash support.
+    #[must_use]
+    pub fn with_dash(mut self, pattern: impl Into<Box<[f32]>>, offset: f32) -> Self {
+        self.dash = pattern.into();
+        self.dash_offset = offset;
         self
     }
 
@@ -93,6 +118,25 @@ impl Stroke {
     pub const fn miter_limit(&self) -> f32 {
         self.miter_limit
     }
+
+    /// Returns the stroke's dash pattern (empty for a solid stroke).
+    #[must_use]
+    pub fn dash(&self) -> &[f32] {
+        &self.dash
+    }
+
+    /// Returns the stroke's dash phase offset (unused when [`Self::dash`] is
+    /// empty).
+    #[must_use]
+    pub const fn dash_offset(&self) -> f32 {
+        self.dash_offset
+    }
+
+    /// Returns whether this stroke carries a non-empty dash pattern.
+    #[must_use]
+    pub const fn is_dashed(&self) -> bool {
+        !self.dash.is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -119,5 +163,27 @@ mod tests {
         assert_eq!(s.line_cap(), LineCap::Round);
         assert_eq!(s.line_join(), LineJoin::Bevel);
         assert_eq!(s.miter_limit(), 8.0);
+    }
+
+    #[test]
+    fn new_stroke_is_solid_not_dashed() {
+        let s = Stroke::new(Brush::solid(Color::BLACK), 2.0);
+        assert!(!s.is_dashed());
+        assert!(s.dash().is_empty());
+        assert_eq!(s.dash_offset(), 0.0);
+    }
+
+    #[test]
+    fn with_dash_roundtrips_pattern_and_offset() {
+        let s = Stroke::new(Brush::solid(Color::BLACK), 2.0).with_dash([4.0, 4.0], 1.5);
+        assert!(s.is_dashed());
+        assert_eq!(s.dash(), &[4.0, 4.0]);
+        assert_eq!(s.dash_offset(), 1.5);
+    }
+
+    #[test]
+    fn empty_dash_pattern_clears_to_solid() {
+        let s = Stroke::new(Brush::solid(Color::BLACK), 2.0).with_dash([] as [f32; 0], 0.0);
+        assert!(!s.is_dashed());
     }
 }

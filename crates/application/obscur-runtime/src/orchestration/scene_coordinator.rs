@@ -13,6 +13,7 @@ use obscur_scene::layer::{LayerEffect, SceneLayer};
 use obscur_scene::paint::{
     Brush, ConicGradient as SceneConicGradient, GradientStop as SceneGradientStop,
     LinearGradient as SceneLinearGradient, RadialGradient as SceneRadialGradient, SceneImage,
+    Stroke,
 };
 use obscur_scene::path::Path;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
@@ -782,6 +783,15 @@ impl SceneCoordinator {
                 {
                     let ring = uniform_border_ring(layout_box.bounds, radii, width);
                     node_paint.fill(ring, Brush::solid(scene_color_from(color)));
+                } else if let Some((width, color)) = uniform_dashed_border(computed, node) {
+                    // A uniform DASHED border is a single dashed stroke run along
+                    // the border box inset by width/2, so the centered stroke band
+                    // exactly fills the CSS border area (rounded when a radius is
+                    // present). Solid borders never reach here.
+                    let path = dashed_border_path(layout_box.bounds, radii, width, has_radius);
+                    let stroke = Stroke::new(Brush::solid(scene_color_from(color)), width)
+                        .with_dash(dashed_border_pattern(width), 0.0);
+                    node_paint.stroke(path, stroke);
                 } else {
                     for (rect, color) in border_fills(computed, node, layout_box.bounds) {
                         node_paint.fill_rect(rect, Brush::solid(scene_color_from(color)));
@@ -1959,13 +1969,103 @@ fn corner_radii_present(radii: CornerRadii) -> bool {
 /// handle. An absent style (the deferred `none` initial) or any other value is
 /// treated as not solid, so no edge is painted.
 fn border_is_solid(computed: &ComputedStyles, node: NodeId, id: PropertyId) -> bool {
+    border_style_is(computed, node, id, layout_keyword::BORDER_STYLE_SOLID)
+}
+
+/// Whether a node's computed `border-*-style` (`id`) is the reserved `dashed`
+/// handle (`dotted` folds here too). Any other value — including `solid`, `none`,
+/// or an absent style — is not dashed.
+fn border_is_dashed(computed: &ComputedStyles, node: NodeId, id: PropertyId) -> bool {
+    border_style_is(computed, node, id, layout_keyword::BORDER_STYLE_DASHED)
+}
+
+/// Whether a node's computed `border-*-style` (`id`) equals the reserved
+/// `expected` keyword handle.
+fn border_style_is(
+    computed: &ComputedStyles,
+    node: NodeId,
+    id: PropertyId,
+    expected: obscur_identity::InternedSymbol,
+) -> bool {
     matches!(
         computed
             .get(&node)
             .and_then(|style| style.get(id))
             .map(ComputedValue::value),
-        Some(&PropertyValue::Keyword(sym)) if sym == layout_keyword::BORDER_STYLE_SOLID
+        Some(&PropertyValue::Keyword(sym)) if sym == expected
     )
+}
+
+/// The single width and color of a node's border when it is **uniform** and
+/// every side is **dashed** (or `dotted`, which folds to dashed), else `None`.
+///
+/// Mirrors [`uniform_border`] but gates on the `dashed` style: all four sides
+/// share one positive pixel width, one color, and the `dashed` style. Only such a
+/// border paints as a single dashed stroke; a non-uniform dashed border (mixed
+/// widths / colors, or a mix with solid / no sides) returns `None` and falls back
+/// to [`border_fills`] (which paints only the `solid` sides — the documented
+/// non-uniform fallback, so mixed dashed sides simply do not paint).
+fn uniform_dashed_border(computed: &ComputedStyles, node: NodeId) -> Option<(f32, StyleColor)> {
+    let top = border_width_of(computed, node, PropertyId::BorderTopWidth);
+    let right = border_width_of(computed, node, PropertyId::BorderRightWidth);
+    let bottom = border_width_of(computed, node, PropertyId::BorderBottomWidth);
+    let left = border_width_of(computed, node, PropertyId::BorderLeftWidth);
+    if !(top > 0.0 && top == right && top == bottom && top == left) {
+        return None;
+    }
+    if !(border_is_dashed(computed, node, PropertyId::BorderTopStyle)
+        && border_is_dashed(computed, node, PropertyId::BorderRightStyle)
+        && border_is_dashed(computed, node, PropertyId::BorderBottomStyle)
+        && border_is_dashed(computed, node, PropertyId::BorderLeftStyle))
+    {
+        return None;
+    }
+    let current = current_color_of(computed, node);
+    let ct = border_color_of(computed, node, PropertyId::BorderTopColor, current);
+    let cr = border_color_of(computed, node, PropertyId::BorderRightColor, current);
+    let cb = border_color_of(computed, node, PropertyId::BorderBottomColor, current);
+    let cl = border_color_of(computed, node, PropertyId::BorderLeftColor, current);
+    if ct == cr && ct == cb && ct == cl {
+        Some((top, ct))
+    } else {
+        None
+    }
+}
+
+/// The dash pattern (in logical pixels) for a dashed border of stroke `width`:
+/// `[3·width on, 3·width off]`. CSS leaves the exact dash length implementation-
+/// defined; a multiple of the border width gives dashes that scale with the
+/// border and read as a normal dashed rule.
+fn dashed_border_pattern(width: f32) -> [f32; 2] {
+    let dash = (3.0 * width).max(1.0);
+    [dash, dash]
+}
+
+/// Builds the path a uniform dashed border strokes along: the border box inset by
+/// `width / 2` on every side, so a stroke of `width` centered on it fills the CSS
+/// border band exactly (CSS borders sit inside the border box). Rounded when the
+/// element has a corner radius (each radius reduced by `width / 2`, the centerline
+/// radius), else a plain rectangle.
+fn dashed_border_path(bounds: Rect, radii: CornerRadii, width: f32, has_radius: bool) -> Path {
+    let half = width / 2.0;
+    let center = Rect::new(
+        Point::new(bounds.origin.x + half, bounds.origin.y + half),
+        Size::new(
+            (bounds.size.width - width).max(0.0),
+            (bounds.size.height - width).max(0.0),
+        ),
+    );
+    if has_radius {
+        let center_radii = CornerRadii {
+            top_left: (radii.top_left - half).max(0.0),
+            top_right: (radii.top_right - half).max(0.0),
+            bottom_right: (radii.bottom_right - half).max(0.0),
+            bottom_left: (radii.bottom_left - half).max(0.0),
+        };
+        Path::rounded_rect(center, center_radii)
+    } else {
+        Path::rect(center)
+    }
 }
 
 /// Reads a node's computed `border-*-color` (`id`), falling back to `current`
@@ -2074,6 +2174,7 @@ mod tests {
     use obscur_identity::ComponentId;
     use obscur_layout::model::LayoutBox;
     use obscur_scene::command::PaintCommand;
+    use obscur_scene::paint::Paint;
     use obscur_style::computed::ComputedStyle;
     use obscur_text::selection::TextSelection;
     use obscur_tree::node::{LogicalParent, NodeKind};
@@ -3880,6 +3981,94 @@ mod tests {
         assert_eq!(fills[2].0, Rect::new(Point::new(10.0, 68.0), Size::new(100.0, 2.0)));
         assert_eq!(fills[3].0, Rect::new(Point::new(10.0, 22.0), Size::new(2.0, 46.0)));
         assert!(list.is_balanced());
+    }
+
+    /// Builds a `ComputedStyle` with a uniform DASHED border of `width` px and
+    /// the given per-side `color`.
+    fn with_dashed_border(width: f32, color: StyleColor) -> ComputedStyle {
+        let mut style = with_border(width, color);
+        for id in [
+            PropertyId::BorderTopStyle,
+            PropertyId::BorderRightStyle,
+            PropertyId::BorderBottomStyle,
+            PropertyId::BorderLeftStyle,
+        ] {
+            style.set(id, ComputedValue::keyword(layout_keyword::BORDER_STYLE_DASHED));
+        }
+        style
+    }
+
+    /// Collects every `DrawPath` whose paint is a `Stroke`, as `(path, stroke)`.
+    fn stroke_paths(list: &DisplayList) -> Vec<(Path, Stroke)> {
+        list.commands()
+            .iter()
+            .filter_map(|c| match c {
+                PaintCommand::DrawPath {
+                    path,
+                    paint: Paint::Stroke(stroke),
+                } => Some((path.clone(), stroke.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn uniform_dashed_border_emits_a_dashed_stroke_not_fill_rects() {
+        // A 100×50 box with `border: 2px dashed red` paints ONE dashed stroke
+        // along the border-box centerline, not the four solid fill-rects.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+
+        let red = StyleColor::rgba(1.0, 0.0, 0.0, 1.0);
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, with_dashed_border(2.0, red));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(10.0, 20.0, 100.0, 50.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        // No solid fill DrawPaths for the border — only the dashed stroke.
+        let fill_count = list
+            .commands()
+            .iter()
+            .filter(|c| matches!(c, PaintCommand::DrawPath { paint: Paint::Fill(_), .. }))
+            .count();
+        assert_eq!(fill_count, 0, "dashed border does not fill-rect");
+        let strokes = stroke_paths(&list);
+        assert_eq!(strokes.len(), 1, "one dashed border stroke");
+        let (path, stroke) = &strokes[0];
+        assert_eq!(stroke.width(), 2.0);
+        assert!(stroke.is_dashed(), "carries a non-empty dash pattern");
+        assert_eq!(
+            stroke.brush().as_solid().map(|s| s.color()),
+            Some(scene_color_from(red))
+        );
+        // The stroked path is the border box inset by width/2 (= 1px) on each side.
+        assert_eq!(
+            path.bounds(),
+            Some(Rect::new(Point::new(11.0, 21.0), Size::new(98.0, 48.0)))
+        );
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn solid_border_still_emits_fill_rects_not_a_dashed_stroke() {
+        // Regression guard: a uniform SOLID border keeps the four fill-rects and
+        // emits no dashed stroke (byte-identical to before this feature).
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, with_border(2.0, StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(10.0, 20.0, 100.0, 50.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        assert_eq!(path_fills(&list).len(), 4, "four solid side rects");
+        assert!(stroke_paths(&list).is_empty(), "no dashed stroke for a solid border");
     }
 
     #[test]
