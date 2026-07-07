@@ -38,12 +38,33 @@
 // this module, so some items look unused inside a single binary.
 #![allow(dead_code, unreachable_pub)]
 
+use obscur_kit::identity::InternedSymbol;
 use obscur_kit::primitives::{Container, Text};
-use obscur_kit::view::view::{CLASS, ID, View, ViewNode, ViewProperty, ViewValue};
+use obscur_kit::view::view::{
+    CLASS, EVENT_CLICK, ID, View, ViewEventBinding, ViewNode, ViewProperty, ViewValue,
+};
 
 /// Index of the **Material** theme in [`themes`] — the active tab and the
 /// stylesheet Phase 1 renders.
 pub const MATERIAL_INDEX: usize = 1;
+
+/// The eight reserved **click command** symbols, one per switcher tab: tab `i`'s
+/// node binds `on-click → KIT_TAB_CMD[i]` (via [`EVENT_CLICK`]). These are purely
+/// *bindings* — the static PNG examples never register a handler, so a click is a
+/// no-op there; the windowed `uikit_window` example registers a handler per symbol
+/// that live-swaps to `themes()[i]` and rebuilds `view(i)`. The values sit in an
+/// app-owned command namespace (`0x4B10 + i`, "KIT tab i"), distinct from the
+/// showcase scene's `0x50xx` commands, so nothing collides.
+pub const KIT_TAB_CMD: [InternedSymbol; 8] = [
+    InternedSymbol::from_raw(0x4B10),
+    InternedSymbol::from_raw(0x4B11),
+    InternedSymbol::from_raw(0x4B12),
+    InternedSymbol::from_raw(0x4B13),
+    InternedSymbol::from_raw(0x4B14),
+    InternedSymbol::from_raw(0x4B15),
+    InternedSymbol::from_raw(0x4B16),
+    InternedSymbol::from_raw(0x4B17),
+];
 
 /// The eight theme tab labels, in bar order. Material (index [`MATERIAL_INDEX`]) is
 /// the active tab and the only stylesheet authored in full for Phase 1.
@@ -100,18 +121,22 @@ fn switcher(active: usize) -> ViewNode {
     let tabs: Vec<ViewNode> = THEME_NAMES
         .iter()
         .enumerate()
-        .map(|(i, label)| tab(label, i == active))
+        .map(|(i, label)| tab(label, i == active, KIT_TAB_CMD[i]))
         .collect();
     el("kit-switcher", vec![brand, el("kit-tabs", tabs)])
 }
 
 /// One theme tab; the active tab gets the `active` class and an underline child.
-fn tab(label: &str, active: bool) -> ViewNode {
+/// The tab binds `on-click → cmd` ([`EVENT_CLICK`]) so a host runtime can resolve a
+/// click on it to that command (the classes/CSS are unchanged; an unhandled command
+/// is a no-op, so the static PNG examples keep rendering identically).
+fn tab(label: &str, active: bool, cmd: InternedSymbol) -> ViewNode {
     let mut kids = vec![text("kit-tab-label", label)];
     if active {
         kids.push(el("kit-underline", vec![]));
     }
     el(if active { "kit-tab active" } else { "kit-tab" }, kids)
+        .with_event(ViewEventBinding::new(EVENT_CLICK, cmd))
 }
 
 // ---------------------------------------------------------------------------

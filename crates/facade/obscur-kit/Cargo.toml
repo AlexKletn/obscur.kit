@@ -180,3 +180,19 @@ required-features = [
     "text-harfrust",
     "text-unicode",
 ]
+
+# The windowed, INTERACTIVE imported UI-Kit theme switcher: the SAME shared view +
+# per-theme stylesheets as `uikit_png` / `uikit_vello_png`, rendered through winit +
+# Vello, with clickable tabs that live-swap the stylesheet at full GPU fidelity.
+# Needs the window + GPU adapters plus the resource/text stack, so it is gated on
+# the same backend set as `showcase_window` (a display/GPU are required at runtime).
+[[example]]
+name = "uikit_window"
+required-features = [
+    "render-vello",
+    "window-winit",
+    "resource-fs",
+    "resource-decode",
+    "text-harfrust",
+    "text-unicode",
+]
