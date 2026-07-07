@@ -1,22 +1,25 @@
 //! **Headless imported-UI-Kit → PNG.**
 //!
-//! Renders the shared [`uikit`] scene — the theme-switcher bar over the Material 3
-//! component gallery — through the **software** [`CpuRenderer`] (no display, no
-//! GPU) and writes the frame to `target/uikit_material.png`, a real viewable
-//! artifact.
+//! Renders the shared [`uikit`] scene — the theme-switcher bar over the component
+//! gallery — through the **software** [`CpuRenderer`] (no display, no GPU) and
+//! writes the frame to `target/uikit_<slug>_cpu.png`, a real viewable artifact.
 //!
 //! The scene is *theme-agnostic*: [`uikit::view`] uses only semantic classes and
-//! [`uikit::themes`] supplies the appearance. This example selects the **Material**
-//! entry ([`uikit::MATERIAL_INDEX`]); swapping to another theme later is a one-line
-//! index change once that theme's CSS is authored.
+//! [`uikit::themes`] supplies the appearance. The active theme is selected by the
+//! `UIKIT_THEME` env var (a 0-based index into [`uikit::themes`], default
+//! [`uikit::MATERIAL_INDEX`]); e.g. `UIKIT_THEME=4` renders the **Skeuomorphic**
+//! theme to `target/uikit_skeuo_cpu.png`.
 //!
-//! GPU-class effects degrade to the documented CPU approximation per the project's
-//! effect-split policy (a two-layer `box-shadow` paints as flat offset rects; a
-//! gradient paints its first stop). Layout, text, borders, radius, and color all
-//! render faithfully.
+//! This is deliberately the **honest CPU approximation**: GPU-class effects degrade
+//! per the project's effect-split policy (a multi-layer `box-shadow` paints as flat
+//! offset rects — inset gloss lines and cast shadows both flatten; a
+//! `linear-gradient` paints only its FIRST stop, so the Skeuomorphic theme's glossy
+//! ramps read as flat light fills). Layout, text, borders, radius, and color render
+//! faithfully. Compare with `uikit_vello_png.rs`, the GPU render where the same
+//! gradients and shadows are real.
 //!
-//! Run it:
-//! `cargo run -p obscur-kit --example uikit_png \
+//! Run it (Skeuomorphic):
+//! `UIKIT_THEME=4 cargo run -p obscur-kit --example uikit_png \
 //!   --features "render-cpu resource-fs resource-decode text-harfrust text-unicode"`
 #![forbid(unsafe_code)]
 
@@ -45,10 +48,11 @@ mod uikit;
 const VIEWPORT: Size = Size::new(1280.0, 2080.0);
 
 fn main() {
-    println!("== obscur-kit imported UI Kit → PNG (headless CPU, Material 3) ==\n");
+    println!("== obscur-kit imported UI Kit → PNG (headless CPU approximation) ==\n");
 
-    let (name, css) = uikit::themes()[uikit::MATERIAL_INDEX];
-    println!("[theme] active = {name} (index {})", uikit::MATERIAL_INDEX);
+    let index = theme_index();
+    let (name, css) = uikit::themes()[index];
+    println!("[theme] active = {name} (index {index})");
 
     // 1. Compile the active theme's stylesheet through the real CSS frontend.
     let sheet = compile(css);
@@ -68,8 +72,8 @@ fn main() {
         None => println!("[text] no system font found → text renders as box marks (no panic)"),
     }
 
-    // 4. Render one frame of the Material gallery.
-    let view = uikit::view(uikit::MATERIAL_INDEX);
+    // 4. Render one frame of the selected theme's gallery.
+    let view = uikit::view(index);
     let result = runtime.render_now(&view, std::slice::from_ref(&sheet));
     let snapshot = result.snapshot().clone();
     let commands = snapshot.display_list().commands().len();
@@ -88,7 +92,7 @@ fn main() {
 
     // 6. Encode the pixmap to PNG and write the artifact.
     let png = pixmap.encode_png().expect("encode png");
-    let out = output_path("uikit_material.png");
+    let out = output_path(&format!("uikit_{}_cpu.png", theme_slug(name)));
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("create target dir");
     }
@@ -101,6 +105,27 @@ fn main() {
         out.display(),
         png.len(),
     );
+}
+
+/// The theme index to render: the `UIKIT_THEME` env var parsed as a 0-based index
+/// into [`uikit::themes`], clamped to a valid slot, defaulting to
+/// [`uikit::MATERIAL_INDEX`] when unset or unparseable.
+fn theme_index() -> usize {
+    let count = uikit::themes().len();
+    std::env::var("UIKIT_THEME")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|index| *index < count)
+        .unwrap_or(uikit::MATERIAL_INDEX)
+}
+
+/// A short filename slug for a theme name: `Skeuomorphic` → `skeuo`, otherwise the
+/// lowercased name with spaces folded to underscores (`Dark SaaS` → `dark_saas`).
+fn theme_slug(name: &str) -> String {
+    match name {
+        "Skeuomorphic" => "skeuo".to_owned(),
+        other => other.to_lowercase().replace(' ', "_"),
+    }
 }
 
 /// Compiles authored CSS text into a runtime-matchable [`Stylesheet`].

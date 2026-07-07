@@ -103,6 +103,9 @@ obscur-system-web = { workspace = true }
 winit = "0.30"
 wgpu = "29"
 pollster = "0.4"
+# PNG encoding for the headless-Vello example's read-back pixels (already a
+# workspace dependency via the CPU renderer; not a new external dependency).
+tiny-skia = "0.11"
 
 [[example]]
 name = "windowed_counter"
@@ -142,6 +145,21 @@ required-features = [
 name = "uikit_png"
 required-features = [
     "render-cpu",
+    "resource-fs",
+    "resource-decode",
+    "text-harfrust",
+    "text-unicode",
+]
+
+# The imported UI-Kit → PNG rendered FAITHFULLY through headless Vello/wgpu: the
+# same shared view + per-theme stylesheet as `uikit_png`, rasterized offscreen on
+# the GPU and read back to pixels, so the Skeuomorphic theme's gradients + inset/
+# outset shadows are REAL (not the CPU approximation). Needs the GPU adapter at
+# runtime but no window; gated on the Vello backend + resource/text stack.
+[[example]]
+name = "uikit_vello_png"
+required-features = [
+    "render-vello",
     "resource-fs",
     "resource-decode",
     "text-harfrust",

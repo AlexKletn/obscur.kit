@@ -224,6 +224,144 @@ impl VelloRenderer {
             generation: submission.generation(),
         })
     }
+
+    /// Renders `submission` fully **headless** into an offscreen texture and reads
+    /// the pixels back to CPU memory as tightly-packed RGBA8 (spec §5.6 offscreen
+    /// output).
+    ///
+    /// This is the read-back counterpart to the port [`Renderer::render`] (which
+    /// leaves the result on the GPU) and to [`Self::present_to_surface`] (which
+    /// blits it to a window): it rasterizes into the same
+    /// [`VelloFrame::new_offscreen`] intermediate with
+    /// [`vello::Renderer::render_to_texture`], then copies that texture into a
+    /// mappable [`wgpu::Buffer`] — honoring wgpu's
+    /// [`COPY_BYTES_PER_ROW_ALIGNMENT`](wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) 256-byte
+    /// row stride — waits for the copy with a blocking [`Device::poll`], un-pads the
+    /// rows, and returns `(width, height, rgba8)`. It **does not** disturb the
+    /// on-screen path or the trait `render`; a host uses it to produce PNGs from a
+    /// display list without a window.
+    ///
+    /// The returned bytes are **premultiplied** RGBA8 (Vello's texture output), so
+    /// they can be handed straight to e.g. `tiny_skia::Pixmap::from_vec`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RendererError::DeviceLost`] when no GPU device is attached, and
+    /// [`RendererError::Backend`] on a zero extent, a Vello rasterization failure,
+    /// or a buffer-map / device-poll failure.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn render_to_image(
+        &mut self,
+        submission: &FrameSubmission,
+        width: u32,
+        height: u32,
+    ) -> Result<(u32, u32, Vec<u8>), RendererError> {
+        if width == 0 || height == 0 {
+            return Err(VelloRenderError::RenderFailed("empty target".into()).into_renderer_error());
+        }
+
+        // Convert first (device-free), mirroring the other paths.
+        let scene = self
+            .scene_converter
+            .convert(submission.frame().scene().display_list());
+
+        let Some(device) = self.device.as_mut() else {
+            return Err(
+                VelloRenderError::DeviceCreation("no gpu device".into()).into_renderer_error()
+            );
+        };
+
+        let frame = VelloFrame::new_offscreen(device.device(), width, height);
+        // `new_offscreen` clamps to >= 1 per axis; read the effective extent back so
+        // the buffer stride and un-padding below match the texture exactly.
+        let (width, height) = frame.size();
+        let params = vello::RenderParams {
+            base_color: vello::peniko::Color::TRANSPARENT,
+            width,
+            height,
+            antialiasing_method: vello::AaConfig::Area,
+        };
+        let gpu_device = device.device().clone();
+        let gpu_queue = device.queue().clone();
+        device
+            .renderer_mut()
+            .render_to_texture(&gpu_device, &gpu_queue, &scene, frame.view(), &params)
+            .map_err(|error| {
+                VelloRenderError::RenderFailed(error.to_string().into()).into_renderer_error()
+            })?;
+
+        // Copy the offscreen texture into a mappable buffer. `copy_texture_to_buffer`
+        // requires each row to begin on a 256-byte boundary, so the destination is
+        // padded to `padded_bytes_per_row` and the padding is dropped after mapping.
+        let unpadded_bytes_per_row = width * 4;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
+        let buffer_size = u64::from(padded_bytes_per_row) * u64::from(height);
+        let readback = gpu_device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("obscur-vello-readback"),
+            size: buffer_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("obscur-vello-readback"),
+        });
+        encoder.copy_texture_to_buffer(
+            frame.texture().as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        gpu_queue.submit(std::iter::once(encoder.finish()));
+
+        // Map the buffer and block until the GPU copy has completed (the map
+        // callback fires during the `Wait` poll).
+        let (sender, receiver) = std::sync::mpsc::channel();
+        readback.map_async(wgpu::MapMode::Read, .., move |result| {
+            let _ = sender.send(result);
+        });
+        gpu_device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map_err(|error| {
+                VelloRenderError::RenderFailed(error.to_string().into()).into_renderer_error()
+            })?;
+        match receiver.recv() {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                return Err(VelloRenderError::RenderFailed(error.to_string().into())
+                    .into_renderer_error());
+            }
+            Err(error) => {
+                return Err(VelloRenderError::RenderFailed(error.to_string().into())
+                    .into_renderer_error());
+            }
+        }
+
+        // Copy out, dropping the per-row padding so the result is tight RGBA8.
+        let row = unpadded_bytes_per_row as usize;
+        let stride = padded_bytes_per_row as usize;
+        let mut pixels = Vec::with_capacity(row * height as usize);
+        {
+            let view = readback.get_mapped_range(..);
+            for chunk in view.chunks_exact(stride) {
+                pixels.extend_from_slice(&chunk[..row]);
+            }
+        }
+        readback.unmap();
+
+        self.frames_rendered += 1;
+        Ok((width, height, pixels))
+    }
 }
 
 impl Default for VelloRenderer {
@@ -386,6 +524,25 @@ mod tests {
         let empty = RenderTarget::bitmap(BitmapTarget::new(Size::new(0.0, 0.0)));
         assert!(matches!(
             renderer.render(&submission(1), &empty),
+            Err(RendererError::Backend(_))
+        ));
+    }
+
+    #[test]
+    fn render_to_image_without_device_reports_device_loss() {
+        // The headless read-back path is device-bound like the port `render`: with
+        // no host device it returns an honest DeviceLost rather than fabricating one.
+        let mut renderer = VelloRenderer::new(RendererId::from_raw(6));
+        let result = renderer.render_to_image(&submission(1), 64, 48);
+        assert!(matches!(result, Err(RendererError::DeviceLost(_))));
+        assert_eq!(renderer.frames_rendered(), 0);
+    }
+
+    #[test]
+    fn render_to_image_with_zero_extent_is_a_backend_error() {
+        let mut renderer = VelloRenderer::new(RendererId::from_raw(8));
+        assert!(matches!(
+            renderer.render_to_image(&submission(1), 0, 0),
             Err(RendererError::Backend(_))
         ));
     }

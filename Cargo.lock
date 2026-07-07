@@ -1609,6 +1609,7 @@ dependencies = [
  "obscur-window-winit",
  "obscur-windowing",
  "pollster",
+ "tiny-skia",
  "wgpu",
  "winit",
 ]
