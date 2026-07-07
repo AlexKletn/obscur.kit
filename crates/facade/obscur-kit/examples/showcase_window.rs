@@ -27,6 +27,18 @@
 //!   whose per-keystroke `on_text_input` handler mirrors the resulting text into
 //!   `state.input_text` so the reactive builder repaints the field.
 //!
+//! # HiDPI & zoom
+//!
+//! The window is **device-scale aware**: it lays out in *logical* CSS pixels and
+//! renders at the display's *physical* resolution, so the UI is never tiny on a
+//! HiDPI screen. It reads winit's `scale_factor` (and tracks `ScaleFactorChanged`)
+//! and points the runtime's viewport at `physical_extent / effective_scale` while
+//! setting `UiRuntime::set_device_scale(effective_scale)` — the runtime then
+//! brackets the whole scene in a root `scale(s, s)` transform, so vectors, text,
+//! and gradients scale crisply. A user **zoom** multiplies on top: `Ctrl+=` /
+//! `Ctrl++` zoom in (cap 500%), `Ctrl+-` zooms out (min 30%), and `Ctrl+0` resets
+//! to 100%. The initial window is 1000×700 *logical* pixels.
+//!
 //! Run it (a display + a GPU adapter are required):
 //! `cargo run -p obscur-kit --example showcase_window --features full`
 //!
@@ -80,7 +92,7 @@ use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, Ime, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
-use winit::keyboard::PhysicalKey as WinitPhysicalKey;
+use winit::keyboard::{Key, ModifiersState, PhysicalKey as WinitPhysicalKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 #[path = "showcase/scene.rs"]
@@ -126,6 +138,18 @@ struct ShowcaseWindow {
     /// Last known cursor position in physical pixels, so a `MouseInput` (which
     /// carries no position) can be dispatched as a pointer event at the cursor.
     cursor: (f64, f64),
+    /// The window's current HiDPI device-pixel ratio (winit `scale_factor`), so
+    /// the app lays out in logical CSS pixels while rendering at the display's
+    /// physical resolution. Updated from the window on `resumed` and on every
+    /// `ScaleFactorChanged`.
+    scale_factor: f64,
+    /// The user zoom factor (Ctrl+= / Ctrl+- / Ctrl+0), multiplied with
+    /// `scale_factor` to form the effective device scale. `1.0` is 100%.
+    zoom: f32,
+    /// The modifier keys currently held, tracked from winit `ModifiersChanged`
+    /// so the keyboard handler can recognise the Ctrl+zoom chords before text is
+    /// forwarded to the runtime's editable.
+    modifiers: ModifiersState,
 }
 
 impl ShowcaseWindow {
@@ -187,7 +211,19 @@ impl ShowcaseWindow {
             renderer: None,
             runtime,
             cursor: (0.0, 0.0),
+            scale_factor: 1.0,
+            zoom: 1.0,
+            modifiers: ModifiersState::empty(),
         }
+    }
+
+    /// The effective device-pixel scale the runtime renders at: the window's
+    /// HiDPI `scale_factor` times the user `zoom`. On a 2× display at 100% zoom
+    /// this is `2.0`, so a logical 1000×700 window rasterizes into a 2000×1400
+    /// physical swapchain — crisp, and no longer tiny.
+    #[allow(clippy::cast_possible_truncation)]
+    fn effective_scale(&self) -> f32 {
+        (self.scale_factor as f32) * self.zoom
     }
 
     /// Assembles a domain button [`PointerEvent`] at the tracked cursor, reusing
@@ -204,15 +240,57 @@ impl ShowcaseWindow {
         )
     }
 
-    /// Points the runtime's layout viewport at the swapchain's physical extent so
-    /// the scene rasterizes 1:1 into the surface. Called after surface creation
-    /// and on every resize.
+    /// Re-syncs the runtime's layout viewport and device scale to the current
+    /// swapchain extent, HiDPI factor, and user zoom. Called after surface
+    /// creation, on resize, on a scale-factor change, and after a zoom change.
+    ///
+    /// The viewport is the swapchain's **physical** extent divided by the
+    /// effective scale, so layout runs in **logical** CSS pixels; the runtime's
+    /// device scale is set to that same factor, so the composed scene is bracketed
+    /// by a root `scale(s, s)` and rasterizes crisply at physical resolution. This
+    /// is what keeps the UI from being tiny on a HiDPI display (and what the zoom
+    /// shortcuts drive).
+    #[allow(clippy::cast_possible_truncation)]
     fn sync_viewport(&mut self) {
         if let Some(surface) = self.surface.as_ref() {
             let config = surface.config();
-            let viewport = Size::new(config.width as f32, config.height as f32);
+            let scale = self.effective_scale();
+            let viewport = Size::new(config.width as f32 / scale, config.height as f32 / scale);
             self.runtime.set_viewport(viewport);
+            self.runtime.set_device_scale(scale);
         }
+    }
+
+    /// Handles a Ctrl+zoom shortcut, returning `true` when `key` was a zoom chord
+    /// (so the caller swallows it instead of forwarding it as text):
+    ///
+    /// - `Ctrl+=` / `Ctrl++` → zoom in (×1.1, capped at 5.0);
+    /// - `Ctrl+-` → zoom out (÷1.1, floored at 0.3);
+    /// - `Ctrl+0` → reset zoom to 1.0.
+    ///
+    /// A change re-syncs the viewport + device scale and requests a redraw, so the
+    /// whole showcase grows/shrinks crisply about the new scale.
+    fn handle_zoom_shortcut(&mut self, key: &Key) -> bool {
+        let Key::Character(text) = key else {
+            return false;
+        };
+        let new_zoom = match text.as_str() {
+            "=" | "+" => Some((self.zoom * 1.1).min(5.0)),
+            "-" => Some((self.zoom / 1.1).max(0.3)),
+            "0" => Some(1.0),
+            _ => None,
+        };
+        let Some(new_zoom) = new_zoom else {
+            return false;
+        };
+        self.zoom = new_zoom;
+        self.sync_viewport();
+        self.runtime.request_frame(FrameReason::WindowChange);
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+        println!("[zoom] {:.0}% (device scale {:.2})", self.zoom * 100.0, self.effective_scale());
+        true
     }
 
     /// Renders one frame: run a scheduler-gated reactive frame through the
@@ -301,6 +379,10 @@ impl ApplicationHandler for ShowcaseWindow {
                         } else {
                             eprintln!("no system font found; text will not render");
                         }
+                        // Seed the HiDPI factor from the freshly created window so
+                        // the very first frame lays out in logical px and renders
+                        // at physical resolution (no initial "tiny" frame).
+                        self.scale_factor = window.scale_factor();
                         self.surface = Some(vello_surface);
                         self.device = Some(device);
                         self.renderer = Some(renderer);
@@ -368,7 +450,32 @@ impl ApplicationHandler for ShowcaseWindow {
                     window.request_redraw();
                 }
             }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                // Track the live modifier chord so the Ctrl+zoom shortcuts below
+                // can be recognised (and swallowed) before text reaches the field.
+                self.modifiers = modifiers.state();
+            }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                // The window moved to a display with a different HiDPI ratio: keep
+                // layout in logical px and re-scale. A `Resized` with the new
+                // physical extent typically follows and re-syncs again.
+                self.scale_factor = scale_factor;
+                self.sync_viewport();
+                self.runtime.request_frame(FrameReason::WindowChange);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             WindowEvent::KeyboardInput { event, .. } => {
+                // Ctrl+zoom shortcuts are handled here FIRST (on key-down only),
+                // ahead of forwarding to the runtime, so a zoom chord adjusts the
+                // effective device scale instead of being typed into the Input.
+                if event.state == ElementState::Pressed
+                    && self.modifiers.control_key()
+                    && self.handle_zoom_shortcut(&event.logical_key)
+                {
+                    return;
+                }
                 // Real domain keyboard path: winit → `KeyboardConverter` →
                 // `handle_key`. When the Input is focused, mutating keys drive its
                 // editing session, whose `on_text_input` handler mirrors the text

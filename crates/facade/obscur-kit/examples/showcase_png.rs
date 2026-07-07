@@ -54,6 +54,31 @@ const VIEWPORT: Size = Size::new(1440.0, 900.0);
 fn main() {
     println!("== obscur-kit capability showcase → PNG (headless CPU) ==\n");
 
+    // Optional HiDPI proof: `SHOWCASE_DEVICE_SCALE=2` lays out at a *logical*
+    // 720×500 viewport and renders into a *physical* 1440×1000 buffer at
+    // `device_scale = 2.0` — the same device-scale path the windowed example uses
+    // for HiDPI. Unset (or `1`) keeps the historical byte-identical 1440×900
+    // `showcase_cpu.png` at scale 1.0 (`set_device_scale(1.0)` is a no-op).
+    let device_scale = std::env::var("SHOWCASE_DEVICE_SCALE")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .unwrap_or(1.0);
+    let hidpi = (device_scale - 1.0).abs() > f32::EPSILON;
+    let (logical_viewport, physical_size, out_name) = if hidpi {
+        let logical = Size::new(720.0, 500.0);
+        let physical = Size::new(logical.width * device_scale, logical.height * device_scale);
+        (logical, physical, "showcase_hidpi.png")
+    } else {
+        (VIEWPORT, VIEWPORT, "showcase_cpu.png")
+    };
+    if hidpi {
+        println!(
+            "[hidpi] device_scale={device_scale} · logical {}×{} → physical {}×{}\n",
+            logical_viewport.width, logical_viewport.height, physical_size.width, physical_size.height,
+        );
+    }
+
     // 1. Compile the authored showcase stylesheet through the real CSS frontend.
     let sheet = compile(showcase::stylesheet());
 
@@ -64,7 +89,8 @@ fn main() {
 
     // 3. Boot the runtime at the fixed viewport and inject the real filesystem
     //    image loader + decoder as domain ports (facade builds the adapters).
-    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), VIEWPORT);
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), logical_viewport);
+    runtime.set_device_scale(device_scale);
     KitBootstrap::new().install_image_resources(&mut runtime, &asset_dir);
 
     // 4. Wire the text stack. Fonts are a host resource, so we load one off disk
@@ -91,10 +117,12 @@ fn main() {
         result.is_balanced(),
     );
 
-    // 6. Rasterize the display list into a CPU pixmap sized to the viewport.
-    let frame = RenderFrame::new(snapshot, VIEWPORT);
+    // 6. Rasterize the display list into a CPU pixmap sized to the PHYSICAL
+    //    extent (logical × device_scale). The root scale transform the runtime
+    //    bracketed the scene with fills the whole physical buffer crisply.
+    let frame = RenderFrame::new(snapshot, physical_size);
     let submission = FrameSubmission::new(frame);
-    let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
+    let target = RenderTarget::bitmap(BitmapTarget::new(physical_size));
     renderer
         .render(&submission, &target)
         .expect("cpu render succeeds");
@@ -102,7 +130,7 @@ fn main() {
 
     // 7. Encode the pixmap to PNG and write the artifact.
     let png = pixmap.encode_png().expect("encode png");
-    let out = output_path();
+    let out = output_path(out_name);
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent).expect("create target dir");
     }
@@ -135,13 +163,13 @@ fn stage_image_asset() -> PathBuf {
     dir
 }
 
-/// The workspace-relative output path `target/showcase_cpu.png`, resolved from the
-/// crate manifest dir up to the workspace root so it is independent of the cwd.
-fn output_path() -> PathBuf {
+/// The workspace-relative output path `target/<name>`, resolved from the crate
+/// manifest dir up to the workspace root so it is independent of the cwd.
+fn output_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
         .join("target")
-        .join("showcase_cpu.png")
+        .join(name)
 }
 
 /// Wires the full text stack: itemize → resolve-by-coverage → shape, registering

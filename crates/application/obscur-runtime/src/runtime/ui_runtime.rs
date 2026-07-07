@@ -9,7 +9,7 @@ use obscur_diagnostics::{
     BudgetViolation, DiagnosticSubsystem, NullTelemetrySink, PerformanceCounter, PerformanceSpan,
     TelemetrySink,
 };
-use obscur_geometry::{Point, Size};
+use obscur_geometry::{AffineTransform, Point, Size};
 use obscur_identity::{InternedSymbol, NodeId, RuntimeId};
 use obscur_interaction::command::{
     CommandRouter, KeyEvent, LogicalKey, Modifier, Modifiers, NamedKey, Shortcut,
@@ -28,6 +28,7 @@ use obscur_resources::port::{ResourceDecoder, ResourceLoader};
 use obscur_resources::source::ResourceSource;
 use obscur_resources::state::{ResourceError, ResourceMetadata};
 use obscur_scene::color::AlphaMode;
+use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::paint::SceneImage;
 use obscur_scene::scene::{Scene, SceneSnapshot};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
@@ -211,6 +212,22 @@ pub struct UiRuntime {
     /// `(0.0, 0.0)`. It is consumed only by `position: sticky` layout: at `(0, 0)`
     /// every sticky node lays out at its static flow position.
     viewport_scroll: (f32, f32),
+    /// The host device-pixel scale (HiDPI factor × user zoom) the composed scene
+    /// is rendered at (spec §5.2 device independence). Default `1.0`.
+    ///
+    /// Layout runs in **logical** CSS pixels (the host points [`viewport`] at
+    /// `physical_extent / device_scale`); the produced display list is then
+    /// bracketed by a single root `PushTransform(scale(s, s))` … `PopTransform`
+    /// so the whole scene rasterizes at physical resolution — crisp on any
+    /// backend, since the root transform is an ordinary balanced transform pair
+    /// both renderers already honor. At `1.0` no bracket is emitted, so the
+    /// display list (and every existing test / headless caller) is byte-identical.
+    ///
+    /// Pointer coordinates arrive in the host's physical space, so
+    /// [`handle_pointer`](Self::handle_pointer) divides them by this scale before
+    /// hit-testing against the logical layout. Clamped to a sane minimum by
+    /// [`set_device_scale`](Self::set_device_scale).
+    device_scale: f32,
     /// The domain motion scheduler owning every active timeline (spec §4.17).
     ///
     /// The runtime *owns* the scheduler and its timelines; each frame it samples
@@ -356,6 +373,7 @@ impl UiRuntime {
             next_frame: FrameId::FIRST,
             viewport,
             viewport_scroll: (0.0, 0.0),
+            device_scale: 1.0,
             motion: MotionScheduler::new(),
             animations: Vec::new(),
             next_timeline: TimelineId::from_raw(0),
@@ -1106,7 +1124,10 @@ impl UiRuntime {
                 count,
                 self.budget.check_compose(count),
             );
-            self.scene.set_root(display_list);
+            // Bracket the whole scene in a root device-scale transform so layout
+            // (in logical px) rasterizes at physical resolution. At scale `1.0`
+            // this is a no-op and the list is byte-identical (see `scaled_root`).
+            self.scene.set_root(self.scaled_root(display_list));
         }
         let snapshot = self.scene.snapshot();
 
@@ -1515,7 +1536,20 @@ impl UiRuntime {
     ///
     /// It never itself renders; it only mutates interaction state and requests a
     /// frame. Returns a [`PointerDispatch`] describing the target and what moved.
-    pub fn handle_pointer(&mut self, event: PointerEvent) -> PointerDispatch {
+    pub fn handle_pointer(&mut self, mut event: PointerEvent) -> PointerDispatch {
+        // 0. Device-scale: incoming coordinates are in the host's physical
+        //    (device) space, but layout runs in logical CSS px (viewport =
+        //    physical / device_scale). Divide the pointer position by the scale
+        //    once, here, so every downstream consumer — the hit-test below, the
+        //    caret seat in `begin_text_pointer`, and the drag re-select in
+        //    `update_text_drag` — sees logical coordinates. At scale `1.0` this is
+        //    the identity, so the mapping is byte-identical for existing hosts.
+        let s = self.device_scale;
+        if (s - 1.0).abs() > f32::EPSILON {
+            let physical = event.position();
+            event.position = Point::new(physical.x / s, physical.y / s);
+        }
+
         // 1. Hit-test: the first hit is the topmost (highest z-order) node.
         let target = self
             .spatial
@@ -2428,6 +2462,58 @@ impl UiRuntime {
     /// [`request_frame`](Self::request_frame)`(`[`FrameReason::WindowChange`]`)`.
     pub fn set_viewport(&mut self, viewport: Size) {
         self.viewport = viewport;
+    }
+
+    /// Returns the current device-pixel scale (HiDPI factor × user zoom) the
+    /// composed scene renders at. Default `1.0`.
+    #[must_use]
+    pub fn device_scale(&self) -> f32 {
+        self.device_scale
+    }
+
+    /// Sets the device-pixel scale (HiDPI factor × user zoom) the composed scene
+    /// renders at, clamped to a sane minimum of `0.1` (a non-positive or
+    /// non-finite request is ignored in favour of the clamp) (spec §5.2).
+    ///
+    /// The scale wraps the composed display list in a single root
+    /// `PushTransform(scale(s, s))` … `PopTransform`, so a host that lays out in
+    /// **logical** CSS pixels (viewport = physical extent / `s`) still rasterizes
+    /// crisply at physical resolution. Pointer coordinates are divided by `s` in
+    /// [`handle_pointer`](Self::handle_pointer) so hit-testing stays in logical
+    /// space. Setting `1.0` restores the byte-identical (untransformed) path.
+    ///
+    /// Does not itself schedule a frame; a host typically pairs this with
+    /// [`set_viewport`](Self::set_viewport) and
+    /// [`request_frame`](Self::request_frame)`(`[`FrameReason::WindowChange`]`)`.
+    pub fn set_device_scale(&mut self, scale: f32) {
+        self.device_scale = if scale.is_finite() {
+            scale.max(0.1)
+        } else {
+            0.1
+        };
+    }
+
+    /// Wraps a freshly composed `display_list` in a root device-scale transform
+    /// when [`device_scale`](Self::device_scale) differs from `1.0`, so the whole
+    /// scene rasterizes at physical resolution while layout stays in logical px.
+    ///
+    /// At exactly `1.0` the list is returned unchanged — no `PushTransform` /
+    /// `PopTransform` is emitted, so the output is byte-identical to the
+    /// pre-device-scale path (the regression guard). Otherwise the list is
+    /// re-wrapped as `PushTransform(scale(s, s))` + original commands +
+    /// `PopTransform`, which keeps it balanced (one push, one matching pop) since
+    /// the composed list is itself already balanced.
+    fn scaled_root(&self, display_list: DisplayList) -> DisplayList {
+        let s = self.device_scale;
+        if (s - 1.0).abs() <= f32::EPSILON {
+            return display_list;
+        }
+        let inner = display_list.commands();
+        let mut commands = Vec::with_capacity(inner.len() + 2);
+        commands.push(PaintCommand::PushTransform(AffineTransform::scale(s, s)));
+        commands.extend_from_slice(inner);
+        commands.push(PaintCommand::PopTransform);
+        DisplayList::from_commands(commands)
     }
 }
 
@@ -3677,6 +3763,139 @@ mod tests {
         assert!(runtime.pseudo_state(b).contains(PseudoState::HOVER));
         assert!(runtime.pseudo_state(panel).contains(PseudoState::HOVER));
         assert_eq!(runtime.pseudo_state(a), PseudoState::empty());
+    }
+
+    // ---- Device scale (HiDPI): root scale transform + pointer coord mapping ----
+
+    #[test]
+    fn device_scale_wraps_the_display_list_in_a_root_scale_transform() {
+        // A sheet where `panel` actually paints (a background), so the wrapped
+        // list has real content between the brackets — not just the brackets.
+        let panel_decls = {
+            let mut d = size(100.0, 100.0);
+            d.extend(background(0.1, 0.2, 0.3));
+            d
+        };
+        let sheet = Stylesheet::new(CascadeOrigin::GlobalApp, vec![class_rule("panel", panel_decls)]);
+        let sheets = std::slice::from_ref(&sheet);
+
+        // Scale 2.0: the composed list is bracketed by a single root
+        // PushTransform(scale(2, 2)) … PopTransform, and stays balanced.
+        let mut scaled = UiRuntime::new(runtime_id(), viewport());
+        scaled.set_device_scale(2.0);
+        assert_eq!(scaled.device_scale(), 2.0);
+        let frame = scaled.render_now(&panel_view(), sheets);
+        let list = frame.snapshot().display_list();
+        assert!(list.is_balanced(), "the wrapped list stays balanced");
+        assert!(list.len() >= 3, "at least the two brackets plus content");
+        assert_eq!(
+            list.commands().first(),
+            Some(&PaintCommand::PushTransform(AffineTransform::scale(2.0, 2.0))),
+            "the list opens with the root device-scale transform",
+        );
+        assert_eq!(
+            list.commands().last(),
+            Some(&PaintCommand::PopTransform),
+            "and closes with its matching pop",
+        );
+
+        // Scale 1.0 (default): no root transform is emitted — byte-identical to
+        // the pre-device-scale path.
+        let mut plain = UiRuntime::new(runtime_id(), viewport());
+        let plain_frame = plain.render_now(&panel_view(), sheets);
+        let plain_list = plain_frame.snapshot().display_list();
+        assert!(
+            !plain_list
+                .commands()
+                .iter()
+                .any(|c| matches!(c, PaintCommand::PushTransform(_))),
+            "no root transform at scale 1.0",
+        );
+
+        // The scaled list is exactly the plain list wrapped in the two brackets.
+        let mut expected = vec![PaintCommand::PushTransform(AffineTransform::scale(2.0, 2.0))];
+        expected.extend_from_slice(plain_list.commands());
+        expected.push(PaintCommand::PopTransform);
+        assert_eq!(list.commands(), expected.as_slice());
+    }
+
+    #[test]
+    fn device_scale_one_is_byte_identical_to_before() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+
+        // Default (implicit 1.0) vs an explicit set to 1.0: identical display
+        // lists, and an identical pointer hit-test.
+        let mut default_rt = UiRuntime::new(runtime_id(), viewport());
+        let default_list = default_rt
+            .render_now(&panel_view(), sheets)
+            .snapshot()
+            .display_list()
+            .commands()
+            .to_vec();
+        let d_target = default_rt
+            .handle_pointer(mouse(PointerEventKind::Move, 50.0, 75.0))
+            .target();
+
+        let mut explicit_rt = UiRuntime::new(runtime_id(), viewport());
+        explicit_rt.set_device_scale(1.0);
+        let explicit_list = explicit_rt
+            .render_now(&panel_view(), sheets)
+            .snapshot()
+            .display_list()
+            .commands()
+            .to_vec();
+        let e_target = explicit_rt
+            .handle_pointer(mouse(PointerEventKind::Move, 50.0, 75.0))
+            .target();
+
+        assert_eq!(default_list, explicit_list, "scale 1.0 changes no commands");
+        assert_eq!(d_target, e_target, "scale 1.0 changes no hit-test");
+    }
+
+    #[test]
+    fn device_scale_divides_incoming_pointer_coordinates() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+
+        // Baseline at scale 1: physical (50, 75) lands in `b` (y ∈ [50, 100)).
+        let mut base = UiRuntime::new(runtime_id(), viewport());
+        let _ = base.render_now(&panel_view(), sheets);
+        let (_panel, a, b) = panel_nodes(&base);
+        assert_eq!(
+            base.handle_pointer(mouse(PointerEventKind::Move, 50.0, 75.0)).target(),
+            Some(b),
+        );
+
+        // At scale 2, physical (100, 150) maps to logical (50, 75) → same `b`.
+        let mut scaled = UiRuntime::new(runtime_id(), viewport());
+        scaled.set_device_scale(2.0);
+        let _ = scaled.render_now(&panel_view(), sheets);
+        assert_eq!(
+            scaled.handle_pointer(mouse(PointerEventKind::Move, 100.0, 150.0)).target(),
+            Some(b),
+            "physical (100,150) / 2 = logical (50,75) hits the same node as scale-1 (50,75)",
+        );
+
+        // And physical (50, 75) at scale 2 maps to logical (25, 37.5) → `a`
+        // (y ∈ [0, 50)), proving the coordinates were actually divided.
+        assert_eq!(
+            scaled.handle_pointer(mouse(PointerEventKind::Move, 50.0, 75.0)).target(),
+            Some(a),
+        );
+    }
+
+    #[test]
+    fn set_device_scale_clamps_to_a_sane_minimum() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_device_scale(0.0);
+        assert_eq!(runtime.device_scale(), 0.1, "non-positive clamps to 0.1");
+        runtime.set_device_scale(-4.0);
+        assert_eq!(runtime.device_scale(), 0.1, "negative clamps to 0.1");
+        runtime.set_device_scale(f32::NAN);
+        assert_eq!(runtime.device_scale(), 0.1, "non-finite clamps to 0.1");
+        runtime.set_device_scale(2.5);
+        assert_eq!(runtime.device_scale(), 2.5, "a sane value passes through");
     }
 
     #[test]
