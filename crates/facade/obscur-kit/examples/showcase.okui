@@ -1,0 +1,56 @@
+<app id="app" class="app">
+  <header class="header">
+    <span class="title">obscur.kit — .okui capability showcase</span>
+    <span class="subtitle">authored in .okui · parsed · compiled · bridged to a View · CPU→PNG</span>
+  </header>
+
+  <div class="gallery">
+    <div type="card" class="solid">
+      <span class="card-label">Solid fill</span>
+      <span class="card-note">background-color</span>
+    </div>
+    <div type="card" class="linear">
+      <span class="card-label">Linear gradient</span>
+      <span class="card-note">first-stop on CPU</span>
+    </div>
+    <div type="card" class="radial">
+      <span class="card-label">Radial gradient</span>
+      <span class="card-note">first-stop on CPU</span>
+    </div>
+    <div type="card" class="conic">
+      <span class="card-label">Conic gradient</span>
+      <span class="card-note">first-stop on CPU</span>
+    </div>
+    <div type="card" class="bordered">
+      <span class="card-label">Border + radius</span>
+      <span class="card-note">5px solid, r=14</span>
+    </div>
+    <div type="card" class="shadowed">
+      <span class="card-label">Box shadow</span>
+      <span class="card-note">flat approx on CPU</span>
+    </div>
+    <div type="card" class="dropshadow">
+      <span class="card-label">Drop shadow</span>
+      <span class="card-note">filter: drop-shadow</span>
+    </div>
+    <div type="card" class="faded">
+      <span class="card-label">Opacity 0.5</span>
+      <span class="card-note">group layer</span>
+    </div>
+    <div type="card" class="rotated">
+      <span class="card-label">Transform</span>
+      <span class="card-note">rotate + scale</span>
+    </div>
+    <div type="card" class="bgimage">
+      <span class="card-label">background-image</span>
+      <span class="card-note">url(gallery.png)</span>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="chip chip-a"><span class="chip-text">Layout</span></div>
+    <div class="chip chip-b"><span class="chip-text">Paint</span></div>
+    <div class="chip chip-c"><span class="chip-text">Text</span></div>
+    <span class="counter">rendered from .okui</span>
+  </div>
+</app>

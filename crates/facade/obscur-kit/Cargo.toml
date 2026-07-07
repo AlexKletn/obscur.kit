@@ -121,6 +121,20 @@ required-features = [
     "text-unicode",
 ]
 
+# The `.okui` DSL showcase → View bridge → headless CPU → PNG. Drives the real
+# frontend pipeline (parse → compile → UI IR → View bridge) and rasterizes the
+# bridged view with the software backend. Same runtime feature set as
+# `showcase_png` (no window or GPU), so it builds and runs display-free.
+[[example]]
+name = "showcase_okui_png"
+required-features = [
+    "render-cpu",
+    "resource-fs",
+    "resource-decode",
+    "text-harfrust",
+    "text-unicode",
+]
+
 # The windowed GPU capability showcase: the SAME shared scene as `showcase_png`,
 # rendered through winit + Vello at full effect fidelity and made interactive.
 # Needs the window + GPU adapters plus image loading/decode and the text stack,
