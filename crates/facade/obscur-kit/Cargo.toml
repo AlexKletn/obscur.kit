@@ -107,3 +107,16 @@ pollster = "0.4"
 [[example]]
 name = "windowed_counter"
 required-features = ["full"]
+
+# The headless capability showcase → PNG. Needs the CPU renderer, filesystem
+# image loading + decode, and the real text shaping stack — but no window or GPU,
+# so it builds and runs anywhere (`cargo build --examples` stays display-free).
+[[example]]
+name = "showcase_png"
+required-features = [
+    "render-cpu",
+    "resource-fs",
+    "resource-decode",
+    "text-harfrust",
+    "text-unicode",
+]
