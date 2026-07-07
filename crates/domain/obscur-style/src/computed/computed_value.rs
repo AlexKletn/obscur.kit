@@ -10,7 +10,7 @@
 
 use crate::property::{
     BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow, ConicGradient, Length,
-    LengthExpr, LinearGradient, PropertyValue, RadialGradient, StyleColor, Transform,
+    LengthExpr, LinearGradient, ObjectFit, PropertyValue, RadialGradient, StyleColor, Transform,
     TransformOrigin,
 };
 use obscur_identity::InternedSymbol;
@@ -53,6 +53,7 @@ impl ComputedValue {
             | PropertyValue::BackgroundSize(_)
             | PropertyValue::BackgroundPosition(_)
             | PropertyValue::BackgroundRepeat(_)
+            | PropertyValue::ObjectFit(_)
             | PropertyValue::BoxShadow(_)
             | PropertyValue::Filter(_)
             | PropertyValue::FontFamilies(_)
@@ -171,6 +172,12 @@ impl ComputedValue {
     #[must_use]
     pub const fn as_background_repeat(&self) -> Option<BackgroundRepeat> {
         self.0.as_background_repeat()
+    }
+
+    /// Returns the `object-fit` if this computed value is one.
+    #[must_use]
+    pub const fn as_object_fit(&self) -> Option<ObjectFit> {
+        self.0.as_object_fit()
     }
 
     /// Returns the `filter` drop-shadow list if this computed value is a `filter`.

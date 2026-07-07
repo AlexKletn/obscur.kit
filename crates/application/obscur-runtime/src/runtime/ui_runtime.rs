@@ -461,6 +461,62 @@ impl UiRuntime {
         }
     }
 
+    /// Resolves every not-yet-cached element image `src` (an `<img>` /
+    /// [`Image`](obscur_primitives::Image) primitive's source) referenced by the
+    /// retained tree into a decoded [`SceneImage`] in
+    /// [`image_cache`](Self::image_cache) (spec §5.15 load → §5.16 decode).
+    ///
+    /// Element images share the **same** cache, hub lifecycle, and load/decode path
+    /// as `background-image: url(...)` (see
+    /// [`resolve_background_images`](Self::resolve_background_images)), keyed by the
+    /// raw `src` string. A URL already resolved (or already attempted and failed) is
+    /// not retried; a loader/decoder error `fail`s the handle and caches nothing, so
+    /// the image is simply not painted — no panic. With no loader/decoder installed
+    /// this is a no-op (the honest-capability default).
+    fn resolve_element_images(&mut self) {
+        // Both a loader and a decoder are required; without either, element images
+        // honestly resolve to nothing.
+        let (Some(loader), Some(decoder)) =
+            (self.resource_loader.as_deref(), self.resource_decoder.as_deref())
+        else {
+            return;
+        };
+        // Gather each element node's own image source up front, so the retained-tree
+        // borrow is released before the hub / caches are mutated below.
+        let sources: Vec<Box<str>> = self
+            .tree
+            .iter()
+            .filter_map(|(_, node)| node.attributes().image_source().map(Box::<str>::from))
+            .collect();
+        for key in sources {
+            if self.image_cache.contains_key(&key) || self.image_handles.contains_key(&key) {
+                // Already resolved, or already attempted (and failed): do not retry.
+                continue;
+            }
+            let source = ResourceSource::file(key.clone());
+            let handle = self
+                .resource_hub
+                .request(ResourceRequest::new(source.clone(), ResourceKind::Image));
+            self.image_handles.insert(key.clone(), handle);
+            let Some(version) = self.resource_hub.begin_load(handle) else {
+                continue;
+            };
+            match load_and_decode_image(loader, decoder, &source) {
+                Ok(image) => {
+                    let metadata = ResourceMetadata::new().with_intrinsic_size(Size::new(
+                        image.width() as f32,
+                        image.height() as f32,
+                    ));
+                    self.resource_hub.complete(handle, version, metadata);
+                    self.image_cache.insert(key, image);
+                }
+                Err(error) => {
+                    self.resource_hub.fail(handle, version, error);
+                }
+            }
+        }
+    }
+
     /// Installs the performance-telemetry `sink` each frame's phases record into
     /// (spec §7.9), replacing any previously installed sink.
     ///
@@ -1008,6 +1064,12 @@ impl UiRuntime {
             // composing, so the coordinator can paint the ready ones. A no-op when
             // no loader/decoder is installed or no URL is authored.
             self.resolve_background_images(&computed);
+            // Resolve each element's own image `src` (an `<img>` primitive's
+            // source) into the SAME cache via the SAME load/decode path, so the
+            // coordinator can paint the ready ones over their box as element
+            // content. A no-op when no loader/decoder is installed or no `src` is
+            // authored.
+            self.resolve_element_images();
             // Thread the runtime-owned editing session into compose so the focused
             // editable paints its live session text plus a caret + selection
             // highlight (spec §5.11). `scene_composer`, `tree`, `boxes` and
@@ -2544,8 +2606,8 @@ mod tests {
     use obscur_style::property::{Length, PropertyId, PropertyValue, StyleColor};
     use obscur_style::selector::{ComplexSelector, CompoundSelector, SelectorList, SimpleSelector};
     use obscur_view::view::{
-        CLASS, EVENT_CHANGE, EVENT_CLICK, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
-        ViewValue,
+        CLASS, EVENT_CHANGE, EVENT_CLICK, SRC, ViewEventBinding, ViewFragment, ViewNode,
+        ViewProperty, ViewValue,
     };
     use std::cell::Cell;
 
@@ -2723,6 +2785,48 @@ mod tests {
             draw_image_count(list),
             1,
             "the resolved url() image paints one DrawImage"
+        );
+        assert!(result.is_balanced());
+    }
+
+    /// A view whose single element carries the `counter` class (so
+    /// `counter_stylesheet` sizes it — with a solid background but NO
+    /// background-image) plus an image `src`, an `<img>` primitive's content. Using
+    /// `counter` rather than `img` keeps the only DrawImage the element's own image.
+    fn img_src_view(src: &str) -> View {
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(11))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into())))
+                .with_prop(ViewProperty::new(SRC, ViewValue::Text(src.into()))),
+        ]))
+    }
+
+    #[test]
+    fn element_image_src_resolves_and_paints_a_draw_image() {
+        // A `<img>` element's own `src` loads + decodes into the cache (same path as
+        // background images) and paints one DrawImage over its 100×50 box.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_resource_providers(Box::new(MockLoader { fails: false }), Box::new(MockDecoder));
+        let sheet = counter_stylesheet();
+        let result = runtime.render_now(&img_src_view("logo"), std::slice::from_ref(&sheet));
+        assert_eq!(
+            draw_image_count(result.snapshot().display_list()),
+            1,
+            "the element image resolves and paints one DrawImage"
+        );
+        assert!(result.is_balanced());
+    }
+
+    #[test]
+    fn element_image_loader_error_paints_no_image_and_does_not_panic() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_resource_providers(Box::new(MockLoader { fails: true }), Box::new(MockDecoder));
+        let sheet = counter_stylesheet();
+        let result = runtime.render_now(&img_src_view("logo"), std::slice::from_ref(&sheet));
+        assert_eq!(
+            draw_image_count(result.snapshot().display_list()),
+            0,
+            "a failed load caches nothing → no element DrawImage"
         );
         assert!(result.is_balanced());
     }

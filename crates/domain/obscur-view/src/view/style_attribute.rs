@@ -26,6 +26,14 @@ pub const ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0002);
 /// selector matches (as [`ViewValue::Text`]).
 pub const TYPE: InternedSymbol = InternedSymbol::from_raw(0x0000_0003);
 
+/// Reserved symbol for a replaced element's image *source* — the opaque key an
+/// `<img>` / [`Image`](../../../obscur_primitives/struct.Image.html) primitive
+/// carries (as [`ViewValue::Text`]). Unlike `class` / `id` / `type`, this is not a
+/// CSS selector input: it is the element's own *content*, resolved by the runtime
+/// to decoded pixels and painted over the element's box. Kept in the same reserved
+/// low-symbol namespace so it survives reconciliation onto the retained node.
+pub const SRC: InternedSymbol = InternedSymbol::from_raw(0x0000_0004);
+
 /// The CSS-relevant identity of an element view node: its local name, `id`, and
 /// class list, extracted from a node's [`ViewProperty`] bindings.
 ///
@@ -37,6 +45,10 @@ pub struct StyleAttributes {
     local_name: Option<Box<str>>,
     id: Option<Box<str>>,
     classes: Vec<Box<str>>,
+    /// A replaced element's image source key (`<img src>`), if any. Not a CSS
+    /// selector input — it is the element's own content, resolved to pixels and
+    /// painted by the runtime. Derived from the [`SRC`] reserved symbol.
+    image_source: Option<Box<str>>,
 }
 
 impl StyleAttributes {
@@ -48,10 +60,11 @@ impl StyleAttributes {
 
     /// Extracts the well-known style attributes from a node's properties.
     ///
-    /// Reads the [`CLASS`], [`ID`], and [`TYPE`] reserved symbols; only
+    /// Reads the [`CLASS`], [`ID`], [`TYPE`], and [`SRC`] reserved symbols; only
     /// [`ViewValue::Text`] values contribute (other value kinds are ignored).
     /// The `class` text is split on ASCII whitespace into individual class
-    /// names, preserving order and dropping empties.
+    /// names, preserving order and dropping empties. The [`SRC`] text is the
+    /// element's image source, carried verbatim.
     #[must_use]
     pub fn extract(props: &[ViewProperty]) -> Self {
         let mut attributes = Self::new();
@@ -65,6 +78,7 @@ impl StyleAttributes {
                 }
                 ID => attributes.id = Some(text.clone()),
                 TYPE => attributes.local_name = Some(text.clone()),
+                SRC => attributes.image_source = Some(text.clone()),
                 _ => {}
             }
         }
@@ -95,10 +109,21 @@ impl StyleAttributes {
         self.classes.iter().any(|c| c.as_ref() == class)
     }
 
+    /// The element's image source key (`<img src>`), if any. This is the
+    /// element's own content — the runtime resolves it to decoded pixels and
+    /// paints it over the element's box.
+    #[must_use]
+    pub fn image_source(&self) -> Option<&str> {
+        self.image_source.as_deref()
+    }
+
     /// Whether no style attribute is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.local_name.is_none() && self.id.is_none() && self.classes.is_empty()
+        self.local_name.is_none()
+            && self.id.is_none()
+            && self.classes.is_empty()
+            && self.image_source.is_none()
     }
 }
 
@@ -134,6 +159,28 @@ mod tests {
         assert!(attrs.has_class("primary"));
         assert!(!attrs.has_class("missing"));
         assert!(!attrs.is_empty());
+    }
+
+    #[test]
+    fn extracts_image_source_from_src() {
+        let attrs = StyleAttributes::extract(&[text_prop(SRC, "logo.png")]);
+        assert_eq!(attrs.image_source(), Some("logo.png"));
+        // The image source alone makes the attribute set non-empty.
+        assert!(!attrs.is_empty());
+        // It is independent of the CSS selector inputs.
+        assert_eq!(attrs.local_name(), None);
+        assert_eq!(attrs.id(), None);
+        assert!(attrs.classes().is_empty());
+    }
+
+    #[test]
+    fn equality_includes_image_source() {
+        let a = StyleAttributes::extract(&[text_prop(SRC, "a.png")]);
+        let b = StyleAttributes::extract(&[text_prop(SRC, "b.png")]);
+        // A src change is observed by equality (so reconcile re-applies attributes).
+        assert_ne!(a, b);
+        let a2 = StyleAttributes::extract(&[text_prop(SRC, "a.png")]);
+        assert_eq!(a, a2);
     }
 
     #[test]

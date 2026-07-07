@@ -499,6 +499,50 @@ mod tests {
     }
 
     #[test]
+    fn element_carries_image_source_after_reconcile() {
+        use obscur_view::view::{SRC, ViewProperty, ViewValue};
+
+        let (mut tree, root) = tree_with_root();
+        let img = el(1).with_prop(ViewProperty::new(SRC, ViewValue::Text("logo.png".into())));
+        let _ = Reconciler::new().reconcile(&mut tree, root, &ViewFragment::from_nodes(vec![img]));
+        let id = child_ids(&tree, root)[0];
+        assert_eq!(
+            tree.get(id).expect("live").attributes().image_source(),
+            Some("logo.png")
+        );
+    }
+
+    #[test]
+    fn changed_image_source_is_updated_in_place() {
+        use obscur_view::view::{SRC, ViewProperty, ViewValue};
+
+        let (mut tree, root) = tree_with_root();
+        let recon = Reconciler::new();
+        let with_src = |src: &str| {
+            keyed_el(1, "e").with_prop(ViewProperty::new(SRC, ViewValue::Text(src.into())))
+        };
+
+        let _ = recon.reconcile(&mut tree, root, &ViewFragment::from_nodes(vec![with_src("a.png")]));
+        let id = child_ids(&tree, root)[0];
+        assert_eq!(
+            tree.get(id).expect("live").attributes().image_source(),
+            Some("a.png")
+        );
+
+        // Changing the src re-applies the attributes and emits one Update op.
+        let plan =
+            recon.reconcile(&mut tree, root, &ViewFragment::from_nodes(vec![with_src("b.png")]));
+        assert_eq!(child_ids(&tree, root)[0], id);
+        assert_eq!(
+            tree.get(id).expect("live").attributes().image_source(),
+            Some("b.png")
+        );
+        assert!(plan.iter().any(|op| op.is_update()));
+        assert!(!plan.iter().any(|op| op.is_insert()));
+        assert!(!plan.iter().any(|op| op.is_remove()));
+    }
+
+    #[test]
     fn text_and_bare_element_carry_empty_attributes() {
         let (mut tree, root) = tree_with_root();
         let _ = Reconciler::new().reconcile(

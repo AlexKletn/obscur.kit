@@ -36,6 +36,10 @@ pub enum PropertyId {
     /// The `background-repeat` property (a `BackgroundRepeat` value; NOT
     /// inherited). Tiles the sized image tile to fill the box; initial `repeat`.
     BackgroundRepeat,
+    /// The `object-fit` property (an `ObjectFit` value; NOT inherited). Sizes a
+    /// replaced element's content (e.g. an `<img>`'s pixels) within its content
+    /// box: `fill` (default) / `contain` / `cover` / `none` / `scale-down`.
+    ObjectFit,
     /// The `opacity` property.
     Opacity,
     /// The `width` property.
@@ -286,6 +290,7 @@ impl PropertyId {
             Self::BackgroundSize => "background-size",
             Self::BackgroundPosition => "background-position",
             Self::BackgroundRepeat => "background-repeat",
+            Self::ObjectFit => "object-fit",
             Self::Opacity => "opacity",
             Self::Width => "width",
             Self::Height => "height",
@@ -383,6 +388,7 @@ impl PropertyId {
             | Self::BackgroundSize
             | Self::BackgroundPosition
             | Self::BackgroundRepeat
+            | Self::ObjectFit
             | Self::Opacity
             | Self::Width
             | Self::Height
@@ -494,6 +500,13 @@ mod tests {
                 id.name()
             );
         }
+    }
+
+    #[test]
+    fn object_fit_name_and_not_inherited() {
+        assert_eq!(PropertyId::ObjectFit.name(), "object-fit");
+        // Like the other paint / box properties, `object-fit` resets per element.
+        assert!(!PropertyId::ObjectFit.default_inheritance().is_inherited());
     }
 
     #[test]

@@ -63,6 +63,7 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::BackgroundSize,
     PropertyId::BackgroundPosition,
     PropertyId::BackgroundRepeat,
+    PropertyId::ObjectFit,
     PropertyId::Opacity,
     PropertyId::Visibility,
     // Positioning.
@@ -217,6 +218,16 @@ impl StyleResolver {
                     crate::property::BackgroundRepeat::Repeat,
                 ))
                 .expect("BackgroundRepeat is a concrete computed value"),
+            ),
+            // `object-fit` initial is `fill` (stretch to the box). It has a
+            // no-interner concrete value, so it resolves to the CSS initial
+            // directly (the scene coordinator would default to the same for an
+            // absent property, so this is purely explicit).
+            PropertyId::ObjectFit => Some(
+                ComputedValue::from_concrete(PropertyValue::ObjectFit(
+                    crate::property::ObjectFit::Fill,
+                ))
+                .expect("ObjectFit is a concrete computed value"),
             ),
             // `box-shadow` initial is `none` (no shadows). There is no
             // `BoxShadow` list value for `none` other than an empty one, and an
@@ -1005,6 +1016,7 @@ mod tests {
                 | PropertyId::BackgroundSize
                 | PropertyId::BackgroundPosition
                 | PropertyId::BackgroundRepeat
+                | PropertyId::ObjectFit
                 | PropertyId::Opacity
                 | PropertyId::Width
                 | PropertyId::Height
@@ -1086,6 +1098,7 @@ mod tests {
             PropertyId::BackgroundSize,
             PropertyId::BackgroundPosition,
             PropertyId::BackgroundRepeat,
+            PropertyId::ObjectFit,
             PropertyId::Opacity,
             PropertyId::Width,
             PropertyId::Height,

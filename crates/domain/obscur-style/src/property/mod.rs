@@ -36,6 +36,8 @@ mod length_expr;
 pub use length_expr::LengthExpr;
 mod linear_gradient;
 pub use linear_gradient::LinearGradient;
+mod object_fit;
+pub use object_fit::ObjectFit;
 mod property_id;
 pub use property_id::PropertyId;
 mod property_value;

@@ -1,7 +1,7 @@
 //! `Image`: a raster/vector image primitive (spec §2.6, §5.16).
 
 use obscur_identity::{ComponentId, InternedSymbol};
-use obscur_view::view::{View, ViewNode, ViewProperty, ViewValue};
+use obscur_view::view::{View, ViewNode, ViewProperty, ViewValue, SRC};
 
 /// A reference to an image resource drawn into the view tree.
 ///
@@ -25,10 +25,13 @@ impl Image {
 
     /// Property name for the image source key.
     ///
-    /// Prop-name symbols share the `0x00C1_NNXX` space, where `NN` mirrors the
-    /// owning primitive's component-id nibble and `XX` counts its properties;
-    /// these are the stable raw symbol ids the style/reconcile layer maps.
-    pub const PROP_SRC: InternedSymbol = InternedSymbol::from_raw(0x00C1_0301);
+    /// Unlike the other primitive props (which live in the `0x00C1_NNXX` prop
+    /// space), the source points at [`obscur_view::view::SRC`] — the reserved
+    /// low-symbol attribute the reconciler extracts onto the retained node's
+    /// [`StyleAttributes`](obscur_view::view::StyleAttributes) — so an image's
+    /// `src` survives reconciliation as `image_source()` and the runtime can
+    /// resolve and paint it. Aliased here so `Image::PROP_SRC` still exists.
+    pub const PROP_SRC: InternedSymbol = SRC;
     /// Property name for the accessible alternative text.
     pub const PROP_ALT: InternedSymbol = InternedSymbol::from_raw(0x00C1_0302);
 

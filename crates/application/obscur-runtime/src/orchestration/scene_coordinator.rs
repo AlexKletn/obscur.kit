@@ -19,8 +19,8 @@ use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{
     layout_keyword, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow, ConicGradient,
-    Length, LinearGradient, PropertyId, PropertyValue, RadialGradient, RadialSize, StyleColor,
-    Transform, TransformOrigin,
+    Length, LinearGradient, ObjectFit, PropertyId, PropertyValue, RadialGradient, RadialSize,
+    StyleColor, Transform, TransformOrigin,
 };
 use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontResolver, FontSource,
@@ -739,6 +739,25 @@ impl SceneCoordinator {
                 }
             }
 
+            // An element's own image content (an `<img>` / `Image` primitive's
+            // `src`) whose image has been resolved paints as the element's CONTENT:
+            // OVER its background / border (emitted after them), UNDER its children
+            // and text (they are separate paint units at a later tree index). The
+            // image is sized/placed by `object-fit` (default `fill` = stretch to the
+            // box) about the box center, and its `region` is the box so `cover`
+            // overflow is clipped. The paint uses the element's BORDER box (the
+            // content-box insets are not resolved in this pure coordinator — a
+            // documented approximation). A `src` absent from `images` (unloaded or
+            // failed) or no `src` at all emits nothing (byte-identical when `images`
+            // is empty). A `background-image` and an element `src` both paint: the
+            // background behind, the element image above.
+            if let Some(layout_box) = boxes.get(&node)
+                && let Some(image) = element_image_of(tree, node).and_then(|src| images.get(src))
+            {
+                let tile = object_fit_tile(computed, node, image, layout_box.bounds);
+                node_paint.draw_image(image.clone(), tile, layout_box.bounds, false, false);
+            }
+
             if let Some(retained) = tree.get(node) {
                 // Text nodes emit one text run **per wrapped line** at their
                 // arranged box. A node is either a text node or an element with a
@@ -1245,6 +1264,86 @@ fn background_image_geometry(
         repeat.repeat_x(),
         repeat.repeat_y(),
     )
+}
+
+/// Reads a retained element node's own image `src` (an `<img>` / `Image`
+/// primitive's source), if any — the key the runtime resolves against its image
+/// cache.
+///
+/// Returns [`None`] for a node with no retained record or no `image_source`
+/// attribute (every non-image element and every text node).
+fn element_image_of(tree: &RetainedTree, node: NodeId) -> Option<&str> {
+    tree.get(node).and_then(|n| n.attributes().image_source())
+}
+
+/// Reads a node's computed `object-fit`, defaulting to the CSS initial `fill`
+/// (stretch to the box) when absent.
+fn object_fit_of(computed: &ComputedStyles, node: NodeId) -> ObjectFit {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::ObjectFit))
+        .and_then(ComputedValue::as_object_fit)
+        .unwrap_or(ObjectFit::Fill)
+}
+
+/// Resolves the placed tile rect for an element's image `content` within its box
+/// `region`, per `object-fit`, centered (the `object-position: 50% 50%` default).
+///
+/// The tile size comes from [`resolve_object_fit_size`] against the image's
+/// intrinsic pixel size and the box size; the tile is then centered within the
+/// region so `contain` letterboxes and `cover` overflows symmetrically (the
+/// `region` passed to `DrawImage` clips the overflow).
+#[allow(clippy::cast_precision_loss)]
+fn object_fit_tile(
+    computed: &ComputedStyles,
+    node: NodeId,
+    image: &SceneImage,
+    region: Rect,
+) -> Rect {
+    let fit = object_fit_of(computed, node);
+    let (iw, ih) = (image.width() as f32, image.height() as f32);
+    let bw = region.size.width;
+    let bh = region.size.height;
+    let (tw, th) = resolve_object_fit_size(fit, iw, ih, bw, bh);
+    // Center the tile (object-position default 50% 50%): (box - tile) / 2 per axis.
+    let ox = region.origin.x + (bw - tw) / 2.0;
+    let oy = region.origin.y + (bh - th) / 2.0;
+    Rect::new(Point::new(ox, oy), Size::new(tw, th))
+}
+
+/// Resolves the drawn image tile width/height (logical px) from `object-fit`, the
+/// image's intrinsic size `(iw, ih)`, and the box size `(bw, bh)` — the replaced-
+/// element analog of [`resolve_background_tile_size`].
+///
+/// * `fill` → the box size (stretch, aspect ignored — the CSS initial);
+/// * `contain` → the largest aspect-preserving size that fits (min scale);
+/// * `cover` → the smallest aspect-preserving size that covers (max scale);
+/// * `none` → the intrinsic size (unscaled);
+/// * `scale-down` → `min(none, contain)` (intrinsic, shrunk only if it overflows).
+///
+/// A degenerate intrinsic size (`iw`/`ih` ≤ 0) cannot preserve an aspect ratio, so
+/// it falls back to a full-box stretch (matching the background path).
+fn resolve_object_fit_size(fit: ObjectFit, iw: f32, ih: f32, bw: f32, bh: f32) -> (f32, f32) {
+    if iw <= 0.0 || ih <= 0.0 {
+        return (bw, bh);
+    }
+    match fit {
+        ObjectFit::Fill => (bw, bh),
+        ObjectFit::Contain => {
+            let scale = (bw / iw).min(bh / ih);
+            (iw * scale, ih * scale)
+        }
+        ObjectFit::Cover => {
+            let scale = (bw / iw).max(bh / ih);
+            (iw * scale, ih * scale)
+        }
+        ObjectFit::None => (iw, ih),
+        ObjectFit::ScaleDown => {
+            // min(none, contain): the contain scale, but never larger than 1.
+            let scale = (bw / iw).min(bh / ih).min(1.0);
+            (iw * scale, ih * scale)
+        }
+    }
 }
 
 /// Resolves the drawn tile width/height (logical px) from `background-size`, the
@@ -2098,6 +2197,127 @@ mod tests {
         // clips any overflow at paint time.
         assert!(tile.size.width >= 10.0 - 1e-3, "cover width ≥ box, got {tile:?}");
         assert!(tile.size.height >= 10.0 - 1e-3, "cover height ≥ box");
+    }
+
+    /// Sets an element node's own image `src` on its retained attributes, the way
+    /// the reconciler would from an `Image` primitive's `SRC` prop.
+    fn set_image_src(tree: &mut RetainedTree, node: NodeId, src: &str) {
+        use obscur_view::view::{StyleAttributes, ViewProperty, ViewValue, SRC};
+        let attrs =
+            StyleAttributes::extract(&[ViewProperty::new(SRC, ViewValue::Text(src.into()))]);
+        if let Some(n) = tree.get_mut(node) {
+            n.set_attributes(attrs);
+        }
+    }
+
+    /// A `ComputedStyle` carrying a single `object-fit`.
+    fn with_object_fit(fit: ObjectFit) -> ComputedStyle {
+        let mut style = ComputedStyle::new();
+        style.set(
+            PropertyId::ObjectFit,
+            ComputedValue::from_concrete(PropertyValue::ObjectFit(fit)).expect("concrete"),
+        );
+        style
+    }
+
+    #[test]
+    fn element_image_src_emits_draw_image_as_content() {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let img = add_child(&mut tree, root, 10);
+        set_image_src(&mut tree, img, "logo");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        // Default object-fit (fill): no ObjectFit set → stretch to the box.
+        computed.insert(img, ComputedStyle::new());
+
+        let mut boxes = LayoutBoxes::new();
+        let node_box = box_at(0.0, 0.0, 10.0, 10.0);
+        boxes.insert(img, node_box);
+
+        // Absent from the map: no DrawImage, no panic (honest skip).
+        let empty = HashMap::new();
+        let bare =
+            SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &empty);
+        assert!(image_draws(&bare).is_empty(), "no resolved image → no DrawImage");
+        assert!(bare.is_balanced());
+
+        // Resolved: one DrawImage over the box; default `fill` stretches to the box.
+        let mut images = HashMap::new();
+        images.insert(Box::<str>::from("logo"), canned_image());
+        let list =
+            SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
+        let draws = image_draws(&list);
+        assert_eq!(draws.len(), 1, "the element image paints one DrawImage");
+        let (tile, region, rx, ry) = draws[0];
+        assert_eq!(region, node_box.bounds, "region is the element box");
+        assert_eq!(tile, node_box.bounds, "object-fit fill stretches to the box");
+        assert!(!rx && !ry, "an element image never tiles");
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn object_fit_none_centers_the_intrinsic_tile() {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let img = add_child(&mut tree, root, 10);
+        set_image_src(&mut tree, img, "logo");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(img, with_object_fit(ObjectFit::None));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(img, box_at(0.0, 0.0, 10.0, 10.0));
+
+        let mut images = HashMap::new();
+        images.insert(Box::<str>::from("logo"), canned_image());
+        let list =
+            SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
+        let (tile, region, _rx, _ry) = image_draws(&list)[0];
+        // `none`: the intrinsic 2×2 tile, centered in the 10×10 box at (4, 4).
+        assert!((tile.size.width - 2.0).abs() < 1e-3 && (tile.size.height - 2.0).abs() < 1e-3);
+        assert!((tile.origin.x - 4.0).abs() < 1e-3 && (tile.origin.y - 4.0).abs() < 1e-3);
+        assert_eq!(region.size, Size::new(10.0, 10.0), "region clips overflow to the box");
+    }
+
+    #[test]
+    fn object_fit_contain_and_cover_fit_the_box() {
+        // A non-square box makes `contain` (letterbox) and `cover` (clip) differ.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let img = add_child(&mut tree, root, 10);
+        set_image_src(&mut tree, img, "logo");
+
+        let node_box = box_at(0.0, 0.0, 20.0, 10.0);
+
+        // contain: min-scale fit of a 2×2 image into 20×10 → scale 5 → 10×10,
+        // centered horizontally at x=(20−10)/2=5, y=0.
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(img, with_object_fit(ObjectFit::Contain));
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(img, node_box);
+        let mut images = HashMap::new();
+        images.insert(Box::<str>::from("logo"), canned_image());
+        let list =
+            SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
+        let (tile, _region, _rx, _ry) = image_draws(&list)[0];
+        assert!((tile.size.width - 10.0).abs() < 1e-3 && (tile.size.height - 10.0).abs() < 1e-3);
+        assert!((tile.origin.x - 5.0).abs() < 1e-3 && (tile.origin.y - 0.0).abs() < 1e-3);
+
+        // cover: max-scale of 2×2 into 20×10 → scale 10 → 20×20, centered vertically
+        // at y=(10−20)/2=−5 so it fully covers; the region clips the overflow.
+        computed.insert(img, with_object_fit(ObjectFit::Cover));
+        let list =
+            SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
+        let (tile, region, _rx, _ry) = image_draws(&list)[0];
+        assert!(tile.size.width >= 20.0 - 1e-3 && tile.size.height >= 10.0 - 1e-3);
+        assert_eq!(region.size, Size::new(20.0, 10.0), "cover overflow clips to the box");
     }
 
     #[test]

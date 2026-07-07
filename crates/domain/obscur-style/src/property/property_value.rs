@@ -23,7 +23,7 @@
 use crate::property::{
     BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow, ConicGradient,
     GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length, LengthExpr, LinearGradient,
-    RadialGradient, StyleColor, Transform, TransformOrigin,
+    ObjectFit, RadialGradient, StyleColor, Transform, TransformOrigin,
 };
 use obscur_identity::InternedSymbol;
 
@@ -87,6 +87,11 @@ pub enum PropertyValue {
     /// A `background-repeat` value (see [`BackgroundRepeat`]): whether the sized
     /// image tile is tiled along each axis to fill the box.
     BackgroundRepeat(BackgroundRepeat),
+    /// An `object-fit` value (see [`ObjectFit`]): how a replaced element's content
+    /// (e.g. an `<img>`'s pixels) is scaled within its content box. The scene
+    /// coordinator resolves it against the box and the image's intrinsic size to a
+    /// concrete tile rect at paint time.
+    ObjectFit(ObjectFit),
     /// An ordered `box-shadow` list, in author order: the value of `box-shadow`.
     /// Each [`BoxShadow`] carries its offsets, blur, spread, optional color, and
     /// `inset` flag; `box-shadow: none` lowers to an **empty** list. CSS paints
@@ -238,6 +243,15 @@ impl PropertyValue {
     pub const fn as_background_repeat(&self) -> Option<BackgroundRepeat> {
         match self {
             Self::BackgroundRepeat(repeat) => Some(*repeat),
+            _ => None,
+        }
+    }
+
+    /// Returns the `object-fit` if this value is a [`PropertyValue::ObjectFit`].
+    #[must_use]
+    pub const fn as_object_fit(&self) -> Option<ObjectFit> {
+        match self {
+            Self::ObjectFit(fit) => Some(*fit),
             _ => None,
         }
     }
@@ -495,6 +509,14 @@ mod tests {
         let repeat = PropertyValue::BackgroundRepeat(BackgroundRepeat::NoRepeat);
         assert_eq!(repeat.as_background_repeat(), Some(BackgroundRepeat::NoRepeat));
         assert_eq!(PropertyValue::Number(1.0).as_background_repeat(), None);
+    }
+
+    #[test]
+    fn as_object_fit_extracts_only_object_fit() {
+        use crate::property::ObjectFit;
+        let fit = PropertyValue::ObjectFit(ObjectFit::Cover);
+        assert_eq!(fit.as_object_fit(), Some(ObjectFit::Cover));
+        assert_eq!(PropertyValue::Number(1.0).as_object_fit(), None);
     }
 
     #[test]

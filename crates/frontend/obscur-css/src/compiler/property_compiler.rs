@@ -26,8 +26,8 @@ use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{
     layout_keyword, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow, ConicGradient,
     CustomProperty, GradientStop, GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length,
-    LinearGradient, PropertyId, PropertyValue, RadialGradient, RadialShape, RadialSize, StyleColor,
-    Transform, TransformOrigin,
+    LinearGradient, ObjectFit, PropertyId, PropertyValue, RadialGradient, RadialShape, RadialSize,
+    StyleColor, Transform, TransformOrigin,
 };
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
@@ -1002,13 +1002,14 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 77] = [
+    const ALL: [PropertyId; 78] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::BackgroundImage,
         PropertyId::BackgroundSize,
         PropertyId::BackgroundPosition,
         PropertyId::BackgroundRepeat,
+        PropertyId::ObjectFit,
         PropertyId::Opacity,
         PropertyId::Width,
         PropertyId::Height,
@@ -1158,6 +1159,15 @@ fn lower_for_property(
             return Some(wide);
         }
         return lower_background_repeat(values);
+    }
+    if property == PropertyId::ObjectFit {
+        if let Some(ParsedValue::Keyword(keyword)) = values.first()
+            && let Some(wide) = css_wide_keyword(keyword)
+            && values.len() == 1
+        {
+            return Some(wide);
+        }
+        return lower_object_fit(values);
     }
     if property == PropertyId::BoxShadow {
         if let Some(ParsedValue::Keyword(keyword)) = values.first()
@@ -2411,6 +2421,32 @@ fn background_size_component(value: &ParsedValue) -> Option<Length> {
         ParsedValue::Number(n) if *n == 0.0 => Some(Length::px(0.0)),
         _ => None,
     }
+}
+
+/// Lowers an `object-fit` value into a [`PropertyValue::ObjectFit`] (CSS Images
+/// §5.5).
+///
+/// Accepts a single keyword: `fill` (the initial) / `contain` / `cover` / `none` /
+/// `scale-down`. Any other syntax yields [`None`] (the declaration degrades to an
+/// unsupported-feature diagnostic and the initial `fill` applies).
+fn lower_object_fit(values: &[ParsedValue]) -> Option<PropertyValue> {
+    let [ParsedValue::Keyword(keyword)] = values else {
+        return None;
+    };
+    let fit = if keyword.eq_ignore_ascii_case("fill") {
+        ObjectFit::Fill
+    } else if keyword.eq_ignore_ascii_case("contain") {
+        ObjectFit::Contain
+    } else if keyword.eq_ignore_ascii_case("cover") {
+        ObjectFit::Cover
+    } else if keyword.eq_ignore_ascii_case("none") {
+        ObjectFit::None
+    } else if keyword.eq_ignore_ascii_case("scale-down") {
+        ObjectFit::ScaleDown
+    } else {
+        return None;
+    };
+    Some(PropertyValue::ObjectFit(fit))
 }
 
 /// Lowers a `background-position` value into a [`PropertyValue::BackgroundPosition`]
