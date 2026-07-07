@@ -176,6 +176,31 @@ impl Path {
         path
     }
 
+    /// Builds a closed rounded-rectangle **ring**: an `outer` rounded rectangle
+    /// with an `inner` rounded rectangle punched out as a hole, filled with the
+    /// [`FillRule::EvenOdd`] rule so the inner rectangle's interior is excluded.
+    ///
+    /// The result is a single path holding two subpaths — the outer rounded rect
+    /// followed by the inner rounded rect (each built by [`Path::rounded_rect`]).
+    /// Under the even-odd rule the region between the two outlines is filled while
+    /// the inner region is left empty, yielding a rounded border ring whose OUTER
+    /// **and** INNER corners are rounded. Callers pass the border-box rect with the
+    /// authored corner radii as `outer`, and the inner (padding-box) rect with
+    /// per-corner radii reduced by the border width as `inner`.
+    #[must_use]
+    pub fn rounded_rect_ring(
+        outer: Rect,
+        outer_radii: CornerRadii,
+        inner: Rect,
+        inner_radii: CornerRadii,
+    ) -> Path {
+        let mut path = Path::rounded_rect(outer, outer_radii);
+        let inner_path = Path::rounded_rect(inner, inner_radii);
+        path.segments.extend_from_slice(inner_path.segments());
+        path.fill_rule = FillRule::EvenOdd;
+        path
+    }
+
     /// The axis-aligned bounding box of every point referenced by the path, or
     /// `None` if the path is empty (has no points).
     ///
@@ -293,6 +318,44 @@ mod tests {
         assert!(bounds.origin.x >= r.origin.x - f32::EPSILON);
         assert!(bounds.right() <= r.right() + f32::EPSILON);
         assert!(bounds.bottom() <= r.bottom() + f32::EPSILON);
+    }
+
+    #[test]
+    fn rounded_rect_ring_has_two_subpaths_and_even_odd() {
+        let outer = Rect::new(Point::new(0.0, 0.0), Size::new(40.0, 40.0));
+        let inner = Rect::new(Point::new(5.0, 5.0), Size::new(30.0, 30.0));
+        let ring = Path::rounded_rect_ring(
+            outer,
+            CornerRadii::uniform(14.0),
+            inner,
+            CornerRadii::uniform(9.0),
+        );
+        // Even-odd so the inner subpath punches a hole rather than filling solid.
+        assert_eq!(ring.fill_rule(), FillRule::EvenOdd);
+        // Two closed rounded-rect subpaths ⇒ two `MoveTo`s and two `Close`s.
+        let moves = ring
+            .segments()
+            .iter()
+            .filter(|s| matches!(s, PathSegment::MoveTo(_)))
+            .count();
+        let closes = ring
+            .segments()
+            .iter()
+            .filter(|s| matches!(s, PathSegment::Close))
+            .count();
+        assert_eq!(moves, 2);
+        assert_eq!(closes, 2);
+        // Its segments are exactly the outer rounded rect's followed by the inner's.
+        let outer_only = Path::rounded_rect(outer, CornerRadii::uniform(14.0));
+        let inner_only = Path::rounded_rect(inner, CornerRadii::uniform(9.0));
+        assert_eq!(
+            &ring.segments()[..outer_only.len()],
+            outer_only.segments()
+        );
+        assert_eq!(
+            &ring.segments()[outer_only.len()..],
+            inner_only.segments()
+        );
     }
 
     #[test]

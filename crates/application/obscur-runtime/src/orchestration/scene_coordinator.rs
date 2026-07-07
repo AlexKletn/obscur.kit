@@ -727,15 +727,32 @@ impl SceneCoordinator {
                 }
             }
 
-            // Border edges paint over the background, under the text: one filled
-            // rectangle per visible side (style `solid`, width > 0), covering the
-            // border box's outer ring. An unauthored border emits nothing. When the
-            // element has a radius the edges are clipped to the rounded border box
-            // (the surrounding `PushClip`), so a uniform border follows the rounded
-            // outline; non-uniform rounded borders are approximate (documented).
+            // Border edges paint over the background, under the text. There are two
+            // shapes:
+            //
+            // - A **uniform** border (all four widths equal & positive, all four
+            //   colors equal, every side `solid`) on a node with a positive corner
+            //   radius paints as ONE even-odd rounded-rect RING: the border-box
+            //   rounded rect with the padding-box rounded rect (radii reduced by the
+            //   border width) punched out. This rounds the border's INNER corners as
+            //   well as its outer ones, matching CSS — the four-rect approximation
+            //   below leaves square inner joins. The ring is self-contained, so it
+            //   does not rely on the surrounding rounded `PushClip` for its shape.
+            // - Otherwise (no radius, or a non-uniform border) each visible side
+            //   paints one filled rectangle covering the border box's outer ring; a
+            //   rounded non-uniform border is clipped to the rounded border box (the
+            //   surrounding `PushClip`) and its inner corners stay approximate
+            //   (documented). An unauthored border emits nothing.
             if let Some(layout_box) = boxes.get(&node) {
-                for (rect, color) in border_fills(computed, node, layout_box.bounds) {
-                    node_paint.fill_rect(rect, Brush::solid(scene_color_from(color)));
+                if let Some((width, color)) =
+                    uniform_border(computed, node).filter(|_| has_radius)
+                {
+                    let ring = uniform_border_ring(layout_box.bounds, radii, width);
+                    node_paint.fill(ring, Brush::solid(scene_color_from(color)));
+                } else {
+                    for (rect, color) in border_fills(computed, node, layout_box.bounds) {
+                        node_paint.fill_rect(rect, Brush::solid(scene_color_from(color)));
+                    }
                 }
             }
 
@@ -1737,6 +1754,69 @@ fn border_fills(computed: &ComputedStyles, node: NodeId, bounds: Rect) -> Vec<(R
         ));
     }
     out
+}
+
+/// The single width and color of a node's border when it is **uniform**, else
+/// `None`.
+///
+/// A border is uniform when all four sides share one positive pixel width, one
+/// color, and the `solid` style. Only such a border can be painted as a single
+/// even-odd rounded ring (a concentric inner rounded rect), so a non-uniform
+/// border (differing widths / colors / styles, or any non-`solid` side) returns
+/// `None` and keeps the per-side four-rect approximation.
+fn uniform_border(computed: &ComputedStyles, node: NodeId) -> Option<(f32, StyleColor)> {
+    let top = border_width_of(computed, node, PropertyId::BorderTopWidth);
+    let right = border_width_of(computed, node, PropertyId::BorderRightWidth);
+    let bottom = border_width_of(computed, node, PropertyId::BorderBottomWidth);
+    let left = border_width_of(computed, node, PropertyId::BorderLeftWidth);
+    // All four widths equal and positive.
+    if !(top > 0.0 && top == right && top == bottom && top == left) {
+        return None;
+    }
+    // Every side `solid`.
+    if !(border_is_solid(computed, node, PropertyId::BorderTopStyle)
+        && border_is_solid(computed, node, PropertyId::BorderRightStyle)
+        && border_is_solid(computed, node, PropertyId::BorderBottomStyle)
+        && border_is_solid(computed, node, PropertyId::BorderLeftStyle))
+    {
+        return None;
+    }
+    // All four colors equal (resolving `currentColor` the same way for each side).
+    let current = current_color_of(computed, node);
+    let ct = border_color_of(computed, node, PropertyId::BorderTopColor, current);
+    let cr = border_color_of(computed, node, PropertyId::BorderRightColor, current);
+    let cb = border_color_of(computed, node, PropertyId::BorderBottomColor, current);
+    let cl = border_color_of(computed, node, PropertyId::BorderLeftColor, current);
+    if ct == cr && ct == cb && ct == cl {
+        Some((top, ct))
+    } else {
+        None
+    }
+}
+
+/// Builds the even-odd rounded-rect ring painting a uniform border of `width`
+/// around `bounds` (the border box) with authored corner `radii`.
+///
+/// The ring's outer outline is the border-box rounded rect; its inner outline is
+/// the padding box — `bounds` inset by `width` on every side (clamped to a
+/// non-negative size) — with each corner radius reduced to `max(0, r − width)`,
+/// the concentric inner radius. Filled even-odd, the inner rounded rect becomes a
+/// hole so the border's inner corners are rounded (spec CSS Backgrounds §4).
+fn uniform_border_ring(bounds: Rect, radii: CornerRadii, width: f32) -> Path {
+    let inner = Rect::new(
+        Point::new(bounds.origin.x + width, bounds.origin.y + width),
+        Size::new(
+            (bounds.size.width - 2.0 * width).max(0.0),
+            (bounds.size.height - 2.0 * width).max(0.0),
+        ),
+    );
+    let inner_radii = CornerRadii {
+        top_left: (radii.top_left - width).max(0.0),
+        top_right: (radii.top_right - width).max(0.0),
+        bottom_right: (radii.bottom_right - width).max(0.0),
+        bottom_left: (radii.bottom_left - width).max(0.0),
+    };
+    Path::rounded_rect_ring(bounds, radii, inner, inner_radii)
 }
 
 /// Reads a node's computed `border-*-width` (`id`) in logical pixels, defaulting
@@ -3589,6 +3669,95 @@ mod tests {
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         assert_eq!(fill_count(&list), 0, "no solid style ⇒ no border painted");
+    }
+
+    /// A `ComputedStyle` with a uniform solid border and a uniform `border-radius`.
+    fn with_border_and_radius(width: f32, color: StyleColor, radius: f32) -> ComputedStyle {
+        let mut style = with_border(width, color);
+        for id in [
+            PropertyId::BorderTopLeftRadius,
+            PropertyId::BorderTopRightRadius,
+            PropertyId::BorderBottomRightRadius,
+            PropertyId::BorderBottomLeftRadius,
+        ] {
+            style.set(id, ComputedValue::length(Length::px(radius)));
+        }
+        style
+    }
+
+    #[test]
+    fn uniform_rounded_border_emits_one_even_odd_ring_with_rounded_inner() {
+        // A 100×50 box at (10,20) with `5px solid` + `border-radius: 14px` paints
+        // ONE even-odd ring — NOT four abutting rects — so the border's INNER
+        // corners round (inner radius = 14 − 5 = 9) instead of staying square.
+        use obscur_scene::path::{FillRule, Path, PathSegment};
+
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+
+        let red = StyleColor::rgba(1.0, 0.0, 0.0, 1.0);
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, with_border_and_radius(5.0, red, 14.0));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(10.0, 20.0, 100.0, 50.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        // Exactly one border fill (no background) — the ring, not four rects.
+        let paths: Vec<&Path> = list
+            .commands()
+            .iter()
+            .filter_map(|c| match c {
+                PaintCommand::DrawPath { path, .. } => Some(path),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(paths.len(), 1, "one ring fill, not four side rects");
+        let ring = paths[0];
+        assert_eq!(ring.fill_rule(), FillRule::EvenOdd, "ring is even-odd");
+        // Two closed rounded-rect subpaths (outer + inner) ⇒ two `MoveTo`s.
+        let moves = ring
+            .segments()
+            .iter()
+            .filter(|s| matches!(s, PathSegment::MoveTo(_)))
+            .count();
+        assert_eq!(moves, 2, "outer + inner subpaths");
+        // The outer subpath is the border-box rounded rect; the inner subpath is
+        // the border box inset by 5px on every side with radius 14 − 5 = 9.
+        let outer = Path::rounded_rect(
+            Rect::new(Point::new(10.0, 20.0), Size::new(100.0, 50.0)),
+            CornerRadii::uniform(14.0),
+        );
+        let inner = Path::rounded_rect(
+            Rect::new(Point::new(15.0, 25.0), Size::new(90.0, 40.0)),
+            CornerRadii::uniform(9.0),
+        );
+        assert_eq!(&ring.segments()[..outer.len()], outer.segments());
+        assert_eq!(&ring.segments()[outer.len()..], inner.segments());
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn non_uniform_rounded_border_keeps_four_rects() {
+        // A rounded border with a DIFFERENTLY colored side is non-uniform, so it
+        // stays the four-rect approximation (no even-odd ring).
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+
+        let red = StyleColor::rgba(1.0, 0.0, 0.0, 1.0);
+        let blue = StyleColor::rgba(0.0, 0.0, 1.0, 1.0);
+        let mut style = with_border_and_radius(5.0, red, 14.0);
+        style.set(PropertyId::BorderTopColor, ComputedValue::color(blue));
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, style);
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(10.0, 20.0, 100.0, 50.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        assert_eq!(fill_count(&list), 4, "non-uniform ⇒ four side rects");
     }
 
     /// A `ComputedStyle` with a `background-color` and a uniform `border-radius`.
