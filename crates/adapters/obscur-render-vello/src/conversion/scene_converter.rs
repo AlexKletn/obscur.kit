@@ -12,13 +12,14 @@ use std::collections::HashMap;
 use obscur_scene::clip::Clip;
 use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::color::AlphaMode;
-use obscur_scene::layer::{CompositionMode, SceneLayer};
+use obscur_scene::layer::{CompositionMode, LayerEffect, SceneLayer};
 use obscur_scene::paint::{BlendMode, Brush, Paint, SceneImage};
 use obscur_scene::text::GlyphRun;
 use vello::kurbo::{Affine, Diagonal2, Rect as KurboRect};
 use vello::peniko::{self, Blob, FontData, ImageAlphaType, ImageData, ImageFormat};
 use vello::{FontEmbolden, Scene};
 
+use super::blur_layer::BlurLayer;
 use super::brush_converter::BrushConverter;
 use super::clip_converter::ClipConverter;
 use super::color_converter::ColorConverter;
@@ -153,27 +154,103 @@ impl SceneConverter {
         self.fonts.get(&id).or_else(|| self.fonts.get(&0))
     }
 
-    /// Converts an obscur-scene [`DisplayList`] into a [`vello::Scene`].
+    /// Converts an obscur-scene [`DisplayList`] into a single [`vello::Scene`],
+    /// drawing any `filter: blur` subtree **inline and un-blurred**.
     ///
-    /// Commands are replayed in order. Pops are balanced against a depth counter,
-    /// so a malformed (unbalanced) list is handled without panicking: a stray pop
-    /// is ignored, and any layers left open are closed at the end.
+    /// This is the back-compat entry point (used by callers and tests that do not
+    /// run the owned gaussian pass). For the real blur, the renderer uses
+    /// [`Self::convert_with_blurs`], which extracts blur subtrees into separate
+    /// sub-scenes. With no blur layer the two produce the identical scene.
     #[must_use]
     pub fn convert(&self, list: &DisplayList) -> Scene {
         let mut scene = Scene::new();
+        self.emit(&mut scene, list.commands(), Affine::IDENTITY, None);
+        scene
+    }
+
+    /// Converts an obscur-scene [`DisplayList`] into a main [`vello::Scene`] plus a
+    /// list of [`BlurLayer`]s to blur and composite separately (spec §5.2).
+    ///
+    /// A `filter: blur(r)` element's subtree is bracketed by a `PushLayer(Blur)` …
+    /// `PopLayer` (by the scene coordinator) and is therefore **contiguous** in
+    /// paint order. This walk detects that bracket, collects the bracketed commands
+    /// into their own sub-scene (recorded as a [`BlurLayer`] with the layer's clip
+    /// bounds and radius), and **omits** them from the main scene so they are not
+    /// also drawn un-blurred. Everything else is emitted exactly as [`Self::convert`]
+    /// would, so a list with no blur layer returns `(convert(list), vec![])`,
+    /// byte-for-byte identical to the previous single render.
+    ///
+    /// # Nesting
+    ///
+    /// Only the top level extracts blurs. A blur layer nested inside another is
+    /// drawn as an ordinary layer in the outer sub-scene (its content is blurred
+    /// once, by the outer pass, rather than separately) — a documented minimal
+    /// nesting limitation, not a panic.
+    #[must_use]
+    pub fn convert_with_blurs(&self, list: &DisplayList) -> (Scene, Vec<BlurLayer>) {
+        let mut scene = Scene::new();
+        let mut blurs: Vec<BlurLayer> = Vec::new();
+        self.emit(
+            &mut scene,
+            list.commands(),
+            Affine::IDENTITY,
+            Some(&mut blurs),
+        );
+        (scene, blurs)
+    }
+
+    /// Replays `commands` onto `scene` under a `base` transform, in paint order.
+    ///
+    /// When `extract` is `Some`, a `PushLayer` carrying a
+    /// [`Blur`](obscur_scene::layer::LayerEffect::Blur) effect (and a clip whose
+    /// bounds give the blur region) is peeled off: its bracketed commands become a
+    /// separate sub-scene pushed into `extract`, and are **not** drawn here. When
+    /// `extract` is `None` (a sub-scene render), such a layer is drawn as an
+    /// ordinary layer (its content painted un-blurred). Pops are balanced against a
+    /// depth counter, so a malformed list never panics: a stray pop is ignored and
+    /// open layers are closed at the end.
+    fn emit(
+        &self,
+        scene: &mut Scene,
+        commands: &[PaintCommand],
+        base: Affine,
+        mut extract: Option<&mut Vec<BlurLayer>>,
+    ) {
         let mut depth: u32 = 0;
         // The active CSS 2D `transform` stack: each `PushTransform` composes its
         // affine onto the running transform, and every draw between it and the
-        // matching `PopTransform` is mapped by the top of the stack. Empty (the
-        // identity) when no transform is active, so an untransformed scene draws
-        // exactly as before.
+        // matching `PopTransform` is mapped by the top of the stack. Empty (== the
+        // `base` transform) when no transform is active.
         let mut transforms: Vec<Affine> = Vec::new();
-
-        for command in list.commands() {
-            let current = transforms.last().copied().unwrap_or(Affine::IDENTITY);
-            match command {
+        let mut index = 0;
+        while index < commands.len() {
+            let current = transforms.last().copied().unwrap_or(base);
+            match &commands[index] {
+                // A blur layer (with a clip bounds) is extracted into its own
+                // sub-scene and omitted here, so it is not also drawn un-blurred.
+                PaintCommand::PushLayer(layer)
+                    if extract.is_some()
+                        && layer_blur_radius(layer).is_some()
+                        && layer.clip().and_then(Clip::bounds).is_some() =>
+                {
+                    let radius = layer_blur_radius(layer).unwrap_or(0.0);
+                    // Both are `Some` per the match guard.
+                    let bounds = layer.clip().and_then(Clip::bounds).unwrap_or_default();
+                    let end = matching_layer_pop(commands, index);
+                    let inner = &commands[index + 1..end];
+                    // Build the bracketed subtree as its own scene. Sub-scenes never
+                    // extract nested blurs (drawn as ordinary layers — documented).
+                    let mut sub = Scene::new();
+                    self.emit(&mut sub, inner, current, None);
+                    if let Some(blurs) = extract.as_deref_mut() {
+                        blurs.push(BlurLayer::new(sub, bounds, radius));
+                    }
+                    // Skip past the matching PopLayer (both consumed, still balanced).
+                    index = end + 1;
+                    continue;
+                }
                 PaintCommand::DrawPath { path, paint } => {
-                    self.draw_path(&mut scene, path, paint, current);
+                    self.draw_path(scene, path, paint, current);
                 }
                 PaintCommand::PushTransform(transform) => {
                     transforms.push(current * to_kurbo_affine(transform));
@@ -182,11 +259,11 @@ impl SceneConverter {
                     transforms.pop();
                 }
                 PaintCommand::PushClip(clip) => {
-                    self.push_clip(&mut scene, clip, current);
+                    self.push_clip(scene, clip, current);
                     depth += 1;
                 }
                 PaintCommand::PushLayer(layer) => {
-                    self.push_layer(&mut scene, layer, current);
+                    self.push_layer(scene, layer, current);
                     depth += 1;
                 }
                 PaintCommand::PopClip | PaintCommand::PopLayer => {
@@ -196,7 +273,7 @@ impl SceneConverter {
                     }
                 }
                 PaintCommand::DrawText { origin, run, brush } => {
-                    self.draw_text(&mut scene, *origin, run, brush, current);
+                    self.draw_text(scene, *origin, run, brush, current);
                 }
                 PaintCommand::DrawShadow {
                     rect,
@@ -208,7 +285,7 @@ impl SceneConverter {
                     inset,
                 } => {
                     draw_shadow(
-                        &mut scene, rect, radii, *color, *blur, *spread, *offset, *inset, current,
+                        scene, rect, radii, *color, *blur, *spread, *offset, *inset, current,
                     );
                 }
                 PaintCommand::DrawImage {
@@ -218,17 +295,16 @@ impl SceneConverter {
                     repeat_x,
                     repeat_y,
                 } => {
-                    draw_image(&mut scene, image, tile, region, *repeat_x, *repeat_y, current);
+                    draw_image(scene, image, tile, region, *repeat_x, *repeat_y, current);
                 }
             }
+            index += 1;
         }
 
         // Close any layers a dangling-push (unbalanced) list left open.
         for _ in 0..depth {
             scene.pop_layer();
         }
-
-        scene
     }
 
     /// Rasterizes a single **pre-shaped** text run at `origin`.
@@ -350,6 +426,36 @@ impl SceneConverter {
             scene.push_layer(peniko::Fill::NonZero, blend, alpha, transform, &unbounded);
         }
     }
+}
+
+/// The first [`Blur`](LayerEffect::Blur) radius on a layer, if any. A layer may
+/// carry several effects; the coordinator emits exactly one blur, so the first is
+/// used.
+fn layer_blur_radius(layer: &SceneLayer) -> Option<f32> {
+    layer.effects().iter().find_map(|effect| match effect {
+        LayerEffect::Blur { radius } => Some(*radius),
+        _ => None,
+    })
+}
+
+/// The index of the `PopLayer`/`PopClip` matching the `PushLayer` at `start`,
+/// counting nested `Push*`/`Pop*` of both clip and layer kinds. Returns
+/// `commands.len()` for an unbalanced list (the rest is treated as the subtree).
+fn matching_layer_pop(commands: &[PaintCommand], start: usize) -> usize {
+    let mut depth: i32 = 0;
+    for (offset, command) in commands[start..].iter().enumerate() {
+        match command {
+            PaintCommand::PushClip(_) | PaintCommand::PushLayer(_) => depth += 1,
+            PaintCommand::PopClip | PaintCommand::PopLayer => {
+                depth -= 1;
+                if depth == 0 {
+                    return start + offset;
+                }
+            }
+            _ => {}
+        }
+    }
+    commands.len()
 }
 
 /// Converts an obscur-geometry [`AffineTransform`](obscur_geometry::AffineTransform)
@@ -869,6 +975,52 @@ mod tests {
         }]);
         let scene = converter.convert(&list);
         assert!(scene.encoding().is_empty());
+    }
+
+    #[test]
+    fn blur_layer_is_extracted_into_a_sub_scene() {
+        use obscur_scene::layer::LayerEffect;
+
+        // A blur layer bracketing a filled rect: `convert_with_blurs` peels it into
+        // a BlurLayer (sub-scene + bounds + radius) and OMITS it from the main scene.
+        let bounds = Rect::new(Point::new(2.0, 3.0), Size::new(20.0, 10.0));
+        let mut layer = SceneLayer::new().with_clip(Clip::rect(bounds));
+        layer.add_effect(LayerEffect::blur(6.0));
+        let list = DisplayList::from_commands(vec![
+            PaintCommand::PushLayer(layer),
+            PaintCommand::DrawPath {
+                path: rect_path(),
+                paint: Paint::solid_fill(Color::rgba(1.0, 0.0, 0.0, 1.0)),
+            },
+            PaintCommand::PopLayer,
+        ]);
+
+        let (main, blurs) = SceneConverter::new().convert_with_blurs(&list);
+        // The blurred content moved to a sub-scene, so the main scene is empty.
+        assert!(main.encoding().is_empty(), "blurred content omitted from main");
+        assert_eq!(blurs.len(), 1);
+        assert_eq!(blurs[0].bounds, bounds);
+        assert_eq!(blurs[0].radius, 6.0);
+        // The sub-scene actually holds the bracketed draw.
+        assert!(!blurs[0].scene.encoding().is_empty(), "sub-scene has the content");
+
+        // Back-compat: `convert` draws the same content inline (un-blurred), so it
+        // is non-empty and carries no separate blur layer.
+        let inline = SceneConverter::new().convert(&list);
+        assert!(!inline.encoding().is_empty());
+    }
+
+    #[test]
+    fn no_blur_layer_yields_no_blur_layers() {
+        // A plain filled rect: `convert_with_blurs` returns the same scene `convert`
+        // does and an empty blur list (the byte-identical no-blur path).
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawPath {
+            path: rect_path(),
+            paint: Paint::solid_fill(Color::rgba(0.0, 0.0, 1.0, 1.0)),
+        }]);
+        let (main, blurs) = SceneConverter::new().convert_with_blurs(&list);
+        assert!(blurs.is_empty());
+        assert!(!main.encoding().is_empty());
     }
 
     #[test]

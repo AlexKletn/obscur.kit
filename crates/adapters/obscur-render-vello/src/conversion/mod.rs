@@ -13,6 +13,8 @@
 //! - [`ClipConverter`] — [`Clip`](obscur_scene::clip::Clip) → kurbo clip shape.
 //! - [`SceneConverter`] — [`DisplayList`](obscur_scene::command::DisplayList) →
 //!   `vello::Scene`, driving the above in paint order.
+mod blur_layer;
+pub use blur_layer::BlurLayer;
 mod brush_converter;
 pub use brush_converter::BrushConverter;
 mod clip_converter;

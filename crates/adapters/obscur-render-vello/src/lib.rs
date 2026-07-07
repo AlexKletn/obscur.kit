@@ -4,6 +4,7 @@
 
 pub mod cache;
 pub mod conversion;
+pub mod effects;
 pub mod error;
 pub mod extension;
 pub mod renderer;

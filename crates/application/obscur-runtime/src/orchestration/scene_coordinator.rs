@@ -9,7 +9,7 @@ use obscur_identity::NodeId;
 use obscur_scene::clip::Clip;
 use obscur_scene::color::Color;
 use obscur_scene::command::{DisplayList, DisplayListBuilder, PaintCommand};
-use obscur_scene::layer::SceneLayer;
+use obscur_scene::layer::{LayerEffect, SceneLayer};
 use obscur_scene::paint::{
     Brush, ConicGradient as SceneConicGradient, GradientStop as SceneGradientStop,
     LinearGradient as SceneLinearGradient, RadialGradient as SceneRadialGradient, SceneImage,
@@ -19,8 +19,8 @@ use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{
     layout_keyword, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow, ConicGradient,
-    Length, LinearGradient, ObjectFit, PropertyId, PropertyValue, RadialGradient, RadialSize,
-    StyleColor, Transform, TransformOrigin,
+    FilterOp, Length, LinearGradient, ObjectFit, PropertyId, PropertyValue, RadialGradient,
+    RadialSize, StyleColor, Transform, TransformOrigin,
 };
 use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontResolver, FontSource,
@@ -583,6 +583,14 @@ impl SceneCoordinator {
         // A fully opaque (or absent) opacity records nothing — byte-for-byte
         // identical to before opacity layers existed.
         let mut opacity_brackets: Vec<(NodeId, f32)> = Vec::new();
+        // A CSS `filter: blur(r)` (r > 0) brackets a node's WHOLE composited subtree
+        // with a `PushLayer(SceneLayer::with_clip(border_box).add_effect(blur(r)))` …
+        // `PopLayer`. The clip carries the element's border box so the renderer knows
+        // the blur region. The blur layer is the OUTERMOST subtree wrapper (outside
+        // the transform / opacity / clip brackets), so the Vello renderer's owned
+        // gaussian pass blurs the fully-composited element. No blur records nothing —
+        // byte-for-byte identical to before.
+        let mut blur_brackets: Vec<(NodeId, Rect, f32)> = Vec::new();
         while let Some((node, parent, depth)) = stack.pop() {
             if !visited.insert(node) {
                 // Already painted (cycle or shared child): do not revisit.
@@ -627,6 +635,16 @@ impl SceneCoordinator {
                 opacity_brackets.push((node, alpha));
             }
 
+            // A CSS `filter: blur(r)` brackets this node's subtree with a blur group
+            // layer clipped to its border box. It needs the arranged box (the blur
+            // region), so — unlike opacity — it is only recorded for a node with a
+            // box. No blur (or no box) records nothing (byte-for-byte identical).
+            if let Some(radius) = filter_blur_of(computed, node)
+                && let Some(layout_box) = boxes.get(&node)
+            {
+                blur_brackets.push((node, layout_box.bounds, radius));
+            }
+
             // This node's own paint accumulates into a private builder so it can be
             // reordered as one unit; only leaf commands are emitted, so it stays
             // balanced.
@@ -659,10 +677,10 @@ impl SceneCoordinator {
             // reach here; `blur()` / color-matrix / `backdrop-filter` are dropped at
             // CSS lower time (out of scope on vello 0.9). No filter emits nothing —
             // byte-for-byte identical to before.
-            let drop_shadows = filter_drop_shadows_of(computed, node);
-            if let (Some(drop_shadows), Some(layout_box)) = (drop_shadows, boxes.get(&node)) {
+            let filter_ops = filter_ops_of(computed, node);
+            if let (Some(filter_ops), Some(layout_box)) = (filter_ops, boxes.get(&node)) {
                 let current = current_color_of(computed, node);
-                for shadow in drop_shadows.iter().rev() {
+                for shadow in filter_ops.iter().rev().filter_map(FilterOp::as_drop_shadow) {
                     emit_box_shadow(&mut node_paint, layout_box.bounds, radii, shadow, current);
                 }
             }
@@ -1014,6 +1032,7 @@ impl SceneCoordinator {
         if !clip_brackets.is_empty()
             || !transform_brackets.is_empty()
             || !opacity_brackets.is_empty()
+            || !blur_brackets.is_empty()
         {
             let mut exit_index = enter_index.clone();
             for &node in preorder.iter().rev() {
@@ -1096,6 +1115,32 @@ impl SceneCoordinator {
                     tree_index: exit,
                     order: PaintUnit::transform_pop_order(depth),
                     commands: vec![PaintCommand::PopTransform],
+                });
+            }
+            // Blur group layers are the OUTERMOST subtree wrapper: their push sorts
+            // before every other bracket (BLUR_PUSH_ORDER < TRANSFORM_PUSH_ORDER) and
+            // — emitted LAST here — their pop ties are broken to close after the
+            // transform/opacity/clip pops, so the blur wraps the fully-composited
+            // element. The clip is the node's border box, the blur region the
+            // renderer's owned gaussian pass operates over.
+            for (node, bounds, radius) in blur_brackets {
+                let z = zmap.get(&node).copied().unwrap_or(0);
+                let enter = enter_index.get(&node).copied().unwrap_or(0);
+                let exit = exit_index.get(&node).copied().unwrap_or(enter);
+                let depth = depth_of.get(&node).copied().unwrap_or(0);
+                let mut layer = SceneLayer::new().with_clip(Clip::rect(bounds));
+                layer.add_effect(LayerEffect::blur(radius));
+                units.push(PaintUnit {
+                    z,
+                    tree_index: enter,
+                    order: PaintUnit::BLUR_PUSH_ORDER,
+                    commands: vec![PaintCommand::PushLayer(layer)],
+                });
+                units.push(PaintUnit {
+                    z,
+                    tree_index: exit,
+                    order: PaintUnit::blur_pop_order(depth),
+                    commands: vec![PaintCommand::PopLayer],
                 });
             }
         }
@@ -1444,18 +1489,33 @@ fn box_shadows_of(computed: &ComputedStyles, node: NodeId) -> Option<&[BoxShadow
         .and_then(ComputedValue::as_box_shadows)
 }
 
-/// Reads a node's computed `filter` drop-shadow list, if present.
+/// Reads a node's computed ordered `filter` op list, if present.
 ///
 /// Returns [`None`] when the node has no computed style, no `filter` property, or
-/// a non-filter value — the common (unauthored) case, which emits no shadows.
+/// a non-filter value — the common (unauthored) case, which emits nothing.
 /// `filter: none` (and a filter with only out-of-scope functions) is an **empty**
-/// list (also nothing to emit). Each entry is a drop [`BoxShadow`] (`spread == 0`,
-/// not inset) painted behind the node like a `box-shadow` drop shadow.
-fn filter_drop_shadows_of(computed: &ComputedStyles, node: NodeId) -> Option<&[BoxShadow]> {
+/// list. Each entry is a [`FilterOp`]: a drop-shadow (painted behind the node like
+/// a `box-shadow` drop shadow) or a `blur(<radius>)` content blur.
+fn filter_ops_of(computed: &ComputedStyles, node: NodeId) -> Option<&[FilterOp]> {
     computed
         .get(&node)
         .and_then(|style| style.get(PropertyId::Filter))
-        .and_then(ComputedValue::as_drop_shadows)
+        .and_then(ComputedValue::as_filter_ops)
+}
+
+/// The effective `filter` blur radius (logical px) bracketing a node's subtree, or
+/// [`None`] when no positive-radius `blur()` op is authored (the byte-identical
+/// no-blur path).
+///
+/// A `filter` may list several `blur()` ops; CSS applies them sequentially, but
+/// combining separable gaussians is out of scope here, so the **maximum** authored
+/// radius is used (multiple blurs on one element are uncommon; documented).
+fn filter_blur_of(computed: &ComputedStyles, node: NodeId) -> Option<f32> {
+    let radius = filter_ops_of(computed, node)?
+        .iter()
+        .filter_map(FilterOp::as_blur)
+        .fold(0.0_f32, f32::max);
+    (radius > 0.0).then_some(radius)
 }
 
 /// Emits one [`BoxShadow`] as a scene
@@ -2859,10 +2919,11 @@ mod tests {
     fn with_background_and_filter(bg: StyleColor, shadows: Vec<BoxShadow>) -> ComputedStyle {
         let mut style = ComputedStyle::new();
         style.set(PropertyId::BackgroundColor, ComputedValue::color(bg));
+        let ops: Vec<FilterOp> = shadows.into_iter().map(FilterOp::DropShadow).collect();
         style.set(
             PropertyId::Filter,
-            ComputedValue::from_concrete(PropertyValue::Filter(shadows.into_boxed_slice()))
-                .expect("a filter drop-shadow list is a concrete computed value"),
+            ComputedValue::from_concrete(PropertyValue::Filter(ops.into_boxed_slice()))
+                .expect("a filter op list is a concrete computed value"),
         );
         style
     }
@@ -2981,9 +3042,9 @@ mod tests {
         style.set(
             PropertyId::Filter,
             ComputedValue::from_concrete(PropertyValue::Filter(
-                vec![filter_shadow].into_boxed_slice(),
+                vec![FilterOp::DropShadow(filter_shadow)].into_boxed_slice(),
             ))
-            .expect("a filter drop-shadow list is a concrete computed value"),
+            .expect("a filter op list is a concrete computed value"),
         );
 
         let mut computed = ComputedStyles::new();
@@ -3009,6 +3070,127 @@ mod tests {
             }
         }
         assert!(list.is_balanced());
+    }
+
+    /// A `ComputedStyle` carrying a `background-color` and a `filter: blur(r)`.
+    fn with_background_and_blur(bg: StyleColor, radius: f32) -> ComputedStyle {
+        let mut style = ComputedStyle::new();
+        style.set(PropertyId::BackgroundColor, ComputedValue::color(bg));
+        style.set(
+            PropertyId::Filter,
+            ComputedValue::from_concrete(PropertyValue::Filter(
+                vec![FilterOp::Blur(radius)].into_boxed_slice(),
+            ))
+            .expect("a filter op list is a concrete computed value"),
+        );
+        style
+    }
+
+    #[test]
+    fn filter_blur_brackets_subtree_with_a_blur_layer() {
+        // A node with `filter: blur(6px)` over a background brackets its subtree
+        // paint with a `PushLayer(blur)` … `PopLayer`, the layer clipped to its
+        // border box and carrying the blur effect.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(
+            a,
+            with_background_and_blur(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), 6.0),
+        );
+
+        let mut boxes = LayoutBoxes::new();
+        let bounds = box_at(0.0, 0.0, 20.0, 10.0);
+        boxes.insert(a, bounds);
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        assert!(list.is_balanced());
+
+        // Exactly one blur PushLayer, clipped to the border box, carrying blur(6).
+        let blur_layers: Vec<&SceneLayer> = list
+            .commands()
+            .iter()
+            .filter_map(|c| match c {
+                PaintCommand::PushLayer(layer)
+                    if layer.effects().iter().any(|e| e.is_blur()) =>
+                {
+                    Some(layer)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(blur_layers.len(), 1, "one blur group layer");
+        let layer = blur_layers[0];
+        assert_eq!(
+            layer.effects(),
+            &[LayerEffect::blur(6.0)],
+            "the layer carries the authored blur radius"
+        );
+        assert_eq!(
+            layer.clip().and_then(Clip::bounds),
+            Some(bounds.bounds),
+            "the blur layer is clipped to the element's border box"
+        );
+
+        // The blur PushLayer opens BEFORE the background fill, and the matching
+        // PopLayer closes AFTER it (the layer wraps the subtree paint).
+        let push = list
+            .commands()
+            .iter()
+            .position(|c| matches!(c, PaintCommand::PushLayer(l) if l.effects().iter().any(|e| e.is_blur())))
+            .expect("blur push present");
+        let fill = list
+            .commands()
+            .iter()
+            .position(|c| matches!(c, PaintCommand::DrawPath { .. }))
+            .expect("background present");
+        let pop = list
+            .commands()
+            .iter()
+            .rposition(|c| matches!(c, PaintCommand::PopLayer))
+            .expect("pop present");
+        assert!(push < fill && fill < pop, "blur layer wraps the subtree paint");
+    }
+
+    #[test]
+    fn no_blur_filter_emits_no_layer() {
+        // Regression: a background with only a `drop-shadow` filter (no blur) emits
+        // no blur PushLayer — byte-identical to the pre-blur path.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let shadow = BoxShadow::new(
+            Length::px(4.0),
+            Length::px(4.0),
+            Length::px(8.0),
+            Length::px(0.0),
+            Some(StyleColor::BLACK),
+            false,
+        );
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(
+            a,
+            with_background_and_filter(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), vec![shadow]),
+        );
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 20.0, 10.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        assert!(
+            !list
+                .commands()
+                .iter()
+                .any(|c| matches!(c, PaintCommand::PushLayer(l) if l.effects().iter().any(|e| e.is_blur()))),
+            "a drop-shadow-only filter emits no blur layer"
+        );
     }
 
     /// A `ComputedStyle` with a `background-color`, `position: absolute`, and an

@@ -11,6 +11,8 @@ mod conic_gradient;
 pub use conic_gradient::ConicGradient;
 mod custom_property;
 pub use custom_property::CustomProperty;
+mod filter_op;
+pub use filter_op::FilterOp;
 mod gradient_stop;
 pub use gradient_stop::GradientStop;
 mod grid_area_rect;

@@ -5,9 +5,12 @@ use obscur_render::frame::{FrameSubmission, PresentResult};
 use obscur_render::renderer::{Renderer, RendererCapabilities, RendererError, RendererId};
 use obscur_render::target::RenderTarget;
 
+use vello::kurbo::Affine;
 use vello::peniko::{Blob, FontData};
+use vello::Scene;
 
-use crate::conversion::SceneConverter;
+use crate::conversion::{BlurLayer, SceneConverter};
+use crate::effects::GaussianBlur;
 use crate::error::VelloRenderError;
 use crate::renderer::{VelloDevice, VelloFrame, VelloSurface};
 
@@ -41,6 +44,11 @@ pub struct VelloRenderer {
     /// its render pipeline, so we keep one alive across frames and only rebuild
     /// when absent or when the surface format changes.
     blitter: Option<(wgpu::TextureFormat, wgpu::util::TextureBlitter)>,
+    /// Cached owned wgpu gaussian-blur pipeline set for `filter: blur()` (spec
+    /// §5.2). Built lazily on the first blurred frame (it needs the device) and
+    /// reused across frames; a scene with no blur layer never constructs it, so
+    /// the non-blur path is byte-identical to before.
+    blur: Option<GaussianBlur>,
 }
 
 impl VelloRenderer {
@@ -63,6 +71,7 @@ impl VelloRenderer {
             scene_converter: SceneConverter::new(),
             frames_rendered: 0,
             blitter: None,
+            blur: None,
         }
     }
 
@@ -119,6 +128,130 @@ impl VelloRenderer {
         self.frames_rendered
     }
 
+    /// Renders `submission` into an offscreen [`VelloFrame`]: the main Vello scene,
+    /// then our **own** wgpu gaussian pass for every `filter: blur()` layer.
+    ///
+    /// This is the shared core the on-screen present ([`Self::present_to_surface`]),
+    /// the headless read-back ([`Self::render_to_image`]), and the port
+    /// [`Renderer::render`] all funnel through, so every path produces the exact
+    /// same pixels. The display list is converted into a main scene plus a list of
+    /// [`BlurLayer`] sub-scenes ([`SceneConverter::convert_with_blurs`]); the main
+    /// scene is rasterized into the frame, then each blur layer is rendered into a
+    /// margin-padded offscreen, run through a separable gaussian, and composited
+    /// back onto the frame. With no blur layer this is exactly the previous single
+    /// [`render_to_texture`](vello::Renderer::render_to_texture) — byte-identical.
+    ///
+    /// # Errors
+    ///
+    /// [`RendererError::DeviceLost`] when no device is attached, or
+    /// [`RendererError::Backend`] on a Vello rasterization failure.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    fn render_to_frame(
+        &mut self,
+        submission: &FrameSubmission,
+        width: u32,
+        height: u32,
+    ) -> Result<VelloFrame, RendererError> {
+        // Convert first (device-free): the main scene plus any blur sub-scenes.
+        let (main_scene, blurs) = self
+            .scene_converter
+            .convert_with_blurs(submission.frame().scene().display_list());
+
+        let Some(device) = self.device.as_mut() else {
+            return Err(
+                VelloRenderError::DeviceCreation("no gpu device".into()).into_renderer_error()
+            );
+        };
+
+        let frame = VelloFrame::new_offscreen(device.device(), width, height);
+        // `new_offscreen` clamps to >= 1 per axis; use the effective extent below.
+        let (width, height) = frame.size();
+        let params = vello::RenderParams {
+            base_color: vello::peniko::Color::TRANSPARENT,
+            width,
+            height,
+            antialiasing_method: vello::AaConfig::Area,
+        };
+        // wgpu `Device`/`Queue` are cheap ref-counted handles; clone them so the
+        // renderer can be borrowed mutably alongside the immutable device/queue.
+        let gpu_device = device.device().clone();
+        let gpu_queue = device.queue().clone();
+        device
+            .renderer_mut()
+            .render_to_texture(&gpu_device, &gpu_queue, &main_scene, frame.view(), &params)
+            .map_err(|error| {
+                VelloRenderError::RenderFailed(error.to_string().into()).into_renderer_error()
+            })?;
+
+        if !blurs.is_empty() {
+            // Render each blur sub-scene into its own margin-padded offscreen: the
+            // margin (~3σ) keeps the gaussian tail from being clipped at the edge.
+            let mut prepared: Vec<(VelloFrame, (f32, f32), BlurLayer)> =
+                Vec::with_capacity(blurs.len());
+            for blur in blurs {
+                let margin = (blur.radius * 3.0).ceil().max(1.0);
+                let s_width = (blur.bounds.size.width + 2.0 * margin).ceil().max(1.0) as u32;
+                let s_height = (blur.bounds.size.height + 2.0 * margin).ceil().max(1.0) as u32;
+                let s_frame = VelloFrame::new_offscreen(&gpu_device, s_width, s_height);
+                let (s_width, s_height) = s_frame.size();
+                // Offset the sub-scene so the bounds' top-left maps to (margin, margin).
+                let offset = Affine::translate((
+                    f64::from(margin) - f64::from(blur.bounds.origin.x),
+                    f64::from(margin) - f64::from(blur.bounds.origin.y),
+                ));
+                let mut placed = Scene::new();
+                placed.append(&blur.scene, Some(offset));
+                let sub_params = vello::RenderParams {
+                    base_color: vello::peniko::Color::TRANSPARENT,
+                    width: s_width,
+                    height: s_height,
+                    antialiasing_method: vello::AaConfig::Area,
+                };
+                device
+                    .renderer_mut()
+                    .render_to_texture(
+                        &gpu_device,
+                        &gpu_queue,
+                        &placed,
+                        s_frame.view(),
+                        &sub_params,
+                    )
+                    .map_err(|error| {
+                        VelloRenderError::RenderFailed(error.to_string().into())
+                            .into_renderer_error()
+                    })?;
+                // Absolute pixel top-left the padded offscreen composites back at.
+                let origin = (blur.bounds.origin.x - margin, blur.bounds.origin.y - margin);
+                prepared.push((s_frame, origin, blur));
+            }
+
+            // The `device` borrow ends here; build/reuse the owned blur pipelines and
+            // composite each blurred sub-scene onto the frame in one encoder. The
+            // Vello render-to-texture passes above already submitted, so this
+            // trailing submit runs after them on the same queue (correct ordering).
+            let gaussian = self
+                .blur
+                .get_or_insert_with(|| GaussianBlur::new(&gpu_device));
+            let mut encoder = gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("obscur-vello-blur"),
+            });
+            for (s_frame, origin, blur) in &prepared {
+                gaussian.render(
+                    &gpu_device,
+                    &mut encoder,
+                    s_frame,
+                    *origin,
+                    blur,
+                    frame.view(),
+                    (width, height),
+                );
+            }
+            gpu_queue.submit(std::iter::once(encoder.finish()));
+        }
+
+        Ok(frame)
+    }
+
     /// Presents a submission **on-screen** by rendering into the adapter's
     /// offscreen [`VelloFrame`] and blitting it to a windowed [`VelloSurface`].
     ///
@@ -158,41 +291,24 @@ impl VelloRenderer {
         }
         let format = surface.config().format;
 
-        // Convert first (device-free) so the display list drives Vello's encoding
-        // regardless of the device's presence, mirroring the port `render`.
-        let scene = self
-            .scene_converter
-            .convert(submission.frame().scene().display_list());
+        // Rasterize the display list (main scene + owned blur passes) into the
+        // offscreen intermediate — the same shared path the headless read-back uses.
+        let frame = self.render_to_frame(submission, width, height)?;
 
+        // Re-borrow the (attached) device for the blit. Cheap ref-counted clones let
+        // the renderer be borrowed mutably alongside the immutable device/queue.
         let Some(device) = self.device.as_mut() else {
             return Err(
                 VelloRenderError::DeviceCreation("no gpu device".into()).into_renderer_error()
             );
         };
+        let gpu_device = device.device().clone();
+        let gpu_queue = device.queue().clone();
 
         // Acquire the swapchain image to present into.
         let surface_texture = surface
             .current_texture()
             .map_err(VelloRenderError::into_renderer_error)?;
-
-        // Rasterize into the offscreen intermediate exactly like the port path.
-        let frame = VelloFrame::new_offscreen(device.device(), width, height);
-        let params = vello::RenderParams {
-            base_color: vello::peniko::Color::TRANSPARENT,
-            width,
-            height,
-            antialiasing_method: vello::AaConfig::Area,
-        };
-        // wgpu `Device`/`Queue` are cheap ref-counted handles; clone them so the
-        // renderer can be borrowed mutably alongside the immutable device/queue.
-        let gpu_device = device.device().clone();
-        let gpu_queue = device.queue().clone();
-        device
-            .renderer_mut()
-            .render_to_texture(&gpu_device, &gpu_queue, &scene, frame.view(), &params)
-            .map_err(|error| {
-                VelloRenderError::RenderFailed(error.to_string().into()).into_renderer_error()
-            })?;
 
         // Obtain a blitter matching the surface format, rebuilding only on a
         // format change (or first use) to avoid recompiling the pipeline. Drop a
@@ -260,35 +376,21 @@ impl VelloRenderer {
             return Err(VelloRenderError::RenderFailed("empty target".into()).into_renderer_error());
         }
 
-        // Convert first (device-free), mirroring the other paths.
-        let scene = self
-            .scene_converter
-            .convert(submission.frame().scene().display_list());
+        // Rasterize the display list (main scene + owned blur passes) into the
+        // offscreen frame — the same shared path the on-screen present uses.
+        let frame = self.render_to_frame(submission, width, height)?;
+        // `new_offscreen` clamps to >= 1 per axis; read the effective extent back so
+        // the buffer stride and un-padding below match the texture exactly.
+        let (width, height) = frame.size();
 
+        // Re-borrow the (attached) device for the read-back copy.
         let Some(device) = self.device.as_mut() else {
             return Err(
                 VelloRenderError::DeviceCreation("no gpu device".into()).into_renderer_error()
             );
         };
-
-        let frame = VelloFrame::new_offscreen(device.device(), width, height);
-        // `new_offscreen` clamps to >= 1 per axis; read the effective extent back so
-        // the buffer stride and un-padding below match the texture exactly.
-        let (width, height) = frame.size();
-        let params = vello::RenderParams {
-            base_color: vello::peniko::Color::TRANSPARENT,
-            width,
-            height,
-            antialiasing_method: vello::AaConfig::Area,
-        };
         let gpu_device = device.device().clone();
         let gpu_queue = device.queue().clone();
-        device
-            .renderer_mut()
-            .render_to_texture(&gpu_device, &gpu_queue, &scene, frame.view(), &params)
-            .map_err(|error| {
-                VelloRenderError::RenderFailed(error.to_string().into()).into_renderer_error()
-            })?;
 
         // Copy the offscreen texture into a mappable buffer. `copy_texture_to_buffer`
         // requires each row to begin on a 256-byte boundary, so the destination is
@@ -394,38 +496,10 @@ impl Renderer for VelloRenderer {
             return Err(VelloRenderError::RenderFailed("empty target".into()).into_renderer_error());
         }
 
-        // Convert first (device-free) so a missing device still validates the
-        // scene path; the display list drives Vello's encoding.
-        let scene = self
-            .scene_converter
-            .convert(submission.frame().scene().display_list());
-
-        let Some(device) = self.device.as_mut() else {
-            // Honest: without a host-provided device the Vello backend cannot
-            // rasterize. A host must `set_device` first.
-            return Err(
-                VelloRenderError::DeviceCreation("no gpu device".into()).into_renderer_error()
-            );
-        };
-
-        let frame = VelloFrame::new_offscreen(device.device(), width, height);
-        let params = vello::RenderParams {
-            base_color: vello::peniko::Color::TRANSPARENT,
-            width,
-            height,
-            antialiasing_method: vello::AaConfig::Area,
-        };
-        // `render_to_texture` needs the device/queue immutably while the renderer
-        // is borrowed mutably. wgpu's `Device`/`Queue` are cheap ref-counted
-        // handles, so clone them to sidestep the overlapping borrow.
-        let gpu_device = device.device().clone();
-        let gpu_queue = device.queue().clone();
-        device
-            .renderer_mut()
-            .render_to_texture(&gpu_device, &gpu_queue, &scene, frame.view(), &params)
-            .map_err(|error| {
-                VelloRenderError::RenderFailed(error.to_string().into()).into_renderer_error()
-            })?;
+        // Rasterize into an offscreen frame via the shared path (main scene + owned
+        // blur passes); the port `render` leaves the result on the GPU. A missing
+        // device yields an honest error rather than a fabricated one.
+        let _frame = self.render_to_frame(submission, width, height)?;
 
         self.frames_rendered += 1;
         Ok(PresentResult::Presented {

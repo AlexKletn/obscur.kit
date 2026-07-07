@@ -62,10 +62,18 @@ pub(super) struct PaintUnit {
 }
 
 impl PaintUnit {
+    /// A subtree's opening `PushLayer` for a CSS `filter: blur(r)` group layer,
+    /// sorted before **every** other bracket at the same document position so the
+    /// blur is the OUTERMOST subtree wrapper (outside the transform, opacity, and
+    /// clip). The Vello renderer's owned gaussian pass then operates over the
+    /// fully-composited element. Below
+    /// [`TRANSFORM_PUSH_ORDER`](Self::TRANSFORM_PUSH_ORDER).
+    pub(super) const BLUR_PUSH_ORDER: i64 = -4;
     /// A subtree's opening `PushTransform`, sorted before both the `PushLayer`
     /// and the `PushClip` at the same document position so a CSS 2D `transform`
     /// brackets the whole subtree *outside* any opacity group layer or
-    /// rounded-corner clip (the transform is the outermost wrapper). Below
+    /// rounded-corner clip (the transform is the outermost wrapper, save for a
+    /// blur layer). Between [`BLUR_PUSH_ORDER`](Self::BLUR_PUSH_ORDER) and
     /// [`LAYER_PUSH_ORDER`](Self::LAYER_PUSH_ORDER).
     pub(super) const TRANSFORM_PUSH_ORDER: i64 = -3;
     /// A subtree's opening `PushLayer` (a CSS `opacity` group layer), sorted
@@ -112,6 +120,17 @@ impl PaintUnit {
     /// **after** the clip bracket (so the clip closes first, inside the transform).
     #[must_use]
     pub(super) const fn transform_pop_order(depth: u32) -> i64 {
+        i64::MAX - depth as i64
+    }
+
+    /// The phase for a subtree's closing `PopLayer` (a CSS `filter: blur` group
+    /// layer) at its *exit* index. Uses the same depth-descending schedule as
+    /// [`clip_pop_order`](Self::clip_pop_order); a blur, transform, opacity, and
+    /// clip that end at the same index and depth tie, broken by emitting the blur
+    /// bracket **last** so it closes after them all (the blur is the outermost
+    /// wrapper).
+    #[must_use]
+    pub(super) const fn blur_pop_order(depth: u32) -> i64 {
         i64::MAX - depth as i64
     }
 }

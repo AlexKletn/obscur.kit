@@ -25,9 +25,9 @@ use obscur_identity::InternedSymbol;
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{
     layout_keyword, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow, ConicGradient,
-    CustomProperty, GradientStop, GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length,
-    LinearGradient, ObjectFit, PropertyId, PropertyValue, RadialGradient, RadialShape, RadialSize,
-    StyleColor, Transform, TransformOrigin,
+    CustomProperty, FilterOp, GradientStop, GridAreaTemplate, GridLineValue, GridTrack,
+    GridTrackList, Length, LinearGradient, ObjectFit, PropertyId, PropertyValue, RadialGradient,
+    RadialShape, RadialSize, StyleColor, Transform, TransformOrigin,
 };
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
@@ -2086,26 +2086,31 @@ fn shadow_length(value: &ParsedValue) -> Option<Length> {
     }
 }
 
-/// Lowers a `filter` value into a [`PropertyValue::Filter`] drop-shadow list.
+/// Lowers a `filter` value into a [`PropertyValue::Filter`] op list.
 ///
-/// The `filter` property takes a space-separated `<filter-function-list>`. Only
-/// the single GPU-expressible function on vello 0.9, `drop-shadow(...)`, is
-/// modelled: each is lowered by [`lower_one_drop_shadow`] and kept in author
-/// order. Any **non-drop-shadow** function (`blur()`, `brightness()`, `contrast()`,
-/// `grayscale()`, …) is **silently dropped** — it has no GPU-expressible
-/// approximation here, so faking it would be dishonest (documented). `filter: none`
-/// and an empty value both lower to an **empty** list (painting nothing). Returns
-/// [`None`] (degrading to an unsupported-feature diagnostic) when a `drop-shadow(…)`
-/// is present but malformed, so the author sees the mistake rather than a silent
-/// no-op.
+/// The `filter` property takes a space-separated `<filter-function-list>`. Two
+/// functions are modelled, kept in author order:
+///
+/// - `drop-shadow(...)` → a [`FilterOp::DropShadow`] (via [`lower_one_drop_shadow`]),
+///   a `box-shadow` DROP subset painted behind the element.
+/// - `blur(<length>)` → a [`FilterOp::Blur`] (via [`lower_one_blur`]), the radius
+///   resolved to logical pixels. A zero radius (`blur(0)`, `blur()`) yields **no**
+///   op, so it round-trips to the byte-identical no-blur path.
+///
+/// Any other function (`brightness()`, `contrast()`, `grayscale()`, …) is
+/// **silently dropped** — it has no GPU-expressible path here, so faking it would
+/// be dishonest (documented). `filter: none` and an empty value both lower to an
+/// **empty** list (painting nothing). Returns [`None`] (degrading to an
+/// unsupported-feature diagnostic) when a `drop-shadow(…)` or `blur(…)` is present
+/// but malformed, so the author sees the mistake rather than a silent no-op.
 fn lower_filter(values: &[ParsedValue]) -> Option<PropertyValue> {
-    // `none` → an empty drop-shadow list.
+    // `none` → an empty op list.
     if let [ParsedValue::Keyword(keyword)] = values
         && keyword.eq_ignore_ascii_case("none")
     {
         return Some(PropertyValue::Filter(Box::new([])));
     }
-    let mut shadows: Vec<BoxShadow> = Vec::new();
+    let mut ops: Vec<FilterOp> = Vec::new();
     for value in values {
         let ParsedValue::Function { name, args } = value else {
             // A bare token in the filter list is not a filter function; the value
@@ -2113,12 +2118,44 @@ fn lower_filter(values: &[ParsedValue]) -> Option<PropertyValue> {
             return None;
         };
         if name.eq_ignore_ascii_case("drop-shadow") {
-            shadows.push(lower_one_drop_shadow(args)?);
+            ops.push(FilterOp::DropShadow(lower_one_drop_shadow(args)?));
+        } else if name.eq_ignore_ascii_case("blur") {
+            // A positive radius becomes a blur op; `blur(0)` / `blur()` is a no-op
+            // (kept out of the list so it stays byte-identical to no filter).
+            let radius = lower_one_blur(args)?;
+            if radius > 0.0 {
+                ops.push(FilterOp::Blur(radius));
+            }
         }
-        // Every other filter function (`blur()`, `brightness()`, …) is out of
-        // scope on vello 0.9 and silently dropped — not faked.
+        // Every other filter function (`brightness()`, `contrast()`, …) is out of
+        // scope and silently dropped — not faked.
     }
-    Some(PropertyValue::Filter(shadows.into_boxed_slice()))
+    Some(PropertyValue::Filter(ops.into_boxed_slice()))
+}
+
+/// Lowers one `blur(<length>?)` argument list into a non-negative blur radius in
+/// logical pixels.
+///
+/// The `blur()` grammar takes a single optional non-negative `<length>`; `blur()`
+/// with no argument is the CSS initial `0`. The radius resolves to absolute `px`
+/// (a unitless `0` allowed); a relative/viewport unit that cannot resolve at lower
+/// time falls back to `0` — a documented approximation matching the px-only
+/// transform-translate lowering. Returns [`None`] for more than one argument, a
+/// non-length token, or a **negative** radius (invalid per spec).
+fn lower_one_blur(args: &[ParsedValue]) -> Option<f32> {
+    // `blur()` → 0 (the CSS initial): a no-op.
+    if args.is_empty() {
+        return Some(0.0);
+    }
+    let [value] = args else {
+        return None;
+    };
+    let length = shadow_length(value)?;
+    let px = length.as_px().map_or(0.0, |px| px.0);
+    if px < 0.0 {
+        return None;
+    }
+    Some(px)
 }
 
 /// Lowers one `drop-shadow(<offset-x> <offset-y> <blur>? <color>?)` into a drop
@@ -3227,12 +3264,21 @@ mod tests {
         assert!(list.is_empty());
     }
 
-    /// Extracts the lowered `filter` drop-shadow list from a declaration.
-    fn drop_shadows_of(text: &str) -> Box<[BoxShadow]> {
+    /// Extracts the lowered ordered `filter` op list from a declaration.
+    fn filter_ops_of(text: &str) -> Box<[FilterOp]> {
         match value_of(text) {
             PropertyValue::Filter(list) => list,
-            other => panic!("expected a filter drop-shadow list, got {other:?}"),
+            other => panic!("expected a filter op list, got {other:?}"),
         }
+    }
+
+    /// Extracts only the drop-shadow ops (in order) from a lowered `filter`.
+    fn drop_shadows_of(text: &str) -> Vec<BoxShadow> {
+        filter_ops_of(text)
+            .iter()
+            .filter_map(FilterOp::as_drop_shadow)
+            .cloned()
+            .collect()
     }
 
     #[test]
@@ -3269,22 +3315,43 @@ mod tests {
     }
 
     #[test]
-    fn filter_non_drop_shadow_function_is_dropped() {
-        // `blur(4px)` is out of scope on vello 0.9 and is silently dropped: the
-        // lowered filter is an empty list (no drop-shadows), not an error.
-        let list = drop_shadows_of("filter: blur(4px)");
-        assert!(list.is_empty());
-        // A drop-shadow mixed with an out-of-scope function keeps only the shadow.
-        let mixed = drop_shadows_of("filter: blur(4px) drop-shadow(1px 1px 2px black)");
-        assert_eq!(mixed.len(), 1);
-        assert_eq!(mixed[0].offset_x(), Length::px(1.0));
-        assert_eq!(mixed[0].color(), Some(StyleColor::BLACK));
+    fn filter_blur_lowers_to_a_blur_op() {
+        // `blur(8px)` now lowers to a single `Blur(8)` op (content blur), not a
+        // silently-dropped no-op.
+        let ops = filter_ops_of("filter: blur(8px)");
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0], FilterOp::Blur(8.0));
+    }
+
+    #[test]
+    fn filter_blur_then_drop_shadow_keeps_both_in_order() {
+        // `blur(4px) drop-shadow(...)` lowers to two ops in author order: the blur
+        // first, then the drop-shadow.
+        let ops = filter_ops_of("filter: blur(4px) drop-shadow(1px 1px 2px black)");
+        assert_eq!(ops.len(), 2);
+        assert_eq!(ops[0], FilterOp::Blur(4.0));
+        let shadow = ops[1].as_drop_shadow().expect("second op is a drop-shadow");
+        assert_eq!(shadow.offset_x(), Length::px(1.0));
+        assert_eq!(shadow.color(), Some(StyleColor::BLACK));
+    }
+
+    #[test]
+    fn filter_zero_blur_is_a_no_op() {
+        // `blur(0)` / `blur()` carries no op, keeping the byte-identical no-blur path.
+        assert!(filter_ops_of("filter: blur(0)").is_empty());
+        assert!(filter_ops_of("filter: blur()").is_empty());
+    }
+
+    #[test]
+    fn filter_other_function_is_dropped() {
+        // A still-unsupported function (`brightness()`) is silently dropped: it has
+        // no GPU-expressible path, so the lowered op list is empty (not an error).
+        assert!(filter_ops_of("filter: brightness(0.5)").is_empty());
     }
 
     #[test]
     fn filter_none_is_an_empty_list() {
-        let list = drop_shadows_of("filter: none");
-        assert!(list.is_empty());
+        assert!(filter_ops_of("filter: none").is_empty());
     }
 
     #[test]

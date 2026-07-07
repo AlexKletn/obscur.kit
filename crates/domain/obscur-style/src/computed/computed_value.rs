@@ -9,9 +9,9 @@
 //! remain.
 
 use crate::property::{
-    BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow, ConicGradient, Length,
-    LengthExpr, LinearGradient, ObjectFit, PropertyValue, RadialGradient, StyleColor, Transform,
-    TransformOrigin,
+    BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow, ConicGradient, FilterOp,
+    Length, LengthExpr, LinearGradient, ObjectFit, PropertyValue, RadialGradient, StyleColor,
+    Transform, TransformOrigin,
 };
 use obscur_identity::InternedSymbol;
 
@@ -180,10 +180,10 @@ impl ComputedValue {
         self.0.as_object_fit()
     }
 
-    /// Returns the `filter` drop-shadow list if this computed value is a `filter`.
+    /// Returns the `filter` op list if this computed value is a `filter`.
     #[must_use]
-    pub fn as_drop_shadows(&self) -> Option<&[BoxShadow]> {
-        self.0.as_drop_shadows()
+    pub fn as_filter_ops(&self) -> Option<&[FilterOp]> {
+        self.0.as_filter_ops()
     }
 
     /// Returns the resolved 2D `transform` if this computed value is a transform.
