@@ -168,6 +168,21 @@ required-features = [
     "text-unicode",
 ]
 
+# The Browser Elements Wireframe Kit → PNG: a grayscale, flat "spec sheet" of every
+# native HTML control across all of its states, authored as one semantic view + a
+# wireframe user-agent stylesheet and rasterized headless through the CPU backend.
+# Same runtime feature set as `uikit_png` (no window or GPU), so it builds and runs
+# display-free.
+[[example]]
+name = "wireframe_png"
+required-features = [
+    "render-cpu",
+    "resource-fs",
+    "resource-decode",
+    "text-harfrust",
+    "text-unicode",
+]
+
 # The imported UI-Kit → PNG rendered FAITHFULLY through headless Vello/wgpu: the
 # same shared view + per-theme stylesheet as `uikit_png`, rasterized offscreen on
 # the GPU and read back to pixels, so the Skeuomorphic theme's gradients + inset/
