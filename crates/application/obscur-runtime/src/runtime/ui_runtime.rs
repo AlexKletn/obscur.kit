@@ -228,6 +228,22 @@ pub struct UiRuntime {
     /// hit-testing against the logical layout. Clamped to a sane minimum by
     /// [`set_device_scale`](Self::set_device_scale).
     device_scale: f32,
+    /// The content scroll offset `(x, y)` in **logical** CSS pixels — the point of
+    /// the content currently pinned to the viewport's top-left. Default `(0.0,
+    /// 0.0)`.
+    ///
+    /// Composed with [`device_scale`](Self::device_scale) as the scene's single
+    /// root transform `scale(s) · translate(-ox, -oy)`: scrolling moves content
+    /// up/left, then the whole scene scales to physical resolution. At offset
+    /// `(0, 0)` **and** scale `1.0` no root bracket is emitted, so the display
+    /// list is byte-identical to the pre-scroll path (the regression guard).
+    ///
+    /// Pointer coordinates arrive in the host's physical space, so
+    /// [`handle_pointer`](Self::handle_pointer) maps them to content space as
+    /// `physical / device_scale + offset` (the offset added back after the
+    /// device-scale divide) so hit-testing stays correct while scrolled. Set by a
+    /// host via [`set_content_offset`](Self::set_content_offset).
+    content_offset: (f32, f32),
     /// The domain motion scheduler owning every active timeline (spec §4.17).
     ///
     /// The runtime *owns* the scheduler and its timelines; each frame it samples
@@ -374,6 +390,7 @@ impl UiRuntime {
             viewport,
             viewport_scroll: (0.0, 0.0),
             device_scale: 1.0,
+            content_offset: (0.0, 0.0),
             motion: MotionScheduler::new(),
             animations: Vec::new(),
             next_timeline: TimelineId::from_raw(0),
@@ -1537,17 +1554,20 @@ impl UiRuntime {
     /// It never itself renders; it only mutates interaction state and requests a
     /// frame. Returns a [`PointerDispatch`] describing the target and what moved.
     pub fn handle_pointer(&mut self, mut event: PointerEvent) -> PointerDispatch {
-        // 0. Device-scale: incoming coordinates are in the host's physical
-        //    (device) space, but layout runs in logical CSS px (viewport =
-        //    physical / device_scale). Divide the pointer position by the scale
-        //    once, here, so every downstream consumer — the hit-test below, the
-        //    caret seat in `begin_text_pointer`, and the drag re-select in
-        //    `update_text_drag` — sees logical coordinates. At scale `1.0` this is
-        //    the identity, so the mapping is byte-identical for existing hosts.
+        // 0. Device-scale + content scroll: incoming coordinates are in the host's
+        //    physical (device) space, but layout runs in logical CSS px scrolled by
+        //    `content_offset`. Map the pointer to content space once, here, as
+        //    `physical / device_scale + offset` — the inverse of the root render
+        //    transform `scale(s) · translate(-ox, -oy)` — so every downstream
+        //    consumer (the hit-test below, the caret seat in `begin_text_pointer`,
+        //    and the drag re-select in `update_text_drag`) sees content-space
+        //    coordinates. At scale `1.0` and offset `(0, 0)` this is the identity,
+        //    so the mapping is byte-identical for existing hosts.
         let s = self.device_scale;
-        if (s - 1.0).abs() > f32::EPSILON {
+        let (ox, oy) = self.content_offset;
+        if (s - 1.0).abs() > f32::EPSILON || ox != 0.0 || oy != 0.0 {
             let physical = event.position();
-            event.position = Point::new(physical.x / s, physical.y / s);
+            event.position = Point::new(physical.x / s + ox, physical.y / s + oy);
         }
 
         // 1. Hit-test: the first hit is the topmost (highest z-order) node.
@@ -2493,24 +2513,60 @@ impl UiRuntime {
         };
     }
 
-    /// Wraps a freshly composed `display_list` in a root device-scale transform
-    /// when [`device_scale`](Self::device_scale) differs from `1.0`, so the whole
-    /// scene rasterizes at physical resolution while layout stays in logical px.
+    /// Returns the current content scroll offset `(x, y)` in logical CSS pixels.
+    /// Default `(0.0, 0.0)`.
+    #[must_use]
+    pub fn content_offset(&self) -> (f32, f32) {
+        self.content_offset
+    }
+
+    /// Sets the content scroll `offset` `(x, y)` in **logical** CSS pixels — the
+    /// content point pinned to the viewport top-left. A positive offset scrolls
+    /// content up/left (spec §4.1).
     ///
-    /// At exactly `1.0` the list is returned unchanged — no `PushTransform` /
-    /// `PopTransform` is emitted, so the output is byte-identical to the
-    /// pre-device-scale path (the regression guard). Otherwise the list is
-    /// re-wrapped as `PushTransform(scale(s, s))` + original commands +
-    /// `PopTransform`, which keeps it balanced (one push, one matching pop) since
-    /// the composed list is itself already balanced.
+    /// The offset is composed with [`device_scale`](Self::device_scale) into the
+    /// scene's single root transform `scale(s) · translate(-ox, -oy)`, and added
+    /// back to pointer coordinates in [`handle_pointer`](Self::handle_pointer)
+    /// (`physical / s + offset`) so hit-testing stays correct while scrolled.
+    /// Non-finite components are ignored (the previous value is kept for that
+    /// axis). Setting `(0, 0)` at scale `1.0` restores the byte-identical
+    /// (untransformed) path.
+    ///
+    /// Does not itself schedule a frame; a host typically pairs this with
+    /// [`request_frame`](Self::request_frame)`(`[`FrameReason::WindowChange`]`)`.
+    pub fn set_content_offset(&mut self, x: f32, y: f32) {
+        let ox = if x.is_finite() { x } else { self.content_offset.0 };
+        let oy = if y.is_finite() { y } else { self.content_offset.1 };
+        self.content_offset = (ox, oy);
+    }
+
+    /// Wraps a freshly composed `display_list` in the scene's single root
+    /// transform `scale(s) · translate(-ox, -oy)` — the composition of
+    /// [`device_scale`](Self::device_scale) `s` and the content scroll
+    /// [`content_offset`](Self::content_offset) `(ox, oy)` — so the whole scene
+    /// rasterizes at physical resolution and scrolled to the current offset while
+    /// layout stays in logical px.
+    ///
+    /// At scale exactly `1.0` **and** offset `(0, 0)` the list is returned
+    /// unchanged — no `PushTransform` / `PopTransform` is emitted, so the output is
+    /// byte-identical to the pre-scroll/pre-device-scale path (the regression
+    /// guard). Otherwise the list is re-wrapped as `PushTransform(root)` + original
+    /// commands + `PopTransform`, which keeps it balanced (one push, one matching
+    /// pop) since the composed list is itself already balanced. When the offset is
+    /// `(0, 0)` the root matrix reduces exactly to `scale(s, s)`.
     fn scaled_root(&self, display_list: DisplayList) -> DisplayList {
         let s = self.device_scale;
-        if (s - 1.0).abs() <= f32::EPSILON {
+        let (ox, oy) = self.content_offset;
+        let scale_identity = (s - 1.0).abs() <= f32::EPSILON;
+        if scale_identity && ox == 0.0 && oy == 0.0 {
             return display_list;
         }
+        // Scroll first (translate content up/left by the offset), then scale to
+        // device resolution: `scale(s) · translate(-ox, -oy)`.
+        let root = AffineTransform::scale(s, s).multiply(AffineTransform::translate(-ox, -oy));
         let inner = display_list.commands();
         let mut commands = Vec::with_capacity(inner.len() + 2);
-        commands.push(PaintCommand::PushTransform(AffineTransform::scale(s, s)));
+        commands.push(PaintCommand::PushTransform(root));
         commands.extend_from_slice(inner);
         commands.push(PaintCommand::PopTransform);
         DisplayList::from_commands(commands)
@@ -3896,6 +3952,170 @@ mod tests {
         assert_eq!(runtime.device_scale(), 0.1, "non-finite clamps to 0.1");
         runtime.set_device_scale(2.5);
         assert_eq!(runtime.device_scale(), 2.5, "a sane value passes through");
+    }
+
+    // ---- Content scroll offset: root translate + pointer coord mapping ----
+
+    #[test]
+    fn content_offset_translates_the_display_list_root() {
+        let panel_decls = {
+            let mut d = size(100.0, 100.0);
+            d.extend(background(0.1, 0.2, 0.3));
+            d
+        };
+        let sheet = Stylesheet::new(CascadeOrigin::GlobalApp, vec![class_rule("panel", panel_decls)]);
+        let sheets = std::slice::from_ref(&sheet);
+
+        // Offset (0, 100) at scale 1.0: the list is bracketed by a single root
+        // PushTransform of the pure translate(0, -100) … PopTransform.
+        let mut scrolled = UiRuntime::new(runtime_id(), viewport());
+        scrolled.set_content_offset(0.0, 100.0);
+        assert_eq!(scrolled.content_offset(), (0.0, 100.0));
+        let frame = scrolled.render_now(&panel_view(), sheets);
+        let list = frame.snapshot().display_list();
+        assert!(list.is_balanced(), "the wrapped list stays balanced");
+        assert_eq!(
+            list.commands().first(),
+            Some(&PaintCommand::PushTransform(AffineTransform::translate(0.0, -100.0))),
+            "offset 100 translates content up by 100 (scale·translate reduces to translate at s=1)",
+        );
+        assert_eq!(list.commands().last(), Some(&PaintCommand::PopTransform));
+
+        // Offset (0, 0) at scale 1.0: no root transform emitted (byte-identical).
+        let mut plain = UiRuntime::new(runtime_id(), viewport());
+        let plain_frame = plain.render_now(&panel_view(), sheets);
+        let plain_list = plain_frame.snapshot().display_list();
+        assert!(
+            !plain_list
+                .commands()
+                .iter()
+                .any(|c| matches!(c, PaintCommand::PushTransform(_))),
+            "no root transform at offset (0,0) + scale 1.0",
+        );
+        let mut expected = vec![PaintCommand::PushTransform(AffineTransform::translate(0.0, -100.0))];
+        expected.extend_from_slice(plain_list.commands());
+        expected.push(PaintCommand::PopTransform);
+        assert_eq!(list.commands(), expected.as_slice());
+    }
+
+    #[test]
+    fn content_offset_composes_with_device_scale() {
+        let panel_decls = {
+            let mut d = size(100.0, 100.0);
+            d.extend(background(0.1, 0.2, 0.3));
+            d
+        };
+        let sheet = Stylesheet::new(CascadeOrigin::GlobalApp, vec![class_rule("panel", panel_decls)]);
+        let sheets = std::slice::from_ref(&sheet);
+
+        // scale 2 + offset (0, 100) → root = scale(2)·translate(0, -100).
+        let mut rt = UiRuntime::new(runtime_id(), viewport());
+        rt.set_device_scale(2.0);
+        rt.set_content_offset(0.0, 100.0);
+        let frame = rt.render_now(&panel_view(), sheets);
+        let list = frame.snapshot().display_list();
+        let expected_root =
+            AffineTransform::scale(2.0, 2.0).multiply(AffineTransform::translate(0.0, -100.0));
+        assert_eq!(
+            list.commands().first(),
+            Some(&PaintCommand::PushTransform(expected_root)),
+        );
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn content_offset_maps_incoming_pointer_coordinates() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+
+        // Baseline at offset 0: physical (50, 25) lands in `a` (y ∈ [0, 50)).
+        let mut base = UiRuntime::new(runtime_id(), viewport());
+        let _ = base.render_now(&panel_view(), sheets);
+        let (_panel, a, b) = panel_nodes(&base);
+        assert_eq!(
+            base.handle_pointer(mouse(PointerEventKind::Move, 50.0, 25.0)).target(),
+            Some(a),
+        );
+
+        // With offset (0, 100): physical (50, 25) maps to content y = 25/1 + 100
+        // = 125 → out of the 100-tall panel → no target; and physical (50, -75)
+        // maps to content y = -75 + 100 = 25 → `a`. Prove the offset is added.
+        let mut scrolled = UiRuntime::new(runtime_id(), viewport());
+        scrolled.set_content_offset(0.0, 100.0);
+        let _ = scrolled.render_now(&panel_view(), sheets);
+        assert_eq!(
+            scrolled.handle_pointer(mouse(PointerEventKind::Move, 50.0, -75.0)).target(),
+            Some(a),
+            "physical y -75 + offset 100 = content y 25 hits `a`",
+        );
+
+        // physical (50, -25) → content y = 75 → `b` (y ∈ [50, 100)).
+        assert_eq!(
+            scrolled.handle_pointer(mouse(PointerEventKind::Move, 50.0, -25.0)).target(),
+            Some(b),
+        );
+    }
+
+    #[test]
+    fn content_offset_maps_pointer_with_device_scale() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+
+        // scale 2 + offset (0, 100): content y = physical / 2 + 100.
+        let mut rt = UiRuntime::new(runtime_id(), viewport());
+        rt.set_device_scale(2.0);
+        rt.set_content_offset(0.0, 100.0);
+        let _ = rt.render_now(&panel_view(), sheets);
+        let (_panel, _a, b) = panel_nodes(&rt);
+        // physical y -50 → -25 + 100 = content y 75 → `b`.
+        assert_eq!(
+            rt.handle_pointer(mouse(PointerEventKind::Move, 100.0, -50.0)).target(),
+            Some(b),
+            "physical (100,-50): x=100/2=50, y=-50/2+100=75 → `b`",
+        );
+    }
+
+    #[test]
+    fn content_offset_zero_is_byte_identical_and_pointer_unchanged() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+
+        let mut default_rt = UiRuntime::new(runtime_id(), viewport());
+        let default_list = default_rt
+            .render_now(&panel_view(), sheets)
+            .snapshot()
+            .display_list()
+            .commands()
+            .to_vec();
+        let d_target = default_rt
+            .handle_pointer(mouse(PointerEventKind::Move, 50.0, 75.0))
+            .target();
+
+        let mut explicit_rt = UiRuntime::new(runtime_id(), viewport());
+        explicit_rt.set_content_offset(0.0, 0.0);
+        assert_eq!(explicit_rt.content_offset(), (0.0, 0.0));
+        let explicit_list = explicit_rt
+            .render_now(&panel_view(), sheets)
+            .snapshot()
+            .display_list()
+            .commands()
+            .to_vec();
+        let e_target = explicit_rt
+            .handle_pointer(mouse(PointerEventKind::Move, 50.0, 75.0))
+            .target();
+
+        assert_eq!(default_list, explicit_list, "offset (0,0) changes no commands");
+        assert_eq!(d_target, e_target, "offset (0,0) changes no hit-test");
+    }
+
+    #[test]
+    fn set_content_offset_ignores_non_finite_components() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_content_offset(10.0, 20.0);
+        runtime.set_content_offset(f32::NAN, 40.0);
+        assert_eq!(runtime.content_offset(), (10.0, 40.0), "NaN x keeps prior x");
+        runtime.set_content_offset(50.0, f32::INFINITY);
+        assert_eq!(runtime.content_offset(), (50.0, 40.0), "inf y keeps prior y");
     }
 
     #[test]
