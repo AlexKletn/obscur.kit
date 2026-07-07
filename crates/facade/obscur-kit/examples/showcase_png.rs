@@ -46,8 +46,10 @@ use obscur_kit::text_unicode::UnicodeTextItemizer;
 #[path = "showcase/scene.rs"]
 mod showcase;
 
-/// The fixed viewport the showcase is laid out and rasterized under.
-const VIEWPORT: Size = Size::new(1000.0, 700.0);
+/// The fixed viewport the showcase is laid out and rasterized under. Wide by
+/// default so the PNG artifact demonstrates the sections/cards filling the whole
+/// window width (the gallery's `1fr` grid tracks divide this extent).
+const VIEWPORT: Size = Size::new(1440.0, 900.0);
 
 fn main() {
     println!("== obscur-kit capability showcase → PNG (headless CPU) ==\n");

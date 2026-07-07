@@ -93,14 +93,14 @@ impl Default for ShowcaseState {
 pub fn stylesheet() -> &'static str {
     "\
 #app { display: flex; flex-direction: column; gap: 14px; padding: 20px; \
-       width: 100%; height: 100%; background-color: #12151f; }\n\
-.header { display: flex; flex-direction: column; gap: 4px; width: 960px; height: 62px; }\n\
+       background-color: #12151f; }\n\
+.header { display: flex; flex-direction: column; gap: 4px; height: 62px; }\n\
 .title { color: #f5f7fa; font-size: 30px; font-weight: 700; height: 36px; }\n\
 .subtitle { color: #8b95ad; font-size: 15px; font-style: italic; height: 20px; }\n\
 \
 .gallery { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; \
-           grid-template-rows: 143px 143px 143px; gap: 12px; \
-           width: 960px; height: 454px; }\n\
+           grid-template-rows: 158px 158px 158px; gap: 12px; \
+           height: 498px; }\n\
 .card { border-radius: 10px; padding: 12px; background-color: #1c2130; }\n\
 .card-label { color: #e6ebf5; font-size: 14px; font-weight: 600; height: 18px; }\n\
 .card-note { color: #aab4c8; font-size: 12px; height: 15px; }\n\
@@ -122,7 +122,7 @@ pub fn stylesheet() -> &'static str {
 .widgets { display: flex; flex-direction: column; gap: 6px; background-color: #202638; }\n\
 \
 .toolbar { display: flex; flex-direction: row; gap: 10px; align-items: center; \
-           width: 960px; height: 52px; padding: 8px; border-radius: 10px; \
+           height: 52px; padding: 8px; border-radius: 10px; \
            background-color: #1a1f2e; }\n\
 .chip { border-radius: 8px; padding: 6px; width: 96px; height: 28px; }\n\
 .chip-text { color: #10131c; font-size: 13px; font-weight: 700; height: 16px; }\n\
@@ -132,7 +132,11 @@ pub fn stylesheet() -> &'static str {
 .counter { color: #ffd93d; font-size: 18px; font-weight: 700; width: 160px; height: 24px; }\n\
 \
 .btn { background-color: #3552d9; color: #ffffff; border-radius: 8px; \
-       padding: 6px; height: 26px; font-size: 13px; font-weight: 600; }\n\
+       border: 1px solid #4f6bff; padding: 8px; height: 30px; \
+       font-size: 13px; font-weight: 600; }\n\
+.btn:hover { background-color: #4f6bff; border-color: #7d92ff; }\n\
+.btn:active { background-color: #6b83ff; border-color: #a6b6ff; }\n\
+.btn:focus { background-color: #4f6bff; border-color: #a6b6ff; }\n\
 .check { color: #d7deee; font-size: 13px; height: 18px; }\n\
 .field { background-color: #0f1220; color: #e6ebf5; border: 1px solid #3a4560; \
          border-radius: 6px; padding: 5px; height: 24px; font-size: 13px; }\n\
