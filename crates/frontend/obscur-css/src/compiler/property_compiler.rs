@@ -160,6 +160,9 @@ impl PropertyCompiler {
         if decl.name.eq_ignore_ascii_case("border") {
             return expand_border(decl, BORDER_SIDES, specificity, origin, source_order, selector, interner);
         }
+        if decl.name.eq_ignore_ascii_case("outline") {
+            return expand_outline(decl, specificity, origin, source_order, selector, interner);
+        }
         if let Some(side) = border_side_shorthand(&decl.name) {
             return expand_border(decl, side, specificity, origin, source_order, selector, interner);
         }
@@ -502,6 +505,64 @@ fn expand_border(
                     selector,
                 )));
             }
+        }
+    }
+    out
+}
+
+/// Expands an `outline` shorthand into the present `outline-width` /
+/// `outline-style` / `outline-color` longhands (spec CSS UI §outline).
+///
+/// The value is classified with the SAME `<line-width>` / `<line-style>` /
+/// `<color>` grammar as `border` ([`classify_border`]), in any order; each
+/// authored sub-value is emitted for its outline longhand. Like `border`, omitted
+/// sub-values are not emitted (a documented simplification of reset-to-initial),
+/// so `outline: 2px dashed #333` sets all three while `outline: 2px` sets only the
+/// width. `outline-offset` is a separate longhand (not part of this shorthand). An
+/// unparseable or empty value degrades to a single
+/// [`CompiledDeclaration::Unsupported`].
+fn expand_outline(
+    decl: &ParsedDeclaration,
+    specificity: SelectorSpecificity,
+    origin: CascadeOrigin,
+    source_order: u32,
+    selector: Option<SelectorId>,
+    interner: &mut CssSymbolInterner,
+) -> Vec<CompiledDeclaration> {
+    let unsupported = || {
+        vec![CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
+            value_unsupported_kind(&decl.value),
+            &*decl.name,
+            decl.span,
+        ))]
+    };
+    let Some(components) = classify_border(&decl.value, interner) else {
+        return unsupported();
+    };
+    if components.width.is_none() && components.style.is_none() && components.color.is_none() {
+        return unsupported();
+    }
+    let important = if decl.important {
+        ImportantFlag::Important
+    } else {
+        ImportantFlag::Normal
+    };
+    let mut out = Vec::new();
+    for (property, value) in [
+        (PropertyId::OutlineWidth, &components.width),
+        (PropertyId::OutlineStyle, &components.style),
+        (PropertyId::OutlineColor, &components.color),
+    ] {
+        if let Some(value) = value {
+            out.push(CompiledDeclaration::Standard(Declaration::new(
+                property,
+                value.clone(),
+                important,
+                origin,
+                specificity,
+                source_order,
+                selector,
+            )));
         }
     }
     out
@@ -1003,7 +1064,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 80] = [
+    const ALL: [PropertyId; 84] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::BackgroundImage,
@@ -1047,6 +1108,10 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::BorderTopRightRadius,
         PropertyId::BorderBottomRightRadius,
         PropertyId::BorderBottomLeftRadius,
+        PropertyId::OutlineWidth,
+        PropertyId::OutlineStyle,
+        PropertyId::OutlineColor,
+        PropertyId::OutlineOffset,
         PropertyId::BoxShadow,
         PropertyId::Filter,
         PropertyId::BackdropFilter,
@@ -1322,6 +1387,8 @@ fn is_length_longhand(property: PropertyId) -> bool {
             | PropertyId::BorderTopRightRadius
             | PropertyId::BorderBottomRightRadius
             | PropertyId::BorderBottomLeftRadius
+            | PropertyId::OutlineWidth
+            | PropertyId::OutlineOffset
             | PropertyId::Gap
             | PropertyId::FlexBasis
             | PropertyId::FontSize
@@ -1397,7 +1464,9 @@ fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<Inte
         PropertyId::BorderTopStyle
         | PropertyId::BorderRightStyle
         | PropertyId::BorderBottomStyle
-        | PropertyId::BorderLeftStyle => Some(layout_keyword::border_style_from_name),
+        | PropertyId::BorderLeftStyle
+        // `outline-style` shares the same closed line-style keyword set.
+        | PropertyId::OutlineStyle => Some(layout_keyword::border_style_from_name),
         PropertyId::Direction => Some(layout_keyword::direction_from_name),
         PropertyId::FontStyle => Some(layout_keyword::font_style_from_name),
         PropertyId::TextAlign => Some(layout_keyword::text_align_from_name),
@@ -4019,6 +4088,72 @@ mod tests {
                 (PropertyId::BorderBottomRightRadius, r.clone()),
                 (PropertyId::BorderBottomLeftRadius, r),
             ]
+        );
+    }
+
+    #[test]
+    fn outline_shorthand_sets_width_style_color() {
+        // `2px dashed #333` → the three outline longhands, dashed style handle.
+        let got = pairs(&compile_all("outline: 2px dashed #333333"));
+        assert_eq!(
+            got,
+            vec![
+                (PropertyId::OutlineWidth, PropertyValue::Length(Length::px(2.0))),
+                (
+                    PropertyId::OutlineStyle,
+                    PropertyValue::Keyword(layout_keyword::BORDER_STYLE_DASHED)
+                ),
+                (
+                    PropertyId::OutlineColor,
+                    PropertyValue::Color(StyleColor::rgba(0.2, 0.2, 0.2, 1.0))
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn outline_shorthand_accepts_components_in_any_order() {
+        // `#333 solid 2px` classifies identically to `2px solid #333`.
+        let got = pairs(&compile_all("outline: #333333 solid 2px"));
+        assert!(got.contains(&(PropertyId::OutlineWidth, PropertyValue::Length(Length::px(2.0)))));
+        assert!(got.contains(&(
+            PropertyId::OutlineStyle,
+            PropertyValue::Keyword(layout_keyword::BORDER_STYLE_SOLID)
+        )));
+        assert!(got.contains(&(
+            PropertyId::OutlineColor,
+            PropertyValue::Color(StyleColor::rgba(0.2, 0.2, 0.2, 1.0))
+        )));
+    }
+
+    #[test]
+    fn outline_offset_lowers_to_a_length() {
+        assert_eq!(
+            pairs(&compile_all("outline-offset: 3px")),
+            vec![(PropertyId::OutlineOffset, PropertyValue::Length(Length::px(3.0)))]
+        );
+    }
+
+    #[test]
+    fn outline_style_none_lowers_to_the_none_handle() {
+        assert_eq!(
+            pairs(&compile_all("outline-style: none")),
+            vec![(
+                PropertyId::OutlineStyle,
+                PropertyValue::Keyword(layout_keyword::BORDER_STYLE_NONE)
+            )]
+        );
+    }
+
+    #[test]
+    fn outline_none_shorthand_lowers_to_the_none_style() {
+        // `outline: none` classifies its lone keyword as the style (like `border`).
+        assert_eq!(
+            pairs(&compile_all("outline: none")),
+            vec![(
+                PropertyId::OutlineStyle,
+                PropertyValue::Keyword(layout_keyword::BORDER_STYLE_NONE)
+            )]
         );
     }
 

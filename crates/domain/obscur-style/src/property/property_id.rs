@@ -141,6 +141,25 @@ pub enum PropertyId {
     /// The `border-bottom-left-radius` longhand.
     BorderBottomLeftRadius,
 
+    // ---- Outline (painted OUTSIDE the border box; NOT inherited; no layout) ----
+    /// The `outline-width` longhand (Length-valued, not inherited; initial `0`).
+    /// Paired with a non-`none` [`OutlineStyle`](Self::OutlineStyle) it is the
+    /// thickness of the focus ring the scene coordinator strokes around — but
+    /// outside — the border box; unlike a border it reserves no layout space.
+    OutlineWidth,
+    /// The `outline-style` longhand (Keyword-valued against the reserved
+    /// `BORDER_STYLE_*` handles in [`crate::property::layout_keyword`]; not
+    /// inherited). Only `none` / `solid` / `dashed` are modelled (`dotted` folds
+    /// to dashed); `none` (the initial) paints no outline.
+    OutlineStyle,
+    /// The `outline-color` longhand (Color-valued, not inherited). When unset the
+    /// painted outline falls back to the computed `color` (CSS `currentColor`).
+    OutlineColor,
+    /// The `outline-offset` longhand (Length-valued, not inherited; initial `0`).
+    /// The gap between the border box and the inner edge of the outline; the
+    /// outline is inflated outward by this amount before it is stroked.
+    OutlineOffset,
+
     // ---- Box effects (not inherited) ----
     /// The `box-shadow` property (a `BoxShadow` list value; NOT inherited).
     /// `box-shadow: none` lowers to an empty list. The scene coordinator paints a
@@ -343,6 +362,10 @@ impl PropertyId {
             Self::BorderTopRightRadius => "border-top-right-radius",
             Self::BorderBottomRightRadius => "border-bottom-right-radius",
             Self::BorderBottomLeftRadius => "border-bottom-left-radius",
+            Self::OutlineWidth => "outline-width",
+            Self::OutlineStyle => "outline-style",
+            Self::OutlineColor => "outline-color",
+            Self::OutlineOffset => "outline-offset",
             Self::BoxShadow => "box-shadow",
             Self::Filter => "filter",
             Self::BackdropFilter => "backdrop-filter",
@@ -442,6 +465,10 @@ impl PropertyId {
             | Self::BorderTopRightRadius
             | Self::BorderBottomRightRadius
             | Self::BorderBottomLeftRadius
+            | Self::OutlineWidth
+            | Self::OutlineStyle
+            | Self::OutlineColor
+            | Self::OutlineOffset
             | Self::BoxShadow
             | Self::Filter
             | Self::BackdropFilter
@@ -845,6 +872,27 @@ mod tests {
             PropertyId::BorderTopRightRadius,
             PropertyId::BorderBottomRightRadius,
             PropertyId::BorderBottomLeftRadius,
+        ] {
+            assert!(
+                !id.default_inheritance().is_inherited(),
+                "{} should not inherit",
+                id.name()
+            );
+        }
+    }
+
+    #[test]
+    fn outline_names_and_not_inherited() {
+        assert_eq!(PropertyId::OutlineWidth.name(), "outline-width");
+        assert_eq!(PropertyId::OutlineStyle.name(), "outline-style");
+        assert_eq!(PropertyId::OutlineColor.name(), "outline-color");
+        assert_eq!(PropertyId::OutlineOffset.name(), "outline-offset");
+        // Like borders, the outline properties reset per element (no layout).
+        for id in [
+            PropertyId::OutlineWidth,
+            PropertyId::OutlineStyle,
+            PropertyId::OutlineColor,
+            PropertyId::OutlineOffset,
         ] {
             assert!(
                 !id.default_inheritance().is_inherited(),

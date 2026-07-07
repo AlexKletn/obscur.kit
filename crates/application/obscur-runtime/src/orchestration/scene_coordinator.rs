@@ -12,7 +12,7 @@ use obscur_scene::command::{DisplayList, DisplayListBuilder, PaintCommand};
 use obscur_scene::layer::{LayerEffect, SceneLayer};
 use obscur_scene::paint::{
     Brush, ConicGradient as SceneConicGradient, GradientStop as SceneGradientStop,
-    LinearGradient as SceneLinearGradient, RadialGradient as SceneRadialGradient, SceneImage,
+    LinearGradient as SceneLinearGradient, Paint, RadialGradient as SceneRadialGradient, SceneImage,
     Stroke,
 };
 use obscur_scene::path::Path;
@@ -592,6 +592,14 @@ impl SceneCoordinator {
         // gaussian pass blurs the fully-composited element. No blur records nothing —
         // byte-for-byte identical to before.
         let mut blur_brackets: Vec<(NodeId, Rect, f32)> = Vec::new();
+        // A CSS `outline` (a focus ring) paints as ONE stroked path OUTSIDE the
+        // node's border box, offset by `outline-offset`. It reserves no layout
+        // space and — unlike the background/border — must NOT be clipped by the
+        // node's own rounded clip, so it is recorded here and emitted in the second
+        // pass as its own unit at the subtree's EXIT index (on top of, and outside,
+        // the node's whole subtree). No outline records nothing — byte-for-byte
+        // identical to before outlines existed.
+        let mut outline_brackets: Vec<(NodeId, PaintCommand)> = Vec::new();
         while let Some((node, parent, depth)) = stack.pop() {
             if !visited.insert(node) {
                 // Already painted (cycle or shared child): do not revisit.
@@ -644,6 +652,17 @@ impl SceneCoordinator {
                 && let Some(layout_box) = boxes.get(&node)
             {
                 blur_brackets.push((node, layout_box.bounds, radius));
+            }
+
+            // A CSS `outline` (focus ring): when the node has a non-`none`
+            // `outline-style` and a positive `outline-width`, record the stroked
+            // ring it paints OUTSIDE its border box (inflated by
+            // `outline-offset + width/2`). It needs the arranged box; no outline
+            // (or no box) records nothing (byte-for-byte identical to before).
+            if let Some(layout_box) = boxes.get(&node)
+                && let Some(command) = outline_paint(computed, node, layout_box.bounds, radii, has_radius)
+            {
+                outline_brackets.push((node, command));
             }
 
             // This node's own paint accumulates into a private builder so it can be
@@ -1058,6 +1077,7 @@ impl SceneCoordinator {
             || !transform_brackets.is_empty()
             || !opacity_brackets.is_empty()
             || !blur_brackets.is_empty()
+            || !outline_brackets.is_empty()
         {
             let mut exit_index = enter_index.clone();
             for &node in preorder.iter().rev() {
@@ -1166,6 +1186,23 @@ impl SceneCoordinator {
                     tree_index: exit,
                     order: PaintUnit::blur_pop_order(depth),
                     commands: vec![PaintCommand::PopLayer],
+                });
+            }
+            // The outline (focus ring) paints as its OWN unit at the subtree's exit
+            // index with `OUTLINE_ORDER` — sorting after every `Pop*` bracket at the
+            // same index — so it lands OUTSIDE the node's rounded clip and ON TOP of
+            // the node's whole subtree. Emitted LAST so a tie with a depth-0
+            // `PopClip` (both at `i64::MAX`) breaks in the outline's favour (the ring
+            // paints after the clip closes, unclipped).
+            for (node, command) in outline_brackets {
+                let z = zmap.get(&node).copied().unwrap_or(0);
+                let enter = enter_index.get(&node).copied().unwrap_or(0);
+                let exit = exit_index.get(&node).copied().unwrap_or(enter);
+                units.push(PaintUnit {
+                    z,
+                    tree_index: exit,
+                    order: PaintUnit::OUTLINE_ORDER,
+                    commands: vec![command],
                 });
             }
         }
@@ -2066,6 +2103,75 @@ fn dashed_border_path(bounds: Rect, radii: CornerRadii, width: f32, has_radius: 
     } else {
         Path::rect(center)
     }
+}
+
+/// Builds the [`PaintCommand`] stroking a node's CSS `outline` (a focus ring),
+/// or [`None`] when no outline should paint.
+///
+/// An outline paints only when the node's `outline-style` is not `none`
+/// (`solid` / `dashed`, `dotted` folding to dashed) AND its `outline-width` is a
+/// positive pixel length. Unlike a border, the outline sits OUTSIDE the border
+/// box: the stroke path is `bounds` inflated by `outline-offset + width/2` on
+/// every side, so the outline's inner edge is `offset` px outside the border box
+/// and the centered stroke is `width` thick. When the node has a border radius the
+/// path is a rounded rect whose corner radii are `border_radius + offset + width/2`
+/// (clamped non-negative), concentric with the rounded border box; otherwise it is
+/// a plain rectangle. A `dashed` outline reuses the border dash pattern
+/// ([`dashed_border_pattern`]); the color falls back to the computed `color`
+/// (`currentColor`) when `outline-color` is unset. The outline reserves no layout
+/// space and is emitted so it paints on top of — and outside — the node.
+fn outline_paint(
+    computed: &ComputedStyles,
+    node: NodeId,
+    bounds: Rect,
+    radii: CornerRadii,
+    has_radius: bool,
+) -> Option<PaintCommand> {
+    let width = border_width_of(computed, node, PropertyId::OutlineWidth);
+    if width <= 0.0 {
+        return None;
+    }
+    let dashed = border_is_dashed(computed, node, PropertyId::OutlineStyle);
+    let solid = border_is_solid(computed, node, PropertyId::OutlineStyle);
+    // Only a `solid` or `dashed` (incl. folded `dotted`) outline paints; `none` or
+    // an absent style paints nothing.
+    if !dashed && !solid {
+        return None;
+    }
+    let offset = border_width_of(computed, node, PropertyId::OutlineOffset);
+    // The stroke centerline runs `offset + width/2` outside the border box, so the
+    // outline's inner edge sits `offset` px out and the band is `width` thick.
+    let d = offset + width / 2.0;
+    let rect = Rect::new(
+        Point::new(bounds.origin.x - d, bounds.origin.y - d),
+        Size::new(
+            (bounds.size.width + 2.0 * d).max(0.0),
+            (bounds.size.height + 2.0 * d).max(0.0),
+        ),
+    );
+    let path = if has_radius {
+        // Concentric outer rounding: each corner radius grows by `d`.
+        let outline_radii = CornerRadii {
+            top_left: (radii.top_left + d).max(0.0),
+            top_right: (radii.top_right + d).max(0.0),
+            bottom_right: (radii.bottom_right + d).max(0.0),
+            bottom_left: (radii.bottom_left + d).max(0.0),
+        };
+        Path::rounded_rect(rect, outline_radii)
+    } else {
+        Path::rect(rect)
+    };
+    let current = current_color_of(computed, node);
+    let color = border_color_of(computed, node, PropertyId::OutlineColor, current);
+    let mut stroke = Stroke::new(Brush::solid(scene_color_from(color)), width);
+    if dashed {
+        // Reuse the border dash convention — no duplicate dash logic.
+        stroke = stroke.with_dash(dashed_border_pattern(width), 0.0);
+    }
+    Some(PaintCommand::DrawPath {
+        path,
+        paint: Paint::stroke(stroke),
+    })
 }
 
 /// Reads a node's computed `border-*-color` (`id`), falling back to `current`
@@ -4069,6 +4175,153 @@ mod tests {
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         assert_eq!(path_fills(&list).len(), 4, "four solid side rects");
         assert!(stroke_paths(&list).is_empty(), "no dashed stroke for a solid border");
+    }
+
+    /// Builds a `ComputedStyle` with an `outline` of `width` px, `offset` px, the
+    /// given `style` keyword handle, and `color`.
+    fn with_outline(
+        width: f32,
+        offset: f32,
+        style: obscur_identity::InternedSymbol,
+        color: StyleColor,
+    ) -> ComputedStyle {
+        let mut s = ComputedStyle::new();
+        s.set(PropertyId::OutlineWidth, ComputedValue::length(Length::px(width)));
+        s.set(PropertyId::OutlineOffset, ComputedValue::length(Length::px(offset)));
+        s.set(PropertyId::OutlineStyle, ComputedValue::keyword(style));
+        s.set(PropertyId::OutlineColor, ComputedValue::color(color));
+        s
+    }
+
+    #[test]
+    fn dashed_outline_strokes_a_ring_outside_the_border_box() {
+        // A 100×50 box at (10,20) with `outline: 2px dashed; outline-offset: 3px`
+        // strokes ONE dashed ring, centered `offset + width/2` = 4px outside the
+        // border box, so its bounds exceed the border box by that inflation.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+
+        let teal = StyleColor::rgba(0.17, 0.16, 0.15, 1.0);
+        let mut computed = ComputedStyles::new();
+        computed.insert(
+            root,
+            with_outline(2.0, 3.0, layout_keyword::BORDER_STYLE_DASHED, teal),
+        );
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(10.0, 20.0, 100.0, 50.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        let strokes = stroke_paths(&list);
+        assert_eq!(strokes.len(), 1, "one outline ring stroke");
+        let (path, stroke) = &strokes[0];
+        assert_eq!(stroke.width(), 2.0);
+        assert!(stroke.is_dashed(), "dashed outline carries a dash pattern");
+        assert_eq!(
+            stroke.brush().as_solid().map(|s| s.color()),
+            Some(scene_color_from(teal))
+        );
+        // Centerline at border box inflated by offset(3) + width/2(1) = 4 on each
+        // side: origin (6,16), size (108,58). Its inner edge (7,17) is offset(3) px
+        // OUTSIDE the border box (10,20) — a focus ring with a visible gap.
+        let bounds = path.bounds().expect("outline path has bounds");
+        assert_eq!(bounds, Rect::new(Point::new(6.0, 16.0), Size::new(108.0, 58.0)));
+        assert!(bounds.origin.x < 10.0 && bounds.origin.y < 20.0, "outside the border box");
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn solid_outline_strokes_a_ring_and_no_outline_emits_none() {
+        // A solid outline strokes one solid (non-dashed) ring; with the style set
+        // to `none` (and otherwise identical props) nothing is emitted.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 40.0, 40.0));
+        let color = StyleColor::rgba(0.1, 0.2, 0.9, 1.0);
+
+        // Solid outline → one non-dashed stroke.
+        let mut solid = ComputedStyles::new();
+        solid.insert(
+            root,
+            with_outline(2.0, 0.0, layout_keyword::BORDER_STYLE_SOLID, color),
+        );
+        let list = SceneCoordinator::new().compose(&tree, &solid, &boxes, None);
+        let strokes = stroke_paths(&list);
+        assert_eq!(strokes.len(), 1, "one solid outline ring");
+        assert!(!strokes[0].1.is_dashed(), "solid outline is not dashed");
+
+        // `outline-style: none` → no outline paint at all.
+        let mut none = ComputedStyles::new();
+        none.insert(
+            root,
+            with_outline(2.0, 0.0, layout_keyword::BORDER_STYLE_NONE, color),
+        );
+        let list = SceneCoordinator::new().compose(&tree, &none, &boxes, None);
+        assert!(stroke_paths(&list).is_empty(), "outline-style:none emits nothing");
+        assert!(list.commands().is_empty(), "no outline, no other paint → empty list");
+    }
+
+    #[test]
+    fn no_outline_is_byte_identical() {
+        // Regression guard: a plain background node with no outline paints exactly
+        // as before (one fill, no stroke, no extra brackets).
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, with_background(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 30.0, 30.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        assert_eq!(fill_count(&list), 1, "only the background");
+        assert!(stroke_paths(&list).is_empty(), "no outline stroke");
+        assert_eq!(list.commands().len(), 1, "exactly one command (byte-identical)");
+    }
+
+    #[test]
+    fn rounded_node_gets_a_rounded_outline_path() {
+        // A node with a border radius gets a ROUNDED outline path (its bounding box
+        // is still the inflated border box), whose corner radii grow by the
+        // inflation — concentric with the rounded border box.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+
+        let color = StyleColor::rgba(0.17, 0.16, 0.15, 1.0);
+        let mut style = with_outline(2.0, 3.0, layout_keyword::BORDER_STYLE_SOLID, color);
+        for id in [
+            PropertyId::BorderTopLeftRadius,
+            PropertyId::BorderTopRightRadius,
+            PropertyId::BorderBottomRightRadius,
+            PropertyId::BorderBottomLeftRadius,
+        ] {
+            style.set(id, ComputedValue::length(Length::px(8.0)));
+        }
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, style);
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(10.0, 20.0, 100.0, 50.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        let strokes = stroke_paths(&list);
+        assert_eq!(strokes.len(), 1, "one rounded outline stroke");
+        let (path, _) = &strokes[0];
+        // The rounded path is not a plain rect (it has cubic corner segments), and
+        // its bounds are the inflated border box (inflated by 4 on each side).
+        assert!(
+            path.segments()
+                .iter()
+                .any(|s| matches!(s, obscur_scene::path::PathSegment::CubicTo { .. })),
+            "rounded outline uses a rounded-rect (cubic) path"
+        );
+        assert_eq!(
+            path.bounds(),
+            Some(Rect::new(Point::new(6.0, 16.0), Size::new(108.0, 58.0)))
+        );
     }
 
     #[test]

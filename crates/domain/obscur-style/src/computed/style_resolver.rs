@@ -109,6 +109,11 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::BorderTopRightRadius,
     PropertyId::BorderBottomRightRadius,
     PropertyId::BorderBottomLeftRadius,
+    // Outline (painted outside the border box; no layout).
+    PropertyId::OutlineWidth,
+    PropertyId::OutlineStyle,
+    PropertyId::OutlineColor,
+    PropertyId::OutlineOffset,
     // Box effects.
     PropertyId::BoxShadow,
     PropertyId::Filter,
@@ -278,6 +283,11 @@ impl StyleResolver {
             | PropertyId::BorderTopRightRadius
             | PropertyId::BorderBottomRightRadius
             | PropertyId::BorderBottomLeftRadius
+            // `outline-width` initial is `medium`, modelled as `0` (like border
+            // width) so no outline paints until authored; `outline-offset` initial
+            // is `0` (the outline hugs the border box).
+            | PropertyId::OutlineWidth
+            | PropertyId::OutlineOffset
             | PropertyId::Gap => Some(ComputedValue::length(Length::px(0.0))),
             // Sizing minimums and `flex-basis`: initial `auto`.
             PropertyId::MinWidth | PropertyId::MinHeight | PropertyId::FlexBasis => {
@@ -319,6 +329,12 @@ impl StyleResolver {
             | PropertyId::BorderRightColor
             | PropertyId::BorderBottomColor
             | PropertyId::BorderLeftColor
+            // `outline-style` initial is `none` (its keyword needs the interner, so
+            // an absent value is treated as `none` — no outline painted), and
+            // `outline-color` initial is `currentColor` (an absent color falls back
+            // to the computed `color`, like a border color).
+            | PropertyId::OutlineStyle
+            | PropertyId::OutlineColor
             // Keyword initials need the interner; deferred to a later phase.
             | PropertyId::Display
             | PropertyId::Visibility
@@ -1063,6 +1079,10 @@ mod tests {
                 | PropertyId::BorderTopRightRadius
                 | PropertyId::BorderBottomRightRadius
                 | PropertyId::BorderBottomLeftRadius
+                | PropertyId::OutlineWidth
+                | PropertyId::OutlineStyle
+                | PropertyId::OutlineColor
+                | PropertyId::OutlineOffset
                 | PropertyId::BoxShadow
                 | PropertyId::Filter
                 | PropertyId::BackdropFilter
@@ -1147,6 +1167,10 @@ mod tests {
             PropertyId::BorderTopRightRadius,
             PropertyId::BorderBottomRightRadius,
             PropertyId::BorderBottomLeftRadius,
+            PropertyId::OutlineWidth,
+            PropertyId::OutlineStyle,
+            PropertyId::OutlineColor,
+            PropertyId::OutlineOffset,
             PropertyId::BoxShadow,
             PropertyId::Filter,
             PropertyId::BackdropFilter,

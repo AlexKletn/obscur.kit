@@ -136,6 +136,15 @@ required-features = ["render-vello"]
 name = "dashed_border_proof"
 required-features = ["render-cpu"]
 
+# Proof that `outline` + `outline-offset` paints a focus ring OUTSIDE the border
+# box: three filled boxes (dashed-outline, solid-outline, rounded) each with a
+# `2px` outline offset `3px`, stroked as the coordinator emits and rasterized
+# headless through the CPU renderer to `target/outline_proof.png`. Verifies the
+# ring sits outside the box with a visible offset gap. No window or GPU.
+[[example]]
+name = "outline_proof"
+required-features = ["render-cpu"]
+
 # The headless capability showcase → PNG. Needs the CPU renderer, filesystem
 # image loading + decode, and the real text shaping stack — but no window or GPU,
 # so it builds and runs anywhere (`cargo build --examples` stays display-free).
