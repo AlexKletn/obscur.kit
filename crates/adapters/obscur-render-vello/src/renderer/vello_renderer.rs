@@ -5,11 +5,13 @@ use obscur_render::frame::{FrameSubmission, PresentResult};
 use obscur_render::renderer::{Renderer, RendererCapabilities, RendererError, RendererId};
 use obscur_render::target::RenderTarget;
 
+use obscur_scene::command::{DisplayList, PaintCommand};
+
 use vello::kurbo::Affine;
 use vello::peniko::{Blob, FontData};
 use vello::Scene;
 
-use crate::conversion::{BlurLayer, SceneConverter};
+use crate::conversion::{BlurLayer, SceneConverter, SceneSegment};
 use crate::effects::GaussianBlur;
 use crate::error::VelloRenderError;
 use crate::renderer::{VelloDevice, VelloFrame, VelloSurface};
@@ -152,10 +154,22 @@ impl VelloRenderer {
         width: u32,
         height: u32,
     ) -> Result<VelloFrame, RendererError> {
+        let display_list = submission.frame().scene().display_list();
+
+        // `backdrop-filter` frosts the frame accumulated so far, so it cannot be
+        // rendered in a single Vello pass: fall to the segmented compositing path.
+        // A list with no backdrop-filter keeps the byte-identical single-render fast
+        // path below (main scene + any `filter: blur` sub-scenes composited on top).
+        if display_list
+            .commands()
+            .iter()
+            .any(|command| matches!(command, PaintCommand::BackdropFilter { .. }))
+        {
+            return self.render_segmented(display_list, width, height);
+        }
+
         // Convert first (device-free): the main scene plus any blur sub-scenes.
-        let (main_scene, blurs) = self
-            .scene_converter
-            .convert_with_blurs(submission.frame().scene().display_list());
+        let (main_scene, blurs) = self.scene_converter.convert_with_blurs(display_list);
 
         let Some(device) = self.device.as_mut() else {
             return Err(
@@ -247,6 +261,221 @@ impl VelloRenderer {
                 );
             }
             gpu_queue.submit(std::iter::once(encoder.finish()));
+        }
+
+        Ok(frame)
+    }
+
+    /// Renders a display list containing `backdrop-filter` via **segmented
+    /// compositing** (spec §5.2, CSS `backdrop-filter` — the acrylic effect).
+    ///
+    /// `backdrop-filter` frosts the frame accumulated *so far*, so a single Vello
+    /// render will not do. The list is split at each
+    /// [`BackdropFilter`](PaintCommand::BackdropFilter) into
+    /// [`SceneSegment`]s ([`SceneConverter::convert_segments`]): each
+    /// [`Content`](SceneSegment::Content) run is rendered to a transparent offscreen
+    /// and composited onto an **accumulating frame** `T` (premultiplied-over, so
+    /// segments layer in paint order — no Vello load/no-clear mode needed), and each
+    /// [`Backdrop`](SceneSegment::Backdrop) boundary frosts `T` in place under the
+    /// panel's rounded border box via the owned
+    /// [`GaussianBlur::render_backdrop`]. A content run's `filter: blur` layers are
+    /// composited on top just as the non-segmented path does. The same owned
+    /// [`GaussianBlur`] pipelines are reused; this path is shared by every caller of
+    /// [`Self::render_to_frame`] (present + read-back + the port `render`).
+    ///
+    /// # Errors
+    ///
+    /// [`RendererError::DeviceLost`] when no device is attached, or
+    /// [`RendererError::Backend`] on a Vello rasterization failure.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
+    fn render_segmented(
+        &mut self,
+        display_list: &DisplayList,
+        width: u32,
+        height: u32,
+    ) -> Result<VelloFrame, RendererError> {
+        // Convert first (device-free): the ordered content / backdrop segments.
+        let segments = self.scene_converter.convert_segments(display_list);
+
+        let Some(device) = self.device.as_ref() else {
+            return Err(
+                VelloRenderError::DeviceCreation("no gpu device".into()).into_renderer_error()
+            );
+        };
+        let gpu_device = device.device().clone();
+        let gpu_queue = device.queue().clone();
+
+        // The accumulating frame `T`: segments composite onto it in order, and each
+        // backdrop boundary frosts it in place. Clear it to transparent first (it is
+        // never a Vello render target, so nothing else initialises it).
+        let frame = VelloFrame::new_offscreen(&gpu_device, width, height);
+        let (width, height) = frame.size();
+        {
+            let mut encoder = gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("obscur-vello-backdrop-clear"),
+            });
+            drop(encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("obscur-vello-backdrop-clear-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: frame.view(),
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            }));
+            gpu_queue.submit(std::iter::once(encoder.finish()));
+        }
+
+        // Build (once) / reuse the owned blur + composite pipelines.
+        if self.blur.is_none() {
+            self.blur = Some(GaussianBlur::new(&gpu_device));
+        }
+
+        for segment in segments {
+            match segment {
+                SceneSegment::Content { scene, blurs } => {
+                    // Render this segment's content into a fresh transparent
+                    // offscreen (Vello clears it to `base_color`).
+                    let seg_frame = VelloFrame::new_offscreen(&gpu_device, width, height);
+                    let params = vello::RenderParams {
+                        base_color: vello::peniko::Color::TRANSPARENT,
+                        width,
+                        height,
+                        antialiasing_method: vello::AaConfig::Area,
+                    };
+                    {
+                        let device = self
+                            .device
+                            .as_mut()
+                            .expect("device present (checked above)");
+                        device
+                            .renderer_mut()
+                            .render_to_texture(
+                                &gpu_device,
+                                &gpu_queue,
+                                &scene,
+                                seg_frame.view(),
+                                &params,
+                            )
+                            .map_err(|error| {
+                                VelloRenderError::RenderFailed(error.to_string().into())
+                                    .into_renderer_error()
+                            })?;
+                    }
+
+                    // Render this segment's `filter: blur` sub-scenes into their own
+                    // margin-padded offscreens (same prep as the fast path).
+                    let mut prepared: Vec<(VelloFrame, (f32, f32), BlurLayer)> =
+                        Vec::with_capacity(blurs.len());
+                    for blur in blurs {
+                        let margin = (blur.radius * 3.0).ceil().max(1.0);
+                        let s_width = (blur.bounds.size.width + 2.0 * margin).ceil().max(1.0) as u32;
+                        let s_height =
+                            (blur.bounds.size.height + 2.0 * margin).ceil().max(1.0) as u32;
+                        let s_frame = VelloFrame::new_offscreen(&gpu_device, s_width, s_height);
+                        let (s_width, s_height) = s_frame.size();
+                        let offset = Affine::translate((
+                            f64::from(margin) - f64::from(blur.bounds.origin.x),
+                            f64::from(margin) - f64::from(blur.bounds.origin.y),
+                        ));
+                        let mut placed = Scene::new();
+                        placed.append(&blur.scene, Some(offset));
+                        let sub_params = vello::RenderParams {
+                            base_color: vello::peniko::Color::TRANSPARENT,
+                            width: s_width,
+                            height: s_height,
+                            antialiasing_method: vello::AaConfig::Area,
+                        };
+                        {
+                            let device = self
+                                .device
+                                .as_mut()
+                                .expect("device present (checked above)");
+                            device
+                                .renderer_mut()
+                                .render_to_texture(
+                                    &gpu_device,
+                                    &gpu_queue,
+                                    &placed,
+                                    s_frame.view(),
+                                    &sub_params,
+                                )
+                                .map_err(|error| {
+                                    VelloRenderError::RenderFailed(error.to_string().into())
+                                        .into_renderer_error()
+                                })?;
+                        }
+                        let origin =
+                            (blur.bounds.origin.x - margin, blur.bounds.origin.y - margin);
+                        prepared.push((s_frame, origin, blur));
+                    }
+
+                    // Composite the segment (whole-frame) onto `T`, then its blur
+                    // layers on top, in one encoder submitted after the Vello renders.
+                    let gaussian = self.blur.as_ref().expect("blur pipelines built above");
+                    let mut encoder =
+                        gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("obscur-vello-segment-composite"),
+                        });
+                    gaussian.composite_over(
+                        &gpu_device,
+                        &mut encoder,
+                        seg_frame.view(),
+                        frame.view(),
+                    );
+                    for (s_frame, origin, blur) in &prepared {
+                        gaussian.render(
+                            &gpu_device,
+                            &mut encoder,
+                            s_frame,
+                            *origin,
+                            blur,
+                            frame.view(),
+                            (width, height),
+                        );
+                    }
+                    gpu_queue.submit(std::iter::once(encoder.finish()));
+                }
+                SceneSegment::Backdrop {
+                    bounds,
+                    radii,
+                    blur,
+                } => {
+                    let gaussian = self.blur.as_ref().expect("blur pipelines built above");
+                    let mut encoder =
+                        gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("obscur-vello-backdrop"),
+                        });
+                    gaussian.render_backdrop(
+                        &gpu_device,
+                        &mut encoder,
+                        frame.texture(),
+                        frame.view(),
+                        (width, height),
+                        [
+                            bounds.origin.x,
+                            bounds.origin.y,
+                            bounds.origin.x + bounds.size.width,
+                            bounds.origin.y + bounds.size.height,
+                        ],
+                        [
+                            radii.top_left,
+                            radii.top_right,
+                            radii.bottom_right,
+                            radii.bottom_left,
+                        ],
+                        blur,
+                    );
+                    gpu_queue.submit(std::iter::once(encoder.finish()));
+                }
+            }
         }
 
         Ok(frame)
@@ -517,11 +746,13 @@ impl Renderer for VelloRenderer {
             // A `box-shadow` and a `filter: drop-shadow(...)` both render through
             // `Scene::draw_blurred_rounded_rect` — a real gaussian, but built from
             // Vello's primitives rather than a single native shadow op.
-            "blur" | "shadow" | "drop-shadow" => SupportLevel::Emulated,
-            // The general `filter` / `backdrop-filter` (content blur, color-matrix)
-            // have no primitive on Vello 0.9 — only the `drop-shadow` subset is
-            // expressible — so they are honestly unavailable rather than a silent
-            // no-op (spec §5.2 explicit diagnostics).
+            // `backdrop-filter: blur()` frosts the backdrop via the owned segmented
+            // wgpu compositing path (real gaussian, not a native op).
+            "blur" | "shadow" | "drop-shadow" | "backdrop-filter" => SupportLevel::Emulated,
+            // The general `filter` (color-matrix, brightness, …) has no primitive on
+            // Vello 0.9 — only the `blur` / `drop-shadow` subsets are expressible —
+            // so it is honestly unavailable rather than a silent no-op (spec §5.2
+            // explicit diagnostics).
             _ => SupportLevel::Unavailable,
         }
     }
@@ -635,14 +866,16 @@ mod tests {
             renderer.supports_effect("drop-shadow"),
             SupportLevel::Emulated
         );
-        // The general `filter` / `backdrop-filter` (content blur, color-matrix)
-        // have no Vello 0.9 primitive — honestly unavailable, not a silent no-op.
-        assert_eq!(
-            renderer.supports_effect("filter"),
-            SupportLevel::Unavailable
-        );
+        // `backdrop-filter: blur()` frosts the backdrop via the owned segmented
+        // wgpu compositing path — emulated (a real gaussian), not a native op.
         assert_eq!(
             renderer.supports_effect("backdrop-filter"),
+            SupportLevel::Emulated
+        );
+        // The general `filter` (color-matrix, brightness) has no Vello 0.9
+        // primitive — honestly unavailable, not a silent no-op.
+        assert_eq!(
+            renderer.supports_effect("filter"),
             SupportLevel::Unavailable
         );
         assert_eq!(

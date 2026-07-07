@@ -21,8 +21,11 @@
 //! - **Coordinate space.** Bounds are the element's *untransformed* border box and
 //!   the target is assumed 1:1 logical↔physical pixels; a device scale or an
 //!   enclosing transform combined with blur is approximate (documented).
-//! - **`backdrop-filter`** (blurring the content BEHIND) is out of scope — it needs
-//!   the backdrop, a follow-up that reuses this same offscreen + wgpu-pass path.
+//! - **`backdrop-filter`** (blurring the content BEHIND the element) reuses this
+//!   same pipeline set via [`GaussianBlur::render_backdrop`]: the renderer's
+//!   segmented compositing path copies a region of the accumulated frame, runs the
+//!   same separable gaussian over it, and composites it back masked to the panel's
+//!   rounded shape (the frosted-glass / acrylic effect, spec §5.2).
 
 use crate::conversion::BlurLayer;
 use crate::renderer::VelloFrame;
@@ -208,9 +211,156 @@ impl GaussianBlur {
         let x1 = (ox + sw as f32) / tw as f32 * 2.0 - 1.0;
         let y_top = 1.0 - oy / th as f32 * 2.0;
         let y_bottom = 1.0 - (oy + sh as f32) / th as f32 * 2.0;
-        self.composite_pass(device, encoder, &temp_b_view, target_view, [
-            x0, y_top, x1, y_bottom,
-        ]);
+        // `filter: blur` composites the whole blurred quad, no rounded mask. The
+        // source is a blurred Vello sub-scene (straight alpha); premultiplied `false`
+        // keeps the shipped opaque path byte-identical.
+        self.composite_pass(
+            device,
+            encoder,
+            &temp_b_view,
+            target_view,
+            [x0, y_top, x1, y_bottom],
+            None,
+            false,
+        );
+    }
+
+    /// Frosts the **backdrop** in place: blurs the region of the accumulating frame
+    /// `accum` under `bounds` (the panel's border box, physical pixels
+    /// `(x0, y0, x1, y1)`), clipped to the rounded `radii`, and writes the blurred
+    /// result back over `accum` (spec §5.2, CSS `backdrop-filter`).
+    ///
+    /// Unlike [`Self::render`] (which blurs a *sub-scene* and composites it), this
+    /// samples the already-composited frame itself: a padded region of `accum` is
+    /// copied into a scratch texture (the `~3σ` margin keeps the gaussian tail from
+    /// clipping at the panel edge, clamped to the frame), run through the same
+    /// separable gaussian, and composited back over `accum` masked to the rounded
+    /// panel shape — so only the panel area is frosted and its corners stay sharp
+    /// outside the radius. Recorded into `encoder`; the caller submits after the
+    /// prior segment composites so the backdrop is fully painted first.
+    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::too_many_arguments)]
+    pub fn render_backdrop(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        accum: &wgpu::Texture,
+        accum_view: &wgpu::TextureView,
+        accum_size: (u32, u32),
+        bounds: [f32; 4],
+        radii: [f32; 4],
+        blur_radius: f32,
+    ) {
+        let (tw, th) = accum_size;
+        if tw == 0 || th == 0 || blur_radius <= 0.0 {
+            return;
+        }
+        // Padded region (panel + ~3σ margin), clamped to the frame extent.
+        let margin = (blur_radius * 3.0).ceil().max(1.0);
+        let rx0 = (bounds[0] - margin).floor().clamp(0.0, tw as f32) as u32;
+        let ry0 = (bounds[1] - margin).floor().clamp(0.0, th as f32) as u32;
+        let rx1 = (bounds[2] + margin).ceil().clamp(0.0, tw as f32) as u32;
+        let ry1 = (bounds[3] + margin).ceil().clamp(0.0, th as f32) as u32;
+        if rx1 <= rx0 || ry1 <= ry0 {
+            return;
+        }
+        let sw = rx1 - rx0;
+        let sh = ry1 - ry0;
+
+        // Copy the padded region of the frame into a scratch, then H+V blur it.
+        let src = scratch_texture(device, sw, sh, "obscur-backdrop-src");
+        encoder.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: accum,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x: rx0, y: ry0, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyTextureInfo {
+                texture: &src,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d {
+                width: sw,
+                height: sh,
+                depth_or_array_layers: 1,
+            },
+        );
+        let src_view = src.create_view(&wgpu::TextureViewDescriptor::default());
+        let temp_a = scratch_texture(device, sw, sh, "obscur-backdrop-h");
+        let temp_b = scratch_texture(device, sw, sh, "obscur-backdrop-v");
+        let temp_a_view = temp_a.create_view(&wgpu::TextureViewDescriptor::default());
+        let temp_b_view = temp_b.create_view(&wgpu::TextureViewDescriptor::default());
+        self.blur_pass(
+            device,
+            encoder,
+            &src_view,
+            &temp_a_view,
+            [1.0 / sw as f32, 0.0],
+            blur_radius,
+        );
+        self.blur_pass(
+            device,
+            encoder,
+            &temp_a_view,
+            &temp_b_view,
+            [0.0, 1.0 / sh as f32],
+            blur_radius,
+        );
+
+        // Composite the blurred region back over the frame at the clamped region's
+        // NDC rect, masked to the rounded panel (in scratch pixel space).
+        let x0 = rx0 as f32 / tw as f32 * 2.0 - 1.0;
+        let x1 = rx1 as f32 / tw as f32 * 2.0 - 1.0;
+        let y_top = 1.0 - ry0 as f32 / th as f32 * 2.0;
+        let y_bottom = 1.0 - ry1 as f32 / th as f32 * 2.0;
+        let mask = CompositeMask {
+            panel: [
+                bounds[0] - rx0 as f32,
+                bounds[1] - ry0 as f32,
+                bounds[2] - rx0 as f32,
+                bounds[3] - ry0 as f32,
+            ],
+            radii,
+            quad: [sw as f32, sh as f32],
+            aa: 1.0,
+        };
+        // `temp_b` is a blurred copy of the accumulating frame (already
+        // premultiplied), so premultiplied `false`; the mask frosts only the panel.
+        self.composite_pass(
+            device,
+            encoder,
+            &temp_b_view,
+            accum_view,
+            [x0, y_top, x1, y_bottom],
+            Some(mask),
+            false,
+        );
+    }
+
+    /// Composites the whole of `source` premultiplied-over `target` (both the same
+    /// extent) — the per-segment layering of the backdrop-filter path, which stacks
+    /// each rendered segment onto the accumulating frame in paint order.
+    pub fn composite_over(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &wgpu::TextureView,
+        target: &wgpu::TextureView,
+    ) {
+        // Full-target NDC quad: uv (0,0) → (-1, 1) top-left, (1,1) → (1, -1). The
+        // source is a Vello segment (STRAIGHT alpha), so premultiply it before the
+        // premultiplied-over blend layers it onto the accumulating (premult) frame.
+        self.composite_pass(
+            device,
+            encoder,
+            source,
+            target,
+            [-1.0, 1.0, 1.0, -1.0],
+            None,
+            true,
+        );
     }
 
     /// Records one separable gaussian pass sampling `input` into `output`.
@@ -254,6 +404,11 @@ impl GaussianBlur {
 
     /// Records the premultiplied-over composite of `input` onto `target` at the
     /// target-space NDC `rect` (`[x0, y_top, x1, y_bottom]`).
+    ///
+    /// `mask` optionally clips the composite to a rounded-rect panel shape (the
+    /// backdrop-filter frost); `None` composites the whole quad (the `filter: blur`
+    /// path), byte-identical to the pre-mask uniform (coverage is a constant `1`).
+    #[allow(clippy::too_many_arguments)]
     fn composite_pass(
         &self,
         device: &wgpu::Device,
@@ -261,8 +416,20 @@ impl GaussianBlur {
         input: &wgpu::TextureView,
         target: &wgpu::TextureView,
         rect: [f32; 4],
+        mask: Option<CompositeMask>,
+        premultiply: bool,
     ) {
-        let uniform = f32s_to_bytes(&rect);
+        let mask = mask.unwrap_or_default();
+        // CompositeParams: rect(4) + panel(4) + radii(4) + (quad_w, quad_h,
+        // mask_enabled, aa) + (premultiply, 0, 0, 0) — 20 f32 / 80 bytes, matching
+        // the WGSL struct.
+        let uniform = f32s_to_bytes(&[
+            rect[0], rect[1], rect[2], rect[3],
+            mask.panel[0], mask.panel[1], mask.panel[2], mask.panel[3],
+            mask.radii[0], mask.radii[1], mask.radii[2], mask.radii[3],
+            mask.quad[0], mask.quad[1], mask.enabled(), mask.aa,
+            if premultiply { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0,
+        ]);
         let buffer = uniform_buffer(device, &uniform, "obscur-gaussian-composite-uniform");
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("obscur-gaussian-composite-bind"),
@@ -313,6 +480,37 @@ impl GaussianBlur {
         ]
     }
 
+}
+
+/// The optional rounded-rect mask a [`composite_pass`](GaussianBlur::composite_pass)
+/// clips its blurred quad to — the backdrop-filter panel shape.
+///
+/// [`Default`] is the **disabled** mask (`quad == [0, 0]` → coverage constant `1`),
+/// so the `filter: blur` composite stays byte-identical. A constructed mask carries
+/// the panel border box + per-corner radii in the composited quad's own pixel
+/// space, plus the antialiased edge half-width `aa`.
+#[derive(Clone, Copy, Default)]
+struct CompositeMask {
+    /// Panel border box `[x0, y0, x1, y1]` in the quad's pixel space.
+    panel: [f32; 4],
+    /// Per-corner radii `(tl, tr, br, bl)` in quad pixels.
+    radii: [f32; 4],
+    /// The composited quad's `(width, height)` in pixels; `[0, 0]` disables the mask.
+    quad: [f32; 2],
+    /// Antialiased edge half-width, in pixels.
+    aa: f32,
+}
+
+impl CompositeMask {
+    /// The shader's `mask_enabled` flag: `1` when a non-degenerate quad is set,
+    /// else `0` (the disabled default → whole-quad composite).
+    fn enabled(&self) -> f32 {
+        if self.quad[0] > 0.0 && self.quad[1] > 0.0 {
+            1.0
+        } else {
+            0.0
+        }
+    }
 }
 
 impl std::fmt::Debug for GaussianBlur {
@@ -395,7 +593,11 @@ fn scratch_texture(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: BLUR_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        // COPY_DST lets the backdrop-filter pass seed a scratch with a copied
+        // region of the accumulating frame before blurring it.
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     })
 }

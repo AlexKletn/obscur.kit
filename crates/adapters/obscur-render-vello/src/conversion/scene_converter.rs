@@ -41,6 +41,62 @@ const FAUX_ITALIC_SKEW: f64 = 0.25;
 /// (spec §5.18).
 const FAUX_BOLD_EMBOLDEN_FRACTION: f64 = 0.02;
 
+/// One segment of a display list split at [`BackdropFilter`] boundaries by
+/// [`SceneConverter::convert_segments`] (spec §5.2, CSS `backdrop-filter`).
+///
+/// A `backdrop-filter` frosts the frame accumulated so far, so the renderer must
+/// composite content and frost the backdrop **in order**. The converter emits an
+/// alternating sequence: content to render, a backdrop to frost, more content, …
+///
+/// [`BackdropFilter`]: PaintCommand::BackdropFilter
+// A `Content` segment owns a `vello::Scene` (inherently large, like `BlurLayer`),
+// while `Backdrop` is a few floats; boxing the scene would only add an allocation
+// to the common variant. The size difference is expected.
+#[allow(clippy::large_enum_variant)]
+pub enum SceneSegment {
+    /// A run of drawable content (between two backdrop boundaries) as a Vello
+    /// [`Scene`] plus any `filter: blur` layers extracted from it (composited on
+    /// top exactly as the non-segmented path does).
+    Content {
+        /// The converted sub-scene for this run, in absolute coordinates.
+        scene: Scene,
+        /// The `filter: blur` layers extracted from this run.
+        blurs: Vec<BlurLayer>,
+    },
+    /// A `backdrop-filter` boundary: frost (gaussian-blur) the accumulated frame
+    /// within `bounds`, clipped to the rounded `radii`, by `blur` logical pixels.
+    Backdrop {
+        /// The panel's border box (the frost region), absolute logical pixels.
+        bounds: obscur_geometry::Rect,
+        /// The panel's per-corner radii (the frost is clipped to this shape).
+        radii: obscur_geometry::CornerRadii,
+        /// The CSS blur radius in logical pixels (`> 0`).
+        blur: f32,
+    },
+}
+
+impl std::fmt::Debug for SceneSegment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Content { blurs, .. } => f
+                .debug_struct("SceneSegment::Content")
+                .field("blurs", &blurs.len())
+                .field("scene", &"<vello::Scene>")
+                .finish(),
+            Self::Backdrop {
+                bounds,
+                radii,
+                blur,
+            } => f
+                .debug_struct("SceneSegment::Backdrop")
+                .field("bounds", bounds)
+                .field("radii", radii)
+                .field("blur", blur)
+                .finish(),
+        }
+    }
+}
+
 /// A converter from an obscur-scene [`DisplayList`] to a [`vello::Scene`].
 ///
 /// It owns the leaf converters ([`PathConverter`], [`BrushConverter`],
@@ -199,6 +255,64 @@ impl SceneConverter {
         (scene, blurs)
     }
 
+    /// Splits the display list at each
+    /// [`BackdropFilter`](PaintCommand::BackdropFilter) into an ordered list of
+    /// [`SceneSegment`]s the renderer composites in sequence (spec §5.2, CSS
+    /// `backdrop-filter`).
+    ///
+    /// `backdrop-filter` frosts the frame **as accumulated so far**, so it is
+    /// order-dependent and cannot live inside one Vello scene. This walk breaks the
+    /// command stream at every backdrop boundary: the commands between boundaries
+    /// become a [`SceneSegment::Content`] (converted exactly as
+    /// [`Self::convert_with_blurs`], so each still extracts its own `filter: blur`
+    /// layers), and each boundary becomes a [`SceneSegment::Backdrop`] carrying the
+    /// frost region + radii + radius. The renderer renders and composites each
+    /// content segment onto an accumulating frame, then frosts that frame in place
+    /// at each backdrop boundary.
+    ///
+    /// # Limitation
+    ///
+    /// Each content run is converted as an **independent** scene, so a `PushClip` /
+    /// `PushTransform` left open across a backdrop boundary is closed at the run's
+    /// end and does not carry into the next run (its pops there are ignored). A
+    /// backdrop-filter nested under such an ancestor is therefore approximate; the
+    /// common top-level acrylic panel is exact. A list with no backdrop-filter
+    /// returns a single `Content` segment equal to `convert_with_blurs`.
+    #[must_use]
+    pub fn convert_segments(&self, list: &DisplayList) -> Vec<SceneSegment> {
+        let commands = list.commands();
+        let mut segments: Vec<SceneSegment> = Vec::new();
+        let mut start = 0usize;
+        for (index, command) in commands.iter().enumerate() {
+            if let PaintCommand::BackdropFilter {
+                bounds,
+                radii,
+                blur,
+            } = command
+            {
+                segments.push(self.content_segment(&commands[start..index]));
+                segments.push(SceneSegment::Backdrop {
+                    bounds: *bounds,
+                    radii: *radii,
+                    blur: *blur,
+                });
+                start = index + 1;
+            }
+        }
+        segments.push(self.content_segment(&commands[start..]));
+        segments
+    }
+
+    /// Converts one content run (the commands between two backdrop boundaries) into
+    /// a [`SceneSegment::Content`], extracting its `filter: blur` layers just like
+    /// [`Self::convert_with_blurs`].
+    fn content_segment(&self, commands: &[PaintCommand]) -> SceneSegment {
+        let mut scene = Scene::new();
+        let mut blurs: Vec<BlurLayer> = Vec::new();
+        self.emit(&mut scene, commands, Affine::IDENTITY, Some(&mut blurs));
+        SceneSegment::Content { scene, blurs }
+    }
+
     /// Replays `commands` onto `scene` under a `base` transform, in paint order.
     ///
     /// When `extract` is `Some`, a `PushLayer` carrying a
@@ -297,6 +411,14 @@ impl SceneConverter {
                 } => {
                     draw_image(scene, image, tile, region, *repeat_x, *repeat_y, current);
                 }
+                // `backdrop-filter` blurs the accumulated frame BEHIND the element,
+                // so it cannot be expressed inside a single Vello scene: it is a
+                // segmentation boundary consumed by [`Self::convert_segments`] and
+                // the renderer's segmented compositing. In the inline
+                // (`convert` / `convert_with_blurs`) paths it is a no-op — those
+                // back-compat entry points show the backdrop un-frosted (honest;
+                // the frost needs the renderer's own wgpu passes).
+                PaintCommand::BackdropFilter { .. } => {}
             }
             index += 1;
         }
@@ -1008,6 +1130,69 @@ mod tests {
         // is non-empty and carries no separate blur layer.
         let inline = SceneConverter::new().convert(&list);
         assert!(!inline.encoding().is_empty());
+    }
+
+    #[test]
+    fn backdrop_filter_splits_the_display_list_into_segments() {
+        use obscur_geometry::CornerRadii;
+        // A backdrop (a filled rect) + a BackdropFilter boundary + a panel fill:
+        // `convert_segments` yields Content(backdrop) → Backdrop → Content(panel).
+        let bounds = Rect::new(Point::new(4.0, 4.0), Size::new(20.0, 12.0));
+        let list = DisplayList::from_commands(vec![
+            PaintCommand::DrawPath {
+                path: rect_path(),
+                paint: Paint::solid_fill(Color::rgba(0.0, 0.0, 1.0, 1.0)),
+            },
+            PaintCommand::BackdropFilter {
+                bounds,
+                radii: CornerRadii::uniform(6.0),
+                blur: 10.0,
+            },
+            PaintCommand::DrawPath {
+                path: rect_path(),
+                paint: Paint::solid_fill(Color::rgba(1.0, 1.0, 1.0, 0.3)),
+            },
+        ]);
+
+        let segments = SceneConverter::new().convert_segments(&list);
+        assert_eq!(segments.len(), 3, "content / backdrop / content");
+        match &segments[0] {
+            SceneSegment::Content { scene, blurs } => {
+                assert!(!scene.encoding().is_empty(), "backdrop content present");
+                assert!(blurs.is_empty());
+            }
+            other => panic!("expected leading content, got {other:?}"),
+        }
+        match &segments[1] {
+            SceneSegment::Backdrop {
+                bounds: b,
+                blur,
+                ..
+            } => {
+                assert_eq!(*b, bounds);
+                assert_eq!(*blur, 10.0);
+            }
+            other => panic!("expected a backdrop boundary, got {other:?}"),
+        }
+        match &segments[2] {
+            SceneSegment::Content { scene, .. } => {
+                assert!(!scene.encoding().is_empty(), "panel content present");
+            }
+            other => panic!("expected trailing content, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_backdrop_filter_yields_a_single_content_segment() {
+        // With no BackdropFilter the whole list is one Content segment (the
+        // byte-identical non-segmented path).
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawPath {
+            path: rect_path(),
+            paint: Paint::solid_fill(Color::rgba(0.0, 0.0, 1.0, 1.0)),
+        }]);
+        let segments = SceneConverter::new().convert_segments(&list);
+        assert_eq!(segments.len(), 1);
+        assert!(matches!(segments[0], SceneSegment::Content { .. }));
     }
 
     #[test]

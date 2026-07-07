@@ -155,6 +155,17 @@ pub enum PropertyId {
     /// (`blur()`, `brightness()`, …) are out of scope on vello 0.9 and are
     /// silently dropped; `filter: none` / empty lowers to an empty list.
     Filter,
+    /// The `backdrop-filter` property (a `Filter` op list carrying only the
+    /// `blur(<length>)` function; NOT inherited). Unlike [`Filter`](Self::Filter)
+    /// — which blurs the element's OWN content — `backdrop-filter` blurs what is
+    /// painted BEHIND the element (the backdrop), producing frosted-glass /
+    /// Fluent acrylic. Only `blur(<length>)` is modelled; it lowers to a
+    /// [`FilterOp::Blur`](crate::property::FilterOp) that the scene coordinator
+    /// emits as a `BackdropFilter` command before the element's background, and the
+    /// Vello renderer frosts the backdrop with a segmented gaussian pass.
+    /// Color-matrix / other functions are out of scope (dropped); `none` /
+    /// `blur(0)` lowers to an empty list (no effect).
+    BackdropFilter,
 
     // ---- 2D transform (not inherited) ----
     /// The `transform` property (a resolved `Transform` affine; NOT inherited).
@@ -334,6 +345,7 @@ impl PropertyId {
             Self::BorderBottomLeftRadius => "border-bottom-left-radius",
             Self::BoxShadow => "box-shadow",
             Self::Filter => "filter",
+            Self::BackdropFilter => "backdrop-filter",
             Self::Transform => "transform",
             Self::TransformOrigin => "transform-origin",
             Self::MinWidth => "min-width",
@@ -432,6 +444,7 @@ impl PropertyId {
             | Self::BorderBottomLeftRadius
             | Self::BoxShadow
             | Self::Filter
+            | Self::BackdropFilter
             | Self::Transform
             | Self::TransformOrigin
             | Self::MinWidth
@@ -853,6 +866,18 @@ mod tests {
         // Like `box-shadow` and the other paint effects, `filter` resets per
         // element rather than inheriting.
         assert!(!PropertyId::Filter.default_inheritance().is_inherited());
+    }
+
+    #[test]
+    fn backdrop_filter_name_and_not_inherited() {
+        assert_eq!(PropertyId::BackdropFilter.name(), "backdrop-filter");
+        // Like `filter` and the other paint effects, `backdrop-filter` resets per
+        // element rather than inheriting.
+        assert!(
+            !PropertyId::BackdropFilter
+                .default_inheritance()
+                .is_inherited()
+        );
     }
 
     #[test]

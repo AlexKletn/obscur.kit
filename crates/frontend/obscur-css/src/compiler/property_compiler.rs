@@ -1002,7 +1002,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 79] = [
+    const ALL: [PropertyId; 80] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::BackgroundImage,
@@ -1048,6 +1048,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::BorderBottomLeftRadius,
         PropertyId::BoxShadow,
         PropertyId::Filter,
+        PropertyId::BackdropFilter,
         PropertyId::Transform,
         PropertyId::TransformOrigin,
         PropertyId::MinWidth,
@@ -1187,6 +1188,15 @@ fn lower_for_property(
             return Some(wide);
         }
         return lower_filter(values);
+    }
+    if property == PropertyId::BackdropFilter {
+        if let Some(ParsedValue::Keyword(keyword)) = values.first()
+            && let Some(wide) = css_wide_keyword(keyword)
+            && values.len() == 1
+        {
+            return Some(wide);
+        }
+        return lower_backdrop_filter(values);
     }
     if property == PropertyId::Transform {
         if let Some(ParsedValue::Keyword(keyword)) = values.first()
@@ -2129,6 +2139,46 @@ fn lower_filter(values: &[ParsedValue]) -> Option<PropertyValue> {
         }
         // Every other filter function (`brightness()`, `contrast()`, …) is out of
         // scope and silently dropped — not faked.
+    }
+    Some(PropertyValue::Filter(ops.into_boxed_slice()))
+}
+
+/// Lowers a `backdrop-filter` value into a [`PropertyValue::Filter`] op list
+/// carrying only `blur(<length>)` ops (the frosted-glass / acrylic effect).
+///
+/// `backdrop-filter` blurs what is painted BEHIND the element, not its own
+/// content. Only the `blur(<length>)` function is modelled — it lowers to a
+/// [`FilterOp::Blur`] the coordinator emits as a `BackdropFilter` command. A zero
+/// radius (`blur(0)`, `blur()`) yields **no** op, so it round-trips to the
+/// byte-identical no-effect path. Every other function (`brightness()`,
+/// color-matrix, `drop-shadow()`, …) is **silently dropped** — out of scope for
+/// the backdrop pass (documented). `backdrop-filter: none` and an empty value both
+/// lower to an **empty** list (no effect). Returns [`None`] only when a `blur(…)`
+/// is present but malformed (a negative or non-length radius), so the author sees
+/// the mistake rather than a silent no-op.
+fn lower_backdrop_filter(values: &[ParsedValue]) -> Option<PropertyValue> {
+    // `none` → an empty op list.
+    if let [ParsedValue::Keyword(keyword)] = values
+        && keyword.eq_ignore_ascii_case("none")
+    {
+        return Some(PropertyValue::Filter(Box::new([])));
+    }
+    let mut ops: Vec<FilterOp> = Vec::new();
+    for value in values {
+        let ParsedValue::Function { name, args } = value else {
+            // A bare token in the list is not a filter function; it is malformed.
+            return None;
+        };
+        if name.eq_ignore_ascii_case("blur") {
+            // A positive radius becomes a blur op; `blur(0)` / `blur()` is a no-op
+            // (kept out of the list so it stays byte-identical to no effect).
+            let radius = lower_one_blur(args)?;
+            if radius > 0.0 {
+                ops.push(FilterOp::Blur(radius));
+            }
+        }
+        // Every other function (color-matrix, `drop-shadow()`, `brightness()`, …)
+        // is out of scope for `backdrop-filter` and silently dropped — not faked.
     }
     Some(PropertyValue::Filter(ops.into_boxed_slice()))
 }
@@ -3352,6 +3402,31 @@ mod tests {
     #[test]
     fn filter_none_is_an_empty_list() {
         assert!(filter_ops_of("filter: none").is_empty());
+    }
+
+    #[test]
+    fn backdrop_filter_blur_lowers_to_a_blur_op() {
+        // `backdrop-filter: blur(12px)` lowers to a single `Blur(12)` op (the
+        // frosted-glass radius the coordinator emits as a BackdropFilter command).
+        let ops = filter_ops_of("backdrop-filter: blur(12px)");
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0], FilterOp::Blur(12.0));
+    }
+
+    #[test]
+    fn backdrop_filter_zero_blur_and_none_are_empty() {
+        // `blur(0)` / `blur()` / `none` all carry no op (byte-identical no-effect).
+        assert!(filter_ops_of("backdrop-filter: blur(0)").is_empty());
+        assert!(filter_ops_of("backdrop-filter: blur()").is_empty());
+        assert!(filter_ops_of("backdrop-filter: none").is_empty());
+    }
+
+    #[test]
+    fn backdrop_filter_other_functions_are_dropped() {
+        // Only `blur()` is honored; a `drop-shadow()` / `brightness()` is out of
+        // scope for the backdrop pass and silently dropped (empty list, not error).
+        assert!(filter_ops_of("backdrop-filter: drop-shadow(2px 2px 2px black)").is_empty());
+        assert!(filter_ops_of("backdrop-filter: brightness(0.5)").is_empty());
     }
 
     #[test]

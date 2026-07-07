@@ -122,6 +122,21 @@ impl DisplayListBuilder {
         self
     }
 
+    /// Appends a [`PaintCommand::BackdropFilter`] frosting (blurring) the backdrop
+    /// — everything already painted behind this point — within the border box
+    /// `bounds`, clipped to the rounded `radii`, by the CSS blur radius `blur`.
+    /// This is a leaf command (no nesting effect); it must be issued **before** the
+    /// element's own background so the element paints over the frosted backdrop.
+    /// Returns `&mut Self` for chaining.
+    pub fn backdrop_filter(&mut self, bounds: Rect, radii: CornerRadii, blur: f32) -> &mut Self {
+        self.commands.push(PaintCommand::BackdropFilter {
+            bounds,
+            radii,
+            blur,
+        });
+        self
+    }
+
     /// Appends a stroke: a [`PaintCommand::DrawPath`] with
     /// `Paint::stroke(stroke)`. Returns `&mut Self` for chaining.
     pub fn stroke(&mut self, path: Path, stroke: Stroke) -> &mut Self {
@@ -361,6 +376,25 @@ mod tests {
             }
         );
         // A DrawImage is a leaf, so the list stays balanced.
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn backdrop_filter_appends_a_balanced_leaf() {
+        let mut builder = DisplayListBuilder::new();
+        builder.backdrop_filter(rect(), CornerRadii::uniform(8.0), 10.0);
+        assert!(builder.is_balanced());
+        let list = builder.build();
+        assert_eq!(list.len(), 1);
+        assert_eq!(
+            list.commands()[0],
+            PaintCommand::BackdropFilter {
+                bounds: rect(),
+                radii: CornerRadii::uniform(8.0),
+                blur: 10.0,
+            }
+        );
+        // A BackdropFilter is a leaf, so the list stays balanced.
         assert!(list.is_balanced());
     }
 

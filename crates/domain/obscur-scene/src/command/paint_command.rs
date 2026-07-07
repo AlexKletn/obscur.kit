@@ -119,6 +119,33 @@ pub enum PaintCommand {
         /// Whether to tile the image vertically to fill `region`.
         repeat_y: bool,
     },
+    /// Blur the **backdrop** — everything already painted behind this point —
+    /// within `bounds`, clipped to the rounded `radii`, in place (CSS
+    /// `backdrop-filter: blur(<len>)`, the frosted-glass / acrylic effect, spec
+    /// §5.2). A LEAF command (no nesting effect).
+    ///
+    /// Unlike [`PaintCommand::DrawShadow`] or a `filter: blur` layer (which blur
+    /// the element's OWN content), this command blurs the accumulated frame as
+    /// painted so far — the content BEHIND the element — so it is inherently
+    /// **order-dependent**: a renderer must have already composited every prior
+    /// command before applying it. The coordinator emits it at the element's paint
+    /// position, **before** the element's own background / border / content, so the
+    /// element's (usually translucent) background then draws OVER the frosted
+    /// backdrop → acrylic.
+    ///
+    /// `bounds` is the element's border box and `blur` the CSS blur *radius* in
+    /// logical pixels (`0` = no effect). Only the rounded-`radii` area is frosted;
+    /// pixels outside the rounded shape are left sharp. Backends without a real
+    /// backdrop pass (e.g. the CPU rasterizer) may skip it (honest no-op).
+    BackdropFilter {
+        /// The element's border-box rectangle: the backdrop region to frost.
+        bounds: Rect,
+        /// The border box's per-corner radii (all zero for a square panel); the
+        /// frosted region is clipped to this rounded shape.
+        radii: CornerRadii,
+        /// The CSS blur *radius* in logical pixels (`> 0`; `0` = no effect).
+        blur: f32,
+    },
     /// Push an affine transform onto the transform stack (CSS 2D `transform`,
     /// spec §5.2). Subsequent drawing — up to the matching
     /// [`PaintCommand::PopTransform`] — is mapped by the composition of every
@@ -175,7 +202,8 @@ impl PaintCommand {
             Self::DrawPath { .. }
             | Self::DrawText { .. }
             | Self::DrawShadow { .. }
-            | Self::DrawImage { .. } => 0,
+            | Self::DrawImage { .. }
+            | Self::BackdropFilter { .. } => 0,
         }
     }
 }
@@ -273,6 +301,18 @@ mod tests {
         assert_eq!(cmd.nesting_delta(), 0);
         assert!(!cmd.is_push());
         assert!(!cmd.is_pop());
+    }
+
+    #[test]
+    fn backdrop_filter_is_a_leaf() {
+        let backdrop = PaintCommand::BackdropFilter {
+            bounds: Rect::new(Point::new(4.0, 6.0), Size::new(40.0, 24.0)),
+            radii: CornerRadii::uniform(12.0),
+            blur: 10.0,
+        };
+        assert_eq!(backdrop.nesting_delta(), 0);
+        assert!(!backdrop.is_push());
+        assert!(!backdrop.is_pop());
     }
 
     #[test]

@@ -410,6 +410,13 @@ impl Renderer for CpuRenderer {
                     };
                     draw_image(pixmap, image, *tile, *region, *repeat_x, *repeat_y, clip, current);
                 }
+                // `backdrop-filter` (frosted glass) is a GPU-class effect: it needs
+                // to blur the already-composited frame in place, which the software
+                // rasterizer has no pass for. The CPU backend honestly skips it (the
+                // panel's own translucent background still paints over the SHARP
+                // backdrop) rather than faking a blur — a documented limitation, this
+                // effect is Vello-only (spec §5.2, CPU/GPU effect split).
+                PaintCommand::BackdropFilter { .. } => {}
             }
         }
 

@@ -112,6 +112,7 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     // Box effects.
     PropertyId::BoxShadow,
     PropertyId::Filter,
+    PropertyId::BackdropFilter,
     // 2D transform.
     PropertyId::Transform,
     PropertyId::TransformOrigin,
@@ -239,6 +240,10 @@ impl StyleResolver {
             // value paints nothing, so it is left unresolved — byte-for-byte
             // identical to before `filter: drop-shadow(...)` existed.
             PropertyId::Filter => None,
+            // `backdrop-filter` initial is `none` (no backdrop effect). Like
+            // `filter`, an absent value frosts nothing, so it is left unresolved —
+            // byte-for-byte identical to before backdrop-filter existed.
+            PropertyId::BackdropFilter => None,
             // `transform` initial is `none` (no transform). There is no
             // `Transform` value for `none` other than the identity, and an absent
             // value brackets nothing all the same, so it is left unresolved —
@@ -1060,6 +1065,7 @@ mod tests {
                 | PropertyId::BorderBottomLeftRadius
                 | PropertyId::BoxShadow
                 | PropertyId::Filter
+                | PropertyId::BackdropFilter
                 | PropertyId::Transform
                 | PropertyId::TransformOrigin
                 | PropertyId::MinWidth
@@ -1143,6 +1149,7 @@ mod tests {
             PropertyId::BorderBottomLeftRadius,
             PropertyId::BoxShadow,
             PropertyId::Filter,
+            PropertyId::BackdropFilter,
             PropertyId::Transform,
             PropertyId::TransformOrigin,
             PropertyId::MinWidth,

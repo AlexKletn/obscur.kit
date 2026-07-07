@@ -650,6 +650,21 @@ impl SceneCoordinator {
             // balanced.
             let mut node_paint = DisplayListBuilder::new();
 
+            // CSS `backdrop-filter: blur(r)`: the FIRST command of the node's paint
+            // unit, emitted BEFORE its own shadow / background / border / content. It
+            // frosts (gaussian-blurs) the backdrop — everything painted earlier
+            // (prior siblings, ancestor content) — within the node's border box,
+            // clipped to its rounded corners, so the node's (usually translucent)
+            // background then draws OVER the frosted backdrop → acrylic. It needs the
+            // arranged box (the frost region); no `backdrop-filter` (or no box) emits
+            // nothing (byte-for-byte identical). Only the GPU (Vello) backend frosts;
+            // the CPU rasterizer honestly skips it (documented).
+            if let Some(radius) = backdrop_blur_of(computed, node)
+                && let Some(layout_box) = boxes.get(&node)
+            {
+                node_paint.backdrop_filter(layout_box.bounds, radii, radius);
+            }
+
             // CSS `box-shadow`: a **drop** shadow paints BEHIND the node's
             // background (emitted first), an **inset** shadow ON TOP of it
             // (emitted after the background fill, below). CSS paints the
@@ -1512,6 +1527,27 @@ fn filter_ops_of(computed: &ComputedStyles, node: NodeId) -> Option<&[FilterOp]>
 /// radius is used (multiple blurs on one element are uncommon; documented).
 fn filter_blur_of(computed: &ComputedStyles, node: NodeId) -> Option<f32> {
     let radius = filter_ops_of(computed, node)?
+        .iter()
+        .filter_map(FilterOp::as_blur)
+        .fold(0.0_f32, f32::max);
+    (radius > 0.0).then_some(radius)
+}
+
+/// Reads a node's computed `backdrop-filter` blur radius (logical px), or
+/// [`None`] when no positive-radius `blur()` is authored (the byte-identical
+/// no-effect path).
+///
+/// `backdrop-filter` reuses the [`PropertyValue::Filter`](obscur_style::property::PropertyValue::Filter)
+/// op list (only `blur()` ops survive its lowering). A value may list several
+/// `blur()` ops; the **maximum** authored radius is used (multiple backdrop blurs
+/// on one element are uncommon; documented). The coordinator emits this radius as a
+/// [`BackdropFilter`](obscur_scene::command::PaintCommand::BackdropFilter) command
+/// frosting the backdrop under the node's border box.
+fn backdrop_blur_of(computed: &ComputedStyles, node: NodeId) -> Option<f32> {
+    let radius = computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::BackdropFilter))
+        .and_then(ComputedValue::as_filter_ops)?
         .iter()
         .filter_map(FilterOp::as_blur)
         .fold(0.0_f32, f32::max);
@@ -3190,6 +3226,110 @@ mod tests {
                 .iter()
                 .any(|c| matches!(c, PaintCommand::PushLayer(l) if l.effects().iter().any(|e| e.is_blur()))),
             "a drop-shadow-only filter emits no blur layer"
+        );
+    }
+
+    /// A `ComputedStyle` carrying a `background-color` and a
+    /// `backdrop-filter: blur(r)` (reusing the `Filter` op list).
+    fn with_background_and_backdrop(bg: StyleColor, radius: f32) -> ComputedStyle {
+        let mut style = ComputedStyle::new();
+        style.set(PropertyId::BackgroundColor, ComputedValue::color(bg));
+        style.set(
+            PropertyId::BackdropFilter,
+            ComputedValue::from_concrete(PropertyValue::Filter(
+                vec![FilterOp::Blur(radius)].into_boxed_slice(),
+            ))
+            .expect("a filter op list is a concrete computed value"),
+        );
+        style
+    }
+
+    #[test]
+    fn backdrop_filter_emits_command_before_background() {
+        // A node with `backdrop-filter: blur(12px)` over a background emits a
+        // BackdropFilter command with its border box + radius, positioned BEFORE
+        // (behind) its own background fill so the bg draws over the frosted backdrop.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(
+            a,
+            with_background_and_backdrop(StyleColor::rgba(1.0, 1.0, 1.0, 0.3), 12.0),
+        );
+
+        let mut boxes = LayoutBoxes::new();
+        let bounds = box_at(2.0, 3.0, 20.0, 10.0);
+        boxes.insert(a, bounds);
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        assert!(list.is_balanced());
+
+        // Exactly one BackdropFilter, carrying the border box + blur radius.
+        let backdrops: Vec<_> = list
+            .commands()
+            .iter()
+            .filter_map(|c| match c {
+                PaintCommand::BackdropFilter {
+                    bounds,
+                    blur,
+                    ..
+                } => Some((*bounds, *blur)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(backdrops.len(), 1, "one backdrop-filter command");
+        assert_eq!(backdrops[0].0, bounds.bounds, "frost region is the border box");
+        assert_eq!(backdrops[0].1, 12.0, "carries the authored blur radius");
+
+        // The BackdropFilter is emitted BEFORE the node's own background fill.
+        let backdrop_pos = list
+            .commands()
+            .iter()
+            .position(|c| matches!(c, PaintCommand::BackdropFilter { .. }))
+            .expect("backdrop present");
+        let fill_pos = list
+            .commands()
+            .iter()
+            .position(|c| matches!(c, PaintCommand::DrawPath { .. }))
+            .expect("background present");
+        assert!(
+            backdrop_pos < fill_pos,
+            "backdrop-filter frosts the backdrop before the element's own bg draws over it"
+        );
+    }
+
+    #[test]
+    fn no_backdrop_filter_emits_no_command() {
+        // Regression: a node with a background but no `backdrop-filter` emits no
+        // BackdropFilter command — byte-identical to before backdrop-filter existed.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        let mut style = ComputedStyle::new();
+        style.set(
+            PropertyId::BackgroundColor,
+            ComputedValue::color(StyleColor::rgba(0.0, 0.0, 1.0, 1.0)),
+        );
+        computed.insert(a, style);
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 20.0, 10.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        assert!(
+            !list
+                .commands()
+                .iter()
+                .any(|c| matches!(c, PaintCommand::BackdropFilter { .. })),
+            "no backdrop-filter emits no command"
         );
     }
 

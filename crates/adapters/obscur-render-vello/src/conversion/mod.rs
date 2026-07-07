@@ -24,4 +24,4 @@ pub use color_converter::ColorConverter;
 mod path_converter;
 pub use path_converter::PathConverter;
 mod scene_converter;
-pub use scene_converter::SceneConverter;
+pub use scene_converter::{SceneConverter, SceneSegment};
