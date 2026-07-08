@@ -301,6 +301,11 @@ pub enum PropertyId {
     /// `oblique`; inherited). See the reserved `FONT_STYLE_*` handles in
     /// [`crate::property::layout_keyword`].
     FontStyle,
+    /// The `line-height` property (a unitless [`PropertyValue::Number`] multiple
+    /// of `font-size`, or a `<length>`; inherited). The keyword initial `normal`
+    /// is left unresolved so an absent value falls back to the font's natural
+    /// line height. See [`crate::property::PropertyValue`].
+    LineHeight,
     /// The `text-align` property (Keyword-valued: `left` / `right` / `center` /
     /// `justify` / `start` / `end`; inherited). See the reserved `TEXT_ALIGN_*`
     /// handles in [`crate::property::layout_keyword`].
@@ -411,6 +416,7 @@ impl PropertyId {
             Self::Direction => "direction",
             Self::FontWeight => "font-weight",
             Self::FontStyle => "font-style",
+            Self::LineHeight => "line-height",
             Self::TextAlign => "text-align",
             Self::TextOverflow => "text-overflow",
             Self::Overflow => "overflow",
@@ -432,6 +438,7 @@ impl PropertyId {
             | Self::Direction
             | Self::FontWeight
             | Self::FontStyle
+            | Self::LineHeight
             | Self::TextAlign => Inheritance::Inherited,
             // Box / paint / layout properties reset on each element.
             Self::BackgroundColor
@@ -686,6 +693,14 @@ mod tests {
                 .default_inheritance()
                 .is_inherited()
         );
+    }
+
+    #[test]
+    fn line_height_name_and_inherited() {
+        assert_eq!(PropertyId::LineHeight.name(), "line-height");
+        // Like `font-size` and the other typography properties, `line-height`
+        // inherits by default.
+        assert!(PropertyId::LineHeight.default_inheritance().is_inherited());
     }
 
     #[test]

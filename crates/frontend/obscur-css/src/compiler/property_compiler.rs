@@ -1064,7 +1064,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 85] = [
+    const ALL: [PropertyId; 86] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::BackgroundImage,
@@ -1147,6 +1147,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::Direction,
         PropertyId::FontWeight,
         PropertyId::FontStyle,
+        PropertyId::LineHeight,
         PropertyId::TextAlign,
         PropertyId::TextOverflow,
         PropertyId::Overflow,
@@ -5425,6 +5426,33 @@ mod tests {
         );
         // CSS-wide keywords still take priority.
         assert_eq!(value_of("text-overflow: inherit"), PropertyValue::Inherit);
+    }
+
+    #[test]
+    fn resolves_line_height_name_and_lowers_number_and_length() {
+        assert_eq!(
+            property_id_from_name("line-height"),
+            Some(PropertyId::LineHeight)
+        );
+        assert_eq!(
+            property_id_from_name("LINE-HEIGHT"),
+            Some(PropertyId::LineHeight)
+        );
+        // A unitless number is kept as a `Number` multiple of the font size.
+        assert_eq!(value_of("line-height: 1.5"), PropertyValue::Number(1.5));
+        assert_eq!(
+            standard("line-height: 1.5").0.property(),
+            PropertyId::LineHeight
+        );
+        // An absolute length lowers to a px `Length`.
+        assert_eq!(
+            value_of("line-height: 24px"),
+            PropertyValue::Length(Length::px(24.0))
+        );
+        // `line-height: 0` is a zero multiple (a unitless number), not `0px`.
+        assert_eq!(value_of("line-height: 0"), PropertyValue::Number(0.0));
+        // CSS-wide keywords still take priority.
+        assert_eq!(value_of("line-height: inherit"), PropertyValue::Inherit);
     }
 
     #[test]

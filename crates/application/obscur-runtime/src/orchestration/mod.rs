@@ -31,7 +31,9 @@ pub use style_inputs::StyleInputs;
 mod style_matching_coordinator;
 pub use style_matching_coordinator::StyleMatchingCoordinator;
 mod text_attributes;
-pub(crate) use text_attributes::{alignment_for, attributes_for, direction_for, overflow_for};
+pub(crate) use text_attributes::{
+    alignment_for, attributes_for, direction_for, line_height_for, overflow_for,
+};
 mod text_coordinator;
 pub use text_coordinator::TextCoordinator;
 mod tree_element;

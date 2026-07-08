@@ -152,6 +152,7 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::FontFamily,
     PropertyId::FontWeight,
     PropertyId::FontStyle,
+    PropertyId::LineHeight,
     PropertyId::Direction,
     PropertyId::TextAlign,
     PropertyId::TextOverflow,
@@ -403,6 +404,11 @@ impl StyleResolver {
             // the interner, so an absent value falls back to the runtime's default
             // (`Start`) — byte-for-byte identical to today's behaviour.
             | PropertyId::TextAlign
+            // `line-height` initial is the keyword `normal`, which cannot be
+            // expressed without the interner; left unresolved so an absent value
+            // falls back to the font's natural (metric) line height in the
+            // coordinator — byte-for-byte identical to pre-`line-height` behaviour.
+            | PropertyId::LineHeight
             // `text-overflow` initial is `clip`; its keyword initial likewise needs
             // the interner, so an absent value falls back to the runtime's default
             // (`Clip`) — byte-for-byte identical to today's behaviour.
@@ -1125,6 +1131,7 @@ mod tests {
                 | PropertyId::Direction
                 | PropertyId::FontWeight
                 | PropertyId::FontStyle
+                | PropertyId::LineHeight
                 | PropertyId::TextAlign
                 | PropertyId::TextOverflow
                 | PropertyId::Overflow => {}
@@ -1214,6 +1221,7 @@ mod tests {
             PropertyId::Direction,
             PropertyId::FontWeight,
             PropertyId::FontStyle,
+            PropertyId::LineHeight,
             PropertyId::TextAlign,
             PropertyId::TextOverflow,
             PropertyId::Overflow,

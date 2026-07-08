@@ -27,7 +27,7 @@ use obscur_tree::tree::RetainedTree;
 
 use super::{
     alignment_for, attributes_for, direction_for, families_for, grid_templates_from,
-    overflow_for, resolve_named_grid_areas, resolve_named_grid_lines, ComputedStyles,
+    line_height_for, overflow_for, resolve_named_grid_areas, resolve_named_grid_lines, ComputedStyles,
     GridTemplates,
 };
 
@@ -334,9 +334,18 @@ fn measure_text_node(
     constraints: BoxConstraints,
     paragraph: &ParagraphShaper,
     hyphenator: Option<&dyn Hyphenator>,
+    line_height_override: Option<f32>,
 ) -> Size {
     let font_size = style.font_size;
     let metrics = paragraph.line_metrics(font_size);
+    // The line box height: the authored `line-height` (a multiple of `font-size`
+    // or an absolute length) when present, else the font's natural metric line
+    // height. A larger line height splits the extra leading half above / half
+    // below the glyphs (CSS half-leading), shifting the baseline down so the text
+    // centres in the taller box. With no authored value the leading is zero, so
+    // the baseline is `metrics.baseline()` — byte-for-byte the previous behaviour.
+    let line_height = line_height_override.unwrap_or_else(|| metrics.line_height());
+    let baseline = metrics.baseline() + (line_height - metrics.line_height()) / 2.0;
     let runs = paragraph.shape_paragraph(
         content,
         fallback,
@@ -367,8 +376,8 @@ fn measure_text_node(
             &runs,
             content,
             max_width,
-            metrics.line_height(),
-            metrics.baseline(),
+            line_height,
+            baseline,
             alignment,
             overflow,
         ),
@@ -378,8 +387,8 @@ fn measure_text_node(
             &runs,
             content,
             max_width,
-            metrics.line_height(),
-            metrics.baseline(),
+            line_height,
+            baseline,
             alignment,
             overflow,
             &NullHyphenator,
@@ -395,8 +404,8 @@ fn measure_text_node(
                 &runs,
                 content,
                 max_width,
-                metrics.line_height(),
-                metrics.baseline(),
+                line_height,
+                baseline,
                 alignment,
                 overflow,
                 hyphenator,
@@ -1061,6 +1070,7 @@ fn measure(
         let direction = direction_for(computed.get(&node));
         let alignment = alignment_for(computed.get(&node));
         let overflow = overflow_for(computed.get(&node));
+        let line_height = line_height_for(computed.get(&node), style.font_size);
         return measure_text_node(
             content,
             &style,
@@ -1072,6 +1082,7 @@ fn measure(
             constraints,
             paragraph,
             hyphenator,
+            line_height,
         );
     }
     let Some(algorithm) = algorithm_for(style.display, node, grid_templates, style.gap) else {
@@ -1160,6 +1171,7 @@ fn arrange(
         let direction = direction_for(computed.get(&node));
         let alignment = alignment_for(computed.get(&node));
         let overflow = overflow_for(computed.get(&node));
+        let line_height = line_height_for(computed.get(&node), style.font_size);
         let size = measure_text_node(
             content,
             &style,
@@ -1171,6 +1183,7 @@ fn arrange(
             constraints,
             paragraph,
             hyphenator,
+            line_height,
         );
         boxes.insert(node, LayoutBox::new(Rect::new(origin, size)));
         return;
@@ -2536,6 +2549,41 @@ mod tests {
         assert_eq!(text_box.size().height, 48.0);
         // Widest line ("aaaa " = 5·9.6) fits within the 50px container width.
         assert!((text_box.size().width - 48.0).abs() < 1e-3, "width {}", text_box.size().width);
+    }
+
+    #[test]
+    fn line_height_two_scales_the_wrapped_box_height() {
+        // The same three-word string in a 50px container still wraps to three
+        // lines, but `line-height: 2` makes each line box 2·16 = 32 tall, so the
+        // measured box is 3·32 = 96 — twice the default 48 — reserving the extra
+        // vertical space so following content does not overlap.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "aaaa bbbb cccc");
+
+        let mut computed = ComputedStyles::new();
+        let mut root_style = ComputedStyle::new();
+        root_style.set(PropertyId::Width, ComputedValue::length(Length::px(50.0)));
+        root_style.set(PropertyId::Height, ComputedValue::length(Length::px(300.0)));
+        computed.insert(root, root_style);
+        let mut text_style = ComputedStyle::new();
+        text_style.set(PropertyId::LineHeight, ComputedValue::number(2.0));
+        computed.insert(text, text_style);
+
+        let coordinator = LayoutCoordinator::new();
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &computed,
+            &GridTemplates::new(),
+            Size::new(50.0, 300.0),
+            (0.0, 0.0),
+            &test_paragraph(),
+        );
+        // Three wrapped lines at a 32px line box → 96px tall.
+        assert_eq!(boxes[&text].size().height, 96.0);
     }
 
     #[test]

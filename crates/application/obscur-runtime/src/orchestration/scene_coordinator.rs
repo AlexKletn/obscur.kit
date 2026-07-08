@@ -39,7 +39,8 @@ use obscur_tree::tree::RetainedTree;
 
 use super::stacking::{effective_stacking_z, PaintUnit};
 use super::{
-    alignment_for, attributes_for, direction_for, families_for, overflow_for, ComputedStyles,
+    alignment_for, attributes_for, direction_for, families_for, line_height_for, overflow_for,
+    ComputedStyles,
     EditingView, LayoutBoxes,
 };
 
@@ -277,6 +278,7 @@ impl SceneCoordinator {
         overflow: TextOverflow,
         font_size: f32,
         max_width: f32,
+        line_height_override: Option<f32>,
     ) -> ParagraphLayout {
         let runs = self.paragraph.shape_paragraph(
             content,
@@ -287,6 +289,14 @@ impl SceneCoordinator {
             direction,
         );
         let metrics = self.paragraph.line_metrics(font_size);
+        // The line box height: the authored `line-height` when present, else the
+        // font's natural metric line height. A larger line height splits the extra
+        // leading half above / half below (CSS half-leading), shifting the baseline
+        // down so the text centres in the taller box. With no authored value the
+        // leading is zero, so `line_height`/`baseline` equal the metric values —
+        // byte-for-byte the single-line, default-spacing behaviour.
+        let line_height = line_height_override.unwrap_or_else(|| metrics.line_height());
+        let baseline = metrics.baseline() + (line_height - metrics.line_height()) / 2.0;
         // `text-overflow: ellipsis` needs a shaped ellipsis glyph to append at a
         // cut; `clip` / `visible` need none, so none is shaped on the default path
         // (Clip truncation works from advances alone).
@@ -304,8 +314,8 @@ impl SceneCoordinator {
                 &runs,
                 content,
                 max_width,
-                metrics.line_height(),
-                metrics.baseline(),
+                line_height,
+                baseline,
                 alignment,
                 overflow,
             ),
@@ -315,8 +325,8 @@ impl SceneCoordinator {
                 &runs,
                 content,
                 max_width,
-                metrics.line_height(),
-                metrics.baseline(),
+                line_height,
+                baseline,
                 alignment,
                 overflow,
                 &NullHyphenator,
@@ -331,8 +341,8 @@ impl SceneCoordinator {
                     &runs,
                     content,
                     max_width,
-                    metrics.line_height(),
-                    metrics.baseline(),
+                    line_height,
+                    baseline,
                     alignment,
                     overflow,
                     hyphenator,
@@ -988,6 +998,7 @@ impl SceneCoordinator {
                         overflow,
                         font_size,
                         layout_box.size().width,
+                        line_height_for(computed.get(&node), font_size),
                     );
                     for line in layout.lines() {
                         let baseline = line.baseline();
@@ -4369,6 +4380,65 @@ mod tests {
                 assert_eq!(glyph.x(), 9.6 * i as f32);
             }
         }
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn line_height_two_widens_wrapped_line_spacing() {
+        // `line-height: 2` makes each wrapped line box 2·16 = 32 tall, so the three
+        // wrapped lines stack by 32 (not the 16px font-metric height) and the extra
+        // leading (16px) is split half above / half below — the glyph baseline
+        // shifts down to 12.8 + (32-16)/2 = 20.8.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "aaaa bbbb cccc");
+
+        let mut style = ComputedStyle::new();
+        style.set(PropertyId::LineHeight, ComputedValue::number(2.0));
+        let mut computed = ComputedStyles::new();
+        computed.insert(text, style);
+
+        let mut boxes = LayoutBoxes::new();
+        // Box as layout sizes it under line-height:2 — 50px wide, 3·32 = 96 tall.
+        boxes.insert(text, box_at(10.0, 20.0, 50.0, 96.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        let runs = text_runs(&list);
+        assert_eq!(runs.len(), 3, "one DrawText per wrapped line");
+        // Lines spaced by the resolved 32px line height, not the 16px metric.
+        assert_eq!(runs[0].0, Point::new(10.0, 20.0));
+        assert_eq!(runs[1].0, Point::new(10.0, 52.0));
+        assert_eq!(runs[2].0, Point::new(10.0, 84.0));
+        // Half-leading centres each line's glyphs on the shifted baseline.
+        for (_, run, _) in &runs {
+            for glyph in run.glyphs() {
+                assert_eq!(glyph.y(), 20.8);
+            }
+        }
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn explicit_newline_forces_a_second_line_in_a_wide_box() {
+        // A `\n` is a mandatory break: even in a box wide enough that nothing wraps,
+        // "ab\ncd" splits into two lines, so the scene emits two runs stacked by the
+        // 16px line height.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "ab\ncd");
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(text, ComputedStyle::new());
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(text, box_at(0.0, 0.0, 1000.0, 32.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        let runs = text_runs(&list);
+        assert_eq!(runs.len(), 2, "\\n forces a second line");
+        assert_eq!(runs[0].0.y, 0.0);
+        assert_eq!(runs[1].0.y, 16.0);
         assert!(list.is_balanced());
     }
 

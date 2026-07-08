@@ -145,10 +145,35 @@ pub(crate) fn overflow_for(computed: Option<&ComputedStyle>) -> TextOverflow {
     }
 }
 
+/// Resolves a text node's authored `line-height` into a logical-pixel line box
+/// height from its computed `line-height` and `font_size` (§4.14, §5.10).
+///
+/// Reads [`PropertyId::LineHeight`], returning:
+/// * `Some(multiple * font_size)` for a unitless [`PropertyValue::Number`]
+///   (a multiple of the font size, the common `line-height: 1.5` form);
+/// * `Some(px)` for a [`PropertyValue::Length`] in absolute pixels
+///   (`line-height: 24px`);
+/// * [`None`] for the initial `normal` keyword, an absent property, a relative
+///   length unit, or any other value — the caller then falls back to the font's
+///   natural (metric) line height, keeping the default path byte-for-byte
+///   identical to pre-`line-height` behaviour.
+///
+/// The same value drives both the layout measure/arrange pass and the scene
+/// compose pass, so the sized box height and the painted line spacing agree.
+#[must_use]
+pub(crate) fn line_height_for(computed: Option<&ComputedStyle>, font_size: f32) -> Option<f32> {
+    match computed?.get(PropertyId::LineHeight)?.value() {
+        PropertyValue::Number(multiple) => Some(multiple * font_size),
+        PropertyValue::Length(length) => length.as_px().map(|px| px.0),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use obscur_style::computed::ComputedValue;
+    use obscur_style::property::Length;
 
     fn styled(property: PropertyId, value: PropertyValue) -> ComputedStyle {
         let mut style = ComputedStyle::new();
@@ -245,5 +270,29 @@ mod tests {
             PropertyValue::Keyword(layout_keyword::TEXT_OVERFLOW_ELLIPSIS),
         );
         assert_eq!(overflow_for(Some(&ellipsis)), TextOverflow::Ellipsis);
+    }
+
+    #[test]
+    fn line_height_resolves_number_length_and_falls_back_on_normal() {
+        // Absent property / empty style → None (caller uses the metric line height).
+        assert_eq!(line_height_for(None, 16.0), None);
+        assert_eq!(line_height_for(Some(&ComputedStyle::new()), 16.0), None);
+        // A unitless number is a multiple of the font size: 1.5 × 16 = 24.
+        let multiple = styled(PropertyId::LineHeight, PropertyValue::Number(1.5));
+        assert_eq!(line_height_for(Some(&multiple), 16.0), Some(24.0));
+        // The same multiple scales with the font size: 1.5 × 20 = 30.
+        assert_eq!(line_height_for(Some(&multiple), 20.0), Some(30.0));
+        // An absolute length is taken verbatim, independent of the font size.
+        let length = styled(
+            PropertyId::LineHeight,
+            PropertyValue::Length(Length::px(28.0)),
+        );
+        assert_eq!(line_height_for(Some(&length), 16.0), Some(28.0));
+        // A keyword (`normal`) is unresolved here → None (metric fallback).
+        let normal = styled(
+            PropertyId::LineHeight,
+            PropertyValue::Keyword(layout_keyword::FONT_STYLE_NORMAL),
+        );
+        assert_eq!(line_height_for(Some(&normal), 16.0), None);
     }
 }
