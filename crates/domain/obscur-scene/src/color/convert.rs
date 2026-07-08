@@ -106,6 +106,30 @@ fn oklab_to_linear_srgb(l: f64, a: f64, b: f64) -> [f64; 3] {
     [r, g, bl]
 }
 
+/// Oklab triple from **linear-light** sRGB (Björn Ottosson's Oklab, adopted by
+/// CSS Color 4 §9). Inputs are linear sRGB (no transfer function applied);
+/// returns `[L, a, b]` with `L` nominally `0.0..=1.0` and `a`/`b` signed. This is
+/// the exact inverse of [`oklab_to_linear_srgb`] and shares its canonical
+/// matrices; densifying a gradient's stops in Oklab needs this forward direction.
+#[must_use]
+pub fn linear_srgb_to_oklab(r: f64, g: f64, b: f64) -> [f64; 3] {
+    // Linear sRGB -> LMS (first Oklab matrix, folded to sRGB).
+    let l = 0.412_221_470_8 * r + 0.536_332_536_3 * g + 0.051_445_992_9 * b;
+    let m = 0.211_903_498_2 * r + 0.680_699_545_1 * g + 0.107_396_956_6 * b;
+    let s = 0.088_302_461_9 * r + 0.281_718_837_6 * g + 0.629_978_700_5 * b;
+
+    // Cube-root nonlinearity (sign-preserving so out-of-gamut stays well defined).
+    let l_ = l.cbrt();
+    let m_ = m.cbrt();
+    let s_ = s.cbrt();
+
+    // LMS' -> Oklab (second Oklab matrix).
+    let big_l = 0.210_454_255_3 * l_ + 0.793_617_785_0 * m_ - 0.004_072_046_8 * s_;
+    let a = 1.977_998_495_1 * l_ - 2.428_592_205_0 * m_ + 0.450_593_709_9 * s_;
+    let b_ = 0.025_904_037_1 * l_ + 0.782_771_766_2 * m_ - 0.808_675_766_0 * s_;
+    [big_l, a, b_]
+}
+
 /// Converts `oklab()` to gamma-encoded sRGB (CSS Color 4 §9.2). `l` is
 /// `0.0..=1.0`; `a`/`b` are signed. Result is encoded and clamped to `[0, 1]`.
 #[must_use]
@@ -234,6 +258,29 @@ mod tests {
         );
         close(oklab_to_srgb(1.0, 0.0, 0.0), [1.0, 1.0, 1.0], 1e-3); // white
         close(oklab_to_srgb(0.0, 0.0, 0.0), [0.0, 0.0, 0.0], 1e-3); // black
+    }
+
+    #[test]
+    fn linear_srgb_oklab_round_trips() {
+        // linear sRGB -> Oklab -> (via oklab_to_linear_srgb) linear sRGB is identity.
+        for rgb in [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.25, 0.5, 0.75],
+            [1.0, 1.0, 1.0],
+        ] {
+            let [l, a, b] = linear_srgb_to_oklab(rgb[0], rgb[1], rgb[2]);
+            close(oklab_to_linear_srgb(l, a, b), rgb, 1e-6);
+        }
+    }
+
+    #[test]
+    fn linear_srgb_to_oklab_matches_css_red() {
+        // CSS Color 4 §9: sRGB red is oklab(0.627955 0.224863 0.125846). Feed the
+        // LINEAR-light red (linear sRGB of gamma 1.0 is 1.0) and expect that L,a,b.
+        let [l, a, b] = linear_srgb_to_oklab(1.0, 0.0, 0.0);
+        close([l, a, b], [0.627_955, 0.224_863, 0.125_846], 1e-3);
     }
 
     #[test]

@@ -5,11 +5,45 @@
 //! offsets, and the stroke's width/join/cap, are preserved exactly (spec §5.2 —
 //! the adapter keeps paint data authoritative and delegates only rasterization).
 
+use obscur_scene::color::Color;
+use obscur_scene::color::convert::{linear_srgb_to_oklab, oklab_to_srgb, srgb_decode};
 use obscur_scene::paint::{Brush, LineCap, LineJoin, Stroke};
 use vello::kurbo;
 use vello::peniko;
 
 use super::color_converter::ColorConverter;
+
+/// Color space in which gradient stops are interpolated.
+///
+/// Per **CSS Images Module Level 4 §3.4** ("Color Stops and Transition Hints"),
+/// a gradient with no authored `in <color-space>` interpolates its stops in
+/// **Oklab** — the default rectangular color-interpolation space for `color-mix`
+/// and gradients (CSS Color 4 §12). peniko itself defaults a `Gradient` to sRGB
+/// (`ColorSpaceTag::Srgb`), which produces the muddy dark midpoint of e.g.
+/// `linear-gradient(red, green)`.
+///
+/// We set this tag on every gradient (forward-compatible with a Vello that honors
+/// it), but this Vello/peniko build **rasterizes the ramp in sRGB regardless of
+/// the tag** (verified by the `gradient_oklab_proof` example: the tag alone left
+/// the red→green midpoint at the muddy sRGB `(127, 64, 0)`). So the CSS-correct
+/// interpolation is produced by **densifying** the stops in Oklab (see
+/// [`BrushConverter::stops`]) before handing them to peniko; the tag is kept as a
+/// belt-and-suspenders default that stays correct if Vello later honors it.
+///
+/// Hue direction stays peniko's default (`shorter`); Oklab is rectangular so hue
+/// direction is irrelevant here. Parsing an explicit `in <color-space>` from the
+/// stylesheet is a future extension — the domain model does not yet carry an
+/// authored interpolation space, so Oklab (the CSS default) is applied
+/// unconditionally.
+const GRADIENT_INTERPOLATION_CS: peniko::color::ColorSpaceTag =
+    peniko::color::ColorSpaceTag::Oklab;
+
+/// Number of linear sub-segments each authored stop pair is split into when
+/// densifying in Oklab. `N` segments insert `N - 1` interior Oklab-interpolated
+/// stops between each authored pair; peniko's per-stop sampling (sRGB-linear
+/// between adjacent stops) then closely approximates the true Oklab ramp. 16 keeps
+/// the mid-range hues visually smooth while staying far under any ramp limit.
+const DENSIFY_SEGMENTS: usize = 16;
 
 /// A converter from obscur-scene paint sources to peniko/kurbo equivalents.
 ///
@@ -53,6 +87,7 @@ impl BrushConverter {
                     (f64::from(g.end().x), f64::from(g.end().y)),
                 )
                 .with_extend(extend(g.extend()))
+                .with_interpolation_cs(GRADIENT_INTERPOLATION_CS)
                 .with_stops(self.stops(g.stops()).as_slice());
                 peniko::Brush::Gradient(gradient)
             }
@@ -62,6 +97,7 @@ impl BrushConverter {
                     g.radius(),
                 )
                 .with_extend(extend(g.extend()))
+                .with_interpolation_cs(GRADIENT_INTERPOLATION_CS)
                 .with_stops(self.stops(g.stops()).as_slice());
                 peniko::Brush::Gradient(gradient)
             }
@@ -73,6 +109,7 @@ impl BrushConverter {
                     start + std::f32::consts::TAU,
                 )
                 .with_extend(extend(g.extend()))
+                .with_interpolation_cs(GRADIENT_INTERPOLATION_CS)
                 .with_stops(self.stops(g.stops()).as_slice());
                 peniko::Brush::Gradient(gradient)
             }
@@ -127,13 +164,90 @@ impl BrushConverter {
         }
     }
 
-    /// Converts obscur-scene gradient stops into peniko color stops.
+    /// Converts obscur-scene gradient stops into peniko color stops, **densified in
+    /// Oklab** so Vello rasterizes the CSS-correct interpolation.
+    ///
+    /// CSS Images 4 §3.4 interpolates a gradient's stops in Oklab by default, but
+    /// this Vello/peniko build samples the ramp linearly in sRGB regardless of
+    /// `interpolation_cs` (see [`GRADIENT_INTERPOLATION_CS`]). To honor the spec we
+    /// pre-compute [`DENSIFY_SEGMENTS`]`- 1` interior stops between each authored
+    /// pair by interpolating in **Oklab with premultiplied alpha** (convert each
+    /// endpoint sRGB→linear→Oklab, premultiply by alpha, lerp `L,a,b,α`,
+    /// un-premultiply, convert Oklab→sRGB) — reusing the CSS Color 4 conversions in
+    /// [`obscur_scene::color::convert`]. peniko's sRGB-linear sampling between the
+    /// now-dense stops closely approximates the true Oklab ramp.
+    ///
+    /// Authored stops keep their **exact** converted color and offset (the endpoints
+    /// are not round-tripped through Oklab); only the inserted interior stops are
+    /// Oklab-computed. A gradient with fewer than two stops has nothing to
+    /// interpolate and passes through unchanged (byte-identical to before).
     fn stops(self, stops: &[obscur_scene::paint::GradientStop]) -> Vec<peniko::ColorStop> {
-        stops
-            .iter()
-            .map(|stop| peniko::ColorStop::from((stop.offset(), self.color.convert(stop.color()))))
-            .collect()
+        if stops.len() < 2 {
+            return stops
+                .iter()
+                .map(|s| peniko::ColorStop::from((s.offset(), self.color.convert(s.color()))))
+                .collect();
+        }
+
+        let mut out = Vec::with_capacity((stops.len() - 1) * DENSIFY_SEGMENTS + 1);
+        // Exact authored first stop.
+        out.push(peniko::ColorStop::from((
+            stops[0].offset(),
+            self.color.convert(stops[0].color()),
+        )));
+        for pair in stops.windows(2) {
+            let (a, b) = (&pair[0], &pair[1]);
+            // Interior Oklab-interpolated stops for this pair.
+            for k in 1..DENSIFY_SEGMENTS {
+                let t = k as f64 / DENSIFY_SEGMENTS as f64;
+                #[allow(clippy::cast_possible_truncation)]
+                let offset = a.offset() + (b.offset() - a.offset()) * t as f32;
+                out.push(peniko::ColorStop::from((
+                    offset,
+                    oklab_lerp(a.color(), b.color(), t),
+                )));
+            }
+            // Exact authored end stop of this pair.
+            out.push(peniko::ColorStop::from((b.offset(), self.color.convert(b.color()))));
+        }
+        out
     }
+}
+
+/// Interpolates two straight-alpha sRGB [`Color`]s in **Oklab with premultiplied
+/// alpha** at parameter `t ∈ [0, 1]`, returning a peniko sRGB color.
+///
+/// CSS Color 4 §12.2 interpolates in the (rectangular) Oklab space over
+/// premultiplied components. Each endpoint is taken from gamma sRGB → linear sRGB
+/// ([`srgb_decode`]) → Oklab ([`linear_srgb_to_oklab`]), premultiplied by its
+/// alpha; the four components `L,a,b,α` lerp linearly; the result is
+/// un-premultiplied and mapped back with [`oklab_to_srgb`]. A zero interpolated
+/// alpha yields a fully transparent black (no division by zero).
+// The Oklab component names (L/a/b) are the canonical single-letter names from
+// CSS Color 4 §9; renaming them would obscure the 1:1 mapping to the spec.
+#[allow(clippy::many_single_char_names)]
+fn oklab_lerp(a: Color, b: Color, t: f64) -> peniko::Color {
+    let to_premul_oklab = |c: Color| -> [f64; 4] {
+        let alpha = f64::from(c.a).clamp(0.0, 1.0);
+        let lin = |ch: f32| srgb_decode(f64::from(ch).clamp(0.0, 1.0));
+        let [l, aa, bb] = linear_srgb_to_oklab(lin(c.r), lin(c.g), lin(c.b));
+        [l * alpha, aa * alpha, bb * alpha, alpha]
+    };
+    let pa = to_premul_oklab(a);
+    let pb = to_premul_oklab(b);
+    let lerp = |x: f64, y: f64| x + (y - x) * t;
+    let l = lerp(pa[0], pb[0]);
+    let aa = lerp(pa[1], pb[1]);
+    let bb = lerp(pa[2], pb[2]);
+    let alpha = lerp(pa[3], pb[3]);
+
+    let [r, g, blue] = if alpha > 0.0 {
+        oklab_to_srgb(l / alpha, aa / alpha, bb / alpha)
+    } else {
+        [0.0, 0.0, 0.0]
+    };
+    #[allow(clippy::cast_possible_truncation)]
+    peniko::Color::new([r as f32, g as f32, blue as f32, alpha as f32])
 }
 
 /// Maps an obscur-scene extend mode to a peniko extend mode.
@@ -194,8 +308,19 @@ mod tests {
         );
         match BrushConverter::default().convert(&Brush::Linear(g)) {
             peniko::Brush::Gradient(gradient) => {
-                assert_eq!(gradient.stops.len(), 2);
+                // Two authored stops densify to 1 + (DENSIFY_SEGMENTS) = 17 stops
+                // (exact first + 15 interior Oklab stops + exact end).
+                assert_eq!(gradient.stops.len(), DENSIFY_SEGMENTS + 1);
                 assert_eq!(gradient.extend, peniko::Extend::Pad);
+                // CSS Images 4 default interpolation space is Oklab.
+                assert_eq!(gradient.interpolation_cs, peniko::color::ColorSpaceTag::Oklab);
+                // Endpoints stay EXACT: first stop black, last stop white.
+                let first = gradient.stops.first().expect("first stop").color.to_alpha_color::<peniko::color::Srgb>().to_rgba8();
+                let last = gradient.stops.last().expect("last stop").color.to_alpha_color::<peniko::color::Srgb>().to_rgba8();
+                assert_eq!((first.r, first.g, first.b), (0, 0, 0));
+                assert_eq!((last.r, last.g, last.b), (255, 255, 255));
+                assert_eq!(gradient.stops.first().unwrap().offset, 0.0);
+                assert_eq!(gradient.stops.last().unwrap().offset, 1.0);
             }
             other => panic!("expected Gradient, got {other:?}"),
         }
@@ -214,8 +339,9 @@ mod tests {
         );
         match BrushConverter::default().convert(&Brush::Radial(g)) {
             peniko::Brush::Gradient(gradient) => {
-                assert_eq!(gradient.stops.len(), 2);
+                assert_eq!(gradient.stops.len(), DENSIFY_SEGMENTS + 1);
                 assert!(matches!(gradient.kind, peniko::GradientKind::Radial(_)));
+                assert_eq!(gradient.interpolation_cs, peniko::color::ColorSpaceTag::Oklab);
             }
             other => panic!("expected Gradient, got {other:?}"),
         }
@@ -263,8 +389,62 @@ mod tests {
         );
         match BrushConverter::default().convert(&Brush::Conic(g)) {
             peniko::Brush::Gradient(gradient) => {
-                assert_eq!(gradient.stops.len(), 2);
+                assert_eq!(gradient.stops.len(), DENSIFY_SEGMENTS + 1);
                 assert!(matches!(gradient.kind, peniko::GradientKind::Sweep(_)));
+                assert_eq!(gradient.interpolation_cs, peniko::color::ColorSpaceTag::Oklab);
+            }
+            other => panic!("expected Gradient, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn oklab_midpoint_of_red_to_green_is_vivid_not_muddy() {
+        // CSS red (255,0,0) → CSS green (0,128,0). peniko's default sRGB-gamma
+        // midpoint is the naive lerp of the gamma bytes: (127, 64, 0) — a dark muddy
+        // olive. Oklab interpolation lifts BOTH channels toward a brighter, more
+        // vivid warm orange (≈ (166, 105, 0)); the correctness win is the higher
+        // green channel and higher total luminance, not a hue flip.
+        let mid = oklab_lerp(
+            Color::rgba(1.0, 0.0, 0.0, 1.0),
+            Color::rgba(0.0, 0.501_960_8, 0.0, 1.0),
+            0.5,
+        );
+        let rgba8 = mid.to_rgba8();
+        // Naive sRGB-gamma midpoint for reference.
+        let (srgb_r, srgb_g): (u16, u16) = (127, 64);
+        assert!(
+            u16::from(rgba8.g) > srgb_g + 20,
+            "Oklab midpoint green {} must clear the muddy sRGB midpoint ({}) by a wide margin",
+            rgba8.g,
+            srgb_g,
+        );
+        assert!(
+            u16::from(rgba8.r) + u16::from(rgba8.g) + u16::from(rgba8.b)
+                > srgb_r + srgb_g,
+            "Oklab midpoint {rgba8:?} must be brighter than the sRGB midpoint (127,64,0)",
+        );
+    }
+
+    #[test]
+    fn densified_stops_preserve_exact_endpoints_and_are_monotonic() {
+        let g = LinearGradient::new(
+            Point::new(0.0, 0.0),
+            Point::new(1.0, 0.0),
+            vec![
+                GradientStop::new(0.0, Color::rgba(1.0, 0.0, 0.0, 1.0)),
+                GradientStop::new(1.0, Color::rgba(0.0, 0.5, 0.0, 1.0)),
+            ],
+        );
+        match BrushConverter::default().convert(&Brush::Linear(g)) {
+            peniko::Brush::Gradient(gradient) => {
+                // Offsets are non-decreasing across the dense list.
+                let offsets: Vec<f32> = gradient.stops.iter().map(|s| s.offset).collect();
+                assert!(offsets.windows(2).all(|w| w[0] <= w[1]), "monotonic: {offsets:?}");
+                // Exact authored endpoints.
+                let first = gradient.stops.first().unwrap().color.to_alpha_color::<peniko::color::Srgb>().to_rgba8();
+                let last = gradient.stops.last().unwrap().color.to_alpha_color::<peniko::color::Srgb>().to_rgba8();
+                assert_eq!((first.r, first.g, first.b), (255, 0, 0));
+                assert_eq!((last.r, last.g), (0, 128));
             }
             other => panic!("expected Gradient, got {other:?}"),
         }

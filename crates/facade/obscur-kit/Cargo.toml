@@ -167,6 +167,17 @@ required-features = ["render-vello"]
 name = "gradient_geometry_proof"
 required-features = ["render-vello"]
 
+# Proof that CSS gradients interpolate in OKLAB (CSS Images 4 default): two
+# horizontal `linear-gradient(red, green)` / `linear-gradient(blue, yellow)` bands
+# driven through the full CSS → runtime → Vello path and read back to
+# `target/gradient_oklab_proof.png`. Self-asserts the red→green midpoint pixel is
+# the vivid Oklab yellow-green (green channel well above the muddy sRGB ceiling),
+# proving Vello honors `Gradient::interpolation_cs = Oklab`. Needs the GPU adapter
+# at runtime but no window; gated on the Vello backend only.
+[[example]]
+name = "gradient_oklab_proof"
+required-features = ["render-vello"]
+
 # Proof that `border-style: dashed` renders as REAL dashes: two boxes (square +
 # rounded) with a `2px dashed` border, stroked as a dashed path and rasterized
 # headless through the CPU renderer to `target/dashed_border_proof.png`. Verifies
