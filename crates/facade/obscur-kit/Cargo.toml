@@ -231,6 +231,16 @@ required-features = ["render-cpu"]
 name = "overflow_proof"
 required-features = ["render-cpu"]
 
+# Proof of CSS 2.1 §8.3.1 vertical (block-axis) margin collapsing: four block-flow
+# columns laid out by the REAL FlowLayout — adjacent margins collapse to their
+# `{max_positive, min_negative}` used value (max / sum), an empty spacer collapses
+# through into one gap, and a margins-0 gap-10 control stays unchanged. Self-asserts
+# the child y-positions, then rasterizes headless through the CPU renderer to
+# `target/margin_collapse_proof.png`.
+[[example]]
+name = "margin_collapse_proof"
+required-features = ["render-cpu"]
+
 # Proof of the CSS 2.1 §9.9 seven-layer paint order (catalog bug B2): a positioned
 # `z:auto` box that comes EARLIER in the tree than a non-positioned block still
 # paints ON TOP of it (layer 6 > layers 1–5), while a negative-z positioned box
