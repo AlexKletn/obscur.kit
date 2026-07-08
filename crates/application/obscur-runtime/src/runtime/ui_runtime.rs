@@ -1652,6 +1652,7 @@ impl UiRuntime {
         // 3. Focus: only a press moves focus. A press also anchors click
         //    detection on the pressed node.
         let mut focus_changed = false;
+        let mut press_changed = false;
         if event.kind() == PointerEventKind::Down {
             if self.focused != target {
                 self.focused = target;
@@ -1660,6 +1661,9 @@ impl UiRuntime {
                 // the focused editable's text/caret/selection is live for keys
                 // (and step-2 rendering).
                 self.sync_editing_to_focus();
+            }
+            if self.press_target != target {
+                press_changed = true;
             }
             self.press_target = target;
             // Click → caret: after `sync_editing_to_focus` has (re)seated the
@@ -1692,6 +1696,9 @@ impl UiRuntime {
                 command = self.activation_command_for(pressed);
                 self.activate(pressed);
             }
+            if self.press_target.is_some() {
+                press_changed = true;
+            }
             self.press_target = None;
             // A release ends any in-flight drag-selection: the selection stays
             // wherever the last move left it.
@@ -1699,7 +1706,7 @@ impl UiRuntime {
         }
 
         // 4. Recompute the interaction pseudo-states from the new hover/focus.
-        if hover_changed || focus_changed {
+        if hover_changed || focus_changed || press_changed {
             self.recompute_pseudo_states();
             // 5. Schedule a restyle for the next frame.
             self.request_frame(FrameReason::Input);
@@ -2319,6 +2326,13 @@ impl UiRuntime {
         if let Some(focused) = self.focused {
             let merged = self.pseudo.get(focused).union(PseudoState::FOCUS);
             self.pseudo.set(focused, merged);
+        }
+        // `:active` — while a press is outstanding (a `Down` with no matching
+        // `Up` yet), the pressed node and its element ancestors are active; CSS
+        // applies `:active` up the ancestor chain, mirroring the hover chain.
+        for node in self.hover_chain_for(self.press_target) {
+            let merged = self.pseudo.get(node).union(PseudoState::ACTIVE);
+            self.pseudo.set(node, merged);
         }
     }
 
@@ -4083,6 +4097,26 @@ mod tests {
         assert!(runtime.pseudo_state(b).contains(PseudoState::HOVER));
         assert!(runtime.pseudo_state(panel).contains(PseudoState::HOVER));
         assert_eq!(runtime.pseudo_state(a), PseudoState::empty());
+    }
+
+    #[test]
+    fn press_sets_active_pseudo_and_release_clears_it() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&panel_view(), sheets);
+        let (panel, _a, b) = panel_nodes(&runtime);
+
+        // A press marks the pressed node `b` and its ancestor `panel` `:active`
+        // (CSS applies `:active` up the ancestor chain, like hover).
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0));
+        assert!(runtime.pseudo_state(b).contains(PseudoState::ACTIVE));
+        assert!(runtime.pseudo_state(panel).contains(PseudoState::ACTIVE));
+
+        // The matching release clears `:active` everywhere (hover/focus remain).
+        runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 75.0));
+        assert!(!runtime.pseudo_state(b).contains(PseudoState::ACTIVE));
+        assert!(!runtime.pseudo_state(panel).contains(PseudoState::ACTIVE));
     }
 
     // ---- Device scale (HiDPI): root scale transform + pointer coord mapping ----
