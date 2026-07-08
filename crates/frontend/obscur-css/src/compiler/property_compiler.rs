@@ -22,6 +22,7 @@ use crate::parser::{ParsedDeclaration, ParsedValue};
 
 use obscur_geometry::AffineTransform;
 use obscur_identity::InternedSymbol;
+use obscur_scene::color::convert;
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{
     layout_keyword, BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize,
@@ -437,10 +438,8 @@ fn border_color_component(
     match value {
         ParsedValue::Hash(hex) => parse_hex_color(hex).map(PropertyValue::Color),
         ParsedValue::Keyword(keyword) => named_color(keyword).map(PropertyValue::Color),
-        ParsedValue::Function { name, args }
-            if name.eq_ignore_ascii_case("rgb") || name.eq_ignore_ascii_case("rgba") =>
-        {
-            parse_rgb(args).map(PropertyValue::Color)
+        ParsedValue::Function { name, args } => {
+            color_from_function(name, args).map(PropertyValue::Color)
         }
         _ => None,
     }
@@ -1919,8 +1918,9 @@ fn lower_dimension(value: f64, unit: &str) -> Option<PropertyValue> {
     dimension_length(value, unit).map(PropertyValue::Length)
 }
 
-/// Lowers a function value: `var(--name)` to a [`PropertyValue::CustomRef`],
-/// `rgb()`/`rgba()` to a colour, and `calc()`/`min()`/`max()`/`clamp()` (and a
+/// Lowers a function value: `var(--name)` to a [`PropertyValue::CustomRef`], any
+/// CSS Color 4 `<color>` function (`rgb()`/`hsl()`/`oklab()`/`oklch()`/`lab()`/
+/// `lch()`) to a colour, and `calc()`/`min()`/`max()`/`clamp()` (and a
 /// bare parenthesised group) to a [`PropertyValue::Calc`] symbolic length
 /// expression (spec §4.13). Any other function is not modelled and yields
 /// [`None`].
@@ -1937,8 +1937,8 @@ fn lower_function(
             _ => None,
         });
     }
-    if name.eq_ignore_ascii_case("rgb") || name.eq_ignore_ascii_case("rgba") {
-        return parse_rgb(args).map(PropertyValue::Color);
+    if let Some(color) = color_from_function(name, args) {
+        return Some(PropertyValue::Color(color));
     }
     lower_math_function(name, args).map(PropertyValue::Calc)
 }
@@ -1978,6 +1978,262 @@ fn parse_rgb(args: &[ParsedValue]) -> Option<StyleColor> {
         }
     });
     Some(StyleColor::rgba(r, g, b, a))
+}
+
+/// Lowers any `<color>` function to a [`StyleColor`], resolving each CSS Color 4
+/// color space to gamma-encoded sRGB (spec CSS Color 4).
+///
+/// Handles `rgb()`/`rgba()`, `hsl()`/`hsla()` (§7), `oklab()` (§9.2),
+/// `oklch()` (§9.3), `lab()` (§8.1) and `lch()` (§8.3). The non-sRGB spaces are
+/// converted by the pure math in [`obscur_scene::color::convert`] and then
+/// per-channel clamped into gamut (full CSS gamut mapping is a later
+/// refinement). Any other function name yields [`None`].
+fn color_from_function(name: &str, args: &[ParsedValue]) -> Option<StyleColor> {
+    if name.eq_ignore_ascii_case("rgb") || name.eq_ignore_ascii_case("rgba") {
+        parse_rgb(args)
+    } else if name.eq_ignore_ascii_case("hsl") || name.eq_ignore_ascii_case("hsla") {
+        parse_hsl(args)
+    } else if name.eq_ignore_ascii_case("oklab") {
+        parse_oklab(args)
+    } else if name.eq_ignore_ascii_case("oklch") {
+        parse_oklch(args)
+    } else if name.eq_ignore_ascii_case("lab") {
+        parse_lab(args)
+    } else if name.eq_ignore_ascii_case("lch") {
+        parse_lch(args)
+    } else {
+        None
+    }
+}
+
+/// One tokenized argument of a modern-syntax `<color>` function.
+#[derive(Clone, Copy)]
+enum ColorArg {
+    /// A bare `<number>`.
+    Number(f64),
+    /// A `<percentage>`; stores the numeric part (`50` for `50%`).
+    Percent(f64),
+    /// An `<angle>` normalized to degrees.
+    Angle(f64),
+    /// The `none` keyword (a missing/powerless component).
+    None,
+}
+
+/// Splits a color function's argument list into its color components and an
+/// optional alpha, tolerating both the legacy comma syntax and the modern
+/// space-plus-`/` syntax (spec CSS Color 4 §4). Commas separate components;
+/// a single `/` delimiter introduces the alpha. Returns [`None`] on an
+/// unrecognised token or a malformed (double-`/`) list.
+fn split_color_args(args: &[ParsedValue]) -> Option<(Vec<ColorArg>, Option<ColorArg>)> {
+    let mut comps = Vec::new();
+    let mut alpha: Option<ColorArg> = None;
+    let mut after_slash = false;
+    for arg in args {
+        match arg {
+            ParsedValue::Comma => {}
+            ParsedValue::Delimiter('/') => {
+                if after_slash {
+                    return None;
+                }
+                after_slash = true;
+            }
+            other => {
+                let c = color_arg(other)?;
+                if after_slash {
+                    if alpha.is_some() {
+                        return None;
+                    }
+                    alpha = Some(c);
+                } else {
+                    comps.push(c);
+                }
+            }
+        }
+    }
+    Some((comps, alpha))
+}
+
+/// Tokenizes one component value into a [`ColorArg`], or [`None`] if it is not a
+/// number/percentage/angle/`none`.
+fn color_arg(value: &ParsedValue) -> Option<ColorArg> {
+    match value {
+        ParsedValue::Number(n) => Some(ColorArg::Number(*n)),
+        ParsedValue::Percentage(p) => Some(ColorArg::Percent(*p)),
+        ParsedValue::Dimension { value, unit } => {
+            angle_to_degrees(*value, unit).map(|d| ColorArg::Angle(f64::from(d)))
+        }
+        ParsedValue::Keyword(k) if k.eq_ignore_ascii_case("none") => Some(ColorArg::None),
+        _ => None,
+    }
+}
+
+/// Reads a `<hue>` component (an angle in degrees). A bare number is degrees; an
+/// `<angle>` is already degrees; `none` is a powerless `0` (spec CSS Color 4).
+fn read_hue(c: ColorArg) -> Option<f64> {
+    match c {
+        ColorArg::Number(n) => Some(n),
+        ColorArg::Angle(d) => Some(d),
+        ColorArg::None => Some(0.0),
+        ColorArg::Percent(_) => None,
+    }
+}
+
+/// Resolves the optional alpha to `0.0..=1.0`: a number is a fraction, a
+/// percentage is `p/100`, an absent or `none` alpha resolves to `1.0` / `0.0`
+/// respectively (spec CSS Color 4 §4).
+fn resolve_alpha(alpha: Option<ColorArg>) -> Option<f64> {
+    match alpha {
+        None => Some(1.0),
+        Some(ColorArg::Number(n)) => Some(n),
+        Some(ColorArg::Percent(p)) => Some(p / 100.0),
+        Some(ColorArg::None) => Some(0.0),
+        Some(ColorArg::Angle(_)) => None,
+    }
+}
+
+/// Builds a clamped-alpha [`StyleColor`] from already-sRGB channels.
+fn make_color([r, g, b]: [f64; 3], a: f64) -> StyleColor {
+    StyleColor::rgba(
+        narrow_f32(r),
+        narrow_f32(g),
+        narrow_f32(b),
+        narrow_f32(a.clamp(0.0, 1.0)),
+    )
+}
+
+/// Parses `hsl()`/`hsla()` into a [`StyleColor`] (spec CSS Color 4 §7).
+///
+/// Accepts both the legacy comma syntax (`hsl(120, 100%, 50%)`) and the modern
+/// space syntax with an optional `/ <alpha>` (`hsl(120 100% 50% / 0.5)`);
+/// `hsla` is an alias. Saturation/lightness are `<percentage>` or `<number>`
+/// (interpreted as the percentage value); hue is an angle. HSL is defined on
+/// gamma-encoded sRGB, so no transfer function is applied.
+fn parse_hsl(args: &[ParsedValue]) -> Option<StyleColor> {
+    let (comps, alpha) = split_color_args(args)?;
+    if comps.len() != 3 {
+        return None;
+    }
+    // s/l: percentage or number, both scaled by /100 into 0..1.
+    let pct = |c: ColorArg| -> Option<f64> {
+        match c {
+            ColorArg::Percent(p) | ColorArg::Number(p) => Some(p / 100.0),
+            ColorArg::None => Some(0.0),
+            ColorArg::Angle(_) => None,
+        }
+    };
+    let h = read_hue(comps[0])?;
+    let s = pct(comps[1])?;
+    let l = pct(comps[2])?;
+    let a = resolve_alpha(alpha)?;
+    Some(make_color(convert::hsl_to_srgb(h, s, l), a))
+}
+
+/// Reads the Oklab lightness `L`: a number is `0..=1`, a percentage is `p/100`,
+/// `none` is `0` (spec CSS Color 4 §9.2).
+fn read_ok_lightness(c: ColorArg) -> Option<f64> {
+    match c {
+        ColorArg::Number(n) => Some(n),
+        ColorArg::Percent(p) => Some(p / 100.0),
+        ColorArg::None => Some(0.0),
+        ColorArg::Angle(_) => None,
+    }
+}
+
+/// Reads an Oklab `a`/`b` (or Oklch `C`): a number is used directly, a
+/// percentage is referenced to `±0.4` (`100% = 0.4`), `none` is `0` (spec CSS
+/// Color 4 §9.2/§9.3).
+fn read_ok_axis(c: ColorArg) -> Option<f64> {
+    match c {
+        ColorArg::Number(n) => Some(n),
+        ColorArg::Percent(p) => Some(p / 100.0 * 0.4),
+        ColorArg::None => Some(0.0),
+        ColorArg::Angle(_) => None,
+    }
+}
+
+/// Parses `oklab()` into a [`StyleColor`] (spec CSS Color 4 §9.2). `L` in
+/// `[0,1]`/`%`, signed `a`/`b`, optional `/ <alpha>`.
+fn parse_oklab(args: &[ParsedValue]) -> Option<StyleColor> {
+    let (comps, alpha) = split_color_args(args)?;
+    if comps.len() != 3 {
+        return None;
+    }
+    let l = read_ok_lightness(comps[0])?;
+    let a = read_ok_axis(comps[1])?;
+    let b = read_ok_axis(comps[2])?;
+    let alpha = resolve_alpha(alpha)?;
+    Some(make_color(convert::oklab_to_srgb(l, a, b), alpha))
+}
+
+/// Parses `oklch()` into a [`StyleColor`] (spec CSS Color 4 §9.3). `L` in
+/// `[0,1]`/`%`, `C >= 0`, hue angle, optional `/ <alpha>`.
+fn parse_oklch(args: &[ParsedValue]) -> Option<StyleColor> {
+    let (comps, alpha) = split_color_args(args)?;
+    if comps.len() != 3 {
+        return None;
+    }
+    let l = read_ok_lightness(comps[0])?;
+    let c = read_ok_axis(comps[1])?.max(0.0);
+    let h = read_hue(comps[2])?;
+    let alpha = resolve_alpha(alpha)?;
+    Some(make_color(convert::oklch_to_srgb(l, c, h), alpha))
+}
+
+/// Reads the Lab lightness `L`: a number is `0..=100`, a percentage is `p`
+/// (`100% = 100`), `none` is `0` (spec CSS Color 4 §8.1).
+fn read_lab_lightness(c: ColorArg) -> Option<f64> {
+    match c {
+        ColorArg::Number(n) => Some(n),
+        ColorArg::Percent(p) => Some(p),
+        ColorArg::None => Some(0.0),
+        ColorArg::Angle(_) => None,
+    }
+}
+
+/// Reads a Lab `a`/`b`: a number is used directly, a percentage is referenced
+/// to `±125` (`100% = 125`), `none` is `0` (spec CSS Color 4 §8.1).
+fn read_lab_axis(c: ColorArg) -> Option<f64> {
+    match c {
+        ColorArg::Number(n) => Some(n),
+        ColorArg::Percent(p) => Some(p / 100.0 * 125.0),
+        ColorArg::None => Some(0.0),
+        ColorArg::Angle(_) => None,
+    }
+}
+
+/// Parses `lab()` into a [`StyleColor`] (spec CSS Color 4 §8.1, D50). `L` in
+/// `[0,100]`/`%`, signed `a`/`b`, optional `/ <alpha>`.
+fn parse_lab(args: &[ParsedValue]) -> Option<StyleColor> {
+    let (comps, alpha) = split_color_args(args)?;
+    if comps.len() != 3 {
+        return None;
+    }
+    let l = read_lab_lightness(comps[0])?;
+    let a = read_lab_axis(comps[1])?;
+    let b = read_lab_axis(comps[2])?;
+    let alpha = resolve_alpha(alpha)?;
+    Some(make_color(convert::lab_to_srgb(l, a, b), alpha))
+}
+
+/// Parses `lch()` into a [`StyleColor`] (spec CSS Color 4 §8.3, D50). `L` in
+/// `[0,100]`/`%`, `C >= 0` (`100% = 150`), hue angle, optional `/ <alpha>`.
+fn parse_lch(args: &[ParsedValue]) -> Option<StyleColor> {
+    let (comps, alpha) = split_color_args(args)?;
+    if comps.len() != 3 {
+        return None;
+    }
+    let l = read_lab_lightness(comps[0])?;
+    // Lch chroma references 100% to 150.
+    let c = match comps[1] {
+        ColorArg::Number(n) => n,
+        ColorArg::Percent(p) => p / 100.0 * 150.0,
+        ColorArg::None => 0.0,
+        ColorArg::Angle(_) => return None,
+    }
+    .max(0.0);
+    let h = read_hue(comps[2])?;
+    let alpha = resolve_alpha(alpha)?;
+    Some(make_color(convert::lch_to_srgb(l, c, h), alpha))
 }
 
 /// Parses a 3/4/6/8-digit hex colour (without the leading `#`) into a
@@ -3544,17 +3800,14 @@ fn parse_color_stop(part: &[ParsedValue]) -> Option<GradientStop> {
     }
 }
 
-/// Reads one color-stop color: a hex hash, a modelled named color, or an
-/// `rgb()` / `rgba()` function; [`None`] for anything else.
+/// Reads one color-stop color: a hex hash, a modelled named color, or any CSS
+/// Color 4 `<color>` function (`rgb()`/`hsl()`/`oklab()`/`oklch()`/`lab()`/
+/// `lch()`); [`None`] for anything else.
 fn parse_stop_color(value: &ParsedValue) -> Option<StyleColor> {
     match value {
         ParsedValue::Hash(hex) => parse_hex_color(hex),
         ParsedValue::Keyword(keyword) => named_color(keyword),
-        ParsedValue::Function { name, args }
-            if name.eq_ignore_ascii_case("rgb") || name.eq_ignore_ascii_case("rgba") =>
-        {
-            parse_rgb(args)
-        }
+        ParsedValue::Function { name, args } => color_from_function(name, args),
         _ => None,
     }
 }
@@ -4859,6 +5112,97 @@ mod tests {
         assert_eq!(
             value_of("color: rgb(100%, 0%, 0%)"),
             PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0))
+        );
+    }
+
+    /// Extracts the [`StyleColor`] a `color:` declaration lowers to.
+    fn color_of(text: &str) -> StyleColor {
+        match value_of(text) {
+            PropertyValue::Color(c) => c,
+            other => panic!("expected color, got {other:?}"),
+        }
+    }
+
+    /// Asserts two colors are equal within `eps` per channel.
+    fn color_close(got: StyleColor, want: StyleColor, eps: f32) {
+        assert!(
+            (got.r - want.r).abs() <= eps
+                && (got.g - want.g).abs() <= eps
+                && (got.b - want.b).abs() <= eps
+                && (got.a - want.a).abs() <= eps,
+            "got {got:?} want {want:?} (eps {eps})",
+        );
+    }
+
+    #[test]
+    fn lowers_hsl_modern_and_legacy() {
+        // Modern space syntax.
+        color_close(
+            color_of("color: hsl(120 100% 50%)"),
+            StyleColor::rgba(0.0, 1.0, 0.0, 1.0),
+            1e-2,
+        );
+        // Legacy comma syntax; `hsla` alias.
+        color_close(
+            color_of("color: hsl(0, 100%, 50%)"),
+            StyleColor::rgba(1.0, 0.0, 0.0, 1.0),
+            1e-2,
+        );
+        // Modern alpha via `/`.
+        color_close(
+            color_of("color: hsla(240 100% 50% / 0.5)"),
+            StyleColor::rgba(0.0, 0.0, 1.0, 0.5),
+            1e-2,
+        );
+    }
+
+    #[test]
+    fn lowers_oklab_and_oklch() {
+        // oklab(0.627955 0.224863 0.125846) ~= sRGB red.
+        color_close(
+            color_of("color: oklab(0.627955 0.224863 0.125846)"),
+            StyleColor::rgba(1.0, 0.0, 0.0, 1.0),
+            1e-2,
+        );
+        color_close(
+            color_of("color: oklab(1 0 0)"),
+            StyleColor::rgba(1.0, 1.0, 1.0, 1.0),
+            1e-2,
+        );
+        // oklch(0.62796 0.25768 29.234) ~= red.
+        color_close(
+            color_of("color: oklch(0.62796 0.25768 29.234)"),
+            StyleColor::rgba(1.0, 0.0, 0.0, 1.0),
+            1e-2,
+        );
+        // oklch(0.86644 0.29483 142.5) ~= green, with alpha.
+        color_close(
+            color_of("color: oklch(0.86644 0.29483 142.5 / 50%)"),
+            StyleColor::rgba(0.0, 1.0, 0.0, 0.5),
+            1e-2,
+        );
+    }
+
+    #[test]
+    fn lowers_lab_and_lch() {
+        color_close(
+            color_of("color: lab(100% 0 0)"),
+            StyleColor::rgba(1.0, 1.0, 1.0, 1.0),
+            1e-2,
+        );
+        color_close(
+            color_of("color: lab(0% 0 0)"),
+            StyleColor::rgba(0.0, 0.0, 0.0, 1.0),
+            1e-2,
+        );
+        // A mid reddish lab(); R > G > B and in gamut.
+        let mid = color_of("color: lab(50% 40 30)");
+        assert!(mid.r > mid.g && mid.g > mid.b, "R>G>B: {mid:?}");
+        // lch with hue 0 equals lab with a = C, b = 0.
+        color_close(
+            color_of("color: lch(50% 50 0)"),
+            color_of("color: lab(50% 50 0)"),
+            1e-4,
         );
     }
 
