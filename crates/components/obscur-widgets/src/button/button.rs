@@ -4,7 +4,8 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
 use obscur_view::view::{
-    EVENT_CLICK, TYPE, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
+    DISABLED as ATTR_DISABLED, EVENT_CLICK, TYPE, View, ViewEventBinding, ViewFragment, ViewNode,
+    ViewProperty, ViewValue,
 };
 
 /// A headless push-button control (spec §2.6).
@@ -125,7 +126,7 @@ impl Button {
     /// [`COMPONENT_ID`]: Self::COMPONENT_ID
     #[must_use]
     pub fn view(&self) -> View {
-        let node = ViewNode::element(Self::COMPONENT_ID)
+        let mut node = ViewNode::element(Self::COMPONENT_ID)
             // Stable CSS type / local name so a UA (or author) `button { … }` type
             // selector matches this control (spec §4.13). Additive — it sits
             // alongside the semantic-role/state props, never replacing them.
@@ -142,10 +143,17 @@ impl Button {
                 Self::PROP_PRESSED,
                 ViewValue::Bool(self.pressed),
             ))
-            .with_event(ViewEventBinding::new(EVENT_CLICK, self.command))
-            .with_children(ViewFragment::from_nodes(vec![
-                Text::new(self.label.clone()).into_view_node(),
-            ]));
+            .with_event(ViewEventBinding::new(EVENT_CLICK, self.command));
+        // Reserved `:disabled` structural-state attribute — emitted only when
+        // disabled, so toggling it off drops the attribute and the node restyles.
+        // Survives reconcile (unlike the private `PROP_DISABLED` above), feeding
+        // the matcher's `:disabled` pseudo-class.
+        if self.disabled {
+            node = node.with_prop(ViewProperty::new(ATTR_DISABLED, ViewValue::Bool(true)));
+        }
+        let node = node.with_children(ViewFragment::from_nodes(vec![
+            Text::new(self.label.clone()).into_view_node(),
+        ]));
         View::single(node)
     }
 }
@@ -188,6 +196,21 @@ mod tests {
         b.set_disabled(false);
         b.press();
         assert!(b.release());
+    }
+
+    #[test]
+    fn view_emits_reserved_disabled_attr_only_when_disabled() {
+        // Enabled: no reserved DISABLED attribute (so it never restyles as :disabled).
+        let enabled = Button::new("Go", cmd()).view();
+        let has_attr = |view: &View| match &view.root().nodes()[0] {
+            ViewNode::Element { props, .. } => props.iter().any(|p| p.name() == ATTR_DISABLED),
+            ViewNode::Text { .. } => panic!("expected element root"),
+        };
+        assert!(!has_attr(&enabled));
+
+        // Disabled: the reserved attribute is present and truthy.
+        let disabled = Button::new("Go", cmd()).disabled(true).view();
+        assert!(has_attr(&disabled));
     }
 
     #[test]

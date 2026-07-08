@@ -4,7 +4,8 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
 use obscur_view::view::{
-    EVENT_CHANGE, TYPE, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
+    CHECKED as ATTR_CHECKED, DISABLED as ATTR_DISABLED, EVENT_CHANGE, TYPE, View, ViewEventBinding,
+    ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
 /// A headless tri-state checkbox control (spec §2.6).
@@ -159,7 +160,7 @@ impl Checkbox {
             Some(false) => 0,
             Some(true) => 1,
         };
-        let node = ViewNode::element(Self::COMPONENT_ID)
+        let mut node = ViewNode::element(Self::COMPONENT_ID)
             // Stable CSS type / local name so a UA (or author) `checkbox { … }`
             // type selector matches this control (spec §4.13). Additive.
             .with_prop(ViewProperty::new(TYPE, ViewValue::from("checkbox")))
@@ -175,10 +176,21 @@ impl Checkbox {
                 Self::PROP_CHECKED,
                 ViewValue::Int(checked),
             ))
-            .with_event(ViewEventBinding::new(EVENT_CHANGE, self.command))
-            .with_children(ViewFragment::from_nodes(vec![
-                Text::new(self.label.clone()).into_view_node(),
-            ]));
+            .with_event(ViewEventBinding::new(EVENT_CHANGE, self.command));
+        // Reserved structural-state attributes — emitted only when set, so a
+        // toggle drops them and the node restyles. These survive reconcile
+        // (unlike the private props above) and feed the matcher's `:checked` /
+        // `:disabled` pseudo-classes. Only a *definite* checked value is
+        // `:checked`; the mixed (indeterminate) state is not.
+        if self.is_checked() {
+            node = node.with_prop(ViewProperty::new(ATTR_CHECKED, ViewValue::Bool(true)));
+        }
+        if self.disabled {
+            node = node.with_prop(ViewProperty::new(ATTR_DISABLED, ViewValue::Bool(true)));
+        }
+        let node = node.with_children(ViewFragment::from_nodes(vec![
+            Text::new(self.label.clone()).into_view_node(),
+        ]));
         View::single(node)
     }
 }
@@ -223,6 +235,31 @@ mod tests {
         assert!(Checkbox::new("A", cmd()).checked(true).is_checked());
         assert!(!Checkbox::new("A", cmd()).checked(false).is_checked());
         assert!(!Checkbox::indeterminate("A", cmd()).is_checked());
+    }
+
+    #[test]
+    fn view_emits_reserved_state_attrs_only_when_set() {
+        let attrs = |view: &View| -> (bool, bool) {
+            match &view.root().nodes()[0] {
+                ViewNode::Element { props, .. } => (
+                    props.iter().any(|p| p.name() == ATTR_CHECKED),
+                    props.iter().any(|p| p.name() == ATTR_DISABLED),
+                ),
+                ViewNode::Text { .. } => panic!("expected element root"),
+            }
+        };
+
+        // Unchecked + enabled: neither reserved attribute.
+        assert_eq!(attrs(&Checkbox::new("A", cmd()).view()), (false, false));
+        // Checked: the CHECKED attribute appears.
+        assert_eq!(attrs(&Checkbox::new("A", cmd()).checked(true).view()), (true, false));
+        // Indeterminate is NOT :checked.
+        assert_eq!(attrs(&Checkbox::indeterminate("A", cmd()).view()), (false, false));
+        // Checked AND disabled: both appear.
+        assert_eq!(
+            attrs(&Checkbox::new("A", cmd()).checked(true).disabled(true).view()),
+            (true, true)
+        );
     }
 
     #[test]

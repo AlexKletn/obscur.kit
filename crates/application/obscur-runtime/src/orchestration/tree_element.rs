@@ -27,14 +27,19 @@ use super::PseudoStates;
 ///   [`attribute`](MatchElement::attribute) resolves only `"id"` and `"type"`;
 ///   any other attribute selector (e.g. `[data-*]`, `[aria-*]`) matches nothing
 ///   until the tree retains arbitrary attributes.
-/// - **Pseudo-state** — interaction-driven states (`:hover`, `:active`,
+/// - **Pseudo-state** — *interaction*-driven states (`:hover`, `:active`,
 ///   `:focus`, …) are sourced from an optional per-node [`PseudoStates`] map the
 ///   runtime owns. A cursor built with [`new`](Self::new) carries no source and
-///   reports [`PseudoState::empty`] (the stateless matching path used by
+///   reports no interaction state (the stateless matching path used by
 ///   `run_matched`/`HeadlessHost`); a cursor built with
 ///   [`with_pseudo`](Self::with_pseudo) reads that map, so `:hover`/`:focus`
 ///   finally match once the runtime records the state. Navigation preserves the
 ///   source, so ancestor/sibling combinators over pseudo-classes work too.
+///   *Structural* states (`:disabled`, `:checked`) are intrinsic to the element:
+///   they are read from the node's own
+///   [`StyleAttributes`](obscur_view::view::StyleAttributes) and reported on
+///   **both** paths, so a `:disabled`/`:checked` rule bites even with no
+///   interaction map.
 /// - **Top-level siblings** — an element whose logical parent is the synthetic
 ///   [`Root`](obscur_tree::node::NodeKind::Root) grouping node is treated as
 ///   top-level: it reports no [`parent`](MatchElement::parent) (so `:root` and
@@ -164,12 +169,30 @@ impl MatchElement for TreeElement<'_> {
         }
     }
 
-    /// Reports the node's interaction state from the cursor's [`PseudoStates`]
-    /// source, or [`PseudoState::empty`] when the cursor is stateless (built via
-    /// [`new`](Self::new)) or the node has no recorded state.
+    /// Reports the node's active pseudo-state: the union of its *interaction*
+    /// states (`:hover`/`:focus`/…, from the cursor's [`PseudoStates`] source, or
+    /// empty when the cursor is stateless / the node has no recorded state) with
+    /// its *structural* states (`:disabled`/`:checked`), read directly from the
+    /// node's own [`StyleAttributes`](obscur_view::view::StyleAttributes).
+    ///
+    /// The structural bits are intrinsic to the element, so they are reported on
+    /// **both** the stateful ([`with_pseudo`](Self::with_pseudo)) and the
+    /// stateless ([`new`](Self::new)) paths — a `:disabled`/`:checked` rule bites
+    /// even without a live interaction map.
     fn pseudo_state(&self) -> PseudoState {
-        self.pseudo
-            .map_or_else(PseudoState::empty, |states| states.get(self.id))
+        let interaction = self
+            .pseudo
+            .map_or_else(PseudoState::empty, |states| states.get(self.id));
+        let mut structural = PseudoState::empty();
+        if let Some(node) = self.node() {
+            if node.attributes().is_disabled() {
+                structural = structural.insert(PseudoState::DISABLED);
+            }
+            if node.attributes().is_checked() {
+                structural = structural.insert(PseudoState::CHECKED);
+            }
+        }
+        interaction.union(structural)
     }
 
     /// Returns the logical parent **only when it is an element node**. When the
@@ -221,7 +244,7 @@ mod tests {
     use obscur_identity::ComponentId;
     use obscur_tree::reconciliation::Reconciler;
     use obscur_view::view::{
-        CLASS, ID, TYPE, View, ViewFragment, ViewNode, ViewProperty, ViewValue,
+        CHECKED, CLASS, DISABLED, ID, TYPE, View, ViewFragment, ViewNode, ViewProperty, ViewValue,
     };
 
     fn text_prop(name: obscur_identity::InternedSymbol, value: &str) -> ViewProperty {
@@ -379,6 +402,56 @@ mod tests {
             TreeElement::with_pseudo(&tree, child, &empty_states).pseudo_state(),
             PseudoState::empty()
         );
+    }
+
+    #[test]
+    fn structural_disabled_and_checked_report_on_both_paths() {
+        use obscur_style::selector::{
+            CompoundSelector, PseudoClassSelector, SelectorMatcher, SimpleSelector,
+        };
+
+        // A `button` carrying the reserved DISABLED attribute plus a `checkbox`
+        // carrying CHECKED — the structural state the widgets now emit.
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(20))
+                .with_prop(text_prop(TYPE, "button"))
+                .with_prop(ViewProperty::new(DISABLED, ViewValue::Bool(true))),
+            ViewNode::element(ComponentId::from_raw(21))
+                .with_prop(text_prop(TYPE, "checkbox"))
+                .with_prop(ViewProperty::new(CHECKED, ViewValue::Bool(true))),
+        ]));
+        let tree = reconcile(&view);
+        let kids = root_children(&tree);
+        let button = kids[0];
+        let checkbox = kids[1];
+
+        // Stateless cursor (built via `new`) still reports the intrinsic bits.
+        let btn = TreeElement::new(&tree, button);
+        assert!(btn.pseudo_state().contains(PseudoState::DISABLED));
+        assert!(!btn.pseudo_state().contains(PseudoState::CHECKED));
+
+        let chk = TreeElement::new(&tree, checkbox);
+        assert!(chk.pseudo_state().contains(PseudoState::CHECKED));
+        assert!(!chk.pseudo_state().contains(PseudoState::DISABLED));
+
+        // Structural bits also survive the stateful path, unioned with interaction.
+        let mut states = crate::orchestration::PseudoStates::new();
+        states.set(button, PseudoState::HOVER);
+        let hovered_disabled = TreeElement::with_pseudo(&tree, button, &states);
+        assert!(hovered_disabled.pseudo_state().contains(PseudoState::DISABLED));
+        assert!(hovered_disabled.pseudo_state().contains(PseudoState::HOVER));
+
+        // The `:disabled` / `:checked` selectors actually match the right node.
+        let disabled_sel = CompoundSelector::new(vec![SimpleSelector::PseudoClass(
+            PseudoClassSelector::Disabled,
+        )]);
+        let checked_sel = CompoundSelector::new(vec![SimpleSelector::PseudoClass(
+            PseudoClassSelector::Checked,
+        )]);
+        assert!(SelectorMatcher::matches_compound(&disabled_sel, &btn));
+        assert!(!SelectorMatcher::matches_compound(&disabled_sel, &chk));
+        assert!(SelectorMatcher::matches_compound(&checked_sel, &chk));
+        assert!(!SelectorMatcher::matches_compound(&checked_sel, &btn));
     }
 
     #[test]

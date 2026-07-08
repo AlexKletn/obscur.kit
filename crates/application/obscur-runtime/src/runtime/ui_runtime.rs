@@ -3522,6 +3522,84 @@ mod tests {
         assert_ne!(bg, Some(ua_fill()));
     }
 
+    /// A `button` element that carries the reserved `:disabled` structural-state
+    /// attribute when `disabled` — mirroring what `Button::view` now emits.
+    fn button_state_view(disabled: bool) -> View {
+        use obscur_view::view::{DISABLED, TYPE};
+        let mut node = ViewNode::element(ComponentId::from_raw(20))
+            .with_prop(ViewProperty::new(TYPE, ViewValue::Text("button".into())))
+            .with_children(ViewFragment::from_nodes(vec![ViewNode::text("Save")]));
+        if disabled {
+            node = node.with_prop(ViewProperty::new(DISABLED, ViewValue::Bool(true)));
+        }
+        View::from_fragment(ViewFragment::from_nodes(vec![node]))
+    }
+
+    /// A `button:disabled { … }` rule carrying `decls`.
+    fn button_disabled_rule(decls: Vec<BlockDeclaration>) -> StyleRule {
+        use obscur_style::selector::PseudoClassSelector;
+        StyleRule::new(
+            SelectorList::new(vec![ComplexSelector::new(
+                CompoundSelector::new(vec![
+                    SimpleSelector::Type("button".into()),
+                    SimpleSelector::PseudoClass(PseudoClassSelector::Disabled),
+                ]),
+                Vec::new(),
+            )]),
+            decls,
+        )
+    }
+
+    #[test]
+    fn disabled_pseudo_class_bites_only_a_disabled_button_and_re_resolves_on_toggle() {
+        // Author sheet: base `button { background: ua_fill }` plus a
+        // `button:disabled { background: #808080 }` overlay. The disabled overlay
+        // must apply ONLY when the button reports the reserved DISABLED state.
+        let disabled_fill = StyleColor::rgba(0.5, 0.5, 0.5, 1.0);
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![
+                button_type_rule(background(ua_fill().r, ua_fill().g, ua_fill().b)),
+                button_disabled_rule(background(disabled_fill.r, disabled_fill.g, disabled_fill.b)),
+            ],
+        );
+        let sheets = std::slice::from_ref(&sheet);
+
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+
+        // Enabled button: the base rule wins, the :disabled overlay is inert.
+        let _ = runtime.render_now(&button_state_view(false), sheets);
+        let bg = |runtime: &UiRuntime| {
+            let node = button_node(runtime);
+            runtime
+                .computed_style(node)
+                .and_then(|s| s.get(PropertyId::BackgroundColor))
+                .and_then(ComputedValue::as_color)
+        };
+        assert_eq!(
+            bg(&runtime),
+            Some(ua_fill()),
+            "an enabled button must NOT pick up the :disabled overlay"
+        );
+
+        // Toggle to disabled: the reconcile updates the reserved attribute, the
+        // node restyles, and the :disabled overlay now wins.
+        let _ = runtime.render_now(&button_state_view(true), sheets);
+        assert_eq!(
+            bg(&runtime),
+            Some(disabled_fill),
+            ":disabled must bite once the button reports the disabled state"
+        );
+
+        // Toggle back to enabled: the overlay drops and the base fill re-resolves.
+        let _ = runtime.render_now(&button_state_view(false), sheets);
+        assert_eq!(
+            bg(&runtime),
+            Some(ua_fill()),
+            "clearing disabled must re-resolve the computed style back to the base"
+        );
+    }
+
     #[test]
     fn push_accessibility_feeds_the_bridge() {
         use obscur_accessibility::port::RecordingAccessibilityBridge;

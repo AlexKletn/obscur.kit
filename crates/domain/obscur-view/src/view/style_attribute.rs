@@ -34,6 +34,21 @@ pub const TYPE: InternedSymbol = InternedSymbol::from_raw(0x0000_0003);
 /// low-symbol namespace so it survives reconciliation onto the retained node.
 pub const SRC: InternedSymbol = InternedSymbol::from_raw(0x0000_0004);
 
+/// Reserved symbol for a control's `disabled` structural state — the `:disabled`
+/// pseudo-class input (spec §4.13). Unlike `class`/`id`/`type` (selector inputs
+/// matched as strings), this is a *boolean* state the element carries about
+/// itself: present with a truthy [`ViewValue`] means disabled. A widget emits it
+/// **only when true**, so toggling it off drops the attribute and the extracted
+/// [`StyleAttributes`] change, driving a restyle. Kept in the same reserved
+/// low-symbol namespace so it survives reconciliation onto the retained node.
+pub const DISABLED: InternedSymbol = InternedSymbol::from_raw(0x0000_0005);
+
+/// Reserved symbol for a control's `checked` structural state — the `:checked`
+/// pseudo-class input (spec §4.13). Boolean state (present + truthy = checked);
+/// emitted **only when true** so a toggle re-styles. Same reserved namespace as
+/// `disabled`, so it survives reconciliation.
+pub const CHECKED: InternedSymbol = InternedSymbol::from_raw(0x0000_0006);
+
 /// The CSS-relevant identity of an element view node: its local name, `id`, and
 /// class list, extracted from a node's [`ViewProperty`] bindings.
 ///
@@ -49,6 +64,25 @@ pub struct StyleAttributes {
     /// selector input — it is the element's own content, resolved to pixels and
     /// painted by the runtime. Derived from the [`SRC`] reserved symbol.
     image_source: Option<Box<str>>,
+    /// Whether the control is disabled — the `:disabled` pseudo-class input.
+    /// Derived from the [`DISABLED`] reserved symbol.
+    disabled: bool,
+    /// Whether the control is checked — the `:checked` pseudo-class input.
+    /// Derived from the [`CHECKED`] reserved symbol.
+    checked: bool,
+}
+
+/// Whether a reserved boolean state attribute's value counts as *set*. Bare
+/// presence ([`ViewValue::Null`]) or any truthy value is `true`; an explicit
+/// `false` (`Bool(false)` / `Text("false")` / zero / empty text) is `false`.
+fn is_truthy(value: &ViewValue) -> bool {
+    match value {
+        ViewValue::Bool(flag) => *flag,
+        ViewValue::Int(n) => *n != 0,
+        ViewValue::Float(f) => *f != 0.0,
+        ViewValue::Text(text) => !text.is_empty() && !text.eq_ignore_ascii_case("false"),
+        ViewValue::Null => true,
+    }
 }
 
 impl StyleAttributes {
@@ -60,15 +94,31 @@ impl StyleAttributes {
 
     /// Extracts the well-known style attributes from a node's properties.
     ///
-    /// Reads the [`CLASS`], [`ID`], [`TYPE`], and [`SRC`] reserved symbols; only
-    /// [`ViewValue::Text`] values contribute (other value kinds are ignored).
-    /// The `class` text is split on ASCII whitespace into individual class
-    /// names, preserving order and dropping empties. The [`SRC`] text is the
-    /// element's image source, carried verbatim.
+    /// Reads the [`CLASS`], [`ID`], [`TYPE`], [`SRC`], [`DISABLED`], and
+    /// [`CHECKED`] reserved symbols. The string-valued inputs
+    /// ([`CLASS`]/[`ID`]/[`TYPE`]/[`SRC`]) contribute only from
+    /// [`ViewValue::Text`] values (other value kinds are ignored); the `class`
+    /// text is split on ASCII whitespace into individual class names, preserving
+    /// order and dropping empties, and the [`SRC`] text is carried verbatim. The
+    /// boolean state inputs ([`DISABLED`]/[`CHECKED`]) accept any value kind and
+    /// are set when it is truthy (bare presence or a non-`false` value).
     #[must_use]
     pub fn extract(props: &[ViewProperty]) -> Self {
         let mut attributes = Self::new();
         for prop in props {
+            // Boolean state attributes accept any value kind (presence = set).
+            match prop.name() {
+                DISABLED => {
+                    attributes.disabled = is_truthy(prop.value());
+                    continue;
+                }
+                CHECKED => {
+                    attributes.checked = is_truthy(prop.value());
+                    continue;
+                }
+                _ => {}
+            }
+            // The remaining reserved attributes are string-valued selector inputs.
             let ViewValue::Text(text) = prop.value() else {
                 continue;
             };
@@ -117,6 +167,18 @@ impl StyleAttributes {
         self.image_source.as_deref()
     }
 
+    /// Whether the control reports the `disabled` structural state (`:disabled`).
+    #[must_use]
+    pub const fn is_disabled(&self) -> bool {
+        self.disabled
+    }
+
+    /// Whether the control reports the `checked` structural state (`:checked`).
+    #[must_use]
+    pub const fn is_checked(&self) -> bool {
+        self.checked
+    }
+
     /// Whether no style attribute is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -124,6 +186,8 @@ impl StyleAttributes {
             && self.id.is_none()
             && self.classes.is_empty()
             && self.image_source.is_none()
+            && !self.disabled
+            && !self.checked
     }
 }
 
@@ -181,6 +245,49 @@ mod tests {
         assert_ne!(a, b);
         let a2 = StyleAttributes::extract(&[text_prop(SRC, "a.png")]);
         assert_eq!(a, a2);
+    }
+
+    #[test]
+    fn extracts_disabled_and_checked_state_flags() {
+        // Boolean state attributes accept any value kind; a truthy value sets them.
+        let attrs = StyleAttributes::extract(&[
+            ViewProperty::new(DISABLED, ViewValue::Bool(true)),
+            ViewProperty::new(CHECKED, ViewValue::Bool(true)),
+        ]);
+        assert!(attrs.is_disabled());
+        assert!(attrs.is_checked());
+        // A state flag alone makes the set non-empty (it is a restyle input).
+        assert!(!attrs.is_empty());
+
+        // Bare presence (Null) also counts as set.
+        let present = StyleAttributes::extract(&[
+            ViewProperty::new(DISABLED, ViewValue::Null),
+            text_prop(CHECKED, "true"),
+        ]);
+        assert!(present.is_disabled());
+        assert!(present.is_checked());
+
+        // An explicit false value does not set the flag.
+        let off = StyleAttributes::extract(&[
+            ViewProperty::new(DISABLED, ViewValue::Bool(false)),
+            text_prop(CHECKED, "false"),
+        ]);
+        assert!(!off.is_disabled());
+        assert!(!off.is_checked());
+        assert!(off.is_empty());
+    }
+
+    #[test]
+    fn equality_includes_state_flags() {
+        // A state change is observed by equality, so reconcile re-applies attributes
+        // and the node restyles.
+        let disabled = StyleAttributes::extract(&[ViewProperty::new(DISABLED, ViewValue::Bool(true))]);
+        let enabled = StyleAttributes::extract(&[]);
+        assert_ne!(disabled, enabled);
+
+        let checked = StyleAttributes::extract(&[ViewProperty::new(CHECKED, ViewValue::Bool(true))]);
+        let unchecked = StyleAttributes::extract(&[]);
+        assert_ne!(checked, unchecked);
     }
 
     #[test]

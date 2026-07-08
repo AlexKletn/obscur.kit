@@ -4,8 +4,8 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_text::editing::{EditCommand, TextBuffer};
 use obscur_view::view::{
-    EVENT_CHANGE, EVENT_INPUT, TYPE, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
-    ViewValue,
+    DISABLED as ATTR_DISABLED, EVENT_CHANGE, EVENT_INPUT, TYPE, View, ViewEventBinding,
+    ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
 /// A headless text-input control (spec §2.6).
@@ -187,8 +187,15 @@ impl Input {
                 ViewValue::from(&*self.placeholder),
             ))
             .with_event(ViewEventBinding::new(EVENT_INPUT, self.command))
-            .with_event(ViewEventBinding::new(EVENT_CHANGE, self.command))
-            .with_children(ViewFragment::from_nodes(vec![ViewNode::text(child_text)]));
+            .with_event(ViewEventBinding::new(EVENT_CHANGE, self.command));
+        // Reserved `:disabled` structural-state attribute — emitted only when
+        // disabled; survives reconcile and feeds the matcher's `:disabled`.
+        let node = if self.disabled {
+            node.with_prop(ViewProperty::new(ATTR_DISABLED, ViewValue::Bool(true)))
+        } else {
+            node
+        }
+        .with_children(ViewFragment::from_nodes(vec![ViewNode::text(child_text)]));
         View::single(node)
     }
 }
