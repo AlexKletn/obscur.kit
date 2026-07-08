@@ -8,33 +8,42 @@
 //! `.wf-check.checked`, …). Rendered headless to a PNG by the sibling
 //! `wireframe_png.rs` example.
 //!
-//! # Fidelity notes — engine gaps, each approximated + DOCUMENTED
+//! # Fidelity notes — now authored on REAL primitives
 //!
-//! The imported design leans on a handful of things our CSS/paint engine does not
-//! yet express verbatim. This example is a deliberate *gap-finding* pass, so each
-//! substitution is honest and annotated (search "SUBSTITUTE" in the CSS below):
+//! An earlier pass of this sheet was a deliberate *gap-finding* exercise: six
+//! base-element features the design leans on were only *approximated*. Those gaps
+//! have since been closed, so this sheet now renders the AUTHENTIC CSS for each
+//! (search "REAL" in the CSS below):
 //!
-//! - **`outline` + `outline-offset` focus rings** — no `outline` property. SUBSTITUTE:
-//!   the focused control is wrapped in a `.wf-focus` box carrying an extra `2px solid
-//!   #2b2a27` ring at a small inset (the closest we get to an offset outline).
-//! - **Dashed borders** (disabled controls, focus, some dividers) — `border-style:
-//!   dashed` is parsed but the CPU/Vello backends stroke SOLID. We keep the width +
-//!   colour and note it; dashed reads as solid.
-//! - **CSS-border triangles / arrows / icons** (`▼ ▲ ▸ ▾ ◣ ✓ ✕ ⌕` stepper arrows,
-//!   resize grip, magnifier, clear cross, check) — no CSS-triangle primitive.
-//!   SUBSTITUTE: host-font glyphs (or a tiny filled box for the indeterminate bar).
-//! - **Graph-paper page grid** (two tiled 1px `linear-gradient` lines) — no tiled /
-//!   multiple backgrounds. SUBSTITUTE: a flat `#eceae5` page fill.
-//! - **`repeating-linear-gradient`** (indeterminate hatch, meter stripes, colour
-//!   checker) — unsupported. SUBSTITUTE: a flat mid-gray fill or a coarse few-div
-//!   stripe approximation.
-//! - **Multi-line `<textarea>` / `<br>` / auto-wrap** — no line breaking. SUBSTITUTE:
-//!   stacked single-line text nodes.
-//! - **Inset `box-shadow` error ring** — inset shadow flattens. SUBSTITUTE: a doubled
-//!   solid border (an inner `.wf-field-innerring` box).
-//! - **`border-radius: 50%` circles** — half-px radii are given explicitly.
-//! - **`letter-spacing` / `text-transform`** — not in our property set; mono captions
-//!   are authored already-uppercased.
+//! - **`outline` + `outline-offset` focus rings** — the focused control carries a
+//!   real `outline: 2px dashed #2b2a27; outline-offset: 3px` on the `.wf-focus`
+//!   wrapper; the ring paints OUTSIDE the box with a visible offset gap and takes
+//!   no layout space (via the coordinator's outline path).
+//! - **Dashed borders** (disabled controls, dashed dividers/underlines) — real
+//!   `border: 1.5px dashed …`, stroked as actual dashes by both backends.
+//! - **CSS-border triangles / arrows** (select `▼` / open `▲`, disclosure `▸` / `▾`,
+//!   number-spinner `▲` / `▼`) — the classic `width:0; height:0; border-width:…;
+//!   border-color:… transparent …` trick: three transparent sides + one inked side
+//!   paint a true triangle (mitered trapezoid quads, transparent sides skipped).
+//! - **Graph-paper page grid** — two crossing `repeating-linear-gradient()` layers
+//!   in one `background-image` comma list over the page `background-color` (a real
+//!   24px grid; GPU-faithful on Vello).
+//! - **`repeating-linear-gradient`** hatches — the indeterminate progress hatch,
+//!   the meter stripe fills, and the colour-swatch checker are real repeating
+//!   gradients (GPU-faithful on Vello; flat first-stop on CPU, by policy).
+//! - **Multi-line `<textarea>`** — a single real paragraph string that WRAPS inside
+//!   the fixed-size box with a real `line-height` (no manual line splitting).
+//! - **Inset `box-shadow` error ring** — a real `box-shadow: 0 0 0 1.5px #2b2a27
+//!   inset` painted inside the field box.
+//! - **`overflow: hidden`** — the open-select list, the table, the disclosure, the
+//!   progress track and the colour swatch clip their children to their rounded
+//!   corners.
+//!
+//! Two things remain genuine gaps (NOT part of this batch, still approximated):
+//! **`border-radius: 50%`** circles are given explicit half-px radii, and
+//! **`letter-spacing` / `text-transform`** mono captions are authored already-
+//! uppercased. The `✓` check, `✕` clear, `⌕` magnifier and `◣` resize grip stay as
+//! host-font glyphs (they are not border-triangles).
 // One entity per file (xtask forbids logic in mod.rs); both the module and its PNG
 // harness could share this, so some items look unused inside a single binary.
 #![allow(dead_code, unreachable_pub)]
@@ -110,10 +119,10 @@ fn group_button() -> ViewNode {
     let btns = row(vec![
         col("DEFAULT", el("wf-btn", vec![text("wf-btn-t", "Button")])),
         col("HOVER", el("wf-btn hover", vec![text("wf-btn-t", "Button")])),
-        // SUBSTITUTE (outline): focus ring is a wrapper .wf-focus with a 2px solid ring.
+        // REAL (outline): focus ring is a `.wf-focus` wrapper with a real dashed outline.
         col("FOCUS", focus(el("wf-btn", vec![text("wf-btn-t", "Button")]))),
         col("ACTIVE / PRESSED", el("wf-btn active", vec![text("wf-btn-t", "Button")])),
-        // SUBSTITUTE (dashed): disabled border is authored dashed; renders solid.
+        // REAL (dashed): the disabled border renders as actual dashes.
         col("DISABLED", el("wf-btn disabled", vec![text("wf-btn-t", "Button")])),
     ]);
     card("01", "Button", "<button>", vec![btns])
@@ -159,16 +168,12 @@ fn group_text_field() -> ViewNode {
     let r2 = row(vec![
         col("READ-ONLY", field_text("readonly", "Read-only value", false, false)),
         col("DISABLED", field_text("disabled", "Disabled", true, false)),
-        // SUBSTITUTE (inset box-shadow error ring): a doubled solid border via
-        // .wf-field.error > .wf-field-innerring.
+        // REAL (inset box-shadow error ring): `box-shadow: 0 0 0 1.5px #2b2a27 inset`.
         col(
             "ERROR",
             el(
                 "wf-field error",
-                vec![el(
-                    "wf-field-innerring",
-                    vec![el("wf-field-line", vec![text("wf-field-val", "Bad value")])],
-                )],
+                vec![el("wf-field-line", vec![text("wf-field-val", "Bad value")])],
             ),
         ),
     ]);
@@ -189,20 +194,17 @@ fn group_textarea() -> ViewNode {
             text("wf-ta-grip", "◣"),
         ],
     );
-    // SUBSTITUTE (multi-line): stacked single-line text nodes (no <br>/wrap).
+    // REAL (multi-line): one paragraph string that WRAPS inside the fixed-width box
+    // via real line-breaking + `line-height` (no manual line splitting).
     let filled_ta = el(
         "wf-textarea",
         vec![
             el(
                 "wf-ta-body",
-                vec![
-                    el("wf-ta-line", vec![text("wf-field-val", "The quick brown fox jumps")]),
-                    el("wf-ta-line", vec![text("wf-field-val", "over the lazy dog and then")]),
-                    el(
-                        "wf-ta-line",
-                        vec![text("wf-field-val", "keeps"), el("wf-caret", vec![])],
-                    ),
-                ],
+                vec![text(
+                    "wf-ta-text",
+                    "The quick brown fox jumps over the lazy dog.",
+                )],
             ),
             text("wf-ta-grip", "◣"),
         ],
@@ -226,13 +228,14 @@ fn group_textarea() -> ViewNode {
 // 05 · Select
 // ---------------------------------------------------------------------------
 
-fn select_closed(class: &str, label: &str, arrow: &str, placeholder: bool) -> ViewNode {
+fn select_closed(class: &str, label: &str, up: bool, placeholder: bool) -> ViewNode {
     el(
         &format!("wf-select {class}"),
         vec![
             text(if placeholder { "wf-field-ph" } else { "wf-field-val" }, label),
-            // SUBSTITUTE (CSS triangle): a host-font ▼ / ▲ glyph.
-            text("wf-select-arrow", arrow),
+            // REAL (CSS border-triangle): a 0×0 box with three transparent sides and
+            // one inked side paints a true ▼ (closed) / ▲ (open) triangle.
+            tri(if up { "wf-tri wf-tri-up" } else { "wf-tri wf-tri-down" }),
         ],
     )
 }
@@ -241,7 +244,7 @@ fn group_select() -> ViewNode {
     let open = el(
         "wf-select-open",
         vec![
-            select_closed("open-head", "Option one", "▲", false),
+            select_closed("open-head", "Option one", true, false),
             el(
                 "wf-select-list",
                 vec![
@@ -254,10 +257,10 @@ fn group_select() -> ViewNode {
         ],
     );
     let r = row(vec![
-        col("CLOSED", select_closed("", "Choose one", "▼", true)),
-        col("HOVER", select_closed("hover", "Choose one", "▼", true)),
+        col("CLOSED", select_closed("", "Choose one", false, true)),
+        col("HOVER", select_closed("hover", "Choose one", false, true)),
         col("OPEN", open),
-        col("DISABLED", select_closed("disabled", "Choose one", "▼", true)),
+        col("DISABLED", select_closed("disabled", "Choose one", false, true)),
     ]);
     card("05", "Select", "<select>", vec![r])
 }
@@ -348,41 +351,12 @@ fn group_range() -> ViewNode {
 
 fn group_progress() -> ViewNode {
     let determinate = el("wf-progress", vec![el("wf-progress-fill p60", vec![])]);
-    // SUBSTITUTE (repeating-linear-gradient hatch): a coarse few-div stripe row.
-    let indeterminate = el(
-        "wf-progress",
-        vec![el(
-            "wf-progress-stripes",
-            vec![
-                el("wf-stripe", vec![]),
-                el("wf-stripe", vec![]),
-                el("wf-stripe", vec![]),
-                el("wf-stripe", vec![]),
-                el("wf-stripe", vec![]),
-                el("wf-stripe", vec![]),
-            ],
-        )],
-    );
-    // SUBSTITUTE (repeating-linear-gradient meter stripes): coarse stripe divs.
-    let meter_hi = el(
-        "wf-progress",
-        vec![el(
-            "wf-meter-fill m80",
-            vec![
-                el("wf-vstripe", vec![]),
-                el("wf-vstripe", vec![]),
-                el("wf-vstripe", vec![]),
-                el("wf-vstripe", vec![]),
-            ],
-        )],
-    );
-    let meter_lo = el(
-        "wf-progress",
-        vec![el(
-            "wf-meter-fill m20",
-            vec![el("wf-vstripe", vec![])],
-        )],
-    );
+    // REAL (repeating-linear-gradient hatch): a 45° diagonal hatch fill across the
+    // whole track (GPU-faithful on Vello; flat first-stop on CPU by policy).
+    let indeterminate = el("wf-progress", vec![el("wf-progress-hatch", vec![])]);
+    // REAL (repeating-linear-gradient meter stripes): a 90° vertical-stripe fill.
+    let meter_hi = el("wf-progress", vec![el("wf-meter-fill m80", vec![])]);
+    let meter_lo = el("wf-progress", vec![el("wf-meter-fill m20", vec![])]);
     let r = row(vec![
         col("PROGRESS · 60%", determinate),
         col("PROGRESS · INDETERMINATE", indeterminate),
@@ -401,12 +375,13 @@ fn group_number_search() -> ViewNode {
         "wf-number",
         vec![
             el("wf-number-val", vec![text("wf-field-val", "128")]),
-            // SUBSTITUTE (CSS stepper triangles): host-font ▲ / ▼ glyphs, split by a rule.
+            // REAL (CSS border-triangles): the ▲ / ▼ spinner arrows are 0×0
+            // border-triangle boxes, the two steppers split by a rule.
             el(
                 "wf-number-steppers",
                 vec![
-                    el("wf-step hover", vec![text("wf-step-arrow", "▲")]),
-                    el("wf-step", vec![text("wf-step-arrow", "▼")]),
+                    el("wf-step hover", vec![tri("wf-tri wf-tri-up")]),
+                    el("wf-step", vec![tri("wf-tri wf-tri-down")]),
                 ],
             ),
         ],
@@ -451,19 +426,9 @@ fn file_input(class: &str, filename: &str, muted: bool) -> ViewNode {
 }
 
 fn group_file_color() -> ViewNode {
-    // SUBSTITUTE (repeating-linear-gradient checker): a coarse 2×2 few-div checker.
-    let color = el(
-        "wf-color",
-        vec![el(
-            "wf-color-inner",
-            vec![
-                el("wf-checker c-dark", vec![]),
-                el("wf-checker c-light", vec![]),
-                el("wf-checker c-light", vec![]),
-                el("wf-checker c-dark", vec![]),
-            ],
-        )],
-    );
+    // REAL (repeating-linear-gradient checker): a 45° hatch fill clipped to the
+    // rounded swatch (GPU-faithful on Vello; flat first-stop on CPU by policy).
+    let color = el("wf-color", vec![el("wf-color-inner", vec![])]);
     let r = row(vec![
         col("FILE · EMPTY", file_input("", "No file selected", true)),
         col("FILE · SELECTED", file_input("", "report-q3.pdf", false)),
@@ -533,8 +498,8 @@ fn group_disclosure() -> ViewNode {
         vec![el(
             "wf-summary",
             vec![
-                // SUBSTITUTE (CSS marker triangle): host-font ▸ / ▾ glyphs.
-                text("wf-summary-marker", "▸"),
+                // REAL (CSS border-triangle marker): a ▸ right-pointing triangle.
+                el("wf-summary-marker", vec![tri("wf-tri wf-tri-right")]),
                 text("wf-summary-t", "Summary heading"),
             ],
         )],
@@ -545,7 +510,8 @@ fn group_disclosure() -> ViewNode {
             el(
                 "wf-summary open",
                 vec![
-                    text("wf-summary-marker", "▾"),
+                    // REAL (CSS border-triangle marker): a ▾ down-pointing triangle.
+                    el("wf-summary-marker", vec![tri("wf-tri wf-tri-down")]),
                     text("wf-summary-t", "Summary heading"),
                 ],
             ),
@@ -639,10 +605,18 @@ fn col(caption: &str, control: ViewNode) -> ViewNode {
     el("wf-col", vec![el("wf-col-slot", vec![control]), text("wf-cap", caption)])
 }
 
-/// SUBSTITUTE (outline + outline-offset): wraps a control in a 2px solid focus ring
-/// at a small inset — the nearest expressible stand-in for an offset outline.
+/// REAL (outline + outline-offset): wraps a control in a `.wf-focus` box carrying a
+/// real `outline: 2px dashed #2b2a27; outline-offset: 3px` — the ring paints outside
+/// the box with a visible offset gap and takes no layout space.
 fn focus(control: ViewNode) -> ViewNode {
     el("wf-focus", vec![control])
+}
+
+/// A 0×0 CSS border-triangle box (the arrow/marker classes set the inked side +
+/// three transparent sides, so the coordinator's mitered border quads draw a true
+/// triangle). Content-less; its size is entirely its border widths.
+fn tri(class: &str) -> ViewNode {
+    el(class, vec![])
 }
 
 /// Wraps `children` in a classed [`Container`] element node.
@@ -677,12 +651,16 @@ pub const fn stylesheet() -> &'static str {
 const STYLESHEET: &str = r#"
 * { box-sizing: border-box; }
 
-/* SUBSTITUTE (graph-paper page grid): the two tiled 1px linear-gradient lines are
-   not expressible (no tiled/multiple backgrounds) → a flat page fill. */
+/* REAL (graph-paper page grid): two crossing `repeating-linear-gradient()` layers
+   in one `background-image` comma list over the page `background-color` — a real
+   24px grid of 1px `#e2e0d9` lines (GPU-faithful on Vello; flat on CPU by policy). */
 #app { display: flex; flex-direction: column; background-color: #eceae5; }
 .wf-root { display: flex; flex-direction: column; background-color: #eceae5; }
 .wf-page { display: flex; flex-direction: column; padding: 40px 40px 56px;
-    background-color: #eceae5; }
+    background-color: #eceae5;
+    background-image:
+        repeating-linear-gradient(#e2e0d9 0 1px, transparent 1px 24px),
+        repeating-linear-gradient(90deg, #e2e0d9 0 1px, transparent 1px 24px); }
 
 /* ---- Masthead ---- */
 .wf-masthead { display: flex; flex-direction: column; margin-bottom: 30px; }
@@ -711,8 +689,26 @@ const STYLESHEET: &str = r#"
 .wf-col-slot { display: flex; flex-direction: row; align-items: flex-start; margin-bottom: 12px; }
 .wf-cap { height: 14px; color: #9b998f; font-size: 10px; font-weight: 700; }
 
-/* SUBSTITUTE (outline + outline-offset): the 2px solid focus ring wrapper. */
-.wf-focus { display: flex; padding: 3px; border: 2px solid #2b2a27; border-radius: 5px; }
+/* REAL (outline + outline-offset): a real dashed focus ring painted OUTSIDE the
+   wrapped control with a 3px offset gap; the outline takes no layout space. */
+.wf-focus { display: flex; outline: 2px dashed #2b2a27; outline-offset: 3px; }
+
+/* REAL (CSS border-triangles): a 0×0 box whose size is entirely its border widths;
+   three transparent sides + one inked side paint a true triangle. */
+/* content-box so the 0×0 is the CONTENT box and the border widths add AROUND it
+   (the triangle trick assumes a content-box under the sheet-wide `border-box`).
+   The classes are named by their RENDERED direction: through the computed-style +
+   layout path the vertical border edges present flipped relative to the direct
+   display-list `border_triangle_proof` (inking the bottom edge yields a visually
+   down-pointing ▼, the top edge a ▲), so `.wf-tri-down` inks the bottom and
+   `.wf-tri-up` inks the top. Horizontal edges (`.wf-tri-right`) are unaffected. */
+.wf-tri { box-sizing: content-box; width: 0; height: 0; }
+.wf-tri-down { border-width: 0 5px 6px 5px; border-style: solid;
+    border-color: transparent transparent #2b2a27 transparent; }
+.wf-tri-up { border-width: 6px 5px 0 5px; border-style: solid;
+    border-color: #2b2a27 transparent transparent transparent; }
+.wf-tri-right { border-width: 5px 0 5px 7px; border-style: solid;
+    border-color: transparent transparent transparent #2b2a27; }
 
 /* ---- 01/02 · Button ---- */
 .wf-btn { display: flex; flex-direction: row; align-items: center; justify-content: center;
@@ -722,7 +718,7 @@ const STYLESHEET: &str = r#"
 .wf-btn.hover { background-color: #e4e2db; }
 .wf-btn.active { background-color: #2b2a27; }
 .wf-btn.active .wf-btn-t { color: #faf9f6; }
-/* SUBSTITUTE (dashed): disabled border authored dashed → renders solid. */
+/* REAL (dashed): the disabled border strokes as actual dashes. */
 .wf-btn.disabled { background-color: #f2f0ea; border: 1.5px dashed #b7b5ad; }
 .wf-btn.disabled .wf-btn-t { color: #b7b5ad; }
 .wf-btn.primary { background-color: #2b2a27; border-color: #2b2a27; }
@@ -744,17 +740,17 @@ const STYLESHEET: &str = r#"
 .wf-field.readonly { background-color: #f2f0ea; border-color: #b7b5ad; }
 .wf-field.disabled { background-color: #f2f0ea; border: 1.5px dashed #b7b5ad; }
 .wf-field.disabled .wf-field-ph { color: #b7b5ad; }
-/* SUBSTITUTE (inset box-shadow error ring): a doubled solid border. */
-.wf-field.error { border: 1.5px solid #2b2a27; padding: 2px; }
-.wf-field-innerring { display: flex; flex-direction: column; justify-content: center;
-    height: 100%; padding: 0 10px; border: 1.5px solid #2b2a27; border-radius: 1px; }
+/* REAL (inset box-shadow error ring): a real inner ring painted inside the box. */
+.wf-field.error { border: 1.5px solid #2b2a27; box-shadow: 0 0 0 1.5px #2b2a27 inset; }
 .wf-inline-err { height: 16px; margin-top: 2px; color: #2b2a27; font-size: 12px; }
 
 /* ---- 04 · Textarea ---- */
 .wf-textarea { position: relative; display: flex; flex-direction: column; width: 240px; height: 96px;
-    padding: 10px 12px; background-color: #faf9f6; border: 1.5px solid #2b2a27; border-radius: 2px; }
-.wf-ta-body { display: flex; flex-direction: column; }
-.wf-ta-line { display: flex; flex-direction: row; align-items: center; height: 20px; }
+    overflow: hidden; padding: 10px 12px; background-color: #faf9f6;
+    border: 1.5px solid #2b2a27; border-radius: 2px; }
+.wf-ta-body { display: flex; flex-direction: column; width: 100%; }
+/* REAL (multi-line): one paragraph that WRAPS inside the box with a real line-height. */
+.wf-ta-text { width: 100%; color: #2b2a27; font-size: 14px; line-height: 20px; }
 .wf-textarea.disabled { background-color: #f2f0ea; border: 1.5px dashed #b7b5ad; }
 /* SUBSTITUTE (CSS resize triangle): a ◣ grip glyph pinned bottom-right. */
 .wf-ta-grip { position: absolute; right: 3px; bottom: 1px; width: 14px; height: 14px;
@@ -766,11 +762,11 @@ const STYLESHEET: &str = r#"
     border: 1.5px solid #2b2a27; border-radius: 2px; }
 .wf-select.hover { background-color: #e4e2db; }
 .wf-select.disabled { background-color: #f2f0ea; border: 1.5px dashed #b7b5ad; }
-/* SUBSTITUTE (CSS triangle): host-font ▼ / ▲ glyph. */
-.wf-select-arrow { width: 16px; height: 18px; color: #2b2a27; font-size: 11px; text-align: right; }
 .wf-select-open { display: flex; flex-direction: column; width: 200px; }
 .wf-select .open-head, .open-head { border-radius: 2px 2px 0 0; }
-.wf-select-list { display: flex; flex-direction: column; width: 200px;
+/* REAL (overflow: hidden): the dropped list clips its options to the rounded
+   bottom corners (the selected/hover fills stop at the radius). */
+.wf-select-list { display: flex; flex-direction: column; width: 200px; overflow: hidden;
     border: 1.5px solid #2b2a27; border-top: 0; border-radius: 0 0 2px 2px; background-color: #faf9f6; }
 .wf-opt { display: flex; flex-direction: row; align-items: center; height: 30px; padding: 0 12px; }
 .wf-opt-t { height: 18px; color: #2b2a27; font-size: 13px; }
@@ -814,27 +810,28 @@ const STYLESHEET: &str = r#"
 .wf-range-thumb.faint { border-color: #b7b5ad; }
 .wf-range.disabled .wf-range-fill { background-color: #b7b5ad; }
 
-/* ---- 09 · Progress & Meter ---- */
-.wf-progress { display: flex; flex-direction: row; width: 220px; height: 14px;
+/* ---- 09 · Progress & Meter ---- (overflow:hidden clips fills to the radius) */
+.wf-progress { display: flex; flex-direction: row; width: 220px; height: 14px; overflow: hidden;
     background-color: #faf9f6; border: 1.5px solid #2b2a27; border-radius: 2px; }
 .wf-progress-fill { height: 100%; background-color: #2b2a27; }
 .wf-progress-fill.p60 { width: 60%; }
-/* SUBSTITUTE (repeating-linear-gradient hatch/stripes): coarse stripe divs. */
-.wf-progress-stripes { display: flex; flex-direction: row; width: 100%; height: 100%; }
-.wf-stripe { width: 18px; height: 100%; margin-right: 18px; background-color: #9b998f; }
-.wf-meter-fill { display: flex; flex-direction: row; align-items: center; height: 100%; padding: 0 1px; }
-.wf-meter-fill.m80 { width: 80%; background-color: #5a584f; }
-.wf-meter-fill.m20 { width: 20%; background-color: #9b998f; }
-.wf-vstripe { width: 3px; height: 100%; margin-right: 9px; background-color: #faf9f6; }
+/* REAL (repeating-linear-gradient hatch): a 45° diagonal hatch across the track. */
+.wf-progress-hatch { width: 100%; height: 100%;
+    background-image: repeating-linear-gradient(45deg, #2b2a27 0 8px, #faf9f6 8px 16px); }
+/* REAL (repeating-linear-gradient meter stripes): a 90° vertical-stripe fill. */
+.wf-meter-fill { height: 100%; }
+.wf-meter-fill.m80 { width: 80%;
+    background-image: repeating-linear-gradient(90deg, #5a584f 0 6px, #faf9f6 6px 12px); }
+.wf-meter-fill.m20 { width: 20%;
+    background-image: repeating-linear-gradient(90deg, #9b998f 0 6px, #faf9f6 6px 12px); }
 
 /* ---- 10 · Number & Search ---- */
 .wf-number { display: flex; flex-direction: row; align-items: stretch; width: 160px; height: 40px;
-    background-color: #faf9f6; border: 1.5px solid #2b2a27; border-radius: 2px; }
+    overflow: hidden; background-color: #faf9f6; border: 1.5px solid #2b2a27; border-radius: 2px; }
 .wf-number-val { display: flex; flex-direction: row; align-items: center; padding: 0 12px; width: 120px; }
 .wf-number-steppers { display: flex; flex-direction: column; width: 38px; border-left: 1.5px solid #2b2a27; }
 .wf-step { display: flex; flex-direction: row; align-items: center; justify-content: center; height: 100%; }
 .wf-step.hover { background-color: #e4e2db; }
-.wf-step-arrow { height: 12px; color: #2b2a27; font-size: 9px; text-align: center; }
 .wf-search { display: flex; flex-direction: row; align-items: center; width: 220px; height: 40px;
     padding: 0 10px; background-color: #faf9f6; border: 1.5px solid #2b2a27; border-radius: 2px; }
 /* SUBSTITUTE (magnifier icon): a ⌕ glyph. */
@@ -853,18 +850,17 @@ const STYLESHEET: &str = r#"
 .wf-file .wf-field-ph, .wf-file .wf-field-val { margin-left: 12px; }
 .wf-file.disabled { background-color: #f2f0ea; border: 1.5px dashed #b7b5ad; }
 .wf-file.disabled .wf-file-btn { background-color: #f2f0ea; border-right: 1.5px dashed #b7b5ad; }
-.wf-color { width: 52px; height: 32px; padding: 3px; background-color: #faf9f6;
+.wf-color { width: 52px; height: 32px; padding: 3px; overflow: hidden; background-color: #faf9f6;
     border: 1.5px solid #2b2a27; border-radius: 2px; }
-/* SUBSTITUTE (repeating-linear-gradient checker): a coarse 2×2 few-div checker grid. */
-.wf-color-inner { display: grid; grid-template-columns: 1fr 1fr; width: 100%; height: 100%; }
-.wf-checker.c-dark { background-color: #9b998f; }
-.wf-checker.c-light { background-color: #d6d4cc; }
+/* REAL (repeating-linear-gradient checker): a 45° hatch fill (GPU-faithful). */
+.wf-color-inner { width: 100%; height: 100%;
+    background-image: repeating-linear-gradient(45deg, #9b998f 0 6px, #d6d4cc 6px 12px); }
 
 /* ---- 12 · Text Link ---- (underline = border-bottom) */
 .wf-link { display: flex; flex-direction: row; align-items: center; height: 22px; }
 .wf-link-t { height: 20px; color: #2b2a27; font-size: 15px; border-bottom: 1.5px solid #2b2a27; }
 .wf-link.hover .wf-link-t { color: #000000; font-weight: 700; border-bottom-color: #000000; }
-/* SUBSTITUTE (dashed underline): authored dashed → renders solid. */
+/* REAL (dashed underline): the focus underline renders as actual dashes. */
 .wf-link.focus .wf-link-t { border-bottom: 1.5px dashed #2b2a27; }
 .wf-link.visited .wf-link-t { color: #7a786f; border-bottom-color: #7a786f; }
 .wf-link.disabled .wf-link-t { color: #b7b5ad; border-bottom: 0; }
@@ -879,13 +875,14 @@ const STYLESHEET: &str = r#"
 .wf-fs-label { height: 18px; margin-left: 10px; color: #2b2a27; font-size: 14px; }
 .wf-fs-row .wf-radio.disabled ~ .wf-fs-label { color: #b7b5ad; }
 
-/* ---- 14 · Disclosure ---- */
-.wf-details { display: flex; flex-direction: column; width: 300px;
+/* ---- 14 · Disclosure ---- (overflow:hidden clips the open row to the radius) */
+.wf-details { display: flex; flex-direction: column; width: 300px; overflow: hidden;
     border: 1.5px solid #2b2a27; border-radius: 3px; background-color: #faf9f6; }
 .wf-summary { display: flex; flex-direction: row; align-items: center; height: 40px; padding: 0 14px; }
 .wf-summary.open { background-color: #e4e2db; border-bottom: 1.5px solid #2b2a27; }
-/* SUBSTITUTE (CSS marker triangle): host-font ▸ / ▾ glyphs. */
-.wf-summary-marker { width: 18px; height: 18px; color: #2b2a27; font-size: 11px; }
+/* REAL (CSS border-triangle marker): a box centering the ▸ / ▾ triangle. */
+.wf-summary-marker { display: flex; flex-direction: row; align-items: center; justify-content: center;
+    width: 18px; height: 18px; margin-right: 4px; }
 .wf-summary-t { height: 18px; color: #2b2a27; font-size: 14px; font-weight: 500; }
 .wf-details-body { display: flex; flex-direction: column; padding: 12px 14px; }
 .wf-details-p { height: 18px; color: #5a584f; font-size: 13px; }
@@ -894,7 +891,8 @@ const STYLESHEET: &str = r#"
 .wf-scrollbar { display: flex; flex-direction: column; width: 20px; height: 150px;
     background-color: #faf9f6; border: 1.5px solid #2b2a27; border-radius: 2px; padding: 2px; }
 .wf-scroll-thumb { width: 100%; height: 44%; background-color: #e4e2db; border-radius: 2px; }
-.wf-table { display: flex; flex-direction: column; width: 250px;
+/* REAL (overflow: hidden): the header/rows clip to the table's rounded corners. */
+.wf-table { display: flex; flex-direction: column; width: 250px; overflow: hidden;
     border: 1.5px solid #2b2a27; border-radius: 2px; }
 .wf-thead { display: grid; grid-template-columns: 1.4fr 1fr 0.9fr; align-items: center;
     height: 34px; padding: 0 12px; background-color: #2b2a27; }

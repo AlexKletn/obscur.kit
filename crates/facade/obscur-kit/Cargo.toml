@@ -268,6 +268,22 @@ required-features = [
     "text-unicode",
 ]
 
+# The Browser Elements Wireframe Kit → PNG rendered FAITHFULLY through headless
+# Vello/wgpu: the same shared view + wireframe stylesheet as `wireframe_png`,
+# rasterized offscreen on the GPU and read back to pixels, so the graph-paper page
+# grid + the indeterminate-progress / meter / colour-swatch `repeating-linear-
+# gradient` hatches are REAL (not the CPU flat-first-stop approximation). Needs the
+# GPU adapter at runtime but no window; gated on the Vello backend + resource/text.
+[[example]]
+name = "wireframe_vello_png"
+required-features = [
+    "render-vello",
+    "resource-fs",
+    "resource-decode",
+    "text-harfrust",
+    "text-unicode",
+]
+
 # The imported UI-Kit → PNG rendered FAITHFULLY through headless Vello/wgpu: the
 # same shared view + per-theme stylesheet as `uikit_png`, rasterized offscreen on
 # the GPU and read back to pixels, so the Skeuomorphic theme's gradients + inset/
