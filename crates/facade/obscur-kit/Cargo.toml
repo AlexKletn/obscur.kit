@@ -408,6 +408,34 @@ required-features = [
     "text-unicode",
 ]
 
+# The headless capabilities demo → PNG (software CPU): every CSS feature ported in
+# the math campaign, authored as a CSS string + View tree and rasterized through the
+# CPU backend. The Oklab gradient + linearRGB blur cards degrade to the documented
+# CPU approximation (captioned "GPU / Vello"); everything else renders faithfully.
+# Needs the CPU renderer + the text shaping stack, but no window or GPU.
+[[example]]
+name = "capabilities_png"
+required-features = ["render-cpu", "text-harfrust", "text-unicode"]
+
+# The capabilities demo → PNG rendered FAITHFULLY through headless Vello/wgpu: the
+# same shared view + stylesheet as `capabilities_png`, rasterized offscreen on the
+# GPU and read back to pixels, so the Oklab gradient midpoint + the linearRGB blur
+# are REAL. Needs the GPU adapter at runtime but no window; gated on the Vello
+# backend + text stack.
+[[example]]
+name = "capabilities_vello_png"
+required-features = ["render-vello", "text-harfrust", "text-unicode"]
+
+# The windowed, ANIMATED capabilities demo: the SAME shared view + base stylesheet
+# as the two PNG examples, rendered through winit + Vello at full effect fidelity,
+# with the transform-interpolation card (§13) animated `0°→90°→0°` by blending the
+# affine each frame through `MotionValue::Transform` (decompose→lerp→recompose) and
+# layering the result as a per-frame `.xform-box` override stylesheet. Needs the
+# window + GPU adapters plus the text stack (a display/GPU are required at runtime).
+[[example]]
+name = "capabilities_window"
+required-features = ["full"]
+
 # The windowed, INTERACTIVE imported UI-Kit theme switcher: the SAME shared view +
 # per-theme stylesheets as `uikit_png` / `uikit_vello_png`, rendered through winit +
 # Vello, with clickable tabs that live-swap the stylesheet at full GPU fidelity.
