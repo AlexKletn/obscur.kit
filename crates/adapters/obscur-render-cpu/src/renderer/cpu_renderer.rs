@@ -652,7 +652,10 @@ fn draw_shadow_approx(
         return;
     }
     let shadow_rect = Rect::new(Point::new(x, y), Size::new(w, h));
-    let path = Path::rounded_rect(shadow_rect, radii);
+    // Spec §7.1.1: an outset shadow's corner radii are the box radii grown by
+    // `+spread` (a sharp corner stays sharp), so the rounded corners on the
+    // spread-inflated rect stay concentric with the box's corners.
+    let path = Path::rounded_rect(shadow_rect, radii.offset(spread));
     let Some(sk_path) = to_sk_path(&path) else {
         return;
     };
@@ -712,14 +715,10 @@ fn draw_inset_shadow_approx(
         Path::rounded_rect(rect, radii)
     } else {
         let inner = Rect::new(Point::new(ix, iy), Size::new(iw, ih));
-        // Inner corners round with the frame: reduce each radius by `spread`.
-        let inner_radii = CornerRadii {
-            top_left: (radii.top_left - spread).max(0.0),
-            top_right: (radii.top_right - spread).max(0.0),
-            bottom_right: (radii.bottom_right - spread).max(0.0),
-            bottom_left: (radii.bottom_left - spread).max(0.0),
-        };
-        Path::rounded_rect_ring(rect, radii, inner, inner_radii)
+        // Spec §7.1.1: an inset shadow's radii are the box radii shrunk by
+        // `−spread` on the deflated inner rect (a sharp corner stays sharp), so
+        // the lit hole stays concentric with the box's rounded corners.
+        Path::rounded_rect_ring(rect, radii, inner, radii.offset(-spread))
     };
     let Some(sk_path) = to_sk_path(&path) else {
         return;

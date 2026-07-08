@@ -652,13 +652,18 @@ fn draw_shadow(
         return;
     }
     let kurbo_rect = KurboRect::new(x0, y0, x1, y1);
-    // A single corner radius: the max of the four (documented approximation).
+    // Spec §7.1.1: an outset shadow's corner radii are the box radii grown by
+    // `+spread` (a sharp corner stays sharp) so the rounded corners stay
+    // concentric with the box. Collapse the grown radii to a single corner
+    // radius — the max of the four (documented approximation for non-uniform
+    // corners).
+    let grown = radii.offset(spread);
     let radius = f64::from(
-        radii
+        grown
             .top_left
-            .max(radii.top_right)
-            .max(radii.bottom_right)
-            .max(radii.bottom_left)
+            .max(grown.top_right)
+            .max(grown.bottom_right)
+            .max(grown.bottom_left)
             .max(0.0),
     );
     // Map the CSS blur radius to a gaussian standard deviation.

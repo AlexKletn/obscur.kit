@@ -630,8 +630,18 @@ impl SceneCoordinator {
 
             // A node's per-corner `border-radius` (all four corners), read off its
             // computed style. Non-zero radii round its background fill and clip its
-            // subtree to the rounded border box.
-            let radii = corner_radii_of(computed, node);
+            // subtree to the rounded border box. The authored radii are put through
+            // the CSS Backgrounds §5.5 overlapping-curves correction ONCE here (a
+            // single uniform scale over the box), so the SAME normalized radii feed
+            // every consumer — background fill, subtree clip, border ring, box-shadow
+            // and outline. Radii that already fit are returned unchanged
+            // (byte-identical); a node without an arranged box keeps its raw radii.
+            let radii = {
+                let raw = corner_radii_of(computed, node);
+                boxes
+                    .get(&node)
+                    .map_or(raw, |layout_box| raw.normalized(layout_box.bounds))
+            };
             let has_radius = corner_radii_present(radii);
             // A node with `overflow` other than `visible` clips its subtree to its
             // box (`hidden` / `clip` / `scroll` / `auto`; scroll/auto clip like
