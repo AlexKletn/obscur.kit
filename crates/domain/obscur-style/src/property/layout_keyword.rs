@@ -17,7 +17,8 @@
 //! below. These constants are the canonical cross-crate handles for layout
 //! keyword values.
 //!
-//! The reserved values occupy the `0x0000_1xxx` namespace. This is distinct
+//! The reserved values occupy the `0x0000_1xxx` namespace (extended into
+//! `0x0000_2xxx` once the `1xxx` category nibbles were exhausted). This is distinct
 //! from `obscur-view`'s element-attribute reservations (`CLASS`/`ID`/`TYPE` in
 //! `0x0000_000x`) and from the component/primitive prop namespaces (e.g.
 //! `0x00C1_xxxx`), so a reserved layout keyword can never collide with either.
@@ -122,6 +123,21 @@ pub const TEXT_ALIGN_END: InternedSymbol = InternedSymbol::from_raw(0x0000_1606)
 pub const TEXT_OVERFLOW_CLIP: InternedSymbol = InternedSymbol::from_raw(0x0000_1701);
 /// The `text-overflow: ellipsis` keyword.
 pub const TEXT_OVERFLOW_ELLIPSIS: InternedSymbol = InternedSymbol::from_raw(0x0000_1702);
+
+// ---- `text-transform` keyword values (CSS Text 3 §2.1) ----
+//
+// The `0x0000_1xxx` category nibbles (`0`..`F`) are exhausted, so this closed set
+// opens the adjacent `0x0000_2xxx` reservation block (still disjoint from the CSS
+// interner's `0x00C1_xxxx` and the element-attribute `0x0000_000x` ranges).
+
+/// The `text-transform: none` keyword (the initial; no case mapping).
+pub const TEXT_TRANSFORM_NONE: InternedSymbol = InternedSymbol::from_raw(0x0000_2001);
+/// The `text-transform: uppercase` keyword.
+pub const TEXT_TRANSFORM_UPPERCASE: InternedSymbol = InternedSymbol::from_raw(0x0000_2002);
+/// The `text-transform: lowercase` keyword.
+pub const TEXT_TRANSFORM_LOWERCASE: InternedSymbol = InternedSymbol::from_raw(0x0000_2003);
+/// The `text-transform: capitalize` keyword.
+pub const TEXT_TRANSFORM_CAPITALIZE: InternedSymbol = InternedSymbol::from_raw(0x0000_2004);
 
 // ---- relative `font-weight` keyword values ----
 
@@ -450,6 +466,23 @@ pub fn text_overflow_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
+/// Maps a `text-transform` keyword string to its reserved [`InternedSymbol`]
+/// (CSS Text 3 §2.1).
+///
+/// The input is ASCII-lowercased before matching. Returns [`None`] for any
+/// keyword outside the closed `none` / `uppercase` / `lowercase` / `capitalize`
+/// set (`full-width` / `full-size-kana` are not modelled).
+#[must_use]
+pub fn text_transform_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "none" => Some(TEXT_TRANSFORM_NONE),
+        "uppercase" => Some(TEXT_TRANSFORM_UPPERCASE),
+        "lowercase" => Some(TEXT_TRANSFORM_LOWERCASE),
+        "capitalize" => Some(TEXT_TRANSFORM_CAPITALIZE),
+        _ => None,
+    }
+}
+
 /// Maps an `overflow` keyword string to its reserved [`InternedSymbol`].
 ///
 /// The input is ASCII-lowercased before matching. Returns [`None`] for any
@@ -574,6 +607,10 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         TEXT_ALIGN_END => Some("end"),
         TEXT_OVERFLOW_CLIP => Some("clip"),
         TEXT_OVERFLOW_ELLIPSIS => Some("ellipsis"),
+        TEXT_TRANSFORM_NONE => Some("none"),
+        TEXT_TRANSFORM_UPPERCASE => Some("uppercase"),
+        TEXT_TRANSFORM_LOWERCASE => Some("lowercase"),
+        TEXT_TRANSFORM_CAPITALIZE => Some("capitalize"),
         FONT_WEIGHT_BOLDER => Some("bolder"),
         FONT_WEIGHT_LIGHTER => Some("lighter"),
         GRID_AUTO_FLOW_ROW => Some("row"),
@@ -641,6 +678,10 @@ mod tests {
         TEXT_ALIGN_END,
         TEXT_OVERFLOW_CLIP,
         TEXT_OVERFLOW_ELLIPSIS,
+        TEXT_TRANSFORM_NONE,
+        TEXT_TRANSFORM_UPPERCASE,
+        TEXT_TRANSFORM_LOWERCASE,
+        TEXT_TRANSFORM_CAPITALIZE,
         FONT_WEIGHT_BOLDER,
         FONT_WEIGHT_LIGHTER,
         GRID_AUTO_FLOW_ROW,
@@ -833,6 +874,27 @@ mod tests {
         // Round-trips through `name_of`.
         assert_eq!(name_of(TEXT_OVERFLOW_CLIP), Some("clip"));
         assert_eq!(name_of(TEXT_OVERFLOW_ELLIPSIS), Some("ellipsis"));
+    }
+
+    #[test]
+    fn text_transform_maps_known_keywords() {
+        assert_eq!(text_transform_from_name("none"), Some(TEXT_TRANSFORM_NONE));
+        assert_eq!(
+            text_transform_from_name("uppercase"),
+            Some(TEXT_TRANSFORM_UPPERCASE)
+        );
+        assert_eq!(
+            text_transform_from_name("LOWERCASE"),
+            Some(TEXT_TRANSFORM_LOWERCASE)
+        );
+        assert_eq!(
+            text_transform_from_name("capitalize"),
+            Some(TEXT_TRANSFORM_CAPITALIZE)
+        );
+        assert_eq!(text_transform_from_name("full-width"), None);
+        // Round-trips through `name_of`.
+        assert_eq!(name_of(TEXT_TRANSFORM_UPPERCASE), Some("uppercase"));
+        assert_eq!(name_of(TEXT_TRANSFORM_CAPITALIZE), Some("capitalize"));
     }
 
     #[test]

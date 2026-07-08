@@ -319,6 +319,19 @@ pub enum PropertyId {
     /// inherited). See the reserved `TEXT_OVERFLOW_*` handles in
     /// [`crate::property::layout_keyword`].
     TextOverflow,
+    /// The `letter-spacing` property (a `<length>` [`PropertyValue::Length`], or
+    /// the keyword `normal` ≡ `0`; inherited). Extra tracking added after each
+    /// typographic character unit (CSS Text 3 §8.1). May be negative.
+    LetterSpacing,
+    /// The `word-spacing` property (a `<length>` [`PropertyValue::Length`], or the
+    /// keyword `normal` ≡ `0`; inherited). Extra spacing added to each word
+    /// separator (CSS Text 3 §8.2). May be negative.
+    WordSpacing,
+    /// The `text-transform` property (Keyword-valued: `none` / `uppercase` /
+    /// `lowercase` / `capitalize`; inherited). Casing applied to the text before
+    /// shaping (CSS Text 3 §2.1). See the reserved `TEXT_TRANSFORM_*` handles in
+    /// [`crate::property::layout_keyword`].
+    TextTransform,
 
     // ---- Overflow (Keyword-valued; NOT inherited; pure paint/clip) ----
     /// The `overflow` property (Keyword-valued: `visible` (initial) / `hidden` /
@@ -425,6 +438,9 @@ impl PropertyId {
             Self::LineHeight => "line-height",
             Self::TextAlign => "text-align",
             Self::TextOverflow => "text-overflow",
+            Self::LetterSpacing => "letter-spacing",
+            Self::WordSpacing => "word-spacing",
+            Self::TextTransform => "text-transform",
             Self::Overflow => "overflow",
         }
     }
@@ -445,7 +461,12 @@ impl PropertyId {
             | Self::FontWeight
             | Self::FontStyle
             | Self::LineHeight
-            | Self::TextAlign => Inheritance::Inherited,
+            | Self::TextAlign
+            // `letter-spacing`, `word-spacing`, and `text-transform` all inherit
+            // (CSS Text 3 §8.1 / §8.2 / §2.1).
+            | Self::LetterSpacing
+            | Self::WordSpacing
+            | Self::TextTransform => Inheritance::Inherited,
             // Box / paint / layout properties reset on each element.
             Self::BackgroundColor
             | Self::BackgroundImage

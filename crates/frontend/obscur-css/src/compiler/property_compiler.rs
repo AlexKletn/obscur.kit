@@ -1063,7 +1063,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 87] = [
+    const ALL: [PropertyId; 90] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::BackgroundImage,
@@ -1150,6 +1150,9 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::LineHeight,
         PropertyId::TextAlign,
         PropertyId::TextOverflow,
+        PropertyId::LetterSpacing,
+        PropertyId::WordSpacing,
+        PropertyId::TextTransform,
         PropertyId::Overflow,
     ];
     ALL.into_iter()
@@ -1394,6 +1397,10 @@ fn is_length_longhand(property: PropertyId) -> bool {
             | PropertyId::Gap
             | PropertyId::FlexBasis
             | PropertyId::FontSize
+            // `letter-spacing` / `word-spacing` take a `<length>` (CSS Text 3
+            // §8.1 / §8.2), so a unitless `0` is `0px`.
+            | PropertyId::LetterSpacing
+            | PropertyId::WordSpacing
     )
 }
 
@@ -1474,6 +1481,7 @@ fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<Inte
         PropertyId::FontStyle => Some(layout_keyword::font_style_from_name),
         PropertyId::TextAlign => Some(layout_keyword::text_align_from_name),
         PropertyId::TextOverflow => Some(layout_keyword::text_overflow_from_name),
+        PropertyId::TextTransform => Some(layout_keyword::text_transform_from_name),
         PropertyId::Overflow => Some(layout_keyword::overflow_from_name),
         _ => None,
     }
@@ -6011,6 +6019,66 @@ mod tests {
         );
         // CSS-wide keywords still take priority.
         assert_eq!(value_of("text-overflow: inherit"), PropertyValue::Inherit);
+    }
+
+    #[test]
+    fn resolves_and_lowers_letter_and_word_spacing() {
+        // Names resolve (case-insensitive) to the new longhands.
+        assert_eq!(
+            property_id_from_name("letter-spacing"),
+            Some(PropertyId::LetterSpacing)
+        );
+        assert_eq!(
+            property_id_from_name("WORD-SPACING"),
+            Some(PropertyId::WordSpacing)
+        );
+        // A `<length>` lowers to a pixel Length (CSS Text 3 §8.1 / §8.2), and may
+        // be negative or a unitless `0`.
+        assert_eq!(
+            value_of("letter-spacing: 6px"),
+            PropertyValue::Length(Length::px(6.0))
+        );
+        assert_eq!(
+            value_of("word-spacing: 12px"),
+            PropertyValue::Length(Length::px(12.0))
+        );
+        assert_eq!(
+            value_of("letter-spacing: -2px"),
+            PropertyValue::Length(Length::px(-2.0))
+        );
+        assert_eq!(
+            value_of("letter-spacing: 0"),
+            PropertyValue::Length(Length::px(0.0))
+        );
+        // CSS-wide keywords still take priority; `normal` is a plain keyword the
+        // runtime reads as 0.
+        assert_eq!(value_of("letter-spacing: inherit"), PropertyValue::Inherit);
+    }
+
+    #[test]
+    fn text_transform_maps_to_reserved_symbols() {
+        assert_eq!(
+            property_id_from_name("text-transform"),
+            Some(PropertyId::TextTransform)
+        );
+        assert_eq!(
+            value_of("text-transform: uppercase"),
+            PropertyValue::Keyword(layout_keyword::TEXT_TRANSFORM_UPPERCASE)
+        );
+        assert_eq!(
+            value_of("text-transform: lowercase"),
+            PropertyValue::Keyword(layout_keyword::TEXT_TRANSFORM_LOWERCASE)
+        );
+        assert_eq!(
+            value_of("text-transform: capitalize"),
+            PropertyValue::Keyword(layout_keyword::TEXT_TRANSFORM_CAPITALIZE)
+        );
+        assert_eq!(
+            value_of("text-transform: none"),
+            PropertyValue::Keyword(layout_keyword::TEXT_TRANSFORM_NONE)
+        );
+        // CSS-wide keywords still take priority.
+        assert_eq!(value_of("text-transform: inherit"), PropertyValue::Inherit);
     }
 
     #[test]

@@ -22,12 +22,13 @@ use obscur_text::font::{
 use obscur_text::layout::{
     Hyphenator, NullHyphenator, ParagraphLayout, TextAlignment, TextOverflow,
 };
-use obscur_text::shaping::{ParagraphShaper, ShapedGlyph, TextDirection};
+use obscur_text::shaping::{apply_spacing, ParagraphShaper, ShapedGlyph, TextDirection};
 use obscur_tree::tree::RetainedTree;
 
 use super::{
     alignment_for, attributes_for, direction_for, families_for, grid_templates_from,
-    line_height_for, overflow_for, resolve_named_grid_areas, resolve_named_grid_lines, ComputedStyles,
+    letter_spacing_for, line_height_for, overflow_for, resolve_named_grid_areas,
+    resolve_named_grid_lines, text_transform_for, transform_text, word_spacing_for, ComputedStyles,
     GridTemplates,
 };
 
@@ -335,6 +336,8 @@ fn measure_text_node(
     paragraph: &ParagraphShaper,
     hyphenator: Option<&dyn Hyphenator>,
     line_height_override: Option<f32>,
+    letter_spacing: f32,
+    word_spacing: f32,
 ) -> Size {
     let font_size = style.font_size;
     let metrics = paragraph.line_metrics(font_size);
@@ -346,13 +349,14 @@ fn measure_text_node(
     // the baseline is `metrics.baseline()` — byte-for-byte the previous behaviour.
     let line_height = line_height_override.unwrap_or_else(|| metrics.line_height());
     let baseline = metrics.baseline() + (line_height - metrics.line_height()) / 2.0;
-    let runs = paragraph.shape_paragraph(
+    // Shape once (cache-shared with compose), then fold CSS Text 3 letter-/word-
+    // spacing into the advances through the SAME seam the compose pass uses, so
+    // the width measured here matches the width painted later (§8.1 / §8.2).
+    let runs = apply_spacing(
+        paragraph.shape_paragraph(content, fallback, attributes, &measure_face(), font_size, direction),
         content,
-        fallback,
-        attributes,
-        &measure_face(),
-        font_size,
-        direction,
+        letter_spacing,
+        word_spacing,
     );
     // A text node's own horizontal border/padding shrinks the wrap width; it is
     // almost always zero, but subtract it defensively so the content fits.
@@ -1086,8 +1090,13 @@ fn measure(
         let alignment = alignment_for(computed.get(&node));
         let overflow = overflow_for(computed.get(&node));
         let line_height = line_height_for(computed.get(&node), style.font_size);
+        // `text-transform` rewrites the string BEFORE shaping (§2.1), so the
+        // transformed text flows through itemization/shaping and the paragraph
+        // cache key; letter-/word-spacing are applied post-shaping inside
+        // `measure_text_node`.
+        let content = transform_text(content, text_transform_for(computed.get(&node)));
         return measure_text_node(
-            content,
+            content.as_ref(),
             &style,
             &fallback,
             &attributes,
@@ -1098,6 +1107,8 @@ fn measure(
             paragraph,
             hyphenator,
             line_height,
+            letter_spacing_for(computed.get(&node)),
+            word_spacing_for(computed.get(&node)),
         );
     }
     let Some(algorithm) = algorithm_for(style.display, node, grid_templates, style.gap) else {
@@ -1187,8 +1198,11 @@ fn arrange(
         let alignment = alignment_for(computed.get(&node));
         let overflow = overflow_for(computed.get(&node));
         let line_height = line_height_for(computed.get(&node), style.font_size);
+        // Same pre-shape transform (§2.1) + post-shape spacing (§8.1/§8.2) as the
+        // measure pass, so the arranged box matches the measured one.
+        let content = transform_text(content, text_transform_for(computed.get(&node)));
         let size = measure_text_node(
-            content,
+            content.as_ref(),
             &style,
             &fallback,
             &attributes,
@@ -1199,6 +1213,8 @@ fn arrange(
             paragraph,
             hyphenator,
             line_height,
+            letter_spacing_for(computed.get(&node)),
+            word_spacing_for(computed.get(&node)),
         );
         boxes.insert(node, LayoutBox::new(Rect::new(origin, size)));
         return;

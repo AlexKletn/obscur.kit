@@ -157,6 +157,10 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::Direction,
     PropertyId::TextAlign,
     PropertyId::TextOverflow,
+    // Inherited text spacing/casing (CSS Text 3 §8.1 / §8.2 / §2.1).
+    PropertyId::LetterSpacing,
+    PropertyId::WordSpacing,
+    PropertyId::TextTransform,
     // Overflow (pure paint/clip; no layout effect).
     PropertyId::Overflow,
 ];
@@ -418,6 +422,17 @@ impl StyleResolver {
             // the interner, so an absent value falls back to the runtime's default
             // (`Clip`) — byte-for-byte identical to today's behaviour.
             | PropertyId::TextOverflow
+            // `letter-spacing` / `word-spacing` initial is `normal` (≡ 0). An
+            // absent value is left unresolved so the runtime's spacing helpers
+            // default to `0.0` — no tracking / no word spacing, byte-for-byte
+            // identical to before these properties existed (CSS Text 3 §8.1/§8.2).
+            | PropertyId::LetterSpacing
+            | PropertyId::WordSpacing
+            // `text-transform` initial is `none`; its keyword initial needs the
+            // interner, so an absent value falls back to the runtime's default
+            // (`TextTransform::None`, the string shaped unchanged) — byte-for-byte
+            // identical to before it existed (CSS Text 3 §2.1).
+            | PropertyId::TextTransform
             // `overflow` initial is `visible` (no clip); its keyword initial
             // likewise needs the interner, so an absent value falls back to the
             // coordinator's default (no added clip) — byte-for-byte identical.
@@ -1140,6 +1155,9 @@ mod tests {
                 | PropertyId::LineHeight
                 | PropertyId::TextAlign
                 | PropertyId::TextOverflow
+                | PropertyId::LetterSpacing
+                | PropertyId::WordSpacing
+                | PropertyId::TextTransform
                 | PropertyId::Overflow => {}
             }
         }
@@ -1231,6 +1249,9 @@ mod tests {
             PropertyId::LineHeight,
             PropertyId::TextAlign,
             PropertyId::TextOverflow,
+            PropertyId::LetterSpacing,
+            PropertyId::WordSpacing,
+            PropertyId::TextTransform,
             PropertyId::Overflow,
         ];
         for id in all {

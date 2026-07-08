@@ -263,6 +263,14 @@ required-features = ["render-cpu", "text-harfrust", "text-unicode"]
 name = "multiline_text_proof"
 required-features = ["render-cpu", "text-harfrust", "text-unicode"]
 
+# Proof: CSS Text 3 letter-spacing (§8.1), word-spacing (§8.2), and
+# text-transform (§2.1) in the live text path. Drives the REAL runtime +
+# coordinator and rasterizes headless through the CPU renderer to
+# `target/text_spacing_transform_proof.png`. Needs the CPU renderer + text stack.
+[[example]]
+name = "text_spacing_transform_proof"
+required-features = ["render-cpu", "text-harfrust", "text-unicode"]
+
 # The headless capability showcase → PNG. Needs the CPU renderer, filesystem
 # image loading + decode, and the real text shaping stack — but no window or GPU,
 # so it builds and runs anywhere (`cargo build --examples` stays display-free).

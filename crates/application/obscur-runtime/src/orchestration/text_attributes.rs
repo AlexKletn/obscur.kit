@@ -1,6 +1,8 @@
 //! Resolves a text node's computed typography into shaping inputs:
 //! [`attributes_for`] (weight + slant) and [`direction_for`] (base direction).
 
+use std::borrow::Cow;
+
 use obscur_style::computed::ComputedStyle;
 use obscur_style::property::{layout_keyword, PropertyId, PropertyValue};
 use obscur_text::font::FontAttributes;
@@ -169,6 +171,140 @@ pub(crate) fn line_height_for(computed: Option<&ComputedStyle>, font_size: f32) 
     }
 }
 
+/// Resolves a text node's `letter-spacing` into extra per-cluster tracking, in
+/// logical pixels, from its computed `letter-spacing` (CSS Text 3 §8.1).
+///
+/// Reads [`PropertyId::LetterSpacing`]: an absolute [`PropertyValue::Length`]
+/// resolves to its pixel value (which may be negative); the initial `normal`
+/// keyword, an absent property, a non-pixel length unit (`em` etc., not resolved
+/// here — a documented refinement), or any other value resolves to `0.0`, so an
+/// unauthored text node adds no tracking and shapes byte-for-byte as before.
+///
+/// The same value feeds **both** the layout measure/arrange pass and the scene
+/// compose pass (through the shared [`apply_spacing`](obscur_text::shaping::apply_spacing)
+/// seam) so the measured box width and the painted advances agree.
+#[must_use]
+pub(crate) fn letter_spacing_for(computed: Option<&ComputedStyle>) -> f32 {
+    length_px_of(computed, PropertyId::LetterSpacing)
+}
+
+/// Resolves a text node's `word-spacing` into extra per-separator spacing, in
+/// logical pixels, from its computed `word-spacing` (CSS Text 3 §8.2).
+///
+/// Reads [`PropertyId::WordSpacing`] with the same rules as
+/// [`letter_spacing_for`]: an absolute pixel length (possibly negative) resolves
+/// verbatim; `normal` / absent / non-pixel / other → `0.0`. Fed to the shared
+/// spacing seam on both the measure and compose passes so they cannot drift.
+#[must_use]
+pub(crate) fn word_spacing_for(computed: Option<&ComputedStyle>) -> f32 {
+    length_px_of(computed, PropertyId::WordSpacing)
+}
+
+/// Reads `property` off `computed` as an absolute-pixel [`PropertyValue::Length`],
+/// or `0.0` for an absent property, a non-length value, or a non-pixel unit.
+fn length_px_of(computed: Option<&ComputedStyle>, property: PropertyId) -> f32 {
+    let Some(value) = computed.and_then(|style| style.get(property)) else {
+        return 0.0;
+    };
+    match value.value() {
+        PropertyValue::Length(length) => length.as_px().map_or(0.0, |px| px.0),
+        _ => 0.0,
+    }
+}
+
+/// The CSS Text 3 `text-transform` casing operation (§2.1).
+///
+/// Only the closed case-mapping keyword set is modelled; `full-width` /
+/// `full-size-kana` are documented omissions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TextTransform {
+    /// `none` (the initial): the text is shaped unchanged.
+    None,
+    /// `uppercase`: every character is mapped to uppercase.
+    Uppercase,
+    /// `lowercase`: every character is mapped to lowercase.
+    Lowercase,
+    /// `capitalize`: the first typographic letter of each word is uppercased.
+    Capitalize,
+}
+
+/// Resolves a text node's [`TextTransform`] from its computed `text-transform`
+/// (CSS Text 3 §2.1).
+///
+/// Reads [`PropertyId::TextTransform`] — a [`PropertyValue::Keyword`] backed by
+/// one of the reserved [`layout_keyword`] handles — mapping each
+/// `TEXT_TRANSFORM_*` handle to its variant. An absent property (or any
+/// unrecognised keyword) resolves to [`TextTransform::None`], so an unauthored
+/// text node's string is shaped unchanged.
+#[must_use]
+pub(crate) fn text_transform_for(computed: Option<&ComputedStyle>) -> TextTransform {
+    let symbol = computed
+        .and_then(|style| style.get(PropertyId::TextTransform))
+        .and_then(|value| match value.value() {
+            PropertyValue::Keyword(symbol) => Some(*symbol),
+            _ => None,
+        });
+    match symbol {
+        Some(s) if s == layout_keyword::TEXT_TRANSFORM_UPPERCASE => TextTransform::Uppercase,
+        Some(s) if s == layout_keyword::TEXT_TRANSFORM_LOWERCASE => TextTransform::Lowercase,
+        Some(s) if s == layout_keyword::TEXT_TRANSFORM_CAPITALIZE => TextTransform::Capitalize,
+        // `none` and everything else (including an absent property) → None.
+        _ => TextTransform::None,
+    }
+}
+
+/// Applies `transform` to `content` **before** shaping (CSS Text 3 §2.1),
+/// returning the cased string.
+///
+/// This is the pre-shape seam: the transformed string flows through itemization,
+/// shaping, and the paragraph cache key, so a transformed node is a distinct
+/// cache entry and the measure and compose passes — which both run `content`
+/// through this same function — shape identical text.
+///
+/// [`TextTransform::None`] borrows `content` unchanged (zero-copy,
+/// byte-identical). `uppercase`/`lowercase` use Rust's Unicode-aware
+/// [`str::to_uppercase`]/[`str::to_lowercase`]. `capitalize` uppercases the first
+/// **cased letter** of each whitespace-delimited word (the first letter, not a
+/// leading symbol or digit), leaving the rest untouched. Locale-tailored casing
+/// (e.g. Turkish dotless *i*) and the full grapheme/word-boundary subtleties are
+/// documented refinements over this common Unicode path.
+#[must_use]
+pub(crate) fn transform_text(content: &str, transform: TextTransform) -> Cow<'_, str> {
+    match transform {
+        TextTransform::None => Cow::Borrowed(content),
+        TextTransform::Uppercase => Cow::Owned(content.to_uppercase()),
+        TextTransform::Lowercase => Cow::Owned(content.to_lowercase()),
+        TextTransform::Capitalize => Cow::Owned(capitalize(content)),
+    }
+}
+
+/// Uppercases the first cased letter of each whitespace-bounded word (§2.1
+/// `capitalize`).
+///
+/// A word boundary is any Unicode whitespace run; within a word the first
+/// character for which [`char::is_alphabetic`] holds is title/upper-cased and the
+/// rest are copied verbatim. Leading punctuation or digits do not consume the
+/// "first letter", matching the spec intent that `capitalize` targets the first
+/// *letter* of the word.
+fn capitalize(content: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    // `at_word_start` is set at the string start and after every whitespace run;
+    // it is cleared once a word's first letter has been uppercased.
+    let mut at_word_start = true;
+    for ch in content.chars() {
+        if ch.is_whitespace() {
+            at_word_start = true;
+            out.push(ch);
+        } else if at_word_start && ch.is_alphabetic() {
+            out.extend(ch.to_uppercase());
+            at_word_start = false;
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,5 +430,75 @@ mod tests {
             PropertyValue::Keyword(layout_keyword::FONT_STYLE_NORMAL),
         );
         assert_eq!(line_height_for(Some(&normal), 16.0), None);
+    }
+
+    #[test]
+    fn spacing_defaults_zero_and_reads_px_lengths() {
+        // Absent property and empty style → 0 (no tracking / no word spacing).
+        assert_eq!(letter_spacing_for(None), 0.0);
+        assert_eq!(word_spacing_for(None), 0.0);
+        assert_eq!(letter_spacing_for(Some(&ComputedStyle::new())), 0.0);
+        // `normal` (a keyword) resolves to 0 for both.
+        let ls_normal = styled(
+            PropertyId::LetterSpacing,
+            PropertyValue::Keyword(layout_keyword::FONT_STYLE_NORMAL),
+        );
+        assert_eq!(letter_spacing_for(Some(&ls_normal)), 0.0);
+        // An absolute pixel length resolves verbatim, including a negative one.
+        let ls = styled(PropertyId::LetterSpacing, PropertyValue::Length(Length::px(6.0)));
+        assert_eq!(letter_spacing_for(Some(&ls)), 6.0);
+        let ws = styled(PropertyId::WordSpacing, PropertyValue::Length(Length::px(12.0)));
+        assert_eq!(word_spacing_for(Some(&ws)), 12.0);
+        let neg = styled(PropertyId::LetterSpacing, PropertyValue::Length(Length::px(-2.0)));
+        assert_eq!(letter_spacing_for(Some(&neg)), -2.0);
+        // A percentage / non-pixel length is not resolved here → 0.
+        let pct = styled(PropertyId::LetterSpacing, PropertyValue::Length(Length::Percent(50.0)));
+        assert_eq!(letter_spacing_for(Some(&pct)), 0.0);
+    }
+
+    #[test]
+    fn text_transform_defaults_none_and_maps_keywords() {
+        assert_eq!(text_transform_for(None), TextTransform::None);
+        assert_eq!(
+            text_transform_for(Some(&ComputedStyle::new())),
+            TextTransform::None
+        );
+        let cases = [
+            (layout_keyword::TEXT_TRANSFORM_NONE, TextTransform::None),
+            (layout_keyword::TEXT_TRANSFORM_UPPERCASE, TextTransform::Uppercase),
+            (layout_keyword::TEXT_TRANSFORM_LOWERCASE, TextTransform::Lowercase),
+            (layout_keyword::TEXT_TRANSFORM_CAPITALIZE, TextTransform::Capitalize),
+        ];
+        for (symbol, expected) in cases {
+            let style = styled(PropertyId::TextTransform, PropertyValue::Keyword(symbol));
+            assert_eq!(text_transform_for(Some(&style)), expected);
+        }
+    }
+
+    #[test]
+    fn transform_text_none_is_zero_copy_identity() {
+        let out = transform_text("Hello World", TextTransform::None);
+        assert!(matches!(out, Cow::Borrowed("Hello World")));
+    }
+
+    #[test]
+    fn transform_text_cases_and_capitalizes() {
+        assert_eq!(transform_text("hello", TextTransform::Uppercase), "HELLO");
+        assert_eq!(transform_text("HeLLo", TextTransform::Lowercase), "hello");
+        // Capitalize (task definition: word = whitespace-bounded run; uppercase
+        // its first *cased letter*, so leading symbols are skipped over).
+        assert_eq!(
+            transform_text("hello world", TextTransform::Capitalize),
+            "Hello World"
+        );
+        assert_eq!(
+            transform_text("(quoted) words", TextTransform::Capitalize),
+            "(Quoted) Words"
+        );
+        // Already-capital and non-letter-led words are left/handled sensibly.
+        assert_eq!(
+            transform_text("ÜBER caf\u{00e9}", TextTransform::Capitalize),
+            "ÜBER Caf\u{00e9}"
+        );
     }
 }

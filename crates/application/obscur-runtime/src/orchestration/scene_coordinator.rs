@@ -1,6 +1,7 @@
 //! Composes a paint-ordered display list from the styled + laid-out tree:
 //! [`SceneCoordinator`].
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -32,14 +33,15 @@ use obscur_text::layout::{
 };
 use obscur_text::selection::TextSelection;
 use obscur_text::shaping::{
-    CachingShaper, MockTextShaper, ParagraphShaper, ShapedGlyph, ShapedRun, SingleRunItemizer,
-    TextDirection, TextItemizer, TextShaper,
+    apply_spacing, CachingShaper, MockTextShaper, ParagraphShaper, ShapedGlyph, ShapedRun,
+    SingleRunItemizer, TextDirection, TextItemizer, TextShaper,
 };
 use obscur_tree::tree::RetainedTree;
 
 use super::stacking::{effective_paint_layer, effective_stacking_z, PaintLayer, PaintUnit};
 use super::{
-    alignment_for, attributes_for, direction_for, families_for, line_height_for, overflow_for,
+    alignment_for, attributes_for, direction_for, families_for, letter_spacing_for,
+    line_height_for, overflow_for, text_transform_for, transform_text, word_spacing_for,
     ComputedStyles,
     EditingView, LayoutBoxes,
 };
@@ -279,14 +281,25 @@ impl SceneCoordinator {
         font_size: f32,
         max_width: f32,
         line_height_override: Option<f32>,
+        letter_spacing: f32,
+        word_spacing: f32,
     ) -> ParagraphLayout {
-        let runs = self.paragraph.shape_paragraph(
+        // Shape once (cache-shared with the measure pass), then fold CSS Text 3
+        // letter-/word-spacing into the advances through the SAME `apply_spacing`
+        // seam the measure pass uses, so the painted advances match the measured
+        // box (§8.1 / §8.2). `content` is already `text-transform`ed by the caller.
+        let runs = apply_spacing(
+            self.paragraph.shape_paragraph(
+                content,
+                fallback,
+                attributes,
+                &self.default_face,
+                font_size,
+                direction,
+            ),
             content,
-            fallback,
-            attributes,
-            &self.default_face,
-            font_size,
-            direction,
+            letter_spacing,
+            word_spacing,
         );
         let metrics = self.paragraph.line_metrics(font_size);
         // The line box height: the authored `line-height` when present, else the
@@ -956,6 +969,19 @@ impl SceneCoordinator {
                         },
                         None => retained_content,
                     };
+                    // `text-transform` (§2.1) rewrites the string BEFORE shaping so
+                    // the cased text flows through shaping and the paragraph cache
+                    // key (matching the layout pass, which transforms the retained
+                    // content identically). It is applied only to IDLE display text:
+                    // while actively editing, the caret/selection use live buffer
+                    // byte offsets, so the shaped string is left untransformed to
+                    // keep those offsets exact (a documented interaction).
+                    let transformed: Cow<'_, str> = if active.is_some() {
+                        Cow::Borrowed(content)
+                    } else {
+                        transform_text(content, text_transform_for(computed.get(&node)))
+                    };
+                    let content: &str = transformed.as_ref();
                     // The rendered caret/selection: while composing, the caret sits
                     // at the preedit's caret within the SPLICED display text; with
                     // no preedit it is the session's own selection (buffer offsets
@@ -1028,6 +1054,8 @@ impl SceneCoordinator {
                         font_size,
                         layout_box.size().width,
                         line_height_for(computed.get(&node), font_size),
+                        letter_spacing_for(computed.get(&node)),
+                        word_spacing_for(computed.get(&node)),
                     );
                     for line in layout.lines() {
                         let baseline = line.baseline();

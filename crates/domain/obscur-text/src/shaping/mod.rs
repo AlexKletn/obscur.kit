@@ -17,6 +17,8 @@ mod shaped_run;
 pub use shaped_run::ShapedRun;
 mod shaping_request;
 pub use shaping_request::ShapingRequest;
+mod spacing;
+pub use spacing::apply_spacing;
 mod text_direction;
 pub use text_direction::TextDirection;
 mod text_item;
