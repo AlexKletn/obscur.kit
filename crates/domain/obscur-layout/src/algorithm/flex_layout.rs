@@ -34,6 +34,20 @@ fn main_bounds(style: &LayoutStyle, is_row: bool) -> (Dimension, Dimension) {
     }
 }
 
+/// The item's total border + padding along the given axis (`horizontal` for the
+/// row main / column cross axis, else vertical).
+///
+/// Used to expand an explicit `content-box` size into the border-box extent the
+/// item actually occupies, so a `width: 0` / `height: 0` item with a border keeps
+/// its border widths instead of collapsing to a zero-extent box.
+fn axis_bp(style: &LayoutStyle, horizontal: bool) -> f32 {
+    if horizontal {
+        style.border.left + style.border.right + style.padding.left + style.padding.right
+    } else {
+        style.border.top + style.border.bottom + style.padding.top + style.padding.bottom
+    }
+}
+
 /// Single-line (no-wrap) flex layout (spec §4.1, §4.2, §4.6).
 ///
 /// Lays items out along a main axis chosen by `style.flex_direction`, resolves
@@ -184,22 +198,35 @@ impl LayoutAlgorithm for FlexLayout {
             } else {
                 child.style.height
             };
+            // An explicit main size (from `flex-basis` or `width`/`height`) is
+            // authored against the item's box-sizing, so it is expanded to the
+            // border-box extent the item occupies (`content-box` adds the item's
+            // main-axis border + padding). The measured fallback already reports a
+            // border box, so it is used as-is.
             let base = child
                 .style
                 .flex_basis
                 .resolve(container_main)
                 .or_else(|| main_dim.resolve(container_main))
-                .unwrap_or_else(|| {
-                    let measured = measurer.measure_child(
-                        index,
-                        BoxConstraints::loose(Size::new(content_width, content_height)),
-                    );
-                    if is_row {
-                        measured.width
-                    } else {
-                        measured.height
-                    }
-                });
+                .map_or_else(
+                    || {
+                        let measured = measurer.measure_child(
+                            index,
+                            BoxConstraints::loose(Size::new(content_width, content_height)),
+                        );
+                        if is_row {
+                            measured.width
+                        } else {
+                            measured.height
+                        }
+                    },
+                    |explicit| {
+                        child
+                            .style
+                            .box_sizing
+                            .border_extent(explicit, axis_bp(&child.style, is_row))
+                    },
+                );
             let (min_main, max_main) = main_bounds(&child.style, is_row);
             base_main.push(clamp_main(base.max(0.0), min_main, max_main, container_main));
         }
@@ -248,12 +275,21 @@ impl LayoutAlgorithm for FlexLayout {
                 // cross-axis size on the item wins over the stretch (a stretched
                 // item must not override an author height in a row / width in a
                 // column). `Auto` (the usual case) keeps the stretched extent.
+                let cross_style = &children[index].style;
                 let cross_dim = if is_row {
-                    children[index].style.height
+                    cross_style.height
                 } else {
-                    children[index].style.width
+                    cross_style.width
                 };
-                cross_dim.resolve(container_cross).unwrap_or(container_cross)
+                // An explicit cross size is authored against the item's box-sizing,
+                // so it is expanded to the border-box extent it occupies (a
+                // `height: 0` / `width: 0` item with a border keeps its border
+                // widths rather than collapsing). `Auto` keeps the stretched extent.
+                cross_dim.resolve(container_cross).map_or(container_cross, |explicit| {
+                    cross_style
+                        .box_sizing
+                        .border_extent(explicit, axis_bp(cross_style, !is_row))
+                })
             } else {
                 let item_constraints = if is_row {
                     BoxConstraints {

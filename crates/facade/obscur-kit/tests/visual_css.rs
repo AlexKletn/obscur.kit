@@ -647,3 +647,202 @@ fn authored_opacity_brackets_group_layer_and_composites_on_cpu() {
         px.alpha()
     );
 }
+
+// ---------------------------------------------------------------------------
+// CSS border-triangle direction (the `width:0; height:0` trick)
+// ---------------------------------------------------------------------------
+
+/// Builds a flex-row host containing a single `width:0; height:0` `content-box`
+/// element carrying `tri_class`, so the classic CSS border-triangle trick lays
+/// out through the *real* path (a flex parent sizes the collapsed child; only its
+/// border widths give it extent).
+fn host_with_tri(tri_class: &str) -> View {
+    let tri = ViewNode::element(ComponentId::from_raw(41))
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text(tri_class.into())));
+    let host = ViewNode::element(ComponentId::from_raw(40))
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("tri-host".into())))
+        .with_children(ViewFragment::from_nodes(vec![tri]));
+    View::from_fragment(ViewFragment::from_nodes(vec![host]))
+}
+
+/// The vertices (in segment order) of the single solid triangle fill of color
+/// `want`, i.e. the one inked border side of the collapsed box.
+fn triangle_pts(commands: &[PaintCommand], want: Color) -> Vec<(f32, f32)> {
+    use obscur_kit::scene::path::PathSegment;
+    for c in commands {
+        if let PaintCommand::DrawPath { path, paint } = c {
+            if let Some(solid) = paint.brush().as_solid() {
+                let color = solid.color();
+                let close = (color.r - want.r).abs() < 1e-3
+                    && (color.g - want.g).abs() < 1e-3
+                    && (color.b - want.b).abs() < 1e-3
+                    && (color.a - want.a).abs() < 1e-3;
+                if close {
+                    return path
+                        .segments()
+                        .iter()
+                        .filter_map(|s| match s {
+                            PathSegment::MoveTo(p) | PathSegment::LineTo(p) => Some((p.x, p.y)),
+                            _ => None,
+                        })
+                        .collect();
+                }
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// The distinct y-coordinates of a triangle's vertices (deduped within 1e-3).
+fn distinct_ys(pts: &[(f32, f32)]) -> Vec<f32> {
+    let mut ys: Vec<f32> = Vec::new();
+    for &(_, y) in pts {
+        if !ys.iter().any(|&e| (e - y).abs() < 1e-3) {
+            ys.push(y);
+        }
+    }
+    ys
+}
+
+/// The distinct x-coordinates of a triangle's vertices (deduped within 1e-3).
+fn distinct_xs(pts: &[(f32, f32)]) -> Vec<f32> {
+    let mut xs: Vec<f32> = Vec::new();
+    for &(x, _) in pts {
+        if !xs.iter().any(|&e| (e - x).abs() < 1e-3) {
+            xs.push(x);
+        }
+    }
+    xs
+}
+
+/// The CSS border-triangle sheet: a flex host over a 0×0 `content-box` box whose
+/// one inked side (a distinct color) makes a triangle. The border widths are the
+/// classic 5/6px arrow proportions; each class inks exactly one side.
+const TRI_SHEET: &str = "
+.tri-host { display: flex; flex-direction: row; }
+.tri { box-sizing: content-box; width: 0; height: 0; border-style: solid; }
+.tri-top    { border-width: 6px 5px 0 5px;
+              border-color: #ff0000 transparent transparent transparent; }
+.tri-bottom { border-width: 0 5px 6px 5px;
+              border-color: transparent transparent #00ff00 transparent; }
+.tri-left   { border-width: 5px 0 5px 7px;
+              border-color: transparent transparent transparent #0000ff; }
+.tri-right  { border-width: 5px 7px 5px 0;
+              border-color: transparent #ffff00 transparent transparent; }
+";
+
+// A `border-top`-colored collapsed box renders a DOWNWARD triangle (▼): its base
+// (the two shared vertices) is the box's TOP edge and its apex is the single
+// vertex BELOW it. This is the end-to-end invariant the CSS→computed→layout→
+// coordinator path must satisfy — the box must occupy its border widths (here
+// 10×6), not collapse to 0×0 (which would invert the triangle to ▲).
+#[test]
+fn border_top_colored_collapsed_box_points_down() {
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(TRI_SHEET);
+    let result = rt.render_now(&host_with_tri("tri tri-top"), std::slice::from_ref(&sheet));
+    let commands = result.snapshot().display_list().commands();
+
+    let pts = triangle_pts(commands, Color::rgba(1.0, 0.0, 0.0, 1.0));
+    assert_eq!(pts.len(), 4, "one closed triangle quad (two shared vertices)");
+    let ys = distinct_ys(&pts);
+    assert_eq!(ys.len(), 2, "a vertical triangle spans exactly two rows");
+    // Apex (the single vertex) sits BELOW the base (the two shared vertices).
+    let base_y = ys.iter().copied().fold(f32::INFINITY, f32::min);
+    let apex_y = ys.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let base_count = pts.iter().filter(|&&(_, y)| (y - base_y).abs() < 1e-3).count();
+    assert!(
+        base_count >= 2 && apex_y > base_y,
+        "border-top → apex below base (▼): base_y={base_y}, apex_y={apex_y}, pts={pts:?}"
+    );
+}
+
+// A `border-bottom`-colored collapsed box renders an UPWARD triangle (▲): base at
+// the box's BOTTOM edge, apex ABOVE it.
+#[test]
+fn border_bottom_colored_collapsed_box_points_up() {
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(TRI_SHEET);
+    let result = rt.render_now(&host_with_tri("tri tri-bottom"), std::slice::from_ref(&sheet));
+    let commands = result.snapshot().display_list().commands();
+
+    let pts = triangle_pts(commands, Color::rgba(0.0, 1.0, 0.0, 1.0));
+    assert_eq!(pts.len(), 4, "one closed triangle quad");
+    let ys = distinct_ys(&pts);
+    assert_eq!(ys.len(), 2, "a vertical triangle spans exactly two rows");
+    let base_y = ys.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let apex_y = ys.iter().copied().fold(f32::INFINITY, f32::min);
+    let base_count = pts.iter().filter(|&&(_, y)| (y - base_y).abs() < 1e-3).count();
+    assert!(
+        base_count >= 2 && apex_y < base_y,
+        "border-bottom → apex above base (▲): base_y={base_y}, apex_y={apex_y}, pts={pts:?}"
+    );
+}
+
+// A `border-left`-colored collapsed box renders a RIGHT-pointing triangle (▶):
+// base at the box's LEFT edge, apex to the RIGHT (horizontal was always correct;
+// this pins that the fix did not regress it).
+#[test]
+fn border_left_colored_collapsed_box_points_right() {
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(TRI_SHEET);
+    let result = rt.render_now(&host_with_tri("tri tri-left"), std::slice::from_ref(&sheet));
+    let commands = result.snapshot().display_list().commands();
+
+    let pts = triangle_pts(commands, Color::rgba(0.0, 0.0, 1.0, 1.0));
+    assert_eq!(pts.len(), 4, "one closed triangle quad");
+    let xs = distinct_xs(&pts);
+    assert_eq!(xs.len(), 2, "a horizontal triangle spans exactly two columns");
+    let base_x = xs.iter().copied().fold(f32::INFINITY, f32::min);
+    let apex_x = xs.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let base_count = pts.iter().filter(|&&(x, _)| (x - base_x).abs() < 1e-3).count();
+    assert!(
+        base_count >= 2 && apex_x > base_x,
+        "border-left → apex right of base (▶): base_x={base_x}, apex_x={apex_x}, pts={pts:?}"
+    );
+}
+
+// A `border-right`-colored collapsed box renders a LEFT-pointing triangle (◀):
+// base at the box's RIGHT edge, apex to the LEFT.
+#[test]
+fn border_right_colored_collapsed_box_points_left() {
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(TRI_SHEET);
+    let result = rt.render_now(&host_with_tri("tri tri-right"), std::slice::from_ref(&sheet));
+    let commands = result.snapshot().display_list().commands();
+
+    let pts = triangle_pts(commands, Color::rgba(1.0, 1.0, 0.0, 1.0));
+    assert_eq!(pts.len(), 4, "one closed triangle quad");
+    let xs = distinct_xs(&pts);
+    assert_eq!(xs.len(), 2, "a horizontal triangle spans exactly two columns");
+    let base_x = xs.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let apex_x = xs.iter().copied().fold(f32::INFINITY, f32::min);
+    let base_count = pts.iter().filter(|&&(x, _)| (x - base_x).abs() < 1e-3).count();
+    assert!(
+        base_count >= 2 && apex_x < base_x,
+        "border-right → apex left of base (◀): base_x={base_x}, apex_x={apex_x}, pts={pts:?}"
+    );
+}
+
+// The collapsed `content-box` box occupies its BORDER WIDTHS, not a 0×0 box: a
+// `border-width: 6px 5px 0 5px` box arranges a 10×6 border box (5+5 wide, 6+0
+// tall). This is the general box-model fix (a content-box child's border/padding
+// is added to its explicit size) that makes the triangle direction correct.
+#[test]
+fn collapsed_content_box_occupies_its_border_widths() {
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(TRI_SHEET);
+    let result = rt.render_now(&host_with_tri("tri tri-top"), std::slice::from_ref(&sheet));
+    let host = rt
+        .tree()
+        .root()
+        .and_then(|r| rt.tree().get(r).unwrap().children().first().copied());
+    let tri = host.and_then(|h| rt.tree().get(h).unwrap().children().first().copied());
+    let bounds = rt.layout_boxes().get(&tri.unwrap()).copied().unwrap().bounds;
+    assert!(
+        (bounds.size.width - 10.0).abs() < 1e-3 && (bounds.size.height - 6.0).abs() < 1e-3,
+        "collapsed content-box border box = its border widths (10×6), got {:?}",
+        bounds.size
+    );
+    assert!(result.is_balanced());
+}

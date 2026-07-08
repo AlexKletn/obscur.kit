@@ -697,16 +697,15 @@ const STYLESHEET: &str = r#"
    three transparent sides + one inked side paint a true triangle. */
 /* content-box so the 0×0 is the CONTENT box and the border widths add AROUND it
    (the triangle trick assumes a content-box under the sheet-wide `border-box`).
-   The classes are named by their RENDERED direction: through the computed-style +
-   layout path the vertical border edges present flipped relative to the direct
-   display-list `border_triangle_proof` (inking the bottom edge yields a visually
-   down-pointing ▼, the top edge a ▲), so `.wf-tri-down` inks the bottom and
-   `.wf-tri-up` inks the top. Horizontal edges (`.wf-tri-right`) are unaffected. */
+   The classes are named by their RENDERED direction and authored CSS-correctly:
+   a triangle points AWAY from its inked edge, so a down arrow ▼ inks the TOP edge,
+   an up arrow ▲ inks the BOTTOM edge, and a right arrow ▶ inks the LEFT edge —
+   matching the direct display-list `border_triangle_proof` end-to-end. */
 .wf-tri { box-sizing: content-box; width: 0; height: 0; }
-.wf-tri-down { border-width: 0 5px 6px 5px; border-style: solid;
-    border-color: transparent transparent #2b2a27 transparent; }
-.wf-tri-up { border-width: 6px 5px 0 5px; border-style: solid;
+.wf-tri-down { border-width: 6px 5px 0 5px; border-style: solid;
     border-color: #2b2a27 transparent transparent transparent; }
+.wf-tri-up { border-width: 0 5px 6px 5px; border-style: solid;
+    border-color: transparent transparent #2b2a27 transparent; }
 .wf-tri-right { border-width: 5px 0 5px 7px; border-style: solid;
     border-color: transparent transparent transparent #2b2a27; }
 
