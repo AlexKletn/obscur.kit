@@ -159,6 +159,23 @@ impl LayoutAlgorithm for FlexLayout {
             (content_height, content_width)
         };
 
+        // Whether the block (height) extent is content-sized rather than
+        // fill-available. In horizontal writing mode `height: auto` hugs its
+        // content, but only when the incoming height constraint is *indefinite*
+        // (a loose measure, `min.height != max.height`, or an unbounded axis). A
+        // *definite* (tight) height from the parent — the constraint every
+        // `arrange` pass supplies — fills as before, so placement is unchanged and
+        // only the measured size a parent observes shrinks to fit.
+        //
+        // For a column this shrinks the MAIN axis to the stacked children (the
+        // previous "fill the whole available height" was the root of nested
+        // flex-column items over-reporting their height); for a row it shrinks the
+        // CROSS axis to the tallest item. Width (the inline axis) always fills.
+        let height_is_auto = style.height.resolve(constraints.max.height).is_none();
+        let height_indefinite = height_is_auto
+            && (!constraints.max.height.is_finite()
+                || (constraints.max.height - constraints.min.height).abs() > f32::EPSILON);
+
         let count = children.len();
 
         // Per-item margins split into main-leading / main-trailing (which consume
@@ -240,7 +257,20 @@ impl LayoutAlgorithm for FlexLayout {
 
         if !style.flex_wrap.is_multi_line() {
             let line: Vec<usize> = (0..count).collect();
-            place_line(LineArgs {
+
+            // The main-axis extent the single line's items occupy: their base main
+            // sizes, the inter-item gaps, and their main-axis margins. This is the
+            // content main size a column hugs to under an indefinite height.
+            let gap_span = gap * (count.saturating_sub(1) as f32);
+            let sum_base: f32 = base_main.iter().sum();
+            let sum_margin_main: f32 = main_lead
+                .iter()
+                .zip(main_trail.iter())
+                .map(|(l, t)| l + t)
+                .sum();
+            let content_main = sum_base + gap_span + sum_margin_main;
+
+            let placed = place_line(LineArgs {
                 line: &line,
                 base_main: &base_main,
                 children,
@@ -257,11 +287,28 @@ impl LayoutAlgorithm for FlexLayout {
                 bp_left,
                 bp_top,
                 cross_offset: 0.0,
+                // The content cross extent is only needed to hug the (auto,
+                // indefinite) height of a ROW; otherwise skip the extra
+                // pre-stretch measurement so the definite path stays identical.
+                content_cross_needed: height_indefinite && is_row,
                 measurer: &mut *measurer,
                 child_boxes: &mut child_boxes,
             });
 
-            let border_box = Size::new(content_width + bp_x, content_height + bp_y);
+            // Content-box height: `auto` + indefinite hugs its content (a column's
+            // stacked main extent, a row's tallest item); otherwise fill the
+            // resolved/available height exactly as before.
+            let final_content_height = if height_indefinite {
+                if is_row {
+                    placed.content_cross
+                } else {
+                    content_main
+                }
+            } else {
+                content_height
+            };
+
+            let border_box = Size::new(content_width + bp_x, final_content_height + bp_y);
             return LayoutOutput::new(constraints.constrain(border_box), child_boxes);
         }
 
@@ -324,9 +371,13 @@ impl LayoutAlgorithm for FlexLayout {
                 bp_left,
                 bp_top,
                 cross_offset,
+                // The multi-line path already resolves every item's own cross size
+                // to compute the line cross, so no extra pre-stretch pass is needed.
+                content_cross_needed: false,
                 measurer: &mut *measurer,
                 child_boxes: &mut child_boxes,
-            });
+            })
+            .cross;
             cross_offset += line_cross;
             total_cross += line_cross;
         }
@@ -388,10 +439,28 @@ struct LineArgs<'a, 'm> {
     bp_top: f32,
     /// The line's leading cross-axis offset (0 for a single line).
     cross_offset: f32,
+    /// Whether the caller needs [`PlacedLine::content_cross`] (the line's
+    /// pre-stretch content cross extent). When `false`, a stretched item's
+    /// hypothetical cross is not measured, keeping the definite path byte-identical
+    /// and avoiding an unnecessary measurement.
+    content_cross_needed: bool,
     /// Child measurer.
     measurer: &'m mut dyn ChildMeasurer,
     /// Output boxes, written at each item's global index.
     child_boxes: &'a mut [LayoutBox],
+}
+
+/// The result of placing one flex line.
+struct PlacedLine {
+    /// The line's cross extent, used to stack lines (the stretch target for the
+    /// single-line path, the max item cross for the multi-line path).
+    cross: f32,
+    /// The line's **pre-stretch** content cross extent — the tallest item's
+    /// hypothetical (measured or explicit) cross size. Equals [`Self::cross`] for
+    /// the multi-line path; for the single-line path it is the height an
+    /// (auto, indefinite) row hugs to. Only meaningful when the caller set
+    /// `content_cross_needed`.
+    content_cross: f32,
 }
 
 /// Sizes, justifies, and cross-aligns one flex line, writing each item's box and
@@ -401,7 +470,7 @@ struct LineArgs<'a, 'm> {
 /// re-clamps into each item's main min/max range, positions items with
 /// `justify_content` along the main axis, and aligns them with `align_items`
 /// along the cross axis. Reverse directions place items in reversed main order.
-fn place_line(args: LineArgs) -> f32 {
+fn place_line(args: LineArgs) -> PlacedLine {
     let LineArgs {
         line,
         base_main,
@@ -419,6 +488,7 @@ fn place_line(args: LineArgs) -> f32 {
         bp_left,
         bp_top,
         cross_offset,
+        content_cross_needed,
         measurer,
         child_boxes,
     } = args;
@@ -466,6 +536,7 @@ fn place_line(args: LineArgs) -> f32 {
     // the line cross is their max, and a stretched item fills that line cross.
     let mut cross_size: Vec<f32> = Vec::with_capacity(count);
     let line_cross;
+    let mut content_cross = 0.0_f32;
     match stretch_target {
         Some(target) => {
             for (pos, &i) in line.iter().enumerate() {
@@ -480,6 +551,24 @@ fn place_line(args: LineArgs) -> f32 {
                     &mut *measurer,
                 );
                 cross_size.push(cross);
+                // The line's pre-stretch content cross: a stretched item does not
+                // report its used (filled) cross but its hypothetical size — its
+                // explicit cross, else its measured cross. Only measured when the
+                // caller needs it (an auto, indefinite row), so the definite path
+                // takes no extra measurement and is byte-identical.
+                if content_cross_needed {
+                    let hypothetical = cross_item_size(
+                        false,
+                        0.0,
+                        &children[i].style,
+                        is_row,
+                        final_main[pos],
+                        container_cross,
+                        i,
+                        &mut *measurer,
+                    );
+                    content_cross = content_cross.max(hypothetical);
+                }
             }
             line_cross = target;
         }
@@ -517,6 +606,7 @@ fn place_line(args: LineArgs) -> f32 {
                 cross_size.push(cross);
             }
             line_cross = lc;
+            content_cross = lc;
         }
     }
 
@@ -592,7 +682,10 @@ fn place_line(args: LineArgs) -> f32 {
         cursor += main + main_trail[i] + gap + spacing;
     }
 
-    line_cross
+    PlacedLine {
+        cross: line_cross,
+        content_cross,
+    }
 }
 
 /// Resolves one item's cross-axis size.
@@ -1245,6 +1338,78 @@ mod tests {
         approx(b[2].origin().y, 0.0);
         approx(b[0].origin().y, 30.0);
         approx(b[1].origin().y, 30.0);
+    }
+
+    #[test]
+    fn column_auto_height_hugs_content_under_loose_constraint() {
+        // A flex COLUMN with no explicit height, measured under a LOOSE
+        // (indefinite) height, sizes its main axis to the stacked children + gaps
+        // (shrink-to-fit) — not the full available height. This is the fix for a
+        // nested flex-column item over-reporting its height when a parent flex row
+        // cross-measures it (the wireframe "cramping").
+        let style = container(
+            FlexDirection::Column,
+            JustifyContent::FlexStart,
+            AlignItems::FlexStart,
+            8.0,
+        );
+        let children = [fixed_basis(1, 40.0), fixed_basis(2, 14.0)];
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(300.0, 1000.0)),
+            &mut FixedChildMeasurer::default(),
+        );
+        // 40 + gap 8 + 14 = 62, NOT the 1000px available height.
+        approx(out.size().height, 62.0);
+        // Under a TIGHT (definite) height the column fills as before: unchanged.
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(300.0, 1000.0)),
+            &mut FixedChildMeasurer::default(),
+        );
+        approx(out.size().height, 1000.0);
+    }
+
+    #[test]
+    fn row_auto_height_hugs_tallest_item_under_loose_constraint() {
+        // A flex ROW with no explicit height, measured under a LOOSE height, hugs
+        // its tallest item's cross size instead of filling the available height.
+        let children = [fixed_basis(1, 50.0), fixed_basis(2, 50.0)];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(50.0, 40.0), Size::new(50.0, 24.0)]);
+        let out = FlexLayout.layout(
+            &container(
+                FlexDirection::Row,
+                JustifyContent::FlexStart,
+                AlignItems::FlexStart,
+                0.0,
+            ),
+            &children,
+            BoxConstraints::loose(Size::new(200.0, 1000.0)),
+            &mut measurer,
+        );
+        // Tallest item is 40, so the row hugs 40 — not the 1000px available.
+        approx(out.size().height, 40.0);
+
+        // With `align-items: stretch` the auto row height still hugs the tallest
+        // item's HYPOTHETICAL (pre-stretch) cross (40), exercising the extra
+        // measurement path; items themselves stretch to fill on the definite pass.
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(50.0, 40.0), Size::new(50.0, 24.0)]);
+        let out = FlexLayout.layout(
+            &container(
+                FlexDirection::Row,
+                JustifyContent::FlexStart,
+                AlignItems::Stretch,
+                0.0,
+            ),
+            &children,
+            BoxConstraints::loose(Size::new(200.0, 1000.0)),
+            &mut measurer,
+        );
+        approx(out.size().height, 40.0);
     }
 
     #[test]

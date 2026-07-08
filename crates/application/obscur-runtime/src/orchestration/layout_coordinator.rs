@@ -2695,4 +2695,79 @@ mod tests {
         // A `None` root produces no box at all.
         assert!(boxes.is_empty());
     }
+
+    #[test]
+    fn nested_column_flex_item_measured_at_full_intrinsic_height() {
+        // Regression (the wireframe "cramping"): a flex ROW whose item is itself a
+        // flex COLUMN must reserve the column's FULL stacked height (control slot +
+        // margin + caption), so consecutive rows do not overlap.
+        //
+        //   root(block) -> row(flex row, align flex-start)
+        //     -> col(flex column, width 264)
+        //          -> slot(flex row) -> control(block 100x28)
+        //          -> cap(block, height 14)
+        //
+        // The column stacks a 28px slot (with a 12px bottom margin) over a 14px
+        // caption, so its intrinsic height is 28 + 12 + 14 = 54; the row reserves
+        // exactly that and the caption sits at y = 40..54, clear of the slot.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let row = add_child(&mut tree, root, 100);
+        let col = add_child(&mut tree, row, 101);
+        let slot = add_child(&mut tree, col, 102);
+        let control = add_child(&mut tree, slot, 103);
+        let cap = add_child(&mut tree, col, 104);
+
+        let mut flex_row_start = LayoutStyle::default().with_display(LayoutDisplay::Flex);
+        flex_row_start.flex_direction = FlexDirection::Row;
+        flex_row_start.align_items = AlignItems::FlexStart;
+
+        let mut col_style = LayoutStyle::default()
+            .with_display(LayoutDisplay::Flex)
+            .with_width(Dimension::Px(264.0));
+        col_style.flex_direction = FlexDirection::Column;
+
+        let mut slot_style = flex_row_start.clone();
+        slot_style.margin = Insets {
+            top: 0.0,
+            right: 0.0,
+            bottom: 12.0,
+            left: 0.0,
+        };
+
+        let cap_style = LayoutStyle::default()
+            .with_display(LayoutDisplay::Block)
+            .with_height(Dimension::Px(14.0));
+
+        let mut styles = LayoutStyles::new();
+        styles.insert(root, LayoutStyle::default().with_display(LayoutDisplay::Block));
+        styles.insert(row, flex_row_start);
+        styles.insert(col, col_style);
+        styles.insert(slot, slot_style);
+        styles.insert(control, block(100.0, 28.0));
+        styles.insert(cap, cap_style);
+
+        let coordinator = LayoutCoordinator::new();
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &ComputedStyles::new(),
+            &GridTemplates::new(),
+            Size::new(1200.0, 4160.0),
+            (0.0, 0.0),
+            &test_paragraph(),
+        );
+
+        // The column child is measured at its full intrinsic height (54), and the
+        // row reserves that — NOT the ~28px slot-only height that caused overlap.
+        assert_eq!(boxes[&col].size().height, 54.0);
+        assert_eq!(boxes[&row].size().height, 54.0);
+        // Within the column the caption sits fully BELOW the slot: slot 0..28,
+        // caption 40..54, no overlap.
+        assert_eq!(boxes[&slot].origin().y, 0.0);
+        assert_eq!(boxes[&slot].size().height, 28.0);
+        assert_eq!(boxes[&cap].origin().y, 40.0);
+        assert_eq!(boxes[&cap].size().height, 14.0);
+    }
 }
