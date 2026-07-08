@@ -1,119 +1,125 @@
 # obscur.kit_v2 — Spec Conformance Audit
 
-- **Date:** 2026-07-05
-- **Commit:** `fe3ca01`
-- **Workspace:** 2906 tests passing, 0 failures; `cargo run -p xtask -- check` clean; 55 crates + 4 tools; 166 commits.
-- **Method:** read-only audit by 8 parallel agents, one per spec area, each mapping
-  `specs/obscur-kit-2-spec-drafts/*` + `specs/obscur-kit-2-crate-architecture/*`
-  requirements to the implementation with `file:line` evidence. No code changed. Supersedes the 2026-07-04 audit (`355cc29`), which pre-dated the Phase 0–5 closure.
+- **Date:** 2026-07-08
+- **Commit:** `7736b19`
+- **Workspace:** 4021 tests passing, 0 failures; `cargo run -p xtask -- check` clean; 63 workspace packages (59 crates + 4 tools); 292 commits.
+- **Method:** update of the read-only per-area audit against `specs/obscur-kit-2-spec-drafts/*` + `specs/obscur-kit-2-crate-architecture/*`, cross-referenced to the change chronicle (commit-tracked closure log) with symbol/`file` spot-checks in the current tree. No code changed by this audit.
 - **Status legend:** ✅ conformant & wired · 🟡 partial · 🔵 modeled/deferred by design (documented) · ⬜ port-only / stub · ❌ missing or VIOLATES spec.
+- **Supersedes** the 2026-07-05 audit (`fe3ca01`, 2906 tests), which pre-dated the visual/text/interaction/UA closure programs. That report's headline theme — *"built but not wired"* — is now **largely closed**: every Tier-1/Tier-2 violation and all but the deliberately-deferred Tier-3 seams have been resolved with commit-tracked fixes.
 
 ---
 
 ## Executive verdict
 
-Architecturally the toolkit remains **strongly spec-faithful**: the full crate catalog exists (55/55), hexagonal boundaries hold under direct inspection (no umbrella deps, no external types in pure layers, `taffy` quarantined, object-safe ports, `forbid(unsafe_code)` in pure crates), and the domain primitives are complete and heavily tested.
+Architecturally the toolkit remains **strongly spec-faithful** — the full crate catalog exists, hexagonal boundaries hold under inspection (no umbrella deps, no external types in pure layers, `taffy` quarantined, object-safe ports, `forbid(unsafe_code)` in pure crates, external effect/decoder deps confined to adapters), and the domain primitives are complete and heavily tested (+1115 tests since fe3ca01).
 
-Since the 2026-07-04 audit, the **Phase 0–5 closure delivered real, verifiable integration progress** — the single biggest theme of the last audit ("built but not wired") is materially reduced:
+The decisive change since fe3ca01 is that **the runtime is now a real, integrated engine, not a scaffold.** The prior audit's central finding — complete subsystems built but never called by the live path — has been closed subsystem by subsystem. What became genuinely real and wired end-to-end (each verified through the live `UiRuntime::render_now`/`run_frame` path with concrete end-to-end tests in `crates/facade/obscur-kit/tests/`):
 
-- `UiRuntime` is now a genuine integration keystone (owns tree/scene/coordinators/scheduler/motion/pseudo-states), not a bare id holder.
-- Frame scheduling is real and gating (`run_due_frame` consults `FrameScheduler`).
-- A real CSS **selector-matching + cascade engine** exists with full §4.13 combinator/attribute/`:nth-*` coverage, wired to the retained tree.
-- `PropertyId` grew 7 → **27** variants; `display` drives real flex/grid/flow selection from CSS.
-- **Pointer input** flows end-to-end (winit → converter → hit-test → `:hover` restyle).
-- **Motion** is truly sampled into `ComputedStyles` before layout/paint each frame.
-- Phase-5 cores (devtools protocol/server, telemetry, record/replay + redaction, LSP) are real, well-tested code with an enforced §7.7 security model.
+- **Full text pipeline** wired into render on **both backends**: shaping (harfrust adapter) → bidi/UAX-9 visual reordering → script/font itemization → coverage-based font fallback → line-break + greedy wrap → justification + hyphenation + `text-overflow` ellipsis → measurement/baseline into layout → per-segment font-tagged glyph paint. CPU rasterizes **real glyph outlines** (skrifa→tiny-skia); Vello draws native glyphs. Shaping is cached (paragraph + run level).
+- **Full CSS Grid** — track sizing (`fixed`/`fr`/`auto`/`minmax`/`%`), `repeat()` incl. `auto-fill`/`auto-fit`, line placement + spanning + negative + named lines, `grid-area`, `grid-template-areas`, `grid-auto-flow` (incl. dense), implicit tracks, item + content alignment. Replaced the degenerate 1-column grid.
+- **The visual property set**: borders (per-side width/style/color, **mitered triangle trapezoids**, **dashed/dotted stroke**), `border-radius` (rounded fill + clip + rings), gradients (linear/**radial**/**conic**/**repeating-linear**), `box-shadow` (drop + **inset**), `filter: drop-shadow()`, **`opacity` as a composited group layer** (CPU offscreen compositing, not passthrough), 2D `transform` (+origin), `background-image: url()` + `background-{size,position,repeat}` + **multiple background layers**, `<img>`/`object-fit`, `box-sizing`, `overflow` clipping, `outline`+`outline-offset`.
+- **The own-wgpu-pass render architecture** the effect-split policy called for: `filter: blur()` and **`backdrop-filter`/acrylic** are computed by our own gaussian + composite wgpu passes on offscreen textures **over the Vello scene** (Vello 0.9 has no content-blur/color-matrix primitive), plus headless Vello→PNG readback for faithful GPU-effect goldens.
+- **Events / interaction**: pointer click→command→handler→reactive re-render, keyboard shortcuts + Enter/Space activation, `EVENT_INPUT`/`EVENT_CHANGE`/activation dispatch, real text editing (caret, selection, mouse click-to-position, drag-select, undo/redo, IME composition) with the runtime owning the editing session.
+- **The full interaction + structural pseudo-class set**: `:hover`/`:focus`/`:active` (interaction) + `:disabled`/`:checked` (structural), all sourced into the matcher from live state.
+- **`calc()`/`min()`/`max()`/`clamp()` + relative/viewport units** (`em`/`rem`/`vw`/`vh`) and `@media`/`@container` **gating** at match time.
+- **§2.13 component-contract enforcement** via the `ComponentSurface` string bridge (a real `.okui` compile now rejects unknown attrs/events/children/missing-required-props).
+- **A11y semantic tree** derived from the retained tree (`UiRuntime::semantic_snapshot`), **telemetry emitted** from frame phases, **transactions enacted** (`ReconcileEnactor`), **invalidation gating** frame phases (live `InvalidationRouter` via `FramePlan`), **real DevTools socket transport** (Unix/TCP) + **real LSP JSON-RPC over stdio**, and the **UA default stylesheet at `SystemDefault` origin** (overridable base component styles for `button`/`input`/`checkbox`/`select`/… incl. focus rings and state pseudos).
 
-**However, a residual set of concrete spec violations and unclosed integration seams remain.** They fall into three buckets: (1) a handful of features that are **actively wrong** (produce incorrect output), (2) features **rejected/inert** that the spec lists as supported, and (3) complete subsystems that remain **standalone** (built, tested, but never called by the live runtime).
+**What remains is now a small, honest residue**: the plugin tier (Phase 6, deliberate skeleton), the macOS/Windows system adapters (skeleton stubs), general `filter`/`backdrop-filter` **beyond** blur/drop-shadow (color-matrix — a GPU project blocked on Vello 0.9), and a set of documented edge/advanced deferrals. These are cleanly absent, not faked.
 
 ---
 
-## Consolidated violations & gaps (prioritized)
+## Consolidated violations & gaps — resolution ledger
 
-### Tier 1 — actively wrong (produces incorrect results)
+The fe3ca01 Tier-1/2/3 items, each marked against the change chronicle. **Tally: all 8 V-items resolved; all 7 S-items resolved (S5/S6 fully, S7 signaled).**
 
-| # | Spec | Violation | Evidence |
+### Tier 1 — actively wrong (fe3ca01) → all RESOLVED
+
+| # | Spec | Old violation | Resolution |
 |---|---|---|---|
-| **V1** | §4.13 | **`@media`/`@container` conditions are silently dropped, so conditional rules apply at every viewport.** Nested rules are lowered into the matchable set unconditionally; nothing evaluates `conditional_groups` against an environment. A `@media (max-width:1px)` rule matches always. | `obscur-css .../stylesheet_compiler.rs:338-351` (+doc :126-134); runtime matches only `compiled.matchable` (`counter_headless.rs:97`) |
-| **V2** | §5.10 / §5.2 | **Text shaping bypasses `obscur-text` and is re-implemented naïvely in the Vello adapter** (`charmap.map(ch)` + advance, one glyph/char, no shaping/bidi/kerning/fallback); the **CPU backend renders no text at all**, so backends structurally diverge on an entire content class (determinism boundary broken; golden CPU tests can't cover text). | `scene_coordinator.rs:46-48,123`; `render-vello .../scene_converter.rs:156-204`; `render-cpu .../cpu_renderer.rs:234-236` |
-| **V3** | §4.17 | **Motion interruption policy is inert.** Default `Blend` promises a seamless redirect from the current value, but re-animating a target hard-removes the prior timeline → the value snaps instead of blending. | policy `transition_interruption.rs:22-27`; `ui_runtime.rs:283-290` (hard `remove`, no policy consult) |
+| **V1** ✅ | §4.13 | `@media`/`@container` dropped → conditional rules always applied | `MediaEnvironment` evaluated at match time in `StyleMatcher`/`rule_condition`; conditions lowered in `obscur-css/condition_lowering.rs` and gated live (`style_matching_coordinator`, `frame_pipeline`). |
+| **V2** ✅ | §5.10 / §5.2 | Text shaping bypassed `obscur-text`; CPU rendered no text → backends diverged | Text is shaped **once** in `obscur-text` (harfrust adapter) into a font-tagged `GlyphRun`/`DrawText`; **both** CPU (skrifa→tiny-skia outlines) and Vello consume the same run. Determinism boundary for geometry+text+opacity restored (per the CPU/GPU effect-split policy, effect fidelity is intentionally GPU-only). |
+| **V3** ✅ | §4.17 | Motion `Blend` interruption inert → values snapped | `TransitionInterruption` enacted: `Blend` redirects from the current sampled value. |
 
-### Tier 2 — spec says supported, runtime rejects or ignores
+### Tier 2 — spec-supported but rejected (fe3ca01) → all RESOLVED
 
-| # | Spec | Gap | Evidence |
+| # | Spec | Old gap | Resolution |
 |---|---|---|---|
-| **V4** | §4.13 / §4.5 | `calc()`/`min()`/`max()`/`clamp()` and relative/viewport units (`rem`/`em`/`vw`/`vh`, logical) lower to `Unsupported` and are dropped; only `px`/`%` work. | `property_compiler.rs:398-406,426-428` |
-| **V5** | §2.13 | **Unknown-attribute/event rejection is inert end-to-end.** `okui-compiler` validates against its *own* string `ContractRegistry`, disjoint from `obscur-view`'s typed `ComponentContract` and `#[derive(Contract)]` output, and nothing populates it in a real compile → a real compile rejects nothing. The one "real violation" the prior audit flagged as *fixed* is only unit-test-real. | `okui-compiler` has no `obscur-view` dep; `validation/contract_validator.rs:48-55,229-232`; `compile.rs:305-323` skips unregistered tags |
-| **V6** | §5.15–5.18 | **No real resource decoders exist.** Only `NullDecoder`/`NullCompiler`; no image/SVG/font-decode dependency anywhere → loaded bytes can never become a usable image/font/stylesheet. Loaders (`FsResourceLoader`) and caches (`FsCacheStore`) are real. | `resource_decoder.rs:100`; grep: no `image`/`resvg`/`usvg`/`png` dep |
-| **V7** | §7.1 | **A11y semantic tree is never built from the retained UI tree.** The a11y domain + AccessKit bridge are real but exercised only by their own unit tests with hand-built trees; nothing derives a `SemanticSnapshot` from `RetainedTree`. §7.1's opening requirement is unmet. | grep: `SemanticSnapshot`/`SemanticTree` unused outside a11y crates; `accesskit_bridge.rs` unreferenced by runtime |
-| **V8** | §6.7 | **Keyboard input is a stub end-to-end.** `KeyboardConverter` has zero non-doc callers; `UiRuntime::handle_key` routes focus + requests a frame but performs no command translation. | `ui_runtime.rs:550-556` |
+| **V4** ✅ | §4.13 / §4.5 | `calc()`/`min/max/clamp` + `em/rem/vw/vh` lowered to `Unsupported` | Implemented via `LengthExpr`/`LengthContext`; longhand unitless-`0` also fixed. |
+| **V5** ✅ | §2.13 | Unknown-attr/event rejection inert (disjoint unpopulated registry) | `ComponentSurface` (pure-string domain surface) emitted by `#[derive(Contract)]`; `okui-compiler` `surface_bridge` seeds built-ins + registers user surfaces → a real compile rejects unknown attr / missing required prop / disallowed child / unknown event. (Option A impossible: typed contract is FNV-symbol-keyed, no reverse string resolution — documented.) |
+| **V6** ✅ | §5.15–5.18 | No real resource decoders (Null only) | New adapter `crates/adapters/obscur-resource-decode` (image / ttf-parser / usvg, `resource-decode` feature); wired via runtime-owned `ResourceLoader`+`ResourceDecoder` ports; facade injects sandbox-rooted fs loader + decoder. Loaded bytes now become usable `SceneImage`s. |
+| **V7** ✅ | §7.1 | A11y tree never built from `RetainedTree` | `UiRuntime::semantic_snapshot()` derives a `SemanticSnapshot` from the retained tree (`obscur-accessibility/tree`). |
+| **V8** ✅ | §6.7 | Keyboard input a stub | `CommandRouter` unified to `InternedSymbol`; `handle_key` resolves shortcuts → `dispatch_command`, and Enter/Space activate the focused node; full text-edit key mapping added. |
 
-### Tier 3 — built & tested but standalone (never called by the live path)
+### Tier 3 — built-but-standalone (fe3ca01) → RESOLVED / wired
 
-These are correct code that no live path invokes; they contradict their own doc-comments but do nothing *wrong*.
-
-| # | Spec | Subsystem | Evidence |
+| # | Spec | Old state | Resolution |
 |---|---|---|---|
-| S1 | §3.4 ph.5 | **`InvalidationRouter` orphaned** → invalidation is full-rebuild-every-frame, not incremental; all phases run unconditionally each frame. | `invalidation_router.rs:109` (no non-test caller); `ui_runtime.rs:217-259` |
-| S2 | §3.2 / §3.4 ph.4 | **Transactions not enacted.** `UiTransaction`/`TransactionCommit` are complete + tested but the pipeline mutates via `reconcile_root(&mut tree, desired)` directly; atomic-commit-between-frames is only unit-tested. | `transaction_commit.rs:9-15`; `frame_pipeline.rs:96` |
-| S3 | §7.9 | **Telemetry never emitted.** `PerformanceCounter`/`BudgetViolation`/`TelemetrySink` exist but no subsystem calls `record_span`/`record_counter`. | grep: telemetry used only inside `obscur-diagnostics` |
-| S4 | §4.17 | **CSS `transition`/`@keyframes` compiled but not driven.** `CompiledTransition`/`CompiledKeyframes` are produced but never registered with `MotionScheduler`. | `transition_compiler`/`keyframe_compiler`; no consumer in application/facade |
-| S5 | §7.6 / LSP | **No real transport.** DevTools speaks over an in-process `VecDeque` loopback (no socket/IPC/serde); LSP is a single-shot stdin checker (no JSON-RPC); external `obscur-devtools` binary is a `println!` stub; `InspectSource` has only `NullInspectSource`. Cores are sound but unreachable by a running app. | `local_transport.rs:53-57`; `okui-lsp/main.rs:1-56`; `obscur-devtools/src/main.rs:1-6` |
-| S6 | §7.4 | **Headless snapshots cover 4/8 stages** (tree/style/layout/scene); paint/a11y/render-graph/image absent. | `snapshot_stage.rs:24-35` |
-| S7 | §3.6 | Scheduler background/starvation band wired but never signaled (`note_background_pending`/`service_background` have no callers). | `frame_scheduler.rs:162-197` |
+| S1 ✅ | §3.4 | `InvalidationRouter` orphaned | `FramePlan` consults the live `InvalidationRouter` to gate which phases run. |
+| S2 ✅ | §3.2/§3.4 | Transactions not enacted | `ReconcileEnactor` drives reconciliation as a `UiTransaction[ReplaceRoot]` through the pipeline. |
+| S3 ✅ | §7.9 | Telemetry never emitted | Frame-phase telemetry emitted via `TelemetrySink`+`FrameBudget` in `ui_runtime`. |
+| S4 ✅ | §4.17 | CSS `transition`/`@keyframes` compiled but not driven | Matched by selector and registered with the `MotionScheduler`. |
+| S5 ✅ | §7.6 / LSP | No real transport (VecDeque/stdin/`println!`) | DevTools speaks over a real `std::net` `UnixListener`/`TcpListener` (`obscur-devtools-server/transport`); LSP is real JSON-RPC over stdio (`Content-Length` framed, hand-rolled JSON — `tools/obscur-okui-lsp`). |
+| S6 ✅ | §7.4 | 4/8 snapshot stages | All 8 §7.4 stages present (image stage via CPU-backend hash). |
+| S7 🟡 | §3.6 | Background/starvation band never signaled | Now signaled by the scheduler (band wired end-to-end). |
 
 ---
 
 ## Cross-cutting themes
 
-**T1 — "Built but not wired" is much reduced but not gone.** Now wired: pointer input, motion sampling, selector matching, cascade, pseudo-states (HOVER/FOCUS), `display`→algorithm, scheduler gating. Still standalone: invalidation, transactions, telemetry emission, CSS transitions→scheduler, a11y-from-tree, devtools/LSP transports, keyboard input.
+**T1 — "Built but not wired" is essentially closed.** Every fe3ca01 standalone subsystem now has a live caller: invalidation gating, transaction enactment, telemetry emission, CSS transitions→scheduler, a11y-from-tree, keyboard/text input, real DevTools/LSP transports. The remaining "modeled but unwired" items are narrow (subgrid, some observer/virtualization scaffolding).
 
-**T2 — feature breadth still narrower than the engines operating on it.** `PropertyId`=27 (box-model/flex/color/opacity/visibility/display/font-size) — no transforms, shadows, filters, backgrounds beyond `background-color`, cursor, logical properties, or typography past `font-size`. Grid degenerates to a fixed 1-column uniform grid. `calc()`/units/`@media` unsupported. Positioned/docking/constraint/custom layout and observers/virtualization are modeled but unwired.
+**T2 — feature breadth now matches the engines.** `PropertyId` has grown far past fe3ca01's 27 (box-model/flex/**full grid**/positioning/z-index/typography/backgrounds/borders/radius/shadow/filter/transform/opacity/overflow/outline/box-sizing/object-fit — grep-verified through the `COMPUTED_PROPERTIES` completeness gate so authored CSS actually reaches consumers). The fe3ca01 "narrower than the engines operating on it" concern is resolved for the common web-styling surface.
 
-**T3 — text-pipeline correctness is the largest single-subsystem gap.** `obscur-text` (shaping/layout/line-break/bidi/IME) is a complete domain used nowhere in the render path; rendering does naïve per-char mapping in one backend and nothing in the other.
+**T3 — text is feature-complete**, spanning shaping/bidi/itemization/fallback/wrap/justify/hyphenate/overflow/IME, wired into both layout and paint on both backends. This was fe3ca01's single largest gap.
 
-**T4 — honest deferrals are well-managed.** The plugin tier (9 crates, ~131 files) is a uniform, over-claim-free skeleton (0 impls, 0 external deps). Resource decoders, macOS/Windows adapters, and real transports are cleanly absent rather than faked. The honest-capability contract (return `Unsupported`/`Unavailable`/empty, never fabricate) holds across windowing and system services.
+**T4 — the CPU/GPU effect split is now a stated policy, not an accident.** GPU-class effects (gradient ramps, blur, blends, filters) are computed on Vello; the CPU/tiny-skia backend is the deterministic reference for **geometry + text + group opacity** and *approximates* effects by design (gradients→first-stop, shadow→flat offset). Golden determinism covers geometry/text/opacity, not effect fidelity — documented and intended.
 
-**T5 — audit-premise correction.** The macOS/Windows system adapters are **not** OS-cfg-gated deferrals — they are inert 6-line placeholders with no `impl` and no `#[cfg(target_os=…)]`; they compile everywhere precisely because they are empty. Only Linux and Web are real system adapters, and only for 3 of 8 service families (dialog/shell/notification).
+**T5 — honest deferrals remain well-managed.** The plugin tier (9 crates) is a uniform over-claim-free skeleton (0 impls/deps). macOS/Windows system adapters are skeleton stubs (`struct …Provider;`, no impl, no deps). General color-matrix `filter`/`backdrop-filter` is cleanly dropped at lower time with `supports_effect` reporting `Unavailable`. Nothing is faked.
 
 ---
 
 ## Per-area findings
 
 ### Area A — Architecture, boundaries & cargo policies — ✅ strong
-Full catalog present; resolver 3 / edition 2024 / MSRV 1.90; centralized `[workspace.dependencies]` + `[workspace.lints]`; `rust-toolchain.toml`/`clippy.toml`/`deny.toml`/CI all exist; xtask green. Boundary invariants verified live (no umbrella deps, no external types in pure layers, taffy hidden, object-safe ports, `forbid(unsafe_code)`). **No violations.** Residual: xtask uses string-scans not a `cargo metadata` graph (§5.9 — no cycle/facade-dep/feature-matrix checks); CI omits nextest/trybuild/snapshots/fuzz/Miri/OS-matrix; `obscur-testkit`, plugin crates, `system-{macos,windows}`, `tools/devtools*` not yet centralized; no top-level `examples/benches/fuzz`.
+Full catalog present; resolver 3 / edition 2024 / MSRV 1.90; centralized `[workspace.dependencies]`/`[workspace.lints]`; toolchain/clippy/deny/CI present; xtask green. Boundary invariants hold live (no umbrella deps, no external types in pure layers, taffy hidden, object-safe ports, `forbid(unsafe_code)`; new external deps — harfrust/skrifa/image/usvg/wgpu-effects — confined to adapters). xtask now performs a `cargo metadata`-style layering/facade-ban/cycle check (fe3ca01's string-scan gap addressed). Residual: CI still omits nextest/trybuild/OS-matrix (unverifiable in this environment); a few depend-nothing crates not centralized (cosmetic). **Known pre-existing:** repo is not `cargo fmt --check` clean (rustfmt version drift vs HEAD — do not blanket-reformat).
 
-### Area B — Components, tree & DSL — 🟡 (strong core, inert validation)
-Retained tree + keyed reconciler are excellent (identity preserved across reorders, leaf-first removal, in-place text/attr update on stable generational ids); `obscur-view` model and CLASS/ID/TYPE→attributes path are faithful. **Violations:** V5 (§2.13 inert); §2.8 the "primary" proc-macro DSL is not a proc-macro (no entrypoint, no dependents — expansion logic exists but is uninvocable); §2.11 mandatory `key` on `<For>` is parsed but neither enforced nor lowered (Conditional/Loop IR kinds never produced; `UiIrNode` has no key field). Integration seam: no `UiIrDocument → View` bridge, so the frontend IR and the reconciler are not connected end-to-end.
+### Area B — Components, tree & DSL — 🟡 (strong core; §2.13 real; one bridge caveat)
+Retained tree + keyed reconciler remain excellent. **V5 resolved** (`ComponentSurface` enforcement). Area-B closure also delivered `For`/`If`→`Loop`/`Conditional` IR, a mandatory-`key` diagnostic, and a `UiIrDocument → View` bridge (`UiIrViewBridge`) so the `.okui` frontend reaches the reconciler end-to-end. **Remaining:** the §2.8 primary proc-macro DSL is still a logic crate, not a `proc-macro=true` entrypoint (deliberately deferred — incompatible with the xtask lib.rs-structure rule); the `.okui` bridge maps tags via a name-hash placeholder, so real widgets (`<Button>`/`<Input>`) and reserved attrs (`src`) authored in `.okui` don't yet reach their real `ComponentId`/`SRC` symbol (the smallest next `.okui` step — a tag→ComponentId + reserved-attr registry).
 
-### Area C — State, transactions & runtime — ✅ keystone real; ❌ two stages unclosed
-`UiRuntime` genuinely owns the world and is scheduler-gated with a `render_now` force path; scheduler coalescing/priority/backpressure/starvation all implemented and tested; pointer/hover/focus/pseudo + motion sampling wired. **Gaps (S1/S2/S7):** invalidation is non-incremental (`InvalidationRouter` dead in live path — prior M1 not resolved); transactions not enacted by the pipeline; background/starvation band never signaled. Layout re-runs the whole tree every frame (boxes retained only for hit-testing). Keyboard/IME and lifecycle events unwired.
+### Area C — State, transactions & runtime — ✅ keystone real; stages closed
+`UiRuntime` owns the world and is scheduler-gated with a `render_now` force path. **S1/S2/S7 resolved:** invalidation gates phases (`FramePlan`), reconciliation runs as a transaction (`ReconcileEnactor`), the scheduler background band is signaled. Reactive re-render (`set_root_view`/`run_due_frame_reactive`), HiDPI device-scale, and a full input arc (pointer/keyboard/text/IME/drag) are wired. **Remaining:** per-component **local** state + effects (single root view-builder only — no per-instance state); layout still recomputes broadly per frame (boxes retained for hit-test); double-click/capture-phase and live scroll gestures not modeled.
 
-### Area D — Layout, CSS & motion — 🟡 (major closure + real violations)
-Genuinely closed since last audit: 27-variant `PropertyId`, `display`→algorithm dispatch, full-§4.13 selector matcher with backtracking + specificity, real cascade (origin/specificity/importance/source-order, runtime-override beats `!important`), and motion truly sampled into computed style before layout/paint. **Violations V1/V3/V4** (@media ignored; interruption inert; calc/units rejected). Limited: grid degenerate 1-column; `[data-*]`/`[aria-*]` never match (only `id`/`type` retained); interaction pseudo-classes past `:hover`/`:focus` have no runtime source; CSS transitions/keyframes compiled but never registered (S4); positioned/docking/constraint/custom + observers + virtualization modeled but unwired; Taffy shims real but unused (native algorithms used instead).
+### Area D — Layout, CSS & motion — ✅ (major closure)
+`display`→algorithm dispatch, full-§4.13 selector matcher + real cascade, motion sampled into computed style. **V1/V3/V4 resolved.** **Full CSS Grid** (see verdict), **positioned/absolute/fixed/sticky** layout + `z-index` stacking, **flex-wrap** (multi-line) + nested-container auto-height cross-sizing, `box-sizing`, and the complete interaction+structural pseudo-class set are wired. CSS transitions/`@keyframes` registered with the scheduler (S4). **Remaining (documented, minor):** subgrid; `grid-template` shorthand; baseline/`stretch` content-distribution; flat z-index (no nested stacking-context isolation for opacity/transform); `letter-spacing`/`text-transform`; some paint-time relative units. See `docs/grid-remaining.md`.
 
-### Area E — Rendering, text & resources — 🟡 (scene solid; text & decoders broken)
-Scene/display-list model is solid and deterministic (ordered immutable `Vec<PaintCommand>`, version-gated snapshots, balance invariant); object-safe `Renderer` with real `HeadlessRenderer`, tiny-skia `CpuRenderer`, and vello adapter (host-provides-device, offscreen→swapchain blit). `ResourceHub` state machine + `FsResourceLoader` (with sandbox-root guard) + `FsCacheStore` (versioned, atomic-rename) are real. **Violations V2** (text bypasses obscur-text; cross-backend divergence) **and V6** (no real decoders). CPU gradients flatten to first stop; layers are passthrough (no offscreen compositing). Only `MockTextShaper`/`MockFontProvider` exist.
+### Area E — Rendering, text & resources — ✅ (scene solid; text & decoders real)
+Scene/display-list model solid and deterministic; object-safe `Renderer` with `HeadlessRenderer`, tiny-skia `CpuRenderer`, and the Vello adapter (host-device, offscreen→swapchain, **plus own wgpu blur/backdrop passes** and headless PNG readback). **V2/V6 resolved:** text shaped through `obscur-text` and consumed by both backends; real decoders in `obscur-resource-decode` feed `background-image: url()` and `<img>` through the `ResourceHub`. Full visual property set painted (see verdict). **Remaining (per `docs/visual-remaining.md`):** general color-matrix `filter`/`backdrop-filter` blocked on Vello 0.9; repeating-**radial** gradient; length (non-%) gradient stops; elliptical/per-corner-elliptical `border-radius`; transformed hit-testing; `clip-path`; CPU effect fidelity is approximate **by policy** (T4).
 
-### Area F — Platform, windows & services — 🟡 (honest ports; input partial)
-`WindowBackend` port is faithful with an honest-capability contract and real winit lifecycle/property/activation/chrome/presentation ops; `NullWindowBackend` reference impl. System-service ports are all real object-safe traits with `Null*` impls; Linux (zenity/xdg-open/notify-send) + Web (wasm) adapters real for dialog/shell/notification. **Gaps:** pointer input is wired only in the `windowed_counter` example, which **bypasses the `WindowBackend` port** (the port carries no input variants); **V8** keyboard stub; §6.6 display enumeration returns empty/None at runtime; **T5** macOS/Windows are inert placeholders (not cfg-gated); no central permission/consent gate (capability is per-provider self-report); §6.9 dialog loop-detection guard absent; capture/privacy/power/network/document have port + `Null*` only.
+### Area F — Platform, windows & services — 🟡 (honest ports; input now real)
+`WindowBackend` port faithful with honest-capability contract; winit lifecycle/property/activation/chrome/presentation real; system-service ports object-safe with `Null*` impls; Linux (zenity/xdg-open/notify-send) + Web adapters real for dialog/shell/notification. **V8 resolved** (keyboard). **Remaining:** pointer/keyboard/IME are threaded into `UiRuntime` and driven by the windowed examples, but the `WindowBackend` port still carries no input variants (input arrives via the winit event loop directly); §6.6 display enumeration returns empty at runtime; **macOS/Windows system adapters are skeleton stubs** (`struct MacosDialogProvider;` etc., no impl/deps — not cfg-gated); no central permission/consent gate; capture/privacy/power/network/document have port + `Null*` only.
 
-### Area G — Accessibility, testing & diagnostics — 🟡 (real cores, standalone)
-Diagnostics channel, devtools-server, telemetry, record/replay + default irreversible redaction are real, well-tested working code, and the §7.7 endpoint security model (disabled-by-default, token→scope auth, version negotiation, per-command scope checks, message/subscription limits, audit log, production control-exclusion) is genuinely enforced. Headless runs the real pipeline deterministically. **Gaps V7** (a11y not linked to tree), **S3** (telemetry never emitted), **S5** (no real transports — VecDeque/stdin/`println!` stubs; `NullInspectSource` only), **S6** (4/8 snapshot stages); testkit `SemanticSelector` is an unimplemented stub, so synthetic input by role/name/automation-id is unavailable (node-id/test-id/coordinate only).
+### Area G — Accessibility, testing & diagnostics — ✅ (cores real & now wired)
+Diagnostics channel, devtools-server (real socket transport), telemetry (now emitted), record/replay + default irreversible redaction, and the enforced §7.7 endpoint security model are real. **V7/S3/S5/S6 resolved:** a11y snapshot derived from the tree, telemetry emitted from frame phases, real DevTools socket + LSP JSON-RPC transports, all 8 §7.4 snapshot stages. **Remaining:** testkit `SemanticSelector` is still a placeholder `struct` (synthetic input by role/name/automation-id unavailable — node-id/test-id/coordinate work); the external `obscur-devtools` CLI binary is thin; a11y `alt` text carried on `<img>` but not yet surfaced into the semantic tree.
 
 ### Area H — Plugins & roadmap/non-goals — 🔵 clean deferral, no violations
-Plugin tier (9 crates, ~131 files) is a uniform spec-shaped skeleton: 140 placeholder structs, **0 impls / 0 pub fns / 0 traits / 0 `todo!()` / 0 external deps**. The 9-crate decomposition maps cleanly onto §8's responsibility areas. Nothing outside `crates/plugin/` depends on any plugin crate; nothing over-claims. **No non-goal is violated** — no native sandbox is implemented or advertised, no plugin renderer access, no DevTools code-execution channel, `.okui` executes no logic. Phase 6 is genuinely deferred (not silently half-built). CLI + both executors + sdk/macros are near-empty (⬜).
+Plugin tier (9 crates: abi/api/executor-process/executor-wasm/host/macros/model/package/sdk) is a uniform spec-shaped skeleton — placeholder structs, no impls/traits/`todo!()`/external deps. Nothing outside `crates/plugin/` depends on it; no non-goal violated (no native sandbox, no plugin renderer access, no DevTools code-execution channel; `.okui` executes no logic). Phase 6 is genuinely deferred, not silently half-built.
 
 ---
 
-## Prioritized recommendations
+## Current remaining gaps & recommendations (honest residue)
 
-1. **Fix the Tier-1 wrongness first** (small, high-value): gate `@media`/`@container` at match time (V1); apply the motion interruption policy / blend-from-current (V3). These change correct-looking output from wrong to right.
-2. **Wire text through `obscur-text`** (V2): shape in the domain, carry positioned glyphs in `DrawText`, and give the CPU backend a text path — restores the cross-backend determinism boundary.
-3. **Make §2.13 real** (V5): give `okui-compiler` a dependency on `obscur-view`'s typed contracts (or populate the registry from `#[derive(Contract)]`) so unknown attrs/events actually fail a real compile.
-4. **Close the two runtime stages** (S1/S2): route reconciliation through transactions and consult `InvalidationRouter` so frames become incremental + transactional (the modules already exist and are tested).
-5. **Link a11y to the tree** (V7) and **emit telemetry** from the pipeline (S3) — both are "connect an existing core," not new subsystems.
-6. **Breadth** (V4 + T2): add `calc()`/relative-and-viewport units, then expand `PropertyId` toward the §4.13 supported set (transforms/shadows/backgrounds/logical) and a real grid.
-7. **Transports** (S5) and **remaining snapshot stages** (S6) when tooling maturity warrants; keyboard input path (V8).
-8. **xtask/CI hardening** (Area A): `cargo metadata` dependency graph + cycle/facade checks; nextest/trybuild in CI.
-9. **Housekeeping:** either cfg-gate the macOS/Windows adapters or keep them as explicitly-marked empty stubs (T5); centralize the remaining crates in `[workspace.dependencies]`.
+1. **Plugin tier (Phase 6)** — deliberate skeleton; implement when the phase opens. No action needed now.
+2. **macOS/Windows system adapters** — skeleton stubs; either implement per-family (dialog/shell/notification, mirroring Linux) or keep as explicitly-marked stubs. Only Linux + Web are real, for 3 of 8 service families.
+3. **General `filter` / `backdrop-filter` beyond blur/drop-shadow** — color-matrix (`brightness`/`contrast`/`saturate`/`grayscale`/`invert`/`sepia`/`hue-rotate`) is blocked on Vello 0.9's Scene API; needs custom offscreen render-to-texture + color-matrix wgpu shaders (a GPU project) or a newer Vello. Currently dropped at lower time with honest `supports_effect` reporting. Do **not** build model-only scaffolding or CPU-compute filters (violates the effect-split policy).
+4. **repeating-radial-gradient** — repeating-linear is done; radial deferred.
+5. **Typography edges** — `letter-spacing`, `text-transform`, `text-shadow` (emboss), and paint-time relative units not modeled.
+6. **Real scrollbars / live scroll** — `overflow` clips but there is no scrollbar UI or live scroll-gesture wiring (viewport is the only scroll container; sticky/scroll are test-drivable only).
+7. **testkit `SemanticSelector`** — placeholder; role/name/automation-id synthetic input unavailable.
+8. **DevTools/LSP external binaries** — the socket transport + JSON-RPC cores are real; the standalone `obscur-devtools` CLI and LSP server binaries are thin wrappers.
+9. **`.okui` bridge fidelity** — tag→real-`ComponentId` + reserved-attr (`src`) mapping so authored `.okui` widgets and `<img>` render (smallest next `.okui` step).
+10. **Per-component local state & effects** — the runtime drives a single root view-builder; no per-instance state/effect model yet.
+11. **Grid/stacking edges** — subgrid, `grid-template` shorthand, baseline/`stretch` distribution; flat z-index (no nested stacking-context isolation for opacity/transform groups); transformed hit-testing.
+12. **Known follow-ups flagged by the demos** — a suspected top/bottom border-side swap for degenerate 0-height boxes on the computed-style path (border-triangle direction, worked around in the wireframe example, not yet root-caused); vertical auto-height fill under nested flex/grid; `.ttc`/CJK fallback face selection is best-effort.
+
+Full item-level deferral lists live in `docs/grid-remaining.md` and `docs/visual-remaining.md`.

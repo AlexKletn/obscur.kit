@@ -41,8 +41,14 @@ The following are deferred. Each is documented at its site in code.
   Deferred: `space` / `round` fold to `repeat` (no gap-distribution / integer-fit);
   multiple background layers; sub-pixel tiling can show a hairline seam at some
   scales; `em`/`vw`/… size/position units fall back (px + % are exact).
-- **Multiple background layers** — a comma list of backgrounds; only a single
-  gradient/color is honored.
+- ~~**Multiple background layers**~~ — DONE. `PropertyValue::BackgroundLayers`
+  (comma list of `{Linear|Radial|Conic|Url}` layers) painted back-to-front; a
+  single layer is byte-identical to before.
+- ~~**`repeating-linear-gradient`**~~ — DONE. A repeating flag + period on the
+  linear gradient; the coordinator sizes the axis to one period and tiles via
+  `ExtendMode::Repeat` (Vello tiles; CPU flattens to the first stop). Combined
+  with multiple layers this expresses the graph-paper grid. (`repeating-radial`
+  is still deferred.)
 - **Non-percentage (length) gradient stop positions** — stops take `%` only
   (applies to linear / radial / conic alike).
 - **Radial/conic gradient fidelity** — `radial-gradient` and `conic-gradient` are
@@ -58,8 +64,15 @@ The following are deferred. Each is documented at its site in code.
   CSS's aspect-ratio-aware corner angle.
 
 ## Border
-- **`border-style` variants** — `dashed`/`dotted`/`double`/`groove`/… all render
-  as `solid`; only `none`/`solid` are distinct.
+- ~~**`border-style: dashed`/`dotted`**~~ — DONE. Scene `Stroke` gained a
+  `dash`/`dash_offset`; a uniform dashed/dotted border strokes the (rounded) box
+  outline on both backends (Vello kurbo dashes, CPU tiny-skia `StrokeDash`).
+  Non-uniform dashed still falls back. `double`/`groove`/`ridge`/`inset`/`outset`
+  still render as `solid`.
+- ~~**Mitered border triangles**~~ — DONE. Solid non-rounded borders render as
+  mitered trapezoid quads, so the `width:0;height:0;border-…` CSS-triangle trick
+  works. (Known follow-up: vertical edges arrive flipped through the
+  computed-style path for degenerate 0-height boxes — see the audit's residue.)
 - **Non-uniform rounded borders** — a border with a radius and unequal side
   widths/colors is approximate (edges clipped to the rounded box, no per-corner
   mitre geometry).
@@ -69,8 +82,9 @@ The following are deferred. Each is documented at its site in code.
 ## Shadow
 - **CPU gaussian blur** — the CPU backend paints a flat reduced-alpha offset rect
   (no blur); Vello does real `draw_blurred_rounded_rect`.
-- **Inset shadow fidelity (Vello)** — inset shadows are not clipped to the box
-  interior (approximate).
+- ~~**Inset shadow fidelity (Vello)**~~ — DONE. Vello now clips+isolates to the
+  box and punches the lit interior via `Compose::DestOut` (soft inner frame);
+  CPU draws an even-odd rounded-rect ring. (Drop shadows byte-identical.)
 - **Shadow on a rounded element** — a drop shadow sits inside the element's own
   subtree clip (documented approximation of the paint order).
 - **`filter: drop-shadow(...)`** — DONE. Lowered to a drop `BoxShadow` (spread `0`,
@@ -97,14 +111,21 @@ The following are deferred. Each is documented at its site in code.
   / effects are still approximated on the CPU backend (only opacity is honored).
 
 ## Not started
-- **`filter` / `backdrop-filter`** — the general property is BLOCKED on Vello 0.9,
-  which has no content-blur or color-matrix primitive: `blur()`, `brightness()`,
-  `contrast()`, `grayscale()`, `backdrop-filter`, … cannot be expressed and are
-  **silently dropped** at CSS lower time (not faked). Only the single
-  GPU-expressible function, `filter: drop-shadow(...)`, is implemented (see the
-  Shadow section above); `supports_effect("filter" / "backdrop-filter")` reports
-  `Unavailable` on both backends, `"drop-shadow"` reports `Emulated`.
-- **`outline` / `outline-offset`** — an outline that does not affect layout.
+- **`filter` / `backdrop-filter` — color-matrix subset only** — `filter: blur()`
+  and `backdrop-filter` (acrylic) ARE now implemented on the Vello backend via our
+  own gaussian + composite **wgpu passes on offscreen textures** over the scene
+  (this is what the Fluent theme's acrylic uses); `filter: drop-shadow()` is
+  implemented via the `DrawShadow` path (see Shadow). What remains BLOCKED on
+  Vello 0.9 is the **color-matrix** family — `brightness()`, `contrast()`,
+  `saturate()`, `grayscale()`, `invert()`, `sepia()`, `hue-rotate()` — which has
+  no Vello primitive and is **silently dropped** at CSS lower time (not faked).
+  `supports_effect` reports the color-matrix subset as `Unavailable`.
+- ~~**`outline` / `outline-offset`**~~ — DONE. Painted as one stroked `DrawPath` at
+  the border box inflated by `offset + width/2` (rounded if a radius, dashed via
+  the dash stroke); reserves no layout space; emitted outside the node's clip.
+- ~~**`overflow` clipping**~~ — DONE. `overflow: hidden`/`clip`/`scroll`/`auto`
+  bracket the subtree with a `PushClip` to the box; `scroll`/`auto` clip but paint
+  no scrollbars (no scroll UI / gesture wiring yet).
 - **`clip-path`** — arbitrary clip shapes (the scene has path clips).
 - **`mix-blend-mode` / `background-blend-mode`** — the scene has blend on layers.
 - **`visibility: hidden` vs `display: none`** paint suppression — confirm
