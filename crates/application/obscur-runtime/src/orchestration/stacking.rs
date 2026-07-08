@@ -19,12 +19,35 @@
 //!   units by `(z ascending, tree_index ascending)`. Higher z paints last (on
 //!   top); ties keep document (pre-order) order.
 //!
+//! On top of the effective z, each node also carries a **§9.9 paint-layer rank**
+//! (see [`PaintLayer`] / [`effective_paint_layer`]) that orders units *within an
+//! equal-z bucket*. CSS 2.1 §9.9.1 / Appendix E paint a stacking context's
+//! contents in seven layers, bottom→top: (1) the context root's background &
+//! borders; (2) child contexts with negative z; (3) non-positioned in-flow
+//! **block** descendants; (4) non-positioned **floats**; (5) non-positioned
+//! **inline** descendants; (6) **positioned** descendants with `z-index: auto`
+//! **or** `0`; (7) child contexts with positive z. The critical consequence — and
+//! the one the old flat `(z, tree_index)` sort got wrong (catalog bug B2) — is
+//! that **layer 6 always paints above layers 1–5 regardless of tree order**: a
+//! positioned `z:auto`/`0` box lifts above its *non-positioned* siblings even when
+//! it appears earlier in the document. Negative- and positive-z positioned boxes
+//! are already separated by the primary `z` key (layers 2 and 7), so the rank only
+//! has to lift positioned-`z0`/`auto` boxes (layer 6) above non-positioned content
+//! (layers 1–5) in the common `z == 0` bucket.
+//!
 //! **Not modelled** (documented simplifications): nested stacking-context
 //! isolation (a child's high z can escape its parent's context, unlike real
-//! CSS), the `auto`-establishes-no-context nuance, and opacity/transform/filter
-//! induced stacking contexts. When no node authors a non-`auto` `z-index`, every
-//! effective z is `0` and the stable sort by `tree_index` reproduces the exact
-//! pre-order paint sequence — the regression guard.
+//! CSS) — the [`effective_paint_layer`] walk *inherits* the lift so a positioned
+//! subtree moves together, but it does not re-isolate a descending context; the
+//! `auto`-establishes-no-context nuance; opacity/transform/filter induced stacking
+//! contexts; and — because `float` is not a computed property here and the
+//! byte-identical regression guard forbids reordering non-positioned block vs
+//! inline siblings — the §9.9 non-positioned layers 1/3/4/5 are **collapsed into a
+//! single rank** ([`PaintLayer::NonPositioned`]). When no node authors a
+//! non-`auto` `z-index` *and* no node is positioned, every effective z is `0` and
+//! every layer rank is [`PaintLayer::NonPositioned`], so the stable sort by
+//! `tree_index` reproduces the exact pre-order paint sequence — the regression
+//! guard.
 
 use std::collections::{HashMap, HashSet};
 
@@ -42,16 +65,28 @@ use super::ComputedStyles;
 /// The commands are exactly the node's own background / border / text (never its
 /// descendants'), captured in emission order — or, for a `border-radius` element,
 /// a lone `PushClip` / `PopClip` that brackets the node's subtree. The key
-/// `(z, tree_index, order)` orders the unit against every other unit: `z` is the
-/// node's effective stacking level, `tree_index` its pre-order document position
-/// (the primary tie-breaker), and `order` a within-position phase so a subtree's
+/// `(z, layer, tree_index, order)` orders the unit against every other unit: `z`
+/// is the node's effective stacking level, `layer` its §9.9 paint-layer rank
+/// (lifting positioned-`z0`/`auto` boxes above non-positioned content within an
+/// equal z bucket), `tree_index` its pre-order document position (the tie-breaker
+/// within a z+layer bucket), and `order` a within-position phase so a subtree's
 /// `PushClip` sorts before the node's paint and its `PopClip` sorts after the
-/// whole subtree (see [`PaintUnit::PAINT_ORDER`]). When no radius is authored
-/// every unit is [`PAINT_ORDER`](PaintUnit::PAINT_ORDER), so the key reduces to
-/// `(z, tree_index)` — the pre-radius ordering, byte-for-byte.
+/// whole subtree (see [`PaintUnit::PAINT_ORDER`]). When nothing is positioned
+/// every `layer` is [`PaintLayer::NonPositioned`] and, with no radius, every unit
+/// is [`PAINT_ORDER`](PaintUnit::PAINT_ORDER), so the key reduces to
+/// `(z, tree_index)` — the pre-fix ordering, byte-for-byte.
 pub(super) struct PaintUnit {
     /// The node's effective stacking z (see [`effective_stacking_z`]).
     pub z: i32,
+    /// The node's CSS 2.1 §9.9 paint-layer rank (see [`effective_paint_layer`]),
+    /// sorted *between* `z` and `tree_index`: within one z bucket a
+    /// [`PaintLayer::PositionedZeroOrAuto`] box (layer 6) sorts after every
+    /// [`PaintLayer::NonPositioned`] unit (layers 1–5), so a positioned `z:auto`/`0`
+    /// box paints above its non-positioned siblings regardless of tree order. Every
+    /// bracket/paint unit of one node shares that node's `layer`, so a node's own
+    /// clip/transform/opacity/paint interleave is untouched (they tie on `z` and
+    /// `layer` and stay ordered by `order`).
+    pub layer: PaintLayer,
     /// The node's pre-order document position (for a `PopClip` bracket, the
     /// subtree's *exit* index), tie-breaking equal-z units so ties keep tree order.
     pub tree_index: usize,
@@ -140,6 +175,115 @@ impl PaintUnit {
     #[must_use]
     pub(super) const fn blur_pop_order(depth: u32) -> i64 {
         i64::MAX - depth as i64
+    }
+}
+
+/// A node's CSS 2.1 §9.9 / Appendix E **paint-layer rank** — the order key used
+/// *within a single z bucket* to lift positioned boxes above non-positioned
+/// content.
+///
+/// §9.9.1 paints a stacking context bottom→top in seven layers; layers 2 (negative
+/// z) and 7 (positive z) are already separated here by the primary effective-`z`
+/// key, so this rank only distinguishes the `z == 0` layers:
+///
+/// * [`NonPositioned`](Self::NonPositioned) — the context root's background &
+///   borders (layer 1) and every non-positioned in-flow **block** (3), **float**
+///   (4) and **inline** (5) descendant. These four §9.9 layers are **collapsed
+///   into one rank** because `float` is not a computed property in this engine and
+///   because splitting block (3) from inline (5) would reorder non-positioned
+///   siblings out of document order — violating the byte-identical regression
+///   guard. Within this rank `tree_index` (document order) decides.
+/// * [`PositionedZeroOrAuto`](Self::PositionedZeroOrAuto) — a **positioned**
+///   descendant (and, by inheritance, its subtree) whose effective own `z-index`
+///   is `auto` or `0` (§9.9 layer 6). It sorts **after** every `NonPositioned`
+///   unit in the same z bucket, so the whole positioned box paints on top of its
+///   non-positioned siblings even when it comes earlier in the tree — the fix for
+///   catalog bug B2.
+///
+/// A positioned box with a non-zero integer `z-index` is *not* lifted here: the
+/// primary `z` key already floats it into its own bucket (layer 2 or 7), and
+/// keeping it at `NonPositioned` leaves it below its own descendants (which share
+/// its z) in document order — matching "the SC root's own background paints first"
+/// (§9.9 layer 1 within its own context).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(super) enum PaintLayer {
+    /// §9.9 layers 1/3/4/5 — the context root's bg+borders and all non-positioned
+    /// in-flow descendants (collapsed; see the type docs). Sorts *below*
+    /// [`PositionedZeroOrAuto`](Self::PositionedZeroOrAuto).
+    NonPositioned,
+    /// §9.9 layer 6 — a positioned descendant with effective own `z-index` `auto`
+    /// or `0` (and its subtree). Sorts *above* [`NonPositioned`](Self::NonPositioned)
+    /// within the same z bucket.
+    PositionedZeroOrAuto,
+}
+
+/// Computes each node's **effective §9.9 paint-layer rank** for the whole tree.
+///
+/// Walks pre-order from the root (cycle-safe via a visited set); the root's rank
+/// is [`PaintLayer::NonPositioned`]. Each node's rank is its **own** rank when it
+/// is positioned (see [`own_paint_layer`]), otherwise it **inherits** its parent's
+/// rank. Inheritance makes a positioned `z:auto`/`0` box's *whole subtree* share
+/// the [`PositionedZeroOrAuto`](PaintLayer::PositionedZeroOrAuto) lift, so the
+/// entire positioned box (background, borders and non-positioned descendants) rises
+/// above non-positioned siblings **together**, while `tree_index` keeps the
+/// ancestor painting below its own descendants. (Nested-context re-isolation — a
+/// deeper positioned integer-z context resetting the rank — is applied when that
+/// child is itself positioned, but a descendant's high z otherwise escaping its
+/// parent context stays the documented simplification.)
+///
+/// When no node is positioned every rank is
+/// [`NonPositioned`](PaintLayer::NonPositioned), so the layer key is uniform and
+/// the sort reduces to `tree_index` order — the byte-identical regression guard.
+#[must_use]
+pub(super) fn effective_paint_layer(
+    tree: &RetainedTree,
+    computed: &ComputedStyles,
+) -> HashMap<NodeId, PaintLayer> {
+    let mut map: HashMap<NodeId, PaintLayer> = HashMap::new();
+    let Some(root) = tree.root() else {
+        return map;
+    };
+    let mut visited: HashSet<NodeId> = HashSet::new();
+    // Each stack entry carries the layer rank inherited from its parent chain.
+    let mut stack: Vec<(NodeId, PaintLayer)> = vec![(root, PaintLayer::NonPositioned)];
+    while let Some((node, inherited)) = stack.pop() {
+        if !visited.insert(node) {
+            continue;
+        }
+        let layer = own_paint_layer(computed, node).unwrap_or(inherited);
+        map.insert(node, layer);
+        if let Some(retained) = tree.get(node) {
+            for &child in retained.children().iter().rev() {
+                if !visited.contains(&child) {
+                    stack.push((child, layer));
+                }
+            }
+        }
+    }
+    map
+}
+
+/// Reads a node's **own** §9.9 paint-layer rank, or [`None`] when the node does not
+/// establish one and should inherit its parent's rank.
+///
+/// A non-positioned node returns [`None`] (it participates in its parent's layer).
+/// A **positioned** node returns [`PaintLayer::PositionedZeroOrAuto`] when its
+/// effective own `z-index` is `auto` (or absent) or the integer `0` — the §9.9
+/// layer-6 lift; a positioned node with a non-zero integer `z-index` returns
+/// [`PaintLayer::NonPositioned`] (it is isolated by the primary `z` key and must
+/// not lift above its own descendants — see [`PaintLayer`]).
+fn own_paint_layer(computed: &ComputedStyles, node: NodeId) -> Option<PaintLayer> {
+    let style = computed.get(&node)?;
+    if !is_positioned(style) {
+        return None;
+    }
+    match style.get(PropertyId::ZIndex).map(ComputedValue::value) {
+        // A non-zero integer z-index is isolated by the primary `z` key.
+        Some(&PropertyValue::Number(n)) if z_index_to_i32(n) != 0 => {
+            Some(PaintLayer::NonPositioned)
+        }
+        // `auto` (absent / non-numeric) or an explicit `0`: §9.9 layer 6.
+        _ => Some(PaintLayer::PositionedZeroOrAuto),
     }
 }
 
@@ -338,5 +482,179 @@ mod tests {
 
         let zmap = effective_stacking_z(&tree, &computed);
         assert_eq!(zmap.get(&a), Some(&-2));
+    }
+
+    // ---- §9.9 paint-layer rank (bug B2) ----------------------------------
+
+    /// A bare positioned element (no `z-index`, i.e. `z-index: auto`).
+    fn positioned_auto() -> ComputedStyle {
+        let mut style = ComputedStyle::new();
+        style.set(
+            PropertyId::Position,
+            ComputedValue::keyword(layout_keyword::POSITION_ABSOLUTE),
+        );
+        style
+    }
+
+    #[test]
+    fn all_static_nodes_share_the_non_positioned_rank() {
+        // The byte-identical regression guard: nothing positioned → every rank is
+        // `NonPositioned`, so the layer key is uniform and the sort reduces to
+        // `tree_index`.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 1);
+        let b = add_child(&mut tree, a, 2);
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(a, ComputedStyle::new());
+        computed.insert(b, ComputedStyle::new());
+
+        let layers = effective_paint_layer(&tree, &computed);
+        assert_eq!(layers.get(&root), Some(&PaintLayer::NonPositioned));
+        assert_eq!(layers.get(&a), Some(&PaintLayer::NonPositioned));
+        assert_eq!(layers.get(&b), Some(&PaintLayer::NonPositioned));
+    }
+
+    #[test]
+    fn positioned_z_auto_or_zero_takes_the_lift_rank() {
+        // A positioned `z:auto` box and a positioned `z:0` box both land in §9.9
+        // layer 6, ABOVE a non-positioned sibling in the same z bucket.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let auto = add_child(&mut tree, root, 1);
+        let zero = add_child(&mut tree, root, 2);
+        let static_block = add_child(&mut tree, root, 3);
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(auto, positioned_auto());
+        computed.insert(zero, positioned_with_z(0.0));
+        computed.insert(static_block, ComputedStyle::new());
+
+        let layers = effective_paint_layer(&tree, &computed);
+        let zmap = effective_stacking_z(&tree, &computed);
+        // All three share the z == 0 bucket …
+        assert_eq!(zmap.get(&auto), Some(&0));
+        assert_eq!(zmap.get(&zero), Some(&0));
+        assert_eq!(zmap.get(&static_block), Some(&0));
+        // … but the positioned pair lifts above the non-positioned block.
+        assert_eq!(layers.get(&auto), Some(&PaintLayer::PositionedZeroOrAuto));
+        assert_eq!(layers.get(&zero), Some(&PaintLayer::PositionedZeroOrAuto));
+        assert_eq!(layers.get(&static_block), Some(&PaintLayer::NonPositioned));
+        assert!(PaintLayer::NonPositioned < PaintLayer::PositionedZeroOrAuto);
+    }
+
+    #[test]
+    fn positioned_lift_is_inherited_by_the_subtree() {
+        // A positioned `z:auto` box's non-positioned descendants inherit the lift so
+        // the whole positioned box rises together (ancestor still below its own
+        // descendants by tree order).
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let pos = add_child(&mut tree, root, 1);
+        let child = add_child(&mut tree, pos, 2);
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(pos, positioned_auto());
+        computed.insert(child, ComputedStyle::new());
+
+        let layers = effective_paint_layer(&tree, &computed);
+        assert_eq!(layers.get(&pos), Some(&PaintLayer::PositionedZeroOrAuto));
+        assert_eq!(
+            layers.get(&child),
+            Some(&PaintLayer::PositionedZeroOrAuto),
+            "a positioned box's subtree inherits the layer-6 lift"
+        );
+    }
+
+    #[test]
+    fn positioned_integer_z_is_not_lifted() {
+        // A positioned box with a non-zero integer z-index is isolated by the
+        // primary `z` key, so it keeps the `NonPositioned` rank (it must not lift
+        // above its own descendants, which share its z).
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let up = add_child(&mut tree, root, 1);
+        let down = add_child(&mut tree, root, 2);
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(up, positioned_with_z(5.0));
+        computed.insert(down, positioned_with_z(-2.0));
+
+        let layers = effective_paint_layer(&tree, &computed);
+        assert_eq!(layers.get(&up), Some(&PaintLayer::NonPositioned));
+        assert_eq!(layers.get(&down), Some(&PaintLayer::NonPositioned));
+    }
+
+    #[test]
+    fn sort_key_lifts_positioned_above_earlier_non_positioned() {
+        // The end-to-end ordering the fix delivers: a positioned `z:auto` box (B)
+        // that comes EARLIER in the tree than a non-positioned block (A) must paint
+        // LAST (on top), even though its `tree_index` is smaller. Pre-fix the
+        // `(z, tree_index)` sort kept B below A.
+        let a_non_positioned = PaintUnit {
+            z: 0,
+            layer: PaintLayer::NonPositioned,
+            tree_index: 2, // later in the tree
+            order: PaintUnit::PAINT_ORDER,
+            commands: Vec::new(),
+        };
+        let b_positioned = PaintUnit {
+            z: 0,
+            layer: PaintLayer::PositionedZeroOrAuto,
+            tree_index: 1, // earlier in the tree
+            order: PaintUnit::PAINT_ORDER,
+            commands: Vec::new(),
+        };
+        let mut units = vec![b_positioned, a_non_positioned];
+        units.sort_by_key(|u| (u.z, u.layer, u.tree_index, u.order));
+        // A (non-positioned, later) paints first; B (positioned, earlier) paints
+        // last — on top.
+        assert_eq!(units[0].tree_index, 2, "non-positioned A paints first");
+        assert_eq!(units[1].tree_index, 1, "positioned B paints last (on top)");
+    }
+
+    #[test]
+    fn sort_key_keeps_non_positioned_in_tree_order() {
+        // Regression guard at the sort level: equal (z, layer) units keep
+        // `tree_index` (document) order — byte-identical to the pre-fix sequence.
+        let mut units = vec![
+            PaintUnit { z: 0, layer: PaintLayer::NonPositioned, tree_index: 3, order: PaintUnit::PAINT_ORDER, commands: Vec::new() },
+            PaintUnit { z: 0, layer: PaintLayer::NonPositioned, tree_index: 1, order: PaintUnit::PAINT_ORDER, commands: Vec::new() },
+            PaintUnit { z: 0, layer: PaintLayer::NonPositioned, tree_index: 2, order: PaintUnit::PAINT_ORDER, commands: Vec::new() },
+        ];
+        units.sort_by_key(|u| (u.z, u.layer, u.tree_index, u.order));
+        assert_eq!(
+            units.iter().map(|u| u.tree_index).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn sort_key_negative_z_paints_below_non_positioned() {
+        // A negative-z positioned box (C) sorts below a non-positioned block (A) via
+        // the PRIMARY `z` key — the layer rank is not even consulted across z.
+        let a_non_positioned = PaintUnit {
+            z: 0,
+            layer: PaintLayer::NonPositioned,
+            tree_index: 1,
+            order: PaintUnit::PAINT_ORDER,
+            commands: Vec::new(),
+        };
+        let c_negative = PaintUnit {
+            z: -2,
+            layer: PaintLayer::NonPositioned,
+            tree_index: 2,
+            order: PaintUnit::PAINT_ORDER,
+            commands: Vec::new(),
+        };
+        let mut units = vec![a_non_positioned, c_negative];
+        units.sort_by_key(|u| (u.z, u.layer, u.tree_index, u.order));
+        assert_eq!(units[0].z, -2, "negative-z positioned paints first (below)");
+        assert_eq!(units[1].z, 0, "non-positioned paints on top of negative-z");
     }
 }

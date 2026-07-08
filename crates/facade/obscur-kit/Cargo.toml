@@ -211,6 +211,16 @@ required-features = ["render-cpu"]
 name = "overflow_proof"
 required-features = ["render-cpu"]
 
+# Proof of the CSS 2.1 §9.9 seven-layer paint order (catalog bug B2): a positioned
+# `z:auto` box that comes EARLIER in the tree than a non-positioned block still
+# paints ON TOP of it (layer 6 > layers 1–5), while a negative-z positioned box
+# paints UNDER a non-positioned sibling that comes earlier. Drives the REAL scene
+# coordinator and rasterizes headless through the CPU renderer to
+# `target/stacking_order_proof.png`.
+[[example]]
+name = "stacking_order_proof"
+required-features = ["render-cpu"]
+
 # Proof of the built-in UA default stylesheet: bare Button/Input/Checkbox rendered
 # with only the UA sheet installed (base look) over the same controls with a
 # one-line author `button` override (author wins). Needs the CPU renderer + the

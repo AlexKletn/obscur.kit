@@ -37,7 +37,7 @@ use obscur_text::shaping::{
 };
 use obscur_tree::tree::RetainedTree;
 
-use super::stacking::{effective_stacking_z, PaintUnit};
+use super::stacking::{effective_paint_layer, effective_stacking_z, PaintLayer, PaintUnit};
 use super::{
     alignment_for, attributes_for, direction_for, families_for, line_height_for, overflow_for,
     ComputedStyles,
@@ -551,6 +551,12 @@ impl SceneCoordinator {
         // `z-index`, else its nearest z-index ancestor's, root = 0). Computed once
         // up front so the emission walk can key each paint unit by it.
         let zmap = effective_stacking_z(tree, computed);
+        // Each node's CSS 2.1 §9.9 paint-layer rank, keyed like `zmap`. Sorted
+        // between `z` and `tree_index`, it lifts a positioned `z:auto`/`0` box (and
+        // its inherited subtree) above non-positioned siblings within the same z
+        // bucket (catalog bug B2). Uniform (`NonPositioned`) when nothing is
+        // positioned, so the sort then reduces to the pre-fix `(z, tree_index)`.
+        let layermap = effective_paint_layer(tree, computed);
 
         // Pre-order walk (parent before children). Children are pushed reversed
         // so the leftmost child is popped first, preserving left-to-right paint
@@ -1135,8 +1141,10 @@ impl SceneCoordinator {
             let commands = node_paint.build().commands().to_vec();
             if !commands.is_empty() {
                 let z = zmap.get(&node).copied().unwrap_or(0);
+                let layer = layermap.get(&node).copied().unwrap_or(PaintLayer::NonPositioned);
                 units.push(PaintUnit {
                     z,
+                    layer,
                     tree_index,
                     order: PaintUnit::PAINT_ORDER,
                     commands,
@@ -1169,17 +1177,20 @@ impl SceneCoordinator {
             }
             for (node, clip) in clip_brackets {
                 let z = zmap.get(&node).copied().unwrap_or(0);
+                let layer = layermap.get(&node).copied().unwrap_or(PaintLayer::NonPositioned);
                 let enter = enter_index.get(&node).copied().unwrap_or(0);
                 let exit = exit_index.get(&node).copied().unwrap_or(enter);
                 let depth = depth_of.get(&node).copied().unwrap_or(0);
                 units.push(PaintUnit {
                     z,
+                    layer,
                     tree_index: enter,
                     order: PaintUnit::CLIP_PUSH_ORDER,
                     commands: vec![PaintCommand::PushClip(clip)],
                 });
                 units.push(PaintUnit {
                     z,
+                    layer,
                     tree_index: exit,
                     order: PaintUnit::clip_pop_order(depth),
                     commands: vec![PaintCommand::PopClip],
@@ -1196,11 +1207,13 @@ impl SceneCoordinator {
             // first (innermost), then the layer, then the transform (outermost).
             for (node, alpha) in opacity_brackets {
                 let z = zmap.get(&node).copied().unwrap_or(0);
+                let layer = layermap.get(&node).copied().unwrap_or(PaintLayer::NonPositioned);
                 let enter = enter_index.get(&node).copied().unwrap_or(0);
                 let exit = exit_index.get(&node).copied().unwrap_or(enter);
                 let depth = depth_of.get(&node).copied().unwrap_or(0);
                 units.push(PaintUnit {
                     z,
+                    layer,
                     tree_index: enter,
                     order: PaintUnit::LAYER_PUSH_ORDER,
                     commands: vec![PaintCommand::PushLayer(
@@ -1209,6 +1222,7 @@ impl SceneCoordinator {
                 });
                 units.push(PaintUnit {
                     z,
+                    layer,
                     tree_index: exit,
                     order: PaintUnit::layer_pop_order(depth),
                     commands: vec![PaintCommand::PopLayer],
@@ -1223,17 +1237,20 @@ impl SceneCoordinator {
             // outermost wrapper of the subtree.
             for (node, affine) in transform_brackets {
                 let z = zmap.get(&node).copied().unwrap_or(0);
+                let layer = layermap.get(&node).copied().unwrap_or(PaintLayer::NonPositioned);
                 let enter = enter_index.get(&node).copied().unwrap_or(0);
                 let exit = exit_index.get(&node).copied().unwrap_or(enter);
                 let depth = depth_of.get(&node).copied().unwrap_or(0);
                 units.push(PaintUnit {
                     z,
+                    layer,
                     tree_index: enter,
                     order: PaintUnit::TRANSFORM_PUSH_ORDER,
                     commands: vec![PaintCommand::PushTransform(affine)],
                 });
                 units.push(PaintUnit {
                     z,
+                    layer,
                     tree_index: exit,
                     order: PaintUnit::transform_pop_order(depth),
                     commands: vec![PaintCommand::PopTransform],
@@ -1247,6 +1264,7 @@ impl SceneCoordinator {
             // renderer's owned gaussian pass operates over.
             for (node, bounds, radius, color_matrix) in blur_brackets {
                 let z = zmap.get(&node).copied().unwrap_or(0);
+                let paint_layer = layermap.get(&node).copied().unwrap_or(PaintLayer::NonPositioned);
                 let enter = enter_index.get(&node).copied().unwrap_or(0);
                 let exit = exit_index.get(&node).copied().unwrap_or(enter);
                 let depth = depth_of.get(&node).copied().unwrap_or(0);
@@ -1262,12 +1280,14 @@ impl SceneCoordinator {
                 }
                 units.push(PaintUnit {
                     z,
+                    layer: paint_layer,
                     tree_index: enter,
                     order: PaintUnit::BLUR_PUSH_ORDER,
                     commands: vec![PaintCommand::PushLayer(layer)],
                 });
                 units.push(PaintUnit {
                     z,
+                    layer: paint_layer,
                     tree_index: exit,
                     order: PaintUnit::blur_pop_order(depth),
                     commands: vec![PaintCommand::PopLayer],
@@ -1281,10 +1301,12 @@ impl SceneCoordinator {
             // paints after the clip closes, unclipped).
             for (node, command) in outline_brackets {
                 let z = zmap.get(&node).copied().unwrap_or(0);
+                let layer = layermap.get(&node).copied().unwrap_or(PaintLayer::NonPositioned);
                 let enter = enter_index.get(&node).copied().unwrap_or(0);
                 let exit = exit_index.get(&node).copied().unwrap_or(enter);
                 units.push(PaintUnit {
                     z,
+                    layer,
                     tree_index: exit,
                     order: PaintUnit::OUTLINE_ORDER,
                     commands: vec![command],
@@ -1292,13 +1314,17 @@ impl SceneCoordinator {
             }
         }
 
-        // Stable sort by `(z ascending, tree_index ascending, order ascending)`:
-        // higher z paints last (on top); equal-z units keep pre-order (document)
-        // order; and `order` phases a subtree's `PushClip` before the node's paint
-        // and its `PopClip` after the whole subtree. With no radius every `order`
-        // is `PAINT_ORDER`, so the key reduces to `(z, tree_index)`, reproducing the
-        // pre-radius pre-order sequence byte-for-byte.
-        units.sort_by_key(|unit| (unit.z, unit.tree_index, unit.order));
+        // Stable sort by `(z, layer, tree_index, order)`, all ascending (CSS 2.1
+        // §9.9 / Appendix E painting order): higher z paints last (on top); within
+        // one z bucket the §9.9 `layer` rank lifts a positioned `z:auto`/`0` box
+        // (`PositionedZeroOrAuto`) above every non-positioned unit (`NonPositioned`)
+        // regardless of tree order — the fix for bug B2; equal-(z, layer) units keep
+        // pre-order (document) order; and `order` phases a subtree's `PushClip`
+        // before the node's paint and its `PopClip` after the whole subtree. When
+        // nothing is positioned every `layer` is `NonPositioned` and, with no radius,
+        // every `order` is `PAINT_ORDER`, so the key reduces to `(z, tree_index)`,
+        // reproducing the pre-fix pre-order sequence byte-for-byte.
+        units.sort_by_key(|unit| (unit.z, unit.layer, unit.tree_index, unit.order));
 
         let mut ordered: Vec<PaintCommand> = Vec::new();
         for unit in units {
