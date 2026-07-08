@@ -825,14 +825,20 @@ impl SceneCoordinator {
             //   radius paints as ONE even-odd rounded-rect RING: the border-box
             //   rounded rect with the padding-box rounded rect (radii reduced by the
             //   border width) punched out. This rounds the border's INNER corners as
-            //   well as its outer ones, matching CSS — the four-rect approximation
-            //   below leaves square inner joins. The ring is self-contained, so it
-            //   does not rely on the surrounding rounded `PushClip` for its shape.
+            //   well as its outer ones, matching CSS — the mitered-quad path below
+            //   keeps its corners square-cornered (but 45°-mitered). The ring is
+            //   self-contained, so it does not rely on the surrounding rounded
+            //   `PushClip` for its shape.
             // - Otherwise (no radius, or a non-uniform border) each visible side
-            //   paints one filled rectangle covering the border box's outer ring; a
-            //   rounded non-uniform border is clipped to the rounded border box (the
-            //   surrounding `PushClip`) and its inner corners stay approximate
-            //   (documented). An unauthored border emits nothing.
+            //   paints one **mitered trapezoid quad**: its outer edge spans the full
+            //   border-box side and its inner edge is inset by the two adjacent
+            //   border widths, so the corners split at 45° between their two sides
+            //   (the correct CSS border-corner model, and what makes the CSS
+            //   border-triangle trick render — a collapsed side becomes a triangle).
+            //   A rounded non-uniform border is clipped to the rounded border box
+            //   (the surrounding `PushClip`) and its inner corners stay approximate
+            //   (documented). A transparent or zero-width side, or an unauthored
+            //   border, emits nothing.
             if let Some(layout_box) = boxes.get(&node) {
                 if let Some((width, color)) =
                     uniform_border(computed, node).filter(|_| has_radius)
@@ -849,8 +855,8 @@ impl SceneCoordinator {
                         .with_dash(dashed_border_pattern(width), 0.0);
                     node_paint.stroke(path, stroke);
                 } else {
-                    for (rect, color) in border_fills(computed, node, layout_box.bounds) {
-                        node_paint.fill_rect(rect, Brush::solid(scene_color_from(color)));
+                    for (path, color) in border_fills(computed, node, layout_box.bounds) {
+                        node_paint.fill(path, Brush::solid(scene_color_from(color)));
                     }
                 }
             }
@@ -1976,21 +1982,31 @@ fn resolve_radius(size: RadialSize, cx: f32, cy: f32, bounds: Rect) -> f32 {
     }
 }
 
-/// Computes the filled rectangles painting a node's border, in top/right/bottom/
-/// left paint order, each paired with its side color (spec CSS Backgrounds and
-/// Borders §4).
+/// Computes the mitered trapezoid **quads** painting a node's border, in top/
+/// right/bottom/left paint order, each paired with its side color (spec CSS
+/// Backgrounds and Borders §4).
 ///
-/// A side contributes a rectangle only when its computed `border-*-style` is
-/// `solid` **and** its `border-*-width` is a positive pixel length; every other
-/// side (unauthored, `none`, or zero-width) paints nothing, so a node with no
-/// authored border yields an empty list (byte-identical to before borders were
-/// painted). The four rectangles tile the border box's outer ring: the top and
-/// bottom edges span the full width, and the left and right edges fill the
-/// remaining height between them, so per-side widths and colors compose without
-/// overlap (corner mitres are assigned to the top / bottom edges — a documented
-/// simplification). A side's color is its `border-*-color`, falling back to the
-/// node's computed `color` (CSS `currentColor`) when the color is unset.
-fn border_fills(computed: &ComputedStyles, node: NodeId, bounds: Rect) -> Vec<(Rect, StyleColor)> {
+/// A side contributes a quad only when its computed `border-*-style` is `solid`,
+/// its `border-*-width` is a positive pixel length, **and** its resolved color is
+/// not fully transparent; every other side (unauthored, `none`, zero-width, or a
+/// transparent color) paints nothing, so a node with no authored border yields an
+/// empty list (byte-identical to before borders were painted). Skipping
+/// transparent sides is what makes the classic CSS border-triangle trick work.
+///
+/// Each side's quad is a **mitered trapezoid**: its outer edge spans the full
+/// border-box side, and its inner edge is inset by the two adjacent border widths,
+/// so the diagonals from each outer corner to the matching inner corner are the
+/// 45°-ish miters that split every corner between its two sides. Adjacent sides
+/// therefore share a corner diagonal exactly (no overlap, no gap), which is the
+/// correct CSS border-corner model. When a box collapses (a `0×0` content box, so
+/// only the border widths remain) a side whose outer edge shrinks to a point
+/// degenerates into a **triangle** — e.g. a lone `border-bottom` yields an
+/// up-pointing triangle — exactly the arrow/marker glyph the border trick draws.
+/// For a normal, single-color uniform border the four trapezoids tile the same
+/// band the old four rects did (visually identical; corners now mitered rather
+/// than square-joined). A side's color is its `border-*-color`, falling back to
+/// the node's computed `color` (CSS `currentColor`) when the color is unset.
+fn border_fills(computed: &ComputedStyles, node: NodeId, bounds: Rect) -> Vec<(Path, StyleColor)> {
     let top = border_width_of(computed, node, PropertyId::BorderTopWidth);
     let right = border_width_of(computed, node, PropertyId::BorderRightWidth);
     let bottom = border_width_of(computed, node, PropertyId::BorderBottomWidth);
@@ -2004,35 +2020,62 @@ fn border_fills(computed: &ComputedStyles, node: NodeId, bounds: Rect) -> Vec<(R
     let y = bounds.origin.y;
     let w = bounds.size.width;
     let h = bounds.size.height;
-    // The height of the left / right edges: the border box height minus the top
-    // and bottom edges (clamped non-negative), so the four rects never overlap.
-    let mid_h = (h - top - bottom).max(0.0);
+    // Outer corners (the border box) and inner corners (each inset by its two
+    // adjacent border widths). A side's miter runs from an outer corner to the
+    // matching inner corner.
+    let outer_tl = Point::new(x, y);
+    let outer_tr = Point::new(x + w, y);
+    let outer_br = Point::new(x + w, y + h);
+    let outer_bl = Point::new(x, y + h);
+    let inner_tl = Point::new(x + left, y + top);
+    let inner_tr = Point::new(x + w - right, y + top);
+    let inner_br = Point::new(x + w - right, y + h - bottom);
+    let inner_bl = Point::new(x + left, y + h - bottom);
+    // A closed quad path from four corners, in order.
+    let quad = |a: Point, b: Point, c: Point, d: Point| -> Path {
+        let mut path = Path::new();
+        path.move_to(a).line_to(b).line_to(c).line_to(d).close();
+        path
+    };
     let mut out = Vec::new();
-    if top > 0.0 && border_is_solid(computed, node, PropertyId::BorderTopStyle) {
-        let color = border_color_of(computed, node, PropertyId::BorderTopColor, current);
-        out.push((Rect::new(Point::new(x, y), Size::new(w, top)), color));
-    }
-    if right > 0.0 && border_is_solid(computed, node, PropertyId::BorderRightStyle) {
-        let color = border_color_of(computed, node, PropertyId::BorderRightColor, current);
-        out.push((
-            Rect::new(Point::new(x + w - right, y + top), Size::new(right, mid_h)),
-            color,
-        ));
-    }
-    if bottom > 0.0 && border_is_solid(computed, node, PropertyId::BorderBottomStyle) {
-        let color = border_color_of(computed, node, PropertyId::BorderBottomColor, current);
-        out.push((
-            Rect::new(Point::new(x, y + h - bottom), Size::new(w, bottom)),
-            color,
-        ));
-    }
-    if left > 0.0 && border_is_solid(computed, node, PropertyId::BorderLeftStyle) {
-        let color = border_color_of(computed, node, PropertyId::BorderLeftColor, current);
-        out.push((
-            Rect::new(Point::new(x, y + top), Size::new(left, mid_h)),
-            color,
-        ));
-    }
+    // Each side: outer full edge, then the two inner corners (inset by adjacent
+    // widths). Emitted only when solid, positive-width, and non-transparent.
+    let mut push_side = |width: f32,
+                         style_id: PropertyId,
+                         color_id: PropertyId,
+                         corners: [Point; 4]| {
+        if width > 0.0 && border_is_solid(computed, node, style_id) {
+            let color = border_color_of(computed, node, color_id, current);
+            // A fully transparent side paints nothing (the border-triangle trick).
+            if color.a > 0.0 {
+                out.push((quad(corners[0], corners[1], corners[2], corners[3]), color));
+            }
+        }
+    };
+    push_side(
+        top,
+        PropertyId::BorderTopStyle,
+        PropertyId::BorderTopColor,
+        [outer_tl, outer_tr, inner_tr, inner_tl],
+    );
+    push_side(
+        right,
+        PropertyId::BorderRightStyle,
+        PropertyId::BorderRightColor,
+        [outer_tr, outer_br, inner_br, inner_tr],
+    );
+    push_side(
+        bottom,
+        PropertyId::BorderBottomStyle,
+        PropertyId::BorderBottomColor,
+        [outer_br, outer_bl, inner_bl, inner_br],
+    );
+    push_side(
+        left,
+        PropertyId::BorderLeftStyle,
+        PropertyId::BorderLeftColor,
+        [outer_bl, outer_tl, inner_tl, inner_bl],
+    );
     out
 }
 
@@ -4396,10 +4439,48 @@ mod tests {
             .collect()
     }
 
+    /// Collects the `DrawPath` fills of a display list as `(polygon vertices,
+    /// solid color)` pairs, in paint order. The vertices are the `MoveTo`/`LineTo`
+    /// anchor points of the path (a `Close` adds no point), so a mitered border
+    /// quad yields its four corners and a degenerate side yields the triangle's
+    /// four listed points (two of which coincide at the collapsed apex).
+    fn path_polygons(list: &DisplayList) -> Vec<(Vec<Point>, Color)> {
+        use obscur_scene::path::PathSegment;
+        list.commands()
+            .iter()
+            .filter_map(|c| match c {
+                PaintCommand::DrawPath { path, paint } => {
+                    let pts = path
+                        .segments()
+                        .iter()
+                        .filter_map(|s| match s {
+                            PathSegment::MoveTo(p) | PathSegment::LineTo(p) => Some(*p),
+                            _ => None,
+                        })
+                        .collect();
+                    Some((pts, paint.brush().as_solid()?.color()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The set of DISTINCT vertices of a polygon, sorted for stable comparison.
+    /// Collapsed corners (equal points) fold together, so a degenerate border
+    /// quad reduces to its three triangle vertices.
+    fn distinct_vertices(pts: &[Point]) -> Vec<(f32, f32)> {
+        let mut v: Vec<(f32, f32)> = pts.iter().map(|p| (p.x, p.y)).collect();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v.dedup();
+        v
+    }
+
     #[test]
-    fn border_paints_four_side_rects_covering_the_edges() {
-        // A 100×50 box at (10,20) with `border: 2px solid red` paints four edge
-        // rectangles in top/right/bottom/left order, each red, tiling the ring.
+    fn border_paints_four_mitered_side_quads_covering_the_edges() {
+        // A 100×50 box at (10,20) with `border: 2px solid red` paints four mitered
+        // trapezoid quads in top/right/bottom/left order, each red, tiling the ring
+        // with 45°-mitered corners (outer edge full, inner edge inset by 2px on
+        // each adjacent side).
         let mut tree = RetainedTree::new();
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
@@ -4412,18 +4493,162 @@ mod tests {
         boxes.insert(root, box_at(10.0, 20.0, 100.0, 50.0));
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
-        let fills = path_fills(&list);
-        assert_eq!(fills.len(), 4, "four side rects, no background");
+        let polys = path_polygons(&list);
+        assert_eq!(polys.len(), 4, "four side quads, no background");
         // Every side is red.
-        for (_, color) in &fills {
+        for (_, color) in &polys {
             assert_eq!(*color, Color::rgba(1.0, 0.0, 0.0, 1.0));
         }
-        // top, right, bottom, left — covering the 2px outer ring.
+        // Outer corners (10,20)-(110,70); inner corners inset by 2px: (12,22)-(108,68).
+        // top: outer TL,TR then inner TR,TL.
+        assert_eq!(
+            polys[0].0,
+            vec![p(10.0, 20.0), p(110.0, 20.0), p(108.0, 22.0), p(12.0, 22.0)],
+        );
+        // right: outer TR,BR then inner BR,TR.
+        assert_eq!(
+            polys[1].0,
+            vec![p(110.0, 20.0), p(110.0, 70.0), p(108.0, 68.0), p(108.0, 22.0)],
+        );
+        // bottom: outer BR,BL then inner BL,BR.
+        assert_eq!(
+            polys[2].0,
+            vec![p(110.0, 70.0), p(10.0, 70.0), p(12.0, 68.0), p(108.0, 68.0)],
+        );
+        // left: outer BL,TL then inner TL,BL.
+        assert_eq!(
+            polys[3].0,
+            vec![p(10.0, 70.0), p(10.0, 20.0), p(12.0, 22.0), p(12.0, 68.0)],
+        );
+        // The four quads cover the whole 2px border band: their bounding boxes
+        // union to the full outer ring (top/bottom span the full width, left/right
+        // the full height — corners now shared by the miters, not overlapped).
+        let fills = path_fills(&list);
         assert_eq!(fills[0].0, Rect::new(Point::new(10.0, 20.0), Size::new(100.0, 2.0)));
-        assert_eq!(fills[1].0, Rect::new(Point::new(108.0, 22.0), Size::new(2.0, 46.0)));
+        assert_eq!(fills[1].0, Rect::new(Point::new(108.0, 20.0), Size::new(2.0, 50.0)));
         assert_eq!(fills[2].0, Rect::new(Point::new(10.0, 68.0), Size::new(100.0, 2.0)));
-        assert_eq!(fills[3].0, Rect::new(Point::new(10.0, 22.0), Size::new(2.0, 46.0)));
+        assert_eq!(fills[3].0, Rect::new(Point::new(10.0, 20.0), Size::new(2.0, 50.0)));
         assert!(list.is_balanced());
+    }
+
+    /// Shorthand for a `Point` in the border-geometry tests.
+    fn p(x: f32, y: f32) -> Point {
+        Point::new(x, y)
+    }
+
+    /// Builds a `ComputedStyle` with per-side SOLID borders: `widths` and `colors`
+    /// are in top/right/bottom/left order. Every side is `solid`; a zero-width or
+    /// transparent side paints nothing regardless.
+    fn triangle_border(widths: [f32; 4], colors: [StyleColor; 4]) -> ComputedStyle {
+        let mut style = ComputedStyle::new();
+        let w_ids = [
+            PropertyId::BorderTopWidth,
+            PropertyId::BorderRightWidth,
+            PropertyId::BorderBottomWidth,
+            PropertyId::BorderLeftWidth,
+        ];
+        let s_ids = [
+            PropertyId::BorderTopStyle,
+            PropertyId::BorderRightStyle,
+            PropertyId::BorderBottomStyle,
+            PropertyId::BorderLeftStyle,
+        ];
+        let c_ids = [
+            PropertyId::BorderTopColor,
+            PropertyId::BorderRightColor,
+            PropertyId::BorderBottomColor,
+            PropertyId::BorderLeftColor,
+        ];
+        for (id, w) in w_ids.into_iter().zip(widths) {
+            style.set(id, ComputedValue::length(Length::px(w)));
+        }
+        for id in s_ids {
+            style.set(id, ComputedValue::keyword(layout_keyword::BORDER_STYLE_SOLID));
+        }
+        for (id, c) in c_ids.into_iter().zip(colors) {
+            style.set(id, ComputedValue::color(c));
+        }
+        style
+    }
+
+    #[test]
+    fn border_triangle_trick_renders_the_four_arrow_triangles() {
+        // The classic CSS border-triangle trick: a 0×0-content box whose border
+        // box is exactly its border widths, with three sides transparent and one
+        // side colored, collapses the colored side's trapezoid into a TRIANGLE —
+        // the arrow/marker glyph used for select ▼, disclosure ▸▾, steppers ▲▼.
+        // The border box is (left + right) × (top + bottom).
+        let colored = StyleColor::rgba(0.2, 0.2, 0.2, 1.0); // #333
+        let clear = StyleColor::rgba(0.0, 0.0, 0.0, 0.0); // transparent
+
+        // (widths [t,r,b,l], colored side index, box w, box h, expected 3 vertices).
+        let cases: [([f32; 4], usize, f32, f32, [(f32, f32); 3]); 4] = [
+            // ▽ down — border-top colored, box 10×6: base at top, apex at bottom.
+            ([6.0, 5.0, 0.0, 5.0], 0, 10.0, 6.0, [(0.0, 0.0), (10.0, 0.0), (5.0, 6.0)]),
+            // △ up — border-bottom colored, box 10×6: base at bottom, apex at top.
+            ([0.0, 5.0, 6.0, 5.0], 2, 10.0, 6.0, [(0.0, 6.0), (10.0, 6.0), (5.0, 0.0)]),
+            // ▷ right — border-left colored, box 6×10: base at left, apex at right.
+            ([5.0, 0.0, 5.0, 6.0], 3, 6.0, 10.0, [(0.0, 0.0), (0.0, 10.0), (6.0, 5.0)]),
+            // ◁ left — border-right colored, box 6×10: base at right, apex at left.
+            ([5.0, 6.0, 5.0, 0.0], 1, 6.0, 10.0, [(6.0, 0.0), (6.0, 10.0), (0.0, 5.0)]),
+        ];
+
+        for (widths, colored_side, bw, bh, expected) in cases {
+            let mut colors = [clear; 4];
+            colors[colored_side] = colored;
+
+            let mut tree = RetainedTree::new();
+            let root = tree.alloc(NodeKind::Root);
+            tree.set_root(root);
+            let mut computed = ComputedStyles::new();
+            computed.insert(root, triangle_border(widths, colors));
+            let mut boxes = LayoutBoxes::new();
+            boxes.insert(root, box_at(0.0, 0.0, bw, bh));
+
+            let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+            let polys = path_polygons(&list);
+            // Only the one colored side is emitted; the three transparent sides
+            // (and any zero-width side) paint nothing.
+            assert_eq!(polys.len(), 1, "one triangle for widths {widths:?}");
+            assert_eq!(polys[0].1, scene_color_from(colored), "the triangle is #333");
+            // Exactly three distinct vertices: the collapsed side's two outer (or
+            // two inner) corners coincide at the apex.
+            let mut want: Vec<(f32, f32)> = expected.to_vec();
+            want.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            assert_eq!(
+                distinct_vertices(&polys[0].0),
+                want,
+                "expected arrow triangle for widths {widths:?}"
+            );
+            assert!(list.is_balanced());
+        }
+    }
+
+    #[test]
+    fn transparent_border_side_is_not_emitted() {
+        // A per-side border where one side is a transparent color paints only the
+        // opaque sides — the transparent side emits no quad.
+        let opaque = StyleColor::rgba(0.0, 0.0, 1.0, 1.0);
+        let clear = StyleColor::rgba(0.0, 0.0, 0.0, 0.0);
+
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        // Top transparent; right/bottom/left opaque blue.
+        let mut computed = ComputedStyles::new();
+        computed.insert(
+            root,
+            triangle_border([2.0, 2.0, 2.0, 2.0], [clear, opaque, opaque, opaque]),
+        );
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 40.0, 30.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        let polys = path_polygons(&list);
+        assert_eq!(polys.len(), 3, "transparent top side skipped, three opaque sides");
+        for (_, color) in &polys {
+            assert_eq!(*color, scene_color_from(opaque));
+        }
     }
 
     /// Builds a `ComputedStyle` with a uniform DASHED border of `width` px and
@@ -4497,8 +4722,8 @@ mod tests {
 
     #[test]
     fn solid_border_still_emits_fill_rects_not_a_dashed_stroke() {
-        // Regression guard: a uniform SOLID border keeps the four fill-rects and
-        // emits no dashed stroke (byte-identical to before this feature).
+        // Regression guard: a uniform SOLID border keeps the four side fills (now
+        // mitered quads) and emits no dashed stroke.
         let mut tree = RetainedTree::new();
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);

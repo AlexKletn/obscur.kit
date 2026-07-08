@@ -80,7 +80,10 @@ fn rect_approx_eq(a: Rect, b: Rect) -> bool {
 }
 
 // A bordered element emits four red edge fills covering the 2px ring of its
-// border box, at the exact edges the layout phase arranged.
+// border box, at the exact edges the layout phase arranged. Each side is a
+// mitered trapezoid quad, so its outer edge spans the full side and the
+// left/right quads reach the full box height (their corners now shared with the
+// top/bottom quads at the 45° miters, not clipped short of them).
 #[test]
 fn authored_border_paints_four_red_edge_fills() {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
@@ -104,20 +107,23 @@ fn authored_border_paints_four_red_edge_fills() {
     let red = fills_colored(commands, Color::rgba(1.0, 0.0, 0.0, 1.0));
     assert_eq!(red.len(), 4, "one fill per border side");
 
-    // top, right, bottom, left — the 2px outer ring of the border box.
+    // top, right, bottom, left — the bounding box of each mitered quad. Top and
+    // bottom span the full width at the outer 2px band; the left and right quads
+    // span the full height (their bounding box reaches the corners the miters
+    // share with the top/bottom quads).
     let expected = [
         Rect::new(bounds.origin, Size::new(w, 2.0)),
         Rect::new(
-            obscur_kit::geometry::Point::new(x + w - 2.0, y + 2.0),
-            Size::new(2.0, h - 4.0),
+            obscur_kit::geometry::Point::new(x + w - 2.0, y),
+            Size::new(2.0, h),
         ),
         Rect::new(
             obscur_kit::geometry::Point::new(x, y + h - 2.0),
             Size::new(w, 2.0),
         ),
         Rect::new(
-            obscur_kit::geometry::Point::new(x, y + 2.0),
-            Size::new(2.0, h - 4.0),
+            obscur_kit::geometry::Point::new(x, y),
+            Size::new(2.0, h),
         ),
     ];
     for (got, want) in red.iter().zip(expected) {

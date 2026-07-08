@@ -155,6 +155,15 @@ required-features = ["render-vello"]
 name = "dashed_border_proof"
 required-features = ["render-cpu"]
 
+# Proof that the CSS border-triangle trick renders: four 0×0 boxes with three
+# transparent border sides and one inked side draw the four cardinal arrow
+# triangles (▽ ▲ ▷ ◁), plus a 4-colour mitered bordered box, rasterized headless
+# through the CPU renderer to `target/border_triangle_proof.png`. Verifies each
+# triangle is filled at its centroid yet empty at an outside corner. No window/GPU.
+[[example]]
+name = "border_triangle_proof"
+required-features = ["render-cpu"]
+
 # Proof that `outline` + `outline-offset` paints a focus ring OUTSIDE the border
 # box: three filled boxes (dashed-outline, solid-outline, rounded) each with a
 # `2px` outline offset `3px`, stroked as the coordinator emits and rasterized
