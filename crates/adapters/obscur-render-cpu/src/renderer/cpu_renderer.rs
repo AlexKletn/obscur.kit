@@ -464,14 +464,16 @@ impl Renderer for CpuRenderer {
     /// `"gradient"`, and `"clip"` report [`SupportLevel::Emulated`]. A
     /// `filter: drop-shadow(...)` renders through the same `DrawShadow` path as a
     /// `box-shadow` (a flat offset reduced-alpha rect), so `"drop-shadow"` is also
-    /// [`SupportLevel::Emulated`]. The general `filter` / `backdrop-filter`
-    /// (content blur, color-matrix) have no software approximation here and report
+    /// [`SupportLevel::Emulated`]. The general `filter` / `backdrop-filter` and the
+    /// `color-matrix` filter functions (content blur, grayscale/brightness/…) are
+    /// GPU-class effects per the effect-split policy: they have no software
+    /// approximation here (the element renders **unfiltered**) and report
     /// [`SupportLevel::Unavailable`]. Any other name defaults to
     /// [`SupportLevel::Emulated`]: a software renderer can approximate most 2D
     /// marks.
     fn supports_effect(&self, effect: &str) -> SupportLevel {
         match effect {
-            "filter" | "backdrop-filter" => SupportLevel::Unavailable,
+            "filter" | "backdrop-filter" | "color-matrix" => SupportLevel::Unavailable,
             // A `DrawImage` blits the real decoded pixels (a genuine sampled
             // bitmap via `draw_pixmap`), not an approximation, so images are
             // natively supported here.

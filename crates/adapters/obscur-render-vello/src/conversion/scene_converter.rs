@@ -340,24 +340,27 @@ impl SceneConverter {
         while index < commands.len() {
             let current = transforms.last().copied().unwrap_or(base);
             match &commands[index] {
-                // A blur layer (with a clip bounds) is extracted into its own
-                // sub-scene and omitted here, so it is not also drawn un-blurred.
+                // A filter layer (a blur and/or a color matrix, with a clip bounds)
+                // is extracted into its own sub-scene and omitted here, so it is not
+                // also drawn unfiltered.
                 PaintCommand::PushLayer(layer)
                     if extract.is_some()
-                        && layer_blur_radius(layer).is_some()
+                        && (layer_blur_radius(layer).is_some()
+                            || layer_color_matrix(layer).is_some())
                         && layer.clip().and_then(Clip::bounds).is_some() =>
                 {
                     let radius = layer_blur_radius(layer).unwrap_or(0.0);
-                    // Both are `Some` per the match guard.
+                    let color_matrix = layer_color_matrix(layer);
+                    // The bounds are `Some` per the match guard.
                     let bounds = layer.clip().and_then(Clip::bounds).unwrap_or_default();
                     let end = matching_layer_pop(commands, index);
                     let inner = &commands[index + 1..end];
                     // Build the bracketed subtree as its own scene. Sub-scenes never
-                    // extract nested blurs (drawn as ordinary layers — documented).
+                    // extract nested filters (drawn as ordinary layers — documented).
                     let mut sub = Scene::new();
                     self.emit(&mut sub, inner, current, None);
                     if let Some(blurs) = extract.as_deref_mut() {
-                        blurs.push(BlurLayer::new(sub, bounds, radius));
+                        blurs.push(BlurLayer::new(sub, bounds, radius, color_matrix));
                     }
                     // Skip past the matching PopLayer (both consumed, still balanced).
                     index = end + 1;
@@ -561,6 +564,15 @@ fn layer_blur_radius(layer: &SceneLayer) -> Option<f32> {
         LayerEffect::Blur { radius } => Some(*radius),
         _ => None,
     })
+}
+
+/// The first [`ColorMatrix`](LayerEffect::ColorMatrix) folded matrix on a layer, if
+/// any — the color-op `filter` chain the coordinator composed into one 4×5 matrix.
+fn layer_color_matrix(layer: &SceneLayer) -> Option<[f32; 20]> {
+    layer
+        .effects()
+        .iter()
+        .find_map(|effect| effect.as_color_matrix())
 }
 
 /// The index of the `PopLayer`/`PopClip` matching the `PushLayer` at `start`,
@@ -1248,6 +1260,39 @@ mod tests {
         // is non-empty and carries no separate blur layer.
         let inline = SceneConverter::new().convert(&list);
         assert!(!inline.encoding().is_empty());
+    }
+
+    #[test]
+    fn color_matrix_layer_is_extracted_with_its_matrix() {
+        use obscur_scene::layer::LayerEffect;
+
+        // A color-ONLY filter layer (a ColorMatrix effect, no blur) is peeled into a
+        // BlurLayer carrying `radius == 0` and the folded matrix — driving the
+        // renderer's owned color-matrix pass.
+        let bounds = Rect::new(Point::new(1.0, 1.0), Size::new(16.0, 8.0));
+        let mut matrix = [0.0_f32; 20];
+        matrix[0] = 0.5; // an arbitrary non-identity matrix
+        matrix[5] = 0.5;
+        matrix[10] = 0.5;
+        matrix[15] = 1.0;
+        let mut layer = SceneLayer::new().with_clip(Clip::rect(bounds));
+        layer.add_effect(LayerEffect::color_matrix(matrix));
+        let list = DisplayList::from_commands(vec![
+            PaintCommand::PushLayer(layer),
+            PaintCommand::DrawPath {
+                path: rect_path(),
+                paint: Paint::solid_fill(Color::rgba(1.0, 0.0, 0.0, 1.0)),
+            },
+            PaintCommand::PopLayer,
+        ]);
+
+        let (main, filters) = SceneConverter::new().convert_with_blurs(&list);
+        assert!(main.encoding().is_empty(), "filtered content omitted from main");
+        assert_eq!(filters.len(), 1);
+        assert_eq!(filters[0].bounds, bounds);
+        assert_eq!(filters[0].radius, 0.0, "color-only filter has no blur");
+        assert_eq!(filters[0].color_matrix, Some(matrix), "matrix carried through");
+        assert!(!filters[0].scene.encoding().is_empty(), "sub-scene has the content");
     }
 
     #[test]

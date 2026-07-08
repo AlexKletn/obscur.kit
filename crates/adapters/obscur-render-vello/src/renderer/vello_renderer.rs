@@ -12,7 +12,7 @@ use vello::peniko::{Blob, FontData};
 use vello::Scene;
 
 use crate::conversion::{BlurLayer, SceneConverter, SceneSegment};
-use crate::effects::GaussianBlur;
+use crate::effects::{ColorMatrix, GaussianBlur};
 use crate::error::VelloRenderError;
 use crate::renderer::{VelloDevice, VelloFrame, VelloSurface};
 
@@ -51,6 +51,11 @@ pub struct VelloRenderer {
     /// reused across frames; a scene with no blur layer never constructs it, so
     /// the non-blur path is byte-identical to before.
     blur: Option<GaussianBlur>,
+    /// Cached owned wgpu color-matrix pipeline for the CSS color-matrix `filter`
+    /// functions (grayscale/brightness/contrast/saturate/sepia/invert/hue-rotate/
+    /// opacity). Built lazily on the first color-filtered frame and reused; a scene
+    /// with no color-matrix layer never constructs it (byte-identical to before).
+    color_matrix: Option<ColorMatrix>,
 }
 
 impl VelloRenderer {
@@ -74,6 +79,7 @@ impl VelloRenderer {
             frames_rendered: 0,
             blitter: None,
             blur: None,
+            color_matrix: None,
         }
     }
 
@@ -239,28 +245,41 @@ impl VelloRenderer {
                 prepared.push((s_frame, origin, blur));
             }
 
-            // The `device` borrow ends here; build/reuse the owned blur pipelines and
-            // composite each blurred sub-scene onto the frame in one encoder. The
-            // Vello render-to-texture passes above already submitted, so this
-            // trailing submit runs after them on the same queue (correct ordering).
+            // The `device` borrow ends here; build/reuse the owned filter pipelines
+            // and post-process + composite each filter sub-scene onto the frame in
+            // one encoder. The Vello render-to-texture passes above already
+            // submitted, so this trailing submit runs after them on the same queue
+            // (correct ordering).
+            let needs_color = prepared.iter().any(|(_, _, b)| b.color_matrix.is_some());
             let gaussian = self
                 .blur
                 .get_or_insert_with(|| GaussianBlur::new(&gpu_device));
+            // Disjoint field borrow: the color-matrix pipeline is built only when a
+            // color op is present (byte-identical no-color path otherwise).
+            let color_matrix = needs_color
+                .then(|| self.color_matrix.get_or_insert_with(|| ColorMatrix::new(&gpu_device)));
             let mut encoder = gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("obscur-vello-blur"),
+                label: Some("obscur-vello-filter"),
             });
+            // Keep any color-matrix scratch textures alive until the encoder submits.
+            let mut scratch: Vec<wgpu::Texture> = Vec::new();
             for (s_frame, origin, blur) in &prepared {
-                gaussian.render(
+                if let Some(tex) = apply_filter_layer(
                     &gpu_device,
                     &mut encoder,
+                    gaussian,
+                    color_matrix.as_deref(),
                     s_frame,
                     *origin,
                     blur,
                     frame.view(),
                     (width, height),
-                );
+                ) {
+                    scratch.push(tex);
+                }
             }
             gpu_queue.submit(std::iter::once(encoder.finish()));
+            drop(scratch);
         }
 
         Ok(frame)
@@ -417,9 +436,17 @@ impl VelloRenderer {
                         prepared.push((s_frame, origin, blur));
                     }
 
-                    // Composite the segment (whole-frame) onto `T`, then its blur
+                    // Composite the segment (whole-frame) onto `T`, then its filter
                     // layers on top, in one encoder submitted after the Vello renders.
+                    let needs_color =
+                        prepared.iter().any(|(_, _, b)| b.color_matrix.is_some());
                     let gaussian = self.blur.as_ref().expect("blur pipelines built above");
+                    // Build/reuse the color-matrix pipeline only when a color op is
+                    // present (byte-identical no-color path otherwise).
+                    let color_matrix = needs_color.then(|| {
+                        self.color_matrix
+                            .get_or_insert_with(|| ColorMatrix::new(&gpu_device))
+                    });
                     let mut encoder =
                         gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                             label: Some("obscur-vello-segment-composite"),
@@ -430,18 +457,24 @@ impl VelloRenderer {
                         seg_frame.view(),
                         frame.view(),
                     );
+                    let mut scratch: Vec<wgpu::Texture> = Vec::new();
                     for (s_frame, origin, blur) in &prepared {
-                        gaussian.render(
+                        if let Some(tex) = apply_filter_layer(
                             &gpu_device,
                             &mut encoder,
+                            gaussian,
+                            color_matrix.as_deref(),
                             s_frame,
                             *origin,
                             blur,
                             frame.view(),
                             (width, height),
-                        );
+                        ) {
+                            scratch.push(tex);
+                        }
                     }
                     gpu_queue.submit(std::iter::once(encoder.finish()));
+                    drop(scratch);
                 }
                 SceneSegment::Backdrop {
                     bounds,
@@ -695,6 +728,87 @@ impl VelloRenderer {
     }
 }
 
+/// Post-processes and composites one prepared `filter` sub-scene onto the target
+/// frame: the owned color-matrix pass (if the layer carries one) then the gaussian
+/// blur (if `radius > 0`), sharing the offscreen/composite plumbing.
+///
+/// `s_frame` is the layer's subtree rendered into its margin-padded offscreen (in
+/// absolute coordinates offset so its top-left maps to `origin`). The order is:
+/// color-matrix (into a scratch texture) → blur → composite, matching a
+/// `filter: <color-op> blur()` chain (a color op applied before the spatial
+/// gaussian). A color-only layer (`radius == 0`) composites the color result
+/// directly; a blur-only layer (`color_matrix == None`) is byte-identical to the
+/// shipped blur path.
+///
+/// Returns the color-matrix scratch texture (when one was allocated) so the caller
+/// keeps it alive until the shared encoder is submitted.
+#[allow(clippy::too_many_arguments)]
+fn apply_filter_layer(
+    device: &wgpu::Device,
+    encoder: &mut wgpu::CommandEncoder,
+    gaussian: &GaussianBlur,
+    color_matrix: Option<&ColorMatrix>,
+    s_frame: &VelloFrame,
+    origin: (f32, f32),
+    layer: &BlurLayer,
+    target_view: &wgpu::TextureView,
+    target_size: (u32, u32),
+) -> Option<wgpu::Texture> {
+    let (sw, sh) = s_frame.size();
+
+    // Optional color-matrix pre-pass: transform the sub-scene into a scratch texture.
+    let scratch = layer.color_matrix.and_then(|matrix| {
+        let color_matrix = color_matrix?;
+        let scratch = color_matrix.scratch_texture(device, sw, sh);
+        let src_view = s_frame
+            .texture()
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let scratch_view = scratch.create_view(&wgpu::TextureViewDescriptor::default());
+        color_matrix.apply(device, encoder, &src_view, &scratch_view, &matrix);
+        Some(scratch)
+    });
+
+    // The source for the following blur/composite is the color-matrix scratch (if a
+    // matrix was applied) or the raw sub-scene frame otherwise. A color-transformed
+    // scratch may be translucent (e.g. `opacity()`), so it composites premultiplied;
+    // the raw blur path stays `false` (byte-identical to the shipped opaque path).
+    let (source_view, premultiply) = match &scratch {
+        Some(tex) => (tex.create_view(&wgpu::TextureViewDescriptor::default()), true),
+        None => (
+            s_frame
+                .texture()
+                .create_view(&wgpu::TextureViewDescriptor::default()),
+            false,
+        ),
+    };
+
+    if layer.radius > 0.0 {
+        gaussian.render_view(
+            device,
+            encoder,
+            &source_view,
+            (sw, sh),
+            origin,
+            layer.radius,
+            target_view,
+            target_size,
+        );
+    } else {
+        gaussian.composite_texture(
+            device,
+            encoder,
+            &source_view,
+            (sw, sh),
+            origin,
+            target_view,
+            target_size,
+            premultiply,
+        );
+    }
+
+    scratch
+}
+
 impl Default for VelloRenderer {
     fn default() -> Self {
         Self::new(RendererId::from_raw(0))
@@ -747,12 +861,15 @@ impl Renderer for VelloRenderer {
             // `Scene::draw_blurred_rounded_rect` — a real gaussian, but built from
             // Vello's primitives rather than a single native shadow op.
             // `backdrop-filter: blur()` frosts the backdrop via the owned segmented
-            // wgpu compositing path (real gaussian, not a native op).
-            "blur" | "shadow" | "drop-shadow" | "backdrop-filter" => SupportLevel::Emulated,
-            // The general `filter` (color-matrix, brightness, …) has no primitive on
-            // Vello 0.9 — only the `blur` / `drop-shadow` subsets are expressible —
-            // so it is honestly unavailable rather than a silent no-op (spec §5.2
-            // explicit diagnostics).
+            // wgpu compositing path (real gaussian, not a native op). The CSS
+            // color-matrix `filter` functions (grayscale/brightness/contrast/
+            // saturate/sepia/invert/hue-rotate/opacity) run through our owned wgpu
+            // color-matrix pass — a real per-pixel affine, emulated (Vello 0.9 has
+            // no native color filter).
+            "blur" | "shadow" | "drop-shadow" | "backdrop-filter" | "color-matrix"
+            | "filter" => SupportLevel::Emulated,
+            // Anything else has no primitive on Vello 0.9, so it is honestly
+            // unavailable rather than a silent no-op (spec §5.2 explicit diagnostics).
             _ => SupportLevel::Unavailable,
         }
     }
@@ -872,12 +989,13 @@ mod tests {
             renderer.supports_effect("backdrop-filter"),
             SupportLevel::Emulated
         );
-        // The general `filter` (color-matrix, brightness) has no Vello 0.9
-        // primitive — honestly unavailable, not a silent no-op.
+        // The CSS color-matrix `filter` functions run through the owned wgpu
+        // color-matrix pass — emulated (a real per-pixel affine), not unavailable.
         assert_eq!(
-            renderer.supports_effect("filter"),
-            SupportLevel::Unavailable
+            renderer.supports_effect("color-matrix"),
+            SupportLevel::Emulated
         );
+        assert_eq!(renderer.supports_effect("filter"), SupportLevel::Emulated);
         assert_eq!(
             renderer.supports_effect("time-travel"),
             SupportLevel::Unavailable

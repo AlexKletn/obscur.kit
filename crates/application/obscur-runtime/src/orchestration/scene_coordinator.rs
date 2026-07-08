@@ -594,14 +594,18 @@ impl SceneCoordinator {
         // A fully opaque (or absent) opacity records nothing — byte-for-byte
         // identical to before opacity layers existed.
         let mut opacity_brackets: Vec<(NodeId, f32)> = Vec::new();
-        // A CSS `filter: blur(r)` (r > 0) brackets a node's WHOLE composited subtree
-        // with a `PushLayer(SceneLayer::with_clip(border_box).add_effect(blur(r)))` …
-        // `PopLayer`. The clip carries the element's border box so the renderer knows
-        // the blur region. The blur layer is the OUTERMOST subtree wrapper (outside
-        // the transform / opacity / clip brackets), so the Vello renderer's owned
-        // gaussian pass blurs the fully-composited element. No blur records nothing —
+        // A CSS `filter` blurs and/or color-transforms a node's WHOLE composited
+        // subtree: it brackets the subtree with a
+        // `PushLayer(SceneLayer::with_clip(border_box).add_effect(...))` …
+        // `PopLayer` carrying a `blur(r)` effect (r > 0), a `ColorMatrix` effect
+        // (the folded color-op chain), or both. The clip carries the element's
+        // border box so the renderer knows the region. This filter layer is the
+        // OUTERMOST subtree wrapper (outside the transform / opacity / clip
+        // brackets), so the Vello renderer's owned wgpu passes operate on the
+        // fully-composited element. Each tuple is `(node, border_box, blur_radius
+        // (0 = none), color_matrix)`; no blur AND no color op records nothing —
         // byte-for-byte identical to before.
-        let mut blur_brackets: Vec<(NodeId, Rect, f32)> = Vec::new();
+        let mut blur_brackets: Vec<(NodeId, Rect, f32, Option<[f32; 20]>)> = Vec::new();
         // A CSS `outline` (a focus ring) paints as ONE stroked path OUTSIDE the
         // node's border box, offset by `outline-offset`. It reserves no layout
         // space and — unlike the background/border — must NOT be clipped by the
@@ -666,14 +670,23 @@ impl SceneCoordinator {
                 opacity_brackets.push((node, alpha));
             }
 
-            // A CSS `filter: blur(r)` brackets this node's subtree with a blur group
-            // layer clipped to its border box. It needs the arranged box (the blur
-            // region), so — unlike opacity — it is only recorded for a node with a
-            // box. No blur (or no box) records nothing (byte-for-byte identical).
-            if let Some(radius) = filter_blur_of(computed, node)
-                && let Some(layout_box) = boxes.get(&node)
-            {
-                blur_brackets.push((node, layout_box.bounds, radius));
+            // A CSS `filter` (blur and/or color ops) brackets this node's subtree
+            // with a filter group layer clipped to its border box. It needs the
+            // arranged box (the effect region), so — unlike opacity — it is only
+            // recorded for a node with a box. The color-op chain folds into one
+            // 4×5 matrix; blur keeps its radius. No blur AND no color op (or no
+            // box) records nothing (byte-for-byte identical).
+            if let Some(layout_box) = boxes.get(&node) {
+                let radius = filter_blur_of(computed, node);
+                let color_matrix = filter_color_matrix_of(computed, node);
+                if radius.is_some() || color_matrix.is_some() {
+                    blur_brackets.push((
+                        node,
+                        layout_box.bounds,
+                        radius.unwrap_or(0.0),
+                        color_matrix,
+                    ));
+                }
             }
 
             // A CSS `outline` (focus ring): when the node has a non-`none`
@@ -1222,13 +1235,21 @@ impl SceneCoordinator {
             // transform/opacity/clip pops, so the blur wraps the fully-composited
             // element. The clip is the node's border box, the blur region the
             // renderer's owned gaussian pass operates over.
-            for (node, bounds, radius) in blur_brackets {
+            for (node, bounds, radius, color_matrix) in blur_brackets {
                 let z = zmap.get(&node).copied().unwrap_or(0);
                 let enter = enter_index.get(&node).copied().unwrap_or(0);
                 let exit = exit_index.get(&node).copied().unwrap_or(enter);
                 let depth = depth_of.get(&node).copied().unwrap_or(0);
                 let mut layer = SceneLayer::new().with_clip(Clip::rect(bounds));
-                layer.add_effect(LayerEffect::blur(radius));
+                // Blur and color-matrix can coexist on ONE filter layer; a zero
+                // radius carries no blur effect (the color-only path). The renderer
+                // applies the color matrix, then the gaussian, then composites.
+                if radius > 0.0 {
+                    layer.add_effect(LayerEffect::blur(radius));
+                }
+                if let Some(matrix) = color_matrix {
+                    layer.add_effect(LayerEffect::color_matrix(matrix));
+                }
                 units.push(PaintUnit {
                     z,
                     tree_index: enter,
@@ -1707,6 +1728,180 @@ fn filter_blur_of(computed: &ComputedStyles, node: NodeId) -> Option<f32> {
         .filter_map(FilterOp::as_blur)
         .fold(0.0_f32, f32::max);
     (radius > 0.0).then_some(radius)
+}
+
+/// The node's `filter` color-op chain folded into ONE 4×5 affine color matrix, or
+/// [`None`] when it authors no color op (the byte-identical no-color path — no
+/// `ColorMatrix` effect is emitted).
+///
+/// See [`color_matrix_of_ops`] for the composition. `blur()` / `drop-shadow()` are
+/// spatial, not color, and are ignored here (they keep their own passes).
+fn filter_color_matrix_of(computed: &ComputedStyles, node: NodeId) -> Option<[f32; 20]> {
+    color_matrix_of_ops(filter_ops_of(computed, node)?)
+}
+
+/// Folds a `filter` op list's **color** ops (CSS Filter Effects §) into a single
+/// 4×5 affine color matrix, applied in author order, or [`None`] when the list has
+/// no color op (so the coordinator emits **no** `ColorMatrix` effect — byte
+/// identical to no filter).
+///
+/// Every color function is an affine transform `rgba' = M·rgba + bias`, so a chain
+/// composes by matrix multiply: applying `(Mₙ, bₙ)` after the running `(M, b)`
+/// gives `M' = Mₙ·M`, `b' = Mₙ·b + bₙ`. Starting from the identity and folding
+/// left-to-right yields one matrix equivalent to the whole chain. The result is
+/// flattened row-major: `arr[r*4+c]` is the 4×4 linear entry, `arr[16+r]` the bias.
+fn color_matrix_of_ops(ops: &[FilterOp]) -> Option<[f32; 20]> {
+    if !ops.iter().any(FilterOp::is_color_op) {
+        return None;
+    }
+    // Running affine (linear 4×4 `m`, bias `b`), identity to start.
+    let mut m: [[f32; 4]; 4] = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ];
+    let mut b: [f32; 4] = [0.0; 4];
+    for op in ops {
+        let Some((om, ob)) = color_op_matrix(op) else {
+            continue; // spatial op (blur / drop-shadow) — not a color transform
+        };
+        // Compose op AFTER the running affine: m ← om·m, b ← om·b + ob.
+        m = mat_mul(&om, &m);
+        b = add4(mat_vec(&om, b), ob);
+    }
+    let mut out = [0.0_f32; 20];
+    for (r, row) in m.iter().enumerate() {
+        out[r * 4..r * 4 + 4].copy_from_slice(row);
+    }
+    out[16..20].copy_from_slice(&b);
+    Some(out)
+}
+
+/// The 4×4 linear part + 4-entry bias of a single color-op [`FilterOp`], or
+/// [`None`] for a spatial op (`blur` / `drop-shadow`). Matrices are taken verbatim
+/// from CSS Filter Effects § (<https://drafts.fxtf.org/filter-effects/>).
+fn color_op_matrix(op: &FilterOp) -> Option<([[f32; 4]; 4], [f32; 4])> {
+    // A diagonal RGB scale (alpha untouched) with an RGB bias.
+    let rgb_diag = |k: f32, bias: f32| {
+        (
+            [
+                [k, 0.0, 0.0, 0.0],
+                [0.0, k, 0.0, 0.0],
+                [0.0, 0.0, k, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            [bias, bias, bias, 0.0],
+        )
+    };
+    // A 3×3 RGB matrix (alpha untouched, zero bias).
+    let rgb_3x3 = |r: [f32; 3], g: [f32; 3], b: [f32; 3]| {
+        (
+            [
+                [r[0], r[1], r[2], 0.0],
+                [g[0], g[1], g[2], 0.0],
+                [b[0], b[1], b[2], 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            [0.0; 4],
+        )
+    };
+    Some(match *op {
+        // RGB *= b.
+        FilterOp::Brightness(b) => rgb_diag(b, 0.0),
+        // RGB' = (RGB − 0.5)·c + 0.5  ⇒  diagonal c, bias 0.5·(1 − c).
+        FilterOp::Contrast(c) => rgb_diag(c, 0.5 * (1.0 - c)),
+        // A *= o (alpha-only diagonal).
+        FilterOp::Opacity(o) => (
+            [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, o],
+            ],
+            [0.0; 4],
+        ),
+        // channel' = (1 − 2i)·channel + i, per RGB.
+        FilterOp::Invert(i) => rgb_diag(1.0 - 2.0 * i, i),
+        // Saturate: the spec luminance saturation matrix (0.213/0.715/0.072).
+        FilterOp::Saturate(s) => rgb_3x3(
+            [0.213 + 0.787 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s],
+            [0.213 - 0.213 * s, 0.715 + 0.285 * s, 0.072 - 0.072 * s],
+            [0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s],
+        ),
+        // Grayscale: interpolate toward the luma matrix (0.2126/0.7152/0.0722)
+        // with t = 1 − amount; t == 0 (grayscale(1)) is the pure luma matrix.
+        FilterOp::Grayscale(a) => {
+            let t = 1.0 - a;
+            rgb_3x3(
+                [0.2126 + 0.7874 * t, 0.7152 - 0.7152 * t, 0.0722 - 0.0722 * t],
+                [0.2126 - 0.2126 * t, 0.7152 + 0.2848 * t, 0.0722 - 0.0722 * t],
+                [0.2126 - 0.2126 * t, 0.7152 - 0.7152 * t, 0.0722 + 0.9278 * t],
+            )
+        }
+        // Sepia: the spec sepia matrix interpolated with t = 1 − amount.
+        FilterOp::Sepia(a) => {
+            let t = 1.0 - a;
+            rgb_3x3(
+                [0.393 + 0.607 * t, 0.769 - 0.769 * t, 0.189 - 0.189 * t],
+                [0.349 - 0.349 * t, 0.686 + 0.314 * t, 0.168 - 0.168 * t],
+                [0.272 - 0.272 * t, 0.534 - 0.534 * t, 0.131 + 0.869 * t],
+            )
+        }
+        // Hue-rotate: the spec hue-rotation matrix built from cos θ / sin θ and the
+        // luminance constants (θ in radians).
+        FilterOp::HueRotate(theta) => {
+            let (s, c) = theta.sin_cos();
+            rgb_3x3(
+                [
+                    0.213 + c * 0.787 - s * 0.213,
+                    0.715 - c * 0.715 - s * 0.715,
+                    0.072 - c * 0.072 + s * 0.928,
+                ],
+                [
+                    0.213 - c * 0.213 + s * 0.143,
+                    0.715 + c * 0.285 + s * 0.140,
+                    0.072 - c * 0.072 - s * 0.283,
+                ],
+                [
+                    0.213 - c * 0.213 - s * 0.787,
+                    0.715 - c * 0.715 + s * 0.715,
+                    0.072 + c * 0.928 + s * 0.072,
+                ],
+            )
+        }
+        // Spatial ops are not color transforms.
+        FilterOp::Blur(_) | FilterOp::DropShadow(_) => return None,
+    })
+}
+
+/// Row-major 4×4 · 4×4 product (`a · b`).
+fn mat_mul(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
+    let mut out = [[0.0_f32; 4]; 4];
+    for i in 0..4 {
+        for j in 0..4 {
+            let mut sum = 0.0;
+            for k in 0..4 {
+                sum += a[i][k] * b[k][j];
+            }
+            out[i][j] = sum;
+        }
+    }
+    out
+}
+
+/// Row-major 4×4 · vec4 product (`m · v`).
+fn mat_vec(m: &[[f32; 4]; 4], v: [f32; 4]) -> [f32; 4] {
+    let mut out = [0.0_f32; 4];
+    for i in 0..4 {
+        out[i] = m[i][0] * v[0] + m[i][1] * v[1] + m[i][2] * v[2] + m[i][3] * v[3];
+    }
+    out
+}
+
+/// Component-wise vec4 sum.
+fn add4(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]]
 }
 
 /// Reads a node's computed `backdrop-filter` blur radius (logical px), or
@@ -3994,6 +4189,227 @@ mod tests {
                 .iter()
                 .any(|c| matches!(c, PaintCommand::PushLayer(l) if l.effects().iter().any(|e| e.is_blur()))),
             "a drop-shadow-only filter emits no blur layer"
+        );
+    }
+
+    #[test]
+    fn color_matrix_none_when_no_color_op() {
+        // No color op (empty, or blur / drop-shadow only) ⇒ no ColorMatrix (the
+        // byte-identical no-color path).
+        assert_eq!(color_matrix_of_ops(&[]), None);
+        assert_eq!(color_matrix_of_ops(&[FilterOp::Blur(4.0)]), None);
+        let shadow = BoxShadow::new(
+            Length::px(1.0),
+            Length::px(1.0),
+            Length::px(0.0),
+            Length::px(0.0),
+            None,
+            false,
+        );
+        assert_eq!(color_matrix_of_ops(&[FilterOp::DropShadow(shadow)]), None);
+    }
+
+    #[test]
+    fn color_matrix_brightness_is_a_diagonal() {
+        // brightness(2) ⇒ diagonal 2 on RGB, alpha 1, zero bias.
+        let m = color_matrix_of_ops(&[FilterOp::Brightness(2.0)]).expect("color op");
+        assert_eq!(m[0], 2.0); // r←r
+        assert_eq!(m[5], 2.0); // g←g
+        assert_eq!(m[10], 2.0); // b←b
+        assert_eq!(m[15], 1.0); // a←a
+        assert_eq!(&m[16..20], &[0.0, 0.0, 0.0, 0.0]); // no bias
+        // Off-diagonal RGB entries are zero.
+        assert_eq!(m[1], 0.0);
+        assert_eq!(m[4], 0.0);
+    }
+
+    #[test]
+    fn color_matrix_grayscale_one_is_the_luma_matrix() {
+        // grayscale(1) folds to the spec luma matrix: every RGB row is the same
+        // luminance triple (0.2126, 0.7152, 0.0722).
+        let m = color_matrix_of_ops(&[FilterOp::Grayscale(1.0)]).expect("color op");
+        for row in 0..3 {
+            assert!((m[row * 4] - 0.2126).abs() < 1e-6, "row {row} r coeff");
+            assert!((m[row * 4 + 1] - 0.7152).abs() < 1e-6, "row {row} g coeff");
+            assert!((m[row * 4 + 2] - 0.0722).abs() < 1e-6, "row {row} b coeff");
+        }
+        assert_eq!(m[15], 1.0);
+    }
+
+    #[test]
+    fn color_matrix_hue_rotate_90deg_builds_the_spec_matrix() {
+        // hue-rotate(90°): cos = 0, sin = 1 ⇒ row0 = (0, 0, 1) exactly (the spec
+        // constants collapse: 0.072 − 0 + 0.928 = 1).
+        let m = color_matrix_of_ops(&[FilterOp::HueRotate(core::f32::consts::FRAC_PI_2)])
+            .expect("color op");
+        assert!(m[0].abs() < 1e-6, "r0c0");
+        assert!(m[1].abs() < 1e-6, "r0c1");
+        assert!((m[2] - 1.0).abs() < 1e-6, "r0c2 == 1");
+    }
+
+    #[test]
+    fn color_matrix_chain_composes_in_author_order() {
+        // grayscale(1) THEN brightness(2): grayscale collapses to luma, brightness
+        // scales the result ×2, so row0 r-coeff = 2 × 0.2126 = 0.4252.
+        let m = color_matrix_of_ops(&[FilterOp::Grayscale(1.0), FilterOp::Brightness(2.0)])
+            .expect("color op");
+        assert!((m[0] - 0.4252).abs() < 1e-5, "composed r0c0");
+        assert!((m[1] - 1.4304).abs() < 1e-5, "composed r0c1 = 2×0.7152");
+        // Swapping the order changes the result (brightness first, then luma): the
+        // luma row absorbs the ×2 into its own weights, so r0c0 = 0.2126 (not 0.4252).
+        let swapped = color_matrix_of_ops(&[FilterOp::Brightness(2.0), FilterOp::Grayscale(1.0)])
+            .expect("color op");
+        assert!((swapped[0] - 0.4252).abs() < 1e-5, "brightness∘luma still ×2 in r0c0");
+        // The two orders differ overall (bias / alpha aside, the linear parts diverge
+        // once a biased op like contrast is involved) — assert order matters via a
+        // contrast+brightness pair.
+        let a = color_matrix_of_ops(&[FilterOp::Contrast(2.0), FilterOp::Brightness(0.5)])
+            .expect("color op");
+        let b = color_matrix_of_ops(&[FilterOp::Brightness(0.5), FilterOp::Contrast(2.0)])
+            .expect("color op");
+        assert_ne!(a[16], b[16], "order changes the folded bias");
+    }
+
+    /// A `ComputedStyle` carrying a `background-color` and a `filter` op list.
+    fn with_background_and_filter_ops(bg: StyleColor, ops: Vec<FilterOp>) -> ComputedStyle {
+        let mut style = ComputedStyle::new();
+        style.set(PropertyId::BackgroundColor, ComputedValue::color(bg));
+        style.set(
+            PropertyId::Filter,
+            ComputedValue::from_concrete(PropertyValue::Filter(ops.into_boxed_slice()))
+                .expect("a filter op list is a concrete computed value"),
+        );
+        style
+    }
+
+    #[test]
+    fn filter_color_op_brackets_subtree_with_a_color_matrix_layer() {
+        // A node with `filter: grayscale(1)` (a color op, no blur) brackets its
+        // subtree with a PushLayer carrying a ColorMatrix effect and NO blur.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(
+            a,
+            with_background_and_filter_ops(
+                StyleColor::rgba(0.0, 1.0, 0.0, 1.0),
+                vec![FilterOp::Grayscale(1.0)],
+            ),
+        );
+
+        let mut boxes = LayoutBoxes::new();
+        let bounds = box_at(0.0, 0.0, 20.0, 10.0);
+        boxes.insert(a, bounds);
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        assert!(list.is_balanced());
+
+        let filter_layers: Vec<&SceneLayer> = list
+            .commands()
+            .iter()
+            .filter_map(|c| match c {
+                PaintCommand::PushLayer(layer)
+                    if layer.effects().iter().any(|e| e.is_color_matrix()) =>
+                {
+                    Some(layer)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(filter_layers.len(), 1, "one color-matrix group layer");
+        let layer = filter_layers[0];
+        assert!(
+            !layer.effects().iter().any(|e| e.is_blur()),
+            "a color-only filter carries no blur effect"
+        );
+        let matrix = layer
+            .effects()
+            .iter()
+            .find_map(|e| e.as_color_matrix())
+            .expect("a color matrix effect");
+        // grayscale(1) is the luma matrix.
+        assert!((matrix[0] - 0.2126).abs() < 1e-6);
+        assert_eq!(
+            layer.clip().and_then(Clip::bounds),
+            Some(bounds.bounds),
+            "the filter layer is clipped to the element's border box"
+        );
+    }
+
+    #[test]
+    fn filter_blur_and_color_op_coexist_on_one_layer() {
+        // `filter: grayscale(1) blur(4px)` puts BOTH a blur and a ColorMatrix effect
+        // on the single filter layer.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(
+            a,
+            with_background_and_filter_ops(
+                StyleColor::rgba(0.0, 1.0, 0.0, 1.0),
+                vec![FilterOp::Grayscale(1.0), FilterOp::Blur(4.0)],
+            ),
+        );
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 20.0, 10.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        let layer = list
+            .commands()
+            .iter()
+            .find_map(|c| match c {
+                PaintCommand::PushLayer(layer)
+                    if layer.effects().iter().any(|e| e.is_color_matrix()) =>
+                {
+                    Some(layer)
+                }
+                _ => None,
+            })
+            .expect("one filter layer");
+        assert!(layer.effects().iter().any(|e| e.is_blur()), "blur present");
+        assert!(
+            layer.effects().iter().any(|e| e.is_color_matrix()),
+            "color matrix present"
+        );
+    }
+
+    #[test]
+    fn no_color_op_emits_no_color_matrix_layer() {
+        // Regression: a plain background (no filter) emits no ColorMatrix effect —
+        // byte-identical to before color filters existed.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        let mut style = ComputedStyle::new();
+        style.set(
+            PropertyId::BackgroundColor,
+            ComputedValue::color(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)),
+        );
+        computed.insert(a, style);
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 20.0, 10.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        assert!(
+            !list
+                .commands()
+                .iter()
+                .any(|c| matches!(c, PaintCommand::PushLayer(l) if l.effects().iter().any(|e| e.is_color_matrix()))),
+            "no filter emits no color-matrix layer"
         );
     }
 

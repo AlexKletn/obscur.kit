@@ -173,6 +173,42 @@ impl GaussianBlur {
         target_size: (u32, u32),
     ) {
         let (sw, sh) = source.size();
+        let src_view = source
+            .texture()
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        self.render_view(
+            device,
+            encoder,
+            &src_view,
+            (sw, sh),
+            source_origin,
+            layer.radius,
+            target_view,
+            target_size,
+        );
+    }
+
+    /// Blurs an already-rendered source **texture view** (rather than a
+    /// [`VelloFrame`]) and composites it onto `target` — the shared core of
+    /// [`Self::render`], reused when a color-matrix pass has already written the
+    /// source into a scratch texture (a `filter` that mixes a color op and a blur).
+    ///
+    /// `source_size` is the source's `(width, height)` in pixels; the rest matches
+    /// [`Self::render`]. With no color pre-pass this is byte-identical to the shipped
+    /// blur (same ping-pong passes, same composite).
+    #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
+    pub fn render_view(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &wgpu::TextureView,
+        source_size: (u32, u32),
+        source_origin: (f32, f32),
+        radius: f32,
+        target_view: &wgpu::TextureView,
+        target_size: (u32, u32),
+    ) {
+        let (sw, sh) = source_size;
         let (tw, th) = target_size;
         if sw == 0 || sh == 0 || tw == 0 || th == 0 {
             return;
@@ -188,12 +224,10 @@ impl GaussianBlur {
         self.blur_pass(
             device,
             encoder,
-            &source
-                .texture()
-                .create_view(&wgpu::TextureViewDescriptor::default()),
+            source,
             &temp_a_view,
             [1.0 / sw as f32, 0.0],
-            layer.radius,
+            radius,
         );
         // Vertical pass: sample `temp_a`, write `temp_b`.
         self.blur_pass(
@@ -202,26 +236,65 @@ impl GaussianBlur {
             &temp_a_view,
             &temp_b_view,
             [0.0, 1.0 / sh as f32],
-            layer.radius,
+            radius,
         );
 
         // Composite `temp_b` back onto the target at its absolute pixel rect.
+        // `filter: blur` composites the whole blurred quad, no rounded mask. The
+        // source is a blurred Vello sub-scene (straight alpha); premultiplied `false`
+        // keeps the shipped opaque path byte-identical.
+        self.composite_texture(
+            device,
+            encoder,
+            &temp_b_view,
+            (sw, sh),
+            source_origin,
+            target_view,
+            target_size,
+            false,
+        );
+    }
+
+    /// Composites an already-post-processed source **texture** onto `target` at its
+    /// absolute pixel rect (top-left `source_origin`, extent `source_size`), with no
+    /// rounded mask — the composite step shared by the blur path and the color-only
+    /// `filter` path (a color matrix with no blur).
+    ///
+    /// `premultiply` selects whether the (straight-alpha Vello) source is
+    /// premultiplied before the premultiplied-over blend: the blur path passes
+    /// `false` (byte-identical to the shipped opaque composite), the color-only path
+    /// passes `true` so a translucent color result (e.g. `opacity()`) composites
+    /// correctly.
+    #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
+    pub fn composite_texture(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &wgpu::TextureView,
+        source_size: (u32, u32),
+        source_origin: (f32, f32),
+        target_view: &wgpu::TextureView,
+        target_size: (u32, u32),
+        premultiply: bool,
+    ) {
+        let (sw, sh) = source_size;
+        let (tw, th) = target_size;
+        if sw == 0 || sh == 0 || tw == 0 || th == 0 {
+            return;
+        }
         let (ox, oy) = source_origin;
         let x0 = ox / tw as f32 * 2.0 - 1.0;
         let x1 = (ox + sw as f32) / tw as f32 * 2.0 - 1.0;
         let y_top = 1.0 - oy / th as f32 * 2.0;
         let y_bottom = 1.0 - (oy + sh as f32) / th as f32 * 2.0;
-        // `filter: blur` composites the whole blurred quad, no rounded mask. The
-        // source is a blurred Vello sub-scene (straight alpha); premultiplied `false`
-        // keeps the shipped opaque path byte-identical.
         self.composite_pass(
             device,
             encoder,
-            &temp_b_view,
+            source,
             target_view,
             [x0, y_top, x1, y_bottom],
             None,
-            false,
+            premultiply,
         );
     }
 

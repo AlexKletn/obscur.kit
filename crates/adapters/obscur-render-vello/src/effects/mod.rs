@@ -8,5 +8,10 @@
 //!
 //! - [`GaussianBlur`] — a separable gaussian blur + premultiplied composite,
 //!   implementing CSS `filter: blur()`.
+//! - [`ColorMatrix`] — a folded 4×5 affine color-matrix pass, implementing the CSS
+//!   color-matrix `filter` functions (grayscale/brightness/contrast/saturate/
+//!   sepia/invert/hue-rotate/opacity).
+mod color_matrix;
 mod gaussian_blur;
+pub use color_matrix::ColorMatrix;
 pub use gaussian_blur::GaussianBlur;

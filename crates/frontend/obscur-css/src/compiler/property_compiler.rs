@@ -2181,13 +2181,17 @@ fn shadow_length(value: &ParsedValue) -> Option<Length> {
 /// - `blur(<length>)` → a [`FilterOp::Blur`] (via [`lower_one_blur`]), the radius
 ///   resolved to logical pixels. A zero radius (`blur(0)`, `blur()`) yields **no**
 ///   op, so it round-trips to the byte-identical no-blur path.
+/// - the color-matrix functions (`brightness`, `contrast`, `saturate`,
+///   `grayscale`, `sepia`, `invert`, `hue-rotate`, `opacity`) → the matching
+///   [`FilterOp`] color variant (via [`lower_one_color_filter`]), each an affine
+///   color transform the coordinator folds into one 4×5 matrix.
 ///
-/// Any other function (`brightness()`, `contrast()`, `grayscale()`, …) is
-/// **silently dropped** — it has no GPU-expressible path here, so faking it would
-/// be dishonest (documented). `filter: none` and an empty value both lower to an
-/// **empty** list (painting nothing). Returns [`None`] (degrading to an
-/// unsupported-feature diagnostic) when a `drop-shadow(…)` or `blur(…)` is present
-/// but malformed, so the author sees the mistake rather than a silent no-op.
+/// Any other (unrecognised) function is **silently dropped** — it has no
+/// GPU-expressible path here, so faking it would be dishonest (documented).
+/// `filter: none` and an empty value both lower to an **empty** list (painting
+/// nothing). Returns [`None`] (degrading to an unsupported-feature diagnostic)
+/// when a recognised function is present but malformed, so the author sees the
+/// mistake rather than a silent no-op.
 fn lower_filter(values: &[ParsedValue]) -> Option<PropertyValue> {
     // `none` → an empty op list.
     if let [ParsedValue::Keyword(keyword)] = values
@@ -2211,11 +2215,125 @@ fn lower_filter(values: &[ParsedValue]) -> Option<PropertyValue> {
             if radius > 0.0 {
                 ops.push(FilterOp::Blur(radius));
             }
+        } else if is_color_filter_name(name) {
+            // A color-matrix function (`brightness`/`contrast`/`saturate`/
+            // `grayscale`/`sepia`/`invert`/`hue-rotate`/`opacity`): each is an
+            // affine color transform the coordinator folds into ONE 4×5 matrix.
+            ops.push(lower_one_color_filter(name, args)?);
         }
-        // Every other filter function (`brightness()`, `contrast()`, …) is out of
-        // scope and silently dropped — not faked.
+        // Every other (unrecognised) filter function is out of scope and silently
+        // dropped — not faked.
     }
     Some(PropertyValue::Filter(ops.into_boxed_slice()))
+}
+
+/// Whether `name` is one of the CSS color-matrix `filter` functions this compiler
+/// lowers (`brightness`, `contrast`, `saturate`, `grayscale`, `sepia`, `invert`,
+/// `hue-rotate`, `opacity`).
+fn is_color_filter_name(name: &str) -> bool {
+    [
+        "brightness",
+        "contrast",
+        "saturate",
+        "grayscale",
+        "sepia",
+        "invert",
+        "opacity",
+        "hue-rotate",
+    ]
+    .iter()
+    .any(|known| name.eq_ignore_ascii_case(known))
+}
+
+/// Lowers one CSS color-matrix `filter` function (`brightness`, `contrast`,
+/// `saturate`, `grayscale`, `sepia`, `invert`, `hue-rotate`, `opacity`) into its
+/// [`FilterOp`], preserving order (CSS Filter Effects §).
+///
+/// The caller has already checked (via [`is_color_filter_name`]) that `name` is a
+/// color function. Every amount accepts a `<number>` or a `<percentage>`
+/// (`100% == 1`); a missing argument defaults to `1` for these functions (and
+/// `0deg` for `hue-rotate`), per spec. `hue-rotate` takes an `<angle>`
+/// (`deg`/`grad`/`rad`/`turn`, or a bare `0`) and is stored in **radians**. Returns
+/// [`None`] (propagated by `?`) when the argument list is malformed, so the author
+/// sees the mistake rather than a silent no-op.
+fn lower_one_color_filter(name: &str, args: &[ParsedValue]) -> Option<FilterOp> {
+    // Clamp helper for the `0..1` amount functions (grayscale/sepia/invert/opacity).
+    let unit = |amount: f32| amount.clamp(0.0, 1.0);
+    // Clamp helper for the unbounded-above, `>= 0` functions
+    // (brightness/contrast/saturate): negatives are clamped to `0`.
+    let non_negative = |amount: f32| amount.max(0.0);
+
+    Some(if name.eq_ignore_ascii_case("brightness") {
+        FilterOp::Brightness(non_negative(filter_amount(args, 1.0)?))
+    } else if name.eq_ignore_ascii_case("contrast") {
+        FilterOp::Contrast(non_negative(filter_amount(args, 1.0)?))
+    } else if name.eq_ignore_ascii_case("saturate") {
+        FilterOp::Saturate(non_negative(filter_amount(args, 1.0)?))
+    } else if name.eq_ignore_ascii_case("grayscale") {
+        FilterOp::Grayscale(unit(filter_amount(args, 1.0)?))
+    } else if name.eq_ignore_ascii_case("sepia") {
+        FilterOp::Sepia(unit(filter_amount(args, 1.0)?))
+    } else if name.eq_ignore_ascii_case("invert") {
+        FilterOp::Invert(unit(filter_amount(args, 1.0)?))
+    } else if name.eq_ignore_ascii_case("hue-rotate") {
+        FilterOp::HueRotate(filter_angle_radians(args)?)
+    } else {
+        // `opacity` (the remaining color function per `is_color_filter_name`).
+        FilterOp::Opacity(unit(filter_amount(args, 1.0)?))
+    })
+}
+
+/// Parses one color-filter amount argument (`<number>` or `<percentage>`), where
+/// `100%` is `1.0` and an empty argument list is the function's `default`.
+///
+/// Returns [`None`] (propagated as a malformed value) for more than one argument
+/// or a non-number/percentage token.
+fn filter_amount(args: &[ParsedValue], default: f32) -> Option<f32> {
+    if args.is_empty() {
+        return Some(default);
+    }
+    let [value] = args else {
+        return None;
+    };
+    match value {
+        ParsedValue::Number(number) => Some(narrow_f32(*number)),
+        ParsedValue::Percentage(percentage) => Some(narrow_f32(*percentage / 100.0)),
+        _ => None,
+    }
+}
+
+/// Parses one `hue-rotate` `<angle>` argument into **radians**.
+///
+/// Accepts `deg`, `grad`, `rad`, and `turn` dimensions, a bare `0` (`Number(0)`),
+/// or an empty argument list (the CSS initial `0deg`). Returns [`None`] for more
+/// than one argument, a non-zero bare number, a percentage, or an unknown unit.
+fn filter_angle_radians(args: &[ParsedValue]) -> Option<f32> {
+    use core::f32::consts::PI;
+    if args.is_empty() {
+        return Some(0.0);
+    }
+    let [value] = args else {
+        return None;
+    };
+    match value {
+        // A bare unitless angle is only valid as `0`.
+        ParsedValue::Number(number) if *number == 0.0 => Some(0.0),
+        ParsedValue::Dimension { value, unit } => {
+            let degrees = narrow_f32(*value);
+            if unit.eq_ignore_ascii_case("deg") {
+                Some(degrees.to_radians())
+            } else if unit.eq_ignore_ascii_case("rad") {
+                Some(degrees)
+            } else if unit.eq_ignore_ascii_case("grad") {
+                Some(degrees * PI / 200.0)
+            } else if unit.eq_ignore_ascii_case("turn") {
+                Some(degrees * 2.0 * PI)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Lowers a `backdrop-filter` value into a [`PropertyValue::Filter`] op list
@@ -3721,10 +3839,52 @@ mod tests {
     }
 
     #[test]
-    fn filter_other_function_is_dropped() {
-        // A still-unsupported function (`brightness()`) is silently dropped: it has
-        // no GPU-expressible path, so the lowered op list is empty (not an error).
-        assert!(filter_ops_of("filter: brightness(0.5)").is_empty());
+    fn filter_unknown_function_is_dropped() {
+        // A genuinely unrecognised function is silently dropped: it has no
+        // GPU-expressible path, so the lowered op list is empty (not an error).
+        assert!(filter_ops_of("filter: contrastxyz(0.5)").is_empty());
+    }
+
+    #[test]
+    fn filter_color_functions_lower_to_color_ops() {
+        // Numbers and percentages both parse (100% == 1); a missing amount is the
+        // per-function default (1 for these, 0deg for hue-rotate).
+        assert_eq!(filter_ops_of("filter: brightness(1.5)")[0], FilterOp::Brightness(1.5));
+        assert_eq!(filter_ops_of("filter: brightness(150%)")[0], FilterOp::Brightness(1.5));
+        assert_eq!(filter_ops_of("filter: brightness()")[0], FilterOp::Brightness(1.0));
+        assert_eq!(filter_ops_of("filter: contrast(0.5)")[0], FilterOp::Contrast(0.5));
+        assert_eq!(filter_ops_of("filter: saturate(2)")[0], FilterOp::Saturate(2.0));
+        assert_eq!(filter_ops_of("filter: grayscale(50%)")[0], FilterOp::Grayscale(0.5));
+        assert_eq!(filter_ops_of("filter: grayscale()")[0], FilterOp::Grayscale(1.0));
+        assert_eq!(filter_ops_of("filter: sepia(1)")[0], FilterOp::Sepia(1.0));
+        assert_eq!(filter_ops_of("filter: invert(100%)")[0], FilterOp::Invert(1.0));
+        assert_eq!(filter_ops_of("filter: opacity(0.25)")[0], FilterOp::Opacity(0.25));
+        // Amounts clamp to their spec ranges.
+        assert_eq!(filter_ops_of("filter: grayscale(200%)")[0], FilterOp::Grayscale(1.0));
+        assert_eq!(filter_ops_of("filter: brightness(-1)")[0], FilterOp::Brightness(0.0));
+    }
+
+    #[test]
+    fn filter_hue_rotate_lowers_to_radians() {
+        // `hue-rotate` stores radians; deg/grad/rad/turn and a bare 0 all parse.
+        let deg = filter_ops_of("filter: hue-rotate(90deg)");
+        let FilterOp::HueRotate(r) = deg[0] else { panic!("hue-rotate") };
+        assert!((r - core::f32::consts::FRAC_PI_2).abs() < 1e-5);
+        let turn = filter_ops_of("filter: hue-rotate(0.5turn)");
+        let FilterOp::HueRotate(r) = turn[0] else { panic!("hue-rotate") };
+        assert!((r - core::f32::consts::PI).abs() < 1e-5);
+        assert_eq!(filter_ops_of("filter: hue-rotate()")[0], FilterOp::HueRotate(0.0));
+        assert_eq!(filter_ops_of("filter: hue-rotate(0)")[0], FilterOp::HueRotate(0.0));
+    }
+
+    #[test]
+    fn filter_color_op_chain_preserves_order() {
+        // A mixed chain keeps every op in author order (spatial + color coexist).
+        let ops = filter_ops_of("filter: grayscale(1) brightness(1.2) blur(3px)");
+        assert_eq!(ops.len(), 3);
+        assert_eq!(ops[0], FilterOp::Grayscale(1.0));
+        assert_eq!(ops[1], FilterOp::Brightness(1.2));
+        assert_eq!(ops[2], FilterOp::Blur(3.0));
     }
 
     #[test]
