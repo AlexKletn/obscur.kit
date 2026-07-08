@@ -332,6 +332,16 @@ pub enum PropertyId {
     /// shaping (CSS Text 3 §2.1). See the reserved `TEXT_TRANSFORM_*` handles in
     /// [`crate::property::layout_keyword`].
     TextTransform,
+    /// The `white-space` property (Keyword-valued: `normal` / `nowrap` / `pre` /
+    /// `pre-wrap` / `pre-line`; inherited). Selects whitespace collapsing (applied
+    /// before shaping) and the segment-break / soft-wrap behaviour of the line
+    /// breaker (CSS Text 3 §3, §4.1.1). See the reserved `WHITE_SPACE_*` handles in
+    /// [`crate::property::layout_keyword`].
+    WhiteSpace,
+    /// The `tab-size` property (a unitless [`PropertyValue::Number`] multiple of a
+    /// space advance, or a `<length>`; inherited; initial `8`). Sets the width of a
+    /// preserved tab stop (CSS Text 3 §4.3).
+    TabSize,
 
     // ---- Overflow (Keyword-valued; NOT inherited; pure paint/clip) ----
     /// The `overflow` property (Keyword-valued: `visible` (initial) / `hidden` /
@@ -441,6 +451,8 @@ impl PropertyId {
             Self::LetterSpacing => "letter-spacing",
             Self::WordSpacing => "word-spacing",
             Self::TextTransform => "text-transform",
+            Self::WhiteSpace => "white-space",
+            Self::TabSize => "tab-size",
             Self::Overflow => "overflow",
         }
     }
@@ -466,7 +478,10 @@ impl PropertyId {
             // (CSS Text 3 §8.1 / §8.2 / §2.1).
             | Self::LetterSpacing
             | Self::WordSpacing
-            | Self::TextTransform => Inheritance::Inherited,
+            | Self::TextTransform
+            // `white-space` and `tab-size` inherit (CSS Text 3 §3 / §4.3).
+            | Self::WhiteSpace
+            | Self::TabSize => Inheritance::Inherited,
             // Box / paint / layout properties reset on each element.
             Self::BackgroundColor
             | Self::BackgroundImage

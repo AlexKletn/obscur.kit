@@ -19,6 +19,8 @@ mod shaping_request;
 pub use shaping_request::ShapingRequest;
 mod spacing;
 pub use spacing::apply_spacing;
+mod tab_stops;
+pub use tab_stops::apply_tab_stops;
 mod text_direction;
 pub use text_direction::TextDirection;
 mod text_item;

@@ -1063,7 +1063,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 90] = [
+    const ALL: [PropertyId; 92] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::BackgroundImage,
@@ -1153,6 +1153,8 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::LetterSpacing,
         PropertyId::WordSpacing,
         PropertyId::TextTransform,
+        PropertyId::WhiteSpace,
+        PropertyId::TabSize,
         PropertyId::Overflow,
     ];
     ALL.into_iter()
@@ -1482,6 +1484,7 @@ fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<Inte
         PropertyId::TextAlign => Some(layout_keyword::text_align_from_name),
         PropertyId::TextOverflow => Some(layout_keyword::text_overflow_from_name),
         PropertyId::TextTransform => Some(layout_keyword::text_transform_from_name),
+        PropertyId::WhiteSpace => Some(layout_keyword::white_space_from_name),
         PropertyId::Overflow => Some(layout_keyword::overflow_from_name),
         _ => None,
     }

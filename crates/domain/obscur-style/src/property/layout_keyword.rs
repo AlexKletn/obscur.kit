@@ -139,6 +139,21 @@ pub const TEXT_TRANSFORM_LOWERCASE: InternedSymbol = InternedSymbol::from_raw(0x
 /// The `text-transform: capitalize` keyword.
 pub const TEXT_TRANSFORM_CAPITALIZE: InternedSymbol = InternedSymbol::from_raw(0x0000_2004);
 
+// ---- `white-space` keyword values (CSS Text 3 §3) ----
+
+/// The `white-space: normal` keyword (the initial): collapse whitespace, collapse
+/// segment breaks to a space, soft-wrap.
+pub const WHITE_SPACE_NORMAL: InternedSymbol = InternedSymbol::from_raw(0x0000_2101);
+/// The `white-space: nowrap` keyword: collapse like `normal` but never soft-wrap.
+pub const WHITE_SPACE_NOWRAP: InternedSymbol = InternedSymbol::from_raw(0x0000_2102);
+/// The `white-space: pre` keyword: preserve spaces/tabs/segment breaks, no wrap.
+pub const WHITE_SPACE_PRE: InternedSymbol = InternedSymbol::from_raw(0x0000_2103);
+/// The `white-space: pre-wrap` keyword: preserve whitespace, and soft-wrap.
+pub const WHITE_SPACE_PRE_WRAP: InternedSymbol = InternedSymbol::from_raw(0x0000_2104);
+/// The `white-space: pre-line` keyword: collapse spaces but preserve segment
+/// breaks, and soft-wrap.
+pub const WHITE_SPACE_PRE_LINE: InternedSymbol = InternedSymbol::from_raw(0x0000_2105);
+
 // ---- relative `font-weight` keyword values ----
 
 /// The `font-weight: bolder` keyword. Unlike the absolute weights (which lower
@@ -479,6 +494,24 @@ pub fn text_transform_from_name(name: &str) -> Option<InternedSymbol> {
         "uppercase" => Some(TEXT_TRANSFORM_UPPERCASE),
         "lowercase" => Some(TEXT_TRANSFORM_LOWERCASE),
         "capitalize" => Some(TEXT_TRANSFORM_CAPITALIZE),
+        _ => None,
+    }
+}
+
+/// Maps a `white-space` keyword string to its reserved [`InternedSymbol`]
+/// (CSS Text 3 §3).
+///
+/// The input is ASCII-lowercased before matching. Returns [`None`] for any
+/// keyword outside the closed `normal` / `nowrap` / `pre` / `pre-wrap` /
+/// `pre-line` set (`break-spaces` is not modelled).
+#[must_use]
+pub fn white_space_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "normal" => Some(WHITE_SPACE_NORMAL),
+        "nowrap" => Some(WHITE_SPACE_NOWRAP),
+        "pre" => Some(WHITE_SPACE_PRE),
+        "pre-wrap" => Some(WHITE_SPACE_PRE_WRAP),
+        "pre-line" => Some(WHITE_SPACE_PRE_LINE),
         _ => None,
     }
 }

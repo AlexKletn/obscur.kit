@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use obscur_style::computed::ComputedStyle;
 use obscur_style::property::{layout_keyword, PropertyId, PropertyValue};
 use obscur_text::font::FontAttributes;
-use obscur_text::layout::{TextAlignment, TextOverflow};
+use obscur_text::layout::{TextAlignment, TextOverflow, WhiteSpace};
 use obscur_text::shaping::TextDirection;
 use obscur_text::span::{FontSlant, FontWeight};
 
@@ -305,6 +305,188 @@ fn capitalize(content: &str) -> String {
     out
 }
 
+/// Resolves a text node's [`WhiteSpace`] mode from its computed `white-space`
+/// (CSS Text 3 §3).
+///
+/// Reads [`PropertyId::WhiteSpace`] — a [`PropertyValue::Keyword`] backed by one
+/// of the reserved [`layout_keyword`] handles — mapping each `WHITE_SPACE_*`
+/// handle to its variant. An absent property (or any unrecognised keyword)
+/// resolves to [`WhiteSpace::Normal`], the CSS initial, so an unauthored text
+/// node collapses whitespace and soft-wraps.
+#[must_use]
+pub(crate) fn white_space_for(computed: Option<&ComputedStyle>) -> WhiteSpace {
+    let symbol = computed
+        .and_then(|style| style.get(PropertyId::WhiteSpace))
+        .and_then(|value| match value.value() {
+            PropertyValue::Keyword(symbol) => Some(*symbol),
+            _ => None,
+        });
+    match symbol {
+        Some(s) if s == layout_keyword::WHITE_SPACE_NOWRAP => WhiteSpace::Nowrap,
+        Some(s) if s == layout_keyword::WHITE_SPACE_PRE => WhiteSpace::Pre,
+        Some(s) if s == layout_keyword::WHITE_SPACE_PRE_WRAP => WhiteSpace::PreWrap,
+        Some(s) if s == layout_keyword::WHITE_SPACE_PRE_LINE => WhiteSpace::PreLine,
+        // `normal` and everything else (including an absent property) → Normal.
+        _ => WhiteSpace::Normal,
+    }
+}
+
+/// Applies the CSS Text 3 white-space processing rules (§4.1.1) to `content`
+/// **before** shaping, returning the processed string.
+///
+/// This is the pre-shape collapsing seam (the string-extraction point). Under a
+/// collapsing mode ([`WhiteSpace::collapses_spaces`]): each run of collapsible
+/// spaces/tabs (U+0020, U+0009) collapses to a single U+0020; a segment break
+/// (`\n`, with `\r\n` / `\r` first normalised to one `\n`) is either preserved as
+/// a forced break (when [`WhiteSpace::preserves_segment_breaks`], i.e. `pre-line`)
+/// or removed and treated as a collapsible space (`normal` / `nowrap`); and
+/// leading/trailing collapsible whitespace of the block — plus the collapsible
+/// whitespace immediately around each preserved forced break — is trimmed. Under
+/// a preserving mode (`pre` / `pre-wrap`) spaces, tabs, and segment breaks are
+/// kept verbatim (only `\r` is normalised).
+///
+/// Full per-line hanging-whitespace trimming after wrap is a documented
+/// refinement; this does the block-level and around-forced-break trim. The
+/// processed string flows through itemization, shaping, and the paragraph cache
+/// key, so a collapsed node is a distinct cache entry and the measure/compose
+/// passes — which both run `content` through this same function — shape identical
+/// text. A [`Cow::Borrowed`] is returned whenever the rules leave `content`
+/// byte-for-byte unchanged (the common single-line, single-spaced case).
+#[must_use]
+pub(crate) fn collapse_white_space(content: &str, white_space: WhiteSpace) -> Cow<'_, str> {
+    if !white_space.collapses_spaces() {
+        // `pre` / `pre-wrap`: preserve spaces, tabs, and segment breaks. Only the
+        // CR-normalisation of segment breaks applies (§4.1.1 step 1).
+        if content.contains('\r') {
+            return Cow::Owned(content.replace("\r\n", "\n").replace('\r', "\n"));
+        }
+        return Cow::Borrowed(content);
+    }
+    // Collapsing modes (`normal` / `nowrap` / `pre-line`). Fast path: nothing to
+    // change (no segment break, no tab, and no collapsible space run or edge).
+    if !content.contains('\r')
+        && !content.contains('\n')
+        && !content.contains('\t')
+        && !content.starts_with(' ')
+        && !content.ends_with(' ')
+        && !content.contains("  ")
+    {
+        return Cow::Borrowed(content);
+    }
+    let preserve_breaks = white_space.preserves_segment_breaks();
+    let mut out = String::with_capacity(content.len());
+    // `pending_space` marks a collapsible space that will be emitted before the
+    // next non-space; `at_line_start` suppresses leading collapsible whitespace at
+    // the block start and after each preserved forced break (edge trimming).
+    let mut pending_space = false;
+    let mut at_line_start = true;
+    let mut chars = content.chars().peekable();
+    while let Some(ch) = chars.next() {
+        // Normalise a CRLF / CR segment break to a single `\n`.
+        let ch = if ch == '\r' {
+            if chars.peek() == Some(&'\n') {
+                chars.next();
+            }
+            '\n'
+        } else {
+            ch
+        };
+        if ch == '\n' {
+            if preserve_breaks {
+                // A preserved forced break: trim the collapsible whitespace around
+                // it (drop the pending space) and start a fresh line.
+                pending_space = false;
+                out.push('\n');
+                at_line_start = true;
+            } else if !at_line_start {
+                // `normal` / `nowrap`: the segment break collapses to a space.
+                pending_space = true;
+            }
+        } else if ch == ' ' || ch == '\t' {
+            if !at_line_start {
+                pending_space = true;
+            }
+        } else {
+            if pending_space {
+                out.push(' ');
+                pending_space = false;
+            }
+            out.push(ch);
+            at_line_start = false;
+        }
+    }
+    // A trailing pending space is the block's trailing whitespace: trimmed (never
+    // emitted).
+    Cow::Owned(out)
+}
+
+/// Runs `content` through `text-transform` (§2.1) and then `white-space`
+/// collapsing (§4.1.1), returning the fully processed pre-shape string.
+///
+/// The two pre-shape rewrites compose in spec order: casing first (producing the
+/// *transformed text*), then whitespace processing. When both are no-ops the
+/// original `content` is returned borrowed (zero-copy, byte-for-byte identical).
+#[must_use]
+pub(crate) fn process_text(
+    content: &str,
+    transform: TextTransform,
+    white_space: WhiteSpace,
+) -> Cow<'_, str> {
+    let transformed = transform_text(content, transform);
+    // Collapse over the transformed text. If collapsing changes nothing, keep the
+    // (possibly borrowed) transformed Cow so a pure-transform node stays zero-copy.
+    match collapse_white_space(&transformed, white_space) {
+        Cow::Borrowed(_) => transformed,
+        Cow::Owned(collapsed) => Cow::Owned(collapsed),
+    }
+}
+
+/// The resolved `tab-size` value (CSS Text 3 §4.3): a `<number>` multiple of the
+/// space advance, or a fixed `<length>` tab-stop width in logical pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum TabSize {
+    /// `tab-size: <number>` — the tab stop is `factor` × the advance of a space.
+    Factor(f32),
+    /// `tab-size: <length>` — the tab stop is this fixed pixel width.
+    Length(f32),
+}
+
+impl TabSize {
+    /// Resolves the tab-stop width in logical pixels given the `space_advance` of
+    /// the node's primary font.
+    #[must_use]
+    pub(crate) fn resolve(self, space_advance: f32) -> f32 {
+        match self {
+            Self::Factor(factor) => factor * space_advance,
+            Self::Length(px) => px,
+        }
+    }
+}
+
+/// Resolves a text node's [`TabSize`] from its computed `tab-size` (CSS Text 3
+/// §4.3).
+///
+/// Reads [`PropertyId::TabSize`]: a unitless [`PropertyValue::Number`] resolves to
+/// [`TabSize::Factor`] (a multiple of the space advance), an absolute pixel
+/// [`PropertyValue::Length`] to [`TabSize::Length`]. An absent property, the
+/// initial, or a non-pixel length resolves to the initial `8` spaces
+/// ([`TabSize::Factor(8.0)`](TabSize::Factor)). Tabs only take effect under a
+/// preserving `white-space` mode (`pre` / `pre-wrap`); under a collapsing mode a
+/// tab has already become a space, so this value is unused.
+#[must_use]
+pub(crate) fn tab_size_for(computed: Option<&ComputedStyle>) -> TabSize {
+    let Some(value) = computed.and_then(|style| style.get(PropertyId::TabSize)) else {
+        return TabSize::Factor(8.0);
+    };
+    match value.value() {
+        PropertyValue::Number(factor) => TabSize::Factor(factor.max(0.0)),
+        PropertyValue::Length(length) => length
+            .as_px()
+            .map_or(TabSize::Factor(8.0), |px| TabSize::Length(px.0.max(0.0))),
+        _ => TabSize::Factor(8.0),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -479,6 +661,89 @@ mod tests {
     fn transform_text_none_is_zero_copy_identity() {
         let out = transform_text("Hello World", TextTransform::None);
         assert!(matches!(out, Cow::Borrowed("Hello World")));
+    }
+
+    #[test]
+    fn white_space_defaults_normal_and_maps_keywords() {
+        assert_eq!(white_space_for(None), WhiteSpace::Normal);
+        assert_eq!(white_space_for(Some(&ComputedStyle::new())), WhiteSpace::Normal);
+        let cases = [
+            (layout_keyword::WHITE_SPACE_NORMAL, WhiteSpace::Normal),
+            (layout_keyword::WHITE_SPACE_NOWRAP, WhiteSpace::Nowrap),
+            (layout_keyword::WHITE_SPACE_PRE, WhiteSpace::Pre),
+            (layout_keyword::WHITE_SPACE_PRE_WRAP, WhiteSpace::PreWrap),
+            (layout_keyword::WHITE_SPACE_PRE_LINE, WhiteSpace::PreLine),
+        ];
+        for (symbol, expected) in cases {
+            let style = styled(PropertyId::WhiteSpace, PropertyValue::Keyword(symbol));
+            assert_eq!(white_space_for(Some(&style)), expected);
+        }
+    }
+
+    #[test]
+    fn collapse_single_line_no_run_is_zero_copy_identity() {
+        // The byte-identical guard: single-spaced text with no `\n`/`\t` and no
+        // leading/trailing space collapses to itself, zero-copy.
+        let out = collapse_white_space("a b c", WhiteSpace::Normal);
+        assert!(matches!(out, Cow::Borrowed("a b c")));
+    }
+
+    #[test]
+    fn collapse_normal_folds_runs_and_newlines_to_single_space() {
+        // "a    b" (4 spaces) → "a b"; a `\n` collapses to a space (§4.1.1).
+        assert_eq!(collapse_white_space("a    b", WhiteSpace::Normal), "a b");
+        assert_eq!(collapse_white_space("a\nb", WhiteSpace::Normal), "a b");
+        // Leading/trailing whitespace of the block is trimmed.
+        assert_eq!(collapse_white_space("  a  b  ", WhiteSpace::Normal), "a b");
+        // A tab is collapsible in `normal` and folds into the space run.
+        assert_eq!(collapse_white_space("a\t\tb", WhiteSpace::Normal), "a b");
+    }
+
+    #[test]
+    fn collapse_pre_preserves_spaces_and_newlines() {
+        // `pre` preserves runs of spaces, tabs, and segment breaks verbatim.
+        let out = collapse_white_space("a    b\n\tc", WhiteSpace::Pre);
+        assert_eq!(out, "a    b\n\tc");
+        assert!(matches!(out, Cow::Borrowed(_)), "pre with no CR is zero-copy");
+        // `\r\n` / `\r` normalise to a single `\n` even under a preserving mode.
+        assert_eq!(collapse_white_space("a\r\nb\rc", WhiteSpace::Pre), "a\nb\nc");
+    }
+
+    #[test]
+    fn collapse_pre_line_collapses_spaces_but_preserves_breaks() {
+        // `pre-line`: runs of spaces collapse to one, but `\n` is preserved, and
+        // whitespace around the forced break is trimmed.
+        assert_eq!(
+            collapse_white_space("a    b \n  c", WhiteSpace::PreLine),
+            "a b\nc"
+        );
+    }
+
+    #[test]
+    fn tab_size_defaults_eight_and_reads_number_and_length() {
+        // Absent property / empty style → the initial `8` spaces.
+        assert_eq!(tab_size_for(None), TabSize::Factor(8.0));
+        assert_eq!(tab_size_for(Some(&ComputedStyle::new())), TabSize::Factor(8.0));
+        // A unitless number is a multiple of the space advance.
+        let number = styled(PropertyId::TabSize, PropertyValue::Number(4.0));
+        assert_eq!(tab_size_for(Some(&number)), TabSize::Factor(4.0));
+        assert_eq!(TabSize::Factor(4.0).resolve(10.0), 40.0);
+        // An absolute length is a fixed tab-stop width.
+        let length = styled(PropertyId::TabSize, PropertyValue::Length(Length::px(24.0)));
+        assert_eq!(tab_size_for(Some(&length)), TabSize::Length(24.0));
+        assert_eq!(TabSize::Length(24.0).resolve(10.0), 24.0);
+    }
+
+    #[test]
+    fn process_text_composes_transform_then_collapse() {
+        // uppercase then collapse the doubled spaces (spec order: cases first).
+        assert_eq!(
+            process_text("a    b", TextTransform::Uppercase, WhiteSpace::Normal),
+            "A B"
+        );
+        // A pure no-op stays borrowed (byte-identical).
+        let out = process_text("a b", TextTransform::None, WhiteSpace::Normal);
+        assert!(matches!(out, Cow::Borrowed("a b")));
     }
 
     #[test]

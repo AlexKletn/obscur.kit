@@ -67,9 +67,12 @@ fn main() {
         &format!("{base}\n.block {{ width: 200px; padding: 6px; background: #eef2ff; color: #12203f; font-size: {FONT_SIZE}px; }}"),
         PARAGRAPH,
     );
-    // Block B: a wide box; the `\n` forces two lines with no wrapping.
+    // Block B: a wide box; the `\n` forces two lines with no wrapping. Under the
+    // initial `white-space: normal` a segment break collapses to a space (CSS Text
+    // 3 §4.1.1), so this fixture opts into `pre-line` to PRESERVE the newline as a
+    // forced break — the behaviour this block proves.
     let (b_px, b_ys) = render_block(
-        &format!("{base}\n.block {{ width: 300px; padding: 6px; background: #fff3e6; color: #3f2410; font-size: {FONT_SIZE}px; }}"),
+        &format!("{base}\n.block {{ width: 300px; padding: 6px; background: #fff3e6; color: #3f2410; font-size: {FONT_SIZE}px; white-space: pre-line; }}"),
         "First line before the newline\nSecond line after the newline",
     );
     // Block C: the same ~200px box, but `line-height: 2` (inherited to the text)

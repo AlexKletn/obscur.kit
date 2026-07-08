@@ -161,6 +161,9 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::LetterSpacing,
     PropertyId::WordSpacing,
     PropertyId::TextTransform,
+    // Inherited white-space processing + tab-size (CSS Text 3 §3 / §4.3).
+    PropertyId::WhiteSpace,
+    PropertyId::TabSize,
     // Overflow (pure paint/clip; no layout effect).
     PropertyId::Overflow,
 ];
@@ -433,6 +436,13 @@ impl StyleResolver {
             // (`TextTransform::None`, the string shaped unchanged) — byte-for-byte
             // identical to before it existed (CSS Text 3 §2.1).
             | PropertyId::TextTransform
+            // `white-space` initial is `normal`; its keyword initial needs the
+            // interner, so an absent value falls back to the runtime's default
+            // (`WhiteSpace::Normal`) — byte-for-byte identical to before it existed
+            // (CSS Text 3 §3). `tab-size` initial is `8`, left unresolved so an
+            // absent value falls back to the runtime's default tab stop (§4.3).
+            | PropertyId::WhiteSpace
+            | PropertyId::TabSize
             // `overflow` initial is `visible` (no clip); its keyword initial
             // likewise needs the interner, so an absent value falls back to the
             // coordinator's default (no added clip) — byte-for-byte identical.
@@ -1158,6 +1168,8 @@ mod tests {
                 | PropertyId::LetterSpacing
                 | PropertyId::WordSpacing
                 | PropertyId::TextTransform
+                | PropertyId::WhiteSpace
+                | PropertyId::TabSize
                 | PropertyId::Overflow => {}
             }
         }
@@ -1252,6 +1264,8 @@ mod tests {
             PropertyId::LetterSpacing,
             PropertyId::WordSpacing,
             PropertyId::TextTransform,
+            PropertyId::WhiteSpace,
+            PropertyId::TabSize,
             PropertyId::Overflow,
         ];
         for id in all {

@@ -29,21 +29,20 @@ use obscur_text::font::{
     GenericFamily, MockFontResolver,
 };
 use obscur_text::layout::{
-    Hyphenator, NullHyphenator, ParagraphLayout, TextAlignment, TextOverflow,
+    Hyphenator, NullHyphenator, ParagraphLayout, TextAlignment, TextOverflow, WhiteSpace,
 };
 use obscur_text::selection::TextSelection;
 use obscur_text::shaping::{
-    apply_spacing, CachingShaper, MockTextShaper, ParagraphShaper, ShapedGlyph, ShapedRun,
-    SingleRunItemizer, TextDirection, TextItemizer, TextShaper,
+    apply_spacing, apply_tab_stops, CachingShaper, MockTextShaper, ParagraphShaper, ShapedGlyph,
+    ShapedRun, SingleRunItemizer, TextDirection, TextItemizer, TextShaper,
 };
 use obscur_tree::tree::RetainedTree;
 
 use super::stacking::{effective_paint_layer, effective_stacking_z, PaintLayer, PaintUnit};
 use super::{
     alignment_for, attributes_for, direction_for, families_for, letter_spacing_for,
-    line_height_for, overflow_for, text_transform_for, transform_text, word_spacing_for,
-    ComputedStyles,
-    EditingView, LayoutBoxes,
+    line_height_for, overflow_for, process_text, tab_size_for, text_transform_for, white_space_for,
+    word_spacing_for, ComputedStyles, EditingView, LayoutBoxes, TabSize,
 };
 
 /// The width, in logical pixels, of the caret rectangle painted at the collapsed
@@ -278,16 +277,19 @@ impl SceneCoordinator {
         direction: TextDirection,
         alignment: TextAlignment,
         overflow: TextOverflow,
+        white_space: WhiteSpace,
         font_size: f32,
         max_width: f32,
         line_height_override: Option<f32>,
         letter_spacing: f32,
         word_spacing: f32,
+        tab_size: TabSize,
     ) -> ParagraphLayout {
         // Shape once (cache-shared with the measure pass), then fold CSS Text 3
         // letter-/word-spacing into the advances through the SAME `apply_spacing`
         // seam the measure pass uses, so the painted advances match the measured
-        // box (§8.1 / §8.2). `content` is already `text-transform`ed by the caller.
+        // box (§8.1 / §8.2). `content` is already `text-transform`ed + white-space
+        // collapsed by the caller.
         let runs = apply_spacing(
             self.paragraph.shape_paragraph(
                 content,
@@ -300,6 +302,13 @@ impl SceneCoordinator {
             content,
             letter_spacing,
             word_spacing,
+        );
+        // Preserved tabs advance to the next `tab-size` stop (§4.3); a no-op unless
+        // `content` still holds a `\t` (only `pre` / `pre-wrap` keep tabs).
+        let runs = apply_tab_stops(
+            runs,
+            content,
+            self.tab_stop_width(tab_size, fallback, attributes, direction, font_size, content),
         );
         let metrics = self.paragraph.line_metrics(font_size);
         // The line box height: the authored `line-height` when present, else the
@@ -331,6 +340,7 @@ impl SceneCoordinator {
                 baseline,
                 alignment,
                 overflow,
+                white_space,
             ),
             // Ellipsis without a hyphenator: wrap through the no-op hyphenator so
             // the shaped ellipsis glyph can be threaded into truncation.
@@ -342,6 +352,7 @@ impl SceneCoordinator {
                 baseline,
                 alignment,
                 overflow,
+                white_space,
                 &NullHyphenator,
                 None,
                 ellipsis,
@@ -358,6 +369,7 @@ impl SceneCoordinator {
                     baseline,
                     alignment,
                     overflow,
+                    white_space,
                     hyphenator,
                     hyphen,
                     ellipsis,
@@ -413,6 +425,40 @@ impl SceneCoordinator {
             .iter()
             .flat_map(|run| run.run().glyphs().iter().copied())
             .next()
+    }
+
+    /// Resolves the `tab-size` tab-stop width in logical pixels for `content`
+    /// (CSS Text 3 §4.3), or `0.0` when `content` holds no preserved tab.
+    ///
+    /// A `<number>` tab-size multiplies the advance of a space shaped through the
+    /// coordinator's default face — identical to the layout coordinator's — so both
+    /// passes resolve the same stop; a `<length>` needs no space. The space is only
+    /// shaped when a tab is present, keeping the tab-free path allocation-free.
+    // `attributes` stays by reference to match this pass's `shape_paragraph` calls.
+    #[allow(clippy::too_many_arguments, clippy::trivially_copy_pass_by_ref)]
+    fn tab_stop_width(
+        &self,
+        tab_size: TabSize,
+        fallback: &FontFallback,
+        attributes: &FontAttributes,
+        direction: TextDirection,
+        font_size: f32,
+        content: &str,
+    ) -> f32 {
+        if !content.contains('\t') {
+            return 0.0;
+        }
+        let space_advance = match tab_size {
+            TabSize::Length(_) => 0.0,
+            TabSize::Factor(_) => self
+                .paragraph
+                .shape_paragraph(" ", fallback, attributes, &self.default_face, font_size, direction)
+                .iter()
+                .flat_map(|run| run.run().glyphs().iter())
+                .map(ShapedGlyph::x_advance)
+                .sum(),
+        };
+        tab_size.resolve(space_advance)
     }
 
     /// Returns the caret's pen x (logical pixels) at byte `index` in `content`:
@@ -969,17 +1015,28 @@ impl SceneCoordinator {
                         },
                         None => retained_content,
                     };
-                    // `text-transform` (§2.1) rewrites the string BEFORE shaping so
-                    // the cased text flows through shaping and the paragraph cache
-                    // key (matching the layout pass, which transforms the retained
-                    // content identically). It is applied only to IDLE display text:
+                    // `text-transform` (§2.1) then `white-space` collapsing
+                    // (§4.1.1) rewrite the string BEFORE shaping so the processed
+                    // text flows through shaping and the paragraph cache key,
+                    // matching the layout pass which processes the retained content
+                    // identically. Both are applied only to IDLE display text:
                     // while actively editing, the caret/selection use live buffer
-                    // byte offsets, so the shaped string is left untransformed to
-                    // keep those offsets exact (a documented interaction).
+                    // byte offsets, so the shaped string is left untouched (exact
+                    // offsets) and the field is laid out as `pre-wrap` — a
+                    // `<textarea>`'s mode — so its literal newlines still break.
+                    let white_space = if active.is_some() {
+                        WhiteSpace::PreWrap
+                    } else {
+                        white_space_for(computed.get(&node))
+                    };
                     let transformed: Cow<'_, str> = if active.is_some() {
                         Cow::Borrowed(content)
                     } else {
-                        transform_text(content, text_transform_for(computed.get(&node)))
+                        process_text(
+                            content,
+                            text_transform_for(computed.get(&node)),
+                            white_space,
+                        )
                     };
                     let content: &str = transformed.as_ref();
                     // The rendered caret/selection: while composing, the caret sits
@@ -1051,11 +1108,13 @@ impl SceneCoordinator {
                         direction,
                         alignment,
                         overflow,
+                        white_space,
                         font_size,
                         layout_box.size().width,
                         line_height_for(computed.get(&node), font_size),
                         letter_spacing_for(computed.get(&node)),
                         word_spacing_for(computed.get(&node)),
+                        tab_size_for(computed.get(&node)),
                     );
                     for line in layout.lines() {
                         let baseline = line.baseline();
@@ -5070,10 +5129,41 @@ mod tests {
     }
 
     #[test]
-    fn explicit_newline_forces_a_second_line_in_a_wide_box() {
-        // A `\n` is a mandatory break: even in a box wide enough that nothing wraps,
-        // "ab\ncd" splits into two lines, so the scene emits two runs stacked by the
-        // 16px line height.
+    fn explicit_newline_forces_a_second_line_under_pre_line() {
+        // Under `white-space: pre-line` a `\n` is a preserved mandatory break (CSS
+        // Text 3 §3): even in a box wide enough that nothing wraps, "ab\ncd" splits
+        // into two lines, so the scene emits two runs stacked by the 16px line
+        // height. (Under the initial `normal` the break would collapse to a space —
+        // see `explicit_newline_collapses_to_a_space_under_normal`.)
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "ab\ncd");
+
+        let mut computed = ComputedStyles::new();
+        let mut style = ComputedStyle::new();
+        style.set(
+            PropertyId::WhiteSpace,
+            ComputedValue::keyword(obscur_style::property::layout_keyword::WHITE_SPACE_PRE_LINE),
+        );
+        computed.insert(text, style);
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(text, box_at(0.0, 0.0, 1000.0, 32.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        let runs = text_runs(&list);
+        assert_eq!(runs.len(), 2, "\\n forces a second line under pre-line");
+        assert_eq!(runs[0].0.y, 0.0);
+        assert_eq!(runs[1].0.y, 16.0);
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn explicit_newline_collapses_to_a_space_under_normal() {
+        // The spec-correct initial behaviour (CSS Text 3 §4.1.1): under
+        // `white-space: normal` a segment break collapses to a space, so "ab\ncd"
+        // in a wide box is a SINGLE line — the pre-`white-space` code path forced a
+        // hard break here, which was `pre-line`-ish and wrong for the initial value.
         let mut tree = RetainedTree::new();
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
@@ -5086,9 +5176,7 @@ mod tests {
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         let runs = text_runs(&list);
-        assert_eq!(runs.len(), 2, "\\n forces a second line");
-        assert_eq!(runs[0].0.y, 0.0);
-        assert_eq!(runs[1].0.y, 16.0);
+        assert_eq!(runs.len(), 1, "\\n collapses to a space under normal");
         assert!(list.is_balanced());
     }
 

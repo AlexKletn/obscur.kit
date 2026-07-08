@@ -8,7 +8,9 @@ use crate::font::FontId;
 use crate::shaping::{GlyphRun, ShapedGlyph, ShapedRun, TextDirection};
 use crate::span::TextRange;
 
-use super::{Hyphenator, LineBreak, NullHyphenator, ParagraphLine, TextAlignment, TextOverflow};
+use super::{
+    Hyphenator, LineBreak, NullHyphenator, ParagraphLine, TextAlignment, TextOverflow, WhiteSpace,
+};
 
 /// A fully laid-out multi-font paragraph: its [`ParagraphLine`]s stacked
 /// vertically together with the computed total [`size`](Self::size), alignment,
@@ -148,12 +150,19 @@ impl ParagraphLayout {
     ///    assigns the line its cumulative `top` (spaced by `line_height`),
     ///    `height`, `baseline`, and alignment offset.
     ///
-    /// When `max_width <= 0` (unconstrained) the whole paragraph is one line.
+    /// When `max_width <= 0` (unconstrained) the whole paragraph is one line. The
+    /// `white_space` mode (CSS Text 3 §3) selects the break opportunities: a
+    /// non-wrapping mode (`nowrap` / `pre`) yields no soft breaks, so each segment
+    /// between mandatory (`\n`) breaks lays out on a single line that may overflow
+    /// `max_width` — which is correct (overflow/ellipsis is a separate concern).
     /// Empty input — no runs, or a single empty run — yields one empty line rather
     /// than panicking. This greedy wrapper reorders a line's *segments* into
     /// visual order (line-level bidi) but never reorders glyphs within a segment —
     /// that is the shaper's job — and never splits a word, even one that spans
     /// fonts.
+    // The wrap inputs plus the white-space mode are cohesive positional arguments
+    // of one leaf entry point, not a public API surface.
+    #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn wrap(
         runs: &[ShapedRun],
@@ -163,6 +172,7 @@ impl ParagraphLayout {
         baseline: f32,
         alignment: TextAlignment,
         overflow: TextOverflow,
+        white_space: WhiteSpace,
     ) -> Self {
         // The historical wrapper is exactly hyphenated wrapping through the no-op
         // [`NullHyphenator`] with no hyphen glyph: no interior break is ever
@@ -175,6 +185,7 @@ impl ParagraphLayout {
             baseline,
             alignment,
             overflow,
+            white_space,
             &NullHyphenator,
             None,
             None,
@@ -231,6 +242,7 @@ impl ParagraphLayout {
         baseline: f32,
         alignment: TextAlignment,
         overflow: TextOverflow,
+        white_space: WhiteSpace,
         hyphenator: &dyn Hyphenator,
         hyphen_glyph: Option<ShapedGlyph>,
         ellipsis_glyph: Option<ShapedGlyph>,
@@ -253,7 +265,7 @@ impl ParagraphLayout {
             }
         }
         // Interior break offsets proposed by the hyphenator, one word at a time.
-        let hyphen_offsets = Self::hyphen_offsets(text, hyphenator);
+        let hyphen_offsets = Self::hyphen_offsets(text, white_space, hyphenator);
 
         // Split the flattened stream into per-line packed groups.
         let mut lines_glyphs = if stream.is_empty() {
@@ -273,14 +285,22 @@ impl ParagraphLayout {
                 mandatory_break_after: false,
             }]
         } else {
-            Self::pack_lines(&stream, text, max_width, &hyphen_offsets, &soft, hyphen_glyph)
+            Self::pack_lines(
+                &stream,
+                text,
+                max_width,
+                white_space,
+                &hyphen_offsets,
+                &soft,
+                hyphen_glyph,
+            )
         };
 
         // Justify: stretch every eligible line's inter-word gaps so it fills
         // `max_width`. Only meaningful under a positive constraint (the unbounded
         // and empty branches produce a single, non-justified last line).
         if alignment == TextAlignment::Justify && max_width > 0.0 {
-            Self::justify(&mut lines_glyphs, text, max_width);
+            Self::justify(&mut lines_glyphs, text, white_space, max_width);
         }
 
         // Apply `text-overflow` truncation. Only lines that *still* overflow
@@ -366,9 +386,13 @@ impl ParagraphLayout {
     /// returned offset is shifted by the word's start. Offsets that are not
     /// strictly interior to their word are dropped, so an over-eager adapter can
     /// never split at a word edge.
-    fn hyphen_offsets(text: &str, hyphenator: &dyn Hyphenator) -> HashSet<usize> {
+    fn hyphen_offsets(
+        text: &str,
+        white_space: WhiteSpace,
+        hyphenator: &dyn Hyphenator,
+    ) -> HashSet<usize> {
         let mut offsets = HashSet::new();
-        let mut bounds: Vec<usize> = LineBreak::opportunities(text)
+        let mut bounds: Vec<usize> = LineBreak::opportunities(text, white_space)
             .iter()
             .map(LineBreak::offset)
             .collect();
@@ -401,12 +425,13 @@ impl ParagraphLayout {
         stream: &[Tagged],
         text: &str,
         max_width: f32,
+        white_space: WhiteSpace,
         hyphen_offsets: &HashSet<usize>,
         soft: &HashSet<usize>,
         hyphen_glyph: Option<ShapedGlyph>,
     ) -> Vec<PackedLine> {
         let mut queue: VecDeque<Word> =
-            Self::split_words(stream, text, hyphen_offsets, soft).into();
+            Self::split_words(stream, text, white_space, hyphen_offsets, soft).into();
 
         let mut lines: Vec<PackedLine> = Vec::new();
         let mut current: Vec<Tagged> = Vec::new();
@@ -533,16 +558,17 @@ impl ParagraphLayout {
     /// the word-final space); glyph ids and clusters are left intact, so the line's
     /// rendered width becomes exactly `max_width`. A line already at or past
     /// `max_width` gains nothing.
-    fn justify(lines: &mut [PackedLine], text: &str, max_width: f32) {
+    fn justify(lines: &mut [PackedLine], text: &str, white_space: WhiteSpace, max_width: f32) {
         let Some(last) = lines.len().checked_sub(1) else {
             return;
         };
         // Byte offsets that begin a word (every break opportunity); a glyph whose
         // cluster equals one starts a new word, so the glyph before it ends a gap.
-        let word_starts: std::collections::HashSet<usize> = LineBreak::opportunities(text)
-            .iter()
-            .map(LineBreak::offset)
-            .collect();
+        let word_starts: std::collections::HashSet<usize> =
+            LineBreak::opportunities(text, white_space)
+                .iter()
+                .map(LineBreak::offset)
+                .collect();
         for (index, line) in lines.iter_mut().enumerate() {
             if index == last || line.mandatory_break_after || line.word_count < 2 {
                 continue;
@@ -645,10 +671,11 @@ impl ParagraphLayout {
     fn split_words(
         stream: &[Tagged],
         text: &str,
+        white_space: WhiteSpace,
         hyphen_offsets: &HashSet<usize>,
         soft: &HashSet<usize>,
     ) -> Vec<Word> {
-        let breaks = LineBreak::opportunities(text);
+        let breaks = LineBreak::opportunities(text, white_space);
         let mut words: Vec<Word> = Vec::new();
         let mut glyphs: Vec<Tagged> = Vec::new();
         for tagged in stream {
@@ -885,6 +912,7 @@ mod tests {
             9.0,
             TextAlignment::Start,
             TextOverflow::Clip,
+            WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 1);
         layout.lines()[0]
@@ -919,6 +947,7 @@ mod tests {
         // Left-to-right pen positions place the three segments in that order.
         let layout = ParagraphLayout::wrap(
             &runs, text, 1000.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Clip,
+            WhiteSpace::Normal,
         );
         let segs = layout.lines()[0].segments();
         assert_eq!(segs[0].font(), FontId::new(0));
@@ -973,6 +1002,7 @@ mod tests {
             9.0,
             TextAlignment::Start,
             TextOverflow::Clip,
+            WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 1);
         let line = &layout.lines()[0];
@@ -1006,6 +1036,7 @@ mod tests {
             9.0,
             TextAlignment::Start,
             TextOverflow::Clip,
+            WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 2);
         // Each line has a single same-font segment.
@@ -1031,6 +1062,7 @@ mod tests {
             9.0,
             TextAlignment::Start,
             TextOverflow::Clip,
+            WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 1);
         let line = &layout.lines()[0];
@@ -1053,6 +1085,7 @@ mod tests {
             9.0,
             TextAlignment::Start,
             TextOverflow::Clip,
+            WhiteSpace::Normal,
         );
         assert_eq!(none.line_count(), 1);
         assert!(none.lines()[0].is_empty());
@@ -1069,6 +1102,7 @@ mod tests {
             9.0,
             TextAlignment::Start,
             TextOverflow::Clip,
+            WhiteSpace::Normal,
         );
         assert_eq!(one.line_count(), 1);
         assert!(one.lines()[0].is_empty());
@@ -1089,10 +1123,42 @@ mod tests {
             9.0,
             TextAlignment::Start,
             TextOverflow::Clip,
+            WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 1);
         // Both fonts survive on the one line as two segments.
         assert_eq!(layout.lines()[0].segments().len(), 2);
+    }
+
+    #[test]
+    fn nowrap_keeps_one_line_past_max_width() {
+        // `nowrap` (CSS Text 3 §3): no soft wrap, so a phrase far wider than the
+        // box stays on ONE line (overflow is a separate concern). "ab cd" (five
+        // 6px glyphs = 30) in a 12px box.
+        let text = "ab cd";
+        let runs = vec![run(0, &[(0, 6.0), (1, 6.0), (2, 6.0), (3, 6.0), (4, 6.0)], TextRange::new(0, 5))];
+        let layout = ParagraphLayout::wrap(
+            &runs, text, 12.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Visible,
+            WhiteSpace::Nowrap,
+        );
+        assert_eq!(layout.line_count(), 1);
+        assert_eq!(layout.lines()[0].width(), 30.0);
+    }
+
+    #[test]
+    fn pre_forces_two_lines_at_newline_ignoring_width() {
+        // `pre` (§3): preserve the segment break as a forced break (two lines) but
+        // never soft-wrap. "ab\ncd" in a wide box → two lines split at the `\n`.
+        // Clusters skip the `\n` byte (2): 0,1,3,4.
+        let text = "ab\ncd";
+        let runs = vec![run(0, &[(0, 6.0), (1, 6.0), (3, 6.0), (4, 6.0)], TextRange::new(0, 5))];
+        let layout = ParagraphLayout::wrap(
+            &runs, text, 100.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Clip,
+            WhiteSpace::Pre,
+        );
+        assert_eq!(layout.line_count(), 2);
+        assert_eq!(layout.lines()[0].top(), 0.0);
+        assert_eq!(layout.lines()[1].top(), 12.0);
     }
 
     #[test]
@@ -1110,6 +1176,7 @@ mod tests {
             9.0,
             TextAlignment::Center,
             TextOverflow::Ellipsis,
+            WhiteSpace::Normal,
         );
         let b = ParagraphLayout::wrap(
             &runs,
@@ -1119,6 +1186,7 @@ mod tests {
             9.0,
             TextAlignment::Center,
             TextOverflow::Ellipsis,
+            WhiteSpace::Normal,
         );
         assert_eq!(a, b);
     }
@@ -1146,6 +1214,7 @@ mod tests {
         // max_width 40 fits "ab cd " (36) but not "+ef" (48), so "ef" wraps.
         let layout = ParagraphLayout::wrap(
             &runs, text, 40.0, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
+            WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 2);
         // The first line has a single interior gap (between "ab" and "cd") and is
@@ -1183,6 +1252,7 @@ mod tests {
         // max_width 50 fits "aa bb cc " (45) but not "+dd" (55): "dd" wraps.
         let layout = ParagraphLayout::wrap(
             &runs, text, 50.0, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
+            WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 2);
         // The first line has two gaps; the 5px surplus is split as 2.5 per gap,
@@ -1222,6 +1292,7 @@ mod tests {
         // word — not justified — so it keeps its natural width 40, not 44.
         let layout = ParagraphLayout::wrap(
             &runs, text, 44.0, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
+            WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 2);
         assert_eq!(layout.lines()[0].width(), 40.0);
@@ -1229,8 +1300,9 @@ mod tests {
 
     #[test]
     fn justify_exempts_hard_broken_line() {
-        // "ab cd\nef": the first line ends on a mandatory `\n` break, so it is not
-        // justified even though it is not the paragraph's last line.
+        // "ab cd\nef" under `pre-line` (segment breaks preserved): the first line
+        // ends on a mandatory `\n` break, so it is not justified even though it is
+        // not the paragraph's last line.
         let text = "ab cd\nef";
         let runs = vec![run(
             0,
@@ -1247,6 +1319,7 @@ mod tests {
         )];
         let layout = ParagraphLayout::wrap(
             &runs, text, 100.0, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
+            WhiteSpace::PreLine,
         );
         assert_eq!(layout.line_count(), 2);
         // First line "ab cd" ended by a hard break: natural width 5*6 = 30.
@@ -1264,6 +1337,7 @@ mod tests {
         )];
         let layout = ParagraphLayout::wrap(
             &runs, text, 0.0, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
+            WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 1);
         assert_eq!(layout.lines()[0].width(), 48.0);
@@ -1277,11 +1351,13 @@ mod tests {
         let runs = vec![run(0, &[(0, 6.0), (1, 6.0), (2, 6.0), (3, 6.0), (4, 6.0)], TextRange::new(0, 5))];
         let center = ParagraphLayout::wrap(
             &runs, text, 100.0, 12.0, 9.0, TextAlignment::Center, TextOverflow::Clip,
+            WhiteSpace::Normal,
         );
         assert_eq!(center.lines()[0].width(), 30.0);
         assert_eq!(center.lines()[0].x_offset(), 35.0);
         let right = ParagraphLayout::wrap(
             &runs, text, 100.0, 12.0, 9.0, TextAlignment::Right, TextOverflow::Clip,
+            WhiteSpace::Normal,
         );
         assert_eq!(right.lines()[0].width(), 30.0);
         assert_eq!(right.lines()[0].x_offset(), 70.0);
@@ -1326,6 +1402,7 @@ mod tests {
         )];
         let plain = ParagraphLayout::wrap(
             &runs, text, 50.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Clip,
+            WhiteSpace::Normal,
         );
         let hyphenated = ParagraphLayout::wrap_hyphenated(
             &runs,
@@ -1335,6 +1412,7 @@ mod tests {
             9.0,
             TextAlignment::Start,
             TextOverflow::Clip,
+            WhiteSpace::Normal,
             &NullHyphenator,
             None,
             None,
@@ -1363,6 +1441,7 @@ mod tests {
             9.0,
             TextAlignment::Start,
             TextOverflow::Clip,
+            WhiteSpace::Normal,
             &StubHyphenator { offset: 5 },
             Some(hyphen),
             None,
@@ -1409,6 +1488,7 @@ mod tests {
             9.0,
             TextAlignment::Start,
             TextOverflow::Clip,
+            WhiteSpace::Normal,
             &NullHyphenator,
             Some(ShapedGlyph::new(999, 0, 4.0)),
             None,
@@ -1431,6 +1511,7 @@ mod tests {
             9.0,
             TextAlignment::Start,
             TextOverflow::Clip,
+            WhiteSpace::Normal,
             &NullHyphenator,
             Some(ShapedGlyph::new(999, 0, 4.0)),
             None,
@@ -1468,6 +1549,7 @@ mod tests {
             9.0,
             TextAlignment::Start,
             TextOverflow::Visible,
+            WhiteSpace::Normal,
             &StubHyphenator { offset: 1 },
             Some(ShapedGlyph::new(999, 0, 4.0)),
             None,
@@ -1488,6 +1570,7 @@ mod tests {
             9.0,
             TextAlignment::Right,
             TextOverflow::Ellipsis,
+            WhiteSpace::Normal,
         );
         assert_eq!(layout.alignment(), TextAlignment::Right);
         assert_eq!(layout.overflow(), TextOverflow::Ellipsis);
@@ -1519,6 +1602,7 @@ mod tests {
             9.0,
             alignment,
             overflow,
+            WhiteSpace::Normal,
             &NullHyphenator,
             None,
             ellipsis,

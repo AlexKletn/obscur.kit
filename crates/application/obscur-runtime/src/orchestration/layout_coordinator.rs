@@ -20,16 +20,18 @@ use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontSource, GenericFamily,
 };
 use obscur_text::layout::{
-    Hyphenator, NullHyphenator, ParagraphLayout, TextAlignment, TextOverflow,
+    Hyphenator, NullHyphenator, ParagraphLayout, TextAlignment, TextOverflow, WhiteSpace,
 };
-use obscur_text::shaping::{apply_spacing, ParagraphShaper, ShapedGlyph, TextDirection};
+use obscur_text::shaping::{
+    apply_spacing, apply_tab_stops, ParagraphShaper, ShapedGlyph, TextDirection,
+};
 use obscur_tree::tree::RetainedTree;
 
 use super::{
     alignment_for, attributes_for, direction_for, families_for, grid_templates_from,
-    letter_spacing_for, line_height_for, overflow_for, resolve_named_grid_areas,
-    resolve_named_grid_lines, text_transform_for, transform_text, word_spacing_for, ComputedStyles,
-    GridTemplates,
+    letter_spacing_for, line_height_for, overflow_for, process_text, resolve_named_grid_areas,
+    resolve_named_grid_lines, tab_size_for, text_transform_for, white_space_for, word_spacing_for,
+    ComputedStyles, GridTemplates, TabSize,
 };
 
 /// The initial `font-size` (spec / CSS default), used as the `em`/`rem` base
@@ -332,12 +334,14 @@ fn measure_text_node(
     direction: TextDirection,
     alignment: TextAlignment,
     overflow: TextOverflow,
+    white_space: WhiteSpace,
     constraints: BoxConstraints,
     paragraph: &ParagraphShaper,
     hyphenator: Option<&dyn Hyphenator>,
     line_height_override: Option<f32>,
     letter_spacing: f32,
     word_spacing: f32,
+    tab_size: TabSize,
 ) -> Size {
     let font_size = style.font_size;
     let metrics = paragraph.line_metrics(font_size);
@@ -357,6 +361,13 @@ fn measure_text_node(
         content,
         letter_spacing,
         word_spacing,
+    );
+    // Preserved tabs (`pre` / `pre-wrap`) advance to the next `tab-size` tab stop
+    // (§4.3). Under a collapsing mode the content has no `\t`, so this is a no-op.
+    let runs = apply_tab_stops(
+        runs,
+        content,
+        tab_stop_width(tab_size, paragraph, fallback, attributes, direction, font_size, content),
     );
     // A text node's own horizontal border/padding shrinks the wrap width; it is
     // almost always zero, but subtract it defensively so the content fits.
@@ -384,6 +395,7 @@ fn measure_text_node(
             baseline,
             alignment,
             overflow,
+            white_space,
         ),
         // Ellipsis without a hyphenator: wrap through the no-op hyphenator so the
         // shaped ellipsis glyph can be threaded into truncation.
@@ -395,6 +407,7 @@ fn measure_text_node(
             baseline,
             alignment,
             overflow,
+            white_space,
             &NullHyphenator,
             None,
             ellipsis,
@@ -412,6 +425,7 @@ fn measure_text_node(
                 baseline,
                 alignment,
                 overflow,
+                white_space,
                 hyphenator,
                 hyphen,
                 ellipsis,
@@ -467,6 +481,59 @@ fn measure_ellipsis_glyph(
         .iter()
         .flat_map(|run| run.run().glyphs().iter().copied())
         .next()
+}
+
+/// Resolves the `tab-size` tab-stop width in logical pixels for `content`
+/// (CSS Text 3 §4.3), or `0.0` when `content` has no preserved tab.
+///
+/// A `<number>` tab-size is `factor` × the advance of a space shaped through the
+/// same orchestrator/face the measure and compose passes use (so both agree); a
+/// `<length>` tab-size needs no space and returns its fixed width. When there is
+/// no tab the space is never shaped and `0.0` is returned, so the tab pass
+/// early-returns and an unauthored / collapsing-mode node is unaffected.
+#[allow(clippy::too_many_arguments, clippy::trivially_copy_pass_by_ref)]
+fn tab_stop_width(
+    tab_size: TabSize,
+    paragraph: &ParagraphShaper,
+    fallback: &FontFallback,
+    attributes: &FontAttributes,
+    direction: TextDirection,
+    font_size: f32,
+    content: &str,
+) -> f32 {
+    if !content.contains('\t') {
+        return 0.0;
+    }
+    let space_advance = match tab_size {
+        TabSize::Length(_) => 0.0,
+        TabSize::Factor(_) => {
+            measure_space_advance(paragraph, fallback, attributes, direction, font_size)
+        }
+    };
+    tab_size.resolve(space_advance)
+}
+
+/// Shapes a single space (U+0020) through `paragraph` at `font_size` and returns
+/// its total advance, the unit a `<number>` `tab-size` multiplies (§4.3).
+///
+/// Shaped with the same [`measure_face`] the scene coordinator mirrors, so the
+/// space width the measure pass resolves the tab stop from is identical to the
+/// compose pass's. Returns `0.0` when shaping yields no glyph.
+// `attributes` stays by reference to match this pass's `shape_paragraph` calls.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn measure_space_advance(
+    paragraph: &ParagraphShaper,
+    fallback: &FontFallback,
+    attributes: &FontAttributes,
+    direction: TextDirection,
+    font_size: f32,
+) -> f32 {
+    paragraph
+        .shape_paragraph(" ", fallback, attributes, &measure_face(), font_size, direction)
+        .iter()
+        .flat_map(|run| run.run().glyphs().iter())
+        .map(ShapedGlyph::x_advance)
+        .sum()
 }
 
 /// Maps a single [`ComputedStyle`] into layout's own [`LayoutStyle`].
@@ -1090,11 +1157,12 @@ fn measure(
         let alignment = alignment_for(computed.get(&node));
         let overflow = overflow_for(computed.get(&node));
         let line_height = line_height_for(computed.get(&node), style.font_size);
-        // `text-transform` rewrites the string BEFORE shaping (§2.1), so the
-        // transformed text flows through itemization/shaping and the paragraph
-        // cache key; letter-/word-spacing are applied post-shaping inside
-        // `measure_text_node`.
-        let content = transform_text(content, text_transform_for(computed.get(&node)));
+        let white_space = white_space_for(computed.get(&node));
+        // `text-transform` (§2.1) then `white-space` collapsing (§4.1.1) rewrite
+        // the string BEFORE shaping, so the processed text flows through
+        // itemization/shaping and the paragraph cache key; letter-/word-spacing and
+        // tab stops are applied post-shaping inside `measure_text_node`.
+        let content = process_text(content, text_transform_for(computed.get(&node)), white_space);
         return measure_text_node(
             content.as_ref(),
             &style,
@@ -1103,12 +1171,14 @@ fn measure(
             direction,
             alignment,
             overflow,
+            white_space,
             constraints,
             paragraph,
             hyphenator,
             line_height,
             letter_spacing_for(computed.get(&node)),
             word_spacing_for(computed.get(&node)),
+            tab_size_for(computed.get(&node)),
         );
     }
     let Some(algorithm) = algorithm_for(style.display, node, grid_templates, style.gap) else {
@@ -1198,9 +1268,11 @@ fn arrange(
         let alignment = alignment_for(computed.get(&node));
         let overflow = overflow_for(computed.get(&node));
         let line_height = line_height_for(computed.get(&node), style.font_size);
-        // Same pre-shape transform (§2.1) + post-shape spacing (§8.1/§8.2) as the
-        // measure pass, so the arranged box matches the measured one.
-        let content = transform_text(content, text_transform_for(computed.get(&node)));
+        let white_space = white_space_for(computed.get(&node));
+        // Same pre-shape transform (§2.1) + white-space collapsing (§4.1.1) +
+        // post-shape spacing (§8.1/§8.2) + tab stops (§4.3) as the measure pass, so
+        // the arranged box matches the measured one.
+        let content = process_text(content, text_transform_for(computed.get(&node)), white_space);
         let size = measure_text_node(
             content.as_ref(),
             &style,
@@ -1209,12 +1281,14 @@ fn arrange(
             direction,
             alignment,
             overflow,
+            white_space,
             constraints,
             paragraph,
             hyphenator,
             line_height,
             letter_spacing_for(computed.get(&node)),
             word_spacing_for(computed.get(&node)),
+            tab_size_for(computed.get(&node)),
         );
         boxes.insert(node, LayoutBox::new(Rect::new(origin, size)));
         return;

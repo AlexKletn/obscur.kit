@@ -33,7 +33,8 @@ pub use style_matching_coordinator::StyleMatchingCoordinator;
 mod text_attributes;
 pub(crate) use text_attributes::{
     alignment_for, attributes_for, direction_for, letter_spacing_for, line_height_for,
-    overflow_for, text_transform_for, transform_text, word_spacing_for,
+    overflow_for, process_text, tab_size_for, text_transform_for, white_space_for, word_spacing_for,
+    TabSize,
 };
 mod text_coordinator;
 pub use text_coordinator::TextCoordinator;

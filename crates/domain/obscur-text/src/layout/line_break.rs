@@ -1,5 +1,7 @@
 //! Line-break opportunities discovered in a run of text (spec §5.10).
 
+use super::WhiteSpace;
+
 /// The kind of a [`LineBreak`] opportunity (spec §5.10).
 ///
 /// A [`Soft`](Self::Soft) break is a *permitted* wrap point (for example after a
@@ -67,46 +69,56 @@ impl LineBreak {
         matches!(self.kind, BreakKind::Hard)
     }
 
-    /// Finds the line-break opportunities in `text` (spec §5.10).
+    /// Finds the line-break opportunities in `text` under a `white_space` mode
+    /// (CSS Text 3 §3 white-space table, §5.10).
     ///
     /// This is a deliberately **simplified** approximation of the Unicode line
     /// breaking algorithm (UAX #14); full, tailored breaking is an adapter
-    /// concern. The rules are:
+    /// concern. The `white_space` mode selects which breaks a run yields:
     ///
     /// - a [`Hard`](BreakKind::Hard) break just after each `'\n'` (its offset is
-    ///   the byte index of the character following the newline), and
+    ///   the byte index of the character following the newline) — but **only**
+    ///   when [`white_space.preserves_segment_breaks()`](WhiteSpace::preserves_segment_breaks)
+    ///   (`pre` / `pre-wrap` / `pre-line`). Under `normal` / `nowrap` a segment
+    ///   break has already been collapsed to a space at the pre-shape seam, so it
+    ///   is treated here as ordinary whitespace;
     /// - a [`Soft`](BreakKind::Soft) break after each maximal run of whitespace,
     ///   at the byte offset of the first non-whitespace character that follows it
-    ///   (i.e. the break sits *before* the next word).
+    ///   (the break sits *before* the next word) — but **only** when
+    ///   [`white_space.wraps()`](WhiteSpace::wraps) (`normal` / `pre-wrap` /
+    ///   `pre-line`). Under `nowrap` / `pre` no soft break is emitted, so the
+    ///   wrapper lays each segment on a single (possibly overflowing) line.
     ///
-    /// A whitespace run that contains a newline yields only the mandatory break,
-    /// never a duplicate soft break at the same position. Offsets are byte-correct
-    /// for UTF-8 because iteration is by [`str::char_indices`]. The returned
-    /// breaks are in ascending offset order.
+    /// A whitespace run that contains a preserved segment break yields only the
+    /// mandatory break, never a duplicate soft break at the same position.
+    /// Offsets are byte-correct for UTF-8 because iteration is by
+    /// [`str::char_indices`]. The returned breaks are in ascending offset order.
     #[must_use]
-    pub fn opportunities(text: &str) -> Vec<Self> {
+    pub fn opportunities(text: &str, white_space: WhiteSpace) -> Vec<Self> {
         let mut breaks = Vec::new();
+        let wraps = white_space.wraps();
+        let preserves_breaks = white_space.preserves_segment_breaks();
         // Whether the previous character was whitespace, and whether that
-        // whitespace run contained a newline (which already emits a hard break).
+        // whitespace run contained a preserved (hard) break, which already
+        // emitted a mandatory break and suppresses the run's soft break.
         let mut in_whitespace = false;
-        let mut whitespace_had_newline = false;
+        let mut whitespace_had_hard_break = false;
         for (index, ch) in text.char_indices() {
-            if ch == '\n' {
+            if ch == '\n' && preserves_breaks {
                 breaks.push(Self::hard(index + ch.len_utf8()));
+                whitespace_had_hard_break = true;
             }
             if ch.is_whitespace() {
                 in_whitespace = true;
-                if ch == '\n' {
-                    whitespace_had_newline = true;
-                }
             } else {
                 // Transition from a whitespace run into a word: a soft break
-                // sits before this word, unless a hard break already covers it.
-                if in_whitespace && !whitespace_had_newline {
+                // sits before this word, unless the mode disallows soft wrapping
+                // or a hard break already covers it.
+                if in_whitespace && wraps && !whitespace_had_hard_break {
                     breaks.push(Self::soft(index));
                 }
                 in_whitespace = false;
-                whitespace_had_newline = false;
+                whitespace_had_hard_break = false;
             }
         }
         breaks
@@ -138,28 +150,59 @@ mod tests {
     }
 
     #[test]
-    fn opportunities_of_a_b_newline_c() {
-        // "a b\nc": soft break before "b" (byte 2), hard break after "\n" (byte 4).
-        let breaks = LineBreak::opportunities("a b\nc");
+    fn opportunities_of_a_b_newline_c_under_preserving_breaks() {
+        // "a b\nc" with a mode that preserves segment breaks (`pre-line`): soft
+        // break before "b" (byte 2), hard break after "\n" (byte 4).
+        let breaks = LineBreak::opportunities("a b\nc", WhiteSpace::PreLine);
         assert_eq!(breaks, vec![LineBreak::soft(2), LineBreak::hard(4)]);
     }
 
     #[test]
-    fn newline_run_yields_only_hard_break() {
-        // The word after a newline gets no duplicate soft break.
-        let breaks = LineBreak::opportunities("a\nb");
+    fn newline_run_yields_only_hard_break_when_preserved() {
+        // The word after a preserved newline gets no duplicate soft break.
+        let breaks = LineBreak::opportunities("a\nb", WhiteSpace::PreLine);
         assert_eq!(breaks, vec![LineBreak::hard(2)]);
     }
 
     #[test]
     fn soft_break_after_run_of_spaces_is_utf8_byte_correct() {
         // "é  x": 'é' is two bytes (0..2), two spaces (2, 3), 'x' at byte 4.
-        let breaks = LineBreak::opportunities("é  x");
+        let breaks = LineBreak::opportunities("é  x", WhiteSpace::Normal);
         assert_eq!(breaks, vec![LineBreak::soft(4)]);
     }
 
     #[test]
     fn no_opportunities_in_a_single_word() {
-        assert!(LineBreak::opportunities("hello").is_empty());
+        assert!(LineBreak::opportunities("hello", WhiteSpace::Normal).is_empty());
+    }
+
+    #[test]
+    fn normal_treats_newline_as_soft_whitespace_not_hard() {
+        // Under `normal` a `\n` is NOT preserved (§3): it is ordinary whitespace,
+        // so "a\nb" yields a single soft break before "b" (byte 2), no hard break.
+        let breaks = LineBreak::opportunities("a\nb", WhiteSpace::Normal);
+        assert_eq!(breaks, vec![LineBreak::soft(2)]);
+    }
+
+    #[test]
+    fn nowrap_yields_no_breaks_at_all() {
+        // `nowrap`: no soft wrap and (segment breaks collapsed) no hard break —
+        // the whole run is one line.
+        assert!(LineBreak::opportunities("a b\nc", WhiteSpace::Nowrap).is_empty());
+    }
+
+    #[test]
+    fn pre_yields_only_hard_breaks_no_soft() {
+        // `pre`: preserve segment breaks (hard at byte 4) but no soft wrap, so the
+        // space before "b" yields no soft break.
+        let breaks = LineBreak::opportunities("a b\nc", WhiteSpace::Pre);
+        assert_eq!(breaks, vec![LineBreak::hard(4)]);
+    }
+
+    #[test]
+    fn pre_wrap_yields_both_soft_and_hard() {
+        // `pre-wrap`: soft before "b" (byte 2) and hard after "\n" (byte 4).
+        let breaks = LineBreak::opportunities("a b\nc", WhiteSpace::PreWrap);
+        assert_eq!(breaks, vec![LineBreak::soft(2), LineBreak::hard(4)]);
     }
 }

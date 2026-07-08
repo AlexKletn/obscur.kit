@@ -271,6 +271,14 @@ required-features = ["render-cpu", "text-harfrust", "text-unicode"]
 name = "text_spacing_transform_proof"
 required-features = ["render-cpu", "text-harfrust", "text-unicode"]
 
+# Proof: CSS Text 3 white-space processing (§3, §4.1.1 collapse/preserve/wrap) and
+# tab-size (§4.3) in the live text path. Drives the REAL runtime + coordinator and
+# rasterizes headless through the CPU renderer to `target/white_space_proof.png`.
+# Needs the CPU renderer + the text stack.
+[[example]]
+name = "white_space_proof"
+required-features = ["render-cpu", "text-harfrust", "text-unicode"]
+
 # The headless capability showcase → PNG. Needs the CPU renderer, filesystem
 # image loading + decode, and the real text shaping stack — but no window or GPU,
 # so it builds and runs anywhere (`cargo build --examples` stays display-free).

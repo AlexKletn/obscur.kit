@@ -5,7 +5,7 @@ use obscur_geometry::Size;
 use crate::shaping::{GlyphRun, ShapedGlyph};
 use crate::span::TextRange;
 
-use super::{LineBreak, TextAlignment, TextLine, TextOverflow};
+use super::{LineBreak, TextAlignment, TextLine, TextOverflow, WhiteSpace};
 
 /// A fully laid-out paragraph: its [`TextLine`]s stacked vertically together with
 /// the computed total [`size`](Self::size), alignment, and overflow policy
@@ -152,7 +152,11 @@ impl TextLayout {
     /// cluster equals `o`; a hard break marks the preceding word for a mandatory
     /// line break.
     fn split_words(run: &GlyphRun, text: &str) -> Vec<Word> {
-        let breaks = LineBreak::opportunities(text);
+        // The single-run legacy wrapper keeps its historical break model — soft
+        // breaks at whitespace runs plus hard breaks at each `\n` — which is
+        // exactly `pre-line` semantics. The multi-font `ParagraphLayout` is the
+        // white-space-aware live path; `TextLayout` is retained for the mock path.
+        let breaks = LineBreak::opportunities(text, WhiteSpace::PreLine);
         let mut words: Vec<Word> = Vec::new();
         let mut glyphs: Vec<ShapedGlyph> = Vec::new();
         let mut width = 0.0_f32;

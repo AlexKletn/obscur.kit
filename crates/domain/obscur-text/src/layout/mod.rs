@@ -17,3 +17,5 @@ mod text_line;
 pub use text_line::TextLine;
 mod text_overflow;
 pub use text_overflow::TextOverflow;
+mod white_space;
+pub use white_space::WhiteSpace;
