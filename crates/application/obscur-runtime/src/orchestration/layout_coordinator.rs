@@ -17,10 +17,11 @@ use obscur_style::property::{
     layout_keyword, GridLineValue, Length, LengthContext, PropertyId, PropertyValue,
 };
 use obscur_text::font::{
-    FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontSource, GenericFamily,
+    FontAttributes, FontFace, FontFallback, FontFamily, FontId, FontMetrics, FontSource,
+    GenericFamily,
 };
 use obscur_text::layout::{
-    Hyphenator, NullHyphenator, ParagraphLayout, TextAlignment, TextOverflow, WhiteSpace,
+    Hyphenator, LineStrut, NullHyphenator, ParagraphLayout, TextAlignment, TextOverflow, WhiteSpace,
 };
 use obscur_text::shaping::{
     apply_spacing, apply_tab_stops, ParagraphShaper, ShapedGlyph, TextDirection,
@@ -352,7 +353,20 @@ fn measure_text_node(
     // centres in the taller box. With no authored value the leading is zero, so
     // the baseline is `metrics.baseline()` — byte-for-byte the previous behaviour.
     let line_height = line_height_override.unwrap_or_else(|| metrics.line_height());
-    let baseline = metrics.baseline() + (line_height - metrics.line_height()) / 2.0;
+    // CSS 2.1 §10.8.1 line-box strut: the element's own primary-font ascent and
+    // (below-baseline) descent are the floor of every line box; each segment
+    // font's metrics can grow it. The descent carries everything below the
+    // baseline (incl. line-gap) so `ascent + descent == metrics.line_height()`,
+    // keeping the mock (gap 0) byte-identical to the previous scalar baseline.
+    let strut = LineStrut::new(
+        line_height,
+        metrics.ascent(),
+        metrics.line_height() - metrics.ascent(),
+    );
+    let seg_metrics = |font: FontId| {
+        let m = paragraph.line_metrics_for(font, font_size);
+        (m.ascent(), m.line_height() - m.ascent())
+    };
     // Shape once (cache-shared with compose), then fold CSS Text 3 letter-/word-
     // spacing into the advances through the SAME seam the compose pass uses, so
     // the width measured here matches the width painted later (§8.1 / §8.2).
@@ -387,24 +401,24 @@ fn measure_text_node(
         // hyphen or ellipsis glyph is shaped, so the measured size is byte-identical
         // to whitespace-only wrapping (Clip truncation still applies through
         // `overflow`, but only clips lines that actually overflow).
-        None if ellipsis.is_none() => ParagraphLayout::wrap(
+        None if ellipsis.is_none() => ParagraphLayout::wrap_strut(
             &runs,
             content,
             max_width,
-            line_height,
-            baseline,
+            strut,
+            &seg_metrics,
             alignment,
             overflow,
             white_space,
         ),
         // Ellipsis without a hyphenator: wrap through the no-op hyphenator so the
         // shaped ellipsis glyph can be threaded into truncation.
-        None => ParagraphLayout::wrap_hyphenated(
+        None => ParagraphLayout::wrap_strut_hyphenated(
             &runs,
             content,
             max_width,
-            line_height,
-            baseline,
+            strut,
+            &seg_metrics,
             alignment,
             overflow,
             white_space,
@@ -417,12 +431,12 @@ fn measure_text_node(
         Some(hyphenator) => {
             let hyphen =
                 measure_hyphen_glyph(paragraph, fallback, attributes, direction, font_size);
-            ParagraphLayout::wrap_hyphenated(
+            ParagraphLayout::wrap_strut_hyphenated(
                 &runs,
                 content,
                 max_width,
-                line_height,
-                baseline,
+                strut,
+                &seg_metrics,
                 alignment,
                 overflow,
                 white_space,
@@ -1130,6 +1144,23 @@ impl ChildMeasurer for RecMeasurer<'_> {
 ///
 /// `depth` bounds the recursion: at zero it returns [`Size::ZERO`], guaranteeing
 /// termination on a cyclic or pathologically deep tree.
+/// Resolves the used `text-overflow` for an anonymous text `node` (CSS UI 3
+/// §5.2).
+///
+/// `text-overflow` applies to the block container and does **not** inherit, so
+/// the anonymous text node's own computed value is always the initial `clip`.
+/// The value that governs the node's inline content is the block container's, so
+/// it is read from the text node's parent, falling back to the node itself when
+/// there is none. (Nested inline boxes are not walked to the container — a
+/// documented approximation matching this coordinator's flat text model.)
+fn overflow_for_text(tree: &RetainedTree, computed: &ComputedStyles, node: NodeId) -> TextOverflow {
+    let container = tree
+        .get(node)
+        .and_then(|n| n.logical_parent().parent())
+        .unwrap_or(node);
+    overflow_for(computed.get(&container))
+}
+
 // The tree, both style maps, the constraints, the shaper, the hyphenator, and
 // the depth budget are cohesive positional arguments of one internal recursion.
 #[allow(clippy::too_many_arguments)]
@@ -1155,7 +1186,7 @@ fn measure(
         let attributes = attributes_for(computed.get(&node));
         let direction = direction_for(computed.get(&node));
         let alignment = alignment_for(computed.get(&node));
-        let overflow = overflow_for(computed.get(&node));
+        let overflow = overflow_for_text(tree, computed, node);
         let line_height = line_height_for(computed.get(&node), style.font_size);
         let white_space = white_space_for(computed.get(&node));
         // `text-transform` (§2.1) then `white-space` collapsing (§4.1.1) rewrite
@@ -1266,7 +1297,7 @@ fn arrange(
         let attributes = attributes_for(computed.get(&node));
         let direction = direction_for(computed.get(&node));
         let alignment = alignment_for(computed.get(&node));
-        let overflow = overflow_for(computed.get(&node));
+        let overflow = overflow_for_text(tree, computed, node);
         let line_height = line_height_for(computed.get(&node), style.font_size);
         let white_space = white_space_for(computed.get(&node));
         // Same pre-shape transform (§2.1) + white-space collapsing (§4.1.1) +

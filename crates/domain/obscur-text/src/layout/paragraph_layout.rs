@@ -12,6 +12,62 @@ use super::{
     Hyphenator, LineBreak, NullHyphenator, ParagraphLine, TextAlignment, TextOverflow, WhiteSpace,
 };
 
+/// The inline **line-box strut** plus the used `line-height` (CSS 2.1 §10.8.1 /
+/// CSS Inline 3 §5).
+///
+/// Per CSS 2.1 §10.8 each line box is sized from a *strut* — an imaginary
+/// zero-width inline box with the element's own (primary) font metrics — combined
+/// with the inline content actually on the line. The strut is **always present**,
+/// even on an empty line, so a line never collapses below the element's own font
+/// height. `ascent`/`descent` are that primary face's vertical metrics (the
+/// descent carries everything below the baseline, including line-gap, so
+/// `ascent + descent` is the primary content box); `line_height` is the CSS
+/// *used* `line-height` L, into which any excess over the line's content box is
+/// distributed as half-leading (§10.8.1).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LineStrut {
+    /// The CSS *used* `line-height` L, in logical pixels.
+    line_height: f32,
+    /// The primary font's ascent above the baseline, in logical pixels.
+    ascent: f32,
+    /// The primary font's descent below the baseline (magnitude, incl. line-gap),
+    /// in logical pixels.
+    descent: f32,
+}
+
+impl LineStrut {
+    /// Creates a strut from the used `line_height` L and the primary font's
+    /// `ascent` and `descent` (both logical pixels, `descent` a positive
+    /// magnitude below the baseline).
+    #[must_use]
+    pub const fn new(line_height: f32, ascent: f32, descent: f32) -> Self {
+        Self {
+            line_height,
+            ascent,
+            descent,
+        }
+    }
+
+    /// The used `line-height` L, in logical pixels.
+    #[must_use]
+    pub const fn line_height(&self) -> f32 {
+        self.line_height
+    }
+
+    /// The primary font's ascent above the baseline, in logical pixels.
+    #[must_use]
+    pub const fn ascent(&self) -> f32 {
+        self.ascent
+    }
+
+    /// The primary font's descent below the baseline (magnitude), in logical
+    /// pixels.
+    #[must_use]
+    pub const fn descent(&self) -> f32 {
+        self.descent
+    }
+}
+
 /// A fully laid-out multi-font paragraph: its [`ParagraphLine`]s stacked
 /// vertically together with the computed total [`size`](Self::size), alignment,
 /// and overflow policy (spec §5.10).
@@ -247,6 +303,93 @@ impl ParagraphLayout {
         hyphen_glyph: Option<ShapedGlyph>,
         ellipsis_glyph: Option<ShapedGlyph>,
     ) -> Self {
+        // Historical entry point: a single scalar `line_height`/`baseline` is a
+        // uniform strut (primary ascent = `baseline`, descent = `line_height -
+        // baseline`) with font-agnostic segment metrics, so every line box equals
+        // the scalar values — byte-identical to the pre-strut wrapper.
+        let strut = LineStrut::new(line_height, baseline, line_height - baseline);
+        let seg_metrics = move |_font: FontId| (strut.ascent, strut.descent);
+        Self::wrap_core(
+            runs, text, max_width, strut, &seg_metrics, alignment, overflow, white_space,
+            hyphenator, hyphen_glyph, ellipsis_glyph,
+        )
+    }
+
+    /// Wraps like [`wrap`](Self::wrap) but sizes each line box from the mixed-font
+    /// line-box **strut** (CSS 2.1 §10.8.1): the `strut` (the element's own
+    /// primary-font metrics + used `line-height`) plus each segment font's metrics
+    /// from `seg_metrics`. See
+    /// [`wrap_strut_hyphenated`](Self::wrap_strut_hyphenated) for the formula.
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub fn wrap_strut(
+        runs: &[ShapedRun],
+        text: &str,
+        max_width: f32,
+        strut: LineStrut,
+        seg_metrics: &dyn Fn(FontId) -> (f32, f32),
+        alignment: TextAlignment,
+        overflow: TextOverflow,
+        white_space: WhiteSpace,
+    ) -> Self {
+        Self::wrap_core(
+            runs, text, max_width, strut, seg_metrics, alignment, overflow, white_space,
+            &NullHyphenator, None, None,
+        )
+    }
+
+    /// Wraps like [`wrap_hyphenated`](Self::wrap_hyphenated) but sizes each line
+    /// box from the mixed-font line-box **strut** (CSS 2.1 §10.8 / §10.8.1).
+    ///
+    /// For each packed line the used ascent `A = max(strut.ascent, max over
+    /// segments of seg_metrics(font).0)` and descent `D = max(strut.descent, max
+    /// over segments of seg_metrics(font).1)`; the strut floor is applied even on
+    /// an empty line. The content box is `A + D`; when the used `line-height` L
+    /// (`strut.line_height()`) exceeds it the excess splits as half-leading
+    /// `(L − (A+D))/2` above and below (line box `height = L`,
+    /// `baseline = A + half_leading`), else `height = A + D`, `baseline = A`. Lines
+    /// stack by their own heights, so a tall fallback line pushes the rest down and
+    /// the paragraph height is `Σ line heights`. Packing, hyphenation,
+    /// justification, and `text-overflow` are identical to
+    /// [`wrap_hyphenated`](Self::wrap_hyphenated).
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub fn wrap_strut_hyphenated(
+        runs: &[ShapedRun],
+        text: &str,
+        max_width: f32,
+        strut: LineStrut,
+        seg_metrics: &dyn Fn(FontId) -> (f32, f32),
+        alignment: TextAlignment,
+        overflow: TextOverflow,
+        white_space: WhiteSpace,
+        hyphenator: &dyn Hyphenator,
+        hyphen_glyph: Option<ShapedGlyph>,
+        ellipsis_glyph: Option<ShapedGlyph>,
+    ) -> Self {
+        Self::wrap_core(
+            runs, text, max_width, strut, seg_metrics, alignment, overflow, white_space,
+            hyphenator, hyphen_glyph, ellipsis_glyph,
+        )
+    }
+
+    /// The shared wrapping core: packs `runs` into lines and sizes each line box
+    /// from the CSS 2.1 §10.8.1 strut (`strut` + per-font `seg_metrics`).
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    fn wrap_core(
+        runs: &[ShapedRun],
+        text: &str,
+        max_width: f32,
+        strut: LineStrut,
+        seg_metrics: &dyn Fn(FontId) -> (f32, f32),
+        alignment: TextAlignment,
+        overflow: TextOverflow,
+        white_space: WhiteSpace,
+        hyphenator: &dyn Hyphenator,
+        hyphen_glyph: Option<ShapedGlyph>,
+        ellipsis_glyph: Option<ShapedGlyph>,
+    ) -> Self {
         let mut stream = Self::flatten(runs);
 
         // Author soft hyphens: the byte offset of every `U+00AD` char. Their
@@ -339,14 +482,49 @@ impl ParagraphLayout {
             let direction = glyphs
                 .first()
                 .map_or(TextDirection::LeftToRight, |t| t.direction);
-            let line = ParagraphLine::new(segments, range, top, line_height, baseline);
+            // CSS 2.1 §10.8.1: size this line box from the strut plus the fonts
+            // actually on the line, then stack by its own height.
+            let (height, line_baseline) = Self::strut_line_box(glyphs, strut, seg_metrics);
+            let line = ParagraphLine::new(segments, range, top, height, line_baseline);
             let x_offset = alignment.x_offset(line.width(), max_width, direction);
             let line = line.with_x_offset(x_offset);
-            top += line_height;
+            top += height;
             lines.push(line);
         }
 
         Self::new(lines, alignment, overflow)
+    }
+
+    /// Computes one line box's used `(height, baseline)` from the CSS 2.1
+    /// §10.8.1 strut and the fonts on the line.
+    ///
+    /// The line's ascent `A = max(strut.ascent, max seg ascent)` and descent
+    /// `D = max(strut.descent, max seg descent)` take the strut (the element's own
+    /// primary font) as an always-present floor — an empty line still gets the
+    /// strut's own box. With content box `A + D` and used `line-height`
+    /// `L = strut.line_height`: when `L > A + D` the excess splits as half-leading
+    /// `(L − (A+D))/2` above and below, giving `height = L`,
+    /// `baseline = A + half_leading`; otherwise `height = A + D`, `baseline = A`.
+    /// The `max` is order-independent, so the result is deterministic.
+    fn strut_line_box(
+        glyphs: &[Tagged],
+        strut: LineStrut,
+        seg_metrics: &dyn Fn(FontId) -> (f32, f32),
+    ) -> (f32, f32) {
+        let mut ascent = strut.ascent;
+        let mut descent = strut.descent;
+        for tagged in glyphs {
+            let (seg_ascent, seg_descent) = seg_metrics(tagged.font);
+            ascent = ascent.max(seg_ascent);
+            descent = descent.max(seg_descent);
+        }
+        let content = ascent + descent;
+        if strut.line_height > content {
+            let half_leading = (strut.line_height - content) / 2.0;
+            (strut.line_height, ascent + half_leading)
+        } else {
+            (content, ascent)
+        }
     }
 
     /// Flattens the font-tagged `runs` into one ordered stream of [`Tagged`]
@@ -1692,5 +1870,168 @@ mod tests {
         assert_eq!(kept.iter().map(|g| g.0).collect::<Vec<_>>(), vec![0, 1]);
         // No advance was widened by justification.
         assert!(kept.iter().all(|g| (g.1 - 10.0).abs() < f32::EPSILON));
+    }
+
+    // --- CSS 2.1 §10.8.1 mixed-font line-box strut ---------------------------
+
+    /// A test-double per-font metrics lookup: font 1 is a TALLER fallback face
+    /// (ascent 18, descent 6 → content 24); every other font is the primary
+    /// (ascent 9, descent 3 → content 12). Stands in for the uniform mock, which
+    /// cannot exercise the max-over-fonts strut aggregation.
+    fn tall_fallback(font: FontId) -> (f32, f32) {
+        if font.get() == 1 {
+            (18.0, 6.0)
+        } else {
+            (9.0, 3.0)
+        }
+    }
+
+    #[test]
+    fn strut_uses_content_box_when_line_height_is_smaller() {
+        // L < A+D: the content box wins (no leading). A tall fallback segment
+        // (font 1: 18/6) with a short used line-height (12): A=max(9,18)=18,
+        // D=max(3,6)=6, content=24 > L=12 → height=24, baseline=A=18.
+        let text = "ab";
+        let runs = vec![
+            run(0, &[(0, 6.0)], TextRange::new(0, 1)),
+            run(1, &[(1, 6.0)], TextRange::new(1, 2)),
+        ];
+        let layout = ParagraphLayout::wrap_strut(
+            &runs,
+            text,
+            1000.0,
+            LineStrut::new(12.0, 9.0, 3.0),
+            &tall_fallback,
+            TextAlignment::Start,
+            TextOverflow::Clip,
+            WhiteSpace::Normal,
+        );
+        assert_eq!(layout.line_count(), 1);
+        assert_eq!(layout.lines()[0].height(), 24.0);
+        assert_eq!(layout.lines()[0].baseline(), 18.0);
+    }
+
+    #[test]
+    fn strut_distributes_half_leading_when_line_height_is_larger() {
+        // L > A+D: the excess splits as half-leading. Primary-only line, strut
+        // ascent 9/descent 3 (content 12), used line-height 20: half=(20-12)/2=4,
+        // height=20, baseline=9+4=13.
+        let text = "a";
+        let runs = vec![run(0, &[(0, 6.0)], TextRange::new(0, 1))];
+        let layout = ParagraphLayout::wrap_strut(
+            &runs,
+            text,
+            1000.0,
+            LineStrut::new(20.0, 9.0, 3.0),
+            &|_| (9.0, 3.0),
+            TextAlignment::Start,
+            TextOverflow::Clip,
+            WhiteSpace::Normal,
+        );
+        assert_eq!(layout.lines()[0].height(), 20.0);
+        assert_eq!(layout.lines()[0].baseline(), 13.0);
+    }
+
+    #[test]
+    fn tall_fallback_segment_grows_only_its_line_and_the_paragraph() {
+        // "ab гд": font 0 "ab " (primary, bytes 0,1,2=space) then font 1 "гд"
+        // (Cyrillic fallback, bytes 3,5). max_width 20 fits "ab " (18) but not
+        // "+гд" (34), so it wraps: line 0 primary-only, line 1 the tall fallback.
+        let text = "ab гд";
+        let runs = vec![
+            run(0, &[(0, 6.0), (1, 6.0), (2, 6.0)], TextRange::new(0, 3)),
+            run(1, &[(3, 8.0), (5, 8.0)], TextRange::new(3, 7)),
+        ];
+        let strut = LineStrut::new(12.0, 9.0, 3.0);
+        let layout = ParagraphLayout::wrap_strut(
+            &runs,
+            text,
+            20.0,
+            strut,
+            &tall_fallback,
+            TextAlignment::Start,
+            TextOverflow::Clip,
+            WhiteSpace::Normal,
+        );
+        assert_eq!(layout.line_count(), 2);
+        // Primary-only line: the strut box is unchanged (height 12, baseline 9).
+        assert_eq!(layout.lines()[0].height(), 12.0);
+        assert_eq!(layout.lines()[0].baseline(), 9.0);
+        // The fallback line grows: A=18, D=6, content=24 > L=12 → height 24,
+        // baseline 18 (lower than the primary line's 9).
+        assert_eq!(layout.lines()[1].height(), 24.0);
+        assert_eq!(layout.lines()[1].baseline(), 18.0);
+        assert!(layout.lines()[1].baseline() > layout.lines()[0].baseline());
+        // Lines stack by their OWN heights: the tall line sits below the short one
+        // and the paragraph height is the sum, not N·line_height.
+        assert_eq!(layout.lines()[0].top(), 0.0);
+        assert_eq!(layout.lines()[1].top(), 12.0);
+        assert_eq!(layout.size().height, 36.0);
+
+        // Contrast: a font-agnostic (uniform) lookup — the mock's own case —
+        // leaves BOTH lines at the strut box, so the paragraph stays 24 tall. The
+        // growth is entirely the fallback face's taller metrics.
+        let uniform = ParagraphLayout::wrap_strut(
+            &runs,
+            text,
+            20.0,
+            strut,
+            &|_| (9.0, 3.0),
+            TextAlignment::Start,
+            TextOverflow::Clip,
+            WhiteSpace::Normal,
+        );
+        assert_eq!(uniform.lines()[0].height(), 12.0);
+        assert_eq!(uniform.lines()[1].height(), 12.0);
+        assert_eq!(uniform.size().height, 24.0);
+    }
+
+    #[test]
+    fn empty_line_still_gets_the_strut_box() {
+        // The strut is always present: an empty paragraph keeps the element's own
+        // primary-font box (height 12, baseline 9) even with a tall fallback in
+        // the lookup (nothing on the line to trigger it).
+        let layout = ParagraphLayout::wrap_strut(
+            &[],
+            "",
+            40.0,
+            LineStrut::new(12.0, 9.0, 3.0),
+            &tall_fallback,
+            TextAlignment::Start,
+            TextOverflow::Clip,
+            WhiteSpace::Normal,
+        );
+        assert_eq!(layout.line_count(), 1);
+        assert!(layout.lines()[0].is_empty());
+        assert_eq!(layout.lines()[0].height(), 12.0);
+        assert_eq!(layout.lines()[0].baseline(), 9.0);
+    }
+
+    #[test]
+    fn legacy_wrap_equals_uniform_strut_wrap_byte_identical() {
+        // The byte-identical guard: the historical scalar `wrap` (line_height 12,
+        // baseline 9) is exactly `wrap_strut` with the equivalent uniform strut
+        // (ascent 9, descent 12-9=3) and a font-agnostic lookup — for a MULTI-font,
+        // multi-line input, proving the seam adds no drift under the uniform mock.
+        let text = "ab гд";
+        let runs = vec![
+            run(0, &[(0, 6.0), (1, 6.0), (2, 6.0)], TextRange::new(0, 3)),
+            run(1, &[(3, 8.0), (5, 8.0)], TextRange::new(3, 7)),
+        ];
+        let legacy = ParagraphLayout::wrap(
+            &runs, text, 20.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Clip,
+            WhiteSpace::Normal,
+        );
+        let strut = ParagraphLayout::wrap_strut(
+            &runs,
+            text,
+            20.0,
+            LineStrut::new(12.0, 9.0, 3.0),
+            &|_| (9.0, 3.0),
+            TextAlignment::Start,
+            TextOverflow::Clip,
+            WhiteSpace::Normal,
+        );
+        assert_eq!(legacy, strut);
     }
 }

@@ -4,7 +4,7 @@ pub use hyphenator::{Hyphenator, NullHyphenator};
 mod line_break;
 pub use line_break::{BreakKind, LineBreak};
 mod paragraph_layout;
-pub use paragraph_layout::ParagraphLayout;
+pub use paragraph_layout::{LineStrut, ParagraphLayout};
 mod paragraph_line;
 pub use paragraph_line::ParagraphLine;
 mod text_alignment;

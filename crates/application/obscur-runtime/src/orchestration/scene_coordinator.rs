@@ -25,11 +25,11 @@ use obscur_style::property::{
     PropertyValue, RadialGradient, RadialShape, RadialSize, StyleColor, Transform, TransformOrigin,
 };
 use obscur_text::font::{
-    FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontResolver, FontSource,
-    GenericFamily, MockFontResolver,
+    FontAttributes, FontFace, FontFallback, FontFamily, FontId, FontMetrics, FontResolver,
+    FontSource, GenericFamily, MockFontResolver,
 };
 use obscur_text::layout::{
-    Hyphenator, NullHyphenator, ParagraphLayout, TextAlignment, TextOverflow, WhiteSpace,
+    Hyphenator, LineStrut, NullHyphenator, ParagraphLayout, TextAlignment, TextOverflow, WhiteSpace,
 };
 use obscur_text::selection::TextSelection;
 use obscur_text::shaping::{
@@ -318,7 +318,21 @@ impl SceneCoordinator {
         // leading is zero, so `line_height`/`baseline` equal the metric values —
         // byte-for-byte the single-line, default-spacing behaviour.
         let line_height = line_height_override.unwrap_or_else(|| metrics.line_height());
-        let baseline = metrics.baseline() + (line_height - metrics.line_height()) / 2.0;
+        // CSS 2.1 §10.8.1 line-box strut: the element's own primary-font metrics
+        // are the floor of every line box; a taller fallback segment grows it. The
+        // descent carries everything below the baseline (incl. line-gap) so
+        // `ascent + descent == metrics.line_height()`, keeping the mock (gap 0)
+        // byte-identical to the previous scalar baseline — and IDENTICAL to the
+        // measure pass, which builds the same strut and lookup.
+        let strut = LineStrut::new(
+            line_height,
+            metrics.ascent(),
+            metrics.line_height() - metrics.ascent(),
+        );
+        let seg_metrics = |font: FontId| {
+            let m = self.paragraph.line_metrics_for(font, font_size);
+            (m.ascent(), m.line_height() - m.ascent())
+        };
         // `text-overflow: ellipsis` needs a shaped ellipsis glyph to append at a
         // cut; `clip` / `visible` need none, so none is shaped on the default path
         // (Clip truncation works from advances alone).
@@ -332,24 +346,24 @@ impl SceneCoordinator {
             // no hyphen or ellipsis glyph is shaped, so the output (and the
             // shaping-cache call count) is byte-identical to today. Clip truncation
             // still applies through `overflow`, but only clips lines that overflow.
-            None if ellipsis.is_none() => ParagraphLayout::wrap(
+            None if ellipsis.is_none() => ParagraphLayout::wrap_strut(
                 &runs,
                 content,
                 max_width,
-                line_height,
-                baseline,
+                strut,
+                &seg_metrics,
                 alignment,
                 overflow,
                 white_space,
             ),
             // Ellipsis without a hyphenator: wrap through the no-op hyphenator so
             // the shaped ellipsis glyph can be threaded into truncation.
-            None => ParagraphLayout::wrap_hyphenated(
+            None => ParagraphLayout::wrap_strut_hyphenated(
                 &runs,
                 content,
                 max_width,
-                line_height,
-                baseline,
+                strut,
+                &seg_metrics,
                 alignment,
                 overflow,
                 white_space,
@@ -361,12 +375,12 @@ impl SceneCoordinator {
             // measures) with a real advance, and wrap through the installed port.
             Some(hyphenator) => {
                 let hyphen = self.shape_hyphen(fallback, attributes, direction, font_size);
-                ParagraphLayout::wrap_hyphenated(
+                ParagraphLayout::wrap_strut_hyphenated(
                     &runs,
                     content,
                     max_width,
-                    line_height,
-                    baseline,
+                    strut,
+                    &seg_metrics,
                     alignment,
                     overflow,
                     white_space,
@@ -1063,7 +1077,7 @@ impl SceneCoordinator {
                     let attributes = attributes_for(computed.get(&node));
                     let direction = direction_for(computed.get(&node));
                     let alignment = alignment_for(computed.get(&node));
-                    let overflow = overflow_for(computed.get(&node));
+                    let overflow = overflow_for_text(tree, computed, node);
                     let origin = layout_box.origin();
                     // Selection highlight, painted BEHIND the glyphs (emitted before
                     // the runs so the text shows over it): a rect from x(start) to
@@ -1437,6 +1451,23 @@ impl fmt::Debug for SceneCoordinator {
             .field("hyphenator", &"<dyn Hyphenator>")
             .finish()
     }
+}
+
+/// Resolves the used `text-overflow` for an anonymous text `node` (CSS UI 3
+/// §5.2).
+///
+/// `text-overflow` applies to the block container and does **not** inherit, so
+/// the anonymous text node's own computed value is always the initial `clip`.
+/// The governing value is the block container's, read from the text node's parent
+/// (falling back to the node itself). This mirrors the layout coordinator so the
+/// compose pass truncates identically to the measure pass. (Nested inline boxes
+/// are not walked — a documented approximation of the flat text model.)
+fn overflow_for_text(tree: &RetainedTree, computed: &ComputedStyles, node: NodeId) -> TextOverflow {
+    let container = tree
+        .get(node)
+        .and_then(|n| n.logical_parent().parent())
+        .unwrap_or(node);
+    overflow_for(computed.get(&container))
 }
 
 /// Converts one line [`segment`](ShapedRun) into a font-tagged scene [`GlyphRun`],

@@ -139,6 +139,10 @@ impl TextShaper for CachingShaper {
     fn line_metrics(&self, font_size: f32) -> LineMetrics {
         self.inner.line_metrics(font_size)
     }
+
+    fn line_metrics_for(&self, font: crate::font::FontId, font_size: f32) -> LineMetrics {
+        self.inner.line_metrics_for(font, font_size)
+    }
 }
 
 #[cfg(test)]
