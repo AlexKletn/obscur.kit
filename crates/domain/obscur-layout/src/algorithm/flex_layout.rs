@@ -204,8 +204,12 @@ impl LayoutAlgorithm for FlexLayout {
             cross_lead.push(if is_row { m.top } else { m.left });
         }
 
-        // Step 2: base main size per item, clamped into the item's main-axis
-        // min/max range.
+        // Step 2: per item, the **flex base size** (`flex_basis`/`width`/measured,
+        // never negative) and the **hypothetical main size** (the flex base clamped
+        // into the item's main-axis min/max range). The freeze loop (§9.7) needs
+        // both: the unclamped base is what grow/shrink distribute from, while the
+        // clamped hypothetical drives line-breaking and the freeze-inflexible test.
+        let mut flex_base = Vec::with_capacity(count);
         let mut base_main = Vec::with_capacity(count);
         for (index, child) in children.iter().enumerate() {
             let main_dim = if is_row {
@@ -243,7 +247,9 @@ impl LayoutAlgorithm for FlexLayout {
                     },
                 );
             let (min_main, max_main) = main_bounds(&child.style, is_row);
-            base_main.push(clamp_main(base.max(0.0), min_main, max_main, container_main));
+            let fb = base.max(0.0);
+            flex_base.push(fb);
+            base_main.push(clamp_main(fb, min_main, max_main, container_main));
         }
 
         // Steps 3–8: break the items into flex lines, then size / justify /
@@ -273,6 +279,7 @@ impl LayoutAlgorithm for FlexLayout {
             let placed = place_line(LineArgs {
                 line: &line,
                 base_main: &base_main,
+                flex_base: &flex_base,
                 children,
                 style,
                 is_row,
@@ -357,6 +364,7 @@ impl LayoutAlgorithm for FlexLayout {
             let line_cross = place_line(LineArgs {
                 line,
                 base_main: &base_main,
+                flex_base: &flex_base,
                 children,
                 style,
                 is_row,
@@ -407,8 +415,13 @@ impl LayoutAlgorithm for FlexLayout {
 struct LineArgs<'a, 'm> {
     /// The item indices on this line, in source order.
     line: &'a [usize],
-    /// Base main size per item, indexed by the global item index.
+    /// Hypothetical main size per item (flex base clamped to content min/max),
+    /// indexed by the global item index. Drives line-breaking and the
+    /// freeze-inflexible test in the §9.7 resolve-flexible-lengths loop.
     base_main: &'a [f32],
+    /// Unclamped flex base size per item, indexed by the global item index. This
+    /// is what grow/shrink distribute from in the §9.7 freeze loop.
+    flex_base: &'a [f32],
     /// The flex items.
     children: &'a [LayoutChild],
     /// The flex container's style.
@@ -474,6 +487,7 @@ fn place_line(args: LineArgs) -> PlacedLine {
     let LineArgs {
         line,
         base_main,
+        flex_base,
         children,
         style,
         is_row,
@@ -496,37 +510,21 @@ fn place_line(args: LineArgs) -> PlacedLine {
     let count = line.len();
     let gap_span = gap * (count.saturating_sub(1) as f32);
 
-    // Step 3: free space along the main axis (margins consume space too).
-    let sum_base: f32 = line.iter().map(|&i| base_main[i]).sum();
+    // Margins consume main-axis space alongside the gaps; both are constants that
+    // do not flex, so the justification pass below reuses this sum.
     let sum_margin_main: f32 = line.iter().map(|&i| main_lead[i] + main_trail[i]).sum();
-    let free = line_main - sum_base - gap_span - sum_margin_main;
 
-    // Step 4: resolve final main sizes via grow / shrink.
-    let sum_grow: f32 = line.iter().map(|&i| children[i].style.flex_grow).sum();
-    let mut final_main: Vec<f32> = line.iter().map(|&i| base_main[i]).collect();
-    if free > 0.0 && sum_grow > 0.0 {
-        for (final_size, &i) in final_main.iter_mut().zip(line.iter()) {
-            *final_size += free * children[i].style.flex_grow / sum_grow;
-        }
-    } else if free < 0.0 {
-        let sum_weight: f32 = line
-            .iter()
-            .map(|&i| children[i].style.flex_shrink * base_main[i])
-            .sum();
-        if sum_weight > 0.0 {
-            for (final_size, &i) in final_main.iter_mut().zip(line.iter()) {
-                let weight = children[i].style.flex_shrink * base_main[i];
-                *final_size = (*final_size + free * weight / sum_weight).max(0.0);
-            }
-        }
-    }
-
-    // Re-clamp the grown/shrunk main sizes into each item's min/max range so a
-    // `min-width` / `max-width` bound holds after free-space distribution.
-    for (final_size, &i) in final_main.iter_mut().zip(line.iter()) {
-        let (min_main, max_main) = main_bounds(&children[i].style, is_row);
-        *final_size = clamp_main(*final_size, min_main, max_main, line_main);
-    }
+    // Steps 3–4: resolve the final main sizes with the canonical
+    // "resolve flexible lengths" freeze loop (§9.7).
+    let final_main = resolve_flexible_lengths(
+        line,
+        flex_base,
+        base_main,
+        children,
+        is_row,
+        line_main,
+        gap_span + sum_margin_main,
+    );
 
     // Step 5: cross size per item, and the line's cross extent.
     //
@@ -686,6 +684,177 @@ fn place_line(args: LineArgs) -> PlacedLine {
         cross: line_cross,
         content_cross,
     }
+}
+
+/// Resolves the final main sizes of one flex line's items with the canonical
+/// **resolve flexible lengths** algorithm (CSS Flexbox Level 1, §9.7,
+/// <https://drafts.csswg.org/css-flexbox-1/#resolve-flexible-lengths>).
+///
+/// This replaces a single-pass `size += free · factor / Σfactor` split, which is
+/// wrong whenever an item clamps at its min/max (the violation must be frozen and
+/// the freed space redistributed) or when `Σ`flex factors `< 1` (the line must be
+/// left partly unfilled). The loop freezes items as they reach their limits and
+/// re-distributes the remaining free space among the still-flexible ones until
+/// every item is frozen.
+///
+/// `non_flex_main` is the main-axis space the gaps and item margins consume; it is
+/// subtracted from the container inner main size once, since those extents never
+/// flex. `flex_base` is each item's unclamped flex base size (what grow/shrink
+/// distribute from) and `hypothetical` is that base clamped to the item's content
+/// min/max (the freeze-inflexible reference). Both are indexed by the global item
+/// index; the returned vector is indexed by position within `line`.
+fn resolve_flexible_lengths(
+    line: &[usize],
+    flex_base: &[f32],
+    hypothetical: &[f32],
+    children: &[LayoutChild],
+    is_row: bool,
+    line_main: f32,
+    non_flex_main: f32,
+) -> Vec<f32> {
+    let n = line.len();
+
+    // The main-axis extent available to the items themselves (inner main size less
+    // the non-flexing gaps + margins). Free space below is measured against this.
+    let available = line_main - non_flex_main;
+
+    // §9.7 step 1: use grow factors when the line's items would otherwise leave
+    // free space (their hypothetical outer main sizes sum to less than the inner
+    // main size), else shrink factors. `growing == (free > 0)` under hypotheticals.
+    let sum_hypo: f32 = line.iter().map(|&i| hypothetical[i]).sum();
+    let growing = sum_hypo < available;
+
+    // Per-position flex factor for the chosen direction, and the item's content
+    // min/max bounds.
+    let factor = |pos: usize| -> f32 {
+        let s = &children[line[pos]].style;
+        if growing {
+            s.flex_grow
+        } else {
+            s.flex_shrink
+        }
+    };
+
+    let mut target = vec![0.0_f32; n];
+    let mut frozen = vec![false; n];
+
+    // §9.7 step 2: freeze inflexible items at their hypothetical main size. An item
+    // is inflexible when its used flex factor is 0, or it is already past the
+    // target in the direction of flexing (growing with base > hypothetical, i.e.
+    // clamped down by a max; shrinking with base < hypothetical, clamped up by a
+    // min) so flexing could only push it further out of range.
+    for pos in 0..n {
+        let i = line[pos];
+        let inflexible = factor(pos) == 0.0
+            || (growing && flex_base[i] > hypothetical[i])
+            || (!growing && flex_base[i] < hypothetical[i]);
+        if inflexible {
+            frozen[pos] = true;
+            target[pos] = hypothetical[i];
+        }
+    }
+
+    // The used main size: frozen items contribute their resolved target, unfrozen
+    // items their (unclamped) flex base size.
+    let used_main = |target: &[f32], frozen: &[bool]| -> f32 {
+        (0..n)
+            .map(|pos| {
+                if frozen[pos] {
+                    target[pos]
+                } else {
+                    flex_base[line[pos]]
+                }
+            })
+            .sum()
+    };
+
+    // §9.7 step 3: the initial free space, retained for the `Σfactors < 1` clamp.
+    let initial_free = available - used_main(&target, &frozen);
+
+    // §9.7 step 4: loop until every item is frozen.
+    loop {
+        if frozen.iter().all(|&f| f) {
+            break;
+        }
+
+        // (b) remaining free space against the current (partly frozen) sizes.
+        let mut remaining = available - used_main(&target, &frozen);
+
+        // Sum of the unfrozen flex factors. If it is < 1, the spec caps the space
+        // handed out this pass at `initial_free · Σfactors` when that magnitude is
+        // smaller — this is what makes a lone `flex-grow: 0.5` item claim only half
+        // the free space instead of all of it.
+        let sum_factors: f32 = (0..n).filter(|&pos| !frozen[pos]).map(factor).sum();
+        if sum_factors < 1.0 {
+            let scaled = initial_free * sum_factors;
+            if scaled.abs() < remaining.abs() {
+                remaining = scaled;
+            }
+        }
+
+        // (c) distribute the remaining free space to the unfrozen items.
+        if growing {
+            let sum_grow: f32 = (0..n).filter(|&pos| !frozen[pos]).map(factor).sum();
+            if sum_grow > 0.0 {
+                for pos in 0..n {
+                    if !frozen[pos] {
+                        target[pos] = flex_base[line[pos]] + remaining * factor(pos) / sum_grow;
+                    }
+                }
+            }
+        } else {
+            // Shrinking weights each item by its **scaled** flex shrink factor:
+            // `flex_shrink · flex_base` (a larger item gives up more), per §9.7.
+            let scaled_shrink = |pos: usize| factor(pos) * flex_base[line[pos]];
+            let sum_scaled: f32 = (0..n).filter(|&pos| !frozen[pos]).map(scaled_shrink).sum();
+            if sum_scaled > 0.0 {
+                for pos in 0..n {
+                    if !frozen[pos] {
+                        target[pos] =
+                            flex_base[line[pos]] - remaining.abs() * scaled_shrink(pos) / sum_scaled;
+                    }
+                }
+            }
+        }
+
+        // (d) clamp each unfrozen target to its content min/max (content box floored
+        // at 0) and record the signed violation `clamped − unclamped`.
+        let mut total_violation = 0.0_f32;
+        let mut violations = vec![0.0_f32; n];
+        for pos in 0..n {
+            if frozen[pos] {
+                continue;
+            }
+            let (min_main, max_main) = main_bounds(&children[line[pos]].style, is_row);
+            let unclamped = target[pos];
+            let clamped = clamp_main(unclamped, min_main, max_main, line_main);
+            violations[pos] = clamped - unclamped;
+            total_violation += violations[pos];
+            target[pos] = clamped;
+        }
+
+        // (e) freeze by the sign of the total violation: no net violation freezes
+        // everything; a positive total freezes the min-violators (whose clamp
+        // pushed them up); a negative total freezes the max-violators. Freezing only
+        // the sign-matched items lets the loop redistribute their freed space.
+        if total_violation == 0.0 {
+            frozen.fill(true);
+        } else if total_violation > 0.0 {
+            for pos in 0..n {
+                if !frozen[pos] && violations[pos] > 0.0 {
+                    frozen[pos] = true;
+                }
+            }
+        } else {
+            for pos in 0..n {
+                if !frozen[pos] && violations[pos] < 0.0 {
+                    frozen[pos] = true;
+                }
+            }
+        }
+    }
+
+    target
 }
 
 /// Resolves one item's cross-axis size.
@@ -1410,6 +1579,134 @@ mod tests {
             &mut measurer,
         );
         approx(out.size().height, 40.0);
+    }
+
+    /// §9.7 `Σfactors < 1` clamp: a lone item with `flex-grow: 0.5` in a container
+    /// with free space `F` grows by exactly `F · 0.5`, leaving the line half-empty.
+    /// The old single-pass split gave the sole grow item ALL of `F` (wrong).
+    #[test]
+    fn lone_flex_grow_half_consumes_half_free_space() {
+        let style = container(
+            FlexDirection::Row,
+            JustifyContent::FlexStart,
+            AlignItems::Stretch,
+            0.0,
+        );
+        let mut a = fixed_basis(1, 100.0);
+        a.style.flex_grow = 0.5;
+        let children = [a];
+        // Container main = 200, base = 100, free = 100. grow 0.5 → +50, not +100.
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(200.0, 100.0)),
+            &mut FixedChildMeasurer::default(),
+        );
+        approx(out.child_boxes()[0].size().width, 150.0);
+    }
+
+    /// §9.7 min/max freeze + redistribute (grow): three equal-grow items where one
+    /// caps at a `max-width` smaller than its share. The capped item freezes at its
+    /// max and the OTHERS absorb the freed space, so the line still exactly fills.
+    /// The old single-pass clamped once and left the line under-filled.
+    #[test]
+    fn grow_max_clamp_redistributes_to_others() {
+        let style = container(
+            FlexDirection::Row,
+            JustifyContent::FlexStart,
+            AlignItems::Stretch,
+            0.0,
+        );
+        let mk = |raw| {
+            let mut c = fixed_basis(raw, 0.0);
+            c.style.flex_grow = 1.0;
+            c
+        };
+        let mut a = mk(1);
+        a.style.max_width = Dimension::Px(50.0);
+        let children = [a, mk(2), mk(3)];
+        // Container = 300, bases 0, even share = 100. Item0 caps at 50; its 50 of
+        // freed space is redistributed 1:1 to items 1 & 2 → 125 each. Sum = 300.
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(300.0, 100.0)),
+            &mut FixedChildMeasurer::default(),
+        );
+        let b = out.child_boxes();
+        approx(b[0].size().width, 50.0);
+        approx(b[1].size().width, 125.0);
+        approx(b[2].size().width, 125.0);
+        // Line exactly fills: last item ends at the container main extent.
+        approx(b[2].origin().x + b[2].size().width, 300.0);
+    }
+
+    /// §9.7 min/max freeze + redistribute (shrink): three equal-shrink items where
+    /// one hits a `min-width` larger than its shrunk share. It freezes at its min
+    /// and the others take up the remaining overflow, so the line exactly fills.
+    #[test]
+    fn shrink_min_clamp_redistributes_to_others() {
+        let style = container(
+            FlexDirection::Row,
+            JustifyContent::FlexStart,
+            AlignItems::Stretch,
+            0.0,
+        );
+        let mk = |raw| {
+            let mut c = fixed_basis(raw, 50.0);
+            c.style.flex_shrink = 1.0;
+            c
+        };
+        let mut a = mk(1);
+        a.style.min_width = Dimension::Px(45.0);
+        let children = [a, mk(2), mk(3)];
+        // Container = 100, bases 50 (Σ=150, overflow 50). Even shrink → 33.33 each,
+        // but item0 floors at min 45. It freezes at 45; the remaining 45 of the
+        // container is split by scaled shrink between items 1 & 2 → 27.5 each.
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(100.0, 50.0)),
+            &mut FixedChildMeasurer::default(),
+        );
+        let b = out.child_boxes();
+        approx(b[0].size().width, 45.0);
+        approx(b[1].size().width, 27.5);
+        approx(b[2].size().width, 27.5);
+        approx(b[2].origin().x + b[2].size().width, 100.0);
+    }
+
+    /// A basic `flex: 1 1 auto` three-item even split (no clamping, factors ≥ 1) is
+    /// unchanged by the freeze loop: the free space splits evenly.
+    #[test]
+    fn even_split_three_items_unchanged() {
+        let style = container(
+            FlexDirection::Row,
+            JustifyContent::FlexStart,
+            AlignItems::Stretch,
+            0.0,
+        );
+        let mk = |raw| {
+            let mut c = fixed_basis(raw, 50.0);
+            c.style.flex_grow = 1.0;
+            c.style.flex_shrink = 1.0;
+            c
+        };
+        let children = [mk(1), mk(2), mk(3)];
+        // Container = 300, bases 50 (Σ=150), free = 150, +50 each → 100 each.
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(300.0, 100.0)),
+            &mut FixedChildMeasurer::default(),
+        );
+        let b = out.child_boxes();
+        approx(b[0].size().width, 100.0);
+        approx(b[1].size().width, 100.0);
+        approx(b[2].size().width, 100.0);
+        approx(b[0].origin().x, 0.0);
+        approx(b[1].origin().x, 100.0);
+        approx(b[2].origin().x, 200.0);
     }
 
     #[test]
