@@ -2773,7 +2773,9 @@ fn repeat_axis_tiles(keyword: &str) -> Option<bool> {
 /// The `linear-gradient(...)`, `radial-gradient(...)`, and `conic-gradient(...)`
 /// image forms are modelled (into [`PropertyValue::LinearGradient`],
 /// [`PropertyValue::RadialGradient`], and [`PropertyValue::ConicGradient`]
-/// respectively); a `url(...)` image lowers to a
+/// respectively); `repeating-linear-gradient(...)` lowers to the same
+/// [`PropertyValue::LinearGradient`] carrying the repeating flag and its tiling
+/// period. A `url(...)` image lowers to a
 /// [`PropertyValue::BackgroundImageUrl`] carrying the **raw** authored URL/path
 /// string (quotes stripped for `url("…")`, or the reconstructed body for the
 /// unquoted `url(…)` form). The URL is *not* resolved here — the runtime hands it
@@ -2784,6 +2786,11 @@ fn lower_background_image(values: &[ParsedValue]) -> Option<PropertyValue> {
     match values {
         [ParsedValue::Function { name, args }] if name.eq_ignore_ascii_case("linear-gradient") => {
             lower_linear_gradient(args).map(PropertyValue::LinearGradient)
+        }
+        [ParsedValue::Function { name, args }]
+            if name.eq_ignore_ascii_case("repeating-linear-gradient") =>
+        {
+            lower_repeating_linear_gradient(args).map(PropertyValue::LinearGradient)
         }
         [ParsedValue::Function { name, args }] if name.eq_ignore_ascii_case("radial-gradient") => {
             lower_radial_gradient(args).map(PropertyValue::RadialGradient)
@@ -2879,6 +2886,184 @@ fn lower_linear_gradient(args: &[ParsedValue]) -> Option<LinearGradient> {
     }
     resolve_stop_positions(&mut stops);
     Some(LinearGradient::new(angle, stops))
+}
+
+/// A color stop's position while lowering a `repeating-linear-gradient`, before
+/// normalization: either an absolute `px` offset or a `<percentage>` fraction of
+/// the gradient line. The two variants are the two period units; a single
+/// repeating gradient uses one of them consistently.
+#[derive(Clone, Copy)]
+enum RepeatPos {
+    /// An absolute px offset (the common stripe case).
+    Px(f32),
+    /// A percentage offset, as an authored `0..=100` value.
+    Pct(f32),
+}
+
+impl RepeatPos {
+    /// The raw magnitude in this stop's own unit (px or percent value).
+    fn value(self) -> f32 {
+        match self {
+            Self::Px(v) | Self::Pct(v) => v,
+        }
+    }
+
+    /// Whether this position is expressed in `px` (vs. a percentage).
+    fn is_px(self) -> bool {
+        matches!(self, Self::Px(_))
+    }
+}
+
+/// Lowers `repeating-linear-gradient( [<angle> | to <side-or-corner>]? ,
+/// <color-stop>{2,} )` into a repeating style-local [`LinearGradient`] (spec §5.2).
+///
+/// A repeating gradient defines **one period** — the extent of the last authored
+/// stop position — and tiles it across the box (the scene coordinator sizes the
+/// gradient axis to one period and the renderer repeats it). The direction is
+/// parsed exactly like [`lower_linear_gradient`]. Stops accept `px` or `%`
+/// positions and, in addition to the ordinary `<color> [<pos>]?` form, the
+/// **two-position** `<color> <pos> <pos>` hard-band form (equivalent to the color
+/// repeated at both positions — the standard way to author a hard stripe edge).
+///
+/// The period is the last stop's position (its px value, or its percentage of the
+/// gradient line). All stop positions are then normalized to `0.0..=1.0` over that
+/// period, so the resulting stops flow through the shared coordinator path
+/// unchanged. Returns [`None`] (degrading to an unsupported-feature diagnostic)
+/// for a malformed direction, an unparseable stop, fewer than two resulting stops,
+/// an unpositioned last stop, mixed px/percent units, or a zero-length period.
+fn lower_repeating_linear_gradient(args: &[ParsedValue]) -> Option<LinearGradient> {
+    let parts: Vec<&[ParsedValue]> = args.split(|v| matches!(v, ParsedValue::Comma)).collect();
+    if parts.is_empty() {
+        return None;
+    }
+    let (angle, stop_parts) = match parse_gradient_direction(parts[0]) {
+        Some(angle) => (angle, &parts[1..]),
+        None => (180.0, &parts[..]),
+    };
+    if stop_parts.len() < 2 {
+        return None;
+    }
+    // Flatten stops, expanding the two-position hard-band form into two stops.
+    let mut colored: Vec<(StyleColor, Option<RepeatPos>)> = Vec::with_capacity(stop_parts.len());
+    for part in stop_parts {
+        parse_repeating_color_stop(part, &mut colored)?;
+    }
+    if colored.len() < 2 {
+        return None;
+    }
+    // The period unit: taken from the first positioned stop; every positioned
+    // stop must agree (no mixed px/percent).
+    let unit_is_px = colored
+        .iter()
+        .find_map(|(_, pos)| pos.map(RepeatPos::is_px))?;
+    if colored
+        .iter()
+        .any(|(_, pos)| pos.is_some_and(|p| p.is_px() != unit_is_px))
+    {
+        return None;
+    }
+    // Resolve every stop's magnitude in the chosen unit: the first defaults to 0;
+    // runs of unpositioned stops are spread evenly between positioned neighbours;
+    // the last must be positioned (it defines the period).
+    let magnitudes = resolve_repeating_positions(&colored)?;
+    let period = *magnitudes.last()?;
+    if period <= 0.0 {
+        return None;
+    }
+    let stops: Vec<GradientStop> = colored
+        .iter()
+        .zip(&magnitudes)
+        .map(|((color, _), mag)| GradientStop::new(*color, mag / period))
+        .collect();
+    let period_len = if unit_is_px {
+        Length::px(period)
+    } else {
+        Length::Percent(period)
+    };
+    Some(LinearGradient::new_repeating(angle, stops, period_len))
+}
+
+/// Parses one `repeating-linear-gradient` color stop into `out`, supporting the
+/// `<color>`, `<color> <pos>`, and hard-band `<color> <pos> <pos>` forms. The
+/// hard-band form pushes the color twice (once at each position). Returns [`None`]
+/// for an unparseable color or position.
+fn parse_repeating_color_stop(
+    part: &[ParsedValue],
+    out: &mut Vec<(StyleColor, Option<RepeatPos>)>,
+) -> Option<()> {
+    match part {
+        [color] => out.push((parse_stop_color(color)?, None)),
+        [color, pos] => out.push((parse_stop_color(color)?, Some(repeat_stop_position(pos)?))),
+        [color, p1, p2] => {
+            let color = parse_stop_color(color)?;
+            out.push((color, Some(repeat_stop_position(p1)?)));
+            out.push((color, Some(repeat_stop_position(p2)?)));
+        }
+        _ => return None,
+    }
+    Some(())
+}
+
+/// Reads a repeating-gradient stop position: a `<percentage>` (kept as its
+/// `0..=100` value), an absolute `px` `<length>`, or a bare `0` (a unitless zero
+/// offset). Any other length unit or shape yields [`None`].
+fn repeat_stop_position(value: &ParsedValue) -> Option<RepeatPos> {
+    match value {
+        ParsedValue::Percentage(p) => Some(RepeatPos::Pct(narrow_f32(*p))),
+        ParsedValue::Dimension { value, unit } if unit.eq_ignore_ascii_case("px") => {
+            Some(RepeatPos::Px(narrow_f32(*value)))
+        }
+        ParsedValue::Number(n) if *n == 0.0 => Some(RepeatPos::Px(0.0)),
+        _ => None,
+    }
+}
+
+/// Resolves each repeating stop's used magnitude in its period unit (spec §5.2
+/// color-stop placement, adapted for a repeating gradient's unnormalized axis).
+///
+/// The first stop defaults to `0`; authored positions are clamped non-decreasing;
+/// runs of unpositioned stops are spread evenly between their positioned
+/// neighbours. Returns [`None`] when the last stop is unpositioned (a repeating
+/// gradient needs it to define the period).
+fn resolve_repeating_positions(colored: &[(StyleColor, Option<RepeatPos>)]) -> Option<Vec<f32>> {
+    let n = colored.len();
+    let mut mags: Vec<Option<f32>> = colored.iter().map(|(_, p)| p.map(RepeatPos::value)).collect();
+    if mags[0].is_none() {
+        mags[0] = Some(0.0);
+    }
+    // The last stop must be positioned — it defines the period.
+    mags[n - 1]?;
+    // Clamp authored magnitudes non-decreasing.
+    let mut running = 0.0_f32;
+    for m in mags.iter_mut().flatten() {
+        *m = m.max(running);
+        running = *m;
+    }
+    // Fill runs of unpositioned stops by even interpolation between the known
+    // magnitudes bounding the run (both endpoints are known).
+    let mut i = 0;
+    while i < n {
+        if mags[i].is_some() {
+            i += 1;
+            continue;
+        }
+        let start = i - 1;
+        let prev = mags[start].unwrap_or(0.0);
+        let mut j = i;
+        while j < n && mags[j].is_none() {
+            j += 1;
+        }
+        let next = mags[j].unwrap_or(prev);
+        #[allow(clippy::cast_precision_loss)]
+        let span = (j - start) as f32;
+        for (offset, k) in (i..j).enumerate() {
+            #[allow(clippy::cast_precision_loss)]
+            let t = (offset + 1) as f32 / span;
+            mags[k] = Some(prev + (next - prev) * t);
+        }
+        i = j;
+    }
+    Some(mags.into_iter().map(|m| m.unwrap_or(0.0)).collect())
 }
 
 /// Lowers `radial-gradient( [<shape>? <size>? [at <position>]?]? , <color-stop>{2,} )`
@@ -3635,6 +3820,57 @@ mod tests {
         assert_eq!(g.stops()[0].position(), Some(0.0));
         assert_eq!(g.stops()[1].color(), color(0.0, 0.0, 1.0));
         assert_eq!(g.stops()[1].position(), Some(1.0));
+    }
+
+    #[test]
+    fn linear_gradient_is_non_repeating_with_no_period() {
+        let g = gradient_of("background-image: linear-gradient(90deg, red, blue)");
+        assert!(!g.repeating());
+        assert_eq!(g.period(), None);
+    }
+
+    #[test]
+    fn repeating_linear_gradient_px_hard_bands() {
+        // `repeating-linear-gradient(90deg, #000 0 4px, #fff 4px 8px)` = an 8px
+        // period of two hard bands (black 0–4px, white 4–8px), normalized over
+        // the period to black@0, black@0.5, white@0.5, white@1.
+        let g = gradient_of(
+            "background-image: repeating-linear-gradient(90deg, #000 0 4px, #fff 4px 8px)",
+        );
+        assert_eq!(g.angle_deg(), 90.0);
+        assert!(g.repeating());
+        assert_eq!(g.period(), Some(Length::px(8.0)));
+        assert_eq!(g.stops().len(), 4);
+        assert_eq!(g.stops()[0].color(), StyleColor::BLACK);
+        assert_eq!(g.stops()[0].position(), Some(0.0));
+        assert_eq!(g.stops()[1].color(), StyleColor::BLACK);
+        assert_eq!(g.stops()[1].position(), Some(0.5));
+        assert_eq!(g.stops()[2].color(), color(1.0, 1.0, 1.0));
+        assert_eq!(g.stops()[2].position(), Some(0.5));
+        assert_eq!(g.stops()[3].color(), color(1.0, 1.0, 1.0));
+        assert_eq!(g.stops()[3].position(), Some(1.0));
+    }
+
+    #[test]
+    fn repeating_linear_gradient_percent_period() {
+        // A `%` period: `red 0%, blue 25%` → 25%-of-line period, stops normalized
+        // to red@0, blue@1.
+        let g =
+            gradient_of("background-image: repeating-linear-gradient(0deg, red 0%, blue 25%)");
+        assert!(g.repeating());
+        assert_eq!(g.period(), Some(Length::Percent(25.0)));
+        assert_eq!(g.stops().len(), 2);
+        assert_eq!(g.stops()[0].position(), Some(0.0));
+        assert_eq!(g.stops()[1].position(), Some(1.0));
+    }
+
+    #[test]
+    fn repeating_linear_gradient_default_direction() {
+        // No leading direction → defaults to `to bottom` (180°), still repeating.
+        let g = gradient_of("background-image: repeating-linear-gradient(#000 0 6px, #fff 6px 12px)");
+        assert_eq!(g.angle_deg(), 180.0);
+        assert!(g.repeating());
+        assert_eq!(g.period(), Some(Length::px(12.0)));
     }
 
     #[test]

@@ -128,6 +128,15 @@ required-features = ["render-vello"]
 name = "backdrop_proof"
 required-features = ["render-vello"]
 
+# Proof that CSS `repeating-linear-gradient()` tiles as REAL diagonal stripes via
+# Vello's `ExtendMode::Repeat`: one box painted with a 12px-period 45° stripe,
+# driven through the full CSS → runtime → Vello path and read back to
+# `target/repeating_gradient_proof.png`. Needs the GPU adapter at runtime but no
+# window; gated on the Vello backend only.
+[[example]]
+name = "repeating_gradient_proof"
+required-features = ["render-vello"]
+
 # Proof that `border-style: dashed` renders as REAL dashes: two boxes (square +
 # rounded) with a `2px dashed` border, stroked as a dashed path and rasterized
 # headless through the CPU renderer to `target/dashed_border_proof.png`. Verifies

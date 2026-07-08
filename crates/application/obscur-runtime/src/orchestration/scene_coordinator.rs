@@ -11,7 +11,7 @@ use obscur_scene::color::Color;
 use obscur_scene::command::{DisplayList, DisplayListBuilder, PaintCommand};
 use obscur_scene::layer::{LayerEffect, SceneLayer};
 use obscur_scene::paint::{
-    Brush, ConicGradient as SceneConicGradient, GradientStop as SceneGradientStop,
+    Brush, ConicGradient as SceneConicGradient, ExtendMode, GradientStop as SceneGradientStop,
     LinearGradient as SceneLinearGradient, Paint, RadialGradient as SceneRadialGradient, SceneImage,
     Stroke,
 };
@@ -1732,8 +1732,20 @@ fn resolve_origin_length(length: Length, basis: f32) -> f32 {
 /// authored (resolved) `0.0..=1.0` position becomes the scene stop's offset, and
 /// its [`StyleColor`] becomes the scene paint [`Color`]; an unpositioned stop
 /// (never produced by the CSS lowering, which resolves all positions) falls back
-/// to its index-proportional offset. The brush keeps the default
-/// [`ExtendMode::Pad`](obscur_scene::paint::ExtendMode::Pad).
+/// to its index-proportional offset.
+///
+/// A non-repeating gradient keeps the default
+/// [`ExtendMode::Pad`](obscur_scene::paint::ExtendMode::Pad) and its axis spans
+/// the whole box (the `0%`/`100%` endpoints at `center ∓ dir · half_len`). A
+/// [`repeating`](LinearGradient::repeating) gradient instead sizes its axis to
+/// **one period** (the axis runs from the box's `0%` anchor a distance of one
+/// period along `dir`, with the stops already normalized to `[0, 1]` over that
+/// period) and uses [`ExtendMode::Repeat`](obscur_scene::paint::ExtendMode::Repeat)
+/// so the renderer tiles the pattern across the box. The period is either an
+/// absolute px length or a fraction of the full gradient line
+/// (`2 · half_len`). On Vello this tiles as a true repeating ramp; on the CPU
+/// path a repeated gradient flattens to its first stop (the documented
+/// GPU-class-effect policy), so a stripe reads as a flat first-stop fill there.
 fn linear_gradient_brush(gradient: &LinearGradient, bounds: Rect) -> SceneLinearGradient {
     let theta = gradient.angle_deg().to_radians();
     let (sin, cos) = (theta.sin(), theta.cos());
@@ -1747,8 +1759,21 @@ fn linear_gradient_brush(gradient: &LinearGradient, bounds: Rect) -> SceneLinear
     let dir_y = -cos;
     let half_len = (w * sin).abs().mul_add(0.5, (h * cos).abs() * 0.5);
     let start = Point::new(cx - dir_x * half_len, cy - dir_y * half_len);
+    let stops = gradient_stops(gradient.stops());
+    // A repeating gradient's axis spans exactly one period from the box's 0%
+    // anchor, and the pattern tiles with `ExtendMode::Repeat`.
+    if let Some(period) = gradient.period() {
+        let line_len = 2.0 * half_len;
+        let period_px = match period {
+            Length::Px(px) => px.0,
+            Length::Percent(pct) => pct / 100.0 * line_len,
+            _ => line_len,
+        };
+        let end = Point::new(start.x + dir_x * period_px, start.y + dir_y * period_px);
+        return SceneLinearGradient::new(start, end, stops).with_extend(ExtendMode::Repeat);
+    }
     let end = Point::new(cx + dir_x * half_len, cy + dir_y * half_len);
-    SceneLinearGradient::new(start, end, gradient_stops(gradient.stops()))
+    SceneLinearGradient::new(start, end, stops)
 }
 
 /// Builds a scene [`SceneRadialGradient`] fill brush for a style
@@ -2446,6 +2471,53 @@ mod tests {
         assert_eq!(g.stops()[0].color(), Color::rgba(1.0, 0.0, 0.0, 1.0));
         assert_eq!(g.stops()[1].offset(), 1.0);
         assert_eq!(g.stops()[1].color(), Color::rgba(0.0, 0.0, 1.0, 1.0));
+        // A plain linear gradient keeps the default Pad extend.
+        assert_eq!(g.extend(), ExtendMode::Pad);
+        assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn repeating_linear_gradient_background_tiles_one_period() {
+        use obscur_style::property::GradientStop as StyleStop;
+
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        // `repeating-linear-gradient(90deg, #000 0 4px, #fff 4px 8px)`: an 8px
+        // period of two hard bands, to the right, over a 100×50 box.
+        let gradient = LinearGradient::new_repeating(
+            90.0,
+            vec![
+                StyleStop::new(StyleColor::BLACK, 0.0),
+                StyleStop::new(StyleColor::BLACK, 0.5),
+                StyleStop::new(StyleColor::rgba(1.0, 1.0, 1.0, 1.0), 0.5),
+                StyleStop::new(StyleColor::rgba(1.0, 1.0, 1.0, 1.0), 1.0),
+            ],
+            Length::px(8.0),
+        );
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(a, with_background_gradient(gradient));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 100.0, 50.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        let brushes = fill_brushes(&list);
+        assert_eq!(brushes.len(), 1, "one gradient fill");
+        let Brush::Linear(g) = &brushes[0] else {
+            panic!("expected a linear gradient brush, got {:?}", brushes[0]);
+        };
+        // The axis spans exactly one 8px period from the box's 0% anchor, and the
+        // pattern tiles via Repeat.
+        assert_eq!(g.extend(), ExtendMode::Repeat);
+        let near = |a: Point, b: Point| (a.x - b.x).abs() < 1e-3 && (a.y - b.y).abs() < 1e-3;
+        assert!(near(g.start(), Point::new(0.0, 25.0)), "start {:?}", g.start());
+        assert!(near(g.end(), Point::new(8.0, 25.0)), "end {:?}", g.end());
+        assert_eq!(g.stops().len(), 4);
+        assert_eq!(g.stops()[1].offset(), 0.5);
         assert!(list.is_balanced());
     }
 
