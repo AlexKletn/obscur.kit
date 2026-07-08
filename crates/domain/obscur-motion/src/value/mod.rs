@@ -5,3 +5,7 @@ mod interpolation_result;
 pub use interpolation_result::InterpolationResult;
 mod motion_value;
 pub use motion_value::MotionValue;
+mod transform_interp;
+pub use transform_interp::{
+    Decomposed2D, Matrix2D, decompose, interpolate, interpolate_matrix, recompose,
+};

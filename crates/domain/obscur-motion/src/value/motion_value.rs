@@ -2,6 +2,7 @@
 
 use obscur_geometry::{Point, Rect, Size};
 
+use super::transform_interp::{self, Matrix2D};
 use super::Interpolatable;
 
 /// A concrete presentation value the motion engine can animate (spec §4.17).
@@ -27,6 +28,15 @@ pub enum MotionValue {
     Size(Size),
     /// An axis-aligned rectangle, e.g. an animated layout frame.
     Rect(Rect),
+    /// A 2D `transform`: the six affine coefficients `[a, b, c, d, e, f]` of a
+    /// `matrix(a, b, c, d, e, f)` (the lowered `<transform-function>+` list).
+    ///
+    /// Unlike the other variants this does **not** blend component-wise: it
+    /// interpolates by matrix decomposition (CSS Transforms §14), so a
+    /// `rotate(0°) → rotate(90°)` transition rotates through `rotate(45°)`
+    /// instead of shearing and shrinking the box. See
+    /// [`interpolate_checked`](Self::interpolate_checked).
+    Transform(Matrix2D),
 }
 
 impl MotionValue {
@@ -52,6 +62,12 @@ impl MotionValue {
     #[must_use]
     pub const fn rect(value: Rect) -> Self {
         Self::Rect(value)
+    }
+
+    /// Wraps a 2D `transform` affine `[a, b, c, d, e, f]`.
+    #[must_use]
+    pub const fn transform(matrix: Matrix2D) -> Self {
+        Self::Transform(matrix)
     }
 
     /// Returns the wrapped scalar, or `None` if this is not a
@@ -94,6 +110,16 @@ impl MotionValue {
         }
     }
 
+    /// Returns the wrapped transform affine `[a, b, c, d, e, f]`, or `None` if
+    /// this is not a [`Transform`](Self::Transform).
+    #[must_use]
+    pub const fn as_transform(&self) -> Option<Matrix2D> {
+        match self {
+            Self::Transform(value) => Some(*value),
+            _ => None,
+        }
+    }
+
     /// Returns whether `self` and `other` hold the same variant (and can
     /// therefore be blended by [`interpolate_checked`](Self::interpolate_checked)).
     #[must_use]
@@ -104,6 +130,7 @@ impl MotionValue {
                 | (Self::Point(_), Self::Point(_))
                 | (Self::Size(_), Self::Size(_))
                 | (Self::Rect(_), Self::Rect(_))
+                | (Self::Transform(_), Self::Transform(_))
         )
     }
 
@@ -122,6 +149,12 @@ impl MotionValue {
             (Self::Point(a), Self::Point(b)) => Some(Self::Point(a.interpolate(b, t))),
             (Self::Size(a), Self::Size(b)) => Some(Self::Size(a.interpolate(b, t))),
             (Self::Rect(a), Self::Rect(b)) => Some(Self::Rect(a.interpolate(b, t))),
+            // Transforms do NOT blend component-wise: they interpolate by matrix
+            // decomposition (CSS Transforms §14) so rotation/scale/skew stay
+            // physical instead of shearing (see `transform_interp`).
+            (Self::Transform(a), Self::Transform(b)) => {
+                Some(Self::Transform(transform_interp::interpolate_matrix(*a, *b, t)))
+            }
             _ => None,
         }
     }
@@ -189,6 +222,39 @@ mod tests {
             pa.interpolate_checked(&pb, 0.25),
             Some(MotionValue::point(Point::new(1.0, 2.0)))
         );
+    }
+
+    #[test]
+    fn transform_constructor_and_accessor() {
+        let m = [1.0, 0.0, 0.0, 1.0, 3.0, 4.0];
+        assert_eq!(MotionValue::transform(m).as_transform(), Some(m));
+        assert_eq!(MotionValue::scalar(1.0).as_transform(), None);
+    }
+
+    #[test]
+    fn transform_interpolates_via_decomposition_not_component_wise() {
+        // rotate(0°) → rotate(90°) at t=0.5 must be rotate(45°), scale preserved.
+        let a = MotionValue::transform([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let b = MotionValue::transform([0.0, 1.0, -1.0, 0.0, 0.0, 0.0]);
+        let mid = a
+            .interpolate_checked(&b, 0.5)
+            .and_then(|v| v.as_transform())
+            .expect("matching Transform variants blend");
+
+        let s = 0.5_f32.sqrt(); // ≈ 0.7071
+        for (got, want) in mid.iter().zip([s, s, -s, s, 0.0, 0.0]) {
+            assert!((got - want).abs() <= 1e-4, "got {mid:?}");
+        }
+        // Scale is preserved at 1, unlike the naive lerp's ~0.707 shrink.
+        assert!((mid[0].hypot(mid[1]) - 1.0).abs() <= 1e-4);
+    }
+
+    #[test]
+    fn transform_kind_matches_only_transform() {
+        let a = MotionValue::transform([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        let b = MotionValue::transform([2.0, 0.0, 0.0, 2.0, 0.0, 0.0]);
+        assert!(a.kind_matches(&b));
+        assert!(!a.kind_matches(&MotionValue::scalar(1.0)));
     }
 
     #[test]

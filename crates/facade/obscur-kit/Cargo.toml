@@ -195,6 +195,17 @@ required-features = ["render-vello"]
 name = "dashed_border_proof"
 required-features = ["render-cpu"]
 
+# Proof of 2D `transform` interpolation via matrix decomposition (CSS Transforms
+# §14): blends `rotate(0deg) → rotate(90deg)` through the motion engine at t=0.5,
+# asserts the result is `rotate(45°)` at full scale (NOT the naive component-wise
+# matrix lerp that shrinks 30%), and drives it through a PushTransform bracket to
+# rasterize a rotated square headless through the CPU renderer to
+# `target/transform_interp_proof.png`. Self-asserts the diamond's half-diagonal
+# extent (≈70.7px) — proof the box rotated at preserved scale. No window or GPU.
+[[example]]
+name = "transform_interp_proof"
+required-features = ["render-cpu"]
+
 # Proof that the CSS border-triangle trick renders: four 0×0 boxes with three
 # transparent border sides and one inked side draw the four cardinal arrow
 # triangles (▽ ▲ ▷ ◁), plus a 4-colour mitered bordered box, rasterized headless
