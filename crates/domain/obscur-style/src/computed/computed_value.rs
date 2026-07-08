@@ -9,9 +9,9 @@
 //! remain.
 
 use crate::property::{
-    BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow, ConicGradient, FilterOp,
-    Length, LengthExpr, LinearGradient, ObjectFit, PropertyValue, RadialGradient, StyleColor,
-    Transform, TransformOrigin,
+    BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow,
+    ConicGradient, FilterOp, Length, LengthExpr, LinearGradient, ObjectFit, PropertyValue,
+    RadialGradient, StyleColor, Transform, TransformOrigin,
 };
 use obscur_identity::InternedSymbol;
 
@@ -50,6 +50,7 @@ impl ComputedValue {
             | PropertyValue::RadialGradient(_)
             | PropertyValue::ConicGradient(_)
             | PropertyValue::BackgroundImageUrl(_)
+            | PropertyValue::BackgroundLayers(_)
             | PropertyValue::BackgroundSize(_)
             | PropertyValue::BackgroundPosition(_)
             | PropertyValue::BackgroundRepeat(_)
@@ -150,6 +151,14 @@ impl ComputedValue {
         self.0.as_background_image_url()
     }
 
+    /// Returns the multi-layer `background-image` list if this computed value is a
+    /// [`PropertyValue::BackgroundLayers`] (two or more comma-separated layers, in
+    /// author order). A single-layer background stays a flat gradient/url value.
+    #[must_use]
+    pub fn as_background_layers(&self) -> Option<&[BackgroundLayer]> {
+        self.0.as_background_layers()
+    }
+
     /// Returns the `box-shadow` list if this computed value is a `box-shadow`.
     #[must_use]
     pub fn as_box_shadows(&self) -> Option<&[BoxShadow]> {
@@ -221,6 +230,25 @@ mod tests {
             ComputedValue::from_concrete(PropertyValue::BackgroundImageUrl("logo.png".into()))
                 .expect("a url background-image is a concrete computed value");
         assert_eq!(value.as_background_image_url(), Some("logo.png"));
+    }
+
+    #[test]
+    fn background_layers_survive_the_computed_step() {
+        use crate::property::{BackgroundLayer, GradientStop, LinearGradient};
+        let layers: Box<[BackgroundLayer]> = Box::new([
+            BackgroundLayer::Linear(LinearGradient::new(
+                0.0,
+                vec![
+                    GradientStop::new(StyleColor::BLACK, 0.0),
+                    GradientStop::new(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 1.0),
+                ],
+            )),
+            BackgroundLayer::Url("x.png".into()),
+        ]);
+        let value =
+            ComputedValue::from_concrete(PropertyValue::BackgroundLayers(layers.clone()))
+                .expect("a background-layer list is a concrete computed value");
+        assert_eq!(value.as_background_layers(), Some(&*layers));
     }
 
     #[test]

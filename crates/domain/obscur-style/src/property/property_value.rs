@@ -21,9 +21,9 @@
 //! [`LengthContext`](crate::property::LengthContext) (spec §4.5, §4.13).
 
 use crate::property::{
-    BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow, ConicGradient, FilterOp,
-    GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length, LengthExpr, LinearGradient,
-    ObjectFit, RadialGradient, StyleColor, Transform, TransformOrigin,
+    BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow,
+    ConicGradient, FilterOp, GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, Length,
+    LengthExpr, LinearGradient, ObjectFit, RadialGradient, StyleColor, Transform, TransformOrigin,
 };
 use obscur_identity::InternedSymbol;
 
@@ -76,6 +76,15 @@ pub enum PropertyValue {
     /// whose image is not yet loaded simply paints nothing (the background-color
     /// shows through).
     BackgroundImageUrl(Box<str>),
+    /// A multi-layer `background-image` list: two or more comma-separated image
+    /// layers (see [`BackgroundLayer`]), in CSS author order (first = top). CSS
+    /// paints layers back-to-front, so the scene coordinator emits the list in
+    /// reverse (last-listed = bottom, painted first). The **one-layer** case is
+    /// never this variant — it keeps the flat single-value variant
+    /// ([`LinearGradient`](Self::LinearGradient) / [`RadialGradient`](Self::RadialGradient)
+    /// / [`ConicGradient`](Self::ConicGradient) / [`BackgroundImageUrl`](Self::BackgroundImageUrl))
+    /// so a single-layer background stays byte-identical (spec §5.2).
+    BackgroundLayers(Box<[BackgroundLayer]>),
     /// A `background-size` value (see [`BackgroundSize`]): how one copy of the
     /// `background-image` is scaled (`cover` / `contain` / `auto` / explicit
     /// per-axis lengths). The scene coordinator resolves it against the box and
@@ -213,6 +222,20 @@ impl PropertyValue {
     pub fn as_background_image_url(&self) -> Option<&str> {
         match self {
             Self::BackgroundImageUrl(url) => Some(url),
+            _ => None,
+        }
+    }
+
+    /// Returns the ordered multi-layer `background-image` list if this value is a
+    /// [`PropertyValue::BackgroundLayers`] (two or more layers, in author order).
+    ///
+    /// A single-layer background is *not* this variant (it stays a flat
+    /// gradient/url value), so callers that want to treat both cases uniformly
+    /// must also check the single accessors.
+    #[must_use]
+    pub fn as_background_layers(&self) -> Option<&[BackgroundLayer]> {
+        match self {
+            Self::BackgroundLayers(layers) => Some(layers),
             _ => None,
         }
     }
@@ -484,6 +507,29 @@ mod tests {
         assert_eq!(PropertyValue::Number(1.0).as_background_image_url(), None);
         // A url value is not a gradient, and vice versa.
         assert_eq!(value.as_linear_gradient(), None);
+    }
+
+    #[test]
+    fn as_background_layers_extracts_only_layer_lists() {
+        use crate::property::{BackgroundLayer, GradientStop, LinearGradient};
+        let layers: Box<[BackgroundLayer]> = Box::new([
+            BackgroundLayer::Linear(LinearGradient::new(
+                90.0,
+                vec![
+                    GradientStop::new(StyleColor::BLACK, 0.0),
+                    GradientStop::new(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 1.0),
+                ],
+            )),
+            BackgroundLayer::Url("x.png".into()),
+        ]);
+        let value = PropertyValue::BackgroundLayers(layers.clone());
+        assert_eq!(value.as_background_layers(), Some(&*layers));
+        // A single flat value is not a layer list, and vice versa.
+        assert_eq!(
+            PropertyValue::BackgroundImageUrl("x.png".into()).as_background_layers(),
+            None
+        );
+        assert_eq!(value.as_background_image_url(), None);
     }
 
     #[test]

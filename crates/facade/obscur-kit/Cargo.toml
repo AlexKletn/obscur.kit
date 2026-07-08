@@ -137,6 +137,16 @@ required-features = ["render-vello"]
 name = "repeating_gradient_proof"
 required-features = ["render-vello"]
 
+# Proof that a MULTI-LAYER `background-image` (a comma list) paints all layers
+# back-to-front: one box whose `background-image` is two crossing
+# `repeating-linear-gradient()`s over a `background-color`, driven through the full
+# CSS → runtime → Vello path and read back to `target/multi_bg_proof.png` as a
+# crossing graph-paper grid (both line sets). Needs the GPU adapter at runtime but
+# no window; gated on the Vello backend only.
+[[example]]
+name = "multi_bg_proof"
+required-features = ["render-vello"]
+
 # Proof that `border-style: dashed` renders as REAL dashes: two boxes (square +
 # rounded) with a `2px dashed` border, stroked as a dashed path and rasterized
 # headless through the CPU renderer to `target/dashed_border_proof.png`. Verifies

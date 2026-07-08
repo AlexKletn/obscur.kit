@@ -19,9 +19,9 @@ use obscur_scene::path::Path;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{
-    layout_keyword, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow, ConicGradient,
-    FilterOp, Length, LinearGradient, ObjectFit, PropertyId, PropertyValue, RadialGradient,
-    RadialSize, StyleColor, Transform, TransformOrigin,
+    layout_keyword, BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize,
+    BoxShadow, ConicGradient, FilterOp, Length, LinearGradient, ObjectFit, PropertyId,
+    PropertyValue, RadialGradient, RadialSize, StyleColor, Transform, TransformOrigin,
 };
 use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontResolver, FontSource,
@@ -766,8 +766,8 @@ impl SceneCoordinator {
                 // paint region), resolved by `background_image_geometry`. A URL not
                 // present in `images` (unloaded or failed) emits nothing, so the
                 // color background shows through — the regression-safe path
-                // (byte-identical when `images` is empty). Multiple background
-                // layers are still future work.
+                // (byte-identical when `images` is empty). This is the SINGLE-layer
+                // path; the multi-layer list is handled just below.
                 if let Some(image) = background_image_url_of(computed, node)
                     .and_then(|url| images.get(url))
                 {
@@ -780,6 +780,31 @@ impl SceneCoordinator {
                         repeat_x,
                         repeat_y,
                     );
+                }
+
+                // Multiple `background-image` layers (a comma list). CSS lists them
+                // top→bottom (first = top) and paints back-to-front, so we iterate
+                // in REVERSE: the last-listed (bottom) layer paints first, the
+                // first-listed (top) last. Every layer paints OVER the
+                // `background-color` fill emitted above and UNDER the border/content.
+                // The single-layer case never reaches here (it stays a flat value
+                // above), so one-layer backgrounds are byte-identical. Per-layer
+                // `background-size`/`-position`/`-repeat` currently reuse the node's
+                // single resolved value for every layer (those longhands are not yet
+                // comma lists).
+                if let Some(layers) = background_layers_of(computed, node) {
+                    for layer in layers.iter().rev() {
+                        paint_background_layer(
+                            &mut node_paint,
+                            layer,
+                            computed,
+                            node,
+                            layout_box.bounds,
+                            radii,
+                            has_radius,
+                            images,
+                        );
+                    }
                 }
             }
 
@@ -1325,6 +1350,81 @@ fn background_gradient_brush(
             .then(|| Brush::Conic(conic_gradient_brush(gradient, bounds)));
     }
     None
+}
+
+/// Reads a node's computed multi-layer `background-image` list (two or more
+/// comma-separated layers), in CSS author order (first = top), or [`None`] when
+/// the node has a single flat `background-image` (a lone gradient/url) or none.
+///
+/// The single-layer case is deliberately *not* reported here — it stays on the
+/// flat gradient/url paint path so a one-layer background is byte-identical.
+fn background_layers_of(computed: &ComputedStyles, node: NodeId) -> Option<&[BackgroundLayer]> {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::BackgroundImage))
+        .and_then(ComputedValue::as_background_layers)
+}
+
+/// Fills a node's border box with `brush`, choosing a rounded-rect outline when
+/// the node has a positive corner radius and a plain rectangle otherwise —
+/// the shared fill used by both the single background path and each background
+/// layer.
+fn fill_background_box(
+    paint: &mut DisplayListBuilder,
+    bounds: Rect,
+    radii: CornerRadii,
+    has_radius: bool,
+    brush: Brush,
+) {
+    if has_radius {
+        paint.fill(Path::rounded_rect(bounds, radii), brush);
+    } else {
+        paint.fill_rect(bounds, brush);
+    }
+}
+
+/// Paints one `background-image` [`BackgroundLayer`] over a node's border box
+/// `bounds`: a gradient fills the box (rounded when `has_radius`), a `url(...)`
+/// layer draws its resolved image with the node's `background-size`/`-position`/
+/// `-repeat` geometry (spec §5.2).
+///
+/// A stop-less gradient (never produced by the CSS lowering) and a `url(...)`
+/// whose image is absent from `images` (unloaded / failed) both paint nothing,
+/// letting the layers below show through.
+#[allow(clippy::too_many_arguments)]
+fn paint_background_layer(
+    paint: &mut DisplayListBuilder,
+    layer: &BackgroundLayer,
+    computed: &ComputedStyles,
+    node: NodeId,
+    bounds: Rect,
+    radii: CornerRadii,
+    has_radius: bool,
+    images: &HashMap<Box<str>, SceneImage>,
+) {
+    match layer {
+        BackgroundLayer::Linear(gradient) if !gradient.stops().is_empty() => {
+            let brush = Brush::Linear(linear_gradient_brush(gradient, bounds));
+            fill_background_box(paint, bounds, radii, has_radius, brush);
+        }
+        BackgroundLayer::Radial(gradient) if !gradient.stops().is_empty() => {
+            let brush = Brush::Radial(radial_gradient_brush(gradient, bounds));
+            fill_background_box(paint, bounds, radii, has_radius, brush);
+        }
+        BackgroundLayer::Conic(gradient) if !gradient.stops().is_empty() => {
+            let brush = Brush::Conic(conic_gradient_brush(gradient, bounds));
+            fill_background_box(paint, bounds, radii, has_radius, brush);
+        }
+        BackgroundLayer::Url(url) => {
+            if let Some(image) = images.get(&**url) {
+                let (tile, repeat_x, repeat_y) =
+                    background_image_geometry(computed, node, image, bounds);
+                paint.draw_image(image.clone(), tile, bounds, repeat_x, repeat_y);
+            }
+        }
+        // A stop-less gradient paints nothing.
+        BackgroundLayer::Linear(_) | BackgroundLayer::Radial(_) | BackgroundLayer::Conic(_) => {}
+    }
 }
 
 /// Reads a node's computed `background-image: url(...)` raw URL/path string, if
@@ -2904,6 +3004,75 @@ mod tests {
             })
             .collect();
         assert_eq!(kinds, vec!["fill", "image"], "color fills, image paints over it");
+    }
+
+    #[test]
+    fn multiple_background_layers_paint_back_to_front_over_color() {
+        use obscur_style::property::GradientStop as StyleStop;
+
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        // Two layers, in CSS author order: a linear gradient on TOP, a url image on
+        // the BOTTOM — over a background-color.
+        let gradient = LinearGradient::new(
+            90.0,
+            vec![
+                StyleStop::new(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 0.0),
+                StyleStop::new(StyleColor::rgba(0.0, 0.0, 1.0, 1.0), 1.0),
+            ],
+        );
+        let layers: Box<[BackgroundLayer]> = Box::new([
+            BackgroundLayer::Linear(gradient),
+            BackgroundLayer::Url("x.png".into()),
+        ]);
+        let mut style = with_background_image(PropertyValue::BackgroundLayers(layers));
+        style.set(
+            PropertyId::BackgroundColor,
+            ComputedValue::color(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)),
+        );
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(a, style);
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(a, box_at(0.0, 0.0, 100.0, 50.0));
+
+        let mut images = HashMap::new();
+        images.insert(Box::<str>::from("x.png"), canned_image());
+        let list =
+            SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
+        assert!(list.is_balanced());
+
+        // Paint order, bottom-to-top: the background-COLOR fill, then the BOTTOM
+        // layer (the url image, painted first), then the TOP layer (the gradient
+        // fill, painted last so it sits on top). BOTH a gradient fill and a
+        // DrawImage are emitted.
+        let kinds: Vec<&str> = list
+            .commands()
+            .iter()
+            .filter_map(|c| match c {
+                PaintCommand::DrawPath { .. } => Some("fill"),
+                PaintCommand::DrawImage { .. } => Some("image"),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            vec!["fill", "image", "fill"],
+            "color, then bottom url layer, then top gradient layer"
+        );
+        // The two fills are the solid background-color (bottom) and the gradient
+        // (top); the image draw is the middle (bottom) layer.
+        let brushes = fill_brushes(&list);
+        assert!(matches!(brushes[0], Brush::Solid(_)), "bg-color fills first");
+        assert!(
+            matches!(brushes[1], Brush::Linear(_)),
+            "the top gradient layer fills last"
+        );
+        assert_eq!(image_draws(&list).len(), 1, "the bottom url layer draws one image");
     }
 
     /// A `ComputedStyle` carrying a single `background-image` computed value.

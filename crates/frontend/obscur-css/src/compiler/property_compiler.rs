@@ -24,10 +24,10 @@ use obscur_geometry::AffineTransform;
 use obscur_identity::InternedSymbol;
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{
-    layout_keyword, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow, ConicGradient,
-    CustomProperty, FilterOp, GradientStop, GridAreaTemplate, GridLineValue, GridTrack,
-    GridTrackList, Length, LinearGradient, ObjectFit, PropertyId, PropertyValue, RadialGradient,
-    RadialShape, RadialSize, StyleColor, Transform, TransformOrigin,
+    layout_keyword, BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize,
+    BoxShadow, ConicGradient, CustomProperty, FilterOp, GradientStop, GridAreaTemplate,
+    GridLineValue, GridTrack, GridTrackList, Length, LinearGradient, ObjectFit, PropertyId,
+    PropertyValue, RadialGradient, RadialShape, RadialSize, StyleColor, Transform, TransformOrigin,
 };
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
@@ -2779,27 +2779,53 @@ fn repeat_axis_tiles(keyword: &str) -> Option<bool> {
 /// [`PropertyValue::BackgroundImageUrl`] carrying the **raw** authored URL/path
 /// string (quotes stripped for `url("…")`, or the reconstructed body for the
 /// unquoted `url(…)` form). The URL is *not* resolved here — the runtime hands it
-/// to a resource loader/decoder. `none` and multiple comma-separated images are
-/// out of scope and yield [`None`] (degrading to an unsupported-feature
+/// to a resource loader/decoder.
+///
+/// **Multiple layers**: `background-image` accepts a comma-separated list of image
+/// layers, in author order (first = top). This splits `values` on **top-level**
+/// commas only — the argument commas inside each `linear-gradient(…, …)` /
+/// `rgb(…, …)` live inside that component's [`ParsedValue::Function`] payload and
+/// are never seen here, so they never split a layer. Each segment lowers with the
+/// per-kind lowering. A single layer keeps the flat one-value result
+/// ([`PropertyValue::LinearGradient`] / …), **byte-identical** to before; two or
+/// more layers yield [`PropertyValue::BackgroundLayers`]. `none` and any
+/// unparseable / empty layer yield [`None`] (degrading to an unsupported-feature
 /// diagnostic).
 fn lower_background_image(values: &[ParsedValue]) -> Option<PropertyValue> {
+    let mut layers: Vec<BackgroundLayer> = Vec::new();
+    for segment in values.split(|v| matches!(v, ParsedValue::Comma)) {
+        layers.push(lower_background_layer(segment)?);
+    }
+    match layers.len() {
+        0 => None,
+        // One layer keeps today's exact flat single-value result.
+        1 => Some(layers.pop().expect("one layer present").into_property_value()),
+        _ => Some(PropertyValue::BackgroundLayers(layers.into_boxed_slice())),
+    }
+}
+
+/// Lowers a **single** `background-image` layer (one gradient or `url(...)`), the
+/// per-kind lowering shared by the one-layer and multi-layer paths.
+///
+/// Returns [`None`] for `none`, an unrecognized function, or an unparseable layer.
+fn lower_background_layer(values: &[ParsedValue]) -> Option<BackgroundLayer> {
     match values {
         [ParsedValue::Function { name, args }] if name.eq_ignore_ascii_case("linear-gradient") => {
-            lower_linear_gradient(args).map(PropertyValue::LinearGradient)
+            lower_linear_gradient(args).map(BackgroundLayer::Linear)
         }
         [ParsedValue::Function { name, args }]
             if name.eq_ignore_ascii_case("repeating-linear-gradient") =>
         {
-            lower_repeating_linear_gradient(args).map(PropertyValue::LinearGradient)
+            lower_repeating_linear_gradient(args).map(BackgroundLayer::Linear)
         }
         [ParsedValue::Function { name, args }] if name.eq_ignore_ascii_case("radial-gradient") => {
-            lower_radial_gradient(args).map(PropertyValue::RadialGradient)
+            lower_radial_gradient(args).map(BackgroundLayer::Radial)
         }
         [ParsedValue::Function { name, args }] if name.eq_ignore_ascii_case("conic-gradient") => {
-            lower_conic_gradient(args).map(PropertyValue::ConicGradient)
+            lower_conic_gradient(args).map(BackgroundLayer::Conic)
         }
         [ParsedValue::Function { name, args }] if name.eq_ignore_ascii_case("url") => {
-            lower_url(args).map(PropertyValue::BackgroundImageUrl)
+            lower_url(args).map(BackgroundLayer::Url)
         }
         _ => None,
     }
@@ -3922,6 +3948,62 @@ mod tests {
             compile("background-image: linear-gradient(red)").0,
             CompiledDeclaration::Unsupported(_)
         ));
+    }
+
+    #[test]
+    fn single_gradient_stays_one_flat_layer_byte_identical() {
+        // One layer keeps the flat single-value result — NOT a `BackgroundLayers`.
+        let value = value_of("background-image: linear-gradient(45deg, red, blue)");
+        assert!(matches!(value, PropertyValue::LinearGradient(_)));
+        assert_eq!(value.as_background_layers(), None);
+    }
+
+    #[test]
+    fn two_layers_gradient_then_url_lower_to_a_layer_list_in_order() {
+        // `gradient, url` → two layers, in author order (gradient first = top).
+        let value = value_of(r#"background-image: linear-gradient(90deg, red, blue), url("x.png")"#);
+        let layers = value
+            .as_background_layers()
+            .expect("two layers lower to a BackgroundLayers list");
+        assert_eq!(layers.len(), 2);
+        match &layers[0] {
+            BackgroundLayer::Linear(g) => assert_eq!(g.angle_deg(), 90.0),
+            other => panic!("expected a linear-gradient top layer, got {other:?}"),
+        }
+        assert_eq!(layers[1], BackgroundLayer::Url("x.png".into()));
+    }
+
+    #[test]
+    fn top_level_comma_split_does_not_split_inside_rgb_args() {
+        // The comma inside `rgb(0, 128, 255)` is a FUNCTION-argument comma, not a
+        // layer separator: this must stay ONE gradient layer with the rgb color,
+        // never two layers.
+        let value =
+            value_of("background-image: linear-gradient(rgb(0, 128, 255), rgb(255, 0, 0))");
+        match value {
+            PropertyValue::LinearGradient(g) => {
+                assert_eq!(g.stops().len(), 2);
+                let first = g.stops()[0].color();
+                assert!((first.r - 0.0).abs() < 1e-6);
+                assert!((first.b - 1.0).abs() < 1e-6);
+            }
+            other => panic!("expected a single linear gradient, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn three_repeating_and_url_layers_preserve_kind_and_order() {
+        // The graph-paper grid form plus a url: three layers top→bottom.
+        let value = value_of(concat!(
+            "background-image: repeating-linear-gradient(#e2e0d9 0 1px, transparent 1px 24px), ",
+            "repeating-linear-gradient(90deg, #e2e0d9 0 1px, transparent 1px 24px), ",
+            r#"url("bg.png")"#
+        ));
+        let layers = value.as_background_layers().expect("three layers");
+        assert_eq!(layers.len(), 3);
+        assert!(matches!(layers[0], BackgroundLayer::Linear(_)));
+        assert!(matches!(layers[1], BackgroundLayer::Linear(_)));
+        assert_eq!(layers[2], BackgroundLayer::Url("bg.png".into()));
     }
 
     #[test]

@@ -1,4 +1,6 @@
 //! Property module.
+mod background_layer;
+pub use background_layer::BackgroundLayer;
 mod background_position;
 pub use background_position::BackgroundPosition;
 mod background_repeat;
