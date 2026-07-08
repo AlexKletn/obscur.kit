@@ -684,3 +684,96 @@ fn f32s_to_bytes(values: &[f32]) -> Vec<u8> {
     }
     bytes
 }
+
+#[cfg(test)]
+mod tests {
+    //! Deterministic CPU port of the `blur_fs` decode → blur → encode pipeline,
+    //! validating (without a GPU) that convolving in **linear light** — per the
+    //! Filter Effects Module default `color-interpolation-filters: linearRGB` — keeps
+    //! a bright/dark boundary brighter than a naive gamma-sRGB gaussian, and that a
+    //! flat opaque region round-trips the transfer unchanged.
+    //!
+    //! These mirror the exact WGSL helpers/formulas in `gaussian_blur.wgsl`; the GPU
+    //! render `examples/blur_linear_light_proof.rs` proves the shader itself.
+
+    /// sRGB electro-optical transfer (decode gamma → linear), matching the shader.
+    fn srgb_to_linear(c: f32) -> f32 {
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    /// sRGB opto-electronic transfer (encode linear → gamma), matching the shader.
+    fn linear_to_srgb(c: f32) -> f32 {
+        if c <= 0.0031308 {
+            12.92 * c
+        } else {
+            1.055 * c.powf(1.0 / 2.4) - 0.055
+        }
+    }
+
+    /// One separable gaussian tap-sum over a 1-D row of opaque gamma samples at
+    /// `center`, done in `linear` light (decode → blur → encode) or naive gamma.
+    fn blur_at(row: &[f32], center: usize, sigma: f32, linear: bool) -> f32 {
+        let support = (sigma * 3.0).ceil() as i32;
+        let mut accum = 0.0_f32;
+        let mut wsum = 0.0_f32;
+        for i in -support..=support {
+            let idx = (center as i32 + i).clamp(0, row.len() as i32 - 1) as usize;
+            let fi = i as f32;
+            let w = (-(fi * fi) / (2.0 * sigma * sigma)).exp();
+            let s = row[idx];
+            accum += if linear { srgb_to_linear(s) } else { s } * w;
+            wsum += w;
+        }
+        let norm = accum / wsum.max(0.0001);
+        if linear { linear_to_srgb(norm) } else { norm }
+    }
+
+    #[test]
+    fn transfer_round_trips_near_identity() {
+        for step in 0..=255 {
+            let c = step as f32 / 255.0;
+            let back = linear_to_srgb(srgb_to_linear(c));
+            assert!((back - c).abs() < 1e-4, "round-trip drift at {c}: {back}");
+        }
+    }
+
+    #[test]
+    fn linear_light_blur_is_brighter_at_a_bright_dark_boundary() {
+        // A hard black→white step (0 on the left, 1 on the right), 41 samples wide.
+        let row: Vec<f32> = (0..41).map(|i| if i < 20 { 0.0 } else { 1.0 }).collect();
+        let sigma = 4.0;
+        // The geometric boundary sample (index 20) is the 50/50 crossover.
+        let gamma = blur_at(&row, 20, sigma, false);
+        let linear = blur_at(&row, 20, sigma, true);
+        // Gamma blur lands the crossover near the arithmetic mean ~0.5; linear light
+        // lands it near sRGB-encode(0.5) ≈ 0.735 — visibly brighter. This is the
+        // correctness fix, not a regression.
+        assert!(
+            linear > gamma + 0.15,
+            "linear blur ({linear}) should be well above gamma blur ({gamma}) at the boundary"
+        );
+        assert!(linear > 0.70, "linear crossover {linear} should be ~sRGB-encode(0.5)");
+    }
+
+    #[test]
+    fn flat_opaque_region_is_unchanged_by_the_blur() {
+        // Blur of a constant is that constant (the transfer round-trips), so a flat
+        // region stays byte-identical up to float epsilon in both color spaces.
+        let row = vec![0.6_f32; 41];
+        let linear = blur_at(&row, 20, 4.0, true);
+        assert!((linear - 0.6).abs() < 1e-4, "flat region drifted: {linear}");
+    }
+
+    #[test]
+    fn degenerate_blur_is_a_pass_through() {
+        // A near-zero sigma keeps only the center tap (weight 1), so the sample is
+        // returned unchanged — a zero-radius blur is a pass-through.
+        let row = vec![0.0, 0.25, 0.5, 0.75, 1.0];
+        let linear = blur_at(&row, 2, 0.0001, true);
+        assert!((linear - 0.5).abs() < 1e-3, "degenerate blur changed the center: {linear}");
+    }
+}

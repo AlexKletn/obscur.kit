@@ -119,6 +119,15 @@ required-features = ["full"]
 name = "blur_proof"
 required-features = ["render-vello"]
 
+# Proof that the gaussian blur convolves in LINEAR light (Filter Effects default
+# color-interpolation-filters: linearRGB): a saturated green box on a red background
+# blurred with a moderate radius, rendered headless to
+# `target/blur_linear_light_proof.png`. Self-asserts a transition-band pixel is
+# brighter than a gamma-space blur would give. Needs the GPU adapter at runtime.
+[[example]]
+name = "blur_linear_light_proof"
+required-features = ["render-vello"]
+
 # Proof that CSS `backdrop-filter: blur()` renders as REAL frosted glass / acrylic
 # through our own segmented wgpu compositing over Vello: a hard-edged checkerboard
 # backdrop with a translucent rounded panel on top whose backdrop is blurred in

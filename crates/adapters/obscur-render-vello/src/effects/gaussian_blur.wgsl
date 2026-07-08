@@ -9,6 +9,35 @@
 // All textures are premultiplied RGBA8 (Vello's output encoding); the blur is a
 // normalized weighted sum of premultiplied texels, which stays premultiplied, and
 // the composite blends premultiplied-over (`src * 1 + dst * (1 - src.a)`).
+//
+// Working space: per the Filter Effects Module Level 1, the initial value of
+// `color-interpolation-filters` is `linearRGB`, so `feGaussianBlur` — the primitive
+// CSS `filter: blur()` / `backdrop-filter: blur()` lower to — must convolve in
+// LINEAR light, not gamma-sRGB. A gamma-space gaussian darkens/muddies bright-on-
+// dark and colored edges. `blur_fs` therefore un-premultiplies each tap, decodes
+// sRGB→linear, re-premultiplies, sums in linear light, then re-encodes linear→sRGB
+// so the intermediate `Rgba8Unorm` texture stays gamma-premultiplied (its format and
+// the `composite_fs` premultiplied-gamma assumptions are unchanged; gamma storage
+// also keeps 8-bit precision in darks). The blur is separable, and the gamma
+// round-trip between the H and V passes is an identity up to 8-bit quantization, so
+// two 1-D linear passes compose to a true 2-D linear-light gaussian.
+
+// sRGB electro-optical transfer (sRGB §"The sRGB Color Space" / CSS Color 4),
+// applied to UN-premultiplied color components only.
+// Decode (gamma sRGB → linear): c <= 0.04045 ? c/12.92 : ((c+0.055)/1.055)^2.4.
+fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
+    let lo = c / 12.92;
+    let hi = pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4));
+    // WGSL `select(false_val, true_val, cond)`: pick `lo` where c <= 0.04045.
+    return select(hi, lo, c <= vec3<f32>(0.04045));
+}
+
+// Encode (linear → gamma sRGB): c <= 0.0031308 ? 12.92*c : 1.055*c^(1/2.4)-0.055.
+fn linear_to_srgb(c: vec3<f32>) -> vec3<f32> {
+    let lo = 12.92 * c;
+    let hi = 1.055 * pow(c, vec3<f32>(1.0 / 2.4)) - vec3<f32>(0.055);
+    return select(hi, lo, c <= vec3<f32>(0.0031308));
+}
 
 struct BlurParams {
     // Per-tap UV step for the blur direction: (1/width, 0) horizontal, (0, 1/height)
@@ -44,16 +73,35 @@ fn blur_fs(in: VsOut) -> @location(0) vec4<f32> {
     let sigma = max(blur.radius, 0.0001);
     // Gaussian support of 3 sigma each side captures ~99.7% of the kernel.
     let support = i32(ceil(blur.radius * 3.0));
+    // `accum` accumulates premultiplied LINEAR-light color (.rgb) and gamma-domain
+    // alpha (.a); both channels are simple normalized weighted sums.
     var accum = vec4<f32>(0.0);
     var wsum = 0.0;
     for (var i = -support; i <= support; i = i + 1) {
         let fi = f32(i);
         let w = exp(-(fi * fi) / (2.0 * sigma * sigma));
         let uv = in.uv + blur.direction * fi;
-        accum = accum + textureSampleLevel(src_tex, src_smp, uv, 0.0) * w;
+        // Premultiplied gamma texel t = (rgb', a). The sRGB transfer is defined on
+        // UN-premultiplied color, so un-premultiply → decode → re-premultiply in
+        // linear before summing.
+        let t = textureSampleLevel(src_tex, src_smp, uv, 0.0);
+        var lin_pm = vec3<f32>(0.0);
+        if (t.a > 0.0) {
+            lin_pm = srgb_to_linear(t.rgb / t.a) * t.a;
+        }
+        accum = accum + vec4<f32>(lin_pm, t.a) * w;
         wsum = wsum + w;
     }
-    return accum / max(wsum, 0.0001);
+    // Normalize → premultiplied linear. Re-encode to premultiplied gamma (un-
+    // premultiply → linear_to_srgb → re-premultiply) so the intermediate texture
+    // stays gamma-`Rgba8Unorm`, matching the second pass / `composite_fs`.
+    let norm = accum / max(wsum, 0.0001);
+    let a = norm.a;
+    var gamma_rgb = vec3<f32>(0.0);
+    if (a > 0.0) {
+        gamma_rgb = linear_to_srgb(norm.rgb / a) * a;
+    }
+    return vec4<f32>(gamma_rgb, a);
 }
 
 struct CompositeParams {
