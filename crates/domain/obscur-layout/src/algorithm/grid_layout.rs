@@ -161,107 +161,498 @@ impl GridLayout {
     }
 }
 
-/// The `(base, fr_weight, floor)` a single track contributes to track sizing.
+// ---------------------------------------------------------------------------
+// Canonical CSS Grid track-sizing algorithm (drafts.csswg.org/css-grid-2 §11).
+//
+// Every track carries TWO numbers — a growing floor `base` and a ceiling
+// `limit` (its "growth limit", possibly ∞) — plus its resolved min/max sizing
+// functions. The six staged steps below (§11.4 init, §11.5 resolve-intrinsic
+// span distribution, §11.5.1 distribute-up-to-limits, §11.6 maximise, §11.7
+// find-size-of-fr with restart, §11.8 stretch) replace the previous one-value
+// `(base, fr, floor)` single-pass model. Reimplemented from the spec; the
+// `taffy` crate was read for cross-reference only (not copied).
+//
+// # Content contributions (approximation, documented)
+//
+// The spec feeds each item's min-content AND max-content contribution into the
+// span-distribution sub-steps. We do not yet compute a distinct min/max-content
+// pair, so we approximate BOTH by a single measured contribution (the item's
+// size under a loose constraint). This collapses §11.5's five sub-steps to the
+// two that our track types (`Fixed`/`Percent`/`Auto`/`Fr`/`minmax`) exercise —
+// (a) grow the *base* of intrinsic-min (`auto`) tracks and (d) grow the *growth
+// limit* of intrinsic-max (`auto`) tracks. A proper min/max-content pair is a
+// separate follow-up; the STRUCTURE (two-value, span distribution, fr-restart,
+// maximise, stretch) is the fix even with a single measure.
+// ---------------------------------------------------------------------------
+
+/// Small epsilon so space distribution stops at ~0 instead of looping on f32
+/// rounding error (spec's distribution loops have no natural fixpoint at 0).
+const DISTRIBUTE_THRESHOLD: f32 = 1e-6;
+
+/// A track's resolved *min* sizing function (§11.4). A `Percent`/`Fixed` min is
+/// a definite length; `auto` (and a standalone/`minmax` `fr` min) is intrinsic.
+#[derive(Clone, Copy)]
+enum MinFn {
+    /// A definite length (fixed px or a resolved percentage).
+    Fixed(f32),
+    /// An intrinsic (`auto`) minimum — grows to fit content contributions.
+    Intrinsic,
+}
+
+/// A track's resolved *max* sizing function (§11.4).
+#[derive(Clone, Copy)]
+enum MaxFn {
+    /// A definite length (fixed px or a resolved percentage): the growth limit.
+    Fixed(f32),
+    /// An intrinsic (`auto`) maximum — an infinite initial growth limit.
+    Intrinsic,
+    /// A flexible (`fr`) maximum with the given flex factor.
+    Flex(f32),
+}
+
+/// One track's two-value sizing state during the §11 pipeline.
+struct Track {
+    /// The growing floor (§11 "base size").
+    base: f32,
+    /// The ceiling (§11 "growth limit"), `f32::INFINITY` while unbounded.
+    limit: f32,
+    min_fn: MinFn,
+    max_fn: MaxFn,
+    /// Scratch: this item's increase within one distribution round.
+    increase: f32,
+    /// Scratch: the largest per-item base increase planned across a sub-step.
+    planned_base: f32,
+    /// Scratch: the largest per-item growth-limit increase planned across a
+    /// sub-step.
+    planned_limit: f32,
+    /// Whether this track's growth limit turned finite in the current
+    /// growth-limit round (§11.5.1 "infinitely growable" flag).
+    infinitely_growable: bool,
+}
+
+/// The `min` sizing function of a track (§11.4). `axis` is the content extent a
+/// `Percent` bound resolves against.
 ///
-/// * `base` is the track's size before any `fr` space is distributed.
-/// * `fr_weight` is its flexible fraction (0 for inflexible tracks).
-/// * `floor` is the minimum the track may never drop below after distribution.
-///
-/// `auto_size` is the content size to use for `Auto` (or an `auto` `minmax`
-/// bound): the largest content extent among the items placed in this track.
-/// `axis_size` is the container's content extent along this axis (the content
-/// width for columns / content height for rows), the basis a
-/// [`Percent`](TrackSize::Percent) track resolves against.
-fn resolve_track(track: &TrackSize, auto_size: f32, axis_size: f32) -> (f32, f32, f32) {
+/// Per §7.2.3 a standalone `fr` is formally `minmax(auto, fr)` — an intrinsic
+/// (content) minimum. We instead floor it at `0`: our single-measure content
+/// approximation supplies a max-content value in place of a true min-content
+/// one, and using that as an `auto` minimum would wrongly inflate flexible
+/// tracks to their items' preferred size. Flooring at `0` keeps a plain `1fr`
+/// split identical to the previous model; a real `auto` fr-minimum awaits a
+/// genuine min-content contribution (documented, same caveat as the pair
+/// approximation above). An `fr` used as a `minmax` *min* is likewise invalid
+/// and acts as `0`.
+fn min_fn_of(track: &TrackSize, axis: f32) -> MinFn {
     match track {
-        TrackSize::Fixed(px) => {
-            let v = px.max(0.0);
-            (v, 0.0, v)
-        }
-        // A percentage resolves against the axis extent and, like a fixed track,
-        // is inflexible (it consumes its space before `fr` distribution).
-        TrackSize::Percent(f) => {
-            let v = (f * axis_size).max(0.0);
-            (v, 0.0, v)
-        }
-        TrackSize::Auto => {
-            let v = auto_size.max(0.0);
-            (v, 0.0, v)
-        }
-        TrackSize::Fr(f) => (0.0, f.max(0.0), 0.0),
-        TrackSize::MinMax(min, max) => {
-            let floor = resolve_min(min, auto_size, axis_size);
-            match max.as_ref() {
-                TrackSize::Fr(f) => (floor, f.max(0.0), floor),
-                TrackSize::Fixed(px) => (px.max(0.0).max(floor), 0.0, floor),
-                TrackSize::Percent(f) => ((f * axis_size).max(0.0).max(floor), 0.0, floor),
-                TrackSize::Auto => (auto_size.max(0.0).max(floor), 0.0, floor),
-                // A nested `minmax` as the `max` bound is not meaningful; keep the
-                // floor so the track never collapses below its `min`.
-                TrackSize::MinMax(_, _) => (floor, 0.0, floor),
+        TrackSize::Fixed(px) => MinFn::Fixed(px.max(0.0)),
+        TrackSize::Percent(f) => MinFn::Fixed((f * axis).max(0.0)),
+        TrackSize::Auto => MinFn::Intrinsic,
+        TrackSize::Fr(_) => MinFn::Fixed(0.0),
+        TrackSize::MinMax(min, _) => match min.as_ref() {
+            // An `fr` is not a valid `minmax` minimum — floor at 0.
+            TrackSize::Fr(_) => MinFn::Fixed(0.0),
+            other => min_fn_of(other, axis),
+        },
+    }
+}
+
+/// The `max` sizing function of a track (§11.4). A nested `minmax` as the `max`
+/// bound is not meaningful; it is treated as intrinsic (content-sized).
+fn max_fn_of(track: &TrackSize, axis: f32) -> MaxFn {
+    match track {
+        TrackSize::Fixed(px) => MaxFn::Fixed(px.max(0.0)),
+        TrackSize::Percent(f) => MaxFn::Fixed((f * axis).max(0.0)),
+        TrackSize::Auto => MaxFn::Intrinsic,
+        TrackSize::Fr(f) => MaxFn::Flex(f.max(0.0)),
+        TrackSize::MinMax(_, max) => match max.as_ref() {
+            TrackSize::MinMax(_, _) => MaxFn::Intrinsic,
+            other => max_fn_of(other, axis),
+        },
+    }
+}
+
+/// Whether a track participates in intrinsic (content) sizing — i.e. an item
+/// spanning it must be measured to feed §11.5. True for `auto` and any `minmax`
+/// with an `auto` bound (its min grows the base, its max grows the growth
+/// limit); false for pure fixed/percentage/`fr` tracks, which take no content
+/// contribution (a standalone `fr`'s min is floored at `0`, see [`min_fn_of`]).
+fn track_is_intrinsic(track: &TrackSize) -> bool {
+    let is_auto = |t: &TrackSize| matches!(t, TrackSize::Auto);
+    match track {
+        TrackSize::Auto => true,
+        TrackSize::MinMax(min, max) => is_auto(min) || is_auto(max),
+        _ => false,
+    }
+}
+
+/// §11.5.1 core — *Distribute extra space up to limits*. Grows the affected
+/// tracks in `tracks[lo..hi]` equally, freezing each as it reaches `limit_of`,
+/// by repeatedly raising all still-growable tracks by the smallest per-track
+/// headroom (or the even share, whichever is smaller). Accumulates into each
+/// track's `increase`; returns the space that could not be placed (all affected
+/// tracks hit their limit). Reused by §11.6 maximise.
+fn distribute_up_to_limits(
+    tracks: &mut [Track],
+    lo: usize,
+    hi: usize,
+    mut space: f32,
+    affected: impl Fn(&Track) -> bool,
+    base_of: impl Fn(&Track) -> f32,
+    limit_of: impl Fn(&Track) -> f32,
+) -> f32 {
+    while space > DISTRIBUTE_THRESHOLD {
+        // The growable set: affected tracks not yet at their limit.
+        let mut count = 0.0_f32;
+        let mut min_headroom = f32::INFINITY;
+        for t in &tracks[lo..hi] {
+            if affected(t) && base_of(t) + t.increase < limit_of(t) {
+                count += 1.0;
+                min_headroom = min_headroom.min(limit_of(t) - (base_of(t) + t.increase));
             }
         }
+        if count == 0.0 {
+            break;
+        }
+        // Raise every growable track by the even share, capped so the tightest
+        // track freezes exactly at its limit this round.
+        let per = (space / count).min(min_headroom);
+        for t in &mut tracks[lo..hi] {
+            if affected(t) && base_of(t) + t.increase < limit_of(t) {
+                t.increase += per;
+                space -= per;
+            }
+        }
+        // `per == space/count` exhausts the space; `per == min_headroom` freezes
+        // ≥1 track and loops. A pure-headroom round with 0 leftover also exits.
+        if per <= 0.0 {
+            break;
+        }
+    }
+    space
+}
+
+/// §11.5 sub-step (a) — grow the *base* of intrinsic-min tracks spanned by one
+/// item to fit its (approximated) contribution, then record the per-track
+/// increase as this sub-step's planned increase (flushed by [`flush_base`] so
+/// same-batch items don't double-count).
+fn distribute_to_base(tracks: &mut [Track], start: usize, span: usize, contribution: f32) {
+    let hi = (start + span).min(tracks.len());
+    for t in &mut tracks[start..hi] {
+        t.increase = 0.0;
+    }
+    let sum: f32 = tracks[start..hi].iter().map(|t| t.base).sum();
+    let extra = (contribution - sum).max(0.0);
+    if extra <= 0.0 {
+        return;
+    }
+    let affected = |t: &Track| matches!(t.min_fn, MinFn::Intrinsic);
+    let leftover = distribute_up_to_limits(
+        tracks,
+        start,
+        hi,
+        extra,
+        affected,
+        |t| t.base,
+        |t| t.limit,
+    );
+    // §11.5.1 "distribute space beyond limits": if affected tracks are frozen,
+    // give the remainder to those with an intrinsic max (or, failing that, to
+    // all affected tracks) growing without limit.
+    if leftover > DISTRIBUTE_THRESHOLD {
+        let beyond =
+            |t: &Track| matches!(t.min_fn, MinFn::Intrinsic) && matches!(t.max_fn, MaxFn::Intrinsic);
+        if tracks[start..hi].iter().any(beyond) {
+            distribute_up_to_limits(tracks, start, hi, leftover, beyond, |t| t.base, |_| f32::INFINITY);
+        } else {
+            distribute_up_to_limits(tracks, start, hi, leftover, affected, |t| t.base, |_| f32::INFINITY);
+        }
+    }
+    for t in &mut tracks[start..hi] {
+        t.planned_base = t.planned_base.max(t.increase);
+        t.increase = 0.0;
     }
 }
 
-/// Resolves the floor a `minmax` `min` bound imposes. An `fr` min acts as `0`; a
-/// `Percent` min resolves against `axis_size` exactly like a standalone percentage.
-fn resolve_min(track: &TrackSize, auto_size: f32, axis_size: f32) -> f32 {
-    match track {
-        TrackSize::Fixed(px) => px.max(0.0),
-        TrackSize::Percent(f) => (f * axis_size).max(0.0),
-        TrackSize::Auto => auto_size.max(0.0),
-        TrackSize::Fr(_) => 0.0,
-        TrackSize::MinMax(inner_min, _) => resolve_min(inner_min, auto_size, axis_size),
+/// §11.5 sub-step (d) — grow the *growth limit* of intrinsic-max tracks spanned
+/// by one item to fit its contribution. Space goes only to tracks whose limit
+/// is still infinite (or newly `infinitely_growable`); if none, it is
+/// distributed beyond limits to all affected tracks.
+fn distribute_to_limit(tracks: &mut [Track], start: usize, span: usize, contribution: f32) {
+    let hi = (start + span).min(tracks.len());
+    for t in &mut tracks[start..hi] {
+        t.increase = 0.0;
+    }
+    let affected = |t: &Track| matches!(t.max_fn, MaxFn::Intrinsic);
+    if !tracks[start..hi].iter().any(affected) {
+        return;
+    }
+    let sum: f32 = tracks[start..hi]
+        .iter()
+        .map(|t| if t.limit.is_infinite() { t.base } else { t.limit })
+        .sum();
+    let extra = (contribution - sum).max(0.0);
+    if extra <= 0.0 {
+        return;
+    }
+    let growable: Vec<usize> = (start..hi)
+        .filter(|&i| affected(&tracks[i]) && (tracks[i].infinitely_growable || tracks[i].limit.is_infinite()))
+        .collect();
+    if growable.is_empty() {
+        distribute_up_to_limits(
+            tracks,
+            start,
+            hi,
+            extra,
+            affected,
+            |t| if t.limit.is_infinite() { t.base } else { t.limit },
+            |_| f32::INFINITY,
+        );
+    } else {
+        let per = extra / growable.len() as f32;
+        for &i in &growable {
+            tracks[i].increase = per;
+        }
+    }
+    for t in &mut tracks[start..hi] {
+        t.planned_limit = t.planned_limit.max(t.increase);
+        t.increase = 0.0;
     }
 }
 
-/// Resolves a list of tracks to concrete pixel sizes along one axis.
+/// Flush planned base increases into `base` (§11.5, between sub-steps).
+fn flush_base(tracks: &mut [Track]) {
+    for t in tracks {
+        t.base += t.planned_base;
+        t.planned_base = 0.0;
+    }
+}
+
+/// Flush planned growth-limit increases into `limit` (§11.5.1); a limit that
+/// turns from ∞ to finite becomes `base + planned` and is marked
+/// `infinitely_growable` for the following growth-limit round.
+fn flush_limit(tracks: &mut [Track]) {
+    for t in tracks {
+        if t.planned_limit > 0.0 {
+            t.limit = if t.limit.is_infinite() {
+                t.base + t.planned_limit
+            } else {
+                t.limit + t.planned_limit
+            };
+            t.infinitely_growable = true;
+        } else {
+            t.infinitely_growable = false;
+        }
+        t.planned_limit = 0.0;
+    }
+}
+
+/// §11.5 — *Resolve Intrinsic Track Sizes*. Processes items in ascending span
+/// batches (span-1 first). Within each batch, sub-step (a) grows intrinsic-min
+/// bases and sub-step (d) grows intrinsic-max growth limits, each via
+/// [`distribute_up_to_limits`] over only the item's spanned tracks, flushing
+/// planned increases between sub-steps. Items are `(start, span, contribution)`.
+fn resolve_intrinsic(tracks: &mut [Track], items: &[(usize, usize, f32)]) {
+    let mut order: Vec<usize> = (0..items.len()).collect();
+    // Ascending span; span-1 items sized first (spec batches by span count).
+    order.sort_by_key(|&i| items[i].1);
+    let mut i = 0;
+    while i < order.len() {
+        let span = items[order[i]].1;
+        let mut j = i;
+        while j < order.len() && items[order[j]].1 == span {
+            j += 1;
+        }
+        // Sub-step (a): intrinsic minimums → base sizes.
+        for &k in &order[i..j] {
+            let (start, sp, contribution) = items[k];
+            if contribution > 0.0 {
+                distribute_to_base(tracks, start, sp, contribution);
+            }
+        }
+        flush_base(tracks);
+        // Sub-step (d): intrinsic maximums → growth limits.
+        for &k in &order[i..j] {
+            let (start, sp, contribution) = items[k];
+            if contribution > 0.0 {
+                distribute_to_limit(tracks, start, sp, contribution);
+            }
+        }
+        flush_limit(tracks);
+        i = j;
+    }
+    // Final: raise any growth limit below its base; give any still-∞ growth
+    // limit (empty tracks, flexible tracks) its base — this is what stops
+    // §11.6 maximise from inflating flexible tracks.
+    for t in tracks {
+        if t.limit < t.base {
+            t.limit = t.base;
+        }
+        if t.limit.is_infinite() {
+            t.limit = t.base;
+        }
+    }
+}
+
+/// §11.6 — *Maximise Tracks*. Distributes the free space (`avail − Σ base`) to
+/// every track's base up to its growth limit. (The spec's "infinite free space"
+/// branch — for an indefinite container — is subsumed here: with a finite but
+/// ample `avail`, every track reaches its growth limit anyway, and `auto`/`fr`
+/// tracks have `limit == base` so they are untouched.)
+fn maximise(tracks: &mut [Track], avail: f32) {
+    let used: f32 = tracks.iter().map(|t| t.base).sum();
+    let free = avail - used;
+    if free <= 0.0 {
+        return;
+    }
+    for t in tracks.iter_mut() {
+        t.increase = 0.0;
+    }
+    distribute_up_to_limits(tracks, 0, tracks.len(), free, |_| true, |t| t.base, |t| t.limit);
+    for t in tracks.iter_mut() {
+        t.base += t.increase;
+        t.increase = 0.0;
+    }
+}
+
+/// §11.7.1 — *Find the Size of an fr*. The largest `fr` such that
+/// `fr · factor ≥ base` for every flexible track; any flexible track failing
+/// that is demoted to inflexible and the search restarts (it converges).
+fn find_size_of_fr(tracks: &[Track], space: f32) -> f32 {
+    if space <= 0.0 {
+        return 0.0;
+    }
+    let mut hypo = f32::INFINITY;
+    loop {
+        let mut used = 0.0_f32;
+        let mut factor_sum = 0.0_f32;
+        for t in tracks {
+            match t.max_fn {
+                // A flexible track only counts while `factor · fr ≥ base`;
+                // otherwise it is (this iteration) treated as inflexible.
+                MaxFn::Flex(f) if f * hypo >= t.base => factor_sum += f,
+                _ => used += t.base,
+            }
+        }
+        let leftover = space - used;
+        let prev = hypo;
+        hypo = leftover / factor_sum.max(1.0);
+        let valid = tracks.iter().all(|t| match t.max_fn {
+            MaxFn::Flex(f) => f * hypo >= t.base || f * prev < t.base,
+            _ => true,
+        });
+        if valid {
+            break;
+        }
+    }
+    hypo
+}
+
+/// §11.7 — *Expand Flexible Tracks*. When there is free space, size each
+/// flexible track's base to `max(base, factor · fr)`.
+fn expand_flexible(tracks: &mut [Track], avail: f32) {
+    let used: f32 = tracks.iter().map(|t| t.base).sum();
+    if avail - used <= 0.0 {
+        return;
+    }
+    let fr = find_size_of_fr(tracks, avail);
+    for t in tracks.iter_mut() {
+        if let MaxFn::Flex(factor) = t.max_fn {
+            t.base = t.base.max(factor * fr);
+        }
+    }
+}
+
+/// §11.8 — *Stretch auto Tracks*. Splits any remaining positive free space
+/// equally among tracks whose *max* sizing function is `auto`. The caller only
+/// invokes this when the container axis is definite and its content alignment is
+/// `stretch`/`normal` (the default), matching the spec's preconditions.
+fn stretch_auto(tracks: &mut [Track], avail: f32) {
+    let count = tracks.iter().filter(|t| matches!(t.max_fn, MaxFn::Intrinsic)).count();
+    if count == 0 {
+        return;
+    }
+    let used: f32 = tracks.iter().map(|t| t.base).sum();
+    let free = avail - used;
+    if free <= 0.0 {
+        return;
+    }
+    let per = free / count as f32;
+    for t in tracks.iter_mut() {
+        if matches!(t.max_fn, MaxFn::Intrinsic) {
+            t.base += per;
+        }
+    }
+}
+
+/// Resolves a list of tracks to concrete pixel sizes along one axis via the
+/// canonical CSS-grid track-sizing algorithm (§11).
 ///
-/// `available` is the content extent along the axis, `gap` the inter-track gap,
-/// and `auto_size(i)` supplies the content size for track `i`'s `Auto` (or `auto`
-/// `minmax`) resolution. Fixed, percentage (resolved as `fraction * available`),
-/// and auto tracks take their base size; the space left over (after subtracting
-/// the gaps and those bases) is shared among the `fr` tracks in proportion to
-/// their fractions — the same free-space split
-/// [`FlexLayout`](super::FlexLayout) uses for `flex-grow`. Every track is then
-/// floored (per its `minmax` `min`) and clamped to be non-negative.
+/// `available` is the content extent along the axis and `gap` the inter-track
+/// gap; the *grid space* the tracks share is `available − gap · (n − 1)`.
+/// `definite` is whether the container's size along this axis is authored (not
+/// `auto`) and `stretch` whether its content alignment routes to §11.8 (the
+/// `stretch`/`normal` default). `items` are the grid items as
+/// `(start_track, span, content_contribution)`; only items crossing an intrinsic
+/// track need a real contribution (others pass `0`).
+///
+/// Simple cases — fixed tracks, a single `1fr` split with no floors, and
+/// non-spanning items — resolve to the same sizes as the previous single-pass
+/// model; fr-restart, span distribution, maximise, and stretch change only the
+/// cases they were added to fix.
 fn resolve_tracks(
-    tracks: &[TrackSize],
+    track_sizes: &[TrackSize],
     available: f32,
     gap: f32,
-    auto_size: impl Fn(usize) -> f32,
+    definite: bool,
+    stretch: bool,
+    items: &[(usize, usize, f32)],
 ) -> Vec<f32> {
-    let n = tracks.len();
+    let n = track_sizes.len();
     if n == 0 {
         return Vec::new();
     }
     let gap_span = gap * (n.saturating_sub(1) as f32);
-    let free_space = (available - gap_span).max(0.0);
+    // The grid space the tracks share (gutters always consume their space).
+    let avail = (available - gap_span).max(0.0);
 
-    let mut sizes = Vec::with_capacity(n);
-    let mut floors = Vec::with_capacity(n);
-    let mut frs = Vec::with_capacity(n);
-    for (i, track) in tracks.iter().enumerate() {
-        let (base, fr, floor) = resolve_track(track, auto_size(i), available);
-        sizes.push(base);
-        frs.push(fr);
-        floors.push(floor);
+    // §11.4 Initialize each track's base size and growth limit.
+    let mut tracks: Vec<Track> = track_sizes
+        .iter()
+        .map(|ts| {
+            let min_fn = min_fn_of(ts, available);
+            let max_fn = max_fn_of(ts, available);
+            let base = match min_fn {
+                MinFn::Fixed(v) => v,
+                MinFn::Intrinsic => 0.0,
+            };
+            let mut limit = match max_fn {
+                MaxFn::Fixed(v) => v,
+                MaxFn::Intrinsic | MaxFn::Flex(_) => f32::INFINITY,
+            };
+            if limit < base {
+                limit = base;
+            }
+            Track {
+                base,
+                limit,
+                min_fn,
+                max_fn,
+                increase: 0.0,
+                planned_base: 0.0,
+                planned_limit: 0.0,
+                infinitely_growable: false,
+            }
+        })
+        .collect();
+
+    resolve_intrinsic(&mut tracks, items); // §11.5
+    maximise(&mut tracks, avail); // §11.6
+    expand_flexible(&mut tracks, avail); // §11.7
+    if definite && stretch {
+        stretch_auto(&mut tracks, avail); // §11.8
     }
 
-    let sum_base: f32 = sizes.iter().copied().sum();
-    let sum_fr: f32 = frs.iter().copied().sum();
-    let leftover = (free_space - sum_base).max(0.0);
-    if sum_fr > 0.0 && leftover > 0.0 {
-        for (size, &fr) in sizes.iter_mut().zip(frs.iter()) {
-            *size += leftover * fr / sum_fr;
-        }
-    }
-
-    for (size, &floor) in sizes.iter_mut().zip(floors.iter()) {
-        *size = size.max(floor).max(0.0);
-    }
-    sizes
+    tracks.iter().map(|t| t.base.max(0.0)).collect()
 }
 
 /// Running start offsets for a track list: `offsets[i] = origin + Σ_{k<i}
@@ -834,19 +1225,35 @@ impl LayoutAlgorithm for GridLayout {
             })
             .collect();
 
-        // Step 2: column track sizing. An `Auto`/`minmax` column sizes to the
-        // widest item anchored in it; a spanning item attributes its content
-        // width to its FIRST spanned column (a deterministic simplification).
+        // Step 2: column track sizing via the canonical §11 pipeline. Each item
+        // crossing an intrinsic (`auto`/`fr`/intrinsic-`minmax`) column supplies
+        // a content-width contribution measured under a loose constraint; the
+        // algorithm distributes each spanning item's contribution across ALL its
+        // spanned tracks (not just the first). `justify-content: stretch`/`normal`
+        // (the default) routes leftover space to §11.8 stretch of `auto` columns.
         let loose = BoxConstraints::loose(Size::new(content_width, content_height));
-        let mut auto_col = vec![0.0_f32; n_cols];
-        for (i, &c0) in place_col.iter().enumerate() {
-            if let TrackSize::Auto | TrackSize::MinMax(_, _) = cols_effective[c0] {
-                let w = measurer.measure_child(i, loose).width;
-                auto_col[c0] = auto_col[c0].max(w);
-            }
+        let col_definite = !style.width.is_auto();
+        let col_stretch = matches!(style.justify_content, JustifyContent::FlexStart);
+        let mut col_items: Vec<(usize, usize, f32)> = Vec::with_capacity(count);
+        for i in 0..count {
+            let (start, span) = (place_col[i], col_span[i]);
+            let crosses_intrinsic = (start..(start + span).min(cols_effective.len()))
+                .any(|c| track_is_intrinsic(&cols_effective[c]));
+            let contribution = if crosses_intrinsic {
+                measurer.measure_child(i, loose).width
+            } else {
+                0.0
+            };
+            col_items.push((start, span, contribution));
         }
-        let mut col_sizes =
-            resolve_tracks(&cols_effective, content_width, self.column_gap, |c| auto_col[c]);
+        let mut col_sizes = resolve_tracks(
+            &cols_effective,
+            content_width,
+            self.column_gap,
+            col_definite,
+            col_stretch,
+            &col_items,
+        );
         // `auto-fit`: a generated column no item landed in collapses to zero width
         // (its surrounding gaps collapse in `track_offsets`).
         let col_collapsed = collapsed_tracks(n_cols, col_autofit, &place_col, &col_span);
@@ -871,17 +1278,12 @@ impl LayoutAlgorithm for GridLayout {
             );
         }
 
-        // Step 3: row track sizing. Explicit rows come from the template; rows
-        // past it are implicit, sized by `grid-auto-rows` (cycled; empty → auto).
-        // Auto/implicit rows size to the tallest item anchored in them (a spanning
-        // item attributes its height to its FIRST spanned row).
-        let mut auto_row = vec![0.0_f32; n_rows];
-        for i in 0..count {
-            let r0 = place_row[i];
-            auto_row[r0] = auto_row[r0].max(item_size[i].height);
-        }
-        // Implicit rows (past the explicit template) are sized by `grid-auto-rows`
-        // (cycled; empty → `Auto` — the historical tallest-item content sizing).
+        // Step 3: row track sizing via the same §11 pipeline. Explicit rows come
+        // from the template; rows past it are implicit, sized by `grid-auto-rows`
+        // (cycled; empty → auto). Each item crossing an intrinsic row contributes
+        // its measured height (with its width already fixed to its column span);
+        // the algorithm distributes a row-spanning item's height across its
+        // spanned rows. `align-content: stretch`/`normal` routes to §11.8.
         let auto_rows = self.template.auto_rows();
         let explicit_rows = rows_expanded.len();
         let rows_effective: Vec<TrackSize> = (0..n_rows)
@@ -892,8 +1294,28 @@ impl LayoutAlgorithm for GridLayout {
                     .unwrap_or_else(|| implicit_track(auto_rows, r - explicit_rows))
             })
             .collect();
-        let mut row_sizes =
-            resolve_tracks(&rows_effective, content_height, self.row_gap, |r| auto_row[r]);
+        let row_definite = !style.height.is_auto();
+        let row_stretch = matches!(style.align_content, JustifyContent::FlexStart);
+        let mut row_items: Vec<(usize, usize, f32)> = Vec::with_capacity(count);
+        for i in 0..count {
+            let (start, span) = (place_row[i], row_span[i]);
+            let crosses_intrinsic = (start..(start + span).min(rows_effective.len()))
+                .any(|r| track_is_intrinsic(&rows_effective[r]));
+            let contribution = if crosses_intrinsic {
+                item_size[i].height
+            } else {
+                0.0
+            };
+            row_items.push((start, span, contribution));
+        }
+        let mut row_sizes = resolve_tracks(
+            &rows_effective,
+            content_height,
+            self.row_gap,
+            row_definite,
+            row_stretch,
+            &row_items,
+        );
         // `auto-fit` on the row axis: collapse the generated rows with no item.
         let row_collapsed = collapsed_tracks(n_rows, row_autofit, &place_row, &row_span);
         for (size, &collapsed) in row_sizes.iter_mut().zip(row_collapsed.iter()) {
@@ -2393,5 +2815,148 @@ mod tests {
         // Columns shifted to the end (x = 100 / 150); rows unshifted (y = 0).
         assert_eq!(b[0].origin(), Point::new(100.0, 0.0));
         assert_eq!(b[1].origin(), Point::new(150.0, 0.0));
+    }
+
+    // ---- Canonical §11 track-sizing pipeline: the four divergence fixes plus a
+    // regression that the simple even-split path is unchanged. ----
+
+    // (fr-restart, §11.7) `minmax(200px,1fr) 1fr` in a 300px container. Track 0's
+    // fr share (150) is below its 200px floor, so it pins at 200 and its UNUSED
+    // fr share flows to track 1, which takes ALL the remaining 100 (not a 50/50
+    // split). The old single-pass fr gave track 1 only 50.
+    #[test]
+    fn fr_restart_gives_unused_share_to_other_flex_track() {
+        let style = LayoutStyle {
+            width: Dimension::Px(300.0),
+            ..LayoutStyle::default()
+        };
+        let children = [child(1), child(2)];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(0.0, 10.0), Size::new(0.0, 10.0)]);
+        let g = grid(
+            vec![
+                TrackSize::minmax(TrackSize::Fixed(200.0), TrackSize::Fr(1.0)),
+                TrackSize::Fr(1.0),
+            ],
+            vec![],
+            0.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(300.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].size().width, 200.0);
+        assert_eq!(b[1].origin().x, 200.0);
+        assert_eq!(b[1].size().width, 100.0);
+    }
+
+    // (span distribution, §11.5) `auto auto` with a colspan-2 item 200px wide:
+    // its content is shared ACROSS both auto tracks (100 each), not attributed to
+    // the first spanned track alone. A following 1×1 item in column 0 fills that
+    // 100px cell — proving column 0 is 100 (the old code sized it 200).
+    #[test]
+    fn spanning_item_shares_content_across_auto_tracks() {
+        let style = LayoutStyle::default();
+        let children = [
+            placed(1, GridPlacement::column(GridLine::Auto, GridLine::Span(2))),
+            child(2),
+        ];
+        // Item 0 is 200px wide (crosses both auto cols); item 1 is zero-width.
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(200.0, 20.0), Size::new(0.0, 10.0)]);
+        let g = grid(vec![TrackSize::Auto, TrackSize::Auto], vec![], 0.0, 0.0);
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(1000.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // The span-2 item covers both 100px tracks → 200 wide at x = 0.
+        assert_eq!(b[0].origin().x, 0.0);
+        assert_eq!(b[0].size().width, 200.0);
+        // The 1×1 item lands in column 0 (row 1) and fills its cell: width 100
+        // confirms the 200px content was split 100/100, not dumped on column 0.
+        assert_eq!(b[1].origin().x, 0.0);
+        assert_eq!(b[1].size().width, 100.0);
+    }
+
+    // (maximise, §11.6) `minmax(100px,300px)` alone in a 500px container grows to
+    // its 300px growth limit (free space is distributed up to the limit). The old
+    // model left it at its 100px floor.
+    #[test]
+    fn maximise_grows_minmax_to_its_growth_limit() {
+        let style = LayoutStyle {
+            width: Dimension::Px(500.0),
+            ..LayoutStyle::default()
+        };
+        let children = [child(1)];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(50.0, 20.0)]);
+        let g = grid(
+            vec![TrackSize::minmax(TrackSize::Fixed(100.0), TrackSize::Fixed(300.0))],
+            vec![],
+            0.0,
+            0.0,
+        );
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(500.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].size().width, 300.0);
+    }
+
+    // (stretch, §11.8) `auto auto` in a definite 400px container with small
+    // content: with the default (`normal`/`stretch`) content alignment the two
+    // auto tracks each stretch to fill 200px. The old model packed them at the
+    // start at their content size.
+    #[test]
+    fn stretch_expands_auto_tracks_to_fill_definite_container() {
+        let style = LayoutStyle {
+            width: Dimension::Px(400.0),
+            ..LayoutStyle::default()
+        };
+        let children = [child(1), child(2)];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(30.0, 10.0), Size::new(30.0, 10.0)]);
+        let g = grid(vec![TrackSize::Auto, TrackSize::Auto], vec![], 0.0, 0.0);
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(400.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].origin().x, 0.0);
+        assert_eq!(b[0].size().width, 200.0);
+        assert_eq!(b[1].origin().x, 200.0);
+        assert_eq!(b[1].size().width, 200.0);
+    }
+
+    // (regression) a plain `1fr 1fr` even split is unchanged by the new pipeline:
+    // two equal halves of the 300px content width.
+    #[test]
+    fn even_fr_split_is_unchanged_by_pipeline() {
+        let style = LayoutStyle::default();
+        let children = [child(1), child(2)];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(0.0, 10.0), Size::new(0.0, 10.0)]);
+        let g = grid(vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)], vec![], 0.0, 0.0);
+        let out = g.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(300.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].size().width, 150.0);
+        assert_eq!(b[1].origin().x, 150.0);
+        assert_eq!(b[1].size().width, 150.0);
     }
 }
