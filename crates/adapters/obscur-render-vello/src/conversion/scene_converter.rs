@@ -619,8 +619,15 @@ fn draw_shadow(
     inset: bool,
     transform: Affine,
 ) {
-    // Drop shadows inflate by `spread`; inset shadows deflate by it.
-    let inflate = f64::from(if inset { -spread } else { spread });
+    // An inset shadow is an *inner* shadow confined to the box, not an offset
+    // rounded rect — it takes its own path so it is clipped to the box interior
+    // and painted as a soft frame rather than a filled blob.
+    if inset {
+        draw_inset_shadow(scene, rect, radii, color, blur, spread, offset, transform);
+        return;
+    }
+    // Drop shadows inflate by `spread`.
+    let inflate = f64::from(spread);
     let (ox, oy) = (f64::from(offset.0), f64::from(offset.1));
     let x0 = f64::from(rect.origin.x) + ox - inflate;
     let y0 = f64::from(rect.origin.y) + oy - inflate;
@@ -643,6 +650,94 @@ fn draw_shadow(
     let std_dev = f64::from(blur.max(0.0)) / 2.0;
     let peniko_color = ColorConverter::new().convert(color);
     scene.draw_blurred_rounded_rect(transform, kurbo_rect, peniko_color, radius, std_dev);
+}
+
+/// Rasterizes an **inset** `box-shadow` as an inner shadow confined to the box.
+///
+/// Unlike a drop shadow (a blurred rounded rect behind the box), an inset shadow
+/// darkens the *inside* edges of the box. It is built in three steps, all clipped
+/// to the box's rounded border box so nothing can bleed outside it:
+///
+/// 1. Push a clip layer to the box's rounded rect (the confinement + isolation).
+/// 2. Fill that whole shape with the shadow color.
+/// 3. Punch a hole in the fill with a blurred rounded rect — the box deflated by
+///    `spread` and shifted by `offset` — composited with [`Compose::DestOut`], so
+///    only the soft frame between the box edge and the hole survives. The blur
+///    feathers the hole's edge, giving the standard inner-shadow gradient; with
+///    `blur == 0` and a positive `spread` the frame is a crisp inner ring.
+///
+/// The hole is punched with an opaque color because `DestOut` uses only the source
+/// alpha; the visible shadow keeps the authored color's own alpha from step 2.
+#[allow(clippy::too_many_arguments)]
+fn draw_inset_shadow(
+    scene: &mut Scene,
+    rect: &obscur_geometry::Rect,
+    radii: &obscur_geometry::CornerRadii,
+    color: obscur_scene::color::Color,
+    blur: f32,
+    spread: f32,
+    offset: (f32, f32),
+    transform: Affine,
+) {
+    let bx0 = f64::from(rect.origin.x);
+    let by0 = f64::from(rect.origin.y);
+    let bx1 = f64::from(rect.origin.x + rect.size.width);
+    let by1 = f64::from(rect.origin.y + rect.size.height);
+    if bx1 <= bx0 || by1 <= by0 {
+        return;
+    }
+    // A single corner radius: the max of the four (documented approximation),
+    // matching the drop-shadow path.
+    let radius = f64::from(
+        radii
+            .top_left
+            .max(radii.top_right)
+            .max(radii.bottom_right)
+            .max(radii.bottom_left)
+            .max(0.0),
+    );
+    let box_shape = KurboRect::new(bx0, by0, bx1, by1).to_rounded_rect(radius);
+    let peniko_color = ColorConverter::new().convert(color);
+
+    // (1) Clip + isolate to the box: the inner shadow can never escape it.
+    scene.push_layer(
+        peniko::Fill::NonZero,
+        peniko::BlendMode::default(),
+        1.0,
+        transform,
+        &box_shape,
+    );
+    // (2) Paint the shadow color across the whole box interior.
+    scene.fill(peniko::Fill::NonZero, transform, peniko_color, None, &box_shape);
+
+    // (3) Punch out the lit interior (box deflated by `spread`, shifted by
+    // `offset`), blurred, leaving only the inner frame.
+    let sp = f64::from(spread);
+    let ox = f64::from(offset.0);
+    let oy = f64::from(offset.1);
+    let ix0 = bx0 + ox + sp;
+    let iy0 = by0 + oy + sp;
+    let ix1 = bx1 + ox - sp;
+    let iy1 = by1 + oy - sp;
+    if ix1 > ix0 && iy1 > iy0 {
+        let inner = KurboRect::new(ix0, iy0, ix1, iy1);
+        let inner_radius = (radius - sp).max(0.0);
+        let std_dev = f64::from(blur.max(0.0)) / 2.0;
+        // Opaque punch: `DestOut` clears the destination by the source alpha.
+        let punch = peniko::Color::new([
+            peniko_color.components[0],
+            peniko_color.components[1],
+            peniko_color.components[2],
+            1.0,
+        ]);
+        let dest_out = peniko::BlendMode::new(peniko::Mix::Normal, peniko::Compose::DestOut);
+        scene.push_layer(peniko::Fill::NonZero, dest_out, 1.0, transform, &box_shape);
+        scene.draw_blurred_rounded_rect(transform, inner, punch, inner_radius, std_dev);
+        scene.pop_layer();
+    }
+    // Close the box clip layer. A collapsed inner rect (huge `spread`) leaves the
+    // whole box filled with the shadow color — the correct limit.
+    scene.pop_layer();
 }
 
 /// A `Sized` wrapper over a shared `Arc<[u8]>` pixel buffer so it can back a
@@ -989,7 +1084,7 @@ mod tests {
     }
 
     #[test]
-    fn inset_shadow_converts_without_panicking() {
+    fn inset_shadow_produces_non_empty_balanced_scene() {
         use obscur_geometry::CornerRadii;
         let list = DisplayList::from_commands(vec![PaintCommand::DrawShadow {
             rect: Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 20.0)),
@@ -1000,8 +1095,28 @@ mod tests {
             offset: (0.0, 0.0),
             inset: true,
         }]);
-        // Must not panic (inset is approximated).
-        let _scene = SceneConverter::new().convert(&list);
+        // The inner-frame path (box clip + fill + DestOut punch) encodes content
+        // and every pushed layer is popped (must not panic or dangle).
+        let scene = SceneConverter::new().convert(&list);
+        assert!(!scene.encoding().is_empty());
+    }
+
+    #[test]
+    fn inset_shadow_with_collapsed_hole_still_converts() {
+        use obscur_geometry::CornerRadii;
+        // A spread larger than half the box collapses the inner hole: the whole box
+        // fills with the shadow color (no punch layer) and must not panic.
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawShadow {
+            rect: Rect::new(Point::new(0.0, 0.0), Size::new(10.0, 10.0)),
+            radii: CornerRadii::default(),
+            color: Color::BLACK,
+            blur: 0.0,
+            spread: 40.0,
+            offset: (0.0, 0.0),
+            inset: true,
+        }]);
+        let scene = SceneConverter::new().convert(&list);
+        assert!(!scene.encoding().is_empty());
     }
 
     #[test]

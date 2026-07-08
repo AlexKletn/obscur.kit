@@ -145,6 +145,15 @@ required-features = ["render-cpu"]
 name = "outline_proof"
 required-features = ["render-cpu"]
 
+# Proof that an `inset` box-shadow renders INSIDE the box: two light boxes over a
+# grey page, one with a crisp inner ring (`0 0 0 3px inset`) and one with a soft
+# inner shadow (`inset 0 4px 8px`), rasterized headless through the CPU renderer to
+# `target/inset_shadow_proof.png`. Verifies the ring is inked at the box edge, clear
+# at the center, and untouched outside the box (no bleed). No window or GPU.
+[[example]]
+name = "inset_shadow_proof"
+required-features = ["render-cpu"]
+
 # Proof of CSS `overflow` clipping: two 100×60 boxes, each holding a child that
 # extends beyond it. The left box is `overflow: hidden` (the child is clipped to
 # the box edges); the right box is `overflow: visible` (the child overflows). It

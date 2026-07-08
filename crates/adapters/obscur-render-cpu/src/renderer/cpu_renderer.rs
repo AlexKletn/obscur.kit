@@ -612,14 +612,16 @@ const SHADOW_APPROX_ALPHA: f32 = 0.5;
 /// Rasterizes a CSS `box-shadow` as a **flat**, offset rounded rectangle at
 /// reduced alpha — the software backend's blur-free approximation (spec §5.2).
 ///
-/// The box's border box `rect` is translated by `offset` and inflated (a drop
-/// shadow) or deflated (an inset shadow) by `spread`, then filled as a rounded
-/// rect (`radii`) in the shadow `color` at [`SHADOW_APPROX_ALPHA`] of its alpha.
-/// The `blur` radius is **ignored** (this backend has no gaussian blur), so the
-/// mark is a hard-edged, semi-transparent rounded rect rather than a soft shadow —
-/// a documented approximation that keeps device-free callers deterministic. An
-/// inset shadow is drawn at its deflated geometry (inside the box); a degenerate
-/// (non-positive) rect draws nothing.
+/// The box's border box `rect` is translated by `offset` and inflated by `spread`,
+/// then filled as a rounded rect (`radii`) in the shadow `color` at
+/// [`SHADOW_APPROX_ALPHA`] of its alpha. The `blur` radius is **ignored** (this
+/// backend has no gaussian blur), so the mark is a hard-edged, semi-transparent
+/// rounded rect rather than a soft shadow — a documented approximation that keeps
+/// device-free callers deterministic.
+///
+/// An **inset** shadow takes [`draw_inset_shadow_approx`] instead: it renders as an
+/// inner *frame* (a rounded-rect ring) confined to the box, not an offset blob.
+/// A degenerate (non-positive) rect draws nothing.
 #[allow(clippy::too_many_arguments)]
 fn draw_shadow_approx(
     pixmap: &mut tiny_skia::Pixmap,
@@ -632,8 +634,13 @@ fn draw_shadow_approx(
     clip: Option<&tiny_skia::Mask>,
     transform: tiny_skia::Transform,
 ) {
-    // Drop shadows inflate by `spread`; inset shadows deflate by it.
-    let inflate = if inset { -spread } else { spread };
+    // An inset shadow is an inner frame confined to the box, not an offset rect.
+    if inset {
+        draw_inset_shadow_approx(pixmap, rect, radii, color, spread, offset, clip, transform);
+        return;
+    }
+    // Drop shadows inflate by `spread`.
+    let inflate = spread;
     let (ox, oy) = offset;
     let x = rect.origin.x + ox - inflate;
     let y = rect.origin.y + oy - inflate;
@@ -655,6 +662,70 @@ fn draw_shadow_approx(
         &sk_path,
         &sk_paint,
         tiny_skia::FillRule::Winding,
+        transform,
+        clip,
+    );
+}
+
+/// Rasterizes an **inset** `box-shadow` as an inner frame confined to the box —
+/// the software backend's blur-free approximation of a CSS inner shadow (spec §5.2).
+///
+/// The shadow darkens the inside edges of the box, so it is drawn as a rounded-rect
+/// *ring*: the border box `rect` (with `radii`) as the outer outline, and the box
+/// deflated by `spread` and shifted by `offset` as the inner hole, filled with the
+/// even-odd rule ([`Path::rounded_rect_ring`]). Because the ring lives entirely
+/// inside the border box, the shadow is naturally confined to the box (an inset
+/// shadow never bleeds outside it). With `spread > 0` and no blur this is a crisp
+/// inner ring; an `offset` makes the frame thicker on the side opposite the shift —
+/// the inner-shadow look. The `blur` radius is unavailable on this backend, so the
+/// frame is hard-edged (documented approximation); it keeps the shadow color's own
+/// alpha, since the ring geometry is exact and there is no softness to fake. A
+/// collapsed inner rect (huge `spread`) fills the whole box; a degenerate box draws
+/// nothing.
+#[allow(clippy::too_many_arguments)]
+fn draw_inset_shadow_approx(
+    pixmap: &mut tiny_skia::Pixmap,
+    rect: Rect,
+    radii: CornerRadii,
+    color: Color,
+    spread: f32,
+    offset: (f32, f32),
+    clip: Option<&tiny_skia::Mask>,
+    transform: tiny_skia::Transform,
+) {
+    if rect.size.width <= 0.0 || rect.size.height <= 0.0 {
+        return;
+    }
+    let (ox, oy) = offset;
+    // The lit hole: the box deflated by `spread`, shifted by `offset`.
+    let ix = rect.origin.x + ox + spread;
+    let iy = rect.origin.y + oy + spread;
+    let iw = 2.0f32.mul_add(-spread, rect.size.width);
+    let ih = 2.0f32.mul_add(-spread, rect.size.height);
+    let Some(sk_paint) = solid_paint(color) else {
+        return;
+    };
+    // A collapsed hole → the whole box interior is shadow (fill it solid).
+    let path = if iw <= 0.0 || ih <= 0.0 {
+        Path::rounded_rect(rect, radii)
+    } else {
+        let inner = Rect::new(Point::new(ix, iy), Size::new(iw, ih));
+        // Inner corners round with the frame: reduce each radius by `spread`.
+        let inner_radii = CornerRadii {
+            top_left: (radii.top_left - spread).max(0.0),
+            top_right: (radii.top_right - spread).max(0.0),
+            bottom_right: (radii.bottom_right - spread).max(0.0),
+            bottom_left: (radii.bottom_left - spread).max(0.0),
+        };
+        Path::rounded_rect_ring(rect, radii, inner, inner_radii)
+    };
+    let Some(sk_path) = to_sk_path(&path) else {
+        return;
+    };
+    pixmap.fill_path(
+        &sk_path,
+        &sk_paint,
+        to_sk_fill_rule(path.fill_rule()),
         transform,
         clip,
     );
@@ -1722,6 +1793,48 @@ mod tests {
         assert!(inside.alpha() < 200, "shadow is reduced alpha: {}", inside.alpha());
         // A pixel outside the offset rect (top-left corner) is untouched.
         assert_eq!(pixmap.pixel(0, 0).expect("pixel exists").alpha(), 0);
+    }
+
+    #[test]
+    fn inset_shadow_paints_inner_ring_confined_to_the_box() {
+        // `box-shadow: 0 0 0 3px black inset` on the box (4,4)-(20,20): the software
+        // backend paints an inner frame (a 3px ring) INSIDE the box — the box edge
+        // is shadowed, the box center is clear, and nothing outside the box is
+        // touched (an inset shadow never bleeds out).
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawShadow {
+            rect: obscur_geometry::Rect::new(Point::new(4.0, 4.0), Size::new(16.0, 16.0)),
+            radii: CornerRadii::default(),
+            color: Color::rgba(0.0, 0.0, 0.0, 1.0),
+            blur: 0.0,
+            spread: 3.0,
+            offset: (0.0, 0.0),
+            inset: true,
+        }]);
+        let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(9));
+        let frame = RenderFrame::new(snapshot, Size::new(24.0, 24.0));
+        let submission = FrameSubmission::new(frame);
+
+        let mut renderer = CpuRenderer::default();
+        renderer
+            .render(&submission, &bitmap_target(24.0, 24.0))
+            .expect("renders");
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+
+        // A pixel just inside the box edge (within the 3px frame) is shadowed.
+        let ring = pixmap.pixel(5, 12).expect("pixel exists");
+        assert!(ring.alpha() > 200, "inner ring painted: {}", ring.alpha());
+        // The box center (past the 3px frame) is clear — a ring, not a filled blob.
+        assert_eq!(
+            pixmap.pixel(12, 12).expect("pixel exists").alpha(),
+            0,
+            "box interior stays clear"
+        );
+        // A pixel OUTSIDE the box is untouched: the inset shadow is confined.
+        assert_eq!(
+            pixmap.pixel(1, 12).expect("pixel exists").alpha(),
+            0,
+            "inset shadow does not bleed outside the box"
+        );
     }
 
     #[test]

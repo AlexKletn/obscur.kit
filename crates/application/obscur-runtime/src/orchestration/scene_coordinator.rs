@@ -3344,6 +3344,73 @@ mod tests {
         assert!(list.is_balanced());
     }
 
+    #[test]
+    fn inset_box_shadow_emits_draw_shadow_over_background() {
+        // A node with `box-shadow: 0 0 0 3px black inset` over its background:
+        // the inset shadow emits `DrawShadow { inset: true }` and paints AFTER
+        // (over) the background fill, but its geometry stays the border box (the
+        // renderer confines the inner frame to it).
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let a = add_child(&mut tree, root, 10);
+
+        let shadow = BoxShadow::new(
+            Length::px(0.0),
+            Length::px(0.0),
+            Length::px(0.0),
+            Length::px(3.0),
+            Some(StyleColor::BLACK),
+            true,
+        );
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(
+            a,
+            with_background_and_shadow(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), vec![shadow]),
+        );
+
+        let mut boxes = LayoutBoxes::new();
+        let bounds = box_at(0.0, 0.0, 20.0, 10.0);
+        boxes.insert(a, bounds);
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+
+        // Exactly one DrawShadow, flagged inset, carrying the authored params, and
+        // its rect is the border box (the inset frame is bounded to it).
+        let shadows = shadow_commands(&list);
+        assert_eq!(shadows.len(), 1);
+        let PaintCommand::DrawShadow {
+            rect,
+            spread,
+            inset,
+            ..
+        } = shadows[0]
+        else {
+            panic!("expected a DrawShadow");
+        };
+        assert!(*inset, "an `inset` shadow lowers to DrawShadow{{inset:true}}");
+        assert_eq!(*spread, 3.0);
+        assert_eq!(*rect, Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 10.0)));
+
+        // The inset shadow paints AFTER (over) the background fill.
+        let shadow_pos = list
+            .commands()
+            .iter()
+            .position(|c| matches!(c, PaintCommand::DrawShadow { .. }))
+            .expect("shadow present");
+        let fill_pos = list
+            .commands()
+            .iter()
+            .position(|c| matches!(c, PaintCommand::DrawPath { .. }))
+            .expect("background present");
+        assert!(
+            fill_pos < shadow_pos,
+            "inset shadow paints over the background"
+        );
+        assert!(list.is_balanced());
+    }
+
     /// A `ComputedStyle` carrying a `background-color` and a `filter: blur(r)`.
     fn with_background_and_blur(bg: StyleColor, radius: f32) -> ComputedStyle {
         let mut style = ComputedStyle::new();
