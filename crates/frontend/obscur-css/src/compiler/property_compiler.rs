@@ -1064,7 +1064,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 84] = [
+    const ALL: [PropertyId; 85] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::BackgroundImage,
@@ -1149,6 +1149,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::FontStyle,
         PropertyId::TextAlign,
         PropertyId::TextOverflow,
+        PropertyId::Overflow,
     ];
     ALL.into_iter()
         .find(|id| name.eq_ignore_ascii_case(id.name()))
@@ -1471,6 +1472,7 @@ fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<Inte
         PropertyId::FontStyle => Some(layout_keyword::font_style_from_name),
         PropertyId::TextAlign => Some(layout_keyword::text_align_from_name),
         PropertyId::TextOverflow => Some(layout_keyword::text_overflow_from_name),
+        PropertyId::Overflow => Some(layout_keyword::overflow_from_name),
         _ => None,
     }
 }
@@ -5105,6 +5107,39 @@ mod tests {
         );
         // CSS-wide keywords still take priority.
         assert_eq!(value_of("text-overflow: inherit"), PropertyValue::Inherit);
+    }
+
+    #[test]
+    fn resolves_overflow_name() {
+        assert_eq!(property_id_from_name("overflow"), Some(PropertyId::Overflow));
+        assert_eq!(property_id_from_name("OVERFLOW"), Some(PropertyId::Overflow));
+    }
+
+    #[test]
+    fn overflow_maps_to_reserved_symbols() {
+        assert_eq!(
+            value_of("overflow: hidden"),
+            PropertyValue::Keyword(layout_keyword::OVERFLOW_HIDDEN)
+        );
+        assert_eq!(
+            value_of("overflow: visible"),
+            PropertyValue::Keyword(layout_keyword::OVERFLOW_VISIBLE)
+        );
+        assert_eq!(
+            value_of("overflow: clip"),
+            PropertyValue::Keyword(layout_keyword::OVERFLOW_CLIP)
+        );
+        assert_eq!(
+            value_of("overflow: scroll"),
+            PropertyValue::Keyword(layout_keyword::OVERFLOW_SCROLL)
+        );
+        assert_eq!(
+            value_of("overflow: auto"),
+            PropertyValue::Keyword(layout_keyword::OVERFLOW_AUTO)
+        );
+        assert_eq!(standard("overflow: hidden").0.property(), PropertyId::Overflow);
+        // CSS-wide keywords still take priority.
+        assert_eq!(value_of("overflow: inherit"), PropertyValue::Inherit);
     }
 
     #[test]

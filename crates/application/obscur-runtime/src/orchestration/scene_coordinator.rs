@@ -619,10 +619,22 @@ impl SceneCoordinator {
             // subtree to the rounded border box.
             let radii = corner_radii_of(computed, node);
             let has_radius = corner_radii_present(radii);
-            // The rounded clip shape (border box) bracketing this node's subtree,
-            // recorded for a second pass once every descendant's exit index is known.
-            if has_radius && let Some(layout_box) = boxes.get(&node) {
-                clip_brackets.push((node, Clip::rounded_rect(layout_box.bounds, radii)));
+            // A node with `overflow` other than `visible` clips its subtree to its
+            // box (`hidden` / `clip` / `scroll` / `auto`; scroll/auto clip like
+            // hidden — no scrollbars yet). `visible` / absent adds no clip.
+            let clips_overflow = overflow_clips(computed, node);
+            // The clip shape (border box) bracketing this node's subtree, recorded
+            // for a second pass once every descendant's exit index is known. A node
+            // that rounds its corners OR clips overflow emits exactly ONE clip: the
+            // ROUNDED border box when it has a radius (which also clips overflow),
+            // else a plain rect clip to the border box.
+            if (has_radius || clips_overflow) && let Some(layout_box) = boxes.get(&node) {
+                let clip = if has_radius {
+                    Clip::rounded_rect(layout_box.bounds, radii)
+                } else {
+                    Clip::rect(layout_box.bounds)
+                };
+                clip_brackets.push((node, clip));
             }
 
             // A non-identity CSS 2D `transform` brackets this node's subtree. The
@@ -2000,6 +2012,23 @@ fn corner_radii_present(radii: CornerRadii) -> bool {
         || radii.top_right > 0.0
         || radii.bottom_right > 0.0
         || radii.bottom_left > 0.0
+}
+
+/// Whether a node's computed `overflow` clips its subtree to its box.
+///
+/// Reads [`PropertyId::Overflow`] — a [`PropertyValue::Keyword`] backed by one of
+/// the reserved [`layout_keyword`] `OVERFLOW_*` handles. Every value except
+/// `visible` clips (`hidden` / `clip` / `scroll` / `auto`; the last two clip like
+/// `hidden`, as no scrollbars are synthesised yet). An absent property is the CSS
+/// initial `visible` — no clip, byte-for-byte identical to before overflow existed.
+fn overflow_clips(computed: &ComputedStyles, node: NodeId) -> bool {
+    matches!(
+        computed
+            .get(&node)
+            .and_then(|style| style.get(PropertyId::Overflow))
+            .map(ComputedValue::value),
+        Some(&PropertyValue::Keyword(sym)) if sym != layout_keyword::OVERFLOW_VISIBLE
+    )
 }
 
 /// Whether a node's computed `border-*-style` (`id`) is the reserved `solid`
@@ -4633,6 +4662,134 @@ mod tests {
             )),
             "no clip commands with no radius"
         );
+    }
+
+    /// A `ComputedStyle` carrying a `background-color` and an `overflow` keyword.
+    fn with_background_and_overflow(
+        color: StyleColor,
+        overflow: obscur_identity::InternedSymbol,
+    ) -> ComputedStyle {
+        let mut style = with_background(color);
+        style.set(PropertyId::Overflow, ComputedValue::keyword(overflow));
+        style
+    }
+
+    #[test]
+    fn overflow_hidden_brackets_subtree_with_rect_clip() {
+        // root (bg + overflow:hidden) -> child (bg) offset BEYOND the root box.
+        // The subtree is bracketed by a plain-rect clip to the root's border box,
+        // clipping the overflowing child.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let child = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(
+            root,
+            with_background_and_overflow(
+                StyleColor::rgba(1.0, 0.0, 0.0, 1.0),
+                layout_keyword::OVERFLOW_HIDDEN,
+            ),
+        );
+        computed.insert(child, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 100.0, 60.0));
+        // The child extends past the root's right/bottom edges.
+        boxes.insert(child, box_at(80.0, 40.0, 60.0, 60.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        let cmds = list.commands();
+        // PushClip first, PopClip last — the clip brackets the whole subtree.
+        match &cmds[0] {
+            PaintCommand::PushClip(Clip::Shape(shape)) => {
+                assert!(
+                    matches!(shape, obscur_scene::clip::ClipShape::Rect(_)),
+                    "overflow with no radius ⇒ a plain rect clip, got {shape:?}"
+                );
+                assert_eq!(
+                    shape.bounds(),
+                    Some(Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 60.0))),
+                    "clip is the root's border box"
+                );
+            }
+            other => panic!("expected a PushClip rect, got {other:?}"),
+        }
+        assert!(matches!(cmds.last(), Some(PaintCommand::PopClip)), "clip closes last");
+        assert!(list.is_balanced(), "the clip bracket is balanced");
+    }
+
+    #[test]
+    fn overflow_visible_adds_no_clip() {
+        // Regression guard: `overflow: visible` (the initial) adds NO clip — the
+        // overflowing child is not clipped, byte-identical to before overflow.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let child = add_child(&mut tree, root, 10);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(
+            root,
+            with_background_and_overflow(
+                StyleColor::rgba(1.0, 0.0, 0.0, 1.0),
+                layout_keyword::OVERFLOW_VISIBLE,
+            ),
+        );
+        computed.insert(child, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 100.0, 60.0));
+        boxes.insert(child, box_at(80.0, 40.0, 60.0, 60.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        assert!(
+            !list.commands().iter().any(|c| matches!(
+                c,
+                PaintCommand::PushClip(_) | PaintCommand::PopClip
+            )),
+            "overflow: visible adds no clip"
+        );
+    }
+
+    #[test]
+    fn overflow_with_radius_emits_single_rounded_clip() {
+        // A node with BOTH a border-radius and overflow:hidden emits exactly ONE
+        // clip — the rounded border box — not two.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let child = add_child(&mut tree, root, 10);
+
+        let mut root_style = with_background_and_radius(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 8.0);
+        root_style.set(
+            PropertyId::Overflow,
+            ComputedValue::keyword(layout_keyword::OVERFLOW_HIDDEN),
+        );
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, root_style);
+        computed.insert(child, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 100.0, 60.0));
+        boxes.insert(child, box_at(80.0, 40.0, 60.0, 60.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        let cmds = list.commands();
+        let pushes = cmds
+            .iter()
+            .filter(|c| matches!(c, PaintCommand::PushClip(_)))
+            .count();
+        assert_eq!(pushes, 1, "radius + overflow ⇒ a single clip, not two");
+        match &cmds[0] {
+            PaintCommand::PushClip(Clip::Shape(shape)) => assert!(
+                matches!(shape, obscur_scene::clip::ClipShape::RoundedRect { .. }),
+                "the single clip is the ROUNDED border box, got {shape:?}"
+            ),
+            other => panic!("expected a rounded PushClip, got {other:?}"),
+        }
+        assert!(list.is_balanced(), "the clip bracket is balanced");
     }
 
     /// A `ComputedStyle` carrying a `background-color` and an `opacity`.

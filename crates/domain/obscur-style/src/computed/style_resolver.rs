@@ -155,6 +155,8 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::Direction,
     PropertyId::TextAlign,
     PropertyId::TextOverflow,
+    // Overflow (pure paint/clip; no layout effect).
+    PropertyId::Overflow,
 ];
 
 /// Stateless resolver that computes a node's [`ComputedStyle`] from its cascaded
@@ -404,7 +406,11 @@ impl StyleResolver {
             // `text-overflow` initial is `clip`; its keyword initial likewise needs
             // the interner, so an absent value falls back to the runtime's default
             // (`Clip`) — byte-for-byte identical to today's behaviour.
-            | PropertyId::TextOverflow => None,
+            | PropertyId::TextOverflow
+            // `overflow` initial is `visible` (no clip); its keyword initial
+            // likewise needs the interner, so an absent value falls back to the
+            // coordinator's default (no added clip) — byte-for-byte identical.
+            | PropertyId::Overflow => None,
         }
     }
 
@@ -1120,7 +1126,8 @@ mod tests {
                 | PropertyId::FontWeight
                 | PropertyId::FontStyle
                 | PropertyId::TextAlign
-                | PropertyId::TextOverflow => {}
+                | PropertyId::TextOverflow
+                | PropertyId::Overflow => {}
             }
         }
         let all = [
@@ -1209,6 +1216,7 @@ mod tests {
             PropertyId::FontStyle,
             PropertyId::TextAlign,
             PropertyId::TextOverflow,
+            PropertyId::Overflow,
         ];
         for id in all {
             assert_known(id);

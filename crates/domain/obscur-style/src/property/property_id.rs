@@ -309,6 +309,15 @@ pub enum PropertyId {
     /// inherited). See the reserved `TEXT_OVERFLOW_*` handles in
     /// [`crate::property::layout_keyword`].
     TextOverflow,
+
+    // ---- Overflow (Keyword-valued; NOT inherited; pure paint/clip) ----
+    /// The `overflow` property (Keyword-valued: `visible` (initial) / `hidden` /
+    /// `clip` / `scroll` / `auto`; NOT inherited). See the reserved `OVERFLOW_*`
+    /// handles in [`crate::property::layout_keyword`]. A value other than
+    /// `visible` clips the element's subtree to its box; `scroll` / `auto` clip
+    /// like `hidden` (no scrollbars are synthesised yet — a documented
+    /// simplification). It changes no layout, only the scene coordinator's clip.
+    Overflow,
 }
 
 impl PropertyId {
@@ -404,6 +413,7 @@ impl PropertyId {
             Self::FontStyle => "font-style",
             Self::TextAlign => "text-align",
             Self::TextOverflow => "text-overflow",
+            Self::Overflow => "overflow",
         }
     }
 
@@ -502,7 +512,9 @@ impl PropertyId {
             | Self::GridRowEnd
             // `text-overflow` does not inherit (unlike the other typography
             // properties, which do).
-            | Self::TextOverflow => Inheritance::NotInherited,
+            | Self::TextOverflow
+            // `overflow` is a box / paint property and resets per element.
+            | Self::Overflow => Inheritance::NotInherited,
         }
     }
 }
@@ -674,6 +686,13 @@ mod tests {
                 .default_inheritance()
                 .is_inherited()
         );
+    }
+
+    #[test]
+    fn overflow_name_and_not_inherited() {
+        assert_eq!(PropertyId::Overflow.name(), "overflow");
+        // Like the other box / paint properties, `overflow` resets per element.
+        assert!(!PropertyId::Overflow.default_inheritance().is_inherited());
     }
 
     #[test]

@@ -191,6 +191,26 @@ pub const BOX_SIZING_CONTENT_BOX: InternedSymbol = InternedSymbol::from_raw(0x00
 /// border box.
 pub const BOX_SIZING_BORDER_BOX: InternedSymbol = InternedSymbol::from_raw(0x0000_1D02);
 
+// ---- `overflow` keyword values ----
+//
+// A value other than `visible` clips the element's subtree to its box. `scroll`
+// and `auto` are carried as distinct handles for fidelity but currently clip
+// like `hidden` — no scrollbars are synthesised (a documented simplification).
+
+/// The `overflow: visible` value (the initial): content is not clipped.
+pub const OVERFLOW_VISIBLE: InternedSymbol = InternedSymbol::from_raw(0x0000_1E01);
+/// The `overflow: hidden` value: the subtree is clipped to the element's box.
+pub const OVERFLOW_HIDDEN: InternedSymbol = InternedSymbol::from_raw(0x0000_1E02);
+/// The `overflow: clip` value: like `hidden` for painting (the subtree is
+/// clipped to the box), without a scroll container.
+pub const OVERFLOW_CLIP: InternedSymbol = InternedSymbol::from_raw(0x0000_1E03);
+/// The `overflow: scroll` value. Clips the subtree like `hidden`; no scrollbar
+/// is synthesised yet (a documented simplification).
+pub const OVERFLOW_SCROLL: InternedSymbol = InternedSymbol::from_raw(0x0000_1E04);
+/// The `overflow: auto` value. Clips the subtree like `hidden`; no scrollbar is
+/// synthesised yet (a documented simplification).
+pub const OVERFLOW_AUTO: InternedSymbol = InternedSymbol::from_raw(0x0000_1E05);
+
 /// Maps a `display` keyword string to its reserved [`InternedSymbol`].
 ///
 /// The input is ASCII-lowercased before matching, so callers may pass authored
@@ -407,6 +427,23 @@ pub fn text_overflow_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
+/// Maps an `overflow` keyword string to its reserved [`InternedSymbol`].
+///
+/// The input is ASCII-lowercased before matching. Returns [`None`] for any
+/// keyword outside the closed `visible` / `hidden` / `clip` / `scroll` / `auto`
+/// set (e.g. `overlay`).
+#[must_use]
+pub fn overflow_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "visible" => Some(OVERFLOW_VISIBLE),
+        "hidden" => Some(OVERFLOW_HIDDEN),
+        "clip" => Some(OVERFLOW_CLIP),
+        "scroll" => Some(OVERFLOW_SCROLL),
+        "auto" => Some(OVERFLOW_AUTO),
+        _ => None,
+    }
+}
+
 /// Maps a relative `font-weight` keyword string (`bolder` / `lighter`) to its
 /// reserved [`InternedSymbol`].
 ///
@@ -478,6 +515,11 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         BORDER_STYLE_DASHED => Some("dashed"),
         BOX_SIZING_CONTENT_BOX => Some("content-box"),
         BOX_SIZING_BORDER_BOX => Some("border-box"),
+        OVERFLOW_VISIBLE => Some("visible"),
+        OVERFLOW_HIDDEN => Some("hidden"),
+        OVERFLOW_CLIP => Some("clip"),
+        OVERFLOW_SCROLL => Some("scroll"),
+        OVERFLOW_AUTO => Some("auto"),
         FLEX_ROW => Some("row"),
         FLEX_ROW_REVERSE => Some("row-reverse"),
         FLEX_COLUMN => Some("column"),
@@ -537,6 +579,11 @@ mod tests {
         BORDER_STYLE_DASHED,
         BOX_SIZING_CONTENT_BOX,
         BOX_SIZING_BORDER_BOX,
+        OVERFLOW_VISIBLE,
+        OVERFLOW_HIDDEN,
+        OVERFLOW_CLIP,
+        OVERFLOW_SCROLL,
+        OVERFLOW_AUTO,
         FLEX_ROW,
         FLEX_ROW_REVERSE,
         FLEX_COLUMN,
@@ -742,6 +789,21 @@ mod tests {
         // Round-trips through `name_of`.
         assert_eq!(name_of(TEXT_OVERFLOW_CLIP), Some("clip"));
         assert_eq!(name_of(TEXT_OVERFLOW_ELLIPSIS), Some("ellipsis"));
+    }
+
+    #[test]
+    fn overflow_maps_known_keywords() {
+        assert_eq!(overflow_from_name("visible"), Some(OVERFLOW_VISIBLE));
+        assert_eq!(overflow_from_name("hidden"), Some(OVERFLOW_HIDDEN));
+        assert_eq!(overflow_from_name("clip"), Some(OVERFLOW_CLIP));
+        assert_eq!(overflow_from_name("scroll"), Some(OVERFLOW_SCROLL));
+        assert_eq!(overflow_from_name("AUTO"), Some(OVERFLOW_AUTO));
+        assert_eq!(overflow_from_name("overlay"), None);
+        // Round-trips through `name_of`.
+        assert_eq!(name_of(OVERFLOW_VISIBLE), Some("visible"));
+        assert_eq!(name_of(OVERFLOW_HIDDEN), Some("hidden"));
+        assert_eq!(name_of(OVERFLOW_SCROLL), Some("scroll"));
+        assert_eq!(name_of(OVERFLOW_AUTO), Some("auto"));
     }
 
     #[test]

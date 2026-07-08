@@ -145,6 +145,15 @@ required-features = ["render-cpu"]
 name = "outline_proof"
 required-features = ["render-cpu"]
 
+# Proof of CSS `overflow` clipping: two 100×60 boxes, each holding a child that
+# extends beyond it. The left box is `overflow: hidden` (the child is clipped to
+# the box edges); the right box is `overflow: visible` (the child overflows). It
+# drives the REAL scene coordinator (which emits the PushClip/PopClip) and
+# rasterizes headless through the CPU renderer to `target/overflow_proof.png`.
+[[example]]
+name = "overflow_proof"
+required-features = ["render-cpu"]
+
 # Proof of the built-in UA default stylesheet: bare Button/Input/Checkbox rendered
 # with only the UA sheet installed (base look) over the same controls with a
 # one-line author `button` override (author wins). Needs the CPU renderer + the
