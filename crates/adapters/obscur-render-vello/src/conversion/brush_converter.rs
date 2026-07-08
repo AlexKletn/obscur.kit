@@ -79,6 +79,31 @@ impl BrushConverter {
         }
     }
 
+    /// The optional brush transform to pass alongside [`convert`](Self::convert)
+    /// when filling/stroking with this brush.
+    ///
+    /// A [`Brush::Radial`] with an **elliptical** ending shape is emitted by
+    /// [`convert`](Self::convert) as a concentric *circle* gradient of the x-axis
+    /// radius; this transform stretches that circle into the authored ellipse by
+    /// scaling the y-axis by `radius_y / radius` about the gradient center (spec
+    /// §3.2). Every other brush (solid, linear, conic, or a circular radial) needs
+    /// no brush transform and yields [`None`].
+    #[must_use]
+    pub fn brush_transform(brush: &Brush) -> Option<kurbo::Affine> {
+        match brush {
+            Brush::Radial(g) if g.is_elliptical() && g.radius() != 0.0 => {
+                let (cx, cy) = (f64::from(g.center().x), f64::from(g.center().y));
+                let scale_y = f64::from(g.radius_y()) / f64::from(g.radius());
+                Some(
+                    kurbo::Affine::translate((cx, cy))
+                        * kurbo::Affine::scale_non_uniform(1.0, scale_y)
+                        * kurbo::Affine::translate((-cx, -cy)),
+                )
+            }
+            _ => None,
+        }
+    }
+
     /// Converts an obscur-scene [`Stroke`] style into a [`kurbo::Stroke`].
     ///
     /// Width, join, both caps, and the miter limit are carried across; the
@@ -194,6 +219,35 @@ mod tests {
             }
             other => panic!("expected Gradient, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn circular_radial_needs_no_brush_transform() {
+        use obscur_scene::paint::RadialGradient;
+        let g = Brush::Radial(RadialGradient::new(Point::new(5.0, 5.0), 10.0, Vec::new()));
+        assert!(BrushConverter::brush_transform(&g).is_none());
+    }
+
+    #[test]
+    fn elliptical_radial_brush_transform_stretches_y() {
+        use obscur_scene::paint::RadialGradient;
+        // rx=30, ry=10 about center (5, 5): y scales by ry/rx = 1/3 about the center.
+        let g = Brush::Radial(RadialGradient::new_elliptical(
+            Point::new(5.0, 5.0),
+            30.0,
+            10.0,
+            Vec::new(),
+        ));
+        let t = BrushConverter::brush_transform(&g).expect("ellipse carries a brush transform");
+        // Center is a fixed point of the scale-about-center transform.
+        let c = t * kurbo::Point::new(5.0, 5.0);
+        assert!((c.x - 5.0).abs() < 1e-9 && (c.y - 5.0).abs() < 1e-9, "center fixed: {c:?}");
+        // A point one x-radius right stays put (x unscaled); one x-radius "down"
+        // maps to ry away (y scaled by 1/3): 5 + 30/3 = 15.
+        let down = t * kurbo::Point::new(5.0, 35.0);
+        assert!((down.y - 15.0).abs() < 1e-9, "y stretched to ry: {down:?}");
+        let right = t * kurbo::Point::new(35.0, 5.0);
+        assert!((right.x - 35.0).abs() < 1e-9, "x unscaled: {right:?}");
     }
 
     #[test]

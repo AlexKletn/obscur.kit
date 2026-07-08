@@ -147,6 +147,16 @@ required-features = ["render-vello"]
 name = "multi_bg_proof"
 required-features = ["render-vello"]
 
+# Proof that CSS gradient GEOMETRY is canonical: three wide (non-square) boxes —
+# `linear-gradient(to top right)` (aspect-ratio-aware corner direction, not 45°),
+# `radial-gradient(closest-side circle)`, and `radial-gradient(ellipse
+# farthest-corner)` (a stretched oval, rx≠ry) — driven through the full CSS →
+# runtime → Vello path and read back to `target/gradient_geometry_proof.png`. Needs
+# the GPU adapter at runtime but no window; gated on the Vello backend only.
+[[example]]
+name = "gradient_geometry_proof"
+required-features = ["render-vello"]
+
 # Proof that `border-style: dashed` renders as REAL dashes: two boxes (square +
 # rounded) with a `2px dashed` border, stroked as a dashed path and rasterized
 # headless through the CPU renderer to `target/dashed_border_proof.png`. Verifies

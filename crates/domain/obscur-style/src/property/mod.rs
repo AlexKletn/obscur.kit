@@ -39,7 +39,7 @@ pub use length_context::LengthContext;
 mod length_expr;
 pub use length_expr::LengthExpr;
 mod linear_gradient;
-pub use linear_gradient::LinearGradient;
+pub use linear_gradient::{Corner, LinearGradient};
 mod object_fit;
 pub use object_fit::ObjectFit;
 mod property_id;

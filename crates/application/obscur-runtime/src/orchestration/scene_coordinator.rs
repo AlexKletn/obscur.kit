@@ -20,8 +20,8 @@ use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{
     layout_keyword, BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize,
-    BoxShadow, ConicGradient, FilterOp, Length, LinearGradient, ObjectFit, PropertyId,
-    PropertyValue, RadialGradient, RadialSize, StyleColor, Transform, TransformOrigin,
+    BoxShadow, ConicGradient, Corner, FilterOp, Length, LinearGradient, ObjectFit, PropertyId,
+    PropertyValue, RadialGradient, RadialShape, RadialSize, StyleColor, Transform, TransformOrigin,
 };
 use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontMetrics, FontResolver, FontSource,
@@ -1841,15 +1841,25 @@ fn resolve_origin_length(length: Length, basis: f32) -> f32 {
 /// Builds a scene [`SceneLinearGradient`] fill brush for a style
 /// [`LinearGradient`] over the box `bounds` (spec §5.2).
 ///
-/// The CSS `angle_deg` (0 = to top, increasing clockwise) plus the box size define
-/// the gradient *line*: a line through the box center at that angle, with its `0%`
-/// / `100%` endpoints at the projections of the box that the line covers. The
-/// endpoints are `center ∓ dir · half_len`, where `dir = (sin θ, −cos θ)` (screen
-/// space, y down) and `half_len = (|w·sin θ| + |h·cos θ|) / 2`. Each style stop's
-/// authored (resolved) `0.0..=1.0` position becomes the scene stop's offset, and
-/// its [`StyleColor`] becomes the scene paint [`Color`]; an unpositioned stop
-/// (never produced by the CSS lowering, which resolves all positions) falls back
-/// to its index-proportional offset.
+/// The direction defines the gradient *line*: a line through the box center, with
+/// its `0%` / `100%` endpoints at the projections onto that line of the box extent
+/// it covers. The endpoints are `center ∓ dir · half_len` where `dir` is the unit
+/// gradient-line vector (screen space, y down) and, per the note under
+/// <https://drafts.csswg.org/css-images-3/#linear-gradient-syntax>, the gradient
+/// line length is `|w·dir_x| + |h·dir_y|` (so `half_len` is half of that). Two
+/// direction forms feed `dir`:
+///
+/// * an explicit `<angle>` (CSS `0` = to top, increasing clockwise) → `dir =
+///   (sin θ, −cos θ)`, giving the classic `|w·sin θ| + |h·cos θ|` line length;
+/// * a `to <corner>` → the **aspect-ratio-aware** direction (spec §3.1): the line
+///   points into the corner's quadrant and is perpendicular to the diagonal
+///   joining the two neighbouring corners, i.e. `dir = normalize(±h, ∓w)`. This is
+///   *not* a fixed 45° except on a square box.
+///
+/// Each style stop's authored (resolved) `0.0..=1.0` position becomes the scene
+/// stop's offset, and its [`StyleColor`] becomes the scene paint [`Color`]; an
+/// unpositioned stop (never produced by the CSS lowering, which resolves all
+/// positions) falls back to its index-proportional offset.
 ///
 /// A non-repeating gradient keeps the default
 /// [`ExtendMode::Pad`](obscur_scene::paint::ExtendMode::Pad) and its axis spans
@@ -1864,17 +1874,23 @@ fn resolve_origin_length(length: Length, basis: f32) -> f32 {
 /// path a repeated gradient flattens to its first stop (the documented
 /// GPU-class-effect policy), so a stripe reads as a flat first-stop fill there.
 fn linear_gradient_brush(gradient: &LinearGradient, bounds: Rect) -> SceneLinearGradient {
-    let theta = gradient.angle_deg().to_radians();
-    let (sin, cos) = (theta.sin(), theta.cos());
     let w = bounds.size.width;
     let h = bounds.size.height;
     let cx = bounds.origin.x + w / 2.0;
     let cy = bounds.origin.y + h / 2.0;
-    // Direction of increasing gradient offset (0% → 100%). y is down, so `to top`
-    // (θ = 0) points to smaller y.
-    let dir_x = sin;
-    let dir_y = -cos;
-    let half_len = (w * sin).abs().mul_add(0.5, (h * cos).abs() * 0.5);
+    // Unit direction of increasing gradient offset (0% → 100%), in screen space
+    // (y down). A `to <corner>` uses the aspect-ratio-aware direction (spec §3.1);
+    // otherwise the angle's (sin θ, −cos θ).
+    let (dir_x, dir_y) = gradient.corner().map_or_else(
+        || {
+            let theta = gradient.angle_deg().to_radians();
+            (theta.sin(), -theta.cos())
+        },
+        |corner| corner_direction(corner, w, h),
+    );
+    // Gradient-line length = |w·dir_x| + |h·dir_y| (spec §3.1 projection note),
+    // valid for any unit `dir` (reduces to |w·sin θ| + |h·cos θ| for an angle).
+    let half_len = (w * dir_x).abs().mul_add(0.5, (h * dir_y).abs() * 0.5);
     let start = Point::new(cx - dir_x * half_len, cy - dir_y * half_len);
     let stops = gradient_stops(gradient.stops());
     // A repeating gradient's axis spans exactly one period from the box's 0%
@@ -1893,22 +1909,51 @@ fn linear_gradient_brush(gradient: &LinearGradient, bounds: Rect) -> SceneLinear
     SceneLinearGradient::new(start, end, stops)
 }
 
+/// The unit direction of a `to <corner>` gradient line over a `w × h` box, in
+/// screen space (y down) (spec §3.1).
+///
+/// The gradient line points into the corner's quadrant and is perpendicular to the
+/// diagonal joining the two neighbouring corners; that diagonal is `(w, h)`, so the
+/// perpendicular pointing right is `(h, −w)` and each corner picks the signs that
+/// aim into its quadrant (`+x` = right, `−y` = up). On a degenerate (zero-area)
+/// box the direction falls back to straight down.
+fn corner_direction(corner: Corner, w: f32, h: f32) -> (f32, f32) {
+    let (sx, sy) = match corner {
+        Corner::TopRight => (h, -w),
+        Corner::BottomRight => (h, w),
+        Corner::BottomLeft => (-h, w),
+        Corner::TopLeft => (-h, -w),
+    };
+    let len = sx.hypot(sy);
+    if len == 0.0 {
+        (0.0, 1.0)
+    } else {
+        (sx / len, sy / len)
+    }
+}
+
 /// Builds a scene [`SceneRadialGradient`] fill brush for a style
-/// [`RadialGradient`] over the box `bounds` (spec §5.2).
+/// [`RadialGradient`] over the box `bounds` (spec §5.2, sizing §3.2).
 ///
 /// The box-relative center (`center_x` / `center_y`) resolves to an absolute point
-/// against the box; the ending [`RadialSize`] resolves to a single radius —
-/// `farthest-corner` (the default) is the maximum distance from the center to the
-/// four box corners, and the other extents / an explicit length follow suit (see
-/// [`resolve_radius`]). The scene models a concentric single-radius circle, so an
-/// `ellipse` shape is collapsed to that radius (a documented approximation). Each
-/// style stop's resolved `0.0..=1.0` position becomes the scene stop's offset; the
-/// brush keeps the default [`ExtendMode::Pad`](obscur_scene::paint::ExtendMode::Pad).
+/// against the box; the ending [`shape`](RadialShape) + [`size`](RadialSize)
+/// resolve to a **per-axis** radius pair `(rx, ry)` via [`resolve_radii`]. A
+/// `circle` yields `rx == ry`; an `ellipse` yields independent radii (e.g.
+/// `farthest-corner` on a non-square box gives `rx ≠ ry`), carried faithfully by
+/// the scene [`SceneRadialGradient`] so Vello stretches the concentric circle into
+/// the ellipse. Each style stop's resolved `0.0..=1.0` position becomes the scene
+/// stop's offset; the brush keeps the default
+/// [`ExtendMode::Pad`](obscur_scene::paint::ExtendMode::Pad).
 fn radial_gradient_brush(gradient: &RadialGradient, bounds: Rect) -> SceneRadialGradient {
     let cx = resolve_center(gradient.center_x(), bounds.origin.x, bounds.size.width);
     let cy = resolve_center(gradient.center_y(), bounds.origin.y, bounds.size.height);
-    let radius = resolve_radius(gradient.size(), cx, cy, bounds);
-    SceneRadialGradient::new(Point::new(cx, cy), radius, gradient_stops(gradient.stops()))
+    let (rx, ry) = resolve_radii(gradient.shape(), gradient.size(), cx, cy, bounds);
+    SceneRadialGradient::new_elliptical(
+        Point::new(cx, cy),
+        rx,
+        ry,
+        gradient_stops(gradient.stops()),
+    )
 }
 
 /// Builds a scene [`SceneConicGradient`] fill brush for a style
@@ -1964,32 +2009,78 @@ fn resolve_center(length: Length, origin: f32, extent: f32) -> f32 {
     }
 }
 
-/// Resolves a [`RadialGradient`] ending [`RadialSize`] to a single scene radius,
-/// given the gradient's absolute center `(cx, cy)` and the box `bounds`.
+/// Resolves a [`RadialGradient`]'s ending [`shape`](RadialShape) +
+/// [`size`](RadialSize) to a per-axis radius pair `(rx, ry)`, given the gradient's
+/// absolute center `(cx, cy)` and the box `bounds` (CSS Images §3.2).
 ///
-/// The extent keywords use the center's distances to the box sides (near/far per
-/// axis) and corners (hypotenuse of the per-axis distances). An explicit `px`
-/// length is used directly; a percentage radius resolves against the box's smaller
-/// half-extent (a documented approximation, since the scene models one radius);
-/// any other length falls back to `farthest-corner`.
-fn resolve_radius(size: RadialSize, cx: f32, cy: f32, bounds: Rect) -> f32 {
-    let (left, top, right, bottom) = (bounds.origin.x, bounds.origin.y, bounds.right(), bounds.bottom());
+/// Let the center's distances to the four sides give `dx_near`/`dx_far` (nearest /
+/// farthest vertical side) and `dy_near`/`dy_far` (nearest / farthest horizontal
+/// side). Then, per the spec's sizing rules:
+///
+/// * **circle** collapses to one radius `r` (`rx == ry`): `closest-side` =
+///   `min(dx_near, dy_near)`, `farthest-side` = `max(dx_far, dy_far)`,
+///   `closest-corner` = `hypot(dx_near, dy_near)`, `farthest-corner` =
+///   `hypot(dx_far, dy_far)`;
+/// * **ellipse** keeps independent axes: `closest-side` = `(dx_near, dy_near)`,
+///   `farthest-side` = `(dx_far, dy_far)`. For the *corner* extents the ellipse
+///   keeps the corresponding side ellipse's aspect ratio while passing through the
+///   corner, which (because that corner sits at exactly the side distances on both
+///   axes) scales each side radius by `√2`: `closest-corner` =
+///   `(dx_near, dy_near)·√2`, `farthest-corner` = `(dx_far, dy_far)·√2`.
+///
+/// An explicit length is a concrete radius: `px` directly, a percentage relative to
+/// the corresponding box dimension (spec: radii percentages resolve against the
+/// gradient box's width for `rx` and height for `ry`); for a circle the single
+/// length applies to both axes (a percentage resolves against the box width). Any
+/// other length falls back to `farthest-corner`.
+fn resolve_radii(
+    shape: RadialShape,
+    size: RadialSize,
+    cx: f32,
+    cy: f32,
+    bounds: Rect,
+) -> (f32, f32) {
+    const SQRT2: f32 = std::f32::consts::SQRT_2;
+    let (left, top, right, bottom) =
+        (bounds.origin.x, bounds.origin.y, bounds.right(), bounds.bottom());
     let dx_near = (cx - left).abs().min((right - cx).abs());
     let dx_far = (cx - left).abs().max((right - cx).abs());
     let dy_near = (cy - top).abs().min((bottom - cy).abs());
     let dy_far = (cy - top).abs().max((bottom - cy).abs());
-    match size {
-        RadialSize::ClosestSide => dx_near.min(dy_near),
-        RadialSize::FarthestSide => dx_far.max(dy_far),
-        RadialSize::ClosestCorner => dx_near.hypot(dy_near),
-        RadialSize::FarthestCorner => dx_far.hypot(dy_far),
-        RadialSize::Length(len) => match len {
-            Length::Px(px) => px.0,
-            Length::Percent(pct) => {
-                pct / 100.0 * bounds.size.width.min(bounds.size.height) / 2.0
+    let (w, h) = (bounds.size.width, bounds.size.height);
+    match shape {
+        RadialShape::Circle => {
+            let r = match size {
+                RadialSize::ClosestSide => dx_near.min(dy_near),
+                RadialSize::FarthestSide => dx_far.max(dy_far),
+                RadialSize::ClosestCorner => dx_near.hypot(dy_near),
+                RadialSize::FarthestCorner => dx_far.hypot(dy_far),
+                RadialSize::Length(Length::Px(px)) => px.0,
+                RadialSize::Length(Length::Percent(pct)) => pct / 100.0 * w,
+                RadialSize::Length(_) => dx_far.hypot(dy_far),
+            };
+            (r, r)
+        }
+        RadialShape::Ellipse => match size {
+            RadialSize::ClosestSide => (dx_near, dy_near),
+            RadialSize::FarthestSide => (dx_far, dy_far),
+            RadialSize::ClosestCorner => (dx_near * SQRT2, dy_near * SQRT2),
+            RadialSize::FarthestCorner => (dx_far * SQRT2, dy_far * SQRT2),
+            RadialSize::Length(len) => {
+                (resolve_axis_radius(len, w), resolve_axis_radius(len, h))
             }
-            _ => dx_far.hypot(dy_far),
         },
+    }
+}
+
+/// Resolves an explicit radius [`Length`] against a box axis of length `extent`:
+/// an absolute `px` directly, a percentage as that fraction of `extent`; any other
+/// (context-dependent) length falls back to the full `extent`.
+fn resolve_axis_radius(len: Length, extent: f32) -> f32 {
+    match len {
+        Length::Px(px) => px.0,
+        Length::Percent(pct) => pct / 100.0 * extent,
+        _ => extent,
     }
 }
 
@@ -3231,6 +3322,85 @@ mod tests {
         assert_eq!(g.stops().len(), 2);
         assert_eq!(g.stops()[0].color(), Color::rgba(1.0, 0.0, 0.0, 1.0));
         assert!(list.is_balanced());
+    }
+
+    #[test]
+    fn linear_corner_direction_is_aspect_ratio_aware() {
+        use obscur_style::property::GradientStop as StyleStop;
+
+        // `linear-gradient(to top right, black, white)` on a WIDE 200×50 box.
+        let stops = vec![
+            StyleStop::new(StyleColor::BLACK, 0.0),
+            StyleStop::new(StyleColor::rgba(1.0, 1.0, 1.0, 1.0), 1.0),
+        ];
+        let gradient = LinearGradient::new_corner(Corner::TopRight, 45.0, stops);
+        let bounds = Rect::new(Point::new(0.0, 0.0), Size::new(200.0, 50.0));
+        let g = linear_gradient_brush(&gradient, bounds);
+
+        // Direction points toward the actual top-right corner: normalize(h, −w) =
+        // normalize(50, −200), NOT a 45° diagonal (spec §3.1).
+        let dir = Point::new(g.end().x - g.start().x, g.end().y - g.start().y);
+        let len = dir.x.hypot(dir.y);
+        let (ux, uy) = (dir.x / len, dir.y / len);
+        let expected = 50.0_f32.hypot(200.0);
+        assert!((ux - 50.0 / expected).abs() < 1e-3, "dir.x {ux}");
+        assert!((uy - (-200.0 / expected)).abs() < 1e-3, "dir.y {uy}");
+        // Emphatically not 45° (sin45 ≈ 0.707).
+        assert!((ux - std::f32::consts::FRAC_1_SQRT_2).abs() > 0.4, "not 45°");
+        // Endpoints are symmetric about the box center (100, 25).
+        let midx = (g.start().x + g.end().x) / 2.0;
+        let midy = (g.start().y + g.end().y) / 2.0;
+        assert!((midx - 100.0).abs() < 1e-3 && (midy - 25.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn linear_angle_gradient_line_length_matches_formula() {
+        use obscur_style::property::GradientStop as StyleStop;
+
+        // `linear-gradient(45deg, …)` line length = |W·sin45| + |H·cos45|.
+        let stops = vec![
+            StyleStop::new(StyleColor::BLACK, 0.0),
+            StyleStop::new(StyleColor::rgba(1.0, 1.0, 1.0, 1.0), 1.0),
+        ];
+        let gradient = LinearGradient::new(45.0, stops);
+        let bounds = Rect::new(Point::new(0.0, 0.0), Size::new(200.0, 50.0));
+        let g = linear_gradient_brush(&gradient, bounds);
+        let line_len = (g.end().x - g.start().x).hypot(g.end().y - g.start().y);
+        let s = std::f32::consts::FRAC_1_SQRT_2;
+        let expected = (200.0 * s).abs() + (50.0 * s).abs();
+        assert!((line_len - expected).abs() < 1e-3, "line {line_len} vs {expected}");
+    }
+
+    #[test]
+    fn resolve_radii_circle_extents() {
+        // Centered in a 100×50 box: center (50, 25).
+        let bounds = Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 50.0));
+        // closest-side circle = min distance to a side = 25 (half height).
+        let (rx, ry) = resolve_radii(RadialShape::Circle, RadialSize::ClosestSide, 50.0, 25.0, bounds);
+        assert!((rx - 25.0).abs() < 1e-3 && (ry - 25.0).abs() < 1e-3, "closest-side {rx},{ry}");
+        // farthest-corner circle = hypot(50, 25).
+        let (rx, ry) =
+            resolve_radii(RadialShape::Circle, RadialSize::FarthestCorner, 50.0, 25.0, bounds);
+        let want = 50.0_f32.hypot(25.0);
+        assert!((rx - want).abs() < 1e-3 && (rx - ry).abs() < 1e-6, "farthest-corner {rx},{ry}");
+    }
+
+    #[test]
+    fn resolve_radii_ellipse_nonsquare_has_rx_ne_ry() {
+        // Centered in a WIDE 480×120 box: center (240, 60).
+        let bounds = Rect::new(Point::new(0.0, 0.0), Size::new(480.0, 120.0));
+        // farthest-corner ellipse keeps the far-side ratio, scaled by √2:
+        // (dx_far, dy_far)·√2 = (240√2, 60√2).
+        let (rx, ry) =
+            resolve_radii(RadialShape::Ellipse, RadialSize::FarthestCorner, 240.0, 60.0, bounds);
+        let s = std::f32::consts::SQRT_2;
+        assert!((rx - 240.0 * s).abs() < 1e-2, "rx {rx}");
+        assert!((ry - 60.0 * s).abs() < 1e-2, "ry {ry}");
+        assert!(rx > ry, "a non-square ellipse is stretched: rx {rx} > ry {ry}");
+        // closest-side ellipse = the per-axis near distances (240, 60), still rx≠ry.
+        let (rx, ry) =
+            resolve_radii(RadialShape::Ellipse, RadialSize::ClosestSide, 240.0, 60.0, bounds);
+        assert!((rx - 240.0).abs() < 1e-3 && (ry - 60.0).abs() < 1e-3, "closest-side {rx},{ry}");
     }
 
     /// A `ComputedStyle` carrying a `background-color` and a resolved `transform`.

@@ -2,6 +2,29 @@
 
 use crate::property::{GradientStop, Length};
 
+/// One of the four box corners a `linear-gradient(to <corner>, …)` can point at.
+///
+/// Unlike a `to <side>` keyword (which folds to a fixed angle), a `to <corner>`
+/// direction is **aspect-ratio-aware**: per [CSS Images §3.1] the gradient line is
+/// angled so it points into the corner's quadrant and is *perpendicular to the
+/// diagonal joining the two neighbouring corners* of the box. That angle depends
+/// on the box's width/height, which is unknown at CSS-lowering time, so the corner
+/// is carried symbolically here and resolved against the painted box by the scene
+/// coordinator.
+///
+/// [CSS Images §3.1]: https://drafts.csswg.org/css-images-3/#linear-gradients
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Corner {
+    /// `to top left`.
+    TopLeft,
+    /// `to top right`.
+    TopRight,
+    /// `to bottom right`.
+    BottomRight,
+    /// `to bottom left`.
+    BottomLeft,
+}
+
 /// A CSS `linear-gradient(...)` image, as authored in a stylesheet.
 ///
 /// The gradient is described by an `angle_deg` on the CSS convention — `0` points
@@ -37,8 +60,16 @@ use crate::property::{GradientStop, Length};
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinearGradient {
     /// The gradient line's angle in degrees (CSS convention: `0` = to top,
-    /// increasing clockwise).
+    /// increasing clockwise). When [`corner`](Self::corner) is `Some`, this holds
+    /// the nominal diagonal angle (45°/135°/…) as a fallback, but the scene
+    /// coordinator computes the true aspect-ratio-aware angle from the box instead.
     pub angle_deg: f32,
+    /// A `to <corner>` direction, resolved aspect-ratio-aware at paint time
+    /// ([CSS Images §3.1]). `None` for an explicit `<angle>` or a `to <side>` form,
+    /// where [`angle_deg`](Self::angle_deg) fully defines the gradient line.
+    ///
+    /// [CSS Images §3.1]: https://drafts.csswg.org/css-images-3/#linear-gradients
+    pub corner: Option<Corner>,
     /// The gradient's color stops, in authored order along the line. For a
     /// repeating gradient these are normalized to `0.0..=1.0` over one `period`.
     pub stops: Box<[GradientStop]>,
@@ -57,10 +88,33 @@ impl LinearGradient {
     pub fn new(angle_deg: f32, stops: Vec<GradientStop>) -> Self {
         Self {
             angle_deg,
+            corner: None,
             stops: stops.into_boxed_slice(),
             repeating: false,
             period: None,
         }
+    }
+
+    /// Creates a non-repeating `to <corner>` linear gradient. The `angle_deg` is
+    /// the nominal diagonal angle (a fallback); the scene coordinator resolves the
+    /// aspect-ratio-aware angle from the box (spec §3.1).
+    #[must_use]
+    pub fn new_corner(corner: Corner, angle_deg: f32, stops: Vec<GradientStop>) -> Self {
+        Self {
+            angle_deg,
+            corner: Some(corner),
+            stops: stops.into_boxed_slice(),
+            repeating: false,
+            period: None,
+        }
+    }
+
+    /// Sets the `to <corner>` direction, returning the updated gradient (used to
+    /// attach a corner to a repeating gradient).
+    #[must_use]
+    pub fn with_corner(mut self, corner: Corner) -> Self {
+        self.corner = Some(corner);
+        self
     }
 
     /// Creates a repeating linear gradient at `angle_deg` (CSS convention) whose
@@ -70,6 +124,7 @@ impl LinearGradient {
     pub fn new_repeating(angle_deg: f32, stops: Vec<GradientStop>, period: Length) -> Self {
         Self {
             angle_deg,
+            corner: None,
             stops: stops.into_boxed_slice(),
             repeating: true,
             period: Some(period),
@@ -80,6 +135,12 @@ impl LinearGradient {
     #[must_use]
     pub const fn angle_deg(&self) -> f32 {
         self.angle_deg
+    }
+
+    /// Returns the `to <corner>` direction, or `None` for an angle / side form.
+    #[must_use]
+    pub const fn corner(&self) -> Option<Corner> {
+        self.corner
     }
 
     /// Returns the gradient's color stops.

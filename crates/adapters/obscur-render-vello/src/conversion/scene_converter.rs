@@ -505,14 +505,17 @@ impl SceneConverter {
     ) {
         let bez = self.path.convert(path);
         let brush = self.brush.convert(paint.brush());
+        // An elliptical radial gradient carries a brush transform that stretches the
+        // concentric circle into the authored ellipse (spec §3.2).
+        let brush_transform = BrushConverter::brush_transform(paint.brush());
         match paint {
             Paint::Fill(_) => {
                 let fill = self.path.fill_rule(path.fill_rule());
-                scene.fill(fill, transform, &brush, None, &bez);
+                scene.fill(fill, transform, &brush, brush_transform, &bez);
             }
             Paint::Stroke(stroke) => {
                 let style = self.brush.stroke(stroke);
-                scene.stroke(&style, transform, &brush, None, &bez);
+                scene.stroke(&style, transform, &brush, brush_transform, &bez);
             }
         }
     }

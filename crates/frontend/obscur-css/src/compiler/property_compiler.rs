@@ -25,7 +25,7 @@ use obscur_identity::InternedSymbol;
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{
     layout_keyword, BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize,
-    BoxShadow, ConicGradient, CustomProperty, FilterOp, GradientStop, GridAreaTemplate,
+    BoxShadow, ConicGradient, Corner, CustomProperty, FilterOp, GradientStop, GridAreaTemplate,
     GridLineValue, GridTrack, GridTrackList, Length, LinearGradient, ObjectFit, PropertyId,
     PropertyValue, RadialGradient, RadialShape, RadialSize, StyleColor, Transform, TransformOrigin,
 };
@@ -2888,8 +2888,10 @@ fn append_url_component(out: &mut String, value: &ParsedValue) {
 /// The optional first argument is the gradient direction: a `<angle>` (`45deg`,
 /// and the `grad` / `rad` / `turn` units) or a `to <side>` / `to <corner>` keyword
 /// form folded to its CSS-convention angle (`to top` = 0, `to right` = 90, `to
-/// bottom` = 180, `to left` = 270; corners map to the 45° diagonals, a documented
-/// approximation of CSS's aspect-ratio-aware corner angle). When it is omitted the
+/// bottom` = 180, `to left` = 270). A `to <corner>` is carried symbolically (as a
+/// [`Corner`]) rather than folded, so the scene coordinator can resolve CSS's
+/// aspect-ratio-aware corner angle against the painted box (spec §3.1). When it is
+/// omitted the
 /// direction defaults to `to bottom` (180°). At least two comma-separated
 /// `<color> [<percentage>]?` stops follow; missing positions are auto-distributed
 /// to explicit `0.0..=1.0` values ([`resolve_stop_positions`]). Returns [`None`]
@@ -2902,9 +2904,9 @@ fn lower_linear_gradient(args: &[ParsedValue]) -> Option<LinearGradient> {
     }
     // The optional leading direction; when the first part is not a direction it is
     // a color stop and the direction defaults to `to bottom` (180°).
-    let (angle, stop_parts) = match parse_gradient_direction(parts[0]) {
-        Some(angle) => (angle, &parts[1..]),
-        None => (180.0, &parts[..]),
+    let (direction, stop_parts) = match parse_gradient_direction(parts[0]) {
+        Some(direction) => (direction, &parts[1..]),
+        None => (GradientDirection::Angle(180.0), &parts[..]),
     };
     if stop_parts.len() < 2 {
         return None;
@@ -2914,7 +2916,7 @@ fn lower_linear_gradient(args: &[ParsedValue]) -> Option<LinearGradient> {
         stops.push(parse_color_stop(part)?);
     }
     resolve_stop_positions(&mut stops);
-    Some(LinearGradient::new(angle, stops))
+    Some(direction.into_linear(stops))
 }
 
 /// A color stop's position while lowering a `repeating-linear-gradient`, before
@@ -2965,9 +2967,9 @@ fn lower_repeating_linear_gradient(args: &[ParsedValue]) -> Option<LinearGradien
     if parts.is_empty() {
         return None;
     }
-    let (angle, stop_parts) = match parse_gradient_direction(parts[0]) {
-        Some(angle) => (angle, &parts[1..]),
-        None => (180.0, &parts[..]),
+    let (direction, stop_parts) = match parse_gradient_direction(parts[0]) {
+        Some(direction) => (direction, &parts[1..]),
+        None => (GradientDirection::Angle(180.0), &parts[..]),
     };
     if stop_parts.len() < 2 {
         return None;
@@ -3009,7 +3011,12 @@ fn lower_repeating_linear_gradient(args: &[ParsedValue]) -> Option<LinearGradien
     } else {
         Length::Percent(period)
     };
-    Some(LinearGradient::new_repeating(angle, stops, period_len))
+    let gradient =
+        LinearGradient::new_repeating(direction.nominal_angle(), stops, period_len);
+    Some(match direction {
+        GradientDirection::Corner(corner, _) => gradient.with_corner(corner),
+        GradientDirection::Angle(_) => gradient,
+    })
 }
 
 /// Parses one `repeating-linear-gradient` color stop into `out`, supporting the
@@ -3286,15 +3293,46 @@ fn parse_at_position(tokens: &[ParsedValue]) -> Option<(Length, Length)> {
     }
 }
 
+/// The resolved direction of a `linear-gradient`: either an explicit `<angle>`/
+/// `to <side>` (fully defined by a CSS-convention angle) or a `to <corner>` (the
+/// [`Corner`] plus its nominal diagonal angle, resolved aspect-ratio-aware at paint
+/// time per spec §3.1).
+#[derive(Clone, Copy)]
+enum GradientDirection {
+    /// An angle in CSS-convention degrees (`0` = to top, increasing clockwise).
+    Angle(f32),
+    /// A `to <corner>` direction, carrying the corner and its nominal angle.
+    Corner(Corner, f32),
+}
+
+impl GradientDirection {
+    /// The nominal angle in degrees (the diagonal angle for a corner).
+    fn nominal_angle(self) -> f32 {
+        match self {
+            Self::Angle(a) | Self::Corner(_, a) => a,
+        }
+    }
+
+    /// Builds a non-repeating [`LinearGradient`] for this direction and `stops`.
+    fn into_linear(self, stops: Vec<GradientStop>) -> LinearGradient {
+        match self {
+            Self::Angle(a) => LinearGradient::new(a, stops),
+            Self::Corner(c, a) => LinearGradient::new_corner(c, a, stops),
+        }
+    }
+}
+
 /// Parses the optional leading direction argument of a `linear-gradient`: a single
 /// `<angle>` dimension, or a `to <side>` / `to <corner>` keyword form. Returns
 /// [`None`] when the part is not a direction (so it is treated as the first color
 /// stop instead).
-fn parse_gradient_direction(part: &[ParsedValue]) -> Option<f32> {
+fn parse_gradient_direction(part: &[ParsedValue]) -> Option<GradientDirection> {
     match part {
-        [ParsedValue::Dimension { value, unit }] => angle_to_degrees(*value, unit),
+        [ParsedValue::Dimension { value, unit }] => {
+            angle_to_degrees(*value, unit).map(GradientDirection::Angle)
+        }
         [ParsedValue::Keyword(to), rest @ ..] if to.eq_ignore_ascii_case("to") => {
-            to_side_angle(rest)
+            to_side_direction(rest)
         }
         _ => None,
     }
@@ -3318,11 +3356,12 @@ fn angle_to_degrees(value: f64, unit: &str) -> Option<f32> {
     }
 }
 
-/// Folds a `to <side>` / `to <corner>` keyword list (the tokens after `to`) into
-/// its CSS-convention angle. A single side maps to its axis angle; a two-keyword
-/// corner maps to the nearest 45° diagonal. Returns [`None`] for an empty or
-/// unrecognised list.
-fn to_side_angle(sides: &[ParsedValue]) -> Option<f32> {
+/// Resolves a `to <side>` / `to <corner>` keyword list (the tokens after `to`)
+/// into a [`GradientDirection`]. A single side maps to its axis angle; a two-keyword
+/// corner maps to a [`Corner`] (carrying its nominal diagonal angle, resolved
+/// aspect-ratio-aware at paint time). Returns [`None`] for an empty or unrecognised
+/// list.
+fn to_side_direction(sides: &[ParsedValue]) -> Option<GradientDirection> {
     let mut names: Vec<String> = Vec::new();
     for side in sides {
         match side {
@@ -3331,8 +3370,8 @@ fn to_side_angle(sides: &[ParsedValue]) -> Option<f32> {
         }
     }
     match names.as_slice() {
-        [a] => single_side_angle(a),
-        [a, b] => corner_angle(a, b),
+        [a] => single_side_angle(a).map(GradientDirection::Angle),
+        [a, b] => corner_direction(a, b),
         _ => None,
     }
 }
@@ -3348,25 +3387,28 @@ fn single_side_angle(side: &str) -> Option<f32> {
     }
 }
 
-/// The (approximate) CSS-convention angle of a `to <corner>` keyword pair, mapped
-/// to the corner's 45° diagonal. The two keywords must name one vertical
-/// (`top` / `bottom`) and one horizontal (`left` / `right`) edge, in either order.
-fn corner_angle(a: &str, b: &str) -> Option<f32> {
+/// Resolves a `to <corner>` keyword pair to its [`Corner`] and nominal diagonal
+/// angle (the aspect-ratio-aware angle is computed against the box at paint time;
+/// the nominal angle is a square-box fallback). The two keywords must name one
+/// vertical (`top` / `bottom`) and one horizontal (`left` / `right`) edge, in
+/// either order.
+fn corner_direction(a: &str, b: &str) -> Option<GradientDirection> {
     if a == b {
         return None;
     }
     let has = |name: &str| a == name || b == name;
-    if has("top") && has("right") {
-        Some(45.0)
+    let (corner, nominal) = if has("top") && has("right") {
+        (Corner::TopRight, 45.0)
     } else if has("bottom") && has("right") {
-        Some(135.0)
+        (Corner::BottomRight, 135.0)
     } else if has("bottom") && has("left") {
-        Some(225.0)
+        (Corner::BottomLeft, 225.0)
     } else if has("top") && has("left") {
-        Some(315.0)
+        (Corner::TopLeft, 315.0)
     } else {
-        None
-    }
+        return None;
+    };
+    Some(GradientDirection::Corner(corner, nominal))
 }
 
 /// Parses one `<color> [<percentage>]?` color stop from a comma-delimited part: a
@@ -3900,6 +3942,35 @@ mod tests {
         assert_eq!(g.angle_deg(), 180.0);
         assert!(g.repeating());
         assert_eq!(g.period(), Some(Length::px(12.0)));
+    }
+
+    #[test]
+    fn linear_gradient_to_corner_carries_symbolic_corner() {
+        // `to <corner>` is carried symbolically (aspect-ratio-aware at paint time),
+        // not folded to a fixed 45° angle.
+        for (css, corner) in [
+            ("to top right", Corner::TopRight),
+            ("to bottom right", Corner::BottomRight),
+            ("to bottom left", Corner::BottomLeft),
+            ("to top left", Corner::TopLeft),
+            ("to right top", Corner::TopRight),
+        ] {
+            let g = gradient_of(&format!("background-image: linear-gradient({css}, #000, #fff)"));
+            assert_eq!(g.corner(), Some(corner), "corner for `{css}`");
+        }
+        // A plain side (or angle) carries no corner.
+        let side = gradient_of("background-image: linear-gradient(to right, #000, #fff)");
+        assert_eq!(side.corner(), None);
+        assert_eq!(side.angle_deg(), 90.0);
+    }
+
+    #[test]
+    fn repeating_linear_gradient_to_corner_carries_corner() {
+        let g = gradient_of(
+            "background-image: repeating-linear-gradient(to top right, #000 0 6px, #fff 6px 12px)",
+        );
+        assert_eq!(g.corner(), Some(Corner::TopRight));
+        assert!(g.repeating());
     }
 
     #[test]
