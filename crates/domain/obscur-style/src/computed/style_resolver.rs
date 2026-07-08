@@ -124,6 +124,7 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     // Flex container / item.
     PropertyId::Display,
     PropertyId::FlexDirection,
+    PropertyId::FlexWrap,
     PropertyId::JustifyContent,
     PropertyId::AlignContent,
     PropertyId::AlignItems,
@@ -350,6 +351,10 @@ impl StyleResolver {
             // (`Position::Static`) — byte-for-byte identical to today.
             | PropertyId::Position
             | PropertyId::FlexDirection
+            // `flex-wrap` initial is `nowrap`; its keyword initial needs the
+            // interner, so an absent value falls back to the layout default
+            // (`FlexWrap::NoWrap`) — byte-for-byte identical to today.
+            | PropertyId::FlexWrap
             | PropertyId::JustifyContent
             | PropertyId::AlignContent
             | PropertyId::AlignItems
@@ -1109,6 +1114,7 @@ mod tests {
                 | PropertyId::FlexGrow
                 | PropertyId::FlexShrink
                 | PropertyId::FlexDirection
+                | PropertyId::FlexWrap
                 | PropertyId::JustifyContent
                 | PropertyId::AlignContent
                 | PropertyId::AlignItems
@@ -1199,6 +1205,7 @@ mod tests {
             PropertyId::FlexGrow,
             PropertyId::FlexShrink,
             PropertyId::FlexDirection,
+            PropertyId::FlexWrap,
             PropertyId::JustifyContent,
             PropertyId::AlignContent,
             PropertyId::AlignItems,
@@ -1337,6 +1344,7 @@ mod tests {
         for id in [
             PropertyId::Display,
             PropertyId::FlexDirection,
+            PropertyId::FlexWrap,
             PropertyId::JustifyContent,
             PropertyId::AlignContent,
             PropertyId::AlignItems,

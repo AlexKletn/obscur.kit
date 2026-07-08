@@ -218,6 +218,11 @@ pub enum PropertyId {
     /// The `flex-direction` property (Keyword-valued; see
     /// [`crate::property::layout_keyword`]).
     FlexDirection,
+    /// The `flex-wrap` property (Keyword-valued: `nowrap` (initial) / `wrap` /
+    /// `wrap-reverse`; NOT inherited). Governs whether a flex container is
+    /// single-line or wraps its items onto multiple cross-axis lines. See the
+    /// reserved `FLEX_WRAP_*` handles in [`crate::property::layout_keyword`].
+    FlexWrap,
     /// The `justify-content` property (Keyword-valued; see
     /// [`crate::property::layout_keyword`]). On a grid container this is the
     /// *inline-axis* (column) distribution of leftover track space.
@@ -394,6 +399,7 @@ impl PropertyId {
             Self::FlexGrow => "flex-grow",
             Self::FlexShrink => "flex-shrink",
             Self::FlexDirection => "flex-direction",
+            Self::FlexWrap => "flex-wrap",
             Self::JustifyContent => "justify-content",
             Self::AlignContent => "align-content",
             Self::AlignItems => "align-items",
@@ -500,6 +506,7 @@ impl PropertyId {
             | Self::FlexGrow
             | Self::FlexShrink
             | Self::FlexDirection
+            | Self::FlexWrap
             | Self::JustifyContent
             | Self::AlignContent
             | Self::AlignItems
@@ -607,6 +614,7 @@ mod tests {
         assert_eq!(PropertyId::FlexGrow.name(), "flex-grow");
         assert_eq!(PropertyId::FlexShrink.name(), "flex-shrink");
         assert_eq!(PropertyId::FlexDirection.name(), "flex-direction");
+        assert_eq!(PropertyId::FlexWrap.name(), "flex-wrap");
         assert_eq!(PropertyId::JustifyContent.name(), "justify-content");
         assert_eq!(PropertyId::AlignContent.name(), "align-content");
         assert_eq!(PropertyId::AlignItems.name(), "align-items");
@@ -648,6 +656,7 @@ mod tests {
             PropertyId::FlexGrow,
             PropertyId::FlexShrink,
             PropertyId::FlexDirection,
+            PropertyId::FlexWrap,
             PropertyId::JustifyContent,
             PropertyId::AlignItems,
         ] {

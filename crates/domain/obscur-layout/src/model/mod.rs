@@ -9,6 +9,8 @@ mod dimension;
 pub use dimension::Dimension;
 mod flex_direction;
 pub use flex_direction::FlexDirection;
+mod flex_wrap;
+pub use flex_wrap::FlexWrap;
 mod inset;
 pub use inset::Inset;
 mod intrinsic_size;

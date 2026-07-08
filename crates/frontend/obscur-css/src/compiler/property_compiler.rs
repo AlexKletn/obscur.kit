@@ -1064,7 +1064,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 86] = [
+    const ALL: [PropertyId; 87] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::BackgroundImage,
@@ -1126,6 +1126,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::FlexGrow,
         PropertyId::FlexShrink,
         PropertyId::FlexDirection,
+        PropertyId::FlexWrap,
         PropertyId::JustifyContent,
         PropertyId::AlignContent,
         PropertyId::AlignItems,
@@ -1448,6 +1449,7 @@ fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<Inte
         PropertyId::BoxSizing => Some(layout_keyword::box_sizing_from_name),
         PropertyId::Position => Some(layout_keyword::position_from_name),
         PropertyId::FlexDirection => Some(layout_keyword::flex_direction_from_name),
+        PropertyId::FlexWrap => Some(layout_keyword::flex_wrap_from_name),
         PropertyId::JustifyContent => Some(layout_keyword::justify_content_from_name),
         // `align-content` shares the `justify-content` distribution value grammar
         // (`start`/`end`/`center`/`space-*`).
@@ -5049,6 +5051,14 @@ mod tests {
         assert_eq!(
             value_of("flex-direction: column"),
             PropertyValue::Keyword(layout_keyword::FLEX_COLUMN)
+        );
+        assert_eq!(
+            value_of("flex-wrap: wrap"),
+            PropertyValue::Keyword(layout_keyword::FLEX_WRAP_WRAP)
+        );
+        assert_eq!(
+            value_of("flex-wrap: wrap-reverse"),
+            PropertyValue::Keyword(layout_keyword::FLEX_WRAP_WRAP_REVERSE)
         );
         assert_eq!(
             value_of("justify-content: center"),

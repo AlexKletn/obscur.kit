@@ -160,7 +160,6 @@ impl LayoutAlgorithm for FlexLayout {
         };
 
         let count = children.len();
-        let gap_span = gap * (count.saturating_sub(1) as f32);
 
         // Per-item margins split into main-leading / main-trailing (which consume
         // main-axis space and offset items) and a cross-leading offset. The
@@ -187,7 +186,6 @@ impl LayoutAlgorithm for FlexLayout {
             main_trail.push(trail);
             cross_lead.push(if is_row { m.top } else { m.left });
         }
-        let sum_margin_main: f32 = main_lead.iter().chain(main_trail.iter()).copied().sum();
 
         // Step 2: base main size per item, clamped into the item's main-axis
         // min/max range.
@@ -231,155 +229,420 @@ impl LayoutAlgorithm for FlexLayout {
             base_main.push(clamp_main(base.max(0.0), min_main, max_main, container_main));
         }
 
-        // Step 3: free space along the main axis (margins consume space too).
-        let sum_base: f32 = base_main.iter().copied().sum();
-        let free = container_main - sum_base - gap_span - sum_margin_main;
+        // Steps 3–8: break the items into flex lines, then size / justify /
+        // align each line independently and stack the lines along the cross axis.
+        //
+        // `flex-wrap: nowrap` (the default) has exactly one line holding every
+        // item; it is byte-for-byte identical to the historical single-line path
+        // (`stretch_target = Some(container_cross)` reproduces the old
+        // fill-the-container stretch and container-relative alignment).
+        let mut child_boxes = vec![LayoutBox::default(); count];
 
-        // Step 4: resolve final main sizes via grow / shrink.
-        let sum_grow: f32 = children.iter().map(|c| c.style.flex_grow).sum();
-        let mut final_main: Vec<f32> = base_main.clone();
-        if free > 0.0 && sum_grow > 0.0 {
-            for (final_size, child) in final_main.iter_mut().zip(children.iter()) {
-                *final_size += free * child.style.flex_grow / sum_grow;
-            }
-        } else if free < 0.0 {
-            let sum_weight: f32 = children
-                .iter()
-                .zip(base_main.iter())
-                .map(|(c, &b)| c.style.flex_shrink * b)
-                .sum();
-            if sum_weight > 0.0 {
-                for ((final_size, child), &base) in final_main
-                    .iter_mut()
-                    .zip(children.iter())
-                    .zip(base_main.iter())
-                {
-                    let weight = child.style.flex_shrink * base;
-                    *final_size = (*final_size + free * weight / sum_weight).max(0.0);
-                }
-            }
+        if !style.flex_wrap.is_multi_line() {
+            let line: Vec<usize> = (0..count).collect();
+            place_line(LineArgs {
+                line: &line,
+                base_main: &base_main,
+                children,
+                style,
+                is_row,
+                is_reverse,
+                line_main: container_main,
+                gap,
+                main_lead: &main_lead,
+                main_trail: &main_trail,
+                cross_lead: &cross_lead,
+                stretch_target: Some(container_cross),
+                container_cross,
+                bp_left,
+                bp_top,
+                cross_offset: 0.0,
+                measurer: &mut *measurer,
+                child_boxes: &mut child_boxes,
+            });
+
+            let border_box = Size::new(content_width + bp_x, content_height + bp_y);
+            return LayoutOutput::new(constraints.constrain(border_box), child_boxes);
         }
 
-        // Re-clamp the grown/shrunk main sizes into each item's min/max range so
-        // a `min-width` / `max-width` bound holds after free-space distribution.
-        for (final_size, child) in final_main.iter_mut().zip(children.iter()) {
-            let (min_main, max_main) = main_bounds(&child.style, is_row);
-            *final_size = clamp_main(*final_size, min_main, max_main, container_main);
+        // Multi-line: greedily fill lines along the main axis. An item (with its
+        // main-axis margins) that does not fit on the current non-empty line
+        // starts a new one; an item wider than the container occupies its own line.
+        let mut lines: Vec<Vec<usize>> = Vec::new();
+        let mut current: Vec<usize> = Vec::new();
+        let mut current_main = 0.0_f32;
+        for index in 0..count {
+            let item_main = base_main[index] + main_lead[index] + main_trail[index];
+            let with_item = if current.is_empty() {
+                item_main
+            } else {
+                current_main + gap + item_main
+            };
+            if !current.is_empty() && with_item > container_main {
+                lines.push(std::mem::take(&mut current));
+                current_main = item_main;
+            } else {
+                current_main = with_item;
+            }
+            current.push(index);
+        }
+        if !current.is_empty() {
+            lines.push(current);
         }
 
-        // Step 5: cross size per item.
-        let mut cross_size = Vec::with_capacity(count);
-        for (index, main) in final_main.iter().copied().enumerate() {
-            let cross = if style.align_items == AlignItems::Stretch {
-                // `stretch` fills the cross axis, but an explicit author-set
-                // cross-axis size on the item wins over the stretch (a stretched
-                // item must not override an author height in a row / width in a
-                // column). `Auto` (the usual case) keeps the stretched extent.
-                let cross_style = &children[index].style;
+        // `wrap-reverse` stacks the lines in the opposite cross-axis order: the
+        // last line leads at the cross start.
+        if style.flex_wrap.is_reverse() {
+            lines.reverse();
+        }
+
+        // Stack each line at the running cross offset; the cross-axis gap sits
+        // between adjacent lines. The container's cross extent grows to the sum of
+        // the line cross sizes when it is `auto` (so all lines fit without
+        // overlap); an explicit cross size is kept as authored.
+        let mut cross_offset = 0.0_f32;
+        let mut total_cross = 0.0_f32;
+        for (i, line) in lines.iter().enumerate() {
+            if i > 0 {
+                cross_offset += gap;
+                total_cross += gap;
+            }
+            let line_cross = place_line(LineArgs {
+                line,
+                base_main: &base_main,
+                children,
+                style,
+                is_row,
+                is_reverse,
+                line_main: container_main,
+                gap,
+                main_lead: &main_lead,
+                main_trail: &main_trail,
+                cross_lead: &cross_lead,
+                stretch_target: None,
+                container_cross,
+                bp_left,
+                bp_top,
+                cross_offset,
+                measurer: &mut *measurer,
+                child_boxes: &mut child_boxes,
+            });
+            cross_offset += line_cross;
+            total_cross += line_cross;
+        }
+
+        let cross_is_auto = if is_row {
+            style.height.resolve(constraints.max.height).is_none()
+        } else {
+            style.width.resolve(constraints.max.width).is_none()
+        };
+        let (final_content_width, final_content_height) = if is_row {
+            let h = if cross_is_auto { total_cross } else { content_height };
+            (content_width, h)
+        } else {
+            let w = if cross_is_auto { total_cross } else { content_width };
+            (w, content_height)
+        };
+
+        let border_box = Size::new(final_content_width + bp_x, final_content_height + bp_y);
+        LayoutOutput::new(constraints.constrain(border_box), child_boxes)
+    }
+}
+
+/// Inputs for [`place_line`]: one flex line's items plus the shared container /
+/// style context. Grouped into a struct because the single-line sizing pass
+/// legitimately needs this many parameters and a positional argument list would
+/// be error-prone.
+struct LineArgs<'a, 'm> {
+    /// The item indices on this line, in source order.
+    line: &'a [usize],
+    /// Base main size per item, indexed by the global item index.
+    base_main: &'a [f32],
+    /// The flex items.
+    children: &'a [LayoutChild],
+    /// The flex container's style.
+    style: &'a LayoutStyle,
+    /// Whether the main axis is horizontal.
+    is_row: bool,
+    /// Whether items are placed in reverse main-axis order.
+    is_reverse: bool,
+    /// The main-axis extent this line's free space / justification resolve against.
+    line_main: f32,
+    /// Gap between adjacent items on the line.
+    gap: f32,
+    /// Leading / trailing main-axis margins, indexed by the global item index.
+    main_lead: &'a [f32],
+    main_trail: &'a [f32],
+    /// Leading cross-axis margin, indexed by the global item index.
+    cross_lead: &'a [f32],
+    /// When `Some(target)`, `stretch` fills `target` and alignment resolves
+    /// against `container_cross` (the single-line / no-wrap semantics). When
+    /// `None`, the line's cross size is the max item cross size and `stretch`
+    /// fills that (the multi-line semantics).
+    stretch_target: Option<f32>,
+    /// The container's cross extent (the measurement bound and, for the
+    /// single-line path, the alignment reference).
+    container_cross: f32,
+    /// Content-box origin offsets.
+    bp_left: f32,
+    bp_top: f32,
+    /// The line's leading cross-axis offset (0 for a single line).
+    cross_offset: f32,
+    /// Child measurer.
+    measurer: &'m mut dyn ChildMeasurer,
+    /// Output boxes, written at each item's global index.
+    child_boxes: &'a mut [LayoutBox],
+}
+
+/// Sizes, justifies, and cross-aligns one flex line, writing each item's box and
+/// returning the line's cross extent (spec §4.2, §4.6).
+///
+/// Distributes the line's main-axis free space via `flex_grow` / `flex_shrink`,
+/// re-clamps into each item's main min/max range, positions items with
+/// `justify_content` along the main axis, and aligns them with `align_items`
+/// along the cross axis. Reverse directions place items in reversed main order.
+fn place_line(args: LineArgs) -> f32 {
+    let LineArgs {
+        line,
+        base_main,
+        children,
+        style,
+        is_row,
+        is_reverse,
+        line_main,
+        gap,
+        main_lead,
+        main_trail,
+        cross_lead,
+        stretch_target,
+        container_cross,
+        bp_left,
+        bp_top,
+        cross_offset,
+        measurer,
+        child_boxes,
+    } = args;
+
+    let count = line.len();
+    let gap_span = gap * (count.saturating_sub(1) as f32);
+
+    // Step 3: free space along the main axis (margins consume space too).
+    let sum_base: f32 = line.iter().map(|&i| base_main[i]).sum();
+    let sum_margin_main: f32 = line.iter().map(|&i| main_lead[i] + main_trail[i]).sum();
+    let free = line_main - sum_base - gap_span - sum_margin_main;
+
+    // Step 4: resolve final main sizes via grow / shrink.
+    let sum_grow: f32 = line.iter().map(|&i| children[i].style.flex_grow).sum();
+    let mut final_main: Vec<f32> = line.iter().map(|&i| base_main[i]).collect();
+    if free > 0.0 && sum_grow > 0.0 {
+        for (final_size, &i) in final_main.iter_mut().zip(line.iter()) {
+            *final_size += free * children[i].style.flex_grow / sum_grow;
+        }
+    } else if free < 0.0 {
+        let sum_weight: f32 = line
+            .iter()
+            .map(|&i| children[i].style.flex_shrink * base_main[i])
+            .sum();
+        if sum_weight > 0.0 {
+            for (final_size, &i) in final_main.iter_mut().zip(line.iter()) {
+                let weight = children[i].style.flex_shrink * base_main[i];
+                *final_size = (*final_size + free * weight / sum_weight).max(0.0);
+            }
+        }
+    }
+
+    // Re-clamp the grown/shrunk main sizes into each item's min/max range so a
+    // `min-width` / `max-width` bound holds after free-space distribution.
+    for (final_size, &i) in final_main.iter_mut().zip(line.iter()) {
+        let (min_main, max_main) = main_bounds(&children[i].style, is_row);
+        *final_size = clamp_main(*final_size, min_main, max_main, line_main);
+    }
+
+    // Step 5: cross size per item, and the line's cross extent.
+    //
+    // For the single-line path (`stretch_target = Some`), a stretched item fills
+    // the container cross exactly as before and no measurement is taken. For the
+    // multi-line path, every item's cross size is resolved (explicit) or measured,
+    // the line cross is their max, and a stretched item fills that line cross.
+    let mut cross_size: Vec<f32> = Vec::with_capacity(count);
+    let line_cross;
+    match stretch_target {
+        Some(target) => {
+            for (pos, &i) in line.iter().enumerate() {
+                let cross = cross_item_size(
+                    style.align_items == AlignItems::Stretch,
+                    target,
+                    &children[i].style,
+                    is_row,
+                    final_main[pos],
+                    container_cross,
+                    i,
+                    &mut *measurer,
+                );
+                cross_size.push(cross);
+            }
+            line_cross = target;
+        }
+        None => {
+            // First resolve/measure each item's own cross size (no stretch), so
+            // the line cross size is known before stretched items fill it.
+            let mut base_cross: Vec<f32> = Vec::with_capacity(count);
+            for (pos, &i) in line.iter().enumerate() {
+                let bc = cross_item_size(
+                    false,
+                    0.0,
+                    &children[i].style,
+                    is_row,
+                    final_main[pos],
+                    container_cross,
+                    i,
+                    &mut *measurer,
+                );
+                base_cross.push(bc);
+            }
+            let lc = base_cross.iter().copied().fold(0.0_f32, f32::max);
+            for (pos, &i) in line.iter().enumerate() {
+                let cross_style = &children[i].style;
                 let cross_dim = if is_row {
                     cross_style.height
                 } else {
                     cross_style.width
                 };
-                // An explicit cross size is authored against the item's box-sizing,
-                // so it is expanded to the border-box extent it occupies (a
-                // `height: 0` / `width: 0` item with a border keeps its border
-                // widths rather than collapsing). `Auto` keeps the stretched extent.
-                cross_dim.resolve(container_cross).map_or(container_cross, |explicit| {
-                    cross_style
-                        .box_sizing
-                        .border_extent(explicit, axis_bp(cross_style, !is_row))
-                })
-            } else {
-                let item_constraints = if is_row {
-                    BoxConstraints {
-                        min: Size::new(main, 0.0),
-                        max: Size::new(main, container_cross),
-                    }
+                let has_explicit = cross_dim.resolve(container_cross).is_some();
+                let cross = if style.align_items == AlignItems::Stretch && !has_explicit {
+                    lc
                 } else {
-                    BoxConstraints {
-                        min: Size::new(0.0, main),
-                        max: Size::new(container_cross, main),
-                    }
+                    base_cross[pos]
                 };
-                let measured = measurer.measure_child(index, item_constraints);
-                if is_row {
-                    measured.height
-                } else {
-                    measured.width
-                }
-            };
-            cross_size.push(cross);
+                cross_size.push(cross);
+            }
+            line_cross = lc;
         }
+    }
 
-        // Step 6: justify_content → leading offset and inter-item spacing.
-        let total_final: f32 = final_main.iter().copied().sum();
-        let remaining = container_main - total_final - gap_span - sum_margin_main;
-        let (leading, spacing) = if remaining <= 0.0 || count == 0 {
-            (0.0, 0.0)
-        } else {
-            let n = count as f32;
-            match style.justify_content {
-                JustifyContent::FlexStart => (0.0, 0.0),
-                JustifyContent::FlexEnd => (remaining, 0.0),
-                JustifyContent::Center => (remaining / 2.0, 0.0),
-                JustifyContent::SpaceBetween => {
-                    if count > 1 {
-                        (0.0, remaining / (n - 1.0))
-                    } else {
-                        (0.0, 0.0)
-                    }
-                }
-                JustifyContent::SpaceAround => {
-                    let s = remaining / n;
-                    (s / 2.0, s)
-                }
-                JustifyContent::SpaceEvenly => {
-                    let s = remaining / (n + 1.0);
-                    (s, s)
+    // The alignment reference is the container cross for the single-line path and
+    // the line cross for the multi-line path.
+    let align_ref = match stretch_target {
+        Some(_) => container_cross,
+        None => line_cross,
+    };
+
+    // Step 6: justify_content → leading offset and inter-item spacing.
+    let total_final: f32 = final_main.iter().copied().sum();
+    let remaining = line_main - total_final - gap_span - sum_margin_main;
+    let (leading, spacing) = if remaining <= 0.0 || count == 0 {
+        (0.0, 0.0)
+    } else {
+        let n = count as f32;
+        match style.justify_content {
+            JustifyContent::FlexStart => (0.0, 0.0),
+            JustifyContent::FlexEnd => (remaining, 0.0),
+            JustifyContent::Center => (remaining / 2.0, 0.0),
+            JustifyContent::SpaceBetween => {
+                if count > 1 {
+                    (0.0, remaining / (n - 1.0))
+                } else {
+                    (0.0, 0.0)
                 }
             }
-        };
-
-        // Steps 7 & 8: position each item and map back to (x, y).
-        let mut child_boxes = vec![LayoutBox::default(); count];
-        let mut cursor = leading;
-        let order: Vec<usize> = if is_reverse {
-            (0..count).rev().collect()
-        } else {
-            (0..count).collect()
-        };
-        for &index in &order {
-            // A leading main-axis margin pushes the item further along the main
-            // axis before it is placed.
-            cursor += main_lead[index];
-            let main = final_main[index];
-            let cross = cross_size[index];
-            let cross_start = cross_lead[index]
-                + match style.align_items {
-                    AlignItems::FlexStart | AlignItems::Start | AlignItems::Stretch => 0.0,
-                    AlignItems::FlexEnd | AlignItems::End => container_cross - cross,
-                    AlignItems::Center => (container_cross - cross) / 2.0,
-                };
-            let (origin, size) = if is_row {
-                (
-                    Point::new(bp_left + cursor, bp_top + cross_start),
-                    Size::new(main, cross),
-                )
-            } else {
-                (
-                    Point::new(bp_left + cross_start, bp_top + cursor),
-                    Size::new(cross, main),
-                )
-            };
-            child_boxes[index] = LayoutBox::new(Rect::new(origin, size));
-            cursor += main + main_trail[index] + gap + spacing;
+            JustifyContent::SpaceAround => {
+                let s = remaining / n;
+                (s / 2.0, s)
+            }
+            JustifyContent::SpaceEvenly => {
+                let s = remaining / (n + 1.0);
+                (s, s)
+            }
         }
+    };
 
-        let border_box = Size::new(content_width + bp_x, content_height + bp_y);
-        let size = constraints.constrain(border_box);
+    // Steps 7 & 8: position each item and map back to (x, y).
+    let mut cursor = leading;
+    let order: Vec<usize> = if is_reverse {
+        (0..count).rev().collect()
+    } else {
+        (0..count).collect()
+    };
+    for &pos in &order {
+        let i = line[pos];
+        // A leading main-axis margin pushes the item further along the main axis
+        // before it is placed.
+        cursor += main_lead[i];
+        let main = final_main[pos];
+        let cross = cross_size[pos];
+        let cross_start = cross_offset
+            + cross_lead[i]
+            + match style.align_items {
+                AlignItems::FlexStart | AlignItems::Start | AlignItems::Stretch => 0.0,
+                AlignItems::FlexEnd | AlignItems::End => align_ref - cross,
+                AlignItems::Center => (align_ref - cross) / 2.0,
+            };
+        let (origin, size) = if is_row {
+            (
+                Point::new(bp_left + cursor, bp_top + cross_start),
+                Size::new(main, cross),
+            )
+        } else {
+            (
+                Point::new(bp_left + cross_start, bp_top + cursor),
+                Size::new(cross, main),
+            )
+        };
+        child_boxes[i] = LayoutBox::new(Rect::new(origin, size));
+        cursor += main + main_trail[i] + gap + spacing;
+    }
 
-        LayoutOutput::new(size, child_boxes)
+    line_cross
+}
+
+/// Resolves one item's cross-axis size.
+///
+/// When `stretch` is set, the item fills `stretch_target` unless it sets an
+/// explicit cross-axis size (which wins, expanded to its border-box extent).
+/// Otherwise the item's cross size is measured with its final main size fixed and
+/// a loose cross axis bounded by `container_cross`.
+#[allow(clippy::too_many_arguments)]
+fn cross_item_size(
+    stretch: bool,
+    stretch_target: f32,
+    cross_style: &LayoutStyle,
+    is_row: bool,
+    main: f32,
+    container_cross: f32,
+    index: usize,
+    measurer: &mut dyn ChildMeasurer,
+) -> f32 {
+    if stretch {
+        let cross_dim = if is_row {
+            cross_style.height
+        } else {
+            cross_style.width
+        };
+        cross_dim
+            .resolve(container_cross)
+            .map_or(stretch_target, |explicit| {
+                cross_style
+                    .box_sizing
+                    .border_extent(explicit, axis_bp(cross_style, !is_row))
+            })
+    } else {
+        let item_constraints = if is_row {
+            BoxConstraints {
+                min: Size::new(main, 0.0),
+                max: Size::new(main, container_cross),
+            }
+        } else {
+            BoxConstraints {
+                min: Size::new(0.0, main),
+                max: Size::new(container_cross, main),
+            }
+        };
+        let measured = measurer.measure_child(index, item_constraints);
+        if is_row {
+            measured.height
+        } else {
+            measured.width
+        }
     }
 }
 
@@ -388,7 +651,8 @@ mod tests {
     use super::FlexLayout;
     use crate::algorithm::{FixedChildMeasurer, LayoutAlgorithm, LayoutChild};
     use crate::model::{
-        AlignItems, BoxSizing, Dimension, FlexDirection, JustifyContent, LayoutDisplay, LayoutStyle,
+        AlignItems, BoxSizing, Dimension, FlexDirection, FlexWrap, JustifyContent, LayoutDisplay,
+        LayoutStyle,
     };
     use obscur_geometry::{BoxConstraints, Insets, Point, Size};
     use obscur_identity::NodeId;
@@ -820,6 +1084,167 @@ mod tests {
         );
         // Content extent 52 + border/padding 16 = 68.
         approx(out.size().height, 68.0);
+    }
+
+    /// A wrap container of `width: 100` with three 40-wide items breaks into two
+    /// lines (2 items then 1); the second line sits below the first (cross offset
+    /// = line-1 height + gap) and the container cross size is the sum of the two
+    /// line heights.
+    #[test]
+    fn flex_wrap_breaks_row_into_two_lines() {
+        let style = LayoutStyle {
+            width: Dimension::Px(100.0),
+            flex_wrap: FlexWrap::Wrap,
+            ..container(
+                FlexDirection::Row,
+                JustifyContent::FlexStart,
+                AlignItems::FlexStart,
+                0.0,
+            )
+        };
+        let children = [
+            fixed_basis(1, 40.0),
+            fixed_basis(2, 40.0),
+            fixed_basis(3, 40.0),
+        ];
+        // Each item measures 30px tall on the cross axis.
+        let mut measurer = FixedChildMeasurer::new(vec![
+            Size::new(40.0, 30.0),
+            Size::new(40.0, 30.0),
+            Size::new(40.0, 30.0),
+        ]);
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(100.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // Line 1: items 0 and 1 side by side at y = 0.
+        approx(b[0].origin().x, 0.0);
+        approx(b[0].origin().y, 0.0);
+        approx(b[1].origin().x, 40.0);
+        approx(b[1].origin().y, 0.0);
+        // Line 2: item 2 below line 1 (cross offset = line-1 height 30 + gap 0).
+        approx(b[2].origin().x, 0.0);
+        approx(b[2].origin().y, 30.0);
+        // Item cross sizes are the measured 30.
+        approx(b[0].size().height, 30.0);
+        approx(b[2].size().height, 30.0);
+        // Container grew on the (auto) cross axis to the sum of the two line
+        // heights: 30 + 30 = 60.
+        approx(out.size().height, 60.0);
+        approx(out.size().width, 100.0);
+    }
+
+    /// `flex-wrap: nowrap` (the default) keeps all three items on one line, packed
+    /// against the main axis (overflowing the container), byte-identical to the
+    /// historical single-line path.
+    #[test]
+    fn nowrap_keeps_all_items_on_one_line() {
+        let style = LayoutStyle {
+            width: Dimension::Px(100.0),
+            flex_wrap: FlexWrap::NoWrap,
+            ..container(
+                FlexDirection::Row,
+                JustifyContent::FlexStart,
+                AlignItems::FlexStart,
+                0.0,
+            )
+        };
+        let children = [
+            fixed_basis(1, 40.0),
+            fixed_basis(2, 40.0),
+            fixed_basis(3, 40.0),
+        ];
+        let mut measurer = FixedChildMeasurer::new(vec![
+            Size::new(40.0, 30.0),
+            Size::new(40.0, 30.0),
+            Size::new(40.0, 30.0),
+        ]);
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(100.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // All three share y = 0, laid end to end (40, 80) — no wrapping.
+        approx(b[0].origin().y, 0.0);
+        approx(b[1].origin().y, 0.0);
+        approx(b[2].origin().y, 0.0);
+        approx(b[0].origin().x, 0.0);
+        approx(b[1].origin().x, 40.0);
+        approx(b[2].origin().x, 80.0);
+    }
+
+    /// An item wider than the container occupies its own flex line.
+    #[test]
+    fn wrap_puts_oversized_item_on_its_own_line() {
+        let style = LayoutStyle {
+            width: Dimension::Px(100.0),
+            flex_wrap: FlexWrap::Wrap,
+            ..container(
+                FlexDirection::Row,
+                JustifyContent::FlexStart,
+                AlignItems::FlexStart,
+                0.0,
+            )
+        };
+        // Item 1 (150px) is wider than the 100px container.
+        let children = [fixed_basis(1, 40.0), fixed_basis(2, 150.0)];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(40.0, 30.0), Size::new(150.0, 30.0)]);
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(100.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // Item 0 on line 1 at y = 0; the oversized item 1 is pushed to its own
+        // line 2 (below line 1's 30px height).
+        approx(b[0].origin().y, 0.0);
+        approx(b[1].origin().y, 30.0);
+        approx(b[1].size().width, 150.0);
+    }
+
+    /// `flex-wrap: wrap-reverse` stacks the lines in reverse cross-axis order: the
+    /// last line leads at the cross start.
+    #[test]
+    fn wrap_reverse_reverses_line_order() {
+        let style = LayoutStyle {
+            width: Dimension::Px(100.0),
+            flex_wrap: FlexWrap::WrapReverse,
+            ..container(
+                FlexDirection::Row,
+                JustifyContent::FlexStart,
+                AlignItems::FlexStart,
+                0.0,
+            )
+        };
+        let children = [
+            fixed_basis(1, 40.0),
+            fixed_basis(2, 40.0),
+            fixed_basis(3, 40.0),
+        ];
+        let mut measurer = FixedChildMeasurer::new(vec![
+            Size::new(40.0, 30.0),
+            Size::new(40.0, 30.0),
+            Size::new(40.0, 30.0),
+        ]);
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(100.0, 1000.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // Reversed: the line holding item 2 leads at y = 0; items 0 and 1 follow
+        // on the second-placed line at y = 30.
+        approx(b[2].origin().y, 0.0);
+        approx(b[0].origin().y, 30.0);
+        approx(b[1].origin().y, 30.0);
     }
 
     #[test]

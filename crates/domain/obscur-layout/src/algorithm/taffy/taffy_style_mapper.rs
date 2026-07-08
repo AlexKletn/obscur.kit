@@ -23,7 +23,7 @@
 )]
 
 use crate::model::{
-    AlignItems, Dimension, FlexDirection, JustifyContent, LayoutDisplay, LayoutStyle,
+    AlignItems, Dimension, FlexDirection, FlexWrap, JustifyContent, LayoutDisplay, LayoutStyle,
 };
 use obscur_geometry::Insets;
 
@@ -75,6 +75,7 @@ impl TaffyStyleMapper {
             padding: self.insets_lp(style.padding),
             border: self.insets_lp(style.border),
             flex_direction: Self::flex_direction(style.flex_direction),
+            flex_wrap: Self::flex_wrap(style.flex_wrap),
             justify_content: Some(Self::justify_content(style.justify_content)),
             align_items: Some(Self::align_items(style.align_items)),
             gap: taffy::Size {
@@ -137,6 +138,15 @@ impl TaffyStyleMapper {
             FlexDirection::Column => taffy::FlexDirection::Column,
             FlexDirection::RowReverse => taffy::FlexDirection::RowReverse,
             FlexDirection::ColumnReverse => taffy::FlexDirection::ColumnReverse,
+        }
+    }
+
+    /// Maps [`FlexWrap`] to `taffy::FlexWrap` (1:1).
+    fn flex_wrap(wrap: FlexWrap) -> taffy::FlexWrap {
+        match wrap {
+            FlexWrap::NoWrap => taffy::FlexWrap::NoWrap,
+            FlexWrap::Wrap => taffy::FlexWrap::Wrap,
+            FlexWrap::WrapReverse => taffy::FlexWrap::WrapReverse,
         }
     }
 

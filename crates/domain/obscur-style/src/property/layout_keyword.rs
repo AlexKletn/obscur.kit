@@ -46,6 +46,15 @@ pub const FLEX_COLUMN: InternedSymbol = InternedSymbol::from_raw(0x0000_1103);
 /// The `flex-direction: column-reverse` keyword.
 pub const FLEX_COLUMN_REVERSE: InternedSymbol = InternedSymbol::from_raw(0x0000_1104);
 
+// ---- `flex-wrap` keyword values ----
+
+/// The `flex-wrap: nowrap` keyword (the initial; single-line).
+pub const FLEX_WRAP_NOWRAP: InternedSymbol = InternedSymbol::from_raw(0x0000_1F01);
+/// The `flex-wrap: wrap` keyword (multi-line, lines stacked start-to-end).
+pub const FLEX_WRAP_WRAP: InternedSymbol = InternedSymbol::from_raw(0x0000_1F02);
+/// The `flex-wrap: wrap-reverse` keyword (multi-line, lines stacked end-to-start).
+pub const FLEX_WRAP_WRAP_REVERSE: InternedSymbol = InternedSymbol::from_raw(0x0000_1F03);
+
 // ---- `justify-content` keyword values ----
 
 /// The `justify-content: flex-start` keyword.
@@ -304,6 +313,20 @@ pub fn flex_direction_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
+/// Maps a `flex-wrap` keyword string to its reserved [`InternedSymbol`].
+///
+/// The input is ASCII-lowercased before matching. Returns [`None`] for any
+/// keyword outside the closed `nowrap` / `wrap` / `wrap-reverse` set.
+#[must_use]
+pub fn flex_wrap_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "nowrap" => Some(FLEX_WRAP_NOWRAP),
+        "wrap" => Some(FLEX_WRAP_WRAP),
+        "wrap-reverse" => Some(FLEX_WRAP_WRAP_REVERSE),
+        _ => None,
+    }
+}
+
 /// Maps a `justify-content` keyword string to its reserved [`InternedSymbol`].
 ///
 /// The input is ASCII-lowercased before matching. Both the modern (`start` /
@@ -524,6 +547,9 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         FLEX_ROW_REVERSE => Some("row-reverse"),
         FLEX_COLUMN => Some("column"),
         FLEX_COLUMN_REVERSE => Some("column-reverse"),
+        FLEX_WRAP_NOWRAP => Some("nowrap"),
+        FLEX_WRAP_WRAP => Some("wrap"),
+        FLEX_WRAP_WRAP_REVERSE => Some("wrap-reverse"),
         JUSTIFY_START => Some("flex-start"),
         JUSTIFY_CENTER => Some("center"),
         JUSTIFY_END => Some("flex-end"),
@@ -588,6 +614,9 @@ mod tests {
         FLEX_ROW_REVERSE,
         FLEX_COLUMN,
         FLEX_COLUMN_REVERSE,
+        FLEX_WRAP_NOWRAP,
+        FLEX_WRAP_WRAP,
+        FLEX_WRAP_WRAP_REVERSE,
         JUSTIFY_START,
         JUSTIFY_CENTER,
         JUSTIFY_END,
@@ -672,6 +701,21 @@ mod tests {
             Some(FLEX_COLUMN_REVERSE)
         );
         assert_eq!(flex_direction_from_name("diagonal"), None);
+    }
+
+    #[test]
+    fn flex_wrap_maps_known_keywords() {
+        assert_eq!(flex_wrap_from_name("nowrap"), Some(FLEX_WRAP_NOWRAP));
+        assert_eq!(flex_wrap_from_name("wrap"), Some(FLEX_WRAP_WRAP));
+        assert_eq!(
+            flex_wrap_from_name("Wrap-Reverse"),
+            Some(FLEX_WRAP_WRAP_REVERSE)
+        );
+        assert_eq!(flex_wrap_from_name("clip"), None);
+        // Round-trips through `name_of`.
+        assert_eq!(name_of(FLEX_WRAP_NOWRAP), Some("nowrap"));
+        assert_eq!(name_of(FLEX_WRAP_WRAP), Some("wrap"));
+        assert_eq!(name_of(FLEX_WRAP_WRAP_REVERSE), Some("wrap-reverse"));
     }
 
     #[test]

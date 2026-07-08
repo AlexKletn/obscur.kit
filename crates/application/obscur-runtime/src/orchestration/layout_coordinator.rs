@@ -9,8 +9,8 @@ use obscur_layout::algorithm::{
     LayoutAlgorithm, LayoutChild,
 };
 use obscur_layout::model::{
-    AlignItems, AlignSelf, BoxSizing, Dimension, FlexDirection, Inset, JustifyContent, LayoutBox,
-    LayoutDisplay, LayoutStyle, Position,
+    AlignItems, AlignSelf, BoxSizing, Dimension, FlexDirection, FlexWrap, Inset, JustifyContent,
+    LayoutBox, LayoutDisplay, LayoutStyle, Position,
 };
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{
@@ -498,6 +498,8 @@ fn measure_ellipsis_glyph(
 /// * `flex_basis` ← [`PropertyId::FlexBasis`] via [`dimension_of`].
 /// * `flex_direction` ← [`PropertyId::FlexDirection`] keyword against the
 ///   reserved `FLEX_*` handles (default `Row`).
+/// * `flex_wrap` ← [`PropertyId::FlexWrap`] keyword against the reserved
+///   `FLEX_WRAP_*` handles (default `NoWrap`, i.e. single-line).
 /// * `justify_content` ← [`PropertyId::JustifyContent`] keyword against the
 ///   reserved `JUSTIFY_*` handles (default `FlexStart`).
 /// * `align_content` ← [`PropertyId::AlignContent`] keyword against the same
@@ -557,6 +559,9 @@ fn layout_style_from(computed: &ComputedStyle, viewport: Size, root_font_size: f
             &ctx,
         ),
         flex_direction: flex_direction_of(computed),
+        // `flex-wrap`: an unauthored value stays `NoWrap` (single-line), so a
+        // container that never wraps is byte-for-byte identical to before.
+        flex_wrap: flex_wrap_of(computed),
         justify_content: justify_content_of(computed),
         // Grid container: block-axis (row) track distribution. Unauthored stays
         // `FlexStart` (no distribution), so a default grid packs rows at the top.
@@ -855,6 +860,16 @@ fn justify_content_of(computed: &ComputedStyle) -> JustifyContent {
 /// `justify-content` keyword set.
 fn align_content_of(computed: &ComputedStyle) -> JustifyContent {
     justify_content_keyword(keyword_sym(computed, PropertyId::AlignContent))
+}
+
+/// Resolves the computed `flex-wrap` keyword to a [`FlexWrap`], defaulting to
+/// [`FlexWrap::NoWrap`] for an absent or unrecognized value.
+fn flex_wrap_of(computed: &ComputedStyle) -> FlexWrap {
+    match keyword_sym(computed, PropertyId::FlexWrap) {
+        Some(sym) if sym == layout_keyword::FLEX_WRAP_WRAP => FlexWrap::Wrap,
+        Some(sym) if sym == layout_keyword::FLEX_WRAP_WRAP_REVERSE => FlexWrap::WrapReverse,
+        _ => FlexWrap::NoWrap,
+    }
 }
 
 /// Resolves the computed `align-items` keyword to an [`AlignItems`], defaulting
@@ -2256,6 +2271,10 @@ mod tests {
             ComputedValue::keyword(layout_keyword::FLEX_COLUMN),
         );
         computed.set(
+            PropertyId::FlexWrap,
+            ComputedValue::keyword(layout_keyword::FLEX_WRAP_WRAP),
+        );
+        computed.set(
             PropertyId::JustifyContent,
             ComputedValue::keyword(layout_keyword::JUSTIFY_CENTER),
         );
@@ -2297,6 +2316,7 @@ mod tests {
         assert_eq!(style.max_height, Dimension::Px(13.0));
         assert_eq!(style.gap, 9.0);
         assert_eq!(style.flex_direction, FlexDirection::Column);
+        assert_eq!(style.flex_wrap, FlexWrap::Wrap);
         assert_eq!(style.justify_content, JustifyContent::Center);
         assert_eq!(style.align_items, AlignItems::Stretch);
         assert_eq!(style.flex_grow, 1.0);

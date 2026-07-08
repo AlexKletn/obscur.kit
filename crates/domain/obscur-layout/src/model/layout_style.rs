@@ -2,7 +2,7 @@
 
 use crate::algorithm::{GridAutoFlow, GridPlacement};
 use crate::model::{
-    AlignItems, AlignSelf, BoxSizing, Dimension, FlexDirection, Inset, JustifyContent,
+    AlignItems, AlignSelf, BoxSizing, Dimension, FlexDirection, FlexWrap, Inset, JustifyContent,
     LayoutDisplay, Position,
 };
 use obscur_geometry::Insets;
@@ -69,6 +69,12 @@ pub struct LayoutStyle {
 
     /// Flex container: the main-axis direction.
     pub flex_direction: FlexDirection,
+    /// Flex container: whether items are confined to a single line or wrap onto
+    /// multiple lines along the cross axis (`flex-wrap`). Default
+    /// [`FlexWrap::NoWrap`] (single-line), so a container that never sets it is
+    /// byte-for-byte identical to before wrapping existed. Ignored by non-flex
+    /// formatting contexts.
+    pub flex_wrap: FlexWrap,
     /// Flex container: main-axis distribution of items and free space. Also the
     /// grid container's *inline-axis* (column) distribution of leftover track
     /// space (`justify-content`): when the columns' total size is smaller than
@@ -156,6 +162,7 @@ impl Default for LayoutStyle {
             padding: Insets::uniform(0.0),
             border: Insets::uniform(0.0),
             flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::NoWrap,
             justify_content: JustifyContent::FlexStart,
             align_content: JustifyContent::FlexStart,
             align_items: AlignItems::Stretch,
@@ -311,8 +318,8 @@ impl LayoutStyle {
 mod tests {
     use super::LayoutStyle;
     use crate::model::{
-        AlignItems, AlignSelf, Dimension, FlexDirection, Inset, JustifyContent, LayoutDisplay,
-        Position,
+        AlignItems, AlignSelf, Dimension, FlexDirection, FlexWrap, Inset, JustifyContent,
+        LayoutDisplay, Position,
     };
     use obscur_geometry::Insets;
 
@@ -328,6 +335,7 @@ mod tests {
         assert_eq!(style.padding, Insets::uniform(0.0));
         assert_eq!(style.border, Insets::uniform(0.0));
         assert_eq!(style.flex_direction, FlexDirection::Row);
+        assert_eq!(style.flex_wrap, FlexWrap::NoWrap);
         assert_eq!(style.justify_content, JustifyContent::FlexStart);
         assert_eq!(style.align_content, JustifyContent::FlexStart);
         assert_eq!(style.align_items, AlignItems::Stretch);
