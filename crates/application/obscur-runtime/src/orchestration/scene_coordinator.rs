@@ -599,9 +599,15 @@ impl SceneCoordinator {
     /// Overflow 3 §3.1). It resolves `font-family` / `font-weight` / `font-style`
     /// / `direction` / `font-size` **identically** to
     /// [`caret_offset_at_x`](Self::caret_offset_at_x) (the click inverse) and the
-    /// compose caret, so the scroll offset the runtime derives here uses the SAME
-    /// advance model the paint places the caret with. `index == content.len()`
-    /// yields the whole run advance (the field's content width).
+    /// compose caret. `index == content.len()` yields the whole run advance (the
+    /// field's content width).
+    ///
+    /// This single-line scroll measure sums the **un-spaced** shaped advances; the
+    /// compose caret + click inverse resolve their within-line x from the composed,
+    /// spaced/tabbed line ([`line_caret_x`](Self::line_caret_x)) instead. The two
+    /// agree exactly for the default field (no letter/word-spacing, no tab) that
+    /// horizontal scroll applies to; folding spacing into the scroll measure is
+    /// deferred to the horizontal-scroll item.
     #[must_use]
     pub(crate) fn caret_advance_x(
         &self,
@@ -644,6 +650,55 @@ impl SceneCoordinator {
         }
     }
 
+    /// The caret's pen x **within** a wrapped `line`: the sum of the line's own
+    /// spaced/tabbed glyph advances whose source **cluster** falls before `index`
+    /// (CSS Text 3 §8 letter-/word-spacing + §4.3 tab-size), measured from the
+    /// line's content start.
+    ///
+    /// These are the SAME advances the segments are painted from — the line's
+    /// glyphs already carry the `apply_spacing` / `apply_tab_stops` adjustments the
+    /// compose pass wrapped them with, and any per-line trailing-tracking hang and
+    /// justification the wrapper applied (CSS Text 3 §8.1 / §7.1) — so a caret x
+    /// derived here lands exactly on the painted glyph edge, not on a fresh
+    /// spacing-blind re-shape. Because the line holds only glyphs with clusters in
+    /// its own byte range, filtering `cluster < index` yields the line-relative pen
+    /// x directly (no `\n`/preceding-line subtraction). A caret at the line's end
+    /// byte sums every glyph → the line's used content width. Single-line,
+    /// left-to-right: RTL reordering is not modeled (a documented approximation).
+    fn line_caret_x(line: &ParagraphLine, index: usize) -> f32 {
+        line.segments()
+            .iter()
+            .flat_map(|segment| segment.run().glyphs().iter().copied())
+            .filter(|glyph| glyph.cluster() < index)
+            .map(|glyph| glyph.x_advance())
+            .sum()
+    }
+
+    /// Resolves a within-line pen x (`local_x`, measured from the `line`'s content
+    /// start with any alignment offset already undone) to the nearest cluster byte
+    /// on that line — the per-line **inverse** of [`line_caret_x`](Self::line_caret_x)
+    /// over the SAME spaced/tabbed glyph advances (spec §5.11). The boundary whose
+    /// horizontal midpoint `local_x` falls at or before is chosen (a tie resolves to
+    /// the earlier boundary); a `local_x` past the last glyph clamps to `line_end`.
+    fn byte_at_line_local_x(line: &ParagraphLine, line_end: usize, local_x: f32) -> usize {
+        let mut pen = 0.0_f32;
+        for glyph in line
+            .segments()
+            .iter()
+            .flat_map(|segment| segment.run().glyphs().iter())
+        {
+            let advance = glyph.x_advance();
+            // The boundary just left of this glyph sits at `pen`; cross to the next
+            // boundary only once `local_x` is past this glyph's midpoint.
+            if local_x <= pen + advance / 2.0 {
+                return glyph.cluster();
+            }
+            pen += advance;
+        }
+        // Past every glyph on this line: clamp to the line's end byte.
+        line_end
+    }
+
     /// Resolves a caret byte `index` to its painted geometry against the wrapped
     /// `layout` (spec §5.10/§5.11): `(line_top, line_height, line_x_offset, x)`,
     /// where `line_top` is the caret's line box top measured **down from the text
@@ -651,44 +706,26 @@ impl SceneCoordinator {
     /// offset, and `x` is the caret pen x measured from the line's content start
     /// (so the painted x is `origin.x + line_x_offset + x − scroll_left`).
     ///
-    /// The pen x uses the SAME source-order advance model
-    /// [`caret_offset_x`](Self::caret_offset_x) paints/hit-tests with, measured
-    /// **relative to the line's first byte** (`caret_offset_x(index) −
-    /// caret_offset_x(line_start)`); the `\n`/preceding-line advances cancel in the
-    /// subtraction, so a caret on line 2 lands at that line's own x, not the summed
-    /// width of both lines. A single-line field → line 0, top 0, x_offset 0, and the
-    /// identical `caret_offset_x(index)` — byte-identical.
-    #[allow(clippy::too_many_arguments, clippy::trivially_copy_pass_by_ref)]
+    /// The pen x is the line-relative [`line_caret_x`](Self::line_caret_x): the sum
+    /// of THIS line's spaced/tabbed glyph advances before `index`, i.e. the same
+    /// advances (incl. any per-line hang / justification, CSS Text 3 §8) the
+    /// segments paint from — so a caret on line 2 lands at that line's own x, not
+    /// the summed width of both lines, AND a field with `letter-spacing` /
+    /// `word-spacing` / `tab` places the caret on the spaced glyph edge rather than
+    /// a spacing-blind re-shape. A single-line, default-spacing, left-aligned field
+    /// → line 0, top 0, `x_offset` 0, and the same spacing-0 advance sum the flat
+    /// re-shape produced — byte-identical.
     fn caret_line_geometry(
         &self,
         layout: &ParagraphLayout,
-        content: &str,
-        fallback: &FontFallback,
-        attributes: &FontAttributes,
-        direction: TextDirection,
         font_size: f32,
         index: usize,
     ) -> (f32, f32, f32, f32) {
         let li = Self::line_of_byte(layout, index);
-        let x_index =
-            self.caret_offset_x(content, fallback, attributes, direction, font_size, index);
         let Some(line) = layout.lines().get(li) else {
-            return (
-                0.0,
-                self.paragraph.line_metrics(font_size).line_height(),
-                0.0,
-                x_index,
-            );
+            return (0.0, self.paragraph.line_metrics(font_size).line_height(), 0.0, 0.0);
         };
-        let x_line_start = self.caret_offset_x(
-            content,
-            fallback,
-            attributes,
-            direction,
-            font_size,
-            Self::line_start_byte(layout, li),
-        );
-        (line.top(), line.height(), line.x_offset(), x_index - x_line_start)
+        (line.top(), line.height(), line.x_offset(), Self::line_caret_x(line, index))
     }
 
     /// Shapes the wrapped multi-line [`ParagraphLayout`] for `content` on `node`
@@ -764,12 +801,15 @@ impl SceneCoordinator {
     /// text box origin), clamped to that line's byte span (spec §5.11).
     ///
     /// The line's content starts at pen x `line.x_offset()` from the box origin, so
-    /// the target is offset into the flat source-order run by `caret_offset_x(line
-    /// start) + (target_x − line.x_offset())` and resolved with the SAME midpoint
-    /// walk [`caret_offset_at_x`](Self::caret_offset_at_x) uses. The result is
-    /// clamped to `[line start, line end']`, where `end'` excludes a trailing `\n`
-    /// so a click past the line's end sits before the newline (on this line), not at
-    /// the start of the next.
+    /// the target is turned into a within-line pen x by undoing the alignment offset
+    /// (`target_x − line.x_offset()`) and resolved over the line's OWN spaced/tabbed
+    /// glyph advances with the SAME midpoint walk
+    /// [`byte_at_line_local_x`](Self::byte_at_line_local_x) uses — the exact inverse
+    /// of the [`line_caret_x`](Self::line_caret_x) the caret paints with, so a click
+    /// at a spaced glyph edge (or on a `text-align: right`/`center` line) resolves
+    /// back to that glyph's byte. The result is clamped to `[line start, line end']`,
+    /// where `end'` excludes a trailing `\n` so a click past the line's end sits
+    /// before the newline (on this line), not at the start of the next.
     fn byte_at_line_x(
         &self,
         layout: &ParagraphLayout,
@@ -782,10 +822,10 @@ impl SceneCoordinator {
             return self.caret_offset_at_x(content, style, target_x);
         };
         let line_start = Self::line_start_byte(layout, li);
-        let x_line_start = self.caret_advance_x(content, style, line_start);
-        // Undo the line's alignment offset, then resolve against the flat run.
-        let abs_x = x_line_start + (target_x - line.x_offset());
-        let byte = self.caret_offset_at_x(content, style, abs_x);
+        // Undo the line's alignment offset, then resolve against this line's own
+        // spaced/tabbed advances (the exact inverse of the painted caret x).
+        let byte =
+            Self::byte_at_line_local_x(line, line.range().end, target_x - line.x_offset());
         // The maximum caret byte that stays on this line: the line's end, minus a
         // trailing `\n` (whose caret belongs before it, on this line).
         let end = line.range().end.max(line_start).min(content.len());
@@ -824,12 +864,13 @@ impl SceneCoordinator {
         } else {
             cur.checked_sub(1)?
         };
-        // The caret's current pen x within its line, re-expressed from the text box
-        // origin (add the line's alignment offset) so `byte_at_line_x` maps it back
-        // on the target line consistently.
-        let x_line_start = self.caret_advance_x(content, style, Self::line_start_byte(&layout, cur));
-        let x_index = self.caret_advance_x(content, style, index);
-        let target_x = layout.lines()[target].x_offset() + (x_index - x_line_start);
+        // The caret's current pen x within its line (over the line's own
+        // spaced/tabbed advances), re-expressed from the text box origin by adding
+        // the TARGET line's alignment offset so `byte_at_line_x` maps it back
+        // consistently (it undoes that same offset).
+        let within_line =
+            layout.lines().get(cur).map_or(0.0, |line| Self::line_caret_x(line, index));
+        let target_x = layout.lines()[target].x_offset() + within_line;
         Some(self.byte_at_line_x(&layout, target, content, style, target_x))
     }
 
@@ -1440,14 +1481,10 @@ impl SceneCoordinator {
                     if let Some(selection) = display_selection
                         && !selection.is_empty()
                     {
-                        let (top0, h0, xoff0, x0) = self.caret_line_geometry(
-                            &layout, content, &fallback, &attributes, direction, font_size,
-                            selection.start(),
-                        );
-                        let (_, _, _, x1) = self.caret_line_geometry(
-                            &layout, content, &fallback, &attributes, direction, font_size,
-                            selection.end(),
-                        );
+                        let (top0, h0, xoff0, x0) =
+                            self.caret_line_geometry(&layout, font_size, selection.start());
+                        let (_, _, _, x1) =
+                            self.caret_line_geometry(&layout, font_size, selection.end());
                         let same_line = Self::line_of_byte(&layout, selection.start())
                             == Self::line_of_byte(&layout, selection.end());
                         // End x within the start line: the end's own x when on the
@@ -1506,37 +1543,28 @@ impl SceneCoordinator {
                     // IME preedit underline (spec §5.12): a thin bar beneath the
                     // composing text, distinguishing the uncommitted preedit from
                     // committed glyphs. The preedit's x-range is bounded with the
-                    // SAME caret advance-walk the caret/selection use, over the
-                    // spliced display `content`: from x(at) to x(at + preedit len).
-                    // Only for the editing field with a live, non-empty preedit.
+                    // SAME line-aware, spaced advance-walk the caret/selection use
+                    // (`caret_line_geometry`), over the spliced display `content`:
+                    // from x(at) to x(at + preedit len), including the preedit line's
+                    // alignment `x_offset` so a right/centre-aligned field underlines
+                    // the composing glyphs. Only for the editing field with a live,
+                    // non-empty preedit.
                     if let Some(preedit) = active.and_then(|view| view.preedit)
                         && !preedit.text.is_empty()
                     {
                         let at = preedit.at.min(content.len());
                         let line_height = self.paragraph.line_metrics(font_size).line_height();
-                        let x0 = self.caret_offset_x(
-                            content,
-                            &fallback,
-                            &attributes,
-                            direction,
-                            font_size,
-                            at,
-                        );
-                        let x1 = self.caret_offset_x(
-                            content,
-                            &fallback,
-                            &attributes,
-                            direction,
-                            font_size,
-                            at + preedit.text.len(),
-                        );
+                        let (top0, _h0, xoff0, x0) =
+                            self.caret_line_geometry(&layout, font_size, at);
+                        let (_, _, _, x1) = self
+                            .caret_line_geometry(&layout, font_size, at + preedit.text.len());
                         node_paint.fill_rect(
                             Rect::new(
                                 Point::new(
-                                    origin.x + x0 - scroll_left,
-                                    origin.y + line_height - PREEDIT_UNDERLINE_THICKNESS,
+                                    origin.x + xoff0 + x0 - scroll_left,
+                                    origin.y + top0 + line_height - PREEDIT_UNDERLINE_THICKNESS,
                                 ),
-                                Size::new(x1 - x0, PREEDIT_UNDERLINE_THICKNESS),
+                                Size::new((x1 - x0).max(0.0), PREEDIT_UNDERLINE_THICKNESS),
                             ),
                             Brush::solid(text_color),
                         );
@@ -1556,10 +1584,8 @@ impl SceneCoordinator {
                         // y ≈ line-height and an x measured within line 2 — not the
                         // summed width of every line. Single-line → line 0, top 0,
                         // and the identical pen x (byte-identical).
-                        let (top, height, x_offset, caret_x) = self.caret_line_geometry(
-                            &layout, content, &fallback, &attributes, direction, font_size,
-                            selection.focus(),
-                        );
+                        let (top, height, x_offset, caret_x) =
+                            self.caret_line_geometry(&layout, font_size, selection.focus());
                         node_paint.fill_rect(
                             Rect::new(
                                 Point::new(origin.x + x_offset + caret_x - scroll_left, origin.y + top),
@@ -7182,6 +7208,226 @@ mod tests {
             "caret sits at the preedit caret (display offset 4)"
         );
         assert!(list.is_balanced(), "the display list stays balanced");
+    }
+
+    // ---- Caret geometry under letter-spacing + text-align (this step) --------
+
+    /// A single text node carrying `content` at the origin in a `box_w`×16 box,
+    /// red text, with `mutate` applied to its computed style so a test can author
+    /// `letter-spacing` / `text-align`. Mirrors [`editing_fixture`] but exercises
+    /// the spacing/alignment the caret + click geometry must honor.
+    fn styled_editing_fixture(
+        content: &str,
+        box_w: f32,
+        mutate: impl FnOnce(&mut ComputedStyle),
+    ) -> (RetainedTree, ComputedStyles, LayoutBoxes, NodeId) {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, content);
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        let mut style = with_color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0));
+        mutate(&mut style);
+        computed.insert(text, style);
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(text, box_at(0.0, 0.0, box_w, 16.0));
+        (tree, computed, boxes, text)
+    }
+
+    /// The painted x of the single collapsed-caret fill in `list`.
+    fn caret_paint_x(list: &DisplayList) -> f32 {
+        let fills = caret_fills(list);
+        assert_eq!(fills.len(), 1, "exactly one caret fill");
+        fills[0].0.origin.x
+    }
+
+    /// The sum of every drawn glyph advance across the display list's text runs —
+    /// the painted line's used content width (single line, left-aligned).
+    fn drawn_run_width(list: &DisplayList) -> f32 {
+        list.commands()
+            .iter()
+            .filter_map(|c| match c {
+                PaintCommand::DrawText { run, .. } => {
+                    Some(run.glyphs().iter().map(PositionedGlyph::advance).sum::<f32>())
+                }
+                _ => None,
+            })
+            .sum()
+    }
+
+    #[test]
+    fn caret_x_honors_letter_spacing_and_click_is_the_exact_inverse() {
+        // A `letter-spacing: 4px` field (CSS Text 3 §8.1): the caret at the end
+        // sits on the painted run's right edge — the SPACED glyph advances, not the
+        // un-spaced sum — and a click there resolves back to the last byte (an exact
+        // inverse). §8.1 adds 4px after each of the 4 clusters, so the painted run
+        // width is 4·9.6 + 4·4 = 54.4 (NOT the spacing-blind 4·9.6 = 38.4). The
+        // caret is derived from the SAME composed line, so it equals the run right
+        // edge by construction.
+        let advance = 16.0 * MockTextShaper::ADVANCE_RATIO; // 9.6
+        let ls = 4.0_f32;
+        let coordinator = SceneCoordinator::new();
+        let author = |s: &mut ComputedStyle| {
+            s.set(PropertyId::LetterSpacing, ComputedValue::length(Length::px(ls)));
+        };
+        let (tree, computed, boxes, text) = styled_editing_fixture("abcd", 200.0, author);
+        let view = EditingView::new(text, "abcd", TextSelection::caret(4));
+        let list = coordinator.compose(&tree, &computed, &boxes, Some(view));
+
+        let caret_x = caret_paint_x(&list);
+        let run_right = drawn_run_width(&list);
+        let expected = advance * 4.0 + ls * 4.0; // 54.4
+        assert!(
+            (caret_x - expected).abs() < 0.5,
+            "caret x at end is the spaced run width ~{expected}, got {caret_x}",
+        );
+        assert!(
+            (caret_x - run_right).abs() < 0.5,
+            "caret sits on the painted run right edge {run_right}, got {caret_x}",
+        );
+        assert!(
+            (caret_x - advance * 4.0).abs() > 1.0,
+            "caret x is NOT the spacing-blind sum {}",
+            advance * 4.0,
+        );
+        // The click at the caret x is the exact inverse: it resolves to text.len().
+        let byte =
+            coordinator.caret_offset_at_point(&tree, &computed, text, "abcd", 200.0, caret_x, 8.0);
+        assert_eq!(byte, 4, "click at the end caret x returns text.len()");
+        // A caret at a middle boundary and its click are also exact inverses.
+        let (tree2, computed2, boxes2, text2) = styled_editing_fixture("abcd", 200.0, author);
+        let mid = coordinator
+            .compose(
+                &tree2,
+                &computed2,
+                &boxes2,
+                Some(EditingView::new(text2, "abcd", TextSelection::caret(2))),
+            );
+        let mid_x = caret_paint_x(&mid);
+        assert!(
+            (mid_x - (advance + ls) * 2.0).abs() < 0.5,
+            "caret at byte 2 is two spaced advances ~{}, got {mid_x}",
+            (advance + ls) * 2.0,
+        );
+        assert_eq!(
+            coordinator.caret_offset_at_point(&tree2, &computed2, text2, "abcd", 200.0, mid_x, 8.0),
+            2,
+            "click at the byte-2 caret x returns 2",
+        );
+    }
+
+    #[test]
+    fn caret_x_honors_text_align_right_and_click_is_the_exact_inverse() {
+        // A `text-align: right` field (CSS 2.1 §16.2): the line is shifted right by
+        // `x_offset = box − line_width`, so the end caret sits at the box's right
+        // edge (the right-aligned last glyph) and a click there maps back to the
+        // last byte. No spacing → line width 4·9.6 = 38.4, box 200 → x_offset 161.6,
+        // end caret x = 161.6 + 38.4 = 200.
+        let advance = 16.0 * MockTextShaper::ADVANCE_RATIO; // 9.6
+        let box_w = 200.0_f32;
+        let coordinator = SceneCoordinator::new();
+        let author = |s: &mut ComputedStyle| {
+            s.set(
+                PropertyId::TextAlign,
+                ComputedValue::keyword(layout_keyword::TEXT_ALIGN_RIGHT),
+            );
+        };
+        let (tree, computed, boxes, text) = styled_editing_fixture("abcd", box_w, author);
+        let view = EditingView::new(text, "abcd", TextSelection::caret(4));
+        let list = coordinator.compose(&tree, &computed, &boxes, Some(view));
+
+        let caret_x = caret_paint_x(&list);
+        assert!(
+            (caret_x - box_w).abs() < 0.5,
+            "right-aligned end caret sits at the box right edge {box_w}, got {caret_x}",
+        );
+        assert_eq!(
+            coordinator.caret_offset_at_point(&tree, &computed, text, "abcd", box_w, caret_x, 8.0),
+            4,
+            "click at the right-aligned end caret x returns text.len()",
+        );
+        // A middle boundary is still an exact inverse: caret at 1 → x_offset + 1·adv.
+        let (t1, c1, b1, n1) = styled_editing_fixture("abcd", box_w, author);
+        let mid = coordinator.compose(
+            &t1,
+            &c1,
+            &b1,
+            Some(EditingView::new(n1, "abcd", TextSelection::caret(1))),
+        );
+        let mid_x = caret_paint_x(&mid);
+        let x_offset = box_w - advance * 4.0; // 161.6
+        assert!(
+            (mid_x - (x_offset + advance)).abs() < 0.5,
+            "right-aligned caret at byte 1 is x_offset + 1 advance ~{}, got {mid_x}",
+            x_offset + advance,
+        );
+        assert_eq!(
+            coordinator.caret_offset_at_point(&t1, &c1, n1, "abcd", box_w, mid_x, 8.0),
+            1,
+            "click at the right-aligned byte-1 caret x returns 1",
+        );
+    }
+
+    #[test]
+    fn caret_x_honors_text_align_center_and_click_is_the_exact_inverse() {
+        // A `text-align: center` field (CSS 2.1 §16.2): `x_offset = (box −
+        // line_width)/2`. No spacing → line width 38.4, box 200 → x_offset 80.8, end
+        // caret x = 80.8 + 38.4 = 119.2; a click there maps back to text.len().
+        let advance = 16.0 * MockTextShaper::ADVANCE_RATIO;
+        let box_w = 200.0_f32;
+        let coordinator = SceneCoordinator::new();
+        let author = |s: &mut ComputedStyle| {
+            s.set(
+                PropertyId::TextAlign,
+                ComputedValue::keyword(layout_keyword::TEXT_ALIGN_CENTER),
+            );
+        };
+        let (tree, computed, boxes, text) = styled_editing_fixture("abcd", box_w, author);
+        let view = EditingView::new(text, "abcd", TextSelection::caret(4));
+        let list = coordinator.compose(&tree, &computed, &boxes, Some(view));
+
+        let caret_x = caret_paint_x(&list);
+        let x_offset = (box_w - advance * 4.0) / 2.0; // 80.8
+        let expected = x_offset + advance * 4.0; // 119.2
+        assert!(
+            (caret_x - expected).abs() < 0.5,
+            "centered end caret is x_offset + run width ~{expected}, got {caret_x}",
+        );
+        assert_eq!(
+            coordinator.caret_offset_at_point(&tree, &computed, text, "abcd", box_w, caret_x, 8.0),
+            4,
+            "click at the centered end caret x returns text.len()",
+        );
+    }
+
+    #[test]
+    fn caret_x_is_byte_identical_for_a_plain_left_aligned_field() {
+        // The default field — no letter/word-spacing, no tab, `text-align: start`
+        // (spacing 0, x_offset 0) — is byte-identical: the caret x at each boundary
+        // is exactly `index · advance`, the same flat un-spaced sum as before, and
+        // the click is its exact inverse.
+        let advance = 16.0 * MockTextShaper::ADVANCE_RATIO;
+        let coordinator = SceneCoordinator::new();
+        for index in 0..=4usize {
+            let (tree, computed, boxes, text) = styled_editing_fixture("abcd", 200.0, |_| {});
+            let view = EditingView::new(text, "abcd", TextSelection::caret(index));
+            let list = coordinator.compose(&tree, &computed, &boxes, Some(view));
+            let caret_x = caret_paint_x(&list);
+            #[allow(clippy::cast_precision_loss)]
+            let expected = advance * index as f32;
+            assert!(
+                (caret_x - expected).abs() < 1e-4,
+                "plain field caret at {index} is index·advance {expected}, got {caret_x}",
+            );
+            assert_eq!(
+                coordinator.caret_offset_at_point(
+                    &tree, &computed, text, "abcd", 200.0, caret_x, 8.0,
+                ),
+                index,
+                "plain field click at the byte-{index} caret x returns {index}",
+            );
+        }
     }
 
     #[test]
