@@ -275,6 +275,16 @@ required-features = ["render-cpu", "text-harfrust", "text-unicode"]
 name = "pseudo_state_proof"
 required-features = ["render-cpu", "text-harfrust", "text-unicode"]
 
+# Headless proof for the interactive control gallery: boots the shared controls
+# scene on a real runtime, drives every interaction through the REAL input path
+# (handle_pointer / handle_key), and rasterizes three stitched panels (idle |
+# hover·active·open | typed·selected) to target/controls_gallery_proof.png. Needs
+# the CPU renderer + text stack, but no window or GPU — the display-free proof that
+# the live pseudo-classes + editing work.
+[[example]]
+name = "controls_headless"
+required-features = ["render-cpu", "text-harfrust", "text-unicode"]
+
 # Proof of multi-line auto-wrapping text + CSS `line-height`: a long paragraph
 # wraps at a ~200px box width, an explicit `\n` forces a second line, and a
 # `line-height: 2` block spaces its wrapped lines twice as far apart. Drives the
@@ -451,3 +461,14 @@ required-features = [
     "text-harfrust",
     "text-unicode",
 ]
+
+# The windowed, INTERACTIVE control gallery: a live winit + Vello window of the base
+# HTML controls where hovering, clicking, focusing, typing, toggling, and opening the
+# dropdown drive real state and live CSS pseudo-classes through the SAME shared scene
+# as `controls_headless`. Wires every interactive control (button, checkbox incl.
+# tri-state, composed radio group, select popup, editable input) plus a disabled
+# variant of each. Needs the window + GPU + text stack, so it is gated on the full
+# backend set (a display/GPU are required at runtime).
+[[example]]
+name = "controls_window"
+required-features = ["full"]
