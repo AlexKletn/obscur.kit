@@ -116,6 +116,13 @@ struct Tagged {
 struct Word {
     glyphs: Vec<Tagged>,
     width: f32,
+    /// The advance of the word's trailing run of *collapsible* whitespace glyphs
+    /// (CSS Text 3 §3/§7.1). A word owns the space that follows it (the soft break
+    /// sits before the next word), so this is the part of `width` that **hangs**
+    /// when the word ends a line: it is excluded from the fit test and zeroed out
+    /// of the line's used width. `0.0` when the word has no trailing collapsible
+    /// space (or the mode preserves spaces).
+    trailing_ws: f32,
     mandatory_break_after: bool,
     /// The in-word split points (from the hyphenator or author soft hyphens),
     /// ascending by [`head_width`](HyphenPoint::head_width).
@@ -149,6 +156,17 @@ struct HyphenPoint {
 struct Split {
     head: Vec<Tagged>,
     tail: Word,
+}
+
+/// The character at byte offset `cluster` in `text`, if any.
+fn char_at(text: &str, cluster: usize) -> Option<char> {
+    text.get(cluster..).and_then(|rest| rest.chars().next())
+}
+
+/// Whether the character at byte offset `cluster` is a CSS word separator
+/// (CSS Text 3 §8.2): U+0020 SPACE or U+00A0 NO-BREAK SPACE.
+fn is_word_separator(text: &str, cluster: usize) -> bool {
+    matches!(char_at(text, cluster), Some(' ' | '\u{00A0}'))
 }
 
 /// One packed line: its logical-order tagged glyphs, the number of words it holds
@@ -206,7 +224,11 @@ impl ParagraphLayout {
     ///    assigns the line its cumulative `top` (spaced by `line_height`),
     ///    `height`, `baseline`, and alignment offset.
     ///
-    /// When `max_width <= 0` (unconstrained) the whole paragraph is one line. The
+    /// A **non-finite** `max_width` (`f32::INFINITY`) is the explicit *no
+    /// constraint* sentinel (CSS 2.1 §10.8 available-width; the intrinsic /
+    /// max-content measure): the whole paragraph is one line. A **finite**
+    /// `max_width >= 0` is a real box, so a `0`/tiny width max-wraps toward
+    /// min-content rather than overflowing on one line. The
     /// `white_space` mode (CSS Text 3 §3) selects the break opportunities: a
     /// non-wrapping mode (`nowrap` / `pre`) yields no soft breaks, so each segment
     /// between mandatory (`\n`) breaks lays out on a single line that may overflow
@@ -283,7 +305,7 @@ impl ParagraphLayout {
     /// (carrying the last kept glyph's cluster, font, direction, and level) — with
     /// no `ellipsis_glyph` supplied it degrades to [`Clip`](TextOverflow::Clip).
     /// [`TextOverflow::Visible`] (and any non-truncating policy) leaves overflow
-    /// untouched, as does an unconstrained (`max_width <= 0`) wrap. A truncated
+    /// untouched, as does an unconstrained (non-finite `max_width`) wrap. A truncated
     /// line overflows, so justification never stretches it.
     // The wrap inputs plus the hyphenation port, hyphen glyph, and ellipsis glyph
     // are cohesive positional arguments of one leaf entry point, not a public API
@@ -311,7 +333,7 @@ impl ParagraphLayout {
         let seg_metrics = move |_font: FontId| (strut.ascent, strut.descent);
         Self::wrap_core(
             runs, text, max_width, strut, &seg_metrics, alignment, overflow, white_space,
-            hyphenator, hyphen_glyph, ellipsis_glyph,
+            0.0, 0.0, hyphenator, hyphen_glyph, ellipsis_glyph,
         )
     }
 
@@ -334,7 +356,7 @@ impl ParagraphLayout {
     ) -> Self {
         Self::wrap_core(
             runs, text, max_width, strut, seg_metrics, alignment, overflow, white_space,
-            &NullHyphenator, None, None,
+            0.0, 0.0, &NullHyphenator, None, None,
         )
     }
 
@@ -369,12 +391,19 @@ impl ParagraphLayout {
     ) -> Self {
         Self::wrap_core(
             runs, text, max_width, strut, seg_metrics, alignment, overflow, white_space,
-            hyphenator, hyphen_glyph, ellipsis_glyph,
+            0.0, 0.0, hyphenator, hyphen_glyph, ellipsis_glyph,
         )
     }
 
     /// The shared wrapping core: packs `runs` into lines and sizes each line box
     /// from the CSS 2.1 §10.8.1 strut (`strut` + per-font `seg_metrics`).
+    ///
+    /// `letter_spacing` / `word_spacing` are the resolved CSS Text 3 §8.1/§8.2
+    /// tracking values that were folded into the glyph advances upstream (by
+    /// [`apply_spacing`](crate::shaping::apply_spacing)); the core needs them to
+    /// *hang* (trim) the trailing tracking of each line's last cluster, which §8.1
+    /// says is "deferred to the line breaker". They are `0.0` on every historical
+    /// path, so the trim is then a no-op and the output is byte-identical.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     fn wrap_core(
@@ -386,6 +415,8 @@ impl ParagraphLayout {
         alignment: TextAlignment,
         overflow: TextOverflow,
         white_space: WhiteSpace,
+        letter_spacing: f32,
+        word_spacing: f32,
         hyphenator: &dyn Hyphenator,
         hyphen_glyph: Option<ShapedGlyph>,
         ellipsis_glyph: Option<ShapedGlyph>,
@@ -407,8 +438,41 @@ impl ParagraphLayout {
                 }
             }
         }
+
+        // A preserved segment break (`\n` under pre / pre-wrap / pre-line, CSS Text
+        // 3 §4.1.1) is a *forced* break and is zero-width — like a soft hyphen. If
+        // the shaper emitted a glyph for it, zero that glyph's advance so a `\n`
+        // trailing on its line never inflates the line width (spec §4.1.1/§7.1).
+        if white_space.preserves_segment_breaks() {
+            for tagged in &mut stream {
+                if char_at(text, tagged.glyph.cluster()) == Some('\n') {
+                    tagged.glyph = tagged.glyph.with_x_advance(0.0);
+                }
+            }
+        }
+
+        // Byte offsets of *collapsible* trailing-hangable whitespace (CSS Text 3
+        // §3/§7.1): a run of these at a line's end is removed from the line's used
+        // width (it hangs). Only the collapsing modes have collapsible spaces
+        // (normal / nowrap / pre-line); pre / pre-wrap preserve them, so nothing
+        // hangs there and their measurement is untouched.
+        let hang_ws: HashSet<usize> = if white_space.collapses_spaces() {
+            text.char_indices()
+                .filter(|&(_, ch)| ch == ' ' || ch == '\t')
+                .map(|(index, _)| index)
+                .collect()
+        } else {
+            HashSet::new()
+        };
+
         // Interior break offsets proposed by the hyphenator, one word at a time.
         let hyphen_offsets = Self::hyphen_offsets(text, white_space, hyphenator);
+
+        // A **non-finite** `max_width` (`f32::INFINITY`) is the explicit no-width
+        // constraint (intrinsic / max-content measure); a finite `max_width >= 0`
+        // is a real box that wraps, so a `0`/tiny width max-wraps toward min-content
+        // rather than laying out one overflowing line (CSS 2.1 §10.8).
+        let bounded = max_width.is_finite();
 
         // Split the flattened stream into per-line packed groups.
         let mut lines_glyphs = if stream.is_empty() {
@@ -418,7 +482,7 @@ impl ParagraphLayout {
                 word_count: 0,
                 mandatory_break_after: false,
             }]
-        } else if max_width <= 0.0 {
+        } else if !bounded {
             // Unconstrained width: the whole paragraph is one line. A single
             // unconstrained line is never justified (it is the last line), so its
             // word count is immaterial.
@@ -435,14 +499,30 @@ impl ParagraphLayout {
                 white_space,
                 &hyphen_offsets,
                 &soft,
+                &hang_ws,
                 hyphen_glyph,
             )
         };
 
+        // Hang the trailing collapsible whitespace and trailing letter-/word-spacing
+        // of every line (CSS Text 3 §7.1, §8.1/§8.2): zero the advances of the
+        // line's trailing collapsible-space run, then trim the trailing tracking of
+        // the last remaining cluster. This is what excludes the hung advance from a
+        // line's used `width()`, its alignment `x_offset`, and justification's base.
+        for packed in &mut lines_glyphs {
+            Self::hang_line_trailing(
+                &mut packed.glyphs,
+                text,
+                &hang_ws,
+                letter_spacing,
+                word_spacing,
+            );
+        }
+
         // Justify: stretch every eligible line's inter-word gaps so it fills
         // `max_width`. Only meaningful under a positive constraint (the unbounded
         // and empty branches produce a single, non-justified last line).
-        if alignment == TextAlignment::Justify && max_width > 0.0 {
+        if alignment == TextAlignment::Justify && bounded {
             Self::justify(&mut lines_glyphs, text, white_space, max_width);
         }
 
@@ -451,7 +531,9 @@ impl ParagraphLayout {
         // only under a truncating policy and a positive constraint. Truncation
         // runs after justify — an overflowing line was never justify-eligible
         // (justify only stretches lines with slack), so the two never conflict.
-        if overflow.is_truncating() && max_width > 0.0 {
+        // Truncation needs a *positive* finite box to clip against; a genuinely
+        // 0-width box wraps to min-content (above) but is not clipped to nothing.
+        if overflow.is_truncating() && bounded && max_width > 0.0 {
             for packed in &mut lines_glyphs {
                 let width: f32 = packed.glyphs.iter().map(|t| t.glyph.x_advance()).sum();
                 if width > max_width {
@@ -527,6 +609,49 @@ impl ParagraphLayout {
         }
     }
 
+    /// Hangs one line's trailing content so it is excluded from the line's used
+    /// width, alignment offset, and justification base (CSS Text 3 §7.1, §8.1/§8.2).
+    ///
+    /// Two trims, in order:
+    ///
+    /// 1. **Trailing collapsible whitespace (§3/§7.1):** the maximal run of
+    ///    collapsible-space glyphs (`hang_ws`) at the end of the line has its
+    ///    advances zeroed — a sequence of collapsible spaces at a line's end is
+    ///    *removed*. A trailing `word-spacing` folded onto that space is removed
+    ///    with it.
+    /// 2. **Trailing tracking (§8.1/§8.2):** the last *remaining* cluster carries
+    ///    the `letter_spacing` that was added after every cluster; that trailing
+    ///    tracking hangs, so it is subtracted (plus `word_spacing` when that last
+    ///    cluster is itself a word separator, e.g. a preserved NBSP). `0.0`
+    ///    tracking makes this a no-op.
+    ///
+    /// Zeroing (rather than deleting) the glyphs keeps every cluster present for
+    /// caret hit-testing; only advances change.
+    fn hang_line_trailing(
+        glyphs: &mut [Tagged],
+        text: &str,
+        hang_ws: &HashSet<usize>,
+        letter_spacing: f32,
+        word_spacing: f32,
+    ) {
+        // 1. Zero the trailing collapsible-whitespace run.
+        let mut last = glyphs.len();
+        while last > 0 && hang_ws.contains(&glyphs[last - 1].glyph.cluster()) {
+            let glyph = glyphs[last - 1].glyph;
+            glyphs[last - 1].glyph = glyph.with_x_advance(0.0);
+            last -= 1;
+        }
+        // 2. Trim the trailing letter-/word-spacing of the last remaining cluster.
+        if (letter_spacing != 0.0 || word_spacing != 0.0) && last > 0 {
+            let glyph = glyphs[last - 1].glyph;
+            let mut advance = glyph.x_advance() - letter_spacing;
+            if is_word_separator(text, glyph.cluster()) {
+                advance -= word_spacing;
+            }
+            glyphs[last - 1].glyph = glyph.with_x_advance(advance);
+        }
+    }
+
     /// Flattens the font-tagged `runs` into one ordered stream of [`Tagged`]
     /// glyphs, preserving run order and tagging each glyph with its run's font,
     /// direction, and font size.
@@ -598,7 +723,12 @@ impl ParagraphLayout {
     ///
     /// `hyphen_offsets` and `soft` are the full-text byte offsets of algorithmic
     /// and author-soft-hyphen break points; `hyphen_glyph` (when present) is
-    /// appended at each taken break so a visible hyphen renders.
+    /// appended at each taken break so a visible hyphen renders. `hang_ws` is the
+    /// set of collapsible-whitespace byte offsets, so a word's trailing space can
+    /// be excluded from the fit test (it hangs, CSS Text 3 §3/§7.1).
+    // The stream, text, wrap width, mode, and the three break-offset sets plus the
+    // hyphen glyph are cohesive positional inputs of one internal packing step.
+    #[allow(clippy::too_many_arguments)]
     fn pack_lines(
         stream: &[Tagged],
         text: &str,
@@ -606,19 +736,28 @@ impl ParagraphLayout {
         white_space: WhiteSpace,
         hyphen_offsets: &HashSet<usize>,
         soft: &HashSet<usize>,
+        hang_ws: &HashSet<usize>,
         hyphen_glyph: Option<ShapedGlyph>,
     ) -> Vec<PackedLine> {
         let mut queue: VecDeque<Word> =
-            Self::split_words(stream, text, white_space, hyphen_offsets, soft).into();
+            Self::split_words(stream, text, white_space, hyphen_offsets, soft, hang_ws).into();
 
         let mut lines: Vec<PackedLine> = Vec::new();
         let mut current: Vec<Tagged> = Vec::new();
         let mut current_width = 0.0_f32;
         let mut word_count = 0_usize;
+        // Whether the last word placed closed its line on a *mandatory* (forced)
+        // break — used to emit a trailing empty line box after a final `\n`.
+        let mut ended_on_mandatory = false;
         while let Some(word) = queue.pop_front() {
+            ended_on_mandatory = false;
             // Greedy rule: a whole word that no longer fits the (non-empty) line
-            // closes it, exactly as before hyphenation existed.
-            if !current.is_empty() && current_width + word.width > max_width {
+            // closes it. The word's own trailing collapsible whitespace **hangs**
+            // (CSS Text 3 §3/§7.1), so it never counts toward the fit test —
+            // otherwise a line wraps one space too early.
+            if !current.is_empty()
+                && (current_width + word.width - word.trailing_ws) > max_width
+            {
                 lines.push(PackedLine {
                     glyphs: std::mem::take(&mut current),
                     word_count,
@@ -633,7 +772,7 @@ impl ParagraphLayout {
             let remaining = max_width - current_width;
             if word.width > remaining
                 && let Some(split) =
-                    Self::try_split(&word, remaining, hyphen_glyph, hyphen_offsets, soft)
+                    Self::try_split(&word, remaining, hyphen_glyph, hyphen_offsets, soft, hang_ws)
             {
                 current.extend_from_slice(&split.head);
                 word_count += 1;
@@ -659,12 +798,22 @@ impl ParagraphLayout {
                 });
                 current_width = 0.0;
                 word_count = 0;
+                ended_on_mandatory = true;
             }
         }
         if !current.is_empty() {
             lines.push(PackedLine {
                 glyphs: current,
                 word_count,
+                mandatory_break_after: false,
+            });
+        } else if ended_on_mandatory {
+            // A *trailing* forced break (a `\n` at end of text) opens a new, empty
+            // line box (CSS Text 3 §4.1.1) — the caret needs a home on the last
+            // line. `"ab\n"` is two lines: `ab`, then an empty one.
+            lines.push(PackedLine {
+                glyphs: Vec::new(),
+                word_count: 0,
                 mandatory_break_after: false,
             });
         }
@@ -692,6 +841,7 @@ impl ParagraphLayout {
         hyphen_glyph: Option<ShapedGlyph>,
         hyphen_offsets: &HashSet<usize>,
         soft: &HashSet<usize>,
+        hang_ws: &HashSet<usize>,
     ) -> Option<Split> {
         let hyphen_adv = hyphen_glyph.map_or(0.0, |g| g.x_advance());
         // Points are ascending by head width; take the widest that still fits.
@@ -720,6 +870,7 @@ impl ParagraphLayout {
             word.mandatory_break_after,
             hyphen_offsets,
             soft,
+            hang_ws,
         );
         Some(Split { head, tail })
     }
@@ -842,37 +993,76 @@ impl ParagraphLayout {
     }
 
     /// Segments a glyph `stream` into [`Word`]s at the line-break opportunities of
-    /// `text`. A break at byte offset `o` starts a new word at the glyph whose
-    /// cluster equals `o`; a hard break marks the preceding word for a mandatory
-    /// line break. Each word records its interior hyphenation points from
-    /// `hyphen_offsets` and `soft` (see [`make_word`](Self::make_word)).
+    /// `text`. A break at byte offset `o` closes the word before the first glyph
+    /// whose cluster reaches `o`; a hard break marks that word for a mandatory line
+    /// break. Each word records its trailing collapsible whitespace (from
+    /// `hang_ws`) and its interior hyphenation points (from `hyphen_offsets` /
+    /// `soft`), see [`make_word`](Self::make_word).
+    ///
+    /// Breaks are consumed by offset (ascending), so a break offset that lands
+    /// **inside** a ligature or **past the last glyph** (the end-of-text `\n` of
+    /// `"ab\n"`, whose cluster no glyph carries) is not lost: a trailing hard break
+    /// still marks the final word mandatory (CSS Text 3 §4.1.1), and a hard break
+    /// with no preceding glyphs (a leading/consecutive `\n`) yields an empty
+    /// mandatory word — a forced empty line box.
     fn split_words(
         stream: &[Tagged],
         text: &str,
         white_space: WhiteSpace,
         hyphen_offsets: &HashSet<usize>,
         soft: &HashSet<usize>,
+        hang_ws: &HashSet<usize>,
     ) -> Vec<Word> {
         let breaks = LineBreak::opportunities(text, white_space);
         let mut words: Vec<Word> = Vec::new();
         let mut glyphs: Vec<Tagged> = Vec::new();
+        // Breaks are ascending by offset; `bi` is the next unconsumed break.
+        let mut bi = 0usize;
         for tagged in stream {
-            if let Some(brk) = breaks
-                .iter()
-                .find(|b| b.offset() == tagged.glyph.cluster())
-                && !glyphs.is_empty()
-            {
-                words.push(Self::make_word(
-                    std::mem::take(&mut glyphs),
-                    brk.is_mandatory(),
-                    hyphen_offsets,
-                    soft,
-                ));
+            let cluster = tagged.glyph.cluster();
+            // Consume every break at or before this glyph; the strongest (hard)
+            // kind wins for the word we are about to close.
+            let mut close = false;
+            let mut close_hard = false;
+            while bi < breaks.len() && breaks[bi].offset() <= cluster {
+                close = true;
+                close_hard |= breaks[bi].is_mandatory();
+                bi += 1;
+            }
+            if close {
+                if !glyphs.is_empty() {
+                    words.push(Self::make_word(
+                        std::mem::take(&mut glyphs),
+                        close_hard,
+                        hyphen_offsets,
+                        soft,
+                        hang_ws,
+                    ));
+                } else if close_hard {
+                    // A mandatory break with nothing before it (leading or repeated
+                    // `\n`): emit an empty forced-break word → an empty line box.
+                    words.push(Self::make_word(
+                        Vec::new(),
+                        true,
+                        hyphen_offsets,
+                        soft,
+                        hang_ws,
+                    ));
+                }
             }
             glyphs.push(*tagged);
         }
+        // Breaks after the last glyph (offset > every cluster): a trailing `\n`
+        // whose cluster no glyph carries still forces a break on the final word.
+        let mut trailing_hard = false;
+        while bi < breaks.len() {
+            trailing_hard |= breaks[bi].is_mandatory();
+            bi += 1;
+        }
         if !glyphs.is_empty() {
-            words.push(Self::make_word(glyphs, false, hyphen_offsets, soft));
+            words.push(Self::make_word(glyphs, trailing_hard, hyphen_offsets, soft, hang_ws));
+        } else if trailing_hard {
+            words.push(Self::make_word(Vec::new(), true, hyphen_offsets, soft, hang_ws));
         }
         words
     }
@@ -892,8 +1082,17 @@ impl ParagraphLayout {
         mandatory_break_after: bool,
         hyphen_offsets: &HashSet<usize>,
         soft: &HashSet<usize>,
+        hang_ws: &HashSet<usize>,
     ) -> Word {
         let width: f32 = glyphs.iter().map(|t| t.glyph.x_advance()).sum();
+        // The trailing run of collapsible-whitespace advance that hangs when this
+        // word ends a line (CSS Text 3 §3/§7.1).
+        let trailing_ws: f32 = glyphs
+            .iter()
+            .rev()
+            .take_while(|t| hang_ws.contains(&t.glyph.cluster()))
+            .map(|t| t.glyph.x_advance())
+            .sum();
         let mut hyphens: Vec<HyphenPoint> = Vec::new();
         let mut head_width = 0.0_f32;
         for (index, tagged) in glyphs.iter().enumerate() {
@@ -928,6 +1127,7 @@ impl ParagraphLayout {
         Word {
             glyphs,
             width,
+            trailing_ws,
             mandatory_break_after,
             hyphens,
         }
@@ -1287,7 +1487,12 @@ mod tests {
     }
 
     #[test]
-    fn non_positive_max_width_is_a_single_line() {
+    fn unbounded_max_width_is_a_single_line() {
+        // The no-constraint sentinel is now a NON-FINITE max_width (`INFINITY`),
+        // the intrinsic / max-content measure (CSS 2.1 §10.8) — the whole
+        // paragraph is one line. (This test used to pass `0.0` for "unbounded";
+        // `0.0` is now a real 0-width box that max-wraps — see `finite_zero_or_tiny
+        // _width_wraps_to_min_content`.)
         let text = "ab гд";
         let runs = vec![
             run(0, &[(0, 6.0), (1, 6.0), (2, 6.0)], TextRange::new(0, 3)),
@@ -1296,7 +1501,7 @@ mod tests {
         let layout = ParagraphLayout::wrap(
             &runs,
             text,
-            0.0,
+            f32::INFINITY,
             12.0,
             9.0,
             TextAlignment::Start,
@@ -1306,6 +1511,24 @@ mod tests {
         assert_eq!(layout.line_count(), 1);
         // Both fonts survive on the one line as two segments.
         assert_eq!(layout.lines()[0].segments().len(), 2);
+    }
+
+    #[test]
+    fn finite_zero_or_tiny_width_wraps_to_min_content() {
+        // Fix 5 (CSS 2.1 §10.8): a *finite* `0` width is a real (empty) box, NOT
+        // the no-constraint sentinel, so it max-wraps toward min-content — every
+        // word on its own line — instead of one overflowing line. `"a b c"` → 3.
+        let text = "a b c";
+        let runs = vec![run(
+            0,
+            &[(0, 6.0), (1, 6.0), (2, 6.0), (3, 6.0), (4, 6.0)],
+            TextRange::new(0, 5),
+        )];
+        let layout = ParagraphLayout::wrap(
+            &runs, text, 0.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Visible,
+            WhiteSpace::Normal,
+        );
+        assert_eq!(layout.line_count(), 3);
     }
 
     #[test]
@@ -1367,6 +1590,116 @@ mod tests {
             WhiteSpace::Normal,
         );
         assert_eq!(a, b);
+    }
+
+    // --- CSS Text 3 line-wrap correctness (trailing hang / forced break) --------
+
+    #[test]
+    fn trailing_collapsible_space_hangs_and_never_wraps_early() {
+        // Fix 1 (CSS Text 3 §3/§7.1): "aa bb cc", 6px glyphs, max_width 35. "aa bb"
+        // is 30 wide once the space between "bb" and "cc" hangs, so it FITS line 1 —
+        // no premature wrap after "aa". Line 1's used width excludes the hung space.
+        let text = "aa bb cc";
+        let runs = vec![run(
+            0,
+            &(0..8).map(|i| (i, 6.0)).collect::<Vec<_>>(),
+            TextRange::new(0, 8),
+        )];
+        let layout = ParagraphLayout::wrap(
+            &runs, text, 35.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Clip,
+            WhiteSpace::Normal,
+        );
+        assert_eq!(layout.line_count(), 2);
+        // Line 1 is "aa bb " (clusters 0..5) with the trailing space hung → 30.
+        assert_eq!(layout.lines()[0].width(), 30.0);
+        assert_eq!(line_glyphs(&layout, 0).iter().map(|g| g.0).collect::<Vec<_>>(), vec![0, 1, 2, 3, 4, 5]);
+        assert_eq!(layout.lines()[1].width(), 12.0);
+    }
+
+    #[test]
+    fn trailing_space_hangs_for_alignment_offset() {
+        // Fix 1(c): a right-aligned "aa bb " in a 40px box. The trailing space
+        // hangs, so the used width is 30 and x_offset = 40 − 30 = 10 (NOT 4, which
+        // is what counting the trailing space would give).
+        let text = "aa bb ";
+        let runs = vec![run(
+            0,
+            &(0..6).map(|i| (i, 6.0)).collect::<Vec<_>>(),
+            TextRange::new(0, 6),
+        )];
+        let layout = ParagraphLayout::wrap(
+            &runs, text, 40.0, 12.0, 9.0, TextAlignment::Right, TextOverflow::Clip,
+            WhiteSpace::Normal,
+        );
+        assert_eq!(layout.line_count(), 1);
+        assert_eq!(layout.lines()[0].width(), 30.0);
+        assert_eq!(layout.lines()[0].x_offset(), 10.0);
+    }
+
+    #[test]
+    fn trailing_forced_break_opens_a_final_empty_line() {
+        // Fix 2 (CSS Text 3 §4.1.1): "ab\n" under `pre` is TWO lines — "ab" then an
+        // empty last line box — even though the `\n`'s break offset (byte 3) is at
+        // text end and no glyph carries it. The empty line is where a caret lives.
+        let text = "ab\n";
+        // Glyphs for "ab" only; the shaper carried no glyph for the final `\n`.
+        let runs = vec![run(0, &[(0, 6.0), (1, 6.0)], TextRange::new(0, 3))];
+        for mode in [WhiteSpace::Pre, WhiteSpace::PreWrap] {
+            let layout = ParagraphLayout::wrap(
+                &runs, text, 100.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Clip, mode,
+            );
+            assert_eq!(layout.line_count(), 2, "{mode:?}");
+            assert_eq!(layout.lines()[0].width(), 12.0);
+            assert!(layout.lines()[1].is_empty(), "{mode:?}");
+            assert_eq!(layout.lines()[1].top(), 12.0);
+        }
+    }
+
+    #[test]
+    fn preserved_newline_glyph_is_zero_width() {
+        // Fix 3: under `pre` the shaped `\n` glyph (cluster 2) keeps a non-zero
+        // advance from shaping; a forced break is zero-width, so it is zeroed and
+        // never inflates its line. "ab\ncd" (6px) → line 0 width 12, not 18.
+        let text = "ab\ncd";
+        // Clusters 0,1,2(\n),3,4 — the `\n` glyph IS present, advance 6.
+        let runs = vec![run(0, &[(0, 6.0), (1, 6.0), (2, 6.0), (3, 6.0), (4, 6.0)], TextRange::new(0, 5))];
+        let layout = ParagraphLayout::wrap(
+            &runs, text, 100.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Clip,
+            WhiteSpace::Pre,
+        );
+        assert_eq!(layout.line_count(), 2);
+        // Line 0 is "ab" + the zeroed `\n` → 12, not 18.
+        assert_eq!(layout.lines()[0].width(), 12.0);
+        assert_eq!(layout.lines()[1].width(), 12.0);
+    }
+
+    #[test]
+    fn trailing_letter_spacing_hangs_from_line_width() {
+        // Fix 4 (CSS Text 3 §8.1): `apply_spacing` adds letter-spacing after EVERY
+        // cluster incl. the last, so "ab" with letter-spacing 4 shapes to a=10,
+        // b=10 (total 20). The trailing tracking of the last cluster HANGS: the line
+        // breaker trims it, so the used line width is 16 (6 + 4 + 6), not 20.
+        let text = "ab";
+        // Pre-spaced advances (6 + 4 letter-spacing each), as `apply_spacing` emits.
+        let runs = vec![run(0, &[(0, 10.0), (1, 10.0)], TextRange::new(0, 2))];
+        let strut = LineStrut::new(12.0, 9.0, 3.0);
+        let layout = ParagraphLayout::wrap_core(
+            &runs,
+            text,
+            100.0,
+            strut,
+            &|_| (9.0, 3.0),
+            TextAlignment::Start,
+            TextOverflow::Clip,
+            WhiteSpace::Normal,
+            4.0,
+            0.0,
+            &NullHyphenator,
+            None,
+            None,
+        );
+        assert_eq!(layout.line_count(), 1);
+        assert_eq!(layout.lines()[0].width(), 16.0);
     }
 
     #[test]
@@ -1433,12 +1766,15 @@ mod tests {
             WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 2);
-        // The first line has two gaps; the 5px surplus is split as 2.5 per gap,
-        // widening the two space glyphs (clusters 2 and 5) from 5 to 7.5 each.
+        // The first line "aa bb cc " has two interior gaps AND a trailing space
+        // that now HANGS (CSS Text 3 §3/§7.1): its base width is 40 (not 45), so
+        // the surplus is 10 split as 5 per gap — widening the two interior space
+        // glyphs (clusters 2 and 5) from 5 to 10 each (was 7.5 when the trailing
+        // space wrongly counted against the box).
         assert_eq!(layout.lines()[0].width(), 50.0);
         let glyphs = layout.lines()[0].segments()[0].run().glyphs();
-        assert_eq!(glyphs[2].x_advance(), 7.5);
-        assert_eq!(glyphs[5].x_advance(), 7.5);
+        assert_eq!(glyphs[2].x_advance(), 10.0);
+        assert_eq!(glyphs[5].x_advance(), 10.0);
         // Non-gap glyphs keep their natural advance.
         assert_eq!(glyphs[0].x_advance(), 5.0);
         assert_eq!(glyphs[3].x_advance(), 5.0);
@@ -1466,14 +1802,16 @@ mod tests {
             ],
             TextRange::new(0, 9),
         )];
-        // max_width 44 fits "abcd " (40) but not "+efgh" (72). First line is one
-        // word — not justified — so it keeps its natural width 40, not 44.
+        // max_width 44 fits "abcd " (32 hung, 40 with the trailing space) but not
+        // "+efgh" (72). First line is one word — not justified — so it keeps its
+        // natural used width. Its trailing space now HANGS (CSS Text 3 §3/§7.1),
+        // so the used width is 32 ("abcd"), not the old 40 that counted the space.
         let layout = ParagraphLayout::wrap(
             &runs, text, 44.0, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
             WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 2);
-        assert_eq!(layout.lines()[0].width(), 40.0);
+        assert_eq!(layout.lines()[0].width(), 32.0);
     }
 
     #[test]
@@ -1506,7 +1844,9 @@ mod tests {
 
     #[test]
     fn justify_noop_when_unconstrained() {
-        // max_width <= 0 disables justification entirely (one unconstrained line).
+        // A non-finite (`INFINITY`) max_width is the no-constraint sentinel and
+        // disables justification entirely (one unconstrained last line). Was
+        // written with `0.0`, which now means a real 0-width box that wraps.
         let text = "ab cd ef";
         let runs = vec![run(
             0,
@@ -1514,7 +1854,7 @@ mod tests {
             TextRange::new(0, 8),
         )];
         let layout = ParagraphLayout::wrap(
-            &runs, text, 0.0, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
+            &runs, text, f32::INFINITY, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
             WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 1);
@@ -1853,9 +2193,10 @@ mod tests {
         let visible = truncated(5, 25.0, TextAlignment::Start, TextOverflow::Visible, None);
         assert_eq!(line_glyphs(&visible, 0).len(), 5);
         assert_eq!(visible.lines()[0].width(), 50.0);
-        // Unconstrained width (≤ 0) is a single, never-truncated line even under
-        // a truncating policy.
-        let unconstrained = truncated(5, 0.0, TextAlignment::Start, TextOverflow::Clip, None);
+        // Unconstrained width (the non-finite `INFINITY` sentinel) is a single,
+        // never-truncated line even under a truncating policy. (Was `0.0`, which is
+        // now a finite 0-width box that clips.)
+        let unconstrained = truncated(5, f32::INFINITY, TextAlignment::Start, TextOverflow::Clip, None);
         assert_eq!(line_glyphs(&unconstrained, 0).len(), 5);
     }
 

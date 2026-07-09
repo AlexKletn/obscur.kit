@@ -17,8 +17,11 @@
 //!   it by the shaper's **cluster** grouping (one add per distinct source
 //!   cluster), which is exact for the common one-char-per-cluster case and is a
 //!   documented refinement for combining sequences. The trailing letter-spacing
-//!   at the end of a line is meant to *hang* (be trimmed); that trim is deferred
-//!   to the line breaker and documented here — this pass adds it uniformly.
+//!   at the end of a line is meant to *hang* (be trimmed); this pass adds it
+//!   uniformly (after every cluster incl. the last), and the per-line trim — which
+//!   §8.1 says is "deferred to the line breaker" — is performed by the wrapper
+//!   (`ParagraphLayout::wrap_core` → `hang_line_trailing`), the only stage that
+//!   knows where lines end.
 //!
 //! * **word-spacing (§8.2)** — "additional spacing between 'words'". The resolved
 //!   length is added to the advance of each **word separator**. Per the spec the

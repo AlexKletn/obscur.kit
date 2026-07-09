@@ -2729,8 +2729,10 @@ mod tests {
         let text_box = text_box_in_container("aaaa bbbb cccc", 50.0, 200.0);
         // Three lines stacked → height == 3 · 16.
         assert_eq!(text_box.size().height, 48.0);
-        // Widest line ("aaaa " = 5·9.6) fits within the 50px container width.
-        assert!((text_box.size().width - 48.0).abs() < 1e-3, "width {}", text_box.size().width);
+        // Widest line is "aaaa " but its trailing space now HANGS (CSS Text 3
+        // §3/§7.1), so the used width is 4·9.6 = 38.4 (was 5·9.6 = 48 when the
+        // trailing space wrongly counted) — still within the 50px container.
+        assert!((text_box.size().width - 38.4).abs() < 1e-3, "width {}", text_box.size().width);
     }
 
     #[test]
