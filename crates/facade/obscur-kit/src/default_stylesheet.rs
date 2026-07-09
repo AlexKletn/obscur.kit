@@ -107,6 +107,7 @@ input, textarea {\
    the only property that differs between the two — the box look is shared above. */\
 input {\
   white-space: nowrap;\
+  overflow: hidden;\
 }\
 input:hover, textarea:hover {\
   background: #f4f2ec;\
