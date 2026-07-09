@@ -1654,23 +1654,29 @@ impl UiRuntime {
         let mut focus_changed = false;
         let mut press_changed = false;
         if event.kind() == PointerEventKind::Down {
-            if self.focused != target {
-                self.focused = target;
+            // A disabled control is not a focus / press / editing target: a press
+            // that lands inside one is inert (it seats no focus, no caret, and no
+            // press anchor), so typing can't reach it and its release activates
+            // nothing. Focus/editing simply stay wherever they were.
+            let interactive_target = target.filter(|&t| !self.is_within_disabled(t));
+            if self.focused != interactive_target {
+                self.focused = interactive_target;
                 focus_changed = true;
                 // Focus moved: begin/clear the runtime-owned editing session so
                 // the focused editable's text/caret/selection is live for keys
                 // (and step-2 rendering).
                 self.sync_editing_to_focus();
             }
-            if self.press_target != target {
+            if self.press_target != interactive_target {
                 press_changed = true;
             }
-            self.press_target = target;
+            self.press_target = interactive_target;
             // Click → caret: after `sync_editing_to_focus` has (re)seated the
             // session for the clicked editable, place the caret at the click point
             // and arm a potential drag-selection anchored there. A press on a
-            // non-editable clears any armed drag and leaves the session untouched.
-            self.begin_text_pointer(target, event.position());
+            // non-editable (or disabled) target clears any armed drag and leaves
+            // the session untouched.
+            self.begin_text_pointer(interactive_target, event.position());
         }
 
         // 3a-drag. While a drag is armed, a pointer move re-selects the range from
@@ -1729,6 +1735,20 @@ impl UiRuntime {
             .find_map(|node| self.tree.get(node).and_then(|n| n.command_for_event(event)))
     }
 
+    /// Whether `node` lies within a **disabled** control — the node itself or any
+    /// of its element ancestors carries the reserved `:disabled` structural state.
+    ///
+    /// A disabled control and its whole subtree are inert to interaction: a press
+    /// seats no focus and no editing caret, typing never reaches it, and a click /
+    /// Enter / Space fires no activation command — matching a native disabled form
+    /// control. `:hover` is deliberately unaffected (CSS still hovers a disabled
+    /// element), so only the *behavioural* paths gate on this, not styling.
+    fn is_within_disabled(&self, node: NodeId) -> bool {
+        self.hover_chain_for(Some(node))
+            .into_iter()
+            .any(|n| self.tree.get(n).is_some_and(|el| el.attributes().is_disabled()))
+    }
+
     /// Resolves the **activation** command for `target`: a control is activated
     /// by a click or an Enter/Space keypress, and activation fires its
     /// [`EVENT_CLICK`] command if one is bound (bubbling up its ancestors), else
@@ -1763,6 +1783,11 @@ impl UiRuntime {
     /// registered for the resolved command — it is a harmless no-op that returns
     /// `false` and never panics.
     fn activate(&mut self, node: NodeId) -> bool {
+        // A disabled control is inert: it fires no activation command, whether the
+        // activation came from a pointer click or an Enter/Space keypress.
+        if self.is_within_disabled(node) {
+            return false;
+        }
         match self.activation_command_for(node) {
             Some(command) => self.dispatch_command(command),
             None => false,
@@ -1867,6 +1892,12 @@ impl UiRuntime {
     /// node (e.g. [`Input`](../../obscur_widgets/input/struct.Input.html)) calls
     /// this to seed the buffer with the real value.
     pub fn begin_text_editing(&mut self, node: NodeId, initial_text: impl Into<String>) {
+        // A disabled control accepts no editing session — a defensive guard mirroring
+        // the pointer path, so even an explicit app call can't make a disabled field
+        // editable.
+        if self.is_within_disabled(node) {
+            return;
+        }
         self.editing = Some(TextEditSession::seeded(node, initial_text));
     }
 
@@ -4117,6 +4148,54 @@ mod tests {
         runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 75.0));
         assert!(!runtime.pseudo_state(b).contains(PseudoState::ACTIVE));
         assert!(!runtime.pseudo_state(panel).contains(PseudoState::ACTIVE));
+    }
+
+    #[test]
+    fn disabled_control_takes_no_focus_and_fires_no_command() {
+        use std::cell::Cell;
+        use std::rc::Rc;
+
+        use obscur_view::view::{DISABLED, EVENT_CLICK, TYPE, ViewEventBinding};
+
+        // A single 100x50 `button` carrying the reserved DISABLED attribute and an
+        // `on-click` binding. A native disabled control is inert.
+        let cmd = InternedSymbol::from_raw(0x00BE_EF01);
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(200))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("a".into())))
+                .with_prop(ViewProperty::new(TYPE, ViewValue::from("button")))
+                .with_prop(ViewProperty::new(DISABLED, ViewValue::Bool(true)))
+                .with_event(ViewEventBinding::new(EVENT_CLICK, cmd)),
+        ]));
+        let sheet = Stylesheet::new(CascadeOrigin::GlobalApp, vec![class_rule("a", size(100.0, 50.0))]);
+
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let ran = Rc::new(Cell::new(false));
+        {
+            let r = ran.clone();
+            runtime.on_command(cmd, move || r.set(true));
+        }
+        let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+
+        // Press inside the disabled control: it takes NO focus.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        assert_eq!(runtime.focused(), None, "a disabled control must not take focus");
+        assert!(runtime.editing_text().is_none(), "a disabled control seats no editing session");
+
+        // Release on it activates NOTHING — no command reported, no handler ran.
+        let dispatch = runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 25.0));
+        assert_eq!(dispatch.command(), None, "a disabled control reports no activation command");
+        assert!(!ran.get(), "a disabled control fires no activation command");
+
+        // `:hover` is unaffected — CSS still hovers a disabled element.
+        let node = panel_single_child(&runtime);
+        assert!(runtime.pseudo_state(node).contains(PseudoState::HOVER));
+    }
+
+    /// The lone child node of the root after a frame (for single-element views).
+    fn panel_single_child(runtime: &UiRuntime) -> NodeId {
+        let root = runtime.tree().root().expect("root after a frame");
+        runtime.tree().get(root).unwrap().children()[0]
     }
 
     // ---- Device scale (HiDPI): root scale transform + pointer coord mapping ----
