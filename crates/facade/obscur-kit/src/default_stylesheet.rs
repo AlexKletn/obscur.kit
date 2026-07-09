@@ -103,11 +103,16 @@ input, textarea {\
   font-size: 14px;\
 }\
 /* A native `<input type=text>` is SINGLE-LINE: it never wraps (long text scrolls /\
-   clips). `textarea` keeps the initial `white-space: normal` so it wraps. This is\
-   the only property that differs between the two — the box look is shared above. */\
+   clips). A `<textarea>` is MULTI-LINE: `white-space: pre-wrap` preserves authored\
+   segment breaks (`\n`, CSS Text 3 §4.1.1) AND wraps at the box width, so pressing\
+   Enter inserts a visible newline and long lines wrap. This white-space is the only\
+   property that differs between the two — the box look is shared above. */\
 input {\
   white-space: nowrap;\
   overflow: hidden;\
+}\
+textarea {\
+  white-space: pre-wrap;\
 }\
 input:hover, textarea:hover {\
   background: #f4f2ec;\

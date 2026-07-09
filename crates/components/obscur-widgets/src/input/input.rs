@@ -30,6 +30,13 @@ pub struct Input {
     placeholder: Box<str>,
     command: InternedSymbol,
     disabled: bool,
+    /// Whether this is a **multi-line** field (a `<textarea>`, spec §2.6). A
+    /// multi-line field emits the reserved CSS type `textarea` (so the UA
+    /// `textarea { … }` rules bind and it wraps + preserves segment breaks, CSS
+    /// Text 3 §4.1.1) and marks its editable MULTILINE for the runtime, so `Enter`
+    /// inserts a newline and `ArrowUp`/`ArrowDown` move between laid-out lines. The
+    /// default (`false`) is a single-line `input` — byte-identical to before.
+    multiline: bool,
 }
 
 impl Input {
@@ -66,6 +73,7 @@ impl Input {
             placeholder: Box::<str>::from(""),
             command,
             disabled: false,
+            multiline: false,
         }
     }
 
@@ -77,7 +85,25 @@ impl Input {
             placeholder: Box::<str>::from(""),
             command,
             disabled: false,
+            multiline: false,
         }
+    }
+
+    /// Makes this field **multi-line** (a `<textarea>`), returning the updated
+    /// input (fluent builder). A multi-line field emits the reserved CSS type
+    /// `textarea` and marks its editable MULTILINE (see [`multiline`](Self::multiline)
+    /// field): `Enter` inserts a newline and `ArrowUp`/`ArrowDown` move between
+    /// wrapped lines. The default is a single-line `input`.
+    #[must_use]
+    pub const fn multiline(mut self, multiline: bool) -> Self {
+        self.multiline = multiline;
+        self
+    }
+
+    /// Returns whether this is a multi-line (`<textarea>`) field.
+    #[must_use]
+    pub const fn is_multiline(&self) -> bool {
+        self.multiline
     }
 
     /// Sets the placeholder text, returning the updated input (fluent builder).
@@ -177,10 +203,13 @@ impl Input {
     #[must_use]
     pub fn view(&self) -> View {
         let value = self.buffer.text();
+        // Stable CSS type / local name so a UA (or author) type selector matches
+        // this control (spec §4.13): `textarea` for a multi-line field (so the UA
+        // `textarea { … }` rules bind — wrapping + `white-space: pre-wrap`), else
+        // `input` for a single-line field (byte-identical to before). Additive.
+        let type_name = if self.multiline { "textarea" } else { "input" };
         let node = ViewNode::element(Self::COMPONENT_ID)
-            // Stable CSS type / local name so a UA (or author) `input { … }` type
-            // selector matches this control (spec §4.13). Additive.
-            .with_prop(ViewProperty::new(TYPE, ViewValue::from("input")))
+            .with_prop(ViewProperty::new(TYPE, ViewValue::from(type_name)))
             .with_prop(ViewProperty::new(
                 Self::PROP_ROLE,
                 ViewValue::from("textbox"),
@@ -392,6 +421,38 @@ mod tests {
                         panic!("a non-empty value must render as a bare Text child, no overlay")
                     }
                 }
+            }
+            ViewNode::Text { .. } => panic!("expected element root"),
+        }
+    }
+
+    #[test]
+    fn single_line_input_emits_type_input() {
+        // A plain (single-line) input carries the reserved CSS type `input` and is
+        // not multiline — byte-identical to before the multiline mode existed.
+        let i = Input::new(cmd());
+        assert!(!i.is_multiline());
+        let view = i.view();
+        match &view.root().nodes()[0] {
+            ViewNode::Element { props, .. } => {
+                let ty = props.iter().find(|p| p.name() == TYPE).expect("type prop");
+                assert_eq!(*ty.value(), ViewValue::from("input"));
+            }
+            ViewNode::Text { .. } => panic!("expected element root"),
+        }
+    }
+
+    #[test]
+    fn multiline_input_emits_type_textarea() {
+        // A `.multiline(true)` field carries the reserved CSS type `textarea`, so
+        // the UA `textarea { … }` rules bind and the runtime treats it as MULTILINE.
+        let i = Input::with_value(cmd(), "line one").multiline(true);
+        assert!(i.is_multiline());
+        let view = i.view();
+        match &view.root().nodes()[0] {
+            ViewNode::Element { props, .. } => {
+                let ty = props.iter().find(|p| p.name() == TYPE).expect("type prop");
+                assert_eq!(*ty.value(), ViewValue::from("textarea"));
             }
             ViewNode::Text { .. } => panic!("expected element root"),
         }

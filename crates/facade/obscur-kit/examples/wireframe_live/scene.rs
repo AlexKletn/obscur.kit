@@ -31,11 +31,12 @@
 //!    invert, `:focus` ring; a click bumps the status counter) beside a disabled one.
 //! 2. **Text Field** `<input>` — a live [`Input`] (click → focus ring + caret,
 //!    type → text) beside a disabled one.
-//! 3. **Textarea** `<textarea>` — a live [`Input`] (there is no dedicated textarea
-//!    widget). The UA sheet makes a bare `input` **single-line** (`white-space:
-//!    nowrap`); to act as a textarea this slot adds an author `.wf-area` class that
-//!    resets `white-space: normal` and gives it a definite `360×96` box, so the
-//!    value WRAPS inside that box — the multi-line look, still on the UA base.
+//! 3. **Textarea** `<textarea>` — a live **multi-line** [`Input`]
+//!    (`.multiline(true)`), which emits the reserved CSS type `textarea`. The UA
+//!    sheet makes a bare `input` **single-line** (`white-space: nowrap`) but a
+//!    `textarea` **multi-line** (`white-space: pre-wrap`), so this field WRAPS at
+//!    its author `.wf-area` `360×96` box AND preserves newlines — a real textarea:
+//!    Enter inserts `\n`, ArrowUp/ArrowDown move between lines, all on the UA base.
 //! 4. **Select** `<select>` — a live [`Select`] state machine. Closed, the header
 //!    shows the current label + ▼. Open, the widget emits a real **dropdown popup**
 //!    — a `.select-list` of stacked `.select-option` rows positioned directly BELOW
@@ -244,11 +245,11 @@ pub fn stylesheet() -> &'static str {
 \
 /* ---- Author-level field SIZING (a real form sizes its fields; the LOOK still\n\
    comes from the UA sheet). The text field is single-line (UA `input` nowrap) at a\n\
-   definite width; the \"textarea\" is a live `Input` (so it inherits the UA `input`\n\
-   nowrap) and must MULTI-LINE, so it resets `white-space: normal` and wraps inside a\n\
-   definite box. ---- */\n\
+   definite width; the textarea is a live multi-line `Input` (type `textarea`), so\n\
+   the UA `textarea` rule already gives it `white-space: pre-wrap` — this class only\n\
+   sets its definite `360×96` box so it wraps inside it. ---- */\n\
 .wf-field { width: 220px; overflow: hidden; }\n\
-.wf-area { white-space: pre-wrap; width: 360px; height: 96px; overflow: hidden; }\n\
+.wf-area { width: 360px; height: 96px; overflow: hidden; }\n\
 .wf-select { width: 200px; }\n\
 \
 /* ---- Footer ---- */\n\
@@ -381,8 +382,10 @@ fn field_body(state: &WireState) -> ViewNode {
     ])
 }
 
-/// 03 · Textarea: a live `Input` (no dedicated textarea widget — the UA
-/// `input, textarea` rule styles both identically).
+/// 03 · Textarea: a live **multi-line** [`Input`] (`.multiline(true)`), which
+/// emits the reserved CSS type `textarea` so the UA `textarea { … }` rules bind
+/// (`white-space: pre-wrap` — it wraps at the box AND preserves `\n`). Enter inserts
+/// a newline and ArrowUp/ArrowDown move between wrapped lines (runtime MULTILINE).
 fn area_body(state: &WireState) -> ViewNode {
     body(vec![slot(
         "MULTILINE · LIVE",
@@ -390,6 +393,7 @@ fn area_body(state: &WireState) -> ViewNode {
             "area",
             "wf-area",
             Input::with_value(CMD_AREA, state.area.clone())
+                .multiline(true)
                 .placeholder("Longer entered text…")
                 .view(),
         ),

@@ -512,3 +512,13 @@ required-features = ["full"]
 [[example]]
 name = "caret_scroll_proof"
 required-features = ["render-cpu", "text-harfrust", "text-unicode"]
+
+# Proof: a multi-line <textarea> edits, wraps, and paints a LINE-AWARE caret
+# (spec §5.10/§5.11; CSS Text 3 §4.1.1). Types "line one\nline two\nline three"
+# through the real editing keymap (Enter → newline), rasterizes three laid-out
+# lines to target/textarea_proof.png, and asserts the caret sits on line 3 at its
+# own line-local x (not the summed width of all lines). Needs the CPU renderer +
+# text stack; builds display-free.
+[[example]]
+name = "textarea_proof"
+required-features = ["render-cpu", "text-harfrust", "text-unicode"]

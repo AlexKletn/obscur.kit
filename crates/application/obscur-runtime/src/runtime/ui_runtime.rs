@@ -2071,6 +2071,18 @@ impl UiRuntime {
         })
     }
 
+    /// Whether the editable `node` is a **multi-line** field (a `<textarea>`): it
+    /// carries the reserved CSS type `textarea` (emitted by a multi-line
+    /// [`Input`](obscur_widgets::input::Input)). A multi-line editable inserts a
+    /// newline on `Enter` and moves the caret vertically on ArrowUp/ArrowDown; a
+    /// single-line `input` does neither (its Enter stays activation/submit).
+    fn is_multiline(&self, node: NodeId) -> bool {
+        self.tree
+            .get(node)
+            .and_then(|n| n.attributes().local_name())
+            == Some("textarea")
+    }
+
     /// Concatenates the text content of the editable subtree rooted at `node`
     /// (the node plus its descendants, in tree order) — the seed for a fresh
     /// editing session. A single-line text field has one `Text` child, so this
@@ -2188,18 +2200,26 @@ impl UiRuntime {
     fn caret_offset_at(&self, field: NodeId, point: Point) -> Option<usize> {
         let session = self.editing.as_ref().filter(|s| s.node() == field)?;
         let text_node = self.first_text_descendant(field)?;
-        let origin = self.boxes.get(&text_node)?.origin();
+        let text_box = self.boxes.get(&text_node)?;
+        let origin = text_box.origin();
         // Undo the paint's `−scroll_left` translation: the run is drawn at
         // `origin.x + glyph_x − scroll_left`, so a pointer at screen `point.x`
         // sits at run-local `point.x − origin.x + scroll_left`. Adding the field's
         // scroll offset back lands a click on a scrolled field at the right byte
         // (the inverse of the caret paint, CSS Overflow 3 §3.1). `scroll_left`
         // is `0` on an unscrolled field ⇒ byte-identical to the pre-scroll inverse.
+        // `local_y` picks the wrapped LINE (2D hit-test); a single-line field has
+        // one line, so `local_y` is immaterial and the resolved byte is identical.
         let local_x = point.x - origin.x + session.scroll_left();
-        Some(self.scene_composer.caret_offset_at_x(
+        let local_y = point.y - origin.y;
+        Some(self.scene_composer.caret_offset_at_point(
+            &self.tree,
+            &self.computed,
+            text_node,
             session.text(),
-            self.computed.get(&text_node),
+            text_box.size().width,
             local_x,
+            local_y,
         ))
     }
 
@@ -2328,7 +2348,23 @@ impl UiRuntime {
                         direction: EditDirection::Forward,
                         extend: shift,
                     },
-                    // Enter/Escape/Tab/etc. remain activation/shortcut keys.
+                    // ArrowUp/ArrowDown move the caret between wrapped lines in a
+                    // MULTILINE field (spec §5.11). In a single-line `input` there is
+                    // no line to move to, so they are NOT consumed here (byte-identical
+                    // — they fall through to the shortcut/activation path as before).
+                    NamedKey::ArrowUp | NamedKey::ArrowDown => {
+                        return self.try_vertical_move(
+                            node,
+                            matches!(named, NamedKey::ArrowDown),
+                            shift,
+                        );
+                    }
+                    // Enter inserts a newline in a MULTILINE field (CSS Text 3
+                    // §4.1.1 segment break); a single-line `input`'s Enter is NOT
+                    // consumed — it remains an activation/submit key (byte-identical).
+                    NamedKey::Enter if self.is_multiline(node) => EditCommand::insert("\n"),
+                    // Enter (single-line) / Escape / Tab / etc. remain activation
+                    // or shortcut keys.
                     _ => return false,
                 };
                 self.apply_edit(command);
@@ -2336,6 +2372,56 @@ impl UiRuntime {
             }
             None => false,
         }
+    }
+
+    /// Moves the caret **vertically** between the wrapped lines of a multiline
+    /// field on ArrowUp (`down = false`) / ArrowDown (`down = true`), extending the
+    /// selection when `Shift` is held — standard caret vertical motion (spec §5.11).
+    ///
+    /// Returns whether the key was consumed. A **single-line** field is never
+    /// consumed (`false`), so its ArrowUp/ArrowDown fall through to the
+    /// shortcut/activation path byte-identically. In a multiline field the target
+    /// byte is resolved against the SAME wrapped layout the caret paints from
+    /// ([`SceneCoordinator::caret_line_move`]) at roughly the caret's current x;
+    /// when there is no line in that direction the caret clamps to the text start
+    /// (Up on the first line) or end (Down on the last line).
+    fn try_vertical_move(&mut self, node: NodeId, down: bool, shift: bool) -> bool {
+        if !self.is_multiline(node) {
+            return false;
+        }
+        let Some(session) = self.editing.as_ref().filter(|s| s.node() == node) else {
+            return false;
+        };
+        let Some(text_node) = self.first_text_descendant(node) else {
+            return false;
+        };
+        let Some(text_box) = self.boxes.get(&text_node) else {
+            return false;
+        };
+        let content = session.text();
+        let selection = session.selection();
+        let focus = selection.focus();
+        let new_focus = self
+            .scene_composer
+            .caret_line_move(
+                &self.tree,
+                &self.computed,
+                text_node,
+                content,
+                text_box.size().width,
+                focus,
+                down,
+            )
+            // No line in that direction: clamp to the text end (Down on the last
+            // line) or start (Up on the first line).
+            .unwrap_or(if down { content.len() } else { 0 });
+        let new_selection = if shift {
+            TextSelection::new(selection.anchor(), new_focus)
+        } else {
+            TextSelection::caret(new_focus)
+        };
+        self.apply_edit(EditCommand::SetSelection(new_selection));
+        true
     }
 
     /// Applies `command` to the active editing session, then notifies the app
@@ -6388,8 +6474,9 @@ mod tests {
             .size
             .height;
 
-        // Type a space-separated value that wraps to several lines in the 40px box.
-        // (Enter→newline is a later campaign item, so wrapping is driven by spaces.)
+        // Type a space-separated value that wraps to several lines in the 40px box
+        // (this fixture is a single-line-typed `input`, so wrapping is driven by
+        // spaces; the textarea `\n` path is covered by the multiline tests below).
         for c in "aa aa aa aa".chars() {
             runtime.handle_key(char_press(c));
         }
@@ -6426,6 +6513,227 @@ mod tests {
             measured_height > stale_height + 1e-3,
             "the box grew past the stale retained (1-line) height {stale_height} → measure reads \
              the SESSION, not the lagging retained tree (measured {measured_height})",
+        );
+    }
+
+    // ---- Multi-line editing: textarea, Enter → newline, line-aware caret -------
+
+    /// A **textarea** view: an editable node carrying the reserved CSS type
+    /// `textarea` (so the runtime treats it MULTILINE — Enter inserts `\n`,
+    /// ArrowUp/ArrowDown move between lines) bound to `on-input`, with a single
+    /// text child. Mirrors a multi-line [`Input`](obscur_widgets::input::Input).
+    fn textarea_view(text: &str) -> View {
+        use obscur_view::view::TYPE;
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(710))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+                .with_children(ViewFragment::from_nodes(vec![
+                    ViewNode::element(ComponentId::from_raw(711))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("area".into())))
+                        .with_prop(ViewProperty::new(TYPE, ViewValue::from("textarea")))
+                        .with_event(ViewEventBinding::new(EVENT_INPUT, CMD_INPUT))
+                        .with_children(ViewFragment::from_nodes(vec![ViewNode::text(
+                            text.to_string(),
+                        )])),
+                ])),
+        ]))
+    }
+
+    /// Sheet for [`textarea_view`]: a WIDE `area` (300px, so newline-split lines do
+    /// not further wrap) with an exact 20px `line-height` and `white-space:
+    /// pre-wrap`, so authored `\n`s are preserved as separate lines each 20px tall.
+    fn textarea_sheet() -> Stylesheet {
+        use obscur_style::property::layout_keyword;
+        let field = vec![
+            BlockDeclaration::normal(PropertyId::Width, PropertyValue::Length(Length::px(300.0))),
+            BlockDeclaration::normal(PropertyId::LineHeight, PropertyValue::Length(Length::px(20.0))),
+            BlockDeclaration::normal(
+                PropertyId::WhiteSpace,
+                PropertyValue::Keyword(layout_keyword::WHITE_SPACE_PRE_WRAP),
+            ),
+        ];
+        Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![class_rule("panel", size(400.0, 200.0)), class_rule("area", field)],
+        )
+    }
+
+    /// Focuses the empty `textarea` and returns the runtime with an (empty) session.
+    fn focused_textarea() -> UiRuntime {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.on_text_input(CMD_INPUT, move |_| {});
+        let sheet = textarea_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&textarea_view(""), sheets);
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 20.0, 10.0));
+        assert!(runtime.focused().is_some(), "the press focused the textarea");
+        runtime
+    }
+
+    /// The textarea's editable node id (root → panel → area) and its text-leaf id.
+    fn textarea_nodes(runtime: &UiRuntime) -> (NodeId, NodeId) {
+        let root = runtime.tree().root().expect("root after a frame");
+        let panel = runtime.tree().get(root).unwrap().children()[0];
+        let field = runtime.tree().get(panel).unwrap().children()[0];
+        let text = runtime.tree().get(field).unwrap().children()[0];
+        (field, text)
+    }
+
+    /// Re-renders the seed view (retained text `""`); the SESSION holds the typed
+    /// value, so compose paints the live multi-line text + line-aware caret.
+    fn render_textarea_frame(runtime: &mut UiRuntime) -> DisplayList {
+        let sheet = textarea_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let result = runtime.render_now(&textarea_view(""), sheets);
+        result.snapshot().display_list().clone()
+    }
+
+    /// The painted caret rect (the thin, width-1 fill), or `None` if absent.
+    fn painted_caret_rect(list: &DisplayList) -> Option<obscur_geometry::Rect> {
+        list.commands().iter().find_map(|c| match c {
+            PaintCommand::DrawPath { path, .. } => {
+                path.bounds().filter(|r| (r.size.width - 1.0).abs() < 1e-6)
+            }
+            _ => None,
+        })
+    }
+
+    /// Types `text` into the focused editable one printable char at a time, mapping
+    /// a `\n` to a real `Enter` key press (through the runtime's editing keymap).
+    fn type_multiline(runtime: &mut UiRuntime, text: &str) {
+        for ch in text.chars() {
+            if ch == '\n' {
+                runtime.handle_key(named_press(NamedKey::Enter));
+            } else {
+                runtime.handle_key(char_press(ch));
+            }
+        }
+    }
+
+    #[test]
+    fn enter_in_a_textarea_inserts_a_newline_and_moves_the_caret_to_the_next_line() {
+        // (a) Enter in a MULTILINE field inserts `\n` (CSS Text 3 §4.1.1 segment
+        // break) and the caret advances past it — to line 2, column 0. Typing "ab"
+        // then Enter yields the buffer "ab\n" with the caret at byte 3, and the
+        // painted caret sits on the SECOND line (y ≈ line-height) at x ≈ 0.
+        let mut runtime = focused_textarea();
+        type_multiline(&mut runtime, "ab\n");
+        assert_eq!(runtime.editing_text(), Some("ab\n"), "Enter inserted a newline");
+        assert_eq!(
+            runtime.editing_selection().unwrap().focus(),
+            3,
+            "caret is past the newline (line 2, col 0)",
+        );
+
+        let (_, text_node) = textarea_nodes(&runtime);
+        let text_origin = runtime.layout_boxes().get(&text_node).unwrap().bounds.origin;
+        let list = render_textarea_frame(&mut runtime);
+        let caret = painted_caret_rect(&list).expect("a caret is painted");
+        assert!(
+            (caret.origin.y - text_origin.y - 20.0).abs() < 1e-3,
+            "the caret is on the 2nd line (y ≈ line-height 20): rel y {}",
+            caret.origin.y - text_origin.y,
+        );
+        assert!(
+            (caret.origin.x - text_origin.x).abs() < 1e-3,
+            "the caret is at column 0 on line 2: rel x {}",
+            caret.origin.x - text_origin.x,
+        );
+    }
+
+    #[test]
+    fn arrow_up_and_down_move_the_caret_between_wrapped_lines() {
+        // (b) In a textarea holding "ab\ncd" (caret at end, line 2 col 2), ArrowUp
+        // moves to line 1 at roughly the same x (byte 2, end of "ab"); ArrowDown
+        // moves back to line 2 at that x (byte 5, end of "cd").
+        let mut runtime = focused_textarea();
+        type_multiline(&mut runtime, "ab\ncd");
+        assert_eq!(runtime.editing_text(), Some("ab\ncd"));
+        assert_eq!(runtime.editing_selection().unwrap().focus(), 5, "caret at end");
+
+        runtime.handle_key(named_press(NamedKey::ArrowUp));
+        assert_eq!(
+            runtime.editing_selection().unwrap().focus(),
+            2,
+            "ArrowUp lands on line 1 at ~the same x (byte 2)",
+        );
+
+        runtime.handle_key(named_press(NamedKey::ArrowDown));
+        assert_eq!(
+            runtime.editing_selection().unwrap().focus(),
+            5,
+            "ArrowDown returns to line 2 at ~the same x (byte 5)",
+        );
+    }
+
+    #[test]
+    fn caret_on_the_second_line_paints_within_that_line_not_the_summed_width() {
+        // (c) With "ab\ncd" (caret at end), the painted caret sits on line 2 at
+        // y ≈ line-height, and its x is measured WITHIN line 2 ("cd", ~2 advances) —
+        // NOT the summed width of both lines ("abcd", ~4 advances), which is the
+        // single-line bug this replaces.
+        let mut runtime = focused_textarea();
+        type_multiline(&mut runtime, "ab\ncd");
+
+        let (_, text_node) = textarea_nodes(&runtime);
+        let text_origin = runtime.layout_boxes().get(&text_node).unwrap().bounds.origin;
+        let list = render_textarea_frame(&mut runtime);
+        let caret = painted_caret_rect(&list).expect("a caret");
+        let advance = 16.0_f32 * obscur_text::shaping::MockTextShaper::ADVANCE_RATIO;
+        assert!(
+            (caret.origin.y - text_origin.y - 20.0).abs() < 1e-3,
+            "caret y is on line 2 (≈ line-height 20): rel y {}",
+            caret.origin.y - text_origin.y,
+        );
+        let rel_x = caret.origin.x - text_origin.x;
+        assert!(
+            (rel_x - advance * 2.0).abs() < 1e-2,
+            "caret x is line-2-local (~2 advances = {}), got {rel_x}",
+            advance * 2.0,
+        );
+        assert!(
+            rel_x < advance * 3.0,
+            "caret x is NOT the summed width of both lines (~4 advances): {rel_x}",
+        );
+    }
+
+    #[test]
+    fn a_click_on_the_second_line_resolves_to_a_second_line_byte() {
+        // (d) A pointer press within the SECOND line's y-band resolves to a byte on
+        // line 2 (>= 3, the start of "cd" after "ab\n") — the 2D hit-test picks the
+        // line by y then the byte by x, so a click never lands on line 1.
+        let mut runtime = focused_textarea();
+        type_multiline(&mut runtime, "ab\ncd");
+        // Lay out the multi-line text box (measured from the session) so the second
+        // line has a real y-band to click into.
+        let _ = render_textarea_frame(&mut runtime);
+
+        let (_, text_node) = textarea_nodes(&runtime);
+        let origin = runtime.layout_boxes().get(&text_node).unwrap().bounds.origin;
+        // Click into line 2 (y ∈ [20, 40)), a little in from the left.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, origin.x + 12.0, origin.y + 25.0));
+        let focus = runtime.editing_selection().unwrap().focus();
+        assert!(
+            (3..=5).contains(&focus),
+            "a click on line 2 resolves to a line-2 byte (3..=5), got {focus}",
+        );
+    }
+
+    #[test]
+    fn enter_in_a_single_line_input_does_not_insert_a_newline() {
+        // (e) A single-line `input`'s Enter is NOT an edit — it is left for the
+        // activation/submit path — so the buffer is unchanged (no `\n`), proving the
+        // multiline Enter behaviour is gated on `type=textarea`.
+        let mut runtime = focused_scroll_field();
+        for c in "ab".chars() {
+            runtime.handle_key(char_press(c));
+        }
+        assert_eq!(runtime.editing_text(), Some("ab"));
+        runtime.handle_key(named_press(NamedKey::Enter));
+        assert_eq!(
+            runtime.editing_text(),
+            Some("ab"),
+            "single-line Enter inserts no newline (activation, not an edit)",
         );
     }
 

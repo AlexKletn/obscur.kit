@@ -28,7 +28,8 @@ use obscur_text::font::{
     FontSource, GenericFamily, MockFontResolver,
 };
 use obscur_text::layout::{
-    Hyphenator, LineStrut, NullHyphenator, ParagraphLayout, TextAlignment, TextOverflow, WhiteSpace,
+    Hyphenator, LineStrut, NullHyphenator, ParagraphLayout, ParagraphLine, TextAlignment,
+    TextOverflow, WhiteSpace,
 };
 use obscur_text::selection::TextSelection;
 use obscur_text::shaping::{
@@ -615,6 +616,223 @@ impl SceneCoordinator {
         self.caret_offset_x(content, &fallback, &attributes, direction, font_size, index)
     }
 
+    /// The line index a caret byte `index` sits on within a wrapped `layout`
+    /// (spec §5.10): the first line whose byte range **ends past** `index`, else
+    /// the last line — so a caret at a soft-wrap/`\n` boundary sits at the start of
+    /// the *next* line and a caret at the text end sits on the final line. A
+    /// single-line layout always resolves to line `0`.
+    fn line_of_byte(layout: &ParagraphLayout, index: usize) -> usize {
+        let lines = layout.lines();
+        lines
+            .iter()
+            .position(|line| index < line.range().end)
+            .unwrap_or_else(|| lines.len().saturating_sub(1))
+    }
+
+    /// The byte a wrapped line's content **starts** at (spec §5.10). For a line
+    /// with glyphs this is its first glyph's cluster (`range().start`); for an
+    /// **empty** line box — a trailing/leading/consecutive forced break (`\n`)
+    /// leaves one, whose [`ParagraphLine`] defaults its start to `0` — the true
+    /// start is the *previous* line's end (or `0` for a leading empty line), so a
+    /// caret on the empty line after a final `\n` resolves to just past it.
+    fn line_start_byte(layout: &ParagraphLayout, li: usize) -> usize {
+        let lines = layout.lines();
+        match lines.get(li) {
+            Some(line) if line.glyph_count() > 0 => line.range().start,
+            Some(_) if li > 0 => lines[li - 1].range().end,
+            _ => 0,
+        }
+    }
+
+    /// Resolves a caret byte `index` to its painted geometry against the wrapped
+    /// `layout` (spec §5.10/§5.11): `(line_top, line_height, line_x_offset, x)`,
+    /// where `line_top` is the caret's line box top measured **down from the text
+    /// box origin** (add `origin.y`), `line_x_offset` is that line's alignment
+    /// offset, and `x` is the caret pen x measured from the line's content start
+    /// (so the painted x is `origin.x + line_x_offset + x − scroll_left`).
+    ///
+    /// The pen x uses the SAME source-order advance model
+    /// [`caret_offset_x`](Self::caret_offset_x) paints/hit-tests with, measured
+    /// **relative to the line's first byte** (`caret_offset_x(index) −
+    /// caret_offset_x(line_start)`); the `\n`/preceding-line advances cancel in the
+    /// subtraction, so a caret on line 2 lands at that line's own x, not the summed
+    /// width of both lines. A single-line field → line 0, top 0, x_offset 0, and the
+    /// identical `caret_offset_x(index)` — byte-identical.
+    #[allow(clippy::too_many_arguments, clippy::trivially_copy_pass_by_ref)]
+    fn caret_line_geometry(
+        &self,
+        layout: &ParagraphLayout,
+        content: &str,
+        fallback: &FontFallback,
+        attributes: &FontAttributes,
+        direction: TextDirection,
+        font_size: f32,
+        index: usize,
+    ) -> (f32, f32, f32, f32) {
+        let li = Self::line_of_byte(layout, index);
+        let x_index =
+            self.caret_offset_x(content, fallback, attributes, direction, font_size, index);
+        let Some(line) = layout.lines().get(li) else {
+            return (
+                0.0,
+                self.paragraph.line_metrics(font_size).line_height(),
+                0.0,
+                x_index,
+            );
+        };
+        let x_line_start = self.caret_offset_x(
+            content,
+            fallback,
+            attributes,
+            direction,
+            font_size,
+            Self::line_start_byte(layout, li),
+        );
+        (line.top(), line.height(), line.x_offset(), x_index - x_line_start)
+    }
+
+    /// Shapes the wrapped multi-line [`ParagraphLayout`] for `content` on `node`
+    /// using the SAME style inputs and `box_width` (the text node's content-box
+    /// width, its wrap scrollport) the compose pass wraps the drawn runs with
+    /// (spec §5.10) — so a caret / hit-test resolved against this layout lands on
+    /// the same line the glyphs paint on. The runtime uses it for vertical caret
+    /// motion and 2D click→byte hit-testing over the live editing text.
+    pub(crate) fn shape_text_lines(
+        &self,
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+        node: NodeId,
+        content: &str,
+        box_width: f32,
+    ) -> ParagraphLayout {
+        let style = computed.get(&node);
+        let font_size = font_size_of(computed, node);
+        self.shape_lines(
+            content,
+            &families_for(style),
+            &attributes_for(style),
+            direction_for(style),
+            alignment_for(style),
+            overflow_for_text(tree, computed, node),
+            white_space_for(style),
+            font_size,
+            box_width,
+            line_height_for(style, font_size),
+            letter_spacing_for(style),
+            word_spacing_for(style),
+            tab_size_for(style),
+        )
+    }
+
+    /// Resolves a pointer at text-box-local `(local_x, local_y)` (already
+    /// scroll-adjusted; measured from the text node's box origin) to a byte offset
+    /// in `content`, picking the wrapped line by `local_y` then the byte by
+    /// `local_x` on that line — the 2D inverse of the line-aware caret paint
+    /// (spec §5.11). The line is the first whose box contains `local_y` (else the
+    /// last); within it the byte is the nearest cluster boundary to `local_x`
+    /// (`caret_offset_at_x`'s midpoint walk), clamped to the line's byte span so a
+    /// click never crosses onto an adjacent line, and kept before a trailing `\n`.
+    /// A single-line field → line 0 and the identical `caret_offset_at_x` byte
+    /// (byte-identical).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn caret_offset_at_point(
+        &self,
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+        node: NodeId,
+        content: &str,
+        box_width: f32,
+        local_x: f32,
+        local_y: f32,
+    ) -> usize {
+        let style = computed.get(&node);
+        let layout = self.shape_text_lines(tree, computed, node, content, box_width);
+        let lines = layout.lines();
+        if lines.is_empty() {
+            return self.caret_offset_at_x(content, style, local_x);
+        }
+        // The line whose box contains `local_y` (top ≤ y < top+height), else the
+        // last line (a click below the text lands on the final line).
+        let li = lines
+            .iter()
+            .position(|line| local_y < line.top() + line.height())
+            .unwrap_or(lines.len() - 1);
+        self.byte_at_line_x(&layout, li, content, style, local_x)
+    }
+
+    /// The byte on wrapped line `li` nearest an x of `target_x` (measured from the
+    /// text box origin), clamped to that line's byte span (spec §5.11).
+    ///
+    /// The line's content starts at pen x `line.x_offset()` from the box origin, so
+    /// the target is offset into the flat source-order run by `caret_offset_x(line
+    /// start) + (target_x − line.x_offset())` and resolved with the SAME midpoint
+    /// walk [`caret_offset_at_x`](Self::caret_offset_at_x) uses. The result is
+    /// clamped to `[line start, line end']`, where `end'` excludes a trailing `\n`
+    /// so a click past the line's end sits before the newline (on this line), not at
+    /// the start of the next.
+    fn byte_at_line_x(
+        &self,
+        layout: &ParagraphLayout,
+        li: usize,
+        content: &str,
+        style: Option<&ComputedStyle>,
+        target_x: f32,
+    ) -> usize {
+        let Some(line) = layout.lines().get(li) else {
+            return self.caret_offset_at_x(content, style, target_x);
+        };
+        let line_start = Self::line_start_byte(layout, li);
+        let x_line_start = self.caret_advance_x(content, style, line_start);
+        // Undo the line's alignment offset, then resolve against the flat run.
+        let abs_x = x_line_start + (target_x - line.x_offset());
+        let byte = self.caret_offset_at_x(content, style, abs_x);
+        // The maximum caret byte that stays on this line: the line's end, minus a
+        // trailing `\n` (whose caret belongs before it, on this line).
+        let end = line.range().end.max(line_start).min(content.len());
+        let line_max = if content.get(line_start..end).is_some_and(|s| s.ends_with('\n')) {
+            end - 1
+        } else {
+            end
+        };
+        byte.clamp(line_start, line_max)
+    }
+
+    /// Resolves the byte a **vertical** caret move (ArrowUp/ArrowDown) lands on
+    /// from `index`, moving to the line above (`down = false`) or below
+    /// (`down = true`) at roughly the same pen x — standard caret vertical motion
+    /// (spec §5.11). Returns [`None`] when there is no line in that direction (the
+    /// caret is already on the first line moving up, or the last line moving down),
+    /// so the caller can clamp to the text start/end. A single-line field has one
+    /// line, so it always returns [`None`].
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn caret_line_move(
+        &self,
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+        node: NodeId,
+        content: &str,
+        box_width: f32,
+        index: usize,
+        down: bool,
+    ) -> Option<usize> {
+        let style = computed.get(&node);
+        let layout = self.shape_text_lines(tree, computed, node, content, box_width);
+        let cur = Self::line_of_byte(&layout, index);
+        let target = if down {
+            let next = cur + 1;
+            (next < layout.lines().len()).then_some(next)?
+        } else {
+            cur.checked_sub(1)?
+        };
+        // The caret's current pen x within its line, re-expressed from the text box
+        // origin (add the line's alignment offset) so `byte_at_line_x` maps it back
+        // on the target line consistently.
+        let x_line_start = self.caret_advance_x(content, style, Self::line_start_byte(&layout, cur));
+        let x_index = self.caret_advance_x(content, style, index);
+        let target_x = layout.lines()[target].x_offset() + (x_index - x_line_start);
+        Some(self.byte_at_line_x(&layout, target, content, style, target_x))
+    }
+
     /// Composes a paint-ordered [`DisplayList`] of background fills from the
     /// styled + laid-out tree.
     ///
@@ -1188,42 +1406,14 @@ impl SceneCoordinator {
                     // model (`caret_advance_x`) used below, so paint and hit-test
                     // agree.
                     let scroll_left = active.map_or(0.0, |view| view.scroll_left);
-                    // Selection highlight, painted BEHIND the glyphs (emitted before
-                    // the runs so the text shows over it): a rect from x(start) to
-                    // x(end) spanning the first line's height, in the documented
-                    // semi-transparent selection color. Only for the editing field
-                    // and only when the selection actually covers a span (a
-                    // collapsed caret paints no highlight). Single-line only — a
-                    // multi-line span highlights just the first line's extent
-                    // (documented limitation).
-                    if let Some(selection) = display_selection
-                        && !selection.is_empty()
-                    {
-                        let line_height = self.paragraph.line_metrics(font_size).line_height();
-                        let x0 = self.caret_offset_x(
-                            content,
-                            &fallback,
-                            &attributes,
-                            direction,
-                            font_size,
-                            selection.start(),
-                        );
-                        let x1 = self.caret_offset_x(
-                            content,
-                            &fallback,
-                            &attributes,
-                            direction,
-                            font_size,
-                            selection.end(),
-                        );
-                        node_paint.fill_rect(
-                            Rect::new(
-                                Point::new(origin.x + x0 - scroll_left, origin.y),
-                                Size::new(x1 - x0, line_height),
-                            ),
-                            Brush::solid(SELECTION_COLOR),
-                        );
-                    }
+                    // The wrapped multi-line paragraph the glyphs are drawn from
+                    // (spec §5.10). The caret + selection resolve their (line, x, y)
+                    // against THIS same layout — a byte's line by its wrapped range,
+                    // its pen x by the source-order advance model relative to that
+                    // line's start — so a caret lands on the line its glyphs paint
+                    // on. A single-line (`nowrap`) field wraps to one line, so the
+                    // caret resolves to line 0 at the identical pen x the flat
+                    // `caret_offset_x` returned (byte-identical single-line paint).
                     let layout = self.shape_lines(
                         content,
                         &fallback,
@@ -1239,6 +1429,46 @@ impl SceneCoordinator {
                         word_spacing_for(computed.get(&node)),
                         tab_size_for(computed.get(&node)),
                     );
+                    // Selection highlight, painted BEHIND the glyphs (emitted before
+                    // the runs so the text shows over it): the documented
+                    // semi-transparent selection color. When the selection's start
+                    // and end resolve to the SAME wrapped line it is one rect from
+                    // x(start) to x(end) on that line; when it spans lines only the
+                    // start line's tail (x(start) → line width) is highlighted — a
+                    // documented single-line-first limitation (the per-line
+                    // `SelectionGeometry` fill is a separate later campaign item).
+                    if let Some(selection) = display_selection
+                        && !selection.is_empty()
+                    {
+                        let (top0, h0, xoff0, x0) = self.caret_line_geometry(
+                            &layout, content, &fallback, &attributes, direction, font_size,
+                            selection.start(),
+                        );
+                        let (_, _, _, x1) = self.caret_line_geometry(
+                            &layout, content, &fallback, &attributes, direction, font_size,
+                            selection.end(),
+                        );
+                        let same_line = Self::line_of_byte(&layout, selection.start())
+                            == Self::line_of_byte(&layout, selection.end());
+                        // End x within the start line: the end's own x when on the
+                        // same line, else that line's content width (highlight to
+                        // the line's end).
+                        let end_x = if same_line {
+                            x1
+                        } else {
+                            layout
+                                .lines()
+                                .get(Self::line_of_byte(&layout, selection.start()))
+                                .map_or(x0, ParagraphLine::width)
+                        };
+                        node_paint.fill_rect(
+                            Rect::new(
+                                Point::new(origin.x + xoff0 + x0 - scroll_left, origin.y + top0),
+                                Size::new((end_x - x0).max(0.0), h0),
+                            ),
+                            Brush::solid(SELECTION_COLOR),
+                        );
+                    }
                     for line in layout.lines() {
                         let baseline = line.baseline();
                         let line_top = origin.y + line.top();
@@ -1320,19 +1550,20 @@ impl SceneCoordinator {
                     if let Some(selection) = display_selection
                         && selection.is_collapsed()
                     {
-                        let line_height = self.paragraph.line_metrics(font_size).line_height();
-                        let caret_x = self.caret_offset_x(
-                            content,
-                            &fallback,
-                            &attributes,
-                            direction,
-                            font_size,
+                        // Line-aware caret geometry (spec §5.10/§5.11): the focus
+                        // byte resolves to its wrapped line's top + height and its
+                        // pen x within that line, so a caret on line 2 paints at
+                        // y ≈ line-height and an x measured within line 2 — not the
+                        // summed width of every line. Single-line → line 0, top 0,
+                        // and the identical pen x (byte-identical).
+                        let (top, height, x_offset, caret_x) = self.caret_line_geometry(
+                            &layout, content, &fallback, &attributes, direction, font_size,
                             selection.focus(),
                         );
                         node_paint.fill_rect(
                             Rect::new(
-                                Point::new(origin.x + caret_x - scroll_left, origin.y),
-                                Size::new(CARET_WIDTH, line_height),
+                                Point::new(origin.x + x_offset + caret_x - scroll_left, origin.y + top),
+                                Size::new(CARET_WIDTH, height),
                             ),
                             Brush::solid(text_color),
                         );
