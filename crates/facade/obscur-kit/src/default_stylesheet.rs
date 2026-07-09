@@ -12,13 +12,15 @@
 //! it is matched *below* every author/theme sheet, so any author rule of the same
 //! or higher specificity overrides it — exactly the browser UA-sheet contract.
 //!
-//! It styles the base controls with restrained, neutral defaults: a border,
-//! padding and radius on `button`/`input`/`select`, an `outline`/`outline-offset`
-//! focus ring, a hover shade, a dashed disabled treatment on `input`, and
-//! header/cell rules for `table`. It leans only on properties and interaction
-//! pseudo-classes the engine actually restyles (`:hover`, `:focus`); rules keyed
-//! on `:disabled`/`:checked` are authored for completeness and take effect once
-//! those states are surfaced to the matcher.
+//! It gives the base controls the kit's **Wireframe** look: a grayscale
+//! specification-sheet aesthetic (ink `#2b2a27` on paper `#faf9f6`, hairline
+//! `1.5px` borders, `2px` radii) with the full interaction-state set — a hover
+//! fill shift, a `2px dashed` focus ring with offset, an inverted `:active`, a
+//! dashed muted `:disabled`, and a filled `:checked` — plus `a`, `fieldset`, and
+//! `table` rules. It leans only on properties and interaction pseudo-classes the
+//! engine actually restyles (`:hover`, `:focus`, `:active`, `:disabled`,
+//! `:checked`). Because it sits at `SystemDefault`, any author/theme sheet
+//! overrides it, so themed demos keep their own look untouched.
 
 use crate::css::compiler::StylesheetCompiler;
 use crate::css::parser::StylesheetParser;
@@ -54,97 +56,133 @@ pub fn ua_stylesheet() -> Stylesheet {
         .matchable
 }
 
-/// The neutral base look, keyed on each control's stable CSS type. Kept small but
-/// real, and restricted to properties the engine renders.
+/// The kit's **Wireframe** base look — a grayscale specification-sheet aesthetic
+/// (ink `#2b2a27` on paper `#faf9f6`, hairline `1.5px` borders, tight `2px` radii,
+/// a dashed focus ring, an inverted `:active`, a dashed muted `:disabled`, and a
+/// filled `:checked`), keyed on each control's stable CSS type and restricted to
+/// properties the engine renders. This is the DEFAULT look every bare control
+/// gets; author/theme sheets sit above `SystemDefault` and override it freely.
+///
+/// Palette: ink `#2b2a27`, muted `#5a584f`, faint `#9b998f`, disabled-ink
+/// `#b7b5ad`, surface `#faf9f6`, hover-fill `#e4e2db`, field-hover `#f4f2ec`,
+/// disabled-fill `#f2f0ea`, rule `#d6d4cc`. Fonts are the host's (the source kit's
+/// IBM Plex is not bundled), so only sizes/weights are set.
 const UA_CSS: &str = "\
 button {\
-  padding: 6px 14px;\
-  border: 1px solid #b8b5ad;\
-  border-radius: 6px;\
-  background: #f4f2ee;\
+  padding: 11px 20px;\
+  border: 1.5px solid #2b2a27;\
+  border-radius: 2px;\
+  background: #faf9f6;\
   color: #2b2a27;\
   font-size: 14px;\
+  font-weight: 500;\
 }\
 button:hover {\
-  background: #e9e6df;\
-  border-color: #a5a29a;\
+  background: #e4e2db;\
 }\
 button:focus {\
-  outline: 2px solid #4a7dff;\
-  outline-offset: 2px;\
+  outline: 2px dashed #2b2a27;\
+  outline-offset: 3px;\
+}\
+button:active {\
+  background: #2b2a27;\
+  color: #faf9f6;\
 }\
 button:disabled {\
-  background: #f0efec;\
-  color: #a5a29a;\
-  border-color: #d7d4cd;\
+  background: #f2f0ea;\
+  color: #b7b5ad;\
+  border-style: dashed;\
+  border-color: #b7b5ad;\
 }\
 input, textarea {\
-  padding: 6px 8px;\
-  border: 1px solid #b8b5ad;\
-  border-radius: 4px;\
-  background: #ffffff;\
+  padding: 11px 13px;\
+  border: 1.5px solid #2b2a27;\
+  border-radius: 2px;\
+  background: #faf9f6;\
   color: #2b2a27;\
   font-size: 14px;\
 }\
+input:hover, textarea:hover {\
+  background: #f4f2ec;\
+}\
 input:focus, textarea:focus {\
-  outline: 2px solid #4a7dff;\
-  outline-offset: 1px;\
-  border-color: #4a7dff;\
+  outline: 2px dashed #2b2a27;\
+  outline-offset: 2px;\
 }\
 input:disabled, textarea:disabled {\
   border-style: dashed;\
-  background: #f4f2ee;\
-  color: #a5a29a;\
+  border-color: #b7b5ad;\
+  background: #f2f0ea;\
+  color: #b7b5ad;\
 }\
+/* checkbox / radio carry only text-level defaults here: the 20x20 boxed\
+   indicator (border, fill, tick) is a sub-part the widget/theme draws — a\
+   type rule would box the whole labelled control, not the indicator. */\
 checkbox, radio {\
-  padding: 2px 4px;\
   color: #2b2a27;\
   font-size: 14px;\
 }\
 checkbox:focus, radio:focus {\
-  outline: 2px solid #4a7dff;\
+  outline: 2px dashed #2b2a27;\
   outline-offset: 2px;\
 }\
-checkbox:checked, radio:checked {\
-  color: #1f6f3d;\
+checkbox:disabled, radio:disabled {\
+  color: #b7b5ad;\
 }\
 select {\
-  padding: 6px 10px;\
-  border: 1px solid #b8b5ad;\
-  border-radius: 4px;\
-  background: #ffffff;\
+  padding: 11px 13px;\
+  border: 1.5px solid #2b2a27;\
+  border-radius: 2px;\
+  background: #faf9f6;\
   color: #2b2a27;\
   font-size: 14px;\
+}\
+select:hover {\
+  background: #e4e2db;\
 }\
 select:focus {\
-  outline: 2px solid #4a7dff;\
+  outline: 2px dashed #2b2a27;\
   outline-offset: 2px;\
 }\
+select:disabled {\
+  border-style: dashed;\
+  border-color: #b7b5ad;\
+  background: #f2f0ea;\
+  color: #b7b5ad;\
+}\
 a {\
-  color: #2f5fd0;\
+  color: #2b2a27;\
+  border-bottom: 1.5px solid #2b2a27;\
+}\
+a:hover {\
+  color: #000000;\
+  font-weight: 600;\
+}\
+a:disabled {\
+  color: #b7b5ad;\
 }\
 fieldset {\
-  border: 1px solid #d7d4cd;\
-  border-radius: 6px;\
-  padding: 10px;\
+  border: 1.5px solid #2b2a27;\
+  border-radius: 3px;\
+  padding: 22px 20px;\
 }\
 table {\
-  border: 1px solid #d7d4cd;\
-  font-size: 14px;\
+  border: 1.5px solid #2b2a27;\
+  font-size: 13px;\
 }\
 th {\
-  background: #f4f2ee;\
-  color: #2b2a27;\
-  padding: 6px 10px;\
-  border: 1px solid #d7d4cd;\
+  background: #2b2a27;\
+  color: #faf9f6;\
+  padding: 10px 14px;\
+  font-size: 12px;\
 }\
 td {\
-  padding: 6px 10px;\
-  border: 1px solid #e5e2db;\
+  padding: 11px 14px;\
+  border-bottom: 1px solid #d6d4cc;\
   color: #2b2a27;\
 }\
 tr:hover {\
-  background: #f7f6f2;\
+  background: #e4e2db;\
 }\
 img {\
   display: block;\
@@ -197,9 +235,10 @@ mod tests {
     }
 
     #[test]
-    fn button_background_is_the_neutral_base_fill() {
+    fn button_background_is_the_wireframe_paper_fill() {
         // Pin the concrete UA button background so the cascade-override proof (in
         // the runtime tests) has a known value to assert the author sheet beats.
+        // The wireframe base fills the button with paper `#faf9f6`.
         let sheet = ua_stylesheet();
         let bg = sheet
             .rules()
@@ -215,9 +254,9 @@ mod tests {
         assert_eq!(
             bg,
             Some(PropertyValue::Color(StyleColor::rgba(
-                0xf4 as f32 / 255.0,
-                0xf2 as f32 / 255.0,
-                0xee as f32 / 255.0,
+                0xfa as f32 / 255.0,
+                0xf9 as f32 / 255.0,
+                0xf6 as f32 / 255.0,
                 1.0
             )))
         );
