@@ -50,7 +50,8 @@ impl SchedulerPriority {
     #[must_use]
     pub const fn from_reason(reason: FrameReason) -> Self {
         match reason {
-            FrameReason::Input => Self::Input,
+            // A text edit is user input: same most-urgent band as `Input`.
+            FrameReason::Input | FrameReason::TextEdit => Self::Input,
             FrameReason::UiCommit => Self::Commit,
             // Animation, a window/surface change, and an external render request
             // all drive layout and paint for the current frame.
@@ -123,6 +124,10 @@ mod tests {
             SchedulerPriority::Input
         );
         assert_eq!(
+            SchedulerPriority::from_reason(FrameReason::TextEdit),
+            SchedulerPriority::Input
+        );
+        assert_eq!(
             SchedulerPriority::from_reason(FrameReason::UiCommit),
             SchedulerPriority::Commit
         );
@@ -152,6 +157,7 @@ mod tests {
     fn from_reason_never_returns_background() {
         for reason in [
             FrameReason::Input,
+            FrameReason::TextEdit,
             FrameReason::UiCommit,
             FrameReason::Animation,
             FrameReason::ResourceCompletion,

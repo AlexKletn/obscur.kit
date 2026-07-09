@@ -12,7 +12,7 @@ use crate::frame::{FrameReason, FrameRequest};
 /// [`reason_ord`]); the array also serves as the reverse lookup in
 /// [`reason_from_ord`]. Keeping it in one place ties the two directions
 /// together.
-const REASONS_IN_ORDER: [FrameReason; 7] = [
+const REASONS_IN_ORDER: [FrameReason; 8] = [
     FrameReason::Input,
     FrameReason::UiCommit,
     FrameReason::Animation,
@@ -20,6 +20,7 @@ const REASONS_IN_ORDER: [FrameReason; 7] = [
     FrameReason::WindowChange,
     FrameReason::ExternalRender,
     FrameReason::DiagnosticsCapture,
+    FrameReason::TextEdit,
 ];
 
 /// Returns the deterministic tie-break ordinal of a reason.
@@ -37,6 +38,7 @@ const fn reason_ord(reason: FrameReason) -> u8 {
         FrameReason::WindowChange => 4,
         FrameReason::ExternalRender => 5,
         FrameReason::DiagnosticsCapture => 6,
+        FrameReason::TextEdit => 7,
     }
 }
 

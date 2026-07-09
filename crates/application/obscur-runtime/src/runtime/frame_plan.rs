@@ -30,8 +30,16 @@ use crate::invalidation::{Invalidation, InvalidationReason, InvalidationRouter};
 /// | `ResourceCompletion`   | `TreeChanged`            | yes       |
 /// | `WindowChange`         | `EnvironmentChanged`     | no        |
 /// | `Input`                | `PseudoStateChanged`     | no        |
+/// | `TextEdit`             | *(compose-only)*         | no        |
 /// | `Animation`            | `StyleChanged`          | no        |
 /// | `DiagnosticsCapture`   | *(none — idle)*          | no        |
+///
+/// [`TextEdit`](FrameReason::TextEdit) bypasses the router entirely and maps
+/// straight to a [`compose_only`](Self::compose_only) plan (compose runs; style,
+/// layout and reconcile are all skipped): a same-size text edit re-shapes and
+/// repaints the field from the live editing session without disturbing any
+/// retained box, so it stays pixel-identical to the full frame while eliding the
+/// per-keystroke restyle + relayout.
 ///
 /// The style/layout/compose flags are then read straight off the router's
 /// dirty-phase flags, so the router — previously orphaned — is the live source
@@ -59,6 +67,15 @@ impl FramePlan {
     pub(crate) fn for_frame(reason: FrameReason, first_frame: bool) -> Self {
         if first_frame {
             return Self::full();
+        }
+
+        // A pure text edit into the focused editable that cannot change its box
+        // size is compose-only: re-shape + repaint the field, reusing the retained
+        // styles and boxes (spec §3.4 phase 5). The router is bypassed because no
+        // domain invalidation is involved — only the scene is rebuilt from the
+        // live editing session.
+        if matches!(reason, FrameReason::TextEdit) {
+            return Self::compose_only();
         }
 
         // Drive the router with the reason's global invalidation cause so its
@@ -89,6 +106,21 @@ impl FramePlan {
         }
     }
 
+    /// The compose-only plan: only the scene is re-composed; reconcile, style and
+    /// layout are all skipped and reuse the previous frame's retained tree,
+    /// computed styles and boxes. Used for a same-size text edit
+    /// ([`FrameReason::TextEdit`]) — the field re-shapes and repaints from the
+    /// live editing session while every box is provably unchanged.
+    #[must_use]
+    pub(crate) const fn compose_only() -> Self {
+        Self {
+            reconcile: false,
+            style: false,
+            layout: false,
+            compose: true,
+        }
+    }
+
     /// Maps a [`FrameReason`] to the global [`InvalidationReason`] the router
     /// classifies for it, or `None` for an idle reason that recalculates nothing.
     ///
@@ -110,7 +142,9 @@ impl FramePlan {
             FrameReason::WindowChange => Some(InvalidationReason::EnvironmentChanged),
             FrameReason::Input => Some(InvalidationReason::PseudoStateChanged),
             FrameReason::Animation => Some(InvalidationReason::StyleChanged),
-            FrameReason::DiagnosticsCapture => None,
+            // `TextEdit` short-circuits to `compose_only` in `for_frame` before
+            // this is ever consulted; map it to `None` to keep the match total.
+            FrameReason::TextEdit | FrameReason::DiagnosticsCapture => None,
         }
     }
 
@@ -196,6 +230,27 @@ mod tests {
         assert!(plan.layout());
         assert!(plan.compose());
         assert!(!plan.is_idle());
+    }
+
+    #[test]
+    fn text_edit_is_compose_only() {
+        // A same-size text edit re-composes the field's glyphs + caret without
+        // touching the retained tree, styles or boxes: compose runs; reconcile,
+        // style and layout are all skipped (the per-keystroke fast path).
+        let plan = FramePlan::for_frame(FrameReason::TextEdit, false);
+        assert!(!plan.reconcile(), "a text edit does not reconcile");
+        assert!(!plan.style(), "a text edit does not restyle");
+        assert!(!plan.layout(), "a same-size text edit does not relayout");
+        assert!(plan.compose(), "a text edit re-composes the field");
+        assert!(!plan.is_idle());
+        assert_eq!(plan, FramePlan::compose_only());
+    }
+
+    #[test]
+    fn text_edit_over_an_empty_tree_is_still_full() {
+        // The first-frame guard wins over the compose-only short-circuit: with no
+        // retained tree there is nothing to reuse, so every phase must run.
+        assert_eq!(FramePlan::for_frame(FrameReason::TextEdit, true), FramePlan::full());
     }
 
     #[test]

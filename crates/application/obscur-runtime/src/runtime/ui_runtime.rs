@@ -38,9 +38,9 @@ use obscur_style::selector::{PseudoState, SelectorMatcher};
 use obscur_text::editing::{DeletionUnit, EditCommand, EditDirection, NavigationUnit};
 use obscur_text::font::FontResolver;
 use obscur_text::ime::CompositionEvent;
-use obscur_text::layout::Hyphenator;
+use obscur_text::layout::{Hyphenator, TextAlignment};
 use obscur_text::selection::TextSelection;
-use obscur_text::shaping::{TextItemizer, TextShaper};
+use obscur_text::shaping::{TextDirection, TextItemizer, TextShaper};
 use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::{View, EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT};
@@ -55,7 +55,7 @@ use crate::orchestration::{
     PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint, StyleCoordinator, StyleInputs,
     StyleMatchingCoordinator, TreeElement,
 };
-use crate::orchestration::white_space_for;
+use crate::orchestration::{alignment_for, direction_for, white_space_for};
 use crate::scheduler::{BackpressureDecision, FrameScheduler};
 use crate::transaction::ReconcileEnactor;
 
@@ -733,6 +733,13 @@ impl UiRuntime {
         self.scheduler.request_reason(reason)
     }
 
+    /// The [`FrameReason`] of the most-urgent pending frame request, if any (test
+    /// introspection — lets a test assert which frame a keystroke scheduled).
+    #[cfg(test)]
+    fn peek_frame_reason(&self) -> Option<FrameReason> {
+        self.scheduler.peek().map(|request| request.reason())
+    }
+
     /// Enqueues one unit of **background task work** (spec §3.6 band 5:
     /// background shaping, decoding and cache work) for the runtime to service.
     ///
@@ -1051,6 +1058,21 @@ impl UiRuntime {
         } else {
             false
         };
+
+        // 1a. Controlled-input reseed (WHATWG HTML §4.10.5.5 *value reflection*): a
+        //     structural frame may have rewritten the focused field's retained
+        //     value from the app model (a "Clear" button, or a normalizing
+        //     `on-input` that writes back a trimmed/uppercased value). If the new
+        //     retained value is an EXTERNAL change — not the session's own edit
+        //     mirrored back — reseed the editing session from it now, BEFORE the
+        //     measure/compose phases read the session, so the field shows the model
+        //     value THIS frame instead of the stale buffer until blur (Defect A).
+        //     Gated on `reconcile()` because only a structural frame can change the
+        //     retained value; on a plain keystroke (`Input`/`TextEdit`) frame this
+        //     never runs, so the user's in-flight edit is never fought.
+        if plan.reconcile() {
+            self.reseed_editing_from_retained();
+        }
 
         // 2-3. Match + style: rebuild cascade inputs and resolve computed styles.
         //    When the style phase is skipped, reuse the retained computed styles
@@ -2317,6 +2339,67 @@ impl UiRuntime {
         }
     }
 
+    /// Reconciles the focused editing session with an **external** rewrite of the
+    /// field's retained value while it stays focused — the controlled-input reseed
+    /// (WHATWG HTML §4.10.5.5: a text control reflects its `value`, so when the app
+    /// rewrites that value the control displays the new value). Called after
+    /// reconcile on a structural frame, when the retained tree already carries the
+    /// app's value.
+    ///
+    /// # The reseed discriminator (external rewrite vs the session's own edit)
+    ///
+    /// The session is normally the **sole source of truth** for the focused field
+    /// (an *uncontrolled* input), and the compose/measure passes paint it — so the
+    /// retained tree must NOT clobber the buffer on every keystroke. Two conditions
+    /// gate a reseed, using the session's [`mirror`](TextEditSession::mirror)
+    /// watermark (the last retained value it reconciled against):
+    ///
+    /// 1. the retained editable value **changed** since the session last saw it
+    ///    (`retained != session.mirror()`). A field whose retained value never
+    ///    changes — a static, uncontrolled, one-shot-seeded field — never reseeds,
+    ///    so the user's in-flight typing is never fought (this is what keeps the
+    ///    measure↔compose "session leads the lagging tree" invariant intact); and
+    /// 2. the new retained value **differs from the session's own live text**
+    ///    (`retained != session.text()`) — i.e. it is NOT just the session's own
+    ///    edit mirrored back through the app (a passthrough controlled input). A
+    ///    normalizing `on-input` (trim / uppercase / max-length) whose write-back
+    ///    differs from the buffer trips this and DOES reseed, so the displayed text
+    ///    tracks the model; a plain passthrough does not (it only advances the
+    ///    watermark).
+    ///
+    /// On a reseed the caret is preserved (clamped into the new value); otherwise
+    /// only the watermark is advanced.
+    fn reseed_editing_from_retained(&mut self) {
+        let Some(field) = self.editing.as_ref().map(TextEditSession::node) else {
+            return;
+        };
+        // The field's value as the freshly-reconciled tree now carries it (the
+        // placeholder overlay is skipped, exactly as at seed time).
+        let retained = self.collect_editable_text(field);
+        let Some(session) = self.editing.as_ref() else {
+            return;
+        };
+        // (1) Unchanged retained value: a static/uncontrolled field, or a frame
+        //     that rewrote something else. Never reseed — that would fight typing.
+        if retained == session.mirror() {
+            return;
+        }
+        // (2) The session's OWN edit reached the tree (passthrough controlled
+        //     input): advance the watermark but keep the live buffer + caret.
+        if retained == session.text() {
+            if let Some(session) = self.editing.as_mut() {
+                session.set_mirror(retained);
+            }
+            return;
+        }
+        // External rewrite (Clear / normalize): reseed so the field shows the model
+        // value, caret preserved (clamped). Re-derive the caret scroll afterwards.
+        if let Some(session) = self.editing.as_mut() {
+            session.reseed_controlled(retained);
+        }
+        self.update_caret_scroll();
+    }
+
     /// On a pointer press: if it landed on the active editable, places the caret
     /// at the click point and arms drag-selection anchored there (spec §5.11).
     ///
@@ -2641,25 +2724,100 @@ impl UiRuntime {
     }
 
     /// Post-edit bookkeeping: on a text-changing edit, dispatch the field's
-    /// `on-input` command with the session's resulting text; then always request
-    /// a [`FrameReason::Input`] frame so both text changes and caret-only motions
-    /// reach paint. A caret move or selection change passes `mutating = false`
-    /// and only schedules the frame.
+    /// `on-input` command with the session's resulting text; keep the caret in
+    /// view; then schedule the frame that flushes the edit to paint.
+    ///
+    /// # Frame scheduling: compose-only vs full
+    /// When an `on-input` handler actually **ran** (a *controlled* field: the app
+    /// mirrored the value into its state), [`dispatch_text_input`] already
+    /// requested a full [`FrameReason::Input`] frame — the mirrored value must be
+    /// reconciled (and, for a normalizing handler, that reconcile is what drives
+    /// the Defect-A controlled-value reseed). So this does **not** schedule a
+    /// second, redundant frame.
+    ///
+    /// When **no** handler ran (a caret move, or an *uncontrolled* field whose
+    /// session is the sole source of truth), no reconcile is needed, so a
+    /// box-stable edit is flushed with a COMPOSE-ONLY [`FrameReason::TextEdit`]
+    /// frame — the per-keystroke fast path (Defect B) that re-shapes + repaints the
+    /// field while skipping style + layout. An edit that can resize the box
+    /// (wrapping / multiline growth / auto width) still takes a full `Input` frame.
     fn after_edit(&mut self, mutating: bool) {
+        let mut dispatched = false;
         if mutating
             && let Some((node, text)) =
                 self.editing.as_ref().map(|s| (s.node(), s.text().to_owned()))
             && let Some(command) =
                 self.tree.get(node).and_then(|n| n.command_for_event(EVENT_INPUT))
         {
-            self.dispatch_text_input(command, &text);
+            dispatched = self.dispatch_text_input(command, &text);
         }
         // Keep the caret in view: after any edit or caret move, re-derive the
         // single-line field's horizontal scroll offset so the caret stays inside
         // its content box (CSS Overflow 3 §3.1 scroll-into-view). A no-op for a
         // fitting or wrapping field.
         self.update_caret_scroll();
-        self.request_frame(FrameReason::Input);
+        // A dispatched `on-input` already requested a full frame (a reconcile is
+        // needed for the mirror / reseed); only schedule our own when it did not.
+        if !dispatched {
+            let reason = if self.edit_is_compose_only(mutating) {
+                FrameReason::TextEdit
+            } else {
+                FrameReason::Input
+            };
+            self.request_frame(reason);
+        }
+    }
+
+    /// Whether the just-applied edit can be flushed with a **compose-only** frame
+    /// ([`FrameReason::TextEdit`]) because it provably cannot change any retained
+    /// box — a perf optimization that stays pixel-identical to the full-frame path.
+    ///
+    /// A **non-mutating** edit (a caret move / selection change) never changes the
+    /// text, so no box can change: always compose-only.
+    ///
+    /// A **mutating** edit only stays box-stable when the focused field:
+    /// * is single-line (not a `<textarea>`) and does **not** wrap — so the line
+    ///   count (box height) is pinned at one; and
+    /// * hugs the leading-left edge — its `text-align`/`direction` give a paragraph
+    ///   alignment offset that is independent of the box width (see
+    ///   [`alignment_ignores_width`]) — so the stale (content-sized) text-node box
+    ///   width cannot shift the painted run/caret; and
+    /// * has a **definite** (non-auto) width — so neither the field's own box nor
+    ///   any ancestor resizes with the typed content (a compose-only frame reuses
+    ///   every retained box, so nothing may depend on the grown content width).
+    ///
+    /// Any other field (wrapping, multiline, centre/right/RTL-aligned, or
+    /// auto/content-sized width) returns `false` and takes a full `Input` frame so
+    /// its box relayouts — the measure↔compose box-sync invariant is preserved.
+    fn edit_is_compose_only(&self, mutating: bool) -> bool {
+        // A caret/selection change leaves the text — and therefore every box —
+        // untouched: compose-only regardless of the field's shape.
+        if !mutating {
+            return true;
+        }
+        let Some(field) = self.editing.as_ref().map(TextEditSession::node) else {
+            return false;
+        };
+        // A multiline field grows a line box when a line is added: not box-stable.
+        if self.is_multiline(field) {
+            return false;
+        }
+        let Some(text_node) = self.first_text_descendant(field) else {
+            return false;
+        };
+        let text_style = self.computed.get(&text_node);
+        // A wrapping field reflows (its height tracks the wrapped line count).
+        if white_space_for(text_style).wraps() {
+            return false;
+        }
+        // A width-dependent alignment would shift the run when the stale text-node
+        // box width differs from the (grown) content width.
+        if !alignment_ignores_width(alignment_for(text_style), direction_for(text_style)) {
+            return false;
+        }
+        // The field (and thus its ancestors) must be definite-sized so the typed
+        // content cannot propagate a size change out to any reused box.
+        has_definite_px_width(self.computed.get(&field))
     }
 
     /// Recomputes the focused single-line field's horizontal scroll offset so its
@@ -2861,6 +3019,12 @@ impl UiRuntime {
         // 3. On a press, resolve a bound command from the produced logical key +
         //    held modifiers and DISPATCH it, so a keyboard shortcut runs the same
         //    handler a pointer click would (a release never triggers a shortcut).
+        // Whether the key was consumed as a text EDIT. When it was, the editing
+        // path already scheduled the appropriate frame via `after_edit` (a
+        // compose-only `TextEdit` for a same-size edit, or a full `Input`), so the
+        // generic restyle-frame request below must NOT run — overriding it with a
+        // full `Input` frame would defeat the per-keystroke compose-only fast path.
+        let mut consumed_edit = false;
         let command = if event.pressed() {
             // 3a. Editing takes precedence for a focused editable: a key that the
             //     runtime-owned editing session consumes (a printable char,
@@ -2869,6 +3033,7 @@ impl UiRuntime {
             //     consumed, it is neither resolved as a shortcut nor treated as
             //     activation — a bare 'a' in a field edits the field.
             if self.try_text_edit(target, &event) {
+                consumed_edit = true;
                 None
             } else {
                 // Not text: resolve a bound command from the produced logical key
@@ -2894,8 +3059,12 @@ impl UiRuntime {
         };
 
         // 4. The key reached a focused node: schedule a restyle for the next
-        //    frame, mirroring the pointer path's request on a change.
-        self.request_frame(FrameReason::Input);
+        //    frame, mirroring the pointer path's request on a change — UNLESS the
+        //    key was consumed as a text edit, which already scheduled its own
+        //    (possibly compose-only) frame via `after_edit`.
+        if !consumed_edit {
+            self.request_frame(FrameReason::Input);
+        }
         KeyDispatch::new(Some(target), command)
     }
 
@@ -3363,6 +3532,41 @@ fn field_content_width(style: Option<&ComputedStyle>, border_box_width: f32) -> 
     let border_left = px_length_of(style, PropertyId::BorderLeftWidth);
     let border_right = px_length_of(style, PropertyId::BorderRightWidth);
     (border_box_width - pad_left - pad_right - border_left - border_right).max(0.0)
+}
+
+/// Whether a paragraph alignment offset is **independent of the available (box)
+/// width** — i.e. the line hugs the leading-left edge, so the offset is `0`
+/// regardless of the box width.
+///
+/// This is exactly the case where a same-size text edit can reuse a stale,
+/// content-sized text-node box width without shifting the painted run/caret
+/// (`TextAlignment::x_offset` returns `0` for any available width): `Left` and
+/// `Justify` always, `Start` under left-to-right, and `End` under right-to-left.
+/// Every other combination distributes the remaining space and therefore depends
+/// on the box width.
+fn alignment_ignores_width(alignment: TextAlignment, direction: TextDirection) -> bool {
+    match alignment {
+        TextAlignment::Left | TextAlignment::Justify => true,
+        TextAlignment::Start => !direction.is_rtl(),
+        TextAlignment::End => direction.is_rtl(),
+        TextAlignment::Right | TextAlignment::Center => false,
+    }
+}
+
+/// Whether `style` carries a **definite** absolute-`px` `width` — a concrete
+/// length, not `auto`/content-based sizing.
+///
+/// A definite-width field cannot grow or shrink with its typed content, so its
+/// own box (and every ancestor's) is invariant across a text edit — the
+/// precondition for a compose-only frame to reuse the retained boxes unchanged. A
+/// percentage or `auto` width returns `false` (conservatively taking the full
+/// frame), mirroring the scene coordinator's pixel-only length reads.
+fn has_definite_px_width(style: Option<&ComputedStyle>) -> bool {
+    style
+        .and_then(|s| s.get(PropertyId::Width))
+        .and_then(ComputedValue::as_length)
+        .and_then(Length::as_px)
+        .is_some()
 }
 
 /// Reads one computed length property in absolute `px`, defaulting to `0.0` when
@@ -6299,6 +6503,125 @@ mod tests {
         assert_eq!(&*mirror.borrow(), "SENTINEL", "a caret move does not fire on-input");
     }
 
+    // ---- Controlled-value reseed while focused (Defect A) --------------------
+    // The HTML controlled-input model (WHATWG HTML §4.10.5.5): a text control
+    // reflects its `value`, so an app rewrite of the bound value MID-FOCUS must
+    // reach the display. The session (the sole source of truth for the focused
+    // field, an uncontrolled input) reseeds ONLY on an EXTERNAL rewrite — never on
+    // the user's own keystroke mirrored back.
+
+    /// Drives a reactive, controlled editable: `transform` maps each keystroke's
+    /// resulting text to the value the app stores (identity = passthrough,
+    /// uppercase = a normalizing handler), which the reactive builder reflects back
+    /// into the field. Returns the runtime plus the shared app value. Focus lands
+    /// on the field (empty), ready for keystrokes.
+    fn controlled_field(
+        transform: impl Fn(&str) -> String + 'static,
+    ) -> (UiRuntime, Rc<RefCell<String>>) {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let value = Rc::new(RefCell::new(String::new()));
+        {
+            let s = value.clone();
+            runtime.on_text_input(CMD_INPUT, move |resulting| {
+                *s.borrow_mut() = transform(resulting);
+            });
+        }
+        {
+            let s = value.clone();
+            runtime.set_root_view(move || input_reactive_view(&s.borrow()));
+        }
+        runtime.set_stylesheets(vec![interaction_sheet()]);
+        // First reactive frame builds the tree/boxes; then focus the field.
+        runtime.request_frame(FrameReason::UiCommit);
+        runtime.run_due_frame_reactive().expect("first frame");
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        runtime.run_due_frame_reactive().expect("focus frame");
+        assert!(runtime.focused().is_some(), "the press focused the field");
+        (runtime, value)
+    }
+
+    #[test]
+    fn external_value_rewrite_mid_focus_reseeds_the_session_and_shows_it() {
+        // (A1) Type into a focused field, then an app `set` of a DIFFERENT value
+        // mid-focus: the session reseeds and compose shows the NEW value, not the
+        // stale buffer that used to persist until blur.
+        let (mut runtime, value) = controlled_field(str::to_owned); // passthrough
+        for c in "abc".chars() {
+            runtime.handle_key(char_press(c));
+        }
+        runtime.run_due_frame_reactive().expect("rebuild frame");
+        assert_eq!(runtime.editing_text(), Some("abc"), "typing filled the session");
+        assert_eq!(tree_text(&runtime), "abc", "the passthrough value reached the tree");
+
+        // The app rewrites the bound value to something else while still focused
+        // (a "Clear"-style set, out of band from the session's own edits).
+        *value.borrow_mut() = "reset".to_string();
+        runtime.request_frame(FrameReason::UiCommit);
+        runtime.run_due_frame_reactive().expect("external-rewrite frame");
+
+        assert_eq!(
+            runtime.editing_text(),
+            Some("reset"),
+            "the session reseeded from the external value (not the stale buffer)"
+        );
+        assert_eq!(tree_text(&runtime), "reset");
+        let sel = runtime.editing_selection().expect("session active");
+        assert!(
+            sel.is_collapsed() && sel.focus() <= "reset".len(),
+            "the caret is clamped into the new value (sane)"
+        );
+    }
+
+    #[test]
+    fn a_normalizing_on_input_uppercases_and_the_display_tracks_the_model() {
+        // (A2) An `on-input` that uppercases writes back a value that DIFFERS from
+        // the session buffer, so the session reseeds to the uppercased model value
+        // — the displayed text is uppercased and the caret stays sane, keystroke
+        // after keystroke (continuous controlled normalization).
+        let (mut runtime, _value) = controlled_field(str::to_uppercase);
+
+        runtime.handle_key(char_press('a'));
+        runtime.run_due_frame_reactive().expect("rebuild after 'a'");
+        assert_eq!(runtime.editing_text(), Some("A"), "the model uppercased 'a' → 'A'");
+        assert_eq!(runtime.editing_selection().unwrap().focus(), 1, "caret at the end");
+
+        runtime.handle_key(char_press('b'));
+        runtime.run_due_frame_reactive().expect("rebuild after 'b'");
+        assert_eq!(runtime.editing_text(), Some("AB"), "typing keeps uppercasing");
+        assert_eq!(tree_text(&runtime), "AB");
+        assert_eq!(runtime.editing_selection().unwrap().focus(), 2, "caret stays sane at the end");
+    }
+
+    #[test]
+    fn a_plain_keystroke_does_not_reseed_and_preserves_the_caret() {
+        // (A3) A plain passthrough keystroke does NOT reseed — the retained value
+        // catches up to the session's OWN edit, so the discriminator sees no
+        // external change and leaves the buffer + caret untouched (no fight with
+        // the user). Proven by editing in the MIDDLE: a wrongful reseed would fling
+        // the caret to the end.
+        let (mut runtime, _value) = controlled_field(str::to_owned); // passthrough
+        for c in "hello".chars() {
+            runtime.handle_key(char_press(c));
+        }
+        runtime.run_due_frame_reactive().expect("rebuild frame");
+        // Move the caret into the middle (byte 2), a non-mutating edit.
+        runtime.handle_key(named_press(NamedKey::ArrowLeft));
+        runtime.handle_key(named_press(NamedKey::ArrowLeft));
+        runtime.handle_key(named_press(NamedKey::ArrowLeft));
+        assert_eq!(runtime.editing_selection().unwrap().focus(), 2, "caret in the middle");
+
+        // A reactive frame with UNCHANGED state must not reseed (retained == the
+        // session's own value), so the caret is preserved where the user left it.
+        runtime.request_frame(FrameReason::UiCommit);
+        runtime.run_due_frame_reactive().expect("no-op rebuild frame");
+        assert_eq!(runtime.editing_text(), Some("hello"), "text untouched (no reseed)");
+        assert_eq!(
+            runtime.editing_selection().unwrap().focus(),
+            2,
+            "the caret stayed put — a plain keystroke never reseeds/refights"
+        );
+    }
+
     // ---- readonly: focusable + selectable but NOT editable -------------------
     // (WHATWG HTML §attr-input-readonly). Distinct from `disabled`
     // (`disabled_control_takes_no_focus_and_fires_no_command` covers the disabled
@@ -6827,6 +7150,96 @@ mod tests {
             "the box grew past the stale retained (1-line) height {stale_height} → measure reads \
              the SESSION, not the lagging retained tree (measured {measured_height})",
         );
+    }
+
+    // ---- Compose-only text edits (Defect B) ----------------------------------
+    // A same-size text edit (a single-line, non-wrapping, definite-width,
+    // left-aligned field) is a COMPOSE-ONLY frame: it re-shapes + repaints the
+    // field WITHOUT a restyle or relayout, and must stay pixel-identical to the
+    // full frame. An edit that can resize the box (multiline growth, wrapping,
+    // auto width) falls back to a full frame so the box relayouts.
+
+    #[test]
+    fn a_same_size_single_line_edit_schedules_a_compose_only_frame() {
+        // (B1) Typing into a nowrap, definite-width, left-aligned single-line field
+        // cannot change any box, so the edit schedules a compose-only `TextEdit`
+        // frame (no restyle / relayout) — and that frame paints the SAME pixels the
+        // full frame would.
+        // An UNCONTROLLED field (no `on-input` handler): its session is the sole
+        // source of truth, so a keystroke needs no reconcile and can be flushed
+        // compose-only. (A controlled field mirrors via `on-input`, which forces a
+        // full frame so the reconcile / reseed can run — covered by the A tests.)
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = scroll_field_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&scroll_field_view(""), sheets);
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 10.0));
+        assert!(runtime.focused().is_some(), "the press focused the field");
+        // Drain every frame the focus/caret-placement queued, so the only thing
+        // pending after the keystroke below is that keystroke's own frame.
+        while runtime.has_pending_frame() {
+            runtime.run_due_frame(&scroll_field_view(""), sheets);
+        }
+
+        // Type a char: a same-size edit → the runtime requests a compose-only frame.
+        runtime.handle_key(char_press('x'));
+        assert!(
+            runtime.edit_is_compose_only(true),
+            "a nowrap definite-width single-line edit is box-stable"
+        );
+        assert_eq!(
+            runtime.peek_frame_reason(),
+            Some(FrameReason::TextEdit),
+            "the keystroke scheduled a compose-only TextEdit frame (not a full Input)"
+        );
+
+        // Run it: the plan skips reconcile/style/layout and only composes.
+        let compose_only = runtime
+            .run_due_frame(&scroll_field_view(""), sheets)
+            .expect("the TextEdit frame is due");
+        assert!(!compose_only.reconciled(), "compose-only: no reconcile");
+        assert!(!compose_only.restyled(), "compose-only: no restyle");
+        assert!(!compose_only.relaid_out(), "compose-only: no relayout");
+        let compose_only_list = compose_only.snapshot().display_list().clone();
+
+        // A full frame over the SAME session must paint byte-identical pixels — the
+        // compose-only path is a perf optimization, not a visual change.
+        let full = runtime.render_now(&scroll_field_view(""), sheets);
+        assert!(full.relaid_out(), "the full frame relaid out (control)");
+        assert_eq!(
+            compose_only_list.commands(),
+            full.snapshot().display_list().commands(),
+            "the compose-only frame is pixel-identical to the full frame"
+        );
+    }
+
+    #[test]
+    fn a_multiline_edit_that_adds_a_line_still_relayouts() {
+        // (B2) A textarea grows a line box when Enter inserts a newline, so a
+        // multiline edit is NOT box-stable: it falls back to a full `Input` frame
+        // that relayouts (the measure↔compose box-sync invariant needs the box to
+        // track the painted line count).
+        let mut runtime = focused_textarea();
+        let sheet = textarea_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        while runtime.has_pending_frame() {
+            runtime.run_due_frame(&textarea_view(""), sheets); // drain focus frames
+        }
+
+        type_multiline(&mut runtime, "a\nb"); // inserts a newline → a second line
+        assert!(
+            !runtime.edit_is_compose_only(true),
+            "a multiline field is never compose-only (a line can be added)"
+        );
+        assert_eq!(
+            runtime.peek_frame_reason(),
+            Some(FrameReason::Input),
+            "a multiline edit schedules a full Input frame"
+        );
+        let relaid = runtime
+            .run_due_frame(&textarea_view(""), sheets)
+            .expect("the Input frame is due");
+        assert!(relaid.relaid_out(), "the multiline edit relaid out the grown box");
     }
 
     // ---- EVENT_CHANGE as a COMMIT (blur / single-line Enter) event -----------

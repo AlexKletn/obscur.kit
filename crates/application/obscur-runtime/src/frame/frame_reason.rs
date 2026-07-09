@@ -12,6 +12,14 @@
 pub enum FrameReason {
     /// User input was received and must be dispatched (pointer, key, etc.).
     Input,
+    /// A pure text edit into the focused editable that cannot change its box
+    /// size (a same-size single-line keystroke, or any caret/selection move):
+    /// only the field's glyphs + caret change, so the frame re-shapes and
+    /// re-composes the field WITHOUT a restyle or relayout — the compose-only
+    /// fast path (spec §3.4 phase 5). An edit that can resize the box (a
+    /// wrapping/multiline field growing a line, an auto-width field) uses
+    /// [`Input`](Self::Input) instead so its box relayouts.
+    TextEdit,
     /// Application state committed, invalidating the tree and requiring a
     /// re-render.
     UiCommit,
@@ -37,6 +45,7 @@ mod tests {
         let mut set = HashSet::new();
         for reason in [
             FrameReason::Input,
+            FrameReason::TextEdit,
             FrameReason::UiCommit,
             FrameReason::Animation,
             FrameReason::ResourceCompletion,
@@ -46,7 +55,7 @@ mod tests {
         ] {
             assert!(set.insert(reason), "each reason must be distinct");
         }
-        assert_eq!(set.len(), 7);
+        assert_eq!(set.len(), 8);
     }
 
     #[test]
