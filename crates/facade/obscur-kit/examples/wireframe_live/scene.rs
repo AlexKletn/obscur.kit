@@ -30,7 +30,8 @@
 //! 1. **Button** `<button>` — a live [`Button`] (`:hover` fill shift, `:active`
 //!    invert, `:focus` ring; a click bumps the status counter) beside a disabled one.
 //! 2. **Text Field** `<input>` — a live [`Input`] (click → focus ring + caret,
-//!    type → text) beside a disabled one.
+//!    type → text) beside a **read-only** one (`.readonly(true)`, HTML `readonly`:
+//!    focusable + selectable but not editable).
 //! 3. **Textarea** `<textarea>` — a live **multi-line** [`Input`]
 //!    (`.multiline(true)`), which emits the reserved CSS type `textarea`. The UA
 //!    sheet makes a bare `input` **single-line** (`white-space: nowrap`) but a
@@ -83,7 +84,9 @@ pub const CMD_BTN: InternedSymbol = InternedSymbol::from_raw(0x7100_0001);
 pub const CMD_BTN_OFF: InternedSymbol = InternedSymbol::from_raw(0x7100_0002);
 /// The editable text field's per-keystroke text command.
 pub const CMD_FIELD: InternedSymbol = InternedSymbol::from_raw(0x7100_0003);
-/// The **disabled** field's command — no handler, so it is a no-op.
+/// The **readonly** field's command — no handler needed: a readonly field is
+/// focusable and its text selectable, but its value can never change, so its
+/// `change`/`input` never fire (WHATWG HTML §attr-input-readonly).
 pub const CMD_FIELD_OFF: InternedSymbol = InternedSymbol::from_raw(0x7100_0004);
 /// The textarea (a live `Input`) per-keystroke text command.
 pub const CMD_AREA: InternedSymbol = InternedSymbol::from_raw(0x7100_0005);
@@ -358,7 +361,15 @@ fn button_body() -> ViewNode {
     ])
 }
 
-/// 02 · Text Field: a live input beside a disabled one.
+/// 02 · Text Field: a live input beside a **read-only** one.
+///
+/// The read-only field is `Input::with_value(..).readonly(true)` (HTML `readonly`,
+/// WHATWG HTML §attr-input-readonly): unlike a `disabled(true)` field it CAN be
+/// focused and its "read only" text selected / copied — it just cannot be edited
+/// (typing / Backspace / IME / paste are no-ops and its `change` never fires). The
+/// text is its real value. It reuses `wf-field` (no distinct read-only styling: the
+/// selector engine has no `:read-only` pseudo-class yet, so a read-only field looks
+/// like a normal field here — an author would add a class for a muted look).
 fn field_body(state: &WireState) -> ViewNode {
     body(vec![
         slot(
@@ -372,11 +383,11 @@ fn field_body(state: &WireState) -> ViewNode {
             ),
         ),
         slot(
-            "DISABLED",
+            "READ ONLY",
             control_sized(
                 "field-off",
                 "wf-field",
-                Input::with_value(CMD_FIELD_OFF, "read only").disabled(true).view(),
+                Input::with_value(CMD_FIELD_OFF, "read only").readonly(true).view(),
             ),
         ),
     ])

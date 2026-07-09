@@ -1804,6 +1804,25 @@ impl UiRuntime {
             .any(|n| self.tree.get(n).is_some_and(|el| el.attributes().is_disabled()))
     }
 
+    /// Whether `node` lies within a **readonly** control — the node itself or any
+    /// of its element ancestors carries the reserved `readonly` structural state
+    /// (WHATWG HTML §attr-input-readonly).
+    ///
+    /// **Distinct from [`is_within_disabled`](Self::is_within_disabled).** A
+    /// readonly control is still *focusable* and its text still *selectable /
+    /// copyable* — a press seats focus, a caret, and drag-selection exactly as on a
+    /// normal field. Only its **value is immutable**: the text-mutating edits
+    /// (insert / delete / backspace, IME commit, paste, a multiline `Enter`
+    /// newline) are dropped. So — unlike the disabled gate, which blocks
+    /// focus/caret/editing wholesale — this gates **only** the mutation path
+    /// ([`apply_edit`](Self::apply_edit) mutating commands and
+    /// [`handle_ime`](Self::handle_ime)), never focus / caret / selection.
+    fn is_within_readonly(&self, node: NodeId) -> bool {
+        self.hover_chain_for(Some(node))
+            .into_iter()
+            .any(|n| self.tree.get(n).is_some_and(|el| el.attributes().is_readonly()))
+    }
+
     /// Resolves the **activation** command for `target`: a control is activated
     /// by a click or an Enter/Space keypress, and activation fires its
     /// [`EVENT_CLICK`] command if one is bound (bubbling up its ancestors), else —
@@ -2027,6 +2046,14 @@ impl UiRuntime {
             return false;
         }
         let node = session.node();
+        // A **readonly** field's value can never change (WHATWG HTML
+        // §attr-input-readonly), so its `change` never fires. The session can never
+        // become dirty on a readonly field (every mutation is dropped upstream), so
+        // this is normally unreachable — but guard explicitly so a commit is a
+        // hard no-op regardless of how the session got here.
+        if self.is_within_readonly(node) {
+            return false;
+        }
         let text = session.text().to_owned();
         if rebaseline {
             if let Some(session) = self.editing.as_mut() {
@@ -2121,6 +2148,19 @@ impl UiRuntime {
         }
 
         // No focused editable → nothing to compose against.
+        let Some(node) = self.editing.as_ref().map(TextEditSession::node) else {
+            return false;
+        };
+        // A **readonly** field cannot be edited (WHATWG HTML §attr-input-readonly):
+        // IME composition — whose whole purpose is to compose text for insertion —
+        // is inert on it. Drop the event before any preedit is anchored so nothing
+        // is ever committed into the buffer. (Focus / caret / selection are
+        // unaffected; only this mutation entry gates on readonly.)
+        if self.is_within_readonly(node) {
+            return false;
+        }
+        // Re-borrow mutably to drive the composition (the session still exists — we
+        // hold `&mut self` throughout — so this never fails; no panic path).
         let Some(session) = self.editing.as_mut() else {
             return false;
         };
@@ -2583,6 +2623,17 @@ impl UiRuntime {
     /// [`after_edit`](Self::after_edit).
     fn apply_edit(&mut self, command: EditCommand) {
         let mutating = command.is_mutating();
+        // A **readonly** field (WHATWG HTML §attr-input-readonly) is focusable and
+        // selectable but not editable: drop any text-mutating edit (insert / delete
+        // / replace — this is the one choke point every typed insert, backspace/
+        // delete, and IME commit flows through) while letting the non-mutating
+        // caret/selection edits (Move / SetSelection / SelectAll) apply unchanged.
+        if mutating
+            && let Some(node) = self.editing.as_ref().map(TextEditSession::node)
+            && self.is_within_readonly(node)
+        {
+            return;
+        }
         if let Some(session) = self.editing.as_mut() {
             session.buffer_mut().apply(command);
         }
@@ -6246,6 +6297,114 @@ mod tests {
         runtime.handle_key(named_press(NamedKey::ArrowLeft));
         assert_eq!(runtime.editing_text(), Some("hi!"), "text intact after a move");
         assert_eq!(&*mirror.borrow(), "SENTINEL", "a caret move does not fire on-input");
+    }
+
+    // ---- readonly: focusable + selectable but NOT editable -------------------
+    // (WHATWG HTML §attr-input-readonly). Distinct from `disabled`
+    // (`disabled_control_takes_no_focus_and_fires_no_command` covers the disabled
+    // gate, which is deliberately unchanged).
+
+    /// App-owned command a readonly editable binds `on-change` to; used to prove a
+    /// readonly field never fires `change` (its value can't change).
+    const CMD_RO_CHANGE: InternedSymbol = InternedSymbol::from_raw(0x1249);
+
+    /// A **readonly** editable view: same shape as [`input_reactive_view`] (a
+    /// focusable `b` binding `on-input` with a seeded text child), plus the
+    /// reserved `READONLY` structural-state attribute (as the `Input` widget emits)
+    /// and an `on-change → CMD_RO_CHANGE` binding — so the runtime gates only its
+    /// mutation path while focus/caret/selection stay live.
+    fn readonly_input_view(text: &str) -> View {
+        use obscur_view::view::READONLY;
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(500))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+                .with_children(ViewFragment::from_nodes(vec![
+                    ViewNode::element(ComponentId::from_raw(501))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("b".into())))
+                        .with_prop(ViewProperty::new(READONLY, ViewValue::Bool(true)))
+                        .with_event(ViewEventBinding::new(EVENT_INPUT, CMD_INPUT))
+                        .with_event(ViewEventBinding::new(EVENT_CHANGE, CMD_RO_CHANGE))
+                        .with_children(ViewFragment::from_nodes(vec![ViewNode::text(
+                            text.to_string(),
+                        )])),
+                ])),
+        ]))
+    }
+
+    /// Focuses the readonly editable seeded with `seed` (via a press inside `b`)
+    /// and returns the runtime plus a mirror of any `on-input` text and a flag set
+    /// if `on-change` ever fires (it must not on a readonly field).
+    fn focused_readonly(seed: &str) -> (UiRuntime, Rc<RefCell<String>>, Rc<std::cell::Cell<bool>>) {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let mirror = Rc::new(RefCell::new(String::new()));
+        let changed = Rc::new(std::cell::Cell::new(false));
+        {
+            let s = mirror.clone();
+            runtime.on_text_input(CMD_INPUT, move |resulting| {
+                *s.borrow_mut() = resulting.to_owned();
+            });
+            let c = changed.clone();
+            runtime.on_change(CMD_RO_CHANGE, move |_| c.set(true));
+        }
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&readonly_input_view(seed), sheets);
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        (runtime, mirror, changed)
+    }
+
+    #[test]
+    fn readonly_field_focuses_and_places_a_caret_and_selects_all() {
+        // (a) A readonly field IS focusable and selectable (WHATWG HTML
+        // §attr-input-readonly): a press seats focus + a caret, and Ctrl+A selects
+        // the whole value — none of which is gated on readonly.
+        let (mut runtime, _mirror, _changed) = focused_readonly("hi");
+        assert!(runtime.focused().is_some(), "a readonly field takes focus");
+        assert_eq!(runtime.editing_text(), Some("hi"), "session seeded from its value");
+        let sel = runtime.editing_selection().expect("session active");
+        assert!(sel.is_collapsed(), "caret placed (collapsed) on focus");
+
+        // Select-all works: the selection becomes the whole value (non-empty).
+        runtime.handle_key(KeyEvent::press(PhysicalKey::ControlLeft, None));
+        runtime.handle_key(char_press('a'));
+        runtime.handle_key(KeyEvent::release(PhysicalKey::ControlLeft, None));
+        let sel = runtime.editing_selection().expect("session active");
+        assert!(!sel.is_collapsed(), "select-all selected the text (selectable)");
+        assert_eq!((sel.start(), sel.end()), (0, 2), "the whole value is selected");
+        assert_eq!(runtime.editing_text(), Some("hi"), "selecting did not change the value");
+    }
+
+    #[test]
+    fn readonly_field_typing_and_backspace_change_nothing_and_fire_no_change() {
+        // (b) A readonly field CANNOT be edited: typing, Backspace, Delete and a
+        // (single-line) Enter are all no-ops on its value, no `on-input` fires, and
+        // `on-change` never fires (its value can't change).
+        let (mut runtime, mirror, changed) = focused_readonly("hi");
+
+        runtime.handle_key(char_press('x'));
+        assert_eq!(runtime.editing_text(), Some("hi"), "typing inserts nothing");
+        runtime.handle_key(named_press(NamedKey::Backspace));
+        assert_eq!(runtime.editing_text(), Some("hi"), "Backspace deletes nothing");
+        runtime.handle_key(named_press(NamedKey::Delete));
+        assert_eq!(runtime.editing_text(), Some("hi"), "Delete deletes nothing");
+        assert_eq!(&*mirror.borrow(), "", "no mutating edit fired on-input");
+
+        // Enter (single-line) commits — but a readonly value never changed, so no
+        // `change` fires; then blur (focus a non-editable) also fires nothing.
+        runtime.handle_key(named_press(NamedKey::Enter));
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0));
+        assert!(!changed.get(), "a readonly field never fires on-change");
+    }
+
+    #[test]
+    fn readonly_field_ime_commit_inserts_nothing() {
+        // IME is a mutation entry too: a composition commit on a readonly field is
+        // inert — the buffer is unchanged and no `on-input` fires.
+        let (mut runtime, mirror, _changed) = focused_readonly("ab");
+        assert!(!runtime.handle_ime(CompositionEvent::Start), "readonly rejects IME start");
+        assert!(!runtime.handle_ime(CompositionEvent::Commit("に".into())), "readonly rejects IME commit");
+        assert_eq!(runtime.editing_text(), Some("ab"), "IME committed nothing");
+        assert_eq!(&*mirror.borrow(), "", "no on-input fired");
     }
 
     #[test]

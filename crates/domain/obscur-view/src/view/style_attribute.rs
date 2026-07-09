@@ -49,6 +49,16 @@ pub const DISABLED: InternedSymbol = InternedSymbol::from_raw(0x0000_0005);
 /// `disabled`, so it survives reconciliation.
 pub const CHECKED: InternedSymbol = InternedSymbol::from_raw(0x0000_0006);
 
+/// Reserved symbol for a text control's `readonly` structural state — the HTML
+/// `readonly` attribute (WHATWG HTML §attr-input-readonly). **Distinct from
+/// [`DISABLED`]:** a readonly control is still *focusable* and its text is still
+/// *selectable / copyable*; it merely cannot be *edited* (no insert/delete, no IME
+/// commit, no paste). Boolean state (present + truthy = readonly); emitted **only
+/// when true** so toggling it drops the attribute and re-styles. Same reserved
+/// namespace as `disabled`/`checked`, so it survives reconciliation onto the
+/// retained node, where the runtime reads it to gate *only* the mutation path.
+pub const READONLY: InternedSymbol = InternedSymbol::from_raw(0x0000_0007);
+
 /// The CSS-relevant identity of an element view node: its local name, `id`, and
 /// class list, extracted from a node's [`ViewProperty`] bindings.
 ///
@@ -70,6 +80,11 @@ pub struct StyleAttributes {
     /// Whether the control is checked — the `:checked` pseudo-class input.
     /// Derived from the [`CHECKED`] reserved symbol.
     checked: bool,
+    /// Whether the text control is readonly — the HTML `readonly` attribute
+    /// (WHATWG HTML §attr-input-readonly). Derived from the [`READONLY`] reserved
+    /// symbol. Independent of [`disabled`](Self::disabled): a readonly control is
+    /// focusable + selectable but not editable.
+    readonly: bool,
 }
 
 /// Whether a reserved boolean state attribute's value counts as *set*. Bare
@@ -94,14 +109,15 @@ impl StyleAttributes {
 
     /// Extracts the well-known style attributes from a node's properties.
     ///
-    /// Reads the [`CLASS`], [`ID`], [`TYPE`], [`SRC`], [`DISABLED`], and
-    /// [`CHECKED`] reserved symbols. The string-valued inputs
+    /// Reads the [`CLASS`], [`ID`], [`TYPE`], [`SRC`], [`DISABLED`], [`CHECKED`],
+    /// and [`READONLY`] reserved symbols. The string-valued inputs
     /// ([`CLASS`]/[`ID`]/[`TYPE`]/[`SRC`]) contribute only from
     /// [`ViewValue::Text`] values (other value kinds are ignored); the `class`
     /// text is split on ASCII whitespace into individual class names, preserving
     /// order and dropping empties, and the [`SRC`] text is carried verbatim. The
-    /// boolean state inputs ([`DISABLED`]/[`CHECKED`]) accept any value kind and
-    /// are set when it is truthy (bare presence or a non-`false` value).
+    /// boolean state inputs ([`DISABLED`]/[`CHECKED`]/[`READONLY`]) accept any
+    /// value kind and are set when it is truthy (bare presence or a non-`false`
+    /// value).
     #[must_use]
     pub fn extract(props: &[ViewProperty]) -> Self {
         let mut attributes = Self::new();
@@ -114,6 +130,10 @@ impl StyleAttributes {
                 }
                 CHECKED => {
                     attributes.checked = is_truthy(prop.value());
+                    continue;
+                }
+                READONLY => {
+                    attributes.readonly = is_truthy(prop.value());
                     continue;
                 }
                 _ => {}
@@ -179,6 +199,14 @@ impl StyleAttributes {
         self.checked
     }
 
+    /// Whether the text control reports the `readonly` state (HTML `readonly`).
+    /// Independent of [`is_disabled`](Self::is_disabled): a readonly control is
+    /// focusable + selectable but not editable.
+    #[must_use]
+    pub const fn is_readonly(&self) -> bool {
+        self.readonly
+    }
+
     /// Whether no style attribute is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -188,6 +216,7 @@ impl StyleAttributes {
             && self.image_source.is_none()
             && !self.disabled
             && !self.checked
+            && !self.readonly
     }
 }
 
@@ -288,6 +317,38 @@ mod tests {
         let checked = StyleAttributes::extract(&[ViewProperty::new(CHECKED, ViewValue::Bool(true))]);
         let unchecked = StyleAttributes::extract(&[]);
         assert_ne!(checked, unchecked);
+    }
+
+    #[test]
+    fn extracts_readonly_state_flag_independent_of_disabled() {
+        // `readonly` is a distinct boolean state from `disabled` (WHATWG HTML
+        // §attr-input-readonly): a field can carry either, both, or neither.
+        let readonly = StyleAttributes::extract(&[ViewProperty::new(READONLY, ViewValue::Bool(true))]);
+        assert!(readonly.is_readonly());
+        assert!(!readonly.is_disabled());
+        assert!(!readonly.is_empty());
+
+        // Bare presence counts as set; an explicit false does not.
+        assert!(StyleAttributes::extract(&[ViewProperty::new(READONLY, ViewValue::Null)]).is_readonly());
+        let off = StyleAttributes::extract(&[ViewProperty::new(READONLY, ViewValue::Bool(false))]);
+        assert!(!off.is_readonly());
+        assert!(off.is_empty());
+
+        // Both flags can be set at once.
+        let both = StyleAttributes::extract(&[
+            ViewProperty::new(DISABLED, ViewValue::Bool(true)),
+            ViewProperty::new(READONLY, ViewValue::Bool(true)),
+        ]);
+        assert!(both.is_disabled() && both.is_readonly());
+    }
+
+    #[test]
+    fn equality_includes_readonly_flag() {
+        // A readonly change is observed by equality, so reconcile re-applies
+        // attributes and the runtime sees the state change.
+        let readonly = StyleAttributes::extract(&[ViewProperty::new(READONLY, ViewValue::Bool(true))]);
+        let normal = StyleAttributes::extract(&[]);
+        assert_ne!(readonly, normal);
     }
 
     #[test]

@@ -4,8 +4,8 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_text::editing::{EditCommand, TextBuffer};
 use obscur_view::view::{
-    CLASS, DISABLED as ATTR_DISABLED, EVENT_CHANGE, EVENT_INPUT, TYPE, View, ViewEventBinding,
-    ViewFragment, ViewNode, ViewProperty, ViewValue,
+    CLASS, DISABLED as ATTR_DISABLED, EVENT_CHANGE, EVENT_INPUT, READONLY as ATTR_READONLY, TYPE,
+    View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
 /// A headless text-input control (spec §2.6).
@@ -30,6 +30,16 @@ pub struct Input {
     placeholder: Box<str>,
     command: InternedSymbol,
     disabled: bool,
+    /// Whether this field is **readonly** (the HTML `readonly` attribute, WHATWG
+    /// HTML §attr-input-readonly). **Distinct from — and independent of —
+    /// [`disabled`](Self::disabled):** a readonly field can still receive focus, a
+    /// caret, and a selection (it is selectable / copyable), but its text cannot be
+    /// *edited* (no insert/delete, no IME commit, no paste — [`apply`](Self::apply)
+    /// drops mutating edits, and the runtime gates only the mutation path on the
+    /// reserved `READONLY` attribute this emits). A field may be neither, one, or
+    /// both flags; the default (`false`) is a normal editable field —
+    /// byte-identical to before.
+    readonly: bool,
     /// Whether this is a **multi-line** field (a `<textarea>`, spec §2.6). A
     /// multi-line field emits the reserved CSS type `textarea` (so the UA
     /// `textarea { … }` rules bind and it wraps + preserves segment breaks, CSS
@@ -62,6 +72,8 @@ impl Input {
     const PROP_VALUE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0202);
     /// Interned name of the `placeholder` property.
     const PROP_PLACEHOLDER: InternedSymbol = InternedSymbol::from_raw(0x00D1_0203);
+    /// Interned name of the `readonly` state property (`NN = 02`, suffix `04`).
+    const PROP_READONLY: InternedSymbol = InternedSymbol::from_raw(0x00D1_0204);
 
 
     /// Creates an empty, enabled input with no placeholder that fires `command`
@@ -73,6 +85,7 @@ impl Input {
             placeholder: Box::<str>::from(""),
             command,
             disabled: false,
+            readonly: false,
             multiline: false,
         }
     }
@@ -85,6 +98,7 @@ impl Input {
             placeholder: Box::<str>::from(""),
             command,
             disabled: false,
+            readonly: false,
             multiline: false,
         }
     }
@@ -120,6 +134,19 @@ impl Input {
         self
     }
 
+    /// Sets the **readonly** state, returning the updated input (fluent builder).
+    ///
+    /// A readonly field (the HTML `readonly` attribute, WHATWG HTML
+    /// §attr-input-readonly) is still focusable and its text still selectable /
+    /// copyable, but it cannot be edited (no insert/delete, no IME commit, no
+    /// paste). It is **independent of** [`disabled`](Self::disabled): a field can be
+    /// neither, one, or both.
+    #[must_use]
+    pub const fn readonly(mut self, readonly: bool) -> Self {
+        self.readonly = readonly;
+        self
+    }
+
     /// Returns the current text value.
     #[must_use]
     pub fn value(&self) -> &str {
@@ -133,12 +160,22 @@ impl Input {
     }
 
     /// Applies an [`EditCommand`] to the underlying buffer — the way all text
-    /// edits (typing, deletion, navigation, IME/programmatic edits) flow in. A
-    /// no-op while [`disabled`](Self::is_disabled).
+    /// edits (typing, deletion, navigation, IME/programmatic edits) flow in.
+    ///
+    /// A no-op while [`disabled`](Self::is_disabled) (the field is fully inert).
+    /// While [`readonly`](Self::is_readonly) (but not disabled) only the
+    /// **text-mutating** commands (insert / delete / replace) are dropped — caret
+    /// and selection navigation still apply, matching the HTML `readonly` model
+    /// (WHATWG HTML §attr-input-readonly: focusable + selectable, not editable). A
+    /// normal field applies every command (byte-identical to before).
     pub fn apply(&mut self, command: EditCommand) {
-        if !self.disabled {
-            self.buffer.apply(command);
+        if self.disabled {
+            return;
         }
+        if self.readonly && command.is_mutating() {
+            return;
+        }
+        self.buffer.apply(command);
     }
 
     /// Returns a shared reference to the underlying editing buffer.
@@ -162,6 +199,17 @@ impl Input {
     /// Sets the disabled state in place.
     pub fn set_disabled(&mut self, disabled: bool) {
         self.disabled = disabled;
+    }
+
+    /// Returns whether the input is readonly (HTML `readonly`).
+    #[must_use]
+    pub const fn is_readonly(&self) -> bool {
+        self.readonly
+    }
+
+    /// Sets the readonly state in place.
+    pub const fn set_readonly(&mut self, readonly: bool) {
+        self.readonly = readonly;
     }
 
     /// Returns the accessible role of this control.
@@ -224,6 +272,10 @@ impl Input {
                 ViewValue::Bool(self.disabled),
             ))
             .with_prop(ViewProperty::new(
+                Self::PROP_READONLY,
+                ViewValue::Bool(self.readonly),
+            ))
+            .with_prop(ViewProperty::new(
                 Self::PROP_VALUE,
                 ViewValue::from(value),
             ))
@@ -237,6 +289,16 @@ impl Input {
         // disabled; survives reconcile and feeds the matcher's `:disabled`.
         let node = if self.disabled {
             node.with_prop(ViewProperty::new(ATTR_DISABLED, ViewValue::Bool(true)))
+        } else {
+            node
+        };
+        // Reserved `readonly` structural-state attribute (WHATWG HTML
+        // §attr-input-readonly) — emitted only when readonly; survives reconcile so
+        // the runtime reads it (via `StyleAttributes::is_readonly`) to gate ONLY the
+        // mutation path, leaving focus / caret / selection / copy intact. Distinct
+        // from and independent of DISABLED (both may be present at once).
+        let node = if self.readonly {
+            node.with_prop(ViewProperty::new(ATTR_READONLY, ViewValue::Bool(true)))
         } else {
             node
         };
@@ -289,6 +351,58 @@ mod tests {
         let mut i = Input::with_value(cmd(), "seed").disabled(true);
         i.apply(EditCommand::insert("more"));
         assert_eq!(i.value(), "seed");
+    }
+
+    #[test]
+    fn readonly_apply_drops_mutations_but_keeps_navigation() {
+        // A readonly field (HTML `readonly`) is not editable: a mutating edit is a
+        // no-op. It is still selectable, so a non-mutating navigation/selection edit
+        // still applies. Independent of `disabled` (this field is not disabled).
+        let mut i = Input::with_value(cmd(), "seed").readonly(true);
+        assert!(i.is_readonly() && !i.is_disabled());
+        i.apply(EditCommand::insert("more"));
+        assert_eq!(i.value(), "seed", "readonly drops an insert");
+        i.apply(EditCommand::SelectAll);
+        // SelectAll is non-mutating (selectable), so the buffer applied it: the whole
+        // value is now selected while the text is unchanged.
+        assert_eq!(i.value(), "seed");
+        assert!(!i.buffer().selection().is_collapsed(), "select-all selected the text");
+    }
+
+    #[test]
+    fn readonly_field_emits_reserved_readonly_attr_not_disabled() {
+        // A readonly field carries the reserved READONLY structural-state attribute
+        // (so the runtime gates its mutation path) but NOT DISABLED (it stays
+        // focusable). The two flags are independent.
+        let view = Input::with_value(cmd(), "ro").readonly(true).view();
+        match &view.root().nodes()[0] {
+            ViewNode::Element { props, .. } => {
+                assert!(
+                    props.iter().any(|p| p.name() == ATTR_READONLY
+                        && *p.value() == ViewValue::Bool(true)),
+                    "readonly field emits the reserved READONLY attr"
+                );
+                assert!(
+                    !props.iter().any(|p| p.name() == ATTR_DISABLED),
+                    "a readonly (not disabled) field must NOT emit DISABLED"
+                );
+            }
+            ViewNode::Text { .. } => panic!("expected element root"),
+        }
+    }
+
+    #[test]
+    fn plain_field_emits_no_readonly_attr() {
+        // Byte-identical-when-unset guard: a normal field emits no reserved READONLY
+        // attribute (only the semantic PROP_READONLY = false property).
+        let view = Input::with_value(cmd(), "x").view();
+        match &view.root().nodes()[0] {
+            ViewNode::Element { props, .. } => assert!(
+                !props.iter().any(|p| p.name() == ATTR_READONLY),
+                "a normal field emits no reserved READONLY attr"
+            ),
+            ViewNode::Text { .. } => panic!("expected element root"),
+        }
     }
 
     #[test]
