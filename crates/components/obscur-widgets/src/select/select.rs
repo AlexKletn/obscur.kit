@@ -4,8 +4,8 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
 use obscur_view::view::{
-    DISABLED as ATTR_DISABLED, EVENT_CLICK, TYPE, View, ViewEventBinding, ViewFragment, ViewNode,
-    ViewProperty, ViewValue,
+    CLASS, DISABLED as ATTR_DISABLED, EVENT_CLICK, TYPE, View, ViewEventBinding, ViewFragment,
+    ViewNode, ViewProperty, ViewValue,
 };
 
 /// A headless single-choice dropdown control (spec §2.6).
@@ -41,6 +41,10 @@ impl Select {
     ///
     /// [`Button::COMPONENT_ID`]: crate::button::Button::COMPONENT_ID
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0004);
+
+    /// Component id of the disclosure-arrow indicator sub-part
+    /// (`.select-arrow`), in the widget sub-part id space (`..14`).
+    const ARROW_ID: ComponentId = ComponentId::from_raw(0x00D0_0014);
 
     /// Interned name of the semantic-role property (`role`); shares the
     /// `0x00D1_NNXX` scheme with `NN = 04` (select): role=`00`, disabled=`01`,
@@ -185,17 +189,36 @@ impl Select {
     /// Derives the semantic view: a [`COMPONENT_ID`] element carrying the role,
     /// disabled and open state, the selected index as an integer property
     /// (`-1` when nothing is selected), a click event bound to `command`,
-    /// and each option as a [`Text`] child in order.
+    /// each option as a [`Text`] child in order, and a trailing
+    /// `.select-arrow` indicator sub-part.
+    ///
+    /// The arrow carries an `open` state class (so a `select-arrow.open { … }`
+    /// or `select:disabled .select-arrow { … }` rule can key on it) and shows
+    /// the disclosure glyph as its text child — "▼" closed, "▲" open. The click
+    /// event and reserved `:disabled` attr stay on the OUTER control element.
     ///
     /// [`COMPONENT_ID`]: Self::COMPONENT_ID
     #[must_use]
     pub fn view(&self) -> View {
         let selected = self.selected.map_or(-1, |i| i64::try_from(i).unwrap_or(-1));
-        let children: Vec<ViewNode> = self
+        let mut children: Vec<ViewNode> = self
             .options
             .iter()
             .map(|label| Text::new(label.clone()).into_view_node())
             .collect();
+        // The disclosure-arrow indicator sub-part, appended after the options.
+        let (arrow_class, arrow_glyph) = if self.open {
+            ("select-arrow open", "▲")
+        } else {
+            ("select-arrow", "▼")
+        };
+        children.push(
+            ViewNode::element(Self::ARROW_ID)
+                .with_prop(ViewProperty::new(CLASS, ViewValue::from(arrow_class)))
+                .with_children(ViewFragment::from_nodes(vec![
+                    Text::new(arrow_glyph).into_view_node(),
+                ])),
+        );
         let node = ViewNode::element(Self::COMPONENT_ID)
             // Stable CSS type / local name so a UA (or author) `select { … }` type
             // selector matches this control (spec §4.13). Additive.
@@ -302,7 +325,15 @@ mod tests {
                 ..
             } => {
                 assert_eq!(*component, Select::COMPONENT_ID);
-                assert_eq!(children.len(), 3);
+                // Three option children + the trailing `.select-arrow` indicator
+                // (was 3 before the wireframe arrow landed).
+                assert_eq!(children.len(), 4);
+                assert!(matches!(
+                    &children.nodes()[3],
+                    ViewNode::Element { props, .. }
+                        if props.iter().any(|p| p.name() == CLASS
+                            && matches!(p.value(), ViewValue::Text(t) if t.starts_with("select-arrow")))
+                ));
                 let selected = props
                     .iter()
                     .find(|p| p.name() == Select::PROP_SELECTED)

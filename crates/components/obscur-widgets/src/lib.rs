@@ -9,6 +9,7 @@ pub mod docking;
 pub mod input;
 pub mod list;
 pub mod menu;
+pub mod radio;
 pub mod select;
 pub mod table;
 pub mod tabs;

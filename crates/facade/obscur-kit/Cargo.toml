@@ -270,6 +270,16 @@ required-features = ["render-cpu"]
 name = "ua_default_proof"
 required-features = ["render-cpu", "text-harfrust", "text-unicode"]
 
+# Proof of the UA default stylesheet's WIREFRAME INDICATOR sub-parts: bare
+# Checkbox (unchecked/checked/mixed/disabled), Radio (unselected/selected/
+# disabled), and Select (closed/open) rendered with only the UA sheet installed,
+# so every box + ✓, circle + dot, and ▼/▲ arrow comes from the UA rules keying on
+# the widgets' `.checkbox-box`/`.radio-dot`/`.select-arrow` sub-part classes.
+# Needs the CPU renderer + the text stack (labels/glyphs); builds display-free.
+[[example]]
+name = "ua_widgets_proof"
+required-features = ["render-cpu", "text-harfrust", "text-unicode"]
+
 # Proof that the :disabled / :checked pseudo-classes bite from widget state.
 [[example]]
 name = "pseudo_state_proof"

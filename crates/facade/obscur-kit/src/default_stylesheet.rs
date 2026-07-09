@@ -115,10 +115,16 @@ input:disabled, textarea:disabled {\
   background: #f2f0ea;\
   color: #b7b5ad;\
 }\
-/* checkbox / radio carry only text-level defaults here: the 20x20 boxed\
-   indicator (border, fill, tick) is a sub-part the widget/theme draws — a\
-   type rule would box the whole labelled control, not the indicator. */\
+/* checkbox / radio: the control element lays the indicator + label out in a\
+   row and carries the text-level defaults; the boxed/dot indicator itself is a\
+   sub-part the widget emits (`.checkbox-box` / `.radio-dot`) and this sheet\
+   fills — a bare type rule would box the whole labelled control, not the\
+   indicator. Indicator state is a compound class (`.checkbox-box.checked`) or a\
+   descendant of the control's pseudo-class (`checkbox:hover .checkbox-box`). */\
 checkbox, radio {\
+  display: flex;\
+  align-items: center;\
+  gap: 9px;\
   color: #2b2a27;\
   font-size: 14px;\
 }\
@@ -129,7 +135,75 @@ checkbox:focus, radio:focus {\
 checkbox:disabled, radio:disabled {\
   color: #b7b5ad;\
 }\
+.checkbox-box {\
+  display: flex;\
+  align-items: center;\
+  justify-content: center;\
+  width: 20px;\
+  height: 20px;\
+  border: 1.5px solid #2b2a27;\
+  border-radius: 2px;\
+  background: #faf9f6;\
+  color: #2b2a27;\
+  font-size: 15px;\
+}\
+checkbox:hover .checkbox-box {\
+  background: #e4e2db;\
+}\
+checkbox:focus .checkbox-box {\
+  outline: 2px dashed #2b2a27;\
+  outline-offset: 2px;\
+}\
+.checkbox-box.checked {\
+  background: #2b2a27;\
+  color: #faf9f6;\
+}\
+.checkbox-box.indeterminate {\
+  background: #2b2a27;\
+}\
+.checkbox-bar {\
+  width: 10px;\
+  height: 2px;\
+  background: #faf9f6;\
+}\
+checkbox:disabled .checkbox-box {\
+  border-style: dashed;\
+  border-color: #b7b5ad;\
+  background: #f2f0ea;\
+  color: #b7b5ad;\
+}\
+.radio-dot {\
+  display: flex;\
+  align-items: center;\
+  justify-content: center;\
+  width: 20px;\
+  height: 20px;\
+  border: 1.5px solid #2b2a27;\
+  border-radius: 10px;\
+  background: #faf9f6;\
+}\
+radio:hover .radio-dot {\
+  background: #e4e2db;\
+}\
+radio:focus .radio-dot {\
+  outline: 2px dashed #2b2a27;\
+  outline-offset: 2px;\
+}\
+.radio-fill {\
+  width: 10px;\
+  height: 10px;\
+  border-radius: 5px;\
+  background: #2b2a27;\
+}\
+radio:disabled .radio-dot {\
+  border-style: dashed;\
+  border-color: #b7b5ad;\
+  background: #f2f0ea;\
+}\
 select {\
+  display: flex;\
+  align-items: center;\
+  gap: 10px;\
   padding: 11px 13px;\
   border: 1.5px solid #2b2a27;\
   border-radius: 2px;\
@@ -148,6 +222,12 @@ select:disabled {\
   border-style: dashed;\
   border-color: #b7b5ad;\
   background: #f2f0ea;\
+  color: #b7b5ad;\
+}\
+.select-arrow {\
+  color: #2b2a27;\
+}\
+select:disabled .select-arrow {\
   color: #b7b5ad;\
 }\
 a {\

@@ -4,8 +4,8 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
 use obscur_view::view::{
-    CHECKED as ATTR_CHECKED, DISABLED as ATTR_DISABLED, EVENT_CHANGE, TYPE, View, ViewEventBinding,
-    ViewFragment, ViewNode, ViewProperty, ViewValue,
+    CHECKED as ATTR_CHECKED, CLASS, DISABLED as ATTR_DISABLED, EVENT_CHANGE, TYPE, View,
+    ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
 /// A headless tri-state checkbox control (spec §2.6).
@@ -35,6 +35,13 @@ impl Checkbox {
     ///
     /// [`Button::COMPONENT_ID`]: crate::button::Button::COMPONENT_ID
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0003);
+
+    /// Component id of the boxed indicator sub-part (the 20×20 `.checkbox-box`).
+    /// Shares the widget id space with the high nibble of the suffix flipped
+    /// (`..13`), mirroring the menu/table sub-part scheme.
+    const BOX_ID: ComponentId = ComponentId::from_raw(0x00D0_0013);
+    /// Component id of the indeterminate bar sub-part (`.checkbox-bar`).
+    const BAR_ID: ComponentId = ComponentId::from_raw(0x00D0_0023);
 
     /// Interned name of the semantic-role property (`role`); shares the
     /// `0x00D1_NNXX` scheme with `NN = 03` (checkbox): role=`00`, disabled=`01`,
@@ -150,7 +157,18 @@ impl Checkbox {
     /// Derives the semantic view: a [`COMPONENT_ID`] element carrying the role
     /// and disabled state, the tri-state checked value as an integer property
     /// (`-1` = mixed/`None`, `0` = unchecked, `1` = checked), a change event
-    /// bound to `command`, and the label as a single [`Text`] child.
+    /// bound to `command`, and — as children — the boxed indicator sub-part
+    /// followed by the label [`Text`].
+    ///
+    /// The indicator is a `.checkbox-box` element the UA/theme sheet fills; it
+    /// carries a state class (`checked` when definitely on, `indeterminate` when
+    /// mixed) so a `.checkbox-box.checked { … }` rule (or a
+    /// `checkbox:hover .checkbox-box { … }` descendant rule) can key on it. Its
+    /// child is the tick [`Text`] "✓" when checked, or a thin `.checkbox-bar`
+    /// element when mixed; nothing when unchecked. The interactive state
+    /// (`EVENT_CHANGE`, reserved `:checked`/`:disabled` attrs) stays on the OUTER
+    /// control element, so a click on the box bubbles to it and pseudo-classes
+    /// still drive the whole control.
     ///
     /// [`COMPONENT_ID`]: Self::COMPONENT_ID
     #[must_use]
@@ -188,7 +206,26 @@ impl Checkbox {
         if self.disabled {
             node = node.with_prop(ViewProperty::new(ATTR_DISABLED, ViewValue::Bool(true)));
         }
+        // The boxed indicator sub-part: a `.checkbox-box` element carrying a
+        // state class, with the tick / bar as its child.
+        let mut box_class = String::from("checkbox-box");
+        let box_child: Vec<ViewNode> = if self.is_checked() {
+            box_class.push_str(" checked");
+            vec![Text::new("✓").into_view_node()]
+        } else if self.is_indeterminate() {
+            box_class.push_str(" indeterminate");
+            vec![
+                ViewNode::element(Self::BAR_ID)
+                    .with_prop(ViewProperty::new(CLASS, ViewValue::from("checkbox-bar"))),
+            ]
+        } else {
+            Vec::new()
+        };
+        let indicator = ViewNode::element(Self::BOX_ID)
+            .with_prop(ViewProperty::new(CLASS, ViewValue::from(box_class)))
+            .with_children(ViewFragment::from_nodes(box_child));
         let node = node.with_children(ViewFragment::from_nodes(vec![
+            indicator,
             Text::new(self.label.clone()).into_view_node(),
         ]));
         View::single(node)
@@ -271,6 +308,46 @@ mod tests {
     }
 
     #[test]
+    fn view_emits_indicator_box_with_state_class() {
+        // The first child is the `.checkbox-box` indicator; its class reflects
+        // the tri-state, and its own child is the tick / bar / nothing.
+        let box_of = |view: &View| -> (Vec<String>, usize) {
+            match &view.root().nodes()[0] {
+                ViewNode::Element { children, .. } => match &children.nodes()[0] {
+                    ViewNode::Element { props, children, .. } => {
+                        let classes = props
+                            .iter()
+                            .find(|p| p.name() == CLASS)
+                            .map(|p| match p.value() {
+                                ViewValue::Text(t) => {
+                                    t.split_ascii_whitespace().map(String::from).collect()
+                                }
+                                _ => Vec::new(),
+                            })
+                            .unwrap_or_default();
+                        (classes, children.nodes().len())
+                    }
+                    ViewNode::Text { .. } => panic!("expected box element as first child"),
+                },
+                ViewNode::Text { .. } => panic!("expected element root"),
+            }
+        };
+
+        // Unchecked: bare box, no inner tick.
+        let (classes, kids) = box_of(&Checkbox::new("A", cmd()).view());
+        assert_eq!(classes, ["checkbox-box"]);
+        assert_eq!(kids, 0);
+        // Checked: `checked` state class + a single tick child.
+        let (classes, kids) = box_of(&Checkbox::new("A", cmd()).checked(true).view());
+        assert_eq!(classes, ["checkbox-box", "checked"]);
+        assert_eq!(kids, 1);
+        // Indeterminate: `indeterminate` state class + a single bar child.
+        let (classes, kids) = box_of(&Checkbox::indeterminate("A", cmd()).view());
+        assert_eq!(classes, ["checkbox-box", "indeterminate"]);
+        assert_eq!(kids, 1);
+    }
+
+    #[test]
     fn view_encodes_tri_state_checked_prop() {
         let mixed = Checkbox::indeterminate("A", cmd());
         let view = mixed.view();
@@ -289,7 +366,10 @@ mod tests {
                     .expect("checked prop present");
                 assert_eq!(*checked.value(), ViewValue::Int(-1));
                 assert_eq!(events[0].command(), cmd());
-                assert_eq!(children.len(), 1);
+                // Two children now: the boxed indicator sub-part + the label
+                // Text (was a single label child before the wireframe indicator
+                // landed).
+                assert_eq!(children.len(), 2);
             }
             ViewNode::Text { .. } => panic!("expected element root"),
         }
