@@ -87,7 +87,14 @@ fn blur_fs(in: VsOut) -> @location(0) vec4<f32> {
         let t = textureSampleLevel(src_tex, src_smp, uv, 0.0);
         var lin_pm = vec3<f32>(0.0);
         if (t.a > 0.0) {
-            lin_pm = srgb_to_linear(t.rgb / t.a) * t.a;
+            // A valid premultiplied texel has rgb' <= a, so the un-premultiplied
+            // color is in [0,1]; but 8-bit quantization at an antialiased/rounded
+            // edge can leave rgb' a hair ABOVE a, and dividing by a tiny alpha then
+            // blows that up — `srgb_to_linear` amplifies it into a bright colored
+            // speck at rounded corners. Clamp to [0,1] before the transfer: a no-op
+            // for valid pixels, and it kills the divide-by-small-alpha artifact.
+            let straight = clamp(t.rgb / t.a, vec3<f32>(0.0), vec3<f32>(1.0));
+            lin_pm = srgb_to_linear(straight) * t.a;
         }
         accum = accum + vec4<f32>(lin_pm, t.a) * w;
         wsum = wsum + w;
@@ -99,7 +106,10 @@ fn blur_fs(in: VsOut) -> @location(0) vec4<f32> {
     let a = norm.a;
     var gamma_rgb = vec3<f32>(0.0);
     if (a > 0.0) {
-        gamma_rgb = linear_to_srgb(norm.rgb / a) * a;
+        // Same guard as the decode: clamp the un-premultiplied linear color to
+        // [0,1] so quantization can't blow up the divide by a small alpha.
+        let straight = clamp(norm.rgb / a, vec3<f32>(0.0), vec3<f32>(1.0));
+        gamma_rgb = linear_to_srgb(straight) * a;
     }
     return vec4<f32>(gamma_rgb, a);
 }
