@@ -1133,16 +1133,22 @@ impl ParagraphLayout {
         }
     }
 
-    /// Splits one line's logical-order `glyphs` into contiguous same-font AND
-    /// same-level [`ShapedRun`] segments, then reorders those segments into visual
+    /// Splits one line's logical-order `glyphs` into contiguous [`ShapedRun`]
+    /// segments homogeneous in font, bidi level, font size, and synthesis
+    /// (faux bold / oblique), then reorders those segments into visual
     /// (left-to-right) order via the UAX#9 L2 rule (see `reorder_visual`). Each
     /// segment's [`GlyphRun`] takes its direction and font size from its glyphs'
     /// source run, a `source` byte range from its glyphs' clusters (its last
     /// logical segment ending at `line_end`), and carries its bidi `level`.
     ///
-    /// A level boundary ends a segment as well as a font boundary, so a run that
-    /// changes embedding level splits even within one font. Within a segment the
-    /// glyph order is left as the shaper produced it: both HarfRust and the
+    /// A boundary in ANY of {font, level, font-size, synth-bold, synth-oblique}
+    /// ends a segment. Per CSS Inline Layout 3 §3.1 an inline box is split into
+    /// fragments at style boundaries, and CSS Text 3 §1.3 defines a run as a
+    /// maximal sequence of characters sharing formatting: glyphs that differ in
+    /// used font size or in synthesized boldness/obliqueness (CSS Fonts 4 §2.4,
+    /// spec §5.18) belong to distinct inline boxes and must not be coalesced into
+    /// one run rendered at the first glyph's size / synthesis. Within a segment
+    /// the glyph order is left as the shaper produced it: both HarfRust and the
     /// deterministic mock already emit an RTL run's glyphs in visual order.
     fn segment(glyphs: &[Tagged], line_end: usize) -> Vec<ShapedRun> {
         let mut segments = Vec::new();
@@ -1160,6 +1166,9 @@ impl ParagraphLayout {
             while index < glyphs.len()
                 && glyphs[index].font == font
                 && glyphs[index].level == level
+                && glyphs[index].font_size == font_size
+                && glyphs[index].synth_oblique == synth_oblique
+                && glyphs[index].synth_bold == synth_bold
             {
                 run_glyphs.push(glyphs[index].glyph);
                 index += 1;
@@ -1394,6 +1403,51 @@ mod tests {
         assert_eq!(line.width(), 28.0);
         assert_eq!(layout.size().width, 28.0);
         assert_eq!(layout.size().height, 12.0);
+    }
+
+    #[test]
+    fn segment_splits_on_font_size_and_synthesis_boundaries() {
+        // CSS Inline Layout 3 §3.1 / CSS Text 3 §1.3: within one line and one
+        // font face, glyphs that differ in used font size or in synthesized
+        // bold/oblique (CSS Fonts 4 §2.4, spec §5.18) form distinct inline
+        // boxes and MUST NOT be coalesced into a single run rendered at the
+        // first glyph's size / synthesis. The coordinator builds such a line by
+        // concatenating two independently-styled shaped spans of the same font
+        // and bidi level before wrapping:
+        //   [font 0, level 0, size 20, synth_bold=true,  "AB"] (clusters 0,1)
+        //   [font 0, level 0, size 12, synth_bold=false, "cd"] (clusters 2,3)
+        // → TWO segments (20px faux-bold, then 12px plain), not one 20px bold.
+        let tag = |cluster: usize, font_size: f32, synth_bold: bool| Tagged {
+            font: FontId::new(0),
+            direction: TextDirection::LeftToRight,
+            font_size,
+            level: 0,
+            synth_oblique: false,
+            synth_bold,
+            glyph: ShapedGlyph::new(1, cluster, 6.0),
+        };
+        let glyphs = vec![
+            tag(0, 20.0, true),
+            tag(1, 20.0, true),
+            tag(2, 12.0, false),
+            tag(3, 12.0, false),
+        ];
+        let segments = ParagraphLayout::segment(&glyphs, 4);
+        assert_eq!(segments.len(), 2);
+        // First segment: 20px, faux-bold, both "AB" glyphs — NOT the whole line.
+        assert_eq!(segments[0].run().font_size(), 20.0);
+        assert!(segments[0].synth_bold());
+        assert!(!segments[0].synth_oblique());
+        assert_eq!(segments[0].run().len(), 2);
+        // Second segment: 12px, not faux-bold, both "cd" glyphs.
+        assert_eq!(segments[1].run().font_size(), 12.0);
+        assert!(!segments[1].synth_bold());
+        assert_eq!(segments[1].run().len(), 2);
+        // Both share font 0 and level 0: the split is purely on size/synthesis.
+        assert_eq!(segments[0].font(), FontId::new(0));
+        assert_eq!(segments[1].font(), FontId::new(0));
+        assert_eq!(segments[0].level(), 0);
+        assert_eq!(segments[1].level(), 0);
     }
 
     #[test]
