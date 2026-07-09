@@ -365,12 +365,13 @@ impl SceneCoordinator {
             word_spacing,
         );
         // Preserved tabs advance to the next `tab-size` stop (§4.3); a no-op unless
-        // `content` still holds a `\t` (only `pre` / `pre-wrap` keep tabs).
-        let runs = apply_tab_stops(
-            runs,
-            content,
-            self.tab_stop_width(tab_size, fallback, attributes, direction, font_size, content),
-        );
+        // `content` still holds a `\t` (only `pre` / `pre-wrap` keep tabs). The same
+        // `tab_width` is threaded into `wrap` so a tab on a soft-wrapped line is
+        // re-measured from THAT line's start (this pre-wrap pass has no line-break
+        // info and can only reset its pen at a hard `\n`).
+        let tab_width =
+            self.tab_stop_width(tab_size, fallback, attributes, direction, font_size, content);
+        let runs = apply_tab_stops(runs, content, tab_width);
         let metrics = self.paragraph.line_metrics(font_size);
         // The line box height: the authored `line-height` when present, else the
         // font's natural metric line height. A larger line height splits the extra
@@ -416,6 +417,7 @@ impl SceneCoordinator {
                 alignment,
                 overflow,
                 white_space,
+                tab_width,
             ),
             // Ellipsis without a hyphenator: wrap through the no-op hyphenator so
             // the shaped ellipsis glyph can be threaded into truncation.
@@ -428,6 +430,7 @@ impl SceneCoordinator {
                 alignment,
                 overflow,
                 white_space,
+                tab_width,
                 &NullHyphenator,
                 None,
                 ellipsis,
@@ -445,6 +448,7 @@ impl SceneCoordinator {
                     alignment,
                     overflow,
                     white_space,
+                    tab_width,
                     hyphenator,
                     hyphen,
                     ellipsis,

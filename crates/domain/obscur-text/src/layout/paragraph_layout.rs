@@ -333,7 +333,7 @@ impl ParagraphLayout {
         let seg_metrics = move |_font: FontId| (strut.ascent, strut.descent);
         Self::wrap_core(
             runs, text, max_width, strut, &seg_metrics, alignment, overflow, white_space,
-            0.0, 0.0, hyphenator, hyphen_glyph, ellipsis_glyph,
+            0.0, 0.0, 0.0, hyphenator, hyphen_glyph, ellipsis_glyph,
         )
     }
 
@@ -353,10 +353,11 @@ impl ParagraphLayout {
         alignment: TextAlignment,
         overflow: TextOverflow,
         white_space: WhiteSpace,
+        tab_width: f32,
     ) -> Self {
         Self::wrap_core(
             runs, text, max_width, strut, seg_metrics, alignment, overflow, white_space,
-            0.0, 0.0, &NullHyphenator, None, None,
+            tab_width, 0.0, 0.0, &NullHyphenator, None, None,
         )
     }
 
@@ -374,6 +375,11 @@ impl ParagraphLayout {
     /// the paragraph height is `Σ line heights`. Packing, hyphenation,
     /// justification, and `text-overflow` are identical to
     /// [`wrap_hyphenated`](Self::wrap_hyphenated).
+    ///
+    /// `tab_width` is the resolved `tab-size` stop width; after packing, each
+    /// preserved tab is re-expanded from the start of *its own line* (CSS Text 3
+    /// §4.3, see [`wrap_core`](Self::wrap_core)). `0.0` (or text with no `\t`)
+    /// disables the pass and is byte-identical, as is a tab that stays on line 0.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn wrap_strut_hyphenated(
@@ -385,13 +391,14 @@ impl ParagraphLayout {
         alignment: TextAlignment,
         overflow: TextOverflow,
         white_space: WhiteSpace,
+        tab_width: f32,
         hyphenator: &dyn Hyphenator,
         hyphen_glyph: Option<ShapedGlyph>,
         ellipsis_glyph: Option<ShapedGlyph>,
     ) -> Self {
         Self::wrap_core(
             runs, text, max_width, strut, seg_metrics, alignment, overflow, white_space,
-            0.0, 0.0, hyphenator, hyphen_glyph, ellipsis_glyph,
+            tab_width, 0.0, 0.0, hyphenator, hyphen_glyph, ellipsis_glyph,
         )
     }
 
@@ -404,6 +411,16 @@ impl ParagraphLayout {
     /// *hang* (trim) the trailing tracking of each line's last cluster, which §8.1
     /// says is "deferred to the line breaker". They are `0.0` on every historical
     /// path, so the trim is then a no-op and the output is byte-identical.
+    ///
+    /// `tab_width` is the resolved `tab-size` stop width (CSS Text 3 §4.3): after
+    /// packing, each preserved tab is re-expanded from the start of *its own line*
+    /// via [`retab_lines`](Self::retab_lines), because §4.3 measures a tab stop
+    /// from the line the tab is on and the pre-wrap
+    /// [`apply_tab_stops`](crate::shaping::apply_tab_stops) pass could only reset
+    /// the pen at a hard `\n`, never at a soft-wrap boundary. `0.0` (or text with
+    /// no `\t`) disables the pass, so every historical path is byte-identical, as
+    /// is a tab that stays on the first (line-0) line — its line start *is* the
+    /// paragraph origin the pre-wrap pass measured from.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     fn wrap_core(
@@ -415,6 +432,7 @@ impl ParagraphLayout {
         alignment: TextAlignment,
         overflow: TextOverflow,
         white_space: WhiteSpace,
+        tab_width: f32,
         letter_spacing: f32,
         word_spacing: f32,
         hyphenator: &dyn Hyphenator,
@@ -503,6 +521,18 @@ impl ParagraphLayout {
                 hyphen_glyph,
             )
         };
+
+        // Re-expand preserved tabs from each visual line's own left edge (CSS Text
+        // 3 §4.3): a tab stop is measured from the start of the LINE the tab is on,
+        // but the pre-wrap `apply_tab_stops` pass had no line-break info and could
+        // only reset its pen at a hard `\n`, so a tab at the start of a
+        // soft-wrapped 2nd+ line kept an advance measured from the paragraph
+        // origin. This corrects every line's tabs from the line's left edge; a
+        // line-0 tab is unchanged (its line start is the paragraph origin). A no-op
+        // unless a real stop width is supplied and `text` still holds a `\t`.
+        if tab_width > 0.0 && text.contains('\t') {
+            Self::retab_lines(&mut lines_glyphs, text, tab_width);
+        }
 
         // Hang the trailing collapsible whitespace and trailing letter-/word-spacing
         // of every line (CSS Text 3 §7.1, §8.1/§8.2): zero the advances of the
@@ -649,6 +679,40 @@ impl ParagraphLayout {
                 advance -= word_spacing;
             }
             glyphs[last - 1].glyph = glyph.with_x_advance(advance);
+        }
+    }
+
+    /// Re-expands every preserved tab (U+0009) so it advances to the next
+    /// `tab_width` stop measured from the **start of its own line** (CSS Text 3
+    /// §4.3), rewriting the tab glyphs' advances in place per packed line.
+    ///
+    /// For each line the pen is reset to zero at the line's left edge and walked in
+    /// logical order; when a glyph is a tab its advance is set to `next − pen`,
+    /// where `next = (floor(pen / tab_width) + 1) · tab_width` is the next stop
+    /// strictly past the pen (§4.3: a tab always advances), and the recomputed
+    /// advance is folded into the pen so a following tab measures from it. Only tab
+    /// glyphs change — glyph id, cluster, offsets, font, level, and synthesis are
+    /// preserved. This is the exact per-line analogue of the pre-wrap
+    /// [`apply_tab_stops`](crate::shaping::apply_tab_stops) pen, which resets only
+    /// at hard `\n`; running it here — after wrapping knows the soft-wrap
+    /// boundaries — is what makes a tab on a wrapped line measure from that line's
+    /// origin. On line 0 the pen is identical to the pre-wrap pen, so the advance
+    /// is unchanged. Assumes `tab_width > 0`.
+    fn retab_lines(lines: &mut [PackedLine], text: &str, tab_width: f32) {
+        for line in lines {
+            let mut pen = 0.0_f32;
+            for tagged in &mut line.glyphs {
+                let glyph = tagged.glyph;
+                if char_at(text, glyph.cluster()) == Some('\t') {
+                    // Advance to the next tab stop strictly past the line-local pen.
+                    let stops = (pen / tab_width).floor() + 1.0;
+                    let advance = (stops * tab_width - pen).max(0.0);
+                    tagged.glyph = glyph.with_x_advance(advance);
+                    pen += advance;
+                } else {
+                    pen += glyph.x_advance();
+                }
+            }
         }
     }
 
@@ -1746,6 +1810,7 @@ mod tests {
             TextAlignment::Start,
             TextOverflow::Clip,
             WhiteSpace::Normal,
+            0.0,
             4.0,
             0.0,
             &NullHyphenator,
@@ -2300,6 +2365,7 @@ mod tests {
             TextAlignment::Start,
             TextOverflow::Clip,
             WhiteSpace::Normal,
+            0.0,
         );
         assert_eq!(layout.line_count(), 1);
         assert_eq!(layout.lines()[0].height(), 24.0);
@@ -2322,6 +2388,7 @@ mod tests {
             TextAlignment::Start,
             TextOverflow::Clip,
             WhiteSpace::Normal,
+            0.0,
         );
         assert_eq!(layout.lines()[0].height(), 20.0);
         assert_eq!(layout.lines()[0].baseline(), 13.0);
@@ -2347,6 +2414,7 @@ mod tests {
             TextAlignment::Start,
             TextOverflow::Clip,
             WhiteSpace::Normal,
+            0.0,
         );
         assert_eq!(layout.line_count(), 2);
         // Primary-only line: the strut box is unchanged (height 12, baseline 9).
@@ -2375,6 +2443,7 @@ mod tests {
             TextAlignment::Start,
             TextOverflow::Clip,
             WhiteSpace::Normal,
+            0.0,
         );
         assert_eq!(uniform.lines()[0].height(), 12.0);
         assert_eq!(uniform.lines()[1].height(), 12.0);
@@ -2395,6 +2464,7 @@ mod tests {
             TextAlignment::Start,
             TextOverflow::Clip,
             WhiteSpace::Normal,
+            0.0,
         );
         assert_eq!(layout.line_count(), 1);
         assert!(layout.lines()[0].is_empty());
@@ -2426,7 +2496,81 @@ mod tests {
             TextAlignment::Start,
             TextOverflow::Clip,
             WhiteSpace::Normal,
+            0.0,
         );
         assert_eq!(legacy, strut);
+    }
+
+    /// Flattens every glyph advance of one laid-out line, in visual segment order.
+    fn line_advances(layout: &ParagraphLayout, line: usize) -> Vec<f32> {
+        layout.lines()[line]
+            .segments()
+            .iter()
+            .flat_map(|s| s.run().glyphs().iter())
+            .map(ShapedGlyph::x_advance)
+            .collect()
+    }
+
+    #[test]
+    fn preserved_tab_on_a_wrapped_line_measures_from_that_line_start() {
+        // CSS Text 3 §4.3: a tab stop is measured from the start of the LINE the tab
+        // is on. "aa bb\t" (pre-wrap) soft-wraps to "aa " / "bb\t"; the pre-shape
+        // `apply_tab_stops` pass measures the tab from the PARAGRAPH origin (pen 30
+        // = a+a+space+b+b) → advance 40−30 = 10, which is what the input runs carry.
+        // After wrapping puts the tab on the 2nd line, its stop must be re-measured
+        // from that line's left edge (pen 12 = b+b) → advance 40−12 = 28.
+        let text = "aa bb\t";
+        // Runs exactly as `apply_tab_stops` (paragraph origin) would hand them to the
+        // wrapper: the tab already carries its 10px paragraph-origin advance.
+        let runs = vec![run(
+            0,
+            &[(0, 6.0), (1, 6.0), (2, 6.0), (3, 6.0), (4, 6.0), (5, 10.0)],
+            TextRange::new(0, 6),
+        )];
+        let strut = LineStrut::new(12.0, 9.0, 3.0);
+
+        // max_width 30 fits "aa " (18) but not the whole run, so "bb\t" wraps to
+        // line 1 with the tab following "bb".
+        let wrapped = ParagraphLayout::wrap_strut(
+            &runs,
+            text,
+            30.0,
+            strut,
+            &|_| (9.0, 3.0),
+            TextAlignment::Start,
+            // `Visible`: the re-expanded tab makes line 1 (40) overflow the 30 box;
+            // under `Clip` that would drop the over-wide tab, hiding the advance we
+            // assert. Visible keeps it (overflow/clip is a separate, tested concern).
+            TextOverflow::Visible,
+            WhiteSpace::PreWrap,
+            40.0,
+        );
+        assert_eq!(wrapped.line_count(), 2);
+        // Line 0 "aa " is untouched (no tab, and it is line 0).
+        assert_eq!(line_advances(&wrapped, 0), vec![6.0, 6.0, 6.0]);
+        // Line 1 "bb\t": the tab is re-measured from the line start (pen 12) → 28,
+        // NOT the 10 it carried from the paragraph origin.
+        assert_eq!(line_advances(&wrapped, 1), vec![6.0, 6.0, 28.0]);
+        assert_eq!(wrapped.lines()[1].width(), 40.0);
+
+        // Byte-identical guard: unwrapped (wide box, one line) the SAME tab stays on
+        // line 0, whose start IS the paragraph origin, so the re-expansion reproduces
+        // the pre-wrap advance (10) exactly — the common single-line case is unchanged.
+        let one_line = ParagraphLayout::wrap_strut(
+            &runs,
+            text,
+            1000.0,
+            strut,
+            &|_| (9.0, 3.0),
+            TextAlignment::Start,
+            TextOverflow::Visible,
+            WhiteSpace::PreWrap,
+            40.0,
+        );
+        assert_eq!(one_line.line_count(), 1);
+        assert_eq!(
+            line_advances(&one_line, 0),
+            vec![6.0, 6.0, 6.0, 6.0, 6.0, 10.0]
+        );
     }
 }

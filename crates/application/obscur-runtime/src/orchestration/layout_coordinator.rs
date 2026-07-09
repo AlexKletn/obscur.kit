@@ -430,11 +430,12 @@ fn measure_text_node(
     );
     // Preserved tabs (`pre` / `pre-wrap`) advance to the next `tab-size` tab stop
     // (§4.3). Under a collapsing mode the content has no `\t`, so this is a no-op.
-    let runs = apply_tab_stops(
-        runs,
-        content,
-        tab_stop_width(tab_size, paragraph, fallback, attributes, direction, font_size, content),
-    );
+    // The same `tab_width` is threaded into `wrap` so a tab on a soft-wrapped line
+    // can be re-measured from THAT line's start, which this pre-wrap pass — with no
+    // line-break info — cannot do (it resets its pen only at a hard `\n`).
+    let tab_width =
+        tab_stop_width(tab_size, paragraph, fallback, attributes, direction, font_size, content);
+    let runs = apply_tab_stops(runs, content, tab_width);
     // A text node's own horizontal border/padding shrinks the wrap width; it is
     // almost always zero, but subtract it defensively so the content fits.
     let horizontal = style.padding.left + style.padding.right + style.border.left + style.border.right;
@@ -462,6 +463,7 @@ fn measure_text_node(
             alignment,
             overflow,
             white_space,
+            tab_width,
         ),
         // Ellipsis without a hyphenator: wrap through the no-op hyphenator so the
         // shaped ellipsis glyph can be threaded into truncation.
@@ -474,6 +476,7 @@ fn measure_text_node(
             alignment,
             overflow,
             white_space,
+            tab_width,
             &NullHyphenator,
             None,
             ellipsis,
@@ -492,6 +495,7 @@ fn measure_text_node(
                 alignment,
                 overflow,
                 white_space,
+                tab_width,
                 hyphenator,
                 hyphen,
                 ellipsis,
