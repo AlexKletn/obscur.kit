@@ -592,6 +592,30 @@ impl SceneCoordinator {
         content.len()
     }
 
+    /// Returns the caret's pen x (logical pixels) at byte `index` in `content`,
+    /// resolving the shaping inputs from the text node's computed `style` — the
+    /// **style-driven** wrapper over [`caret_offset_x`](Self::caret_offset_x) the
+    /// runtime uses to keep the caret in view (single-line horizontal scroll, CSS
+    /// Overflow 3 §3.1). It resolves `font-family` / `font-weight` / `font-style`
+    /// / `direction` / `font-size` **identically** to
+    /// [`caret_offset_at_x`](Self::caret_offset_at_x) (the click inverse) and the
+    /// compose caret, so the scroll offset the runtime derives here uses the SAME
+    /// advance model the paint places the caret with. `index == content.len()`
+    /// yields the whole run advance (the field's content width).
+    #[must_use]
+    pub(crate) fn caret_advance_x(
+        &self,
+        content: &str,
+        style: Option<&ComputedStyle>,
+        index: usize,
+    ) -> f32 {
+        let fallback = families_for(style);
+        let attributes = attributes_for(style);
+        let direction = direction_for(style);
+        let font_size = font_size_of_style(style);
+        self.caret_offset_x(content, &fallback, &attributes, direction, font_size, index)
+    }
+
     /// Composes a paint-ordered [`DisplayList`] of background fills from the
     /// styled + laid-out tree.
     ///
@@ -1173,6 +1197,18 @@ impl SceneCoordinator {
                     let alignment = alignment_for(computed.get(&node));
                     let overflow = overflow_for_text(tree, computed, node);
                     let origin = layout_box.origin();
+                    // The editing field's horizontal scroll offset (single-line
+                    // text-control scroll model, CSS Overflow 3 §3.1): the run,
+                    // caret, selection highlight and preedit are all translated
+                    // left by `scroll_left` so the caret stays inside the field's
+                    // content box, and the field's `overflow: hidden` clip (an
+                    // ancestor bracket) hides the scrolled-out head/tail. It is
+                    // `0.0` on every non-editing text node and on a fitting or
+                    // wrapping field, so the paint is then byte-identical to the
+                    // unscrolled path. The runtime derives it with the SAME advance
+                    // model (`caret_advance_x`) used below, so paint and hit-test
+                    // agree.
+                    let scroll_left = active.map_or(0.0, |view| view.scroll_left);
                     // Selection highlight, painted BEHIND the glyphs (emitted before
                     // the runs so the text shows over it): a rect from x(start) to
                     // x(end) spanning the first line's height, in the documented
@@ -1203,7 +1239,7 @@ impl SceneCoordinator {
                         );
                         node_paint.fill_rect(
                             Rect::new(
-                                Point::new(origin.x + x0, origin.y),
+                                Point::new(origin.x + x0 - scroll_left, origin.y),
                                 Size::new(x1 - x0, line_height),
                             ),
                             Brush::solid(SELECTION_COLOR),
@@ -1227,7 +1263,7 @@ impl SceneCoordinator {
                     for line in layout.lines() {
                         let baseline = line.baseline();
                         let line_top = origin.y + line.top();
-                        let line_left = origin.x + line.x_offset();
+                        let line_left = origin.x + line.x_offset() - scroll_left;
                         if line.segments().is_empty() {
                             // An empty line (e.g. empty text) still emits a single
                             // empty run at the line origin so the painted line count
@@ -1288,7 +1324,7 @@ impl SceneCoordinator {
                         node_paint.fill_rect(
                             Rect::new(
                                 Point::new(
-                                    origin.x + x0,
+                                    origin.x + x0 - scroll_left,
                                     origin.y + line_height - PREEDIT_UNDERLINE_THICKNESS,
                                 ),
                                 Size::new(x1 - x0, PREEDIT_UNDERLINE_THICKNESS),
@@ -1316,7 +1352,7 @@ impl SceneCoordinator {
                         );
                         node_paint.fill_rect(
                             Rect::new(
-                                Point::new(origin.x + caret_x, origin.y),
+                                Point::new(origin.x + caret_x - scroll_left, origin.y),
                                 Size::new(CARET_WIDTH, line_height),
                             ),
                             Brush::solid(text_color),

@@ -502,3 +502,13 @@ required-features = ["render-cpu", "text-harfrust", "text-unicode"]
 [[example]]
 name = "wireframe_live_window"
 required-features = ["full"]
+
+# Proof: a single-line text field scrolls HORIZONTALLY to keep the caret in view
+# (CSS Overflow 3 §3.1 scroll-into-view). Drives the real runtime editing path,
+# types a value wider than the box, and rasterizes two stitched frames (scrolled
+# tail | Home head) to target/caret_scroll_proof.png — asserting the caret stays
+# inside the box, the head clips out, and Home brings it back. Needs the CPU
+# renderer + text stack; builds display-free.
+[[example]]
+name = "caret_scroll_proof"
+required-features = ["render-cpu", "text-harfrust", "text-unicode"]

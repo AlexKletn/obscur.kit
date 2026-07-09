@@ -35,6 +35,16 @@ pub(crate) struct TextEditSession {
     /// replaces the anchor span in `buffer` with the committed text as one edit
     /// (one composition = one undo unit).
     composition: Option<Composition>,
+    /// The field's horizontal scroll offset (logical px, ≥ 0): how far the text
+    /// run is scrolled left within the field's content box so the caret stays in
+    /// view (the single-line text-control scroll model, CSS Overflow 3 §3.1
+    /// scroll-into-view). Recomputed after every caret move/edit by
+    /// [`UiRuntime::update_caret_scroll`](super::UiRuntime::update_caret_scroll)
+    /// and read back by the compose phase (via
+    /// [`EditingView::scroll_left`](crate::orchestration::EditingView::scroll_left))
+    /// and the click inverse. `0.0` for a value that fits its box and for any
+    /// wrapping (multi-line) field, which never scrolls horizontally.
+    scroll_left: f32,
 }
 
 impl TextEditSession {
@@ -51,6 +61,7 @@ impl TextEditSession {
             node,
             buffer,
             composition: None,
+            scroll_left: 0.0,
         }
     }
 
@@ -62,11 +73,27 @@ impl TextEditSession {
         let end = self.buffer.len();
         self.buffer.set_selection(TextSelection::caret(end));
         self.composition = None;
+        // A fresh value starts unscrolled; scroll-into-view re-derives the offset
+        // on the next edit/caret move.
+        self.scroll_left = 0.0;
     }
 
     /// Returns the editable node this session is bound to.
     pub(crate) const fn node(&self) -> NodeId {
         self.node
+    }
+
+    /// Returns the field's current horizontal scroll offset (logical px, ≥ 0) —
+    /// how far the run is scrolled left so the caret stays in the content box.
+    pub(crate) const fn scroll_left(&self) -> f32 {
+        self.scroll_left
+    }
+
+    /// Sets the field's horizontal scroll offset (logical px). The runtime clamps
+    /// it into `0 ..= max(0, content_width − W)` before calling this, so the paint
+    /// and click-inverse read a valid, in-range offset.
+    pub(crate) const fn set_scroll_left(&mut self, scroll_left: f32) {
+        self.scroll_left = scroll_left;
     }
 
     /// Returns a mutable reference to the underlying editing engine, so the

@@ -55,6 +55,7 @@ use crate::orchestration::{
     PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint, StyleCoordinator, StyleInputs,
     StyleMatchingCoordinator, TreeElement,
 };
+use crate::orchestration::white_space_for;
 use crate::scheduler::{BackpressureDecision, FrameScheduler};
 use crate::transaction::ReconcileEnactor;
 
@@ -1179,7 +1180,13 @@ impl UiRuntime {
             // `editing` are disjoint fields, so this shared borrow is legal; with no
             // session the view is `None` and compose is byte-identical.
             let editing = self.editing.as_ref().map(|session| {
-                let view = EditingView::new(session.node(), session.text(), session.selection());
+                // The field's live horizontal scroll offset, so compose translates
+                // the run/caret/selection/preedit by `−scroll_left` and the field's
+                // `overflow: hidden` clip hides the scrolled-out text (single-line
+                // text-control scroll model, CSS Overflow 3 §3.1). `0.0` for a
+                // fitting or wrapping field ⇒ byte-identical unscrolled paint.
+                let view = EditingView::new(session.node(), session.text(), session.selection())
+                    .with_scroll_left(session.scroll_left());
                 // While composing, attach the live preedit so compose splices it
                 // into the field for DISPLAY (underlined) with the caret at the
                 // preedit's caret — the buffer text is untouched (spec §5.12).
@@ -2188,7 +2195,13 @@ impl UiRuntime {
         let session = self.editing.as_ref().filter(|s| s.node() == field)?;
         let text_node = self.first_text_descendant(field)?;
         let origin = self.boxes.get(&text_node)?.origin();
-        let local_x = point.x - origin.x;
+        // Undo the paint's `−scroll_left` translation: the run is drawn at
+        // `origin.x + glyph_x − scroll_left`, so a pointer at screen `point.x`
+        // sits at run-local `point.x − origin.x + scroll_left`. Adding the field's
+        // scroll offset back lands a click on a scrolled field at the right byte
+        // (the inverse of the caret paint, CSS Overflow 3 §3.1). `scroll_left`
+        // is `0` on an unscrolled field ⇒ byte-identical to the pre-scroll inverse.
+        let local_x = point.x - origin.x + session.scroll_left();
         Some(self.scene_composer.caret_offset_at_x(
             session.text(),
             self.computed.get(&text_node),
@@ -2356,7 +2369,82 @@ impl UiRuntime {
         {
             self.dispatch_text_input(command, &text);
         }
+        // Keep the caret in view: after any edit or caret move, re-derive the
+        // single-line field's horizontal scroll offset so the caret stays inside
+        // its content box (CSS Overflow 3 §3.1 scroll-into-view). A no-op for a
+        // fitting or wrapping field.
+        self.update_caret_scroll();
         self.request_frame(FrameReason::Input);
+    }
+
+    /// Recomputes the focused single-line field's horizontal scroll offset so its
+    /// caret stays within the field's visible content width `W` — the standard
+    /// single-line text-control scroll model (CSS Overflow 3 §3.1
+    /// scroll-into-view; the text-control behaviour a `<input type=text>` scrolls
+    /// with). Called from [`after_edit`](Self::after_edit), so every path that
+    /// moves the caret (typing, delete, arrows, Home/End, click, drag-select,
+    /// select-all, undo/redo, IME commit) keeps the caret visible.
+    ///
+    /// Only a **single-line** (non-wrapping) field scrolls horizontally: a
+    /// wrapping field (`white-space: normal`/`pre-wrap`/`pre-line`) is pinned to
+    /// `scroll_left = 0` (its overflow is handled by wrapping / a later
+    /// vertical-scroll item). `W` is the field's border-box width minus its
+    /// left/right padding + border (its content-box width, the run's scrollport).
+    ///
+    /// The clamp keeps the caret's pen x within `[scroll_left, scroll_left + W]`:
+    /// when the caret hits the left edge (`caret_x − scroll_left < 0`)
+    /// `scroll_left` snaps to `caret_x`; when it hits the right edge
+    /// (`caret_x − scroll_left > W`) it snaps to `caret_x − W`. `scroll_left` is
+    /// then clamped to `0 ..= max(0, content_width − W)` so the field never scrolls
+    /// past the text. `caret_x` and `content_width` are measured with the SAME
+    /// advance model the compose caret paints with
+    /// ([`SceneCoordinator::caret_advance_x`]), so paint and the scroll agree.
+    ///
+    /// A no-op (leaving `scroll_left` unchanged) when the field has no text leaf or
+    /// no retained box yet; a field whose value fits (`content_width ≤ W`) resolves
+    /// to `scroll_left = 0` (byte-identical, unscrolled paint).
+    fn update_caret_scroll(&mut self) {
+        let Some(session) = self.editing.as_ref() else {
+            return;
+        };
+        let field = session.node();
+        let Some(text_node) = self.first_text_descendant(field) else {
+            return;
+        };
+        // Wrapping (multi-line) fields never scroll horizontally: pin to 0.
+        if white_space_for(self.computed.get(&text_node)).wraps() {
+            if let Some(session) = self.editing.as_mut() {
+                session.set_scroll_left(0.0);
+            }
+            return;
+        }
+        // The field's visible content width `W` (its scrollport): the border-box
+        // width minus the left/right padding + border edges. No retained box yet ⇒
+        // nothing to scroll into.
+        let Some(field_box) = self.boxes.get(&field) else {
+            return;
+        };
+        let w = field_content_width(self.computed.get(&field), field_box.size().width);
+        // The caret's pen x and the whole run advance (content width), in the SAME
+        // advance model the compose caret uses, over the live session text.
+        let focus = session.selection().focus();
+        let text = session.text();
+        let style = self.computed.get(&text_node);
+        let caret_x = self.scene_composer.caret_advance_x(text, style, focus);
+        let content_width = self.scene_composer.caret_advance_x(text, style, text.len());
+        let mut scroll_left = session.scroll_left();
+        // Scroll-into-view: keep the caret within `[scroll_left, scroll_left + W]`.
+        if caret_x - scroll_left < 0.0 {
+            scroll_left = caret_x;
+        }
+        if caret_x - scroll_left > w {
+            scroll_left = caret_x - w;
+        }
+        // Never scroll past the text (and never negative).
+        scroll_left = scroll_left.clamp(0.0, (content_width - w).max(0.0));
+        if let Some(session) = self.editing.as_mut() {
+            session.set_scroll_left(scroll_left);
+        }
     }
 
     /// Builds the hover chain for `target`: the target followed by its element
@@ -2944,6 +3032,31 @@ fn load_and_decode_image(
     SceneImage::new(width, height, decoded.data().clone(), AlphaMode::Straight).ok_or_else(|| {
         ResourceError::DecodeFailed("decoded image bytes do not match its intrinsic size".into())
     })
+}
+
+/// The editing field's visible content width `W` (logical px): its border-box
+/// `border_box_width` minus the left/right padding and border edges — the
+/// scrollport the single-line run scrolls within (CSS Overflow 3 §3.1). Only
+/// absolute `px` padding/border widths are honored (mirroring the scene
+/// coordinator's `border_width_of`); the result is clamped non-negative so a box
+/// smaller than its insets yields `0` rather than a negative width.
+fn field_content_width(style: Option<&ComputedStyle>, border_box_width: f32) -> f32 {
+    let pad_left = px_length_of(style, PropertyId::PaddingLeft);
+    let pad_right = px_length_of(style, PropertyId::PaddingRight);
+    let border_left = px_length_of(style, PropertyId::BorderLeftWidth);
+    let border_right = px_length_of(style, PropertyId::BorderRightWidth);
+    (border_box_width - pad_left - pad_right - border_left - border_right).max(0.0)
+}
+
+/// Reads one computed length property in absolute `px`, defaulting to `0.0` when
+/// the property is absent or is a non-pixel length (mirroring the scene
+/// coordinator's pixel-only inset reads).
+fn px_length_of(style: Option<&ComputedStyle>, id: PropertyId) -> f32 {
+    style
+        .and_then(|s| s.get(id))
+        .and_then(ComputedValue::as_length)
+        .and_then(Length::as_px)
+        .map_or(0.0, |px| px.0)
 }
 
 /// Records one frame phase's telemetry into `sink` (spec §7.9): a
@@ -5946,6 +6059,217 @@ mod tests {
             advance * 3.0
         );
         assert!(list.is_balanced(), "the display list stays balanced");
+    }
+
+    // ---- Single-line horizontal caret scroll (CSS Overflow 3 §3.1) ------------
+
+    /// A single-line editable field: a `panel` (200×100) holding one `field`
+    /// (class `field`) that binds `on-input` and carries `text`. The `field`
+    /// rule makes it 100px wide, `white-space: nowrap` (so it scrolls rather than
+    /// wraps) and `overflow: hidden` (so the scrolled-out glyphs clip).
+    fn scroll_field_view(text: &str) -> View {
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(600))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+                .with_children(ViewFragment::from_nodes(vec![
+                    ViewNode::element(ComponentId::from_raw(601))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("field".into())))
+                        .with_event(ViewEventBinding::new(EVENT_INPUT, CMD_INPUT))
+                        .with_children(ViewFragment::from_nodes(vec![ViewNode::text(
+                            text.to_string(),
+                        )])),
+                ])),
+        ]))
+    }
+
+    /// Sheet for [`scroll_field_view`]: a 200×100 `panel` and a 100×20 single-line
+    /// (`nowrap`, `overflow: hidden`) `field`. `white-space` inherits, so the
+    /// field's text child shapes on one line.
+    fn scroll_field_sheet() -> Stylesheet {
+        use obscur_style::property::layout_keyword;
+        let field = vec![
+            BlockDeclaration::normal(PropertyId::Width, PropertyValue::Length(Length::px(100.0))),
+            BlockDeclaration::normal(PropertyId::Height, PropertyValue::Length(Length::px(20.0))),
+            BlockDeclaration::normal(
+                PropertyId::WhiteSpace,
+                PropertyValue::Keyword(layout_keyword::WHITE_SPACE_NOWRAP),
+            ),
+            BlockDeclaration::normal(
+                PropertyId::Overflow,
+                PropertyValue::Keyword(layout_keyword::OVERFLOW_HIDDEN),
+            ),
+        ];
+        Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![class_rule("panel", size(200.0, 100.0)), class_rule("field", field)],
+        )
+    }
+
+    /// Focuses the single-line `field` (seeded empty) and returns the runtime. The
+    /// `on-input` handler is registered but the resulting text is not mirrored.
+    fn focused_scroll_field() -> UiRuntime {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.on_text_input(CMD_INPUT, move |_| {});
+        let sheet = scroll_field_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&scroll_field_view(""), sheets);
+        // Press inside the field to focus it; the runtime seeds an empty session.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 10.0));
+        assert!(runtime.focused().is_some(), "the press focused the field");
+        runtime
+    }
+
+    /// The `field` node id (root → panel → field) after a frame populated the tree.
+    fn scroll_field_node(runtime: &UiRuntime) -> NodeId {
+        let root = runtime.tree().root().expect("root after a frame");
+        let panel = runtime.tree().get(root).unwrap().children()[0];
+        runtime.tree().get(panel).unwrap().children()[0]
+    }
+
+    /// The field's current horizontal scroll offset (reads the private session).
+    fn scroll_left_of(runtime: &UiRuntime) -> f32 {
+        runtime.editing.as_ref().expect("active session").scroll_left()
+    }
+
+    /// Re-renders the seed view and returns the frame's display list — compose
+    /// paints the live session text + caret at the current scroll offset.
+    fn render_scroll_frame(runtime: &mut UiRuntime) -> DisplayList {
+        let sheet = scroll_field_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let result = runtime.render_now(&scroll_field_view(""), sheets);
+        result.snapshot().display_list().clone()
+    }
+
+    /// The painted caret's x (the thin, width-1 fill), or `None` if absent.
+    fn painted_caret_x(list: &DisplayList) -> Option<f32> {
+        list.commands().iter().find_map(|c| match c {
+            PaintCommand::DrawPath { path, .. } => path
+                .bounds()
+                .filter(|r| (r.size.width - 1.0).abs() < 1e-6)
+                .map(|r| r.origin.x),
+            _ => None,
+        })
+    }
+
+    /// The first `DrawText` run's origin x (the run's left edge, `origin −
+    /// scroll_left`).
+    fn first_run_origin_x(list: &DisplayList) -> Option<f32> {
+        list.commands().iter().find_map(|c| match c {
+            PaintCommand::DrawText { origin, .. } => Some(origin.x),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn typing_past_the_box_scrolls_the_caret_into_view() {
+        // (a) Typing a value far wider than the 100px box scrolls the field:
+        // scroll_left > 0 and the painted caret stays within the box's right edge.
+        let mut runtime = focused_scroll_field();
+        for _ in 0..20 {
+            runtime.handle_key(char_press('x'));
+        }
+        assert_eq!(runtime.editing_text().map(str::len), Some(20));
+        assert!(
+            scroll_left_of(&runtime) > 0.0,
+            "a value wider than the box scrolls left: {}",
+            scroll_left_of(&runtime),
+        );
+
+        let field = scroll_field_node(&runtime);
+        let field_box = runtime.layout_boxes().get(&field).expect("a field box").bounds;
+        let box_right = field_box.origin.x + field_box.size.width;
+
+        let list = render_scroll_frame(&mut runtime);
+        let caret_x = painted_caret_x(&list).expect("a caret is painted");
+        assert!(
+            caret_x <= box_right + 1e-3,
+            "caret x {caret_x} must stay within the box right {box_right}",
+        );
+        // The run's left edge is scrolled OUT past the box's left (head clipped).
+        let run_left = first_run_origin_x(&list).expect("a run");
+        assert!(
+            run_left < field_box.origin.x - 1e-3,
+            "the head is scrolled left of the box: run_left {run_left} vs box left {}",
+            field_box.origin.x,
+        );
+    }
+
+    #[test]
+    fn home_resets_scroll_and_shows_the_head() {
+        // (b) Home moves the caret to 0, which resets scroll_left to 0 so the
+        // field's first character is visible again (run left back at the box left).
+        let mut runtime = focused_scroll_field();
+        for _ in 0..20 {
+            runtime.handle_key(char_press('x'));
+        }
+        assert!(scroll_left_of(&runtime) > 0.0, "scrolled while typing");
+
+        runtime.handle_key(named_press(NamedKey::Home));
+        assert_eq!(runtime.editing_selection().unwrap().focus(), 0, "caret at start");
+        assert_eq!(scroll_left_of(&runtime), 0.0, "Home resets scroll_left to 0");
+
+        let field = scroll_field_node(&runtime);
+        let field_left = runtime.layout_boxes().get(&field).unwrap().bounds.origin.x;
+        let list = render_scroll_frame(&mut runtime);
+        let run_left = first_run_origin_x(&list).expect("a run");
+        assert!(
+            (run_left - field_left).abs() < 1e-3,
+            "the head is visible at the box left: run_left {run_left} vs {field_left}",
+        );
+    }
+
+    #[test]
+    fn click_on_a_scrolled_field_resolves_the_scrolled_byte() {
+        // (c) With the field scrolled, a click adds scroll_left back before
+        // resolving the byte, so a click near the visible left edge lands on the
+        // character actually painted there — NOT the head character.
+        let mut runtime = focused_scroll_field();
+        for _ in 0..20 {
+            runtime.handle_key(char_press('x'));
+        }
+        let scroll_left = scroll_left_of(&runtime);
+        assert!(scroll_left > 0.0, "scrolled while typing");
+
+        let field = scroll_field_node(&runtime);
+        let field_left = runtime.layout_boxes().get(&field).unwrap().bounds.origin.x;
+        // Click 10px inside the visible box. Without the +scroll_left inverse this
+        // would resolve to byte ~1; with it, it lands well into the string.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, field_left + 10.0, 10.0));
+        let focus = runtime.editing_selection().unwrap().focus();
+        // The mock shaper advances each char by 9.6px; local_x = 10 + scroll_left.
+        let advance = 16.0_f32 * obscur_text::shaping::MockTextShaper::ADVANCE_RATIO;
+        let expected = ((10.0 + scroll_left) / advance).round() as usize;
+        assert_eq!(
+            focus, expected,
+            "click on a scrolled field resolves the scrolled byte (advance {advance}, scroll {scroll_left})",
+        );
+        assert!(focus > 1, "the resolved byte is not the head character: {focus}");
+    }
+
+    #[test]
+    fn a_fitting_value_never_scrolls() {
+        // (d) A value that fits the box keeps scroll_left == 0, so the paint and
+        // hit-test are byte-identical to the pre-scroll path.
+        let mut runtime = focused_scroll_field();
+        for c in "abc".chars() {
+            runtime.handle_key(char_press(c));
+        }
+        assert_eq!(runtime.editing_text(), Some("abc"));
+        assert_eq!(
+            scroll_left_of(&runtime),
+            0.0,
+            "a value narrower than the box never scrolls",
+        );
+        // The caret paints at the un-offset pen x (origin + 3·advance), unchanged.
+        let list = render_scroll_frame(&mut runtime);
+        let caret_x = painted_caret_x(&list).expect("a caret");
+        let run_left = first_run_origin_x(&list).expect("a run");
+        let advance = 16.0_f32 * obscur_text::shaping::MockTextShaper::ADVANCE_RATIO;
+        assert!(
+            (caret_x - (run_left + advance * 3.0)).abs() < 1e-3,
+            "caret at the un-scrolled pen x: {caret_x} vs {}",
+            run_left + advance * 3.0,
+        );
     }
 
     // ---- IME composition: preedit (shown, not committed) + commit (§5.12) -----
