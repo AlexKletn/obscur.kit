@@ -6,24 +6,6 @@ use crate::model::{AlignItems, Dimension, JustifyContent, LayoutBox, LayoutStyle
 
 use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 
-/// Clamps a main-axis size into the item's `[min, max]` range, resolving each
-/// bound against the container main extent (spec §4.6).
-///
-/// A [`Dimension::Auto`] bound is absent and imposes no limit; `max` is applied
-/// first, then `min`, so `min` wins on conflict (CSS `min-width` overrides
-/// `max-width`). The result is never negative. Both bounds default to `Auto`, so
-/// an item with neither set is returned unchanged.
-fn clamp_main(value: f32, min: Dimension, max: Dimension, container_main: f32) -> f32 {
-    let mut clamped = value;
-    if let Some(max_v) = max.resolve(container_main) {
-        clamped = clamped.min(max_v);
-    }
-    if let Some(min_v) = min.resolve(container_main) {
-        clamped = clamped.max(min_v);
-    }
-    clamped.max(0.0)
-}
-
 /// The item's main-axis min / max dimensions for the container's flow direction:
 /// `width` bounds along a row, `height` bounds along a column.
 fn main_bounds(style: &LayoutStyle, is_row: bool) -> (Dimension, Dimension) {
@@ -31,6 +13,58 @@ fn main_bounds(style: &LayoutStyle, is_row: bool) -> (Dimension, Dimension) {
         (style.min_width, style.max_width)
     } else {
         (style.min_height, style.max_height)
+    }
+}
+
+/// Clamps a main-axis size into a pre-resolved `[min_floor, max_val]` range
+/// (spec §4.6).
+///
+/// `min_floor` and `max_val` are the item's main-axis bounds already resolved to
+/// pixels against the container main extent (with `max_val` set to
+/// [`f32::INFINITY`] when the item has no `max`). It applies `max` first, then the
+/// `min` floor — so `min` wins on conflict, matching CSS `min-width` overriding
+/// `max-width` — and never returns a negative size. `min_floor` carries the §4.5
+/// content-based automatic minimum on the `auto` path and the explicit `min`
+/// otherwise, so an `auto` min with no content floor (`min_floor == 0`) and no
+/// `max` leaves the value unchanged.
+fn clamp_floor(value: f32, min_floor: f32, max_val: f32) -> f32 {
+    let mut clamped = value;
+    if max_val.is_finite() {
+        clamped = clamped.min(max_val);
+    }
+    clamped.max(min_floor).max(0.0)
+}
+
+/// The item's **content-based minimum main size** — its max-content size along the
+/// main axis, measured by laying the item out with an *unbounded* main axis and
+/// the container's cross extent (CSS Flexbox Level 1 §4.5 / §9.2,
+/// <https://drafts.csswg.org/css-flexbox-1/#min-size-auto>).
+///
+/// For content whose main-axis extent does not reflow (a column's stacked block
+/// height, an atomic / single-word inline) this equals the min-content size, so it
+/// is the exact automatic minimum. For reflowable content (a multi-word inline in
+/// a row) it is an upper bound of the true min-content — a deliberately safe
+/// over-approximation, since the engine cannot measure a text leaf's min-content
+/// through the constraint-clamping measure port.
+///
+/// The result may be [`f32::INFINITY`] for a fill-available container whose
+/// max-content is unbounded; the caller resolves that to a finite floor.
+fn content_max_main(
+    measurer: &mut dyn ChildMeasurer,
+    index: usize,
+    is_row: bool,
+    container_cross: f32,
+) -> f32 {
+    let max = if is_row {
+        Size::new(f32::INFINITY, container_cross)
+    } else {
+        Size::new(container_cross, f32::INFINITY)
+    };
+    let measured = measurer.measure_child(index, BoxConstraints { min: Size::ZERO, max });
+    if is_row {
+        measured.width
+    } else {
+        measured.height
     }
 }
 
@@ -211,6 +245,14 @@ impl LayoutAlgorithm for FlexLayout {
         // clamped hypothetical drives line-breaking and the freeze-inflexible test.
         let mut flex_base = Vec::with_capacity(count);
         let mut base_main = Vec::with_capacity(count);
+        // Per-item main-axis min floor / max ceiling, resolved to pixels. `main_max`
+        // is `f32::INFINITY` when the item has no `max`. `main_min` carries the
+        // §4.5 content-based automatic minimum when the item's `min` is `auto` /
+        // unset, and the explicit `min` otherwise. Both the `base_main` clamp below
+        // and the §9.7 freeze loop consume these so the automatic minimum acts as
+        // the true shrink floor.
+        let mut main_min = Vec::with_capacity(count);
+        let mut main_max = Vec::with_capacity(count);
         for (index, child) in children.iter().enumerate() {
             let main_dim = if is_row {
                 child.style.width
@@ -248,8 +290,49 @@ impl LayoutAlgorithm for FlexLayout {
                 );
             let (min_main, max_main) = main_bounds(&child.style, is_row);
             let fb = base.max(0.0);
+            let max_val = max_main.resolve(container_main).unwrap_or(f32::INFINITY);
+            // §4.5 automatic minimum size: an `auto` (or unset) main-axis `min` does
+            // not floor at 0 — its used value is the item's content-based minimum
+            // size. An EXPLICIT `min` is used verbatim (byte-identical to before);
+            // the extra content measure and this whole block run ONLY on the `auto`
+            // path, so the common definite-min case is unchanged.
+            let min_floor = min_main.resolve(container_main).unwrap_or_else(|| {
+                let content = content_max_main(&mut *measurer, index, is_row, container_cross);
+                let has_definite = child
+                    .style
+                    .flex_basis
+                    .resolve(container_main)
+                    .or_else(|| main_dim.resolve(container_main))
+                    .is_some();
+                let floor = if !content.is_finite() {
+                    // Fill-available container (unbounded max-content): the true
+                    // min-content is not measurable through the constraint-clamping
+                    // port, so impose NO automatic floor. The item stays shrinkable
+                    // exactly as before §4.5 (byte-identical), which is what keeps a
+                    // shrink-to-fit row of such containers from locking at its fill
+                    // width.
+                    0.0
+                } else if is_row || has_definite {
+                    // Inline (row) main axis can reflow, so max-content is only an
+                    // UPPER bound of min-content; and a definite preferred size caps
+                    // the automatic minimum (§4.5). Capping by the flex base means the
+                    // floor never inflates the item beyond its preferred size — so
+                    // `base_main` stays byte-identical here.
+                    content.min(fb)
+                } else {
+                    // Block (column) main axis with an auto basis: the block does not
+                    // reflow, so max-content == min-content and the content extent is
+                    // the exact automatic minimum — even when it exceeds a flex base
+                    // that was clamped to an undersized container (the card-collapse
+                    // fix, §4.5).
+                    content
+                };
+                floor.min(max_val).max(0.0)
+            });
             flex_base.push(fb);
-            base_main.push(clamp_main(fb, min_main, max_main, container_main));
+            base_main.push(clamp_floor(fb, min_floor, max_val));
+            main_min.push(min_floor);
+            main_max.push(max_val);
         }
 
         // Steps 3–8: break the items into flex lines, then size / justify /
@@ -280,6 +363,8 @@ impl LayoutAlgorithm for FlexLayout {
                 line: &line,
                 base_main: &base_main,
                 flex_base: &flex_base,
+                main_min: &main_min,
+                main_max: &main_max,
                 children,
                 style,
                 is_row,
@@ -365,6 +450,8 @@ impl LayoutAlgorithm for FlexLayout {
                 line,
                 base_main: &base_main,
                 flex_base: &flex_base,
+                main_min: &main_min,
+                main_max: &main_max,
                 children,
                 style,
                 is_row,
@@ -422,6 +509,12 @@ struct LineArgs<'a, 'm> {
     /// Unclamped flex base size per item, indexed by the global item index. This
     /// is what grow/shrink distribute from in the §9.7 freeze loop.
     flex_base: &'a [f32],
+    /// Pre-resolved main-axis min floor / max ceiling per item, indexed by the
+    /// global item index (`main_max` is `f32::INFINITY` when the item has no
+    /// `max`). `main_min` folds in the §4.5 content-based automatic minimum on the
+    /// `auto` path, so the freeze loop shrinks items no further than their content.
+    main_min: &'a [f32],
+    main_max: &'a [f32],
     /// The flex items.
     children: &'a [LayoutChild],
     /// The flex container's style.
@@ -488,6 +581,8 @@ fn place_line(args: LineArgs) -> PlacedLine {
         line,
         base_main,
         flex_base,
+        main_min,
+        main_max,
         children,
         style,
         is_row,
@@ -520,8 +615,9 @@ fn place_line(args: LineArgs) -> PlacedLine {
         line,
         flex_base,
         base_main,
+        main_min,
+        main_max,
         children,
-        is_row,
         line_main,
         gap_span + sum_margin_main,
     );
@@ -701,14 +797,20 @@ fn place_line(args: LineArgs) -> PlacedLine {
 /// subtracted from the container inner main size once, since those extents never
 /// flex. `flex_base` is each item's unclamped flex base size (what grow/shrink
 /// distribute from) and `hypothetical` is that base clamped to the item's content
-/// min/max (the freeze-inflexible reference). Both are indexed by the global item
-/// index; the returned vector is indexed by position within `line`.
+/// min/max (the freeze-inflexible reference). `main_min` / `main_max` are the
+/// per-item pre-resolved main-axis bounds (the §4.5 automatic minimum folded into
+/// `main_min`). All are indexed by the global item index; the returned vector is
+/// indexed by position within `line`.
+// These are cohesive positional inputs to one internal freeze loop; grouping them
+// into a struct would not aid clarity.
+#[allow(clippy::too_many_arguments)]
 fn resolve_flexible_lengths(
     line: &[usize],
     flex_base: &[f32],
     hypothetical: &[f32],
+    main_min: &[f32],
+    main_max: &[f32],
     children: &[LayoutChild],
-    is_row: bool,
     line_main: f32,
     non_flex_main: f32,
 ) -> Vec<f32> {
@@ -825,9 +927,9 @@ fn resolve_flexible_lengths(
             if frozen[pos] {
                 continue;
             }
-            let (min_main, max_main) = main_bounds(&children[line[pos]].style, is_row);
+            let i = line[pos];
             let unclamped = target[pos];
-            let clamped = clamp_main(unclamped, min_main, max_main, line_main);
+            let clamped = clamp_floor(unclamped, main_min[i], main_max[i]);
             violations[pos] = clamped - unclamped;
             total_violation += violations[pos];
             target[pos] = clamped;
@@ -1707,6 +1809,132 @@ mod tests {
         approx(b[0].origin().x, 0.0);
         approx(b[1].origin().x, 100.0);
         approx(b[2].origin().x, 200.0);
+    }
+
+    /// A default flex item (auto flex-basis, `flex-shrink: 1`, `min: auto`) whose
+    /// content size is supplied by the measurer.
+    fn auto_item(raw: u64) -> LayoutChild {
+        LayoutChild::new(
+            NodeId::from_raw(raw),
+            LayoutStyle {
+                display: LayoutDisplay::Flex,
+                ..LayoutStyle::default()
+            },
+        )
+    }
+
+    /// §4.5 automatic minimum size: a flex COLUMN of auto-basis items in a
+    /// container SHORTER than their stacked content keeps each item at its
+    /// content-based minimum (its measured content height) instead of shrinking it
+    /// toward `0`; the content overflows the container. Without §4.5 the default
+    /// `flex-shrink: 1` items would collapse below their content.
+    #[test]
+    fn column_auto_min_keeps_content_size_under_shrink() {
+        let style = container(
+            FlexDirection::Column,
+            JustifyContent::FlexStart,
+            AlignItems::FlexStart,
+            0.0,
+        );
+        let children = [auto_item(1), auto_item(2)];
+        // Each item's content is 60 × 40; the container main (height) is only 50,
+        // shorter than the stacked 40 + 40 = 80.
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(60.0, 40.0), Size::new(60.0, 40.0)]);
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(100.0, 50.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // Each item keeps its 40px content height (floored by §4.5), NOT shrunk.
+        approx(b[0].size().height, 40.0);
+        approx(b[1].size().height, 40.0);
+        // The second item sits below the first — the content overflows the 50px box.
+        approx(b[0].origin().y, 0.0);
+        approx(b[1].origin().y, 40.0);
+    }
+
+    /// An EXPLICIT `min-height: 0` opts out of §4.5: the automatic minimum applies
+    /// only to an `auto`/unset main-axis min. With `min-height: 0` the items shrink
+    /// below their content and share the undersized container exactly (25 each),
+    /// proving the auto-min path is gated on `auto` and does not affect an explicit
+    /// min.
+    #[test]
+    fn explicit_min_zero_still_shrinks_below_content() {
+        let style = container(
+            FlexDirection::Column,
+            JustifyContent::FlexStart,
+            AlignItems::FlexStart,
+            0.0,
+        );
+        let mk = |raw| {
+            LayoutChild::new(
+                NodeId::from_raw(raw),
+                LayoutStyle {
+                    display: LayoutDisplay::Flex,
+                    min_height: Dimension::Px(0.0),
+                    ..LayoutStyle::default()
+                },
+            )
+        };
+        let children = [mk(1), mk(2)];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(60.0, 40.0), Size::new(60.0, 40.0)]);
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(100.0, 50.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // base 40 each, overflow 30 shared evenly → 25 each; the line exactly fills.
+        approx(b[0].size().height, 25.0);
+        approx(b[1].size().height, 25.0);
+        approx(b[1].origin().y, 25.0);
+    }
+
+    /// §9.2 flex base = max-content for an auto-basis item, protected by §4.5: a
+    /// bare max-content item beside a fill-available sibling in a row where the two
+    /// together overflow keeps its FULL max-content width instead of being shrunk
+    /// below its content (the select-header "One" → "On" clip). The fill sibling
+    /// absorbs the shrink; the content item does not clip.
+    #[test]
+    fn auto_basis_item_keeps_max_content_beside_fill_sibling() {
+        let style = container(
+            FlexDirection::Row,
+            JustifyContent::SpaceBetween,
+            AlignItems::Center,
+            10.0,
+        );
+        let children = [auto_item(1), auto_item(2)];
+        // Item 0 is a 28-wide content item (the label); item 1 has an unbounded
+        // natural width, so under a bounded row it FILLS the row and reports an
+        // unbounded max-content (a flex/flow container with auto width — the
+        // disclosure arrow), creating shrink pressure just like `.select-header`.
+        let mut measurer = FixedChildMeasurer::new(vec![
+            Size::new(28.0, 14.0),
+            Size::new(f32::INFINITY, 14.0),
+        ]);
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(200.0, 40.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // The content item keeps its full 28px max-content width — no clip. The fill
+        // sibling (no automatic floor, since its max-content is unbounded) absorbs
+        // ALL the shrink, so the line fits the 200px row exactly instead of
+        // overflowing: 28 + gap 10 + sibling 162 = 200.
+        approx(b[0].size().width, 28.0);
+        approx(b[0].origin().x, 0.0);
+        approx(b[1].size().width, 162.0);
+        assert!(
+            b[1].size().width < 200.0,
+            "the fill sibling shrinks to make room for the content item (no overflow)",
+        );
     }
 
     #[test]

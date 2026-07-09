@@ -205,10 +205,10 @@ pub fn stylesheet() -> &'static str {
        background-image: \
          repeating-linear-gradient(#e2e0d9 0 1px, transparent 1px 24px), \
          repeating-linear-gradient(90deg, #e2e0d9 0 1px, transparent 1px 24px); }\n\
-.wf-col { display: flex; flex-direction: column; gap: 24px; width: 1120px; flex-shrink: 0; }\n\
+.wf-col { display: flex; flex-direction: column; gap: 24px; width: 1120px; }\n\
 \
 /* ---- Masthead card ---- */\n\
-.wf-masthead { display: flex; flex-direction: column; gap: 16px; padding: 32px 34px; flex-shrink: 0; \
+.wf-masthead { display: flex; flex-direction: column; gap: 16px; padding: 32px 34px; \
     background-color: #faf9f6; border: 1.5px solid #2b2a27; border-radius: 4px; }\n\
 .wf-mast-row { display: flex; flex-direction: row; align-items: flex-end; gap: 16px; }\n\
 .wf-mast-title { height: 38px; color: #2b2a27; font-size: 30px; font-weight: 700; }\n\
@@ -230,7 +230,7 @@ pub fn stylesheet() -> &'static str {
 .wf-sw-disabled { border: 1.5px dashed #b7b5ad; background-color: #f2f0ea; }\n\
 \
 /* ---- Section card + header ---- */\n\
-.wf-card { display: flex; flex-direction: column; gap: 24px; padding: 28px 30px 32px; flex-shrink: 0; \
+.wf-card { display: flex; flex-direction: column; gap: 24px; padding: 28px 30px 32px; \
     background-color: #faf9f6; border: 1.5px solid #2b2a27; border-radius: 4px; }\n\
 .wf-head { display: flex; flex-direction: row; align-items: flex-end; gap: 14px; \
     padding-bottom: 12px; border-bottom: 1.5px solid #2b2a27; }\n\
