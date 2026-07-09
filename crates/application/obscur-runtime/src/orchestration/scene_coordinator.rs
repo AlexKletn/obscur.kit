@@ -3098,11 +3098,22 @@ fn scene_color_from(c: StyleColor) -> Color {
 /// paint the caret/selection there. The walk is bounded by the tree size, so a
 /// malformed (cyclic) parent chain terminates deterministically instead of
 /// looping.
+///
+/// The `.placeholder` overlay is **excluded**: it is the CSS `::placeholder`
+/// pseudo-element (a non-editable hint shown while `:placeholder-shown` holds),
+/// not the field's editable text, so text inside a `.placeholder` subtree is never
+/// treated as the editing field's text — the session never overwrites it with the
+/// typed value (no `placeholder + typed`) and paints no caret into it.
 fn is_editing_text_node(tree: &RetainedTree, node: NodeId, field: NodeId) -> bool {
     let mut current = node;
     // At most `len` hops reach the root from any node in a well-formed tree; the
     // inclusive bound tolerates a self-parent without looping.
     for _ in 0..=tree.len() {
+        if let Some(n) = tree.get(current)
+            && n.attributes().has_class("placeholder")
+        {
+            return false;
+        }
         if current == field {
             return true;
         }
@@ -6980,5 +6991,46 @@ mod tests {
         // Exactly one caret, over the editing node only.
         assert_eq!(caret_fills(&list).len(), 1, "only the editing field gets a caret");
         assert_eq!(text_runs(&list).len(), 2, "both text nodes still render");
+    }
+
+    /// Sets the reserved `class` list on a retained element, the way the
+    /// reconciler would from a `CLASS` prop.
+    fn set_class(tree: &mut RetainedTree, node: NodeId, class: &str) {
+        use obscur_view::view::{StyleAttributes, ViewProperty, ViewValue, CLASS};
+        let attrs =
+            StyleAttributes::extract(&[ViewProperty::new(CLASS, ViewValue::Text(class.into()))]);
+        if let Some(n) = tree.get_mut(node) {
+            n.set_attributes(attrs);
+        }
+    }
+
+    #[test]
+    fn placeholder_overlay_text_is_not_the_fields_editable_text() {
+        // The `.placeholder` overlay (CSS `::placeholder`) is a non-editable hint,
+        // not the field's editable text: `is_editing_text_node` must return false
+        // for text inside a `.placeholder` subtree even though it descends from the
+        // editing field, so the compose override never overwrites it with the typed
+        // value nor paints a caret into it. A bare (non-placeholder) value text of
+        // the SAME field still resolves as editable.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let field = add_child(&mut tree, root, 501);
+        // The `.placeholder` overlay element + its (skipped) hint text.
+        let overlay = add_child(&mut tree, field, 502);
+        set_class(&mut tree, overlay, "placeholder");
+        let hint = add_text_child(&mut tree, overlay, "Type here…");
+        // A separate, ordinary value text of the same field.
+        let value = add_text_child(&mut tree, field, "x");
+
+        assert!(
+            !is_editing_text_node(&tree, hint, field),
+            "placeholder hint text must NOT be treated as the field's editable text"
+        );
+        assert!(
+            is_editing_text_node(&tree, value, field),
+            "the field's ordinary value text is still editable"
+        );
+        assert!(is_editing_text_node(&tree, field, field), "the field is itself editable");
     }
 }

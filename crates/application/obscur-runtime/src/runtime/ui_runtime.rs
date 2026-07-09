@@ -2083,10 +2083,19 @@ impl UiRuntime {
     /// Appends the text content of `node` and its descendants into `out`
     /// (depth-first, in child order), bounded by the tree so a malformed subtree
     /// terminates.
+    ///
+    /// The `.placeholder` overlay is **skipped** in its entirety: it is a
+    /// non-editable rendering layer (the CSS `::placeholder` pseudo-element, shown
+    /// while `:placeholder-shown` holds), *not* the field's value, so it must never
+    /// be seeded into the editing buffer. An empty placeholdered field therefore
+    /// collects no text — it focuses to an empty buffer, caret at 0.
     fn collect_text_into(&self, node: NodeId, out: &mut String) {
         let Some(n) = self.tree.get(node) else {
             return;
         };
+        if n.attributes().has_class("placeholder") {
+            return;
+        }
         if let Some(text) = n.kind().text() {
             out.push_str(text);
         }
@@ -5551,6 +5560,32 @@ mod tests {
         KeyEvent::press(PhysicalKey::KeyA, Some(LogicalKey::character(c)))
     }
 
+    /// An input-like view whose EMPTY editable shows its placeholder inside a
+    /// marked `.placeholder` overlay child (mirroring the `Input` widget), rather
+    /// than as an editable text value — so the runtime must SKIP the placeholder
+    /// when seeding the editing buffer (empty focus → empty buffer).
+    fn placeholder_input_view() -> View {
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(500))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+                .with_children(ViewFragment::from_nodes(vec![
+                    ViewNode::element(ComponentId::from_raw(501))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("b".into())))
+                        .with_event(ViewEventBinding::new(EVENT_INPUT, CMD_INPUT))
+                        .with_children(ViewFragment::from_nodes(vec![
+                            ViewNode::element(ComponentId::from_raw(502))
+                                .with_prop(ViewProperty::new(
+                                    CLASS,
+                                    ViewValue::Text("placeholder".into()),
+                                ))
+                                .with_children(ViewFragment::from_nodes(vec![ViewNode::text(
+                                    "Type here…".to_string(),
+                                )])),
+                        ])),
+                ])),
+        ]))
+    }
+
     #[test]
     fn typing_into_a_focused_editable_edits_app_state_and_re_renders() {
         // (b) End-to-end: typing 'h' then 'i' into a focused `on-input` editable
@@ -5603,6 +5638,43 @@ mod tests {
         assert_eq!(&*text.borrow(), "h", "Backspace deleted the last char");
         runtime.run_due_frame_reactive().expect("re-render frame due");
         assert_eq!(tree_text(&runtime), "h", "the rebuilt view shows the deletion");
+    }
+
+    #[test]
+    fn focusing_an_empty_placeholdered_field_seeds_an_empty_buffer_then_typing_yields_just_the_typed_text()
+     {
+        // Placeholder is a non-editable overlay (CSS `::placeholder` /
+        // `:placeholder-shown`), NOT the field value. Focusing an empty
+        // placeholdered field must seed an EMPTY editing buffer (caret at 0) — the
+        // `.placeholder` hint text must never leak in — and typing 'x' must yield
+        // exactly "x", never "Type here…x".
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let mirror = Rc::new(RefCell::new(String::new()));
+        {
+            let s = mirror.clone();
+            runtime.on_text_input(CMD_INPUT, move |resulting| {
+                *s.borrow_mut() = resulting.to_owned();
+            });
+        }
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&placeholder_input_view(), sheets);
+
+        // Focus the editable by pressing inside it; the runtime auto-seeds.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        assert!(runtime.focused().is_some(), "the press focused the editable");
+        assert_eq!(
+            runtime.editing_text(),
+            Some(""),
+            "an empty placeholdered field seeds an EMPTY buffer, not the placeholder text"
+        );
+        let sel = runtime.editing_selection().expect("session active");
+        assert!(sel.is_collapsed());
+        assert_eq!(sel.focus(), 0, "caret seeded at offset 0 in the empty field");
+
+        runtime.handle_key(char_press('x'));
+        assert_eq!(runtime.editing_text(), Some("x"), "typing yields exactly the typed text");
+        assert_eq!(&*mirror.borrow(), "x", "on-input delivered exactly \"x\", not the placeholder");
     }
 
     #[test]

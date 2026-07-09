@@ -122,6 +122,14 @@ input:disabled, textarea:disabled {\
   background: #f2f0ea;\
   color: #b7b5ad;\
 }\
+/* The placeholder overlay (CSS `::placeholder`, Pseudo-Elements L4 §4.5, shown\
+   while `:placeholder-shown` holds — an empty value): a distinct, non-editable\
+   sub-part the `Input` widget emits (`.placeholder`) while the field is empty, in\
+   the wireframe FAINT ink `#9b998f` so it reads as a muted hint, not a real value.\
+   The runtime skips this subtree when seeding / overriding the editable text. */\
+.placeholder {\
+  color: #9b998f;\
+}\
 /* checkbox / radio: the control element lays the indicator + label out in a\
    row and carries the text-level defaults; the boxed/dot indicator itself is a\
    sub-part the widget emits (`.checkbox-box` / `.radio-dot`) and this sheet\
@@ -360,6 +368,37 @@ mod tests {
             compiled.errors.is_empty(),
             "UA CSS has syntax errors: {:?}",
             compiled.errors
+        );
+    }
+
+    #[test]
+    fn placeholder_class_is_muted_with_the_wireframe_faint_ink() {
+        // The `.placeholder` overlay (CSS `::placeholder`) is styled from the UA
+        // layer — like every other control default — in the wireframe FAINT ink
+        // `#9b998f`, so an empty field's placeholder reads as a muted hint distinct
+        // from a real value's `#2b2a27` ink (and the color is NOT hard-coded in the
+        // coordinator).
+        let sheet = ua_stylesheet();
+        let color = sheet
+            .rules()
+            .iter()
+            .filter(|rule| {
+                rule.selectors().selectors().iter().any(|complex| {
+                    complex.subject().simples() == [SimpleSelector::Class("placeholder".into())]
+                })
+            })
+            .flat_map(|rule| rule.block())
+            .find(|d| d.property() == PropertyId::Color)
+            .map(|d| d.value().clone());
+        assert_eq!(
+            color,
+            Some(PropertyValue::Color(StyleColor::rgba(
+                0x9b as f32 / 255.0,
+                0x99 as f32 / 255.0,
+                0x8f as f32 / 255.0,
+                1.0
+            ))),
+            "the UA sheet mutes `.placeholder` to the wireframe faint ink #9b998f"
         );
     }
 
