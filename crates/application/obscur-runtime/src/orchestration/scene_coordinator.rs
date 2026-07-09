@@ -1131,13 +1131,12 @@ impl SceneCoordinator {
                     // identically. Both are applied only to IDLE display text:
                     // while actively editing, the caret/selection use live buffer
                     // byte offsets, so the shaped string is left untouched (exact
-                    // offsets) and the field is laid out as `pre-wrap` — a
-                    // `<textarea>`'s mode — so its literal newlines still break.
-                    let white_space = if active.is_some() {
-                        WhiteSpace::PreWrap
-                    } else {
-                        white_space_for(computed.get(&node))
-                    };
+                    // offsets). The field is wrapped by its OWN `white-space` in both
+                    // states, so a single-line `input` (`nowrap`, per the UA sheet)
+                    // stays one line while typing — it does NOT reflow like a
+                    // `<textarea>` — while a `pre-wrap` field keeps its literal
+                    // newlines and wraps at the box width.
+                    let white_space = white_space_for(computed.get(&node));
                     let transformed: Cow<'_, str> = if active.is_some() {
                         Cow::Borrowed(content)
                     } else {

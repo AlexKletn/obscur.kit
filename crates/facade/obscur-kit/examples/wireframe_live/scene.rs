@@ -247,8 +247,8 @@ pub fn stylesheet() -> &'static str {
    definite width; the \"textarea\" is a live `Input` (so it inherits the UA `input`\n\
    nowrap) and must MULTI-LINE, so it resets `white-space: normal` and wraps inside a\n\
    definite box. ---- */\n\
-.wf-field { width: 220px; }\n\
-.wf-area { white-space: normal; width: 360px; height: 96px; }\n\
+.wf-field { width: 220px; overflow: hidden; }\n\
+.wf-area { white-space: pre-wrap; width: 360px; height: 96px; overflow: hidden; }\n\
 .wf-select { width: 200px; }\n\
 \
 /* ---- Footer ---- */\n\
