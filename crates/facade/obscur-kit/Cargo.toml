@@ -482,3 +482,23 @@ required-features = [
 [[example]]
 name = "controls_window"
 required-features = ["full"]
+
+# The FINAL interactive Wireframe-Kit demo, headless CPU proof. Boots the shared
+# `wireframe_live` scene with the kit's UA DEFAULT stylesheet installed (the only
+# thing that styles the BARE controls), drives every interaction programmatically
+# through the real input path, asserts the states, and writes two stitched panels
+# (idle | interacted) to target/wireframe_live_proof.png. The demo's own sheet is
+# LAYOUT CHROME ONLY, so the UA default is the whole source of the control look.
+[[example]]
+name = "wireframe_live_headless"
+required-features = ["render-cpu", "text-harfrust", "text-unicode"]
+
+# The FINAL interactive Wireframe-Kit demo, live windowed Vello driver. Renders the
+# same shared scene through winit + Vello into an on-screen window; installs the UA
+# default sheet so the bare controls show the wireframe look, and wires every
+# interactive control (button, field, textarea, select, checkbox incl. tri-state,
+# radio group, text link) plus a disabled variant. Needs a display + GPU + the text
+# stack, so it is gated on the full backend set.
+[[example]]
+name = "wireframe_live_window"
+required-features = ["full"]
