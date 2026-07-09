@@ -201,6 +201,7 @@ pub fn stylesheet() -> &'static str {
 /* Graph-paper page: flat #eceae5 plus two crossing 1px grid layers at 24px (a real\n\
    grid on Vello; flat first-stop on the CPU renderer, by policy). */\n\
 #app { display: flex; flex-direction: column; align-items: center; width: 100%; \
+       height: 100%; overflow: auto; \
        padding: 48px 40px 64px; background-color: #eceae5; \
        background-image: \
          repeating-linear-gradient(#e2e0d9 0 1px, transparent 1px 24px), \

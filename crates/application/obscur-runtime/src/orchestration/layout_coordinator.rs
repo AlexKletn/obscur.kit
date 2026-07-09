@@ -28,6 +28,7 @@ use obscur_text::shaping::{
 };
 use obscur_tree::tree::RetainedTree;
 
+use super::scroll::overflow_scrolls;
 use super::{
     alignment_for, attributes_for, direction_for, families_for, grid_templates_from,
     letter_spacing_for, line_height_for, overflow_for, process_text, resolve_named_grid_areas,
@@ -1334,6 +1335,28 @@ fn arrange(
     // indices map one-to-one to the algorithm's `measure_child(index)`.
     let (children, out_of_flow) = partition_children(tree, styles, node);
 
+    // Scroll container (CSS Overflow Module Level 3 §scroll-container): an
+    // `overflow: scroll`/`auto` box with a **definite (finitely-constrained) block
+    // size** clips and scrolls its content, so its content lays out at its NATURAL
+    // block size and is allowed to overflow the fixed box — the scrollport. The
+    // arrange pass constrains every in-flow node to its measured size (a tight
+    // block axis), so `constraints.max.height` here IS the scrollport height. Relax
+    // the block-axis max to unbounded for CHILD measurement (so the algorithm lays
+    // children out at their natural height instead of clamping them to the box),
+    // then pin the node's OWN box back to that scrollport height. A scroll
+    // container under an unbounded parent (infinite max height) has no definite
+    // size — it grows to fit — so it is left unrelaxed. Only `overflow: scroll`/
+    // `auto` nodes are touched; every other node is byte-for-byte identical.
+    let scroll_relaxed = overflow_scrolls(computed, node) && constraints.max.height.is_finite();
+    let child_constraints = if scroll_relaxed {
+        BoxConstraints {
+            min: Size::new(constraints.min.width, 0.0),
+            max: Size::new(constraints.max.width, f32::INFINITY),
+        }
+    } else {
+        constraints
+    };
+
     // Measurer is pure: it does not borrow `boxes`, so `boxes` is free after.
     let out = {
         let mut measurer = RecMeasurer {
@@ -1346,11 +1369,18 @@ fn arrange(
             hyphenator,
             depth: depth - 1,
         };
-        algorithm.layout(&style, &children, constraints, &mut measurer)
+        algorithm.layout(&style, &children, child_constraints, &mut measurer)
     };
 
-    // Now safe to write this node's absolute box.
-    let border_box = Rect::new(origin, out.size());
+    // Now safe to write this node's absolute box. A relaxed scroll container keeps
+    // its scrollport height (the tight block constraint) while its content
+    // overflows; every other node uses the algorithm's own size verbatim.
+    let node_size = if scroll_relaxed {
+        Size::new(out.size().width, constraints.max.height)
+    } else {
+        out.size()
+    };
+    let border_box = Rect::new(origin, node_size);
     boxes.insert(node, LayoutBox::new(border_box));
 
     // The containing block this node establishes for its positioned descendants:

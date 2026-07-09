@@ -59,6 +59,41 @@ const PREEDIT_UNDERLINE_THICKNESS: f32 = 1.0;
 /// hook to override this yet; it is a documented fixed default.
 const SELECTION_COLOR: Color = Color::rgba(0.20, 0.45, 0.90, 0.35);
 
+/// The width, in logical pixels, of a scroll container's vertical scrollbar
+/// (track and thumb) painted in the right gutter of the scrollport.
+const SCROLLBAR_WIDTH: f32 = 8.0;
+
+/// The smallest a scrollbar thumb is allowed to shrink to (logical px), so a very
+/// tall content still leaves a grabbable-sized thumb.
+const SCROLLBAR_MIN_THUMB: f32 = 16.0;
+
+/// The scrollbar track color: a faint translucent wash so it reads as a gutter
+/// without dominating. A host has no hook to override this yet (a documented
+/// fixed default, like the selection highlight).
+const SCROLLBAR_TRACK_COLOR: Color = Color::rgba(0.0, 0.0, 0.0, 0.06);
+
+/// The scrollbar thumb color: a darker translucent grey over the track.
+const SCROLLBAR_THUMB_COLOR: Color = Color::rgba(0.0, 0.0, 0.0, 0.35);
+
+/// The live scroll state a scroll container is painted with (CSS Overflow 3
+/// §scroll-container): its current vertical scroll position and the scrollable
+/// content height that sizes the scrollbar thumb.
+///
+/// The runtime owns the authoritative per-node scroll position + content height
+/// (see [`scroll`](super::scroll)); it hands a map of these to the coordinator so
+/// composition stays a **pure** function of its inputs. A node **absent** from
+/// that map is not a scroll container (or does not overflow), so no scroll
+/// transform and no scrollbar are emitted — byte-for-byte identical to before
+/// scroll containers existed (the regression guard).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScrollPaint {
+    /// The current vertical scroll position (logical px), already clamped by the
+    /// runtime to `0 ..= content_height − scrollport_height`.
+    pub scroll_top: f32,
+    /// The scrollable content height (logical px), `> scrollport_height`.
+    pub content_height: f32,
+}
+
 /// Default font size (in pixels) used to emit text runs.
 ///
 /// A text node with no computed `font-size` (or one that is not an absolute
@@ -616,6 +651,36 @@ impl SceneCoordinator {
         editing: Option<EditingView<'_>>,
         images: &HashMap<Box<str>, SceneImage>,
     ) -> DisplayList {
+        // No scroll containers: byte-identical to before per-element scroll existed.
+        self.compose_with_images_scrolled(tree, computed, boxes, editing, images, &HashMap::new())
+    }
+
+    /// Composes like [`compose_with_images`](Self::compose_with_images), additionally
+    /// applying each scroll container's live scroll offset and painting its
+    /// scrollbar (CSS Overflow Module Level 3 §scroll-container, §scrollport).
+    ///
+    /// `scroll` maps a scroll-container [`NodeId`] to its
+    /// [`ScrollPaint`] (current `scroll_top` + scrollable `content_height`). For a
+    /// node present in the map the coordinator brackets its descendants — inside
+    /// the node's own `overflow` clip and outside the node's own paint — with a
+    /// `PushTransform(translate(0, −scroll_top))`, so the content scrolls within
+    /// the (clipped) scrollport while the container's own background/border stay
+    /// put; and paints a vertical scrollbar (track + thumb) on the right, on top of
+    /// and unaffected by the scroll. A node **absent** from the map contributes
+    /// neither, so an **empty** map reproduces
+    /// [`compose_with_images`](Self::compose_with_images) byte-for-byte. The scroll
+    /// transform is elided at `scroll_top == 0` (it reduces to the identity), so an
+    /// unscrolled container differs from the pre-scroll list only by its scrollbar.
+    #[must_use]
+    pub fn compose_with_images_scrolled(
+        &self,
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+        boxes: &LayoutBoxes,
+        editing: Option<EditingView<'_>>,
+        images: &HashMap<Box<str>, SceneImage>,
+        scroll: &HashMap<NodeId, ScrollPaint>,
+    ) -> DisplayList {
         let Some(root) = tree.root() else {
             return DisplayListBuilder::new().build();
         };
@@ -693,6 +758,19 @@ impl SceneCoordinator {
         // the node's whole subtree). No outline records nothing — byte-for-byte
         // identical to before outlines existed.
         let mut outline_brackets: Vec<(NodeId, PaintCommand)> = Vec::new();
+        // A scroll container (a node present in `scroll` with a non-zero
+        // `scroll_top`) brackets its DESCENDANTS with a
+        // `PushTransform(translate(0, −scroll_top))` … `PopTransform` nested INSIDE
+        // its overflow clip and OUTSIDE its own paint, so the content scrolls within
+        // the clipped scrollport while the container's own background stays fixed
+        // (CSS Overflow 3 §scrollport). `(node, scroll_top)`; a zero offset records
+        // nothing (the identity), so an unscrolled container is byte-identical save
+        // for its scrollbar.
+        let mut scroll_brackets: Vec<(NodeId, f32)> = Vec::new();
+        // A scroll container's vertical scrollbar: `(node, scrollport, scroll_top,
+        // content_height)`. Painted as its own unit at the subtree exit index, on
+        // top of and outside the scrolled content (CSS Overflow 3 §scrollbars).
+        let mut scrollbar_units: Vec<(NodeId, Rect, f32, f32)> = Vec::new();
         while let Some((node, parent, depth)) = stack.pop() {
             if !visited.insert(node) {
                 // Already painted (cycle or shared child): do not revisit.
@@ -738,6 +816,23 @@ impl SceneCoordinator {
                     Clip::rect(layout_box.bounds)
                 };
                 clip_brackets.push((node, clip));
+            }
+
+            // A scroll container (present in `scroll`): record its descendant
+            // scroll transform (elided at `scroll_top == 0` — the identity) and its
+            // scrollbar. The `overflow` clip above already brackets the same
+            // subtree, so the scroll transform nests inside it (CSS Overflow 3
+            // §scrollport). Absent from the map ⇒ nothing recorded ⇒ byte-identical.
+            if let (Some(paint), Some(layout_box)) = (scroll.get(&node), boxes.get(&node)) {
+                if paint.scroll_top != 0.0 {
+                    scroll_brackets.push((node, paint.scroll_top));
+                }
+                scrollbar_units.push((
+                    node,
+                    layout_box.bounds,
+                    paint.scroll_top,
+                    paint.content_height,
+                ));
             }
 
             // A non-identity CSS 2D `transform` brackets this node's subtree. The
@@ -1264,6 +1359,8 @@ impl SceneCoordinator {
             || !opacity_brackets.is_empty()
             || !blur_brackets.is_empty()
             || !outline_brackets.is_empty()
+            || !scroll_brackets.is_empty()
+            || !scrollbar_units.is_empty()
         {
             let mut exit_index = enter_index.clone();
             for &node in preorder.iter().rev() {
@@ -1275,6 +1372,38 @@ impl SceneCoordinator {
                         *slot = (*slot).max(enter);
                     }
                 }
+            }
+            // Scroll transform brackets are emitted BEFORE the clip brackets so that
+            // when a scroll container carries both (it always does — `overflow:
+            // scroll/auto` clips too), the tie at the shared `(z, exit, MAX − depth)`
+            // pop key resolves — via the stable sort — with the scroll transform's
+            // `PopTransform` BEFORE the clip's `PopClip` (the scroll transform closes
+            // *inside* the clip). The `PushTransform` sorts AFTER the node's own
+            // paint (`SCROLL_TRANSFORM_PUSH_ORDER > PAINT_ORDER`) and after the clip
+            // push, so only the descendants (a strictly greater `tree_index`) are
+            // scrolled — the container's own background/border stay fixed in the
+            // scrollport (CSS Overflow 3 §scrollport).
+            for (node, scroll_top) in scroll_brackets {
+                let z = zmap.get(&node).copied().unwrap_or(0);
+                let layer = layermap.get(&node).copied().unwrap_or(PaintLayer::NonPositioned);
+                let enter = enter_index.get(&node).copied().unwrap_or(0);
+                let exit = exit_index.get(&node).copied().unwrap_or(enter);
+                let depth = depth_of.get(&node).copied().unwrap_or(0);
+                let affine = AffineTransform::translate(0.0, -scroll_top);
+                units.push(PaintUnit {
+                    z,
+                    layer,
+                    tree_index: enter,
+                    order: PaintUnit::SCROLL_TRANSFORM_PUSH_ORDER,
+                    commands: vec![PaintCommand::PushTransform(affine)],
+                });
+                units.push(PaintUnit {
+                    z,
+                    layer,
+                    tree_index: exit,
+                    order: PaintUnit::transform_pop_order(depth),
+                    commands: vec![PaintCommand::PopTransform],
+                });
             }
             for (node, clip) in clip_brackets {
                 let z = zmap.get(&node).copied().unwrap_or(0);
@@ -1411,6 +1540,33 @@ impl SceneCoordinator {
                     tree_index: exit,
                     order: PaintUnit::OUTLINE_ORDER,
                     commands: vec![command],
+                });
+            }
+            // A scroll container's vertical scrollbar (track + thumb), painted as its
+            // OWN unit at the subtree exit index with `SCROLLBAR_ORDER` (the ceiling)
+            // and emitted LAST, so it sorts after the scroll transform's
+            // `PopTransform` — it does NOT scroll — and after the overflow clip's
+            // `PopClip`, landing on top of the container's whole scrolled subtree
+            // (CSS Overflow 3 §scrollbars). Its rects lie within the scrollport, so
+            // being outside the clip is visually identical to being inside it.
+            for (node, scrollport, scroll_top, content_height) in scrollbar_units {
+                let commands = scrollbar_commands(scrollport, scroll_top, content_height);
+                if commands.is_empty() {
+                    continue;
+                }
+                let z = zmap.get(&node).copied().unwrap_or(0);
+                let layer = layermap.get(&node).copied().unwrap_or(PaintLayer::NonPositioned);
+                let exit = exit_index
+                    .get(&node)
+                    .copied()
+                    .or_else(|| enter_index.get(&node).copied())
+                    .unwrap_or(0);
+                units.push(PaintUnit {
+                    z,
+                    layer,
+                    tree_index: exit,
+                    order: PaintUnit::SCROLLBAR_ORDER,
+                    commands,
                 });
             }
         }
@@ -2648,6 +2804,44 @@ fn overflow_clips(computed: &ComputedStyles, node: NodeId) -> bool {
             .map(ComputedValue::value),
         Some(&PropertyValue::Keyword(sym)) if sym != layout_keyword::OVERFLOW_VISIBLE
     )
+}
+
+/// Builds the paint commands for a scroll container's vertical scrollbar — a
+/// track filling the right gutter of the `scrollport` plus a thumb whose length
+/// and position reflect `scroll_top` and `content_height` (CSS Overflow 3
+/// §scrollbars).
+///
+/// The thumb length is `scrollport_h · scrollport_h / content_height` (the
+/// visible fraction of the content), clamped to at least [`SCROLLBAR_MIN_THUMB`],
+/// and its top is `scroll_top / (content_height − scrollport_h)` of the free
+/// track. Returns an empty list when the geometry is degenerate (a non-positive
+/// scrollport, or content that does not exceed the scrollport), so a
+/// non-overflowing container paints no scrollbar. The thumb is **not**
+/// interactive-draggable in this pass — the wheel drives `scroll_top`; drag is a
+/// documented follow-up.
+#[must_use]
+fn scrollbar_commands(scrollport: Rect, scroll_top: f32, content_height: f32) -> Vec<PaintCommand> {
+    let track_h = scrollport.size.height;
+    let track_w = SCROLLBAR_WIDTH.min(scrollport.size.width);
+    let scroll_range = content_height - track_h;
+    if track_h <= 0.0 || track_w <= 0.0 || scroll_range <= 0.0 {
+        return Vec::new();
+    }
+    let track_x = scrollport.right() - track_w;
+    let track_y = scrollport.origin.y;
+    let track = Rect::new(Point::new(track_x, track_y), Size::new(track_w, track_h));
+
+    // Thumb length = the visible fraction of the content, floored to a grabbable
+    // minimum but never taller than the track.
+    let thumb_h = (track_h * track_h / content_height).clamp(SCROLLBAR_MIN_THUMB.min(track_h), track_h);
+    let free = (track_h - thumb_h).max(0.0);
+    let thumb_y = track_y + free * (scroll_top / scroll_range).clamp(0.0, 1.0);
+    let thumb = Rect::new(Point::new(track_x, thumb_y), Size::new(track_w, thumb_h));
+
+    let mut builder = DisplayListBuilder::new();
+    builder.fill_rect(track, Brush::solid(SCROLLBAR_TRACK_COLOR));
+    builder.fill_rect(thumb, Brush::solid(SCROLLBAR_THUMB_COLOR));
+    builder.build().commands().to_vec()
 }
 
 /// Whether a node's computed `border-*-style` (`id`) is the reserved `solid`
@@ -6044,6 +6238,88 @@ mod tests {
         let mut style = with_background(color);
         style.set(PropertyId::Overflow, ComputedValue::keyword(overflow));
         style
+    }
+
+    /// A `root (overflow:auto, 100×60)` with a child overflowing to 120 tall, and
+    /// the matching `(tree, computed, boxes)` — the fixture the scroll tests share.
+    fn scroll_fixture() -> (RetainedTree, ComputedStyles, LayoutBoxes, NodeId, NodeId) {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let child = add_child(&mut tree, root, 10);
+        let mut computed = ComputedStyles::new();
+        computed.insert(
+            root,
+            with_background_and_overflow(
+                StyleColor::rgba(1.0, 1.0, 1.0, 1.0),
+                layout_keyword::OVERFLOW_AUTO,
+            ),
+        );
+        computed.insert(child, with_background(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 100.0, 60.0));
+        boxes.insert(child, box_at(0.0, 0.0, 100.0, 120.0)); // content overflows (120 > 60)
+        (tree, computed, boxes, root, child)
+    }
+
+    #[test]
+    fn empty_scroll_map_is_byte_identical_to_compose() {
+        // Byte-identical guard: composing with an EMPTY scroll map reproduces
+        // `compose` command-for-command (no scroll transform, no scrollbar).
+        let (tree, computed, boxes, _root, _child) = scroll_fixture();
+        let coord = SceneCoordinator::new();
+        let plain = coord.compose(&tree, &computed, &boxes, None);
+        let empty = coord.compose_with_images_scrolled(
+            &tree,
+            &computed,
+            &boxes,
+            None,
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        assert_eq!(plain.commands(), empty.commands(), "empty scroll map ⇒ identical list");
+    }
+
+    #[test]
+    fn scroll_container_brackets_content_in_a_translate_inside_the_clip() {
+        // With a scroll entry the coordinator wraps the DESCENDANTS in a
+        // translate(0,-80) nested INSIDE the overflow clip, and paints a scrollbar
+        // (track + thumb) AFTER the clip closes (on top, unscrolled).
+        let (tree, computed, boxes, root, _child) = scroll_fixture();
+        let mut scroll = HashMap::new();
+        scroll.insert(root, ScrollPaint { scroll_top: 80.0, content_height: 120.0 });
+        let list = SceneCoordinator::new().compose_with_images_scrolled(
+            &tree,
+            &computed,
+            &boxes,
+            None,
+            &HashMap::new(),
+            &scroll,
+        );
+        let cmds = list.commands();
+        assert!(list.is_balanced(), "scroll + clip brackets stay balanced");
+
+        let clip_open = cmds.iter().position(|c| matches!(c, PaintCommand::PushClip(_))).unwrap();
+        let scroll_push = cmds
+            .iter()
+            .position(|c| matches!(c, PaintCommand::PushTransform(t) if (t.coeffs[5] + 80.0).abs() < 0.01))
+            .expect("a translate(0,-80) scroll transform");
+        let scroll_pop = cmds
+            .iter()
+            .rposition(|c| matches!(c, PaintCommand::PopTransform))
+            .unwrap();
+        let clip_close = cmds.iter().rposition(|c| matches!(c, PaintCommand::PopClip)).unwrap();
+        // Clip opens outside the scroll transform; the scroll transform closes
+        // inside the clip (scroll_pop before clip_close).
+        assert!(clip_open < scroll_push, "scroll transform nests inside the clip");
+        assert!(scroll_pop < clip_close, "scroll transform closes before the clip");
+
+        // The scrollbar: two fills AFTER the clip closes (on top, not scrolled).
+        let fills_after_clip = cmds[clip_close + 1..]
+            .iter()
+            .filter(|c| matches!(c, PaintCommand::DrawPath { .. }))
+            .count();
+        assert_eq!(fills_after_clip, 2, "a scrollbar track + thumb paint on top");
     }
 
     #[test]

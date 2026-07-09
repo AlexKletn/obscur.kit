@@ -126,6 +126,23 @@ impl PaintUnit {
     /// A node's own paint (background / border / text). The default phase.
     pub(super) const PAINT_ORDER: i64 = 0;
 
+    /// A scroll container's opening `PushTransform(translate(0, −scroll_top))`,
+    /// sorted *after* the node's own paint ([`PAINT_ORDER`](Self::PAINT_ORDER)) at
+    /// the same document position so the container's own background/border stays
+    /// **fixed** in the scrollport while its descendants (all at a strictly greater
+    /// `tree_index`) are translated by the scroll offset. Inside the overflow clip
+    /// (whose push is at [`CLIP_PUSH_ORDER`](Self::CLIP_PUSH_ORDER)) so scrolled
+    /// content is clipped to the scrollport (CSS Overflow 3 §scrollport). Any value
+    /// above `PAINT_ORDER` works — enter indices are unique per node.
+    pub(super) const SCROLL_TRANSFORM_PUSH_ORDER: i64 = 1;
+
+    /// A scroll container's vertical **scrollbar** (track + thumb) at its subtree
+    /// *exit* index. Painted on top of, and outside, the container's whole scrolled
+    /// subtree — so it does not scroll — using the same ceiling as
+    /// [`OUTLINE_ORDER`](Self::OUTLINE_ORDER); emitted after every other bracket so
+    /// a tie at a depth-0 pop still resolves in the scrollbar's favour.
+    pub(super) const SCROLLBAR_ORDER: i64 = i64::MAX;
+
     /// A node's CSS `outline` (focus ring) at its subtree *exit* index. The
     /// outline paints OUTSIDE the node's rounded clip and ON TOP of the node's
     /// whole subtree, so it sorts after every `Pop*` bracket at that index. Set to

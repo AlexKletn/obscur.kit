@@ -241,7 +241,81 @@ fn main() {
         out.display(),
         png.len(),
     );
+    // --- Demo scroll container: the sheet scrolls in a REAL overflow container --
+    verify_demo_scrolls();
+
     println!("== all interaction assertions held; exiting 0 ==");
+}
+
+/// The window-sized viewport the scroll check lays the sheet out under: shorter
+/// than the ~1560-px sheet, so `#app` (`height: 100%; overflow: auto`) becomes a
+/// real scroll container the wheel drives — the same rewire the windowed demo uses
+/// (CSS Overflow Module Level 3 §scroll-container).
+const SCROLL_VIEWPORT: Size = Size::new(1080.0, 720.0);
+
+/// Proves the demo's `#app` page is a genuine vertical scroll container: it clips +
+/// scrolls its content (the `.wf-col` sheet) via `scroll_by`, exactly as the
+/// windowed driver's mouse wheel does, and paints a scrollbar. Rasterizes an
+/// idle|scrolled pair of the window-sized sheet to `target/wireframe_scroll_proof.png`.
+fn verify_demo_scrolls() {
+    let sheets = vec![compile(wireframe::stylesheet())];
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(3), SCROLL_VIEWPORT);
+    runtime.set_default_stylesheet(obscur_kit::ua_stylesheet());
+    let mut renderer = CpuRenderer::new(RendererId::from_raw(4));
+    if let Some(bytes) = load_system_font() {
+        wire_text_stack(&mut runtime, &mut renderer, bytes);
+    }
+    let state = Rc::new(RefCell::new(WireState::default()));
+
+    let view = wireframe::view(&state.borrow());
+    runtime.render_now(&view, &sheets);
+
+    // `#app` is the root's single child (the page). With a 720-px viewport and a
+    // ~1560-px sheet it overflows → a scroll container starting at scroll_top 0.
+    let root = runtime.tree().root().expect("root after a frame");
+    let app = runtime.tree().get(root).unwrap().children()[0];
+    assert_eq!(runtime.scroll_top(app), 0.0, "the page starts unscrolled");
+    let idle = capture_at(&mut runtime, &mut renderer, SCROLL_VIEWPORT);
+
+    // Drive it exactly as the wheel does: scroll the sheet down by 400 logical px.
+    let landed = runtime.scroll_by(app, 400.0);
+    assert!(landed > 0.0, "#app scrolls — its content overflows the viewport (got {landed})");
+    assert_eq!(runtime.scroll_top(app), landed, "scroll_top advanced");
+    runtime.render_now(&view, &sheets);
+
+    // The scrolled frame carries a translate(0,-scroll_top) wrapping the content.
+    let snapshot = runtime.snapshot();
+    let scrolled_by = snapshot.display_list().commands().iter().find_map(|c| match c {
+        obscur_kit::scene::command::PaintCommand::PushTransform(t) if t.coeffs[5] < 0.0 => {
+            Some(-t.coeffs[5])
+        }
+        _ => None,
+    });
+    assert_eq!(scrolled_by, Some(landed), "the sheet is translated up by scroll_top");
+    let scrolled = capture_at(&mut runtime, &mut renderer, SCROLL_VIEWPORT);
+
+    let combined = stitch(&[&idle, &scrolled]);
+    let png = combined.encode_png().expect("encode png");
+    let out = output_path("wireframe_scroll_proof.png");
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent).expect("create target dir");
+    }
+    std::fs::write(&out, &png).expect("write png");
+    println!(
+        "[scroll] #app is a real overflow container — scrolled {landed:.0}px; wrote {} → {}",
+        format_args!("{} × {}", combined.width(), combined.height()),
+        out.display(),
+    );
+}
+
+/// Rasterizes the runtime's committed scene into a fresh pixmap sized to `size`.
+fn capture_at(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, size: Size) -> tiny_skia::Pixmap {
+    let snapshot = runtime.snapshot();
+    let frame = RenderFrame::new(snapshot, size);
+    let submission = FrameSubmission::new(frame);
+    let target = RenderTarget::bitmap(BitmapTarget::new(size));
+    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer.pixmap().expect("a rasterized frame").clone()
 }
 
 // ---------------------------------------------------------------------------

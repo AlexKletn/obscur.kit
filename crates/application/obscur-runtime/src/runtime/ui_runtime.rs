@@ -50,9 +50,10 @@ use super::{
 };
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::orchestration::{
-    root_font_size, AnimatedKind, AnimationBinding, ComputedStyles, CssMotionRules, EditingView,
-    LayoutBoxes, LayoutCoordinator, MotionCoordinator, PreeditView, PseudoStates, SceneCoordinator,
-    StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement,
+    root_font_size, scroll_containers, AnimatedKind, AnimationBinding, ComputedStyles,
+    CssMotionRules, EditingView, LayoutBoxes, LayoutCoordinator, MotionCoordinator, PreeditView,
+    PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint, StyleCoordinator, StyleInputs,
+    StyleMatchingCoordinator, TreeElement,
 };
 use crate::scheduler::{BackpressureDecision, FrameScheduler};
 use crate::transaction::ReconcileEnactor;
@@ -244,6 +245,18 @@ pub struct UiRuntime {
     /// device-scale divide) so hit-testing stays correct while scrolled. Set by a
     /// host via [`set_content_offset`](Self::set_content_offset).
     content_offset: (f32, f32),
+    /// The per-element vertical scroll position (`scroll_top`, logical CSS px)
+    /// of each `overflow: scroll`/`auto` scroll container the host or a wheel
+    /// gesture has scrolled (CSS Overflow Module Level 3 §scroll-container). Keyed
+    /// by the container's [`NodeId`]; a node **absent** from the map is at
+    /// `scroll_top == 0` (the initial, unscrolled position), so an untouched tree
+    /// keeps an empty map and composes byte-identically.
+    ///
+    /// Stored values are re-clamped to the container's live
+    /// `0 ..= content_height − scrollport_height` range each time they are read or
+    /// written (see [`scroll_paint`](Self::scroll_paint)), so a layout change that
+    /// shrinks the content never leaves a stale over-scroll.
+    scroll_top: HashMap<NodeId, f32>,
     /// The domain motion scheduler owning every active timeline (spec §4.17).
     ///
     /// The runtime *owns* the scheduler and its timelines; each frame it samples
@@ -401,6 +414,7 @@ impl UiRuntime {
             viewport_scroll: (0.0, 0.0),
             device_scale: 1.0,
             content_offset: (0.0, 0.0),
+            scroll_top: HashMap::new(),
             motion: MotionScheduler::new(),
             animations: Vec::new(),
             next_timeline: TimelineId::from_raw(0),
@@ -1178,12 +1192,19 @@ impl UiRuntime {
                     None => view,
                 }
             });
-            let display_list = self.scene_composer.compose_with_images(
+            // Resolve each scroll container's live scroll offset + content height
+            // (CSS Overflow 3 §scroll-container) from the retained boxes, so the
+            // coordinator paints the scroll offset + scrollbar. Empty when no
+            // container overflows → the compose is byte-identical to before scroll
+            // containers existed.
+            let scroll = self.scroll_paint(&computed);
+            let display_list = self.scene_composer.compose_with_images_scrolled(
                 &self.tree,
                 &computed,
                 &self.boxes,
                 editing,
                 &self.image_cache,
+                &scroll,
             );
             // Telemetry: mark the compose phase and count paint commands (§7.9).
             let count = display_list.len() as u64;
@@ -1634,6 +1655,18 @@ impl UiRuntime {
         if (s - 1.0).abs() > f32::EPSILON || ox != 0.0 || oy != 0.0 {
             let physical = event.position();
             event.position = Point::new(physical.x / s + ox, physical.y / s + oy);
+        }
+
+        // 0b. Per-element scroll: the spatial index is keyed by each node's
+        //     UNSCROLLED layout box, but a scroll container's descendants render
+        //     translated by `−scroll_top`. Add back each crossed container's
+        //     `scroll_top` so a click while scrolled hit-tests the scrolled content
+        //     (CSS Overflow 3 §scroll-container). With no scroll container this is
+        //     the identity, so the hit-test is byte-identical for existing hosts.
+        let containers = scroll_containers(&self.tree, &self.computed, &self.boxes);
+        if !containers.is_empty() {
+            let (mapped, _) = self.apply_scroll_to_point(event.position(), &containers);
+            event.position = mapped;
         }
 
         // 1. Hit-test: the first hit is the topmost (highest z-order) node.
@@ -2649,6 +2682,150 @@ impl UiRuntime {
         let ox = if x.is_finite() { x } else { self.content_offset.0 };
         let oy = if y.is_finite() { y } else { self.content_offset.1 };
         self.content_offset = (ox, oy);
+    }
+
+    // ---- Per-element scroll containers (CSS Overflow Module Level 3) ----------
+
+    /// The current vertical scroll position (`scroll_top`, logical CSS px) of the
+    /// scroll container `node`, clamped to its live scrollable range. Returns `0`
+    /// for a node that is not a scroll container, does not overflow, or has never
+    /// been scrolled (CSS Overflow 3 §scroll-container).
+    #[must_use]
+    pub fn scroll_top(&self, node: NodeId) -> f32 {
+        let containers = scroll_containers(&self.tree, &self.computed, &self.boxes);
+        containers
+            .iter()
+            .find(|c| c.node == node)
+            .map_or(0.0, |c| self.clamped_scroll_top(*c))
+    }
+
+    /// Sets the scroll container `node`'s vertical scroll position to `px` (logical
+    /// CSS px), clamped to `0 ..= content_height − scrollport_height` (CSS Overflow
+    /// 3 §scrolling — the position is clamped to the scrollable overflow rect).
+    ///
+    /// A `node` that is not an overflowing scroll container in the current layout
+    /// is ignored (no scroll state is recorded). Does not itself schedule a frame;
+    /// pair it with [`request_frame`](Self::request_frame)`(`[`FrameReason::WindowChange`]`)`.
+    pub fn set_scroll_top(&mut self, node: NodeId, px: f32) {
+        let containers = scroll_containers(&self.tree, &self.computed, &self.boxes);
+        let Some(container) = containers.iter().find(|c| c.node == node).copied() else {
+            return;
+        };
+        let clamped = if px.is_finite() {
+            px.clamp(0.0, container.max_scroll_top())
+        } else {
+            return;
+        };
+        self.scroll_top.insert(node, clamped);
+    }
+
+    /// Scrolls the scroll container `node` by `dy` logical px (positive = toward the
+    /// content's end), clamped to the scrollable range, and returns the resulting
+    /// `scroll_top`. A `node` that is not an overflowing scroll container is
+    /// ignored and `0` is returned (CSS Overflow 3 §scrolling).
+    pub fn scroll_by(&mut self, node: NodeId, dy: f32) -> f32 {
+        let containers = scroll_containers(&self.tree, &self.computed, &self.boxes);
+        let Some(container) = containers.iter().find(|c| c.node == node).copied() else {
+            return 0.0;
+        };
+        let current = self.clamped_scroll_top(container);
+        let next = (current + dy).clamp(0.0, container.max_scroll_top());
+        self.scroll_top.insert(node, next);
+        next
+    }
+
+    /// Routes a wheel/scroll gesture of `delta_y` logical px at host `position` to
+    /// the **innermost** scroll container under the pointer, scrolling it (clamped)
+    /// and requesting an [`Input`](FrameReason::Input) frame. Returns the scrolled
+    /// container's [`NodeId`], or [`None`] when no scroll container lies under the
+    /// pointer (CSS Overflow 3 §scroll-container).
+    ///
+    /// `position` is in the host's physical (device) space; it is mapped to content
+    /// space through the same `physical / device_scale + content_offset` inverse
+    /// [`handle_pointer`](Self::handle_pointer) uses, then through each crossed
+    /// container's own `scroll_top`, so the hit-tested container is the one the
+    /// pointer visually sits over while scrolled.
+    pub fn handle_scroll(&mut self, delta_y: f32, position: Point) -> Option<NodeId> {
+        let containers = scroll_containers(&self.tree, &self.computed, &self.boxes);
+        if containers.is_empty() {
+            return None;
+        }
+        let content = self.to_content_point(position);
+        let (_, target) = self.apply_scroll_to_point(content, &containers);
+        let target = target?;
+        self.scroll_by(target, delta_y);
+        self.request_frame(FrameReason::Input);
+        Some(target)
+    }
+
+    /// The scroll container `node`'s stored `scroll_top`, re-clamped to `c`'s live
+    /// range — so a layout change that shrinks the content never surfaces a stale
+    /// over-scroll.
+    fn clamped_scroll_top(&self, c: ScrollContainer) -> f32 {
+        self.scroll_top
+            .get(&c.node)
+            .copied()
+            .unwrap_or(0.0)
+            .clamp(0.0, c.max_scroll_top())
+    }
+
+    /// Maps a host `position` (physical space) to content space via the inverse of
+    /// the root render transform `scale(s) · translate(−ox, −oy)` — the same
+    /// mapping [`handle_pointer`](Self::handle_pointer) applies before hit-testing.
+    fn to_content_point(&self, position: Point) -> Point {
+        let s = self.device_scale;
+        let (ox, oy) = self.content_offset;
+        if (s - 1.0).abs() > f32::EPSILON || ox != 0.0 || oy != 0.0 {
+            Point::new(position.x / s + ox, position.y / s + oy)
+        } else {
+            position
+        }
+    }
+
+    /// Adjusts a content-space `point` by each scroll container it lies within,
+    /// walking `containers` **outermost-first** (they arrive depth-sorted): for a
+    /// container whose scrollport contains the running point, the container's
+    /// `scroll_top` is added to the point's `y` (undoing that container's
+    /// `translate(0, −scroll_top)`), and the walk continues with the adjusted point
+    /// so a nested container is tested in its own (outer-adjusted) coordinate space.
+    ///
+    /// Returns the fully adjusted point (the layout-space coordinate the unscrolled
+    /// spatial index is keyed by) and the **innermost** container hit — exact for
+    /// the common single-container case; deeply nested scrollers rely on each
+    /// scrollport being tested after its ancestors' adjustment, a documented
+    /// best-effort.
+    fn apply_scroll_to_point(
+        &self,
+        mut point: Point,
+        containers: &[ScrollContainer],
+    ) -> (Point, Option<NodeId>) {
+        let mut innermost = None;
+        for &c in containers {
+            if c.scrollport.contains(point) {
+                point = Point::new(point.x, point.y + self.clamped_scroll_top(c));
+                innermost = Some(c.node);
+            }
+        }
+        (point, innermost)
+    }
+
+    /// Resolves the live [`ScrollPaint`] (clamped `scroll_top` + `content_height`)
+    /// of every overflowing scroll container, keyed by [`NodeId`], for the scene
+    /// coordinator to paint the scroll offset + scrollbar. Empty when nothing
+    /// overflows → a byte-identical compose.
+    fn scroll_paint(&self, computed: &ComputedStyles) -> HashMap<NodeId, ScrollPaint> {
+        scroll_containers(&self.tree, computed, &self.boxes)
+            .into_iter()
+            .map(|c| {
+                (
+                    c.node,
+                    ScrollPaint {
+                        scroll_top: self.clamped_scroll_top(c),
+                        content_height: c.content_height,
+                    },
+                )
+            })
+            .collect()
     }
 
     /// Wraps a freshly composed `display_list` in the scene's single root
@@ -4196,6 +4373,135 @@ mod tests {
     fn panel_single_child(runtime: &UiRuntime) -> NodeId {
         let root = runtime.tree().root().expect("root after a frame");
         runtime.tree().get(root).unwrap().children()[0]
+    }
+
+    // ---- Per-element vertical scroll containers (CSS Overflow 3) ----------------
+
+    /// An `overflow: auto` decl carrying the reserved keyword handle.
+    fn overflow_auto() -> BlockDeclaration {
+        BlockDeclaration::normal(
+            PropertyId::Overflow,
+            PropertyValue::Keyword(obscur_style::property::layout_keyword::OVERFLOW_AUTO),
+        )
+    }
+
+    /// A 200×120 `.scroller { overflow: auto }` holding six 200×40 `.row`s (240 px
+    /// of content), plus the sheet that sizes them. Returns `(view, sheets)`.
+    fn scroller_view() -> View {
+        let rows: Vec<ViewNode> = (0..6)
+            .map(|i| {
+                ViewNode::element(ComponentId::from_raw(200 + i))
+                    .with_prop(ViewProperty::new(CLASS, ViewValue::Text("row".into())))
+            })
+            .collect();
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(100))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("scroller".into())))
+                .with_children(ViewFragment::from_nodes(rows)),
+        ]))
+    }
+
+    fn scroller_sheet() -> Stylesheet {
+        let mut scroller = size(200.0, 120.0);
+        scroller.push(overflow_auto());
+        Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![class_rule("scroller", scroller), class_rule("row", size(200.0, 40.0))],
+        )
+    }
+
+    /// Returns `(scroller, [rows])` after a frame.
+    fn scroller_nodes(runtime: &UiRuntime) -> (NodeId, Vec<NodeId>) {
+        let root = runtime.tree().root().expect("root after a frame");
+        let scroller = runtime.tree().get(root).unwrap().children()[0];
+        let rows = runtime.tree().get(scroller).unwrap().children().to_vec();
+        (scroller, rows)
+    }
+
+    #[test]
+    fn overflowing_content_makes_a_scroll_container_with_a_clamped_scroll_top() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = scroller_sheet();
+        let _ = runtime.render_now(&scroller_view(), std::slice::from_ref(&sheet));
+        let (scroller, _rows) = scroller_nodes(&runtime);
+
+        // Content (240) overflows the 120-px box → it is a scroll container at 0.
+        assert_eq!(runtime.scroll_top(scroller), 0.0);
+        // scroll_by advances, clamped to content_height − scrollport = 240 − 120.
+        assert_eq!(runtime.scroll_by(scroller, 80.0), 80.0);
+        assert_eq!(runtime.scroll_top(scroller), 80.0);
+        assert_eq!(runtime.scroll_by(scroller, 1000.0), 120.0, "clamps to the scrollable range");
+        assert_eq!(runtime.scroll_by(scroller, -1000.0), 0.0, "clamps at the top");
+        // set_scroll_top clamps identically; a non-container node is ignored.
+        runtime.set_scroll_top(scroller, 60.0);
+        assert_eq!(runtime.scroll_top(scroller), 60.0);
+    }
+
+    #[test]
+    fn scroll_offset_translates_content_and_reduces_to_identity_at_zero() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = scroller_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&scroller_view(), sheets);
+        let (scroller, _rows) = scroller_nodes(&runtime);
+
+        // At scroll_top 0 there is NO scroll PushTransform (identity) — the only
+        // change from a plain overflow:hidden box is the scrollbar fills.
+        let idle = runtime.snapshot();
+        let idle_translates = idle
+            .display_list()
+            .commands()
+            .iter()
+            .filter(|c| matches!(c, PaintCommand::PushTransform(t) if t.coeffs[5] != 0.0))
+            .count();
+        assert_eq!(idle_translates, 0, "scroll transform is elided at scroll_top == 0");
+
+        // Scrolled: a PushTransform(translate(0,-80)) wraps the content.
+        runtime.scroll_by(scroller, 80.0);
+        let _ = runtime.render_now(&scroller_view(), sheets);
+        let scrolled = runtime.snapshot();
+        let has = scrolled
+            .display_list()
+            .commands()
+            .iter()
+            .any(|c| matches!(c, PaintCommand::PushTransform(t) if (t.coeffs[5] + 80.0).abs() < 0.01));
+        assert!(has, "scrolled content is wrapped in translate(0,-80)");
+    }
+
+    #[test]
+    fn pointer_hit_test_composes_the_container_scroll_offset() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = scroller_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&scroller_view(), sheets);
+        let (scroller, rows) = scroller_nodes(&runtime);
+
+        // Idle: a click at the top of the scrollport lands on row 0.
+        let hit = runtime.handle_pointer(mouse(PointerEventKind::Move, 100.0, 20.0)).target();
+        assert_eq!(hit, Some(rows[0]), "idle: (100,20) hits row 0");
+
+        // Scroll up two rows: the SAME point now maps to row 2 (content y 20+80).
+        runtime.scroll_by(scroller, 80.0);
+        let hit = runtime.handle_pointer(mouse(PointerEventKind::Move, 100.0, 20.0)).target();
+        assert_eq!(hit, Some(rows[2]), "scrolled: (100,20) hits row 2");
+    }
+
+    #[test]
+    fn absent_overflow_records_no_scroll_state_and_composes_identically() {
+        // Byte-identical guard: a view with NO scroll container composes exactly as
+        // before per-element scroll existed (no scroll transform, no scrollbar).
+        let mut a = UiRuntime::new(runtime_id(), viewport());
+        let mut b = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let list_a = a.render_now(&panel_view(), sheets).snapshot().display_list().commands().to_vec();
+        // Populate b, then drive the scroll API against a non-container node (inert).
+        let _ = b.render_now(&panel_view(), sheets);
+        let (panel, _a, _b) = panel_nodes(&b);
+        b.set_scroll_top(panel, 40.0);
+        assert_eq!(b.scroll_top(panel), 0.0, "a non-overflowing node owns no scroll position");
+        let list_b = b.render_now(&panel_view(), sheets).snapshot().display_list().commands().to_vec();
+        assert_eq!(list_a, list_b, "no scroll container ⇒ byte-identical display list");
     }
 
     // ---- Device scale (HiDPI): root scale transform + pointer coord mapping ----

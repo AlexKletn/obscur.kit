@@ -81,8 +81,6 @@ use wireframe::{
 /// readable fit-to-width scale of `physical_width / (WIRE_WIDTH * FIT_MARGIN)` so
 /// this whole width fills the window at authored size; taller content scrolls.
 const WIRE_WIDTH: f32 = 1240.0;
-/// The design height — the scrollable content height used when clamping `scroll_y`.
-const WIRE_HEIGHT: f32 = 1560.0;
 /// A small margin factor so the fitted sheet does not sit edge-to-edge.
 const FIT_MARGIN: f32 = 1.04;
 /// One wheel *line* of scroll, in logical content px.
@@ -101,7 +99,6 @@ struct WireframeWindow {
     cursor: (f64, f64),
     scale_factor: f64,
     zoom: f32,
-    scroll_y: f32,
     modifiers: ModifiersState,
 }
 
@@ -206,7 +203,6 @@ impl WireframeWindow {
             cursor: (0.0, 0.0),
             scale_factor: 1.0,
             zoom: 1.0,
-            scroll_y: 0.0,
             modifiers: ModifiersState::empty(),
         }
     }
@@ -223,22 +219,6 @@ impl WireframeWindow {
 
     fn effective_scale(&self) -> f32 {
         self.fit_scale() * self.zoom
-    }
-
-    #[allow(clippy::cast_possible_truncation)]
-    fn max_scroll_y(&self) -> f32 {
-        let Some(surface) = self.surface.as_ref() else {
-            return 0.0;
-        };
-        let physical_height = surface.config().height as f32;
-        let content_height = WIRE_HEIGHT * self.effective_scale();
-        (content_height - physical_height).max(0.0)
-    }
-
-    fn apply_scroll(&mut self) {
-        self.scroll_y = self.scroll_y.clamp(0.0, self.max_scroll_y());
-        let offset = self.scroll_y / self.effective_scale();
-        self.runtime.set_content_offset(0.0, offset);
     }
 
     /// Assembles a domain button [`PointerEvent`] at the tracked cursor.
@@ -263,7 +243,6 @@ impl WireframeWindow {
             self.runtime.set_viewport(viewport);
             self.runtime.set_device_scale(scale);
         }
-        self.apply_scroll();
     }
 
     /// Handles a Ctrl+zoom shortcut, returning `true` when `key` was a zoom chord.
@@ -280,9 +259,6 @@ impl WireframeWindow {
         let Some(new_zoom) = new_zoom else {
             return false;
         };
-        if text.as_str() == "0" {
-            self.scroll_y = 0.0;
-        }
         self.zoom = new_zoom;
         self.sync_viewport();
         self.runtime.request_frame(FrameReason::WindowChange);
@@ -420,14 +396,21 @@ impl ApplicationHandler for WireframeWindow {
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
+                // Route the wheel to the REAL `overflow: auto` scroll container under
+                // the pointer (the `#app` page): `handle_scroll` hit-tests the
+                // cursor, walks to the innermost scroll container, and adjusts its
+                // clamped `scroll_top` (CSS Overflow 3 §scroll-container). The wheel
+                // delta is physical px; divide by the effective scale for logical px.
+                // A positive wheel `lines` scrolls the content up (toward the top), so
+                // the scroll delta is negated.
                 let step_px = match delta {
                     MouseScrollDelta::LineDelta(_, lines) => lines * WHEEL_LINE_STEP,
                     #[allow(clippy::cast_possible_truncation)]
                     MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
                 };
-                self.scroll_y -= step_px;
-                self.apply_scroll();
-                self.runtime.request_frame(FrameReason::WindowChange);
+                #[allow(clippy::cast_possible_truncation)]
+                let cursor = Point::new(self.cursor.0 as f32, self.cursor.1 as f32);
+                self.runtime.handle_scroll(-step_px / self.effective_scale(), cursor);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
