@@ -248,6 +248,7 @@ pub fn stylesheet() -> &'static str {
    definite box. ---- */\n\
 .wf-field { width: 220px; }\n\
 .wf-area { white-space: normal; width: 360px; height: 96px; }\n\
+.wf-select { width: 200px; }\n\
 \
 /* ---- Footer ---- */\n\
 .wf-footer { display: flex; flex-direction: row; justify-content: space-between; \
@@ -397,11 +398,12 @@ fn area_body(state: &WireState) -> ViewNode {
 /// 04 · Select: a live dropdown beside a disabled one.
 fn select_body(state: &WireState) -> ViewNode {
     body(vec![
-        slot("DEFAULT · LIVE", control("select", select_widget(state))),
+        slot("DEFAULT · LIVE", control_sized("select", "wf-select", select_widget(state))),
         slot(
             "DISABLED",
-            control(
+            control_sized(
                 "select-off",
+                "wf-select",
                 Select::new(CMD_SEL_OFF).with_options([SELECT_PROMPT]).disabled(true).view(),
             ),
         ),

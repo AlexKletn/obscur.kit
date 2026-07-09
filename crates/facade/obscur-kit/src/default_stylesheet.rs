@@ -221,6 +221,7 @@ select {\
 .select-header {\
   display: flex;\
   align-items: center;\
+  justify-content: space-between;\
   gap: 10px;\
   padding: 11px 13px;\
 }\
