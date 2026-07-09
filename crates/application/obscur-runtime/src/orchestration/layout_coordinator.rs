@@ -1347,7 +1347,18 @@ fn arrange(
     // container under an unbounded parent (infinite max height) has no definite
     // size — it grows to fit — so it is left unrelaxed. Only `overflow: scroll`/
     // `auto` nodes are touched; every other node is byte-for-byte identical.
-    let scroll_relaxed = overflow_scrolls(computed, node) && constraints.max.height.is_finite();
+    //
+    // The natural content height is produced by the **single** layout pass below
+    // (`out.size()`), NOT a second measure: the relaxation only changes this one
+    // call's block-axis bound, and overflow is later derived from the resulting
+    // absolute boxes (`scrollable_content_height`), so the common frame spends zero
+    // extra measures here. The relaxation is also skipped when it provably cannot
+    // change anything — a childless scroll container has no content to overflow, so
+    // its box is identical relaxed or not; keeping it unrelaxed avoids forcing the
+    // whole subtree onto the indefinite-height path for nothing.
+    let scroll_relaxed = overflow_scrolls(computed, node)
+        && constraints.max.height.is_finite()
+        && !children.is_empty();
     let child_constraints = if scroll_relaxed {
         BoxConstraints {
             min: Size::new(constraints.min.width, 0.0),

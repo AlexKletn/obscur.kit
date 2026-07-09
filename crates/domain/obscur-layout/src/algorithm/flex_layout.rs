@@ -253,6 +253,13 @@ impl LayoutAlgorithm for FlexLayout {
         // the true shrink floor.
         let mut main_min = Vec::with_capacity(count);
         let mut main_max = Vec::with_capacity(count);
+        // Items whose §4.5 automatic minimum is a `content.min(fb)` floor (row main
+        // axis, or any definite basis): that floor is `<= fb`, so it never raises the
+        // item's base size and can only bite when the item is actually shrunk below
+        // it. Its `content_max_main` measure is therefore DEFERRED to the per-line
+        // shrink gate in `place_line` (resolved only for lines under real shrink
+        // pressure). `false` means the item's floor was already resolved eagerly.
+        let mut deferred_floor = vec![false; count];
         for (index, child) in children.iter().enumerate() {
             let main_dim = if is_row {
                 child.style.width
@@ -293,42 +300,48 @@ impl LayoutAlgorithm for FlexLayout {
             let max_val = max_main.resolve(container_main).unwrap_or(f32::INFINITY);
             // §4.5 automatic minimum size: an `auto` (or unset) main-axis `min` does
             // not floor at 0 — its used value is the item's content-based minimum
-            // size. An EXPLICIT `min` is used verbatim (byte-identical to before);
-            // the extra content measure and this whole block run ONLY on the `auto`
-            // path, so the common definite-min case is unchanged.
-            let min_floor = min_main.resolve(container_main).unwrap_or_else(|| {
-                let content = content_max_main(&mut *measurer, index, is_row, container_cross);
+            // size. An EXPLICIT `min` is used verbatim (byte-identical to before).
+            // The extra `content_max_main` measure is computed LAZILY: it runs only
+            // when it can actually change the result, so the common frame takes zero
+            // extra measures.
+            let min_floor = if let Some(explicit) = min_main.resolve(container_main) {
+                explicit
+            } else {
                 let has_definite = child
                     .style
                     .flex_basis
                     .resolve(container_main)
                     .or_else(|| main_dim.resolve(container_main))
                     .is_some();
-                let floor = if !content.is_finite() {
-                    // Fill-available container (unbounded max-content): the true
-                    // min-content is not measurable through the constraint-clamping
-                    // port, so impose NO automatic floor. The item stays shrinkable
-                    // exactly as before §4.5 (byte-identical), which is what keeps a
-                    // shrink-to-fit row of such containers from locking at its fill
-                    // width.
-                    0.0
-                } else if is_row || has_definite {
-                    // Inline (row) main axis can reflow, so max-content is only an
-                    // UPPER bound of min-content; and a definite preferred size caps
-                    // the automatic minimum (§4.5). Capping by the flex base means the
-                    // floor never inflates the item beyond its preferred size — so
-                    // `base_main` stays byte-identical here.
-                    content.min(fb)
-                } else {
+                if !is_row && !has_definite {
                     // Block (column) main axis with an auto basis: the block does not
                     // reflow, so max-content == min-content and the content extent is
-                    // the exact automatic minimum — even when it exceeds a flex base
-                    // that was clamped to an undersized container (the card-collapse
-                    // fix, §4.5).
-                    content
-                };
-                floor.min(max_val).max(0.0)
-            });
+                    // the exact automatic minimum. It differs from `fb` ONLY when `fb`
+                    // was clamped by a finite, undersized container main (the
+                    // card-collapse case) — then the natural size may exceed the
+                    // clamped `fb`, so the floor must be measured. When the container
+                    // main is unbounded, or `fb` sits below it, `natural == fb`: use
+                    // `fb` as the floor with NO extra measure.
+                    if container_main.is_finite() && fb >= container_main {
+                        let content =
+                            content_max_main(&mut *measurer, index, is_row, container_cross);
+                        content.min(max_val).max(0.0)
+                    } else {
+                        fb.min(max_val).max(0.0)
+                    }
+                } else {
+                    // Inline (row) main axis, or a definite basis: the floor is
+                    // `content.min(fb) <= fb`, so it never inflates `base_main` and can
+                    // only bite when the item is actually shrunk below it. Defer the
+                    // content measure to `place_line`, which resolves it only for lines
+                    // under real shrink pressure; 0 is the pre-§4.5 baseline used
+                    // otherwise (output-identical whenever the line does not shrink,
+                    // and it also covers the fill-available `!content.is_finite()` →
+                    // no-floor case).
+                    deferred_floor[index] = true;
+                    0.0
+                }
+            };
             flex_base.push(fb);
             base_main.push(clamp_floor(fb, min_floor, max_val));
             main_min.push(min_floor);
@@ -365,6 +378,7 @@ impl LayoutAlgorithm for FlexLayout {
                 flex_base: &flex_base,
                 main_min: &main_min,
                 main_max: &main_max,
+                deferred_floor: &deferred_floor,
                 children,
                 style,
                 is_row,
@@ -452,6 +466,7 @@ impl LayoutAlgorithm for FlexLayout {
                 flex_base: &flex_base,
                 main_min: &main_min,
                 main_max: &main_max,
+                deferred_floor: &deferred_floor,
                 children,
                 style,
                 is_row,
@@ -515,6 +530,10 @@ struct LineArgs<'a, 'm> {
     /// `auto` path, so the freeze loop shrinks items no further than their content.
     main_min: &'a [f32],
     main_max: &'a [f32],
+    /// Whether each item's §4.5 content floor was deferred (a `content.min(fb)`
+    /// floor whose content measure is taken here, lazily, only when this line
+    /// shrinks). Indexed by the global item index.
+    deferred_floor: &'a [bool],
     /// The flex items.
     children: &'a [LayoutChild],
     /// The flex container's style.
@@ -583,6 +602,7 @@ fn place_line(args: LineArgs) -> PlacedLine {
         flex_base,
         main_min,
         main_max,
+        deferred_floor,
         children,
         style,
         is_row,
@@ -608,6 +628,34 @@ fn place_line(args: LineArgs) -> PlacedLine {
     // Margins consume main-axis space alongside the gaps; both are constants that
     // do not flex, so the justification pass below reuses this sum.
     let sum_margin_main: f32 = line.iter().map(|&i| main_lead[i] + main_trail[i]).sum();
+
+    // §4.5 content floors for the DEFERRED items (row main axis / definite basis)
+    // are `content.min(fb) <= fb`, so they can only bite when this line's items are
+    // actually shrunk below their flex base — i.e. when the base main sizes overflow
+    // the space available to them. Resolve them lazily HERE, and only then: a line
+    // that grows or exactly fits takes ZERO extra measures (its floors would never
+    // bind, so the pre-§4.5 baseline of 0 is output-identical).
+    let available = line_main - gap_span - sum_margin_main;
+    let sum_base: f32 = line.iter().map(|&i| base_main[i]).sum();
+    let main_min_owned;
+    let main_min: &[f32] = if sum_base > available && line.iter().any(|&i| deferred_floor[i]) {
+        let mut resolved = main_min.to_vec();
+        for &i in line {
+            if deferred_floor[i] {
+                let content = content_max_main(&mut *measurer, i, is_row, container_cross);
+                let floor = if content.is_finite() {
+                    content.min(flex_base[i])
+                } else {
+                    0.0
+                };
+                resolved[i] = floor.min(main_max[i]).max(0.0);
+            }
+        }
+        main_min_owned = resolved;
+        &main_min_owned
+    } else {
+        main_min
+    };
 
     // Steps 3–4: resolve the final main sizes with the canonical
     // "resolve flexible lengths" freeze loop (§9.7).
@@ -1958,5 +2006,97 @@ mod tests {
         );
         // Cross (height) is the explicit 30, not the stretched 100.
         approx(out.child_boxes()[0].size().height, 30.0);
+    }
+
+    /// A [`ChildMeasurer`] that returns fixed natural sizes (clamped into the
+    /// requested constraints, like [`FixedChildMeasurer`]) and TALLIES every
+    /// [`measure_child`](ChildMeasurer::measure_child) call, so a test can prove the
+    /// §4.5 content measure runs only when it can change the result.
+    struct CountingMeasurer {
+        sizes: Vec<Size>,
+        calls: usize,
+    }
+
+    impl CountingMeasurer {
+        fn new(sizes: Vec<Size>) -> Self {
+            Self { sizes, calls: 0 }
+        }
+    }
+
+    impl crate::algorithm::ChildMeasurer for CountingMeasurer {
+        fn measure_child(&mut self, index: usize, constraints: BoxConstraints) -> Size {
+            self.calls += 1;
+            constraints.constrain(self.sizes.get(index).copied().unwrap_or(Size::ZERO))
+        }
+    }
+
+    /// Perf regression guard: in the common column case (a tall-enough container
+    /// whose auto-basis items are NOT clamped, and no shrink pressure) the §4.5
+    /// content floor is derived from each item's flex base with ZERO extra measures.
+    /// Only the per-item BASE measure runs — one call per item, not two.
+    #[test]
+    fn column_auto_min_takes_no_extra_measure_when_not_clamped() {
+        let style = container(
+            FlexDirection::Column,
+            JustifyContent::FlexStart,
+            AlignItems::Stretch,
+            0.0,
+        );
+        let children = [auto_item(1), auto_item(2), auto_item(3)];
+        // Each item is 60 × 40; the container main (height) is 500 — comfortably
+        // taller than the stacked 120, so no item is clamped and the line grows.
+        let mut measurer = CountingMeasurer::new(vec![
+            Size::new(60.0, 40.0),
+            Size::new(60.0, 40.0),
+            Size::new(60.0, 40.0),
+        ]);
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(100.0, 500.0)),
+            &mut measurer,
+        );
+        // Geometry is unchanged: items keep their 40px content height, stacked.
+        let b = out.child_boxes();
+        approx(b[0].size().height, 40.0);
+        approx(b[2].origin().y, 80.0);
+        // Exactly ONE measure per item (the flex-base measure) — the §4.5
+        // content-floor measure is elided (pre-fix this was TWO per item).
+        assert_eq!(measurer.calls, 3, "no extra §4.5 content measure in the common case");
+    }
+
+    /// The card-collapse §4.5 fix is preserved with its extra measure taken ONLY for
+    /// the clamped item: a column item taller than an undersized container keeps its
+    /// natural (max-content) height, and exactly one extra content measure is spent
+    /// to discover it.
+    #[test]
+    fn column_auto_min_measures_only_the_clamped_item() {
+        let style = container(
+            FlexDirection::Column,
+            JustifyContent::FlexStart,
+            AlignItems::Stretch,
+            0.0,
+        );
+        let children = [auto_item(1), auto_item(2)];
+        // Item 0 is 60 × 80 — TALLER than the 50px container main, so its flex base
+        // clamps to 50 and the natural 80 must be measured (card collapse). Item 1
+        // is 60 × 20 — fits, so it is NOT measured for a floor.
+        let mut measurer =
+            CountingMeasurer::new(vec![Size::new(60.0, 80.0), Size::new(60.0, 20.0)]);
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(100.0, 50.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // Item 0 keeps its natural 80 (floored by §4.5 above the clamped base);
+        // item 1 keeps its 20. Content overflows the 50px box.
+        approx(b[0].size().height, 80.0);
+        approx(b[1].size().height, 20.0);
+        approx(b[1].origin().y, 80.0);
+        // Two base measures + one content measure for the single clamped item = 3
+        // (NOT 4 — the unclamped item spends no content measure).
+        assert_eq!(measurer.calls, 3, "only the clamped item spends a §4.5 measure");
     }
 }
