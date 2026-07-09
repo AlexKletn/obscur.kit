@@ -2,6 +2,9 @@
 
 use obscur_geometry::{Point, Rect, Size};
 
+use crate::layout::{ParagraphLayout, ParagraphLine};
+use crate::shaping::ShapedGlyph;
+
 /// The visual highlight of a [`TextSelection`](super::TextSelection) as a set of
 /// rectangles (spec §5.11 editing engine).
 ///
@@ -89,14 +92,168 @@ impl SelectionGeometry {
     pub fn contains_point(&self, point: Point) -> bool {
         self.rects.iter().any(|rect| rect.contains(point))
     }
+
+    /// Builds the per-line highlight for the byte span `start..end` over a wrapped
+    /// `layout` (spec §5.11 editing engine).
+    ///
+    /// A selection that spans several wrapped lines paints one rectangle per
+    /// covered line: the **leading** line runs from the start offset's pen x to
+    /// that line's trailing edge, whole **interior** lines span their full used
+    /// width, and the **trailing** line runs from its content start to the end
+    /// offset's pen x. The rectangles are in *paragraph-local* coordinates — x is
+    /// the line's alignment [`x_offset`](ParagraphLine::x_offset) plus the
+    /// within-line pen x, y is the line box's [`top`](ParagraphLine::top) — so the
+    /// caller translates them by the text box origin (and any horizontal scroll)
+    /// to place them on screen.
+    ///
+    /// The within-line pen x is the sum of THAT line's spaced/tabbed glyph
+    /// advances whose source cluster falls before the offset — the same advances
+    /// the line's glyphs paint from — so a span confined to ONE line yields exactly
+    /// the single rectangle the caret-driven highlight produced before. A collapsed
+    /// span (`start == end`) and any zero-width per-line extent (e.g. a downstream
+    /// caret's sliver at a soft-wrap boundary, or an empty line) contribute no
+    /// rectangle. Determinism: the covered lines and their advances are a pure
+    /// function of the layout and the two offsets.
+    #[must_use]
+    pub fn from_paragraph(layout: &ParagraphLayout, start: usize, end: usize) -> Self {
+        let (lo, hi) = (start.min(end), start.max(end));
+        let lines = layout.lines();
+        if lo == hi || lines.is_empty() {
+            return Self::new();
+        }
+        let start_line = Self::line_of_byte(lines, lo);
+        let end_line = Self::line_of_byte(lines, hi);
+        let mut rects = Vec::with_capacity(end_line.saturating_sub(start_line) + 1);
+        for (li, line) in lines.iter().enumerate().take(end_line + 1).skip(start_line) {
+            // Leading line: from the start pen x; interior/trailing: from x = 0.
+            let x_from = if li == start_line { Self::line_pen_x(line, lo) } else { 0.0 };
+            // Trailing line: to the end pen x; leading/interior: to the line width.
+            let x_to = if li == end_line { Self::line_pen_x(line, hi) } else { line.width() };
+            let width = x_to - x_from;
+            // Drop a zero/negative-width extent (a boundary sliver or empty line):
+            // it paints nothing, keeping a one-line span byte-identical.
+            if width > 0.0 {
+                rects.push(Rect::new(
+                    Point::new(line.x_offset() + x_from, line.top()),
+                    Size::new(width, line.height()),
+                ));
+            }
+        }
+        Self { rects }
+    }
+
+    /// The line index a caret byte `index` sits on: the first line whose byte range
+    /// **ends past** `index`, else the last line — the same downstream resolution
+    /// the caret hit-test uses, so a selection edge lands on the line its glyphs
+    /// paint on.
+    fn line_of_byte(lines: &[ParagraphLine], index: usize) -> usize {
+        lines
+            .iter()
+            .position(|line| index < line.range().end)
+            .unwrap_or_else(|| lines.len().saturating_sub(1))
+    }
+
+    /// The within-line pen x of `index`: the sum of this `line`'s spaced/tabbed
+    /// glyph advances whose source cluster falls before `index`, measured from the
+    /// line's content start (the same advances the segments paint from).
+    fn line_pen_x(line: &ParagraphLine, index: usize) -> f32 {
+        line.segments()
+            .iter()
+            .flat_map(|segment| segment.run().glyphs())
+            .filter(|glyph| glyph.cluster() < index)
+            .map(ShapedGlyph::x_advance)
+            .sum()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::font::FontId;
+    use crate::layout::{TextAlignment, TextOverflow};
+    use crate::shaping::{GlyphRun, ShapedGlyph, ShapedRun, TextDirection};
+    use crate::span::TextRange;
 
     fn rect(x: f32, y: f32, w: f32, h: f32) -> Rect {
         Rect::new(Point::new(x, y), Size::new(w, h))
+    }
+
+    /// A one-segment line whose glyphs carry the given `(cluster, advance)` pairs,
+    /// covering byte `range`, boxed at `top` with a 12px height, offset by `xoff`.
+    fn line(
+        clusters: &[(usize, f32)],
+        range: TextRange,
+        top: f32,
+        xoff: f32,
+    ) -> ParagraphLine {
+        let glyphs = clusters
+            .iter()
+            .map(|&(cluster, adv)| ShapedGlyph::new(1, cluster, adv))
+            .collect();
+        let segment = ShapedRun::new(
+            FontId::new(0),
+            GlyphRun::new(glyphs, TextDirection::LeftToRight, 10.0, range),
+        );
+        ParagraphLine::new(vec![segment], range, top, 12.0, 9.0).with_x_offset(xoff)
+    }
+
+    /// A three-line layout — "aaaa" / "bbbb" / "cccc" — each glyph 10px wide, lines
+    /// stacked by 12px, covering bytes 0..4 / 4..8 / 8..12.
+    fn three_line_layout(xoffsets: [f32; 3]) -> ParagraphLayout {
+        let lines = vec![
+            line(&[(0, 10.0), (1, 10.0), (2, 10.0), (3, 10.0)], TextRange::new(0, 4), 0.0, xoffsets[0]),
+            line(&[(4, 10.0), (5, 10.0), (6, 10.0), (7, 10.0)], TextRange::new(4, 8), 12.0, xoffsets[1]),
+            line(&[(8, 10.0), (9, 10.0), (10, 10.0), (11, 10.0)], TextRange::new(8, 12), 24.0, xoffsets[2]),
+        ];
+        ParagraphLayout::new(lines, TextAlignment::Start, TextOverflow::Clip)
+    }
+
+    #[test]
+    fn from_paragraph_collapsed_span_is_empty() {
+        let layout = three_line_layout([0.0; 3]);
+        assert!(SelectionGeometry::from_paragraph(&layout, 5, 5).is_empty());
+    }
+
+    #[test]
+    fn from_paragraph_single_line_is_one_rect() {
+        // A span [1,3) confined to line 0: one rect from pen x 10 (one glyph) to
+        // pen x 30 (three glyphs) — width 20 — at the line's top and height.
+        let layout = three_line_layout([0.0; 3]);
+        let geo = SelectionGeometry::from_paragraph(&layout, 1, 3);
+        assert_eq!(geo.len(), 1);
+        assert_eq!(geo.rects()[0], rect(10.0, 0.0, 20.0, 12.0));
+    }
+
+    #[test]
+    fn from_paragraph_spans_three_lines_with_per_line_extents() {
+        // A span [2,10) covers three lines: start-line TAIL (pen x 20 → width 40),
+        // interior FULL line, and end-line HEAD (0 → pen x 20).
+        let layout = three_line_layout([0.0; 3]);
+        let geo = SelectionGeometry::from_paragraph(&layout, 2, 10);
+        assert_eq!(geo.len(), 3, "one rect per covered line");
+        assert_eq!(geo.rects()[0], rect(20.0, 0.0, 20.0, 12.0), "start line: tail");
+        assert_eq!(geo.rects()[1], rect(0.0, 12.0, 40.0, 12.0), "interior: full width");
+        assert_eq!(geo.rects()[2], rect(0.0, 24.0, 20.0, 12.0), "end line: head");
+    }
+
+    #[test]
+    fn from_paragraph_backward_span_normalizes() {
+        // A backward span (focus < anchor) highlights the same rects as forward.
+        let layout = three_line_layout([0.0; 3]);
+        assert_eq!(
+            SelectionGeometry::from_paragraph(&layout, 10, 2),
+            SelectionGeometry::from_paragraph(&layout, 2, 10),
+        );
+    }
+
+    #[test]
+    fn from_paragraph_honors_line_alignment_offset() {
+        // Each covered line's rect x includes that line's own alignment x_offset.
+        let layout = three_line_layout([5.0, 7.0, 9.0]);
+        let geo = SelectionGeometry::from_paragraph(&layout, 2, 10);
+        assert_eq!(geo.rects()[0].origin.x, 5.0 + 20.0);
+        assert_eq!(geo.rects()[1].origin.x, 7.0 + 0.0);
+        assert_eq!(geo.rects()[2].origin.x, 9.0 + 0.0);
     }
 
     #[test]

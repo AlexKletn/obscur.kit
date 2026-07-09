@@ -36,6 +36,7 @@ use obscur_text::shaping::{
     apply_spacing, apply_tab_stops, CachingShaper, MockTextShaper, ParagraphShaper, ShapedGlyph,
     ShapedRun, SingleRunItemizer, TextDirection, TextItemizer, TextShaper,
 };
+use obscur_text::selection::{CaretAffinity, SelectionGeometry};
 use obscur_tree::tree::RetainedTree;
 
 use super::stacking::{effective_paint_layer, effective_stacking_z, PaintLayer, PaintUnit};
@@ -74,6 +75,31 @@ const SCROLLBAR_TRACK_COLOR: Color = Color::rgba(0.0, 0.0, 0.0, 0.06);
 
 /// The scrollbar thumb color: a darker translucent grey over the track.
 const SCROLLBAR_THUMB_COLOR: Color = Color::rgba(0.0, 0.0, 0.0, 0.35);
+
+/// Whether the wrapped-line boundary at byte `index` follows a **forced** break —
+/// a mandatory line-break character consumed by the earlier line (`\n`, `\r`, and
+/// the other Unicode segment-break characters, CSS Text 3 §4.1) — rather than a
+/// **soft** wrap where no character is consumed.
+///
+/// Caret [`CaretAffinity`] only disambiguates SOFT boundaries: at a forced break
+/// the two visual positions straddle the break character and are therefore
+/// *different* bytes, never the same offset, so affinity is inert. The soft case
+/// (this returns `false`) is the one where `index` is simultaneously the end of one
+/// line and the start of the next with the preceding character being ordinary
+/// content. A caret offset is always a char boundary; a non-boundary or
+/// out-of-range `index` conservatively reports `false`.
+fn boundary_after_forced_break(content: &str, index: usize) -> bool {
+    let index = index.min(content.len());
+    if !content.is_char_boundary(index) {
+        return false;
+    }
+    content[..index].chars().next_back().is_some_and(|c| {
+        matches!(
+            c,
+            '\n' | '\r' | '\u{000B}' | '\u{000C}' | '\u{0085}' | '\u{2028}' | '\u{2029}'
+        )
+    })
+}
 
 /// The live scroll state a scroll container is painted with (CSS Overflow 3
 /// §scroll-container): its current vertical scroll position and the scrollable
@@ -726,6 +752,43 @@ impl SceneCoordinator {
             return (0.0, self.paragraph.line_metrics(font_size).line_height(), 0.0, 0.0);
         };
         (line.top(), line.height(), line.x_offset(), Self::line_caret_x(line, index))
+    }
+
+    /// Resolves a caret byte `index` to its painted geometry like
+    /// [`caret_line_geometry`](Self::caret_line_geometry) but honoring the caret's
+    /// wrap-boundary [`CaretAffinity`] (spec §5.11).
+    ///
+    /// A byte at a **soft**-wrap boundary is shared by two visual positions — the
+    /// end of the earlier line and the start of the later one. The default
+    /// [`Downstream`](CaretAffinity::Downstream) binds it to the later line's
+    /// leading edge (exactly what `caret_line_geometry` does), so a default-affinity
+    /// caret — and every caret NOT on a soft boundary — is byte-identical.
+    /// [`Upstream`](CaretAffinity::Upstream) instead binds it to the earlier line's
+    /// trailing edge: its box top/height, its alignment `x_offset`, and its full
+    /// used content width (every glyph on that line has a cluster before `index`).
+    /// A **forced** break (`\n`, spec §4.1) is NOT a soft boundary — its two sides
+    /// are different bytes — so affinity is inert there (`content` distinguishes the
+    /// two cases).
+    fn caret_line_geometry_affinity(
+        &self,
+        layout: &ParagraphLayout,
+        content: &str,
+        font_size: f32,
+        index: usize,
+        affinity: CaretAffinity,
+    ) -> (f32, f32, f32, f32) {
+        let lines = layout.lines();
+        let downstream = Self::line_of_byte(layout, index);
+        if affinity.is_upstream()
+            && downstream > 0
+            && lines[downstream - 1].range().end == index
+            && Self::line_start_byte(layout, downstream) == index
+            && !boundary_after_forced_break(content, index)
+        {
+            let line = &lines[downstream - 1];
+            return (line.top(), line.height(), line.x_offset(), Self::line_caret_x(line, index));
+        }
+        self.caret_line_geometry(layout, font_size, index)
     }
 
     /// Shapes the wrapped multi-line [`ParagraphLayout`] for `content` on `node`
@@ -1480,39 +1543,38 @@ impl SceneCoordinator {
                     );
                     // Selection highlight, painted BEHIND the glyphs (emitted before
                     // the runs so the text shows over it): the documented
-                    // semi-transparent selection color. When the selection's start
-                    // and end resolve to the SAME wrapped line it is one rect from
-                    // x(start) to x(end) on that line; when it spans lines only the
-                    // start line's tail (x(start) → line width) is highlighted — a
-                    // documented single-line-first limitation (the per-line
-                    // `SelectionGeometry` fill is a separate later campaign item).
+                    // semi-transparent selection color. A span over the wrapped
+                    // `layout` paints ONE partial rect per covered line (spec §5.11):
+                    // the leading line from x(start) to its trailing edge, whole
+                    // interior lines full-width, the trailing line up to x(end). The
+                    // per-line geometry is computed by the domain
+                    // `SelectionGeometry::from_paragraph` (the source of truth) in
+                    // paragraph-local space using the SAME per-line spaced/tabbed
+                    // advance + alignment `x_offset` model the caret uses; the
+                    // coordinator only translates each rect by the box `origin` and
+                    // the field's `−scroll_left`. A span confined to ONE line yields
+                    // exactly the single rect the old first-line-only path produced
+                    // (byte-identical). A collapsed selection paints nothing.
                     if let Some(selection) = display_selection
                         && !selection.is_empty()
                     {
-                        let (top0, h0, xoff0, x0) =
-                            self.caret_line_geometry(&layout, font_size, selection.start());
-                        let (_, _, _, x1) =
-                            self.caret_line_geometry(&layout, font_size, selection.end());
-                        let same_line = Self::line_of_byte(&layout, selection.start())
-                            == Self::line_of_byte(&layout, selection.end());
-                        // End x within the start line: the end's own x when on the
-                        // same line, else that line's content width (highlight to
-                        // the line's end).
-                        let end_x = if same_line {
-                            x1
-                        } else {
-                            layout
-                                .lines()
-                                .get(Self::line_of_byte(&layout, selection.start()))
-                                .map_or(x0, ParagraphLine::width)
-                        };
-                        node_paint.fill_rect(
-                            Rect::new(
-                                Point::new(origin.x + xoff0 + x0 - scroll_left, origin.y + top0),
-                                Size::new((end_x - x0).max(0.0), h0),
-                            ),
-                            Brush::solid(SELECTION_COLOR),
+                        let geometry = SelectionGeometry::from_paragraph(
+                            &layout,
+                            selection.start(),
+                            selection.end(),
                         );
+                        for line_rect in geometry.rects() {
+                            node_paint.fill_rect(
+                                Rect::new(
+                                    Point::new(
+                                        origin.x + line_rect.origin.x - scroll_left,
+                                        origin.y + line_rect.origin.y,
+                                    ),
+                                    line_rect.size,
+                                ),
+                                Brush::solid(SELECTION_COLOR),
+                            );
+                        }
                     }
                     for line in layout.lines() {
                         let baseline = line.baseline();
@@ -1590,10 +1652,20 @@ impl SceneCoordinator {
                         // byte resolves to its wrapped line's top + height and its
                         // pen x within that line, so a caret on line 2 paints at
                         // y ≈ line-height and an x measured within line 2 — not the
-                        // summed width of every line. Single-line → line 0, top 0,
-                        // and the identical pen x (byte-identical).
-                        let (top, height, x_offset, caret_x) =
-                            self.caret_line_geometry(&layout, font_size, selection.focus());
+                        // summed width of every line. At a soft-wrap boundary the
+                        // focus byte is shared by two lines; the selection's
+                        // `CaretAffinity` disambiguates — Upstream binds the caret to
+                        // the trailing edge of the earlier line, Downstream (the
+                        // default) to the leading edge of the later line. Single-line
+                        // (and every default-affinity caret) → line 0, top 0, and the
+                        // identical pen x (byte-identical).
+                        let (top, height, x_offset, caret_x) = self.caret_line_geometry_affinity(
+                            &layout,
+                            content,
+                            font_size,
+                            selection.focus(),
+                            selection.affinity(),
+                        );
                         node_paint.fill_rect(
                             Rect::new(
                                 Point::new(origin.x + x_offset + caret_x - scroll_left, origin.y + top),
@@ -7171,6 +7243,133 @@ mod tests {
             .position(|c| matches!(c, PaintCommand::DrawText { .. }))
             .expect("a text run");
         assert!(fill_idx < text_idx, "the highlight is emitted before the glyphs");
+    }
+
+    /// A text node carrying `content` under the root, box at the origin sized
+    /// `w`×`h` (a narrow box wraps the text), red text — the multi-line editing
+    /// fixture for wrapped selection/caret geometry.
+    fn wrapped_editing_fixture(
+        content: &str,
+        w: f32,
+        h: f32,
+    ) -> (RetainedTree, ComputedStyles, LayoutBoxes, NodeId) {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, content);
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(text, with_color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(text, box_at(0.0, 0.0, w, h));
+        (tree, computed, boxes, text)
+    }
+
+    /// The origin of the single collapsed-caret fill (the thin `CARET_WIDTH` bar).
+    fn caret_bar_origin(list: &DisplayList) -> Point {
+        caret_fills(list)
+            .into_iter()
+            .find(|(r, _)| (r.size.width - CARET_WIDTH).abs() < 1e-4)
+            .expect("a caret bar")
+            .0
+            .origin
+    }
+
+    #[test]
+    fn single_line_selection_still_paints_exactly_one_rect() {
+        // (b) A span confined to ONE line (a wide, non-wrapping box) paints a single
+        // rect from x(start) to x(end) — byte-identical to the old first-line path.
+        let adv = 16.0 * MockTextShaper::ADVANCE_RATIO;
+        let (tree, computed, boxes, text) = editing_fixture("abcd");
+        let view = EditingView::new(text, "abcd", TextSelection::new(1, 3));
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, Some(view));
+
+        let fills = caret_fills(&list);
+        assert_eq!(fills.len(), 1, "one line → exactly one highlight rect");
+        let (rect, brush) = &fills[0];
+        assert_eq!(*brush, Brush::solid(SELECTION_COLOR));
+        assert!((rect.origin.x - adv).abs() < 1e-4, "starts at x(1) = one advance");
+        assert!((rect.size.width - adv * 2.0).abs() < 1e-4, "spans bytes 1..3 = two advances");
+        assert_eq!(rect.size.height, 16.0, "spans the line height");
+        assert_eq!(rect.origin.y, 0.0, "on the first line");
+    }
+
+    #[test]
+    fn selection_spanning_three_wrapped_lines_paints_three_per_line_rects() {
+        // (a) A 50px box wraps "aaaa bbbb cccc" to three lines; a selection [2,12)
+        // covers all three, so the highlight is THREE rects — the start line's TAIL,
+        // the middle line FULL, the end line's HEAD — each the domain
+        // `SelectionGeometry` rect translated by the box origin (0,0, no scroll).
+        let coordinator = SceneCoordinator::new();
+        let (tree, computed, boxes, text) =
+            wrapped_editing_fixture("aaaa bbbb cccc", 50.0, 48.0);
+        let view = EditingView::new(text, "aaaa bbbb cccc", TextSelection::new(2, 12));
+        let list = coordinator.compose(&tree, &computed, &boxes, Some(view));
+
+        let highlights: Vec<Rect> = caret_fills(&list)
+            .into_iter()
+            .filter(|(_, brush)| *brush == Brush::solid(SELECTION_COLOR))
+            .map(|(r, _)| r)
+            .collect();
+
+        // The painted rects equal the domain geometry over the same wrapped layout.
+        let layout =
+            coordinator.shape_text_lines(&tree, &computed, text, "aaaa bbbb cccc", 50.0);
+        let expected = SelectionGeometry::from_paragraph(&layout, 2, 12);
+        assert_eq!(expected.len(), 3, "the selection covers three wrapped lines");
+        assert_eq!(highlights.len(), 3, "one highlight rect per covered line");
+        for (got, want) in highlights.iter().zip(expected.rects()) {
+            assert_eq!(got, want, "painted rect == domain geometry (origin 0, no scroll)");
+        }
+
+        // Per-line extents: start TAIL begins mid-line-0 (after 2 glyphs), the
+        // interior line is FULL from x 0, the end HEAD begins at x 0 and spans 2
+        // glyphs. Lines stack by the 16px line height.
+        let adv = 16.0 * MockTextShaper::ADVANCE_RATIO;
+        assert!((highlights[0].origin.x - adv * 2.0).abs() < 1e-3, "start tail after 2 glyphs");
+        assert_eq!(highlights[0].origin.y, 0.0, "start line");
+        assert_eq!(highlights[1].origin.x, 0.0, "interior full width from x 0");
+        assert_eq!(highlights[1].origin.y, 16.0, "middle line");
+        assert_eq!(highlights[2].origin.x, 0.0, "end head from x 0");
+        assert_eq!(highlights[2].origin.y, 32.0, "end line");
+        assert!((highlights[2].size.width - adv * 2.0).abs() < 1e-3, "end head spans 2 glyphs");
+        assert!(list.is_balanced(), "the display list stays balanced");
+    }
+
+    #[test]
+    fn caret_at_soft_wrap_boundary_honors_affinity() {
+        // (c) "aaaa bbbb cccc" wraps at 50px; byte 5 (the 'b' starting line 1) is a
+        // SOFT-wrap boundary shared by line 0's end and line 1's start. Downstream
+        // (the default) places the caret at the LEADING edge of the next line
+        // (line 1, x 0); Upstream at the TRAILING edge of the previous line (line 0,
+        // its used pen width).
+        let coordinator = SceneCoordinator::new();
+        let (tree, computed, boxes, text) =
+            wrapped_editing_fixture("aaaa bbbb cccc", 50.0, 48.0);
+        let layout =
+            coordinator.shape_text_lines(&tree, &computed, text, "aaaa bbbb cccc", 50.0);
+
+        // Downstream (default affinity) → start of line 1.
+        let down = EditingView::new(text, "aaaa bbbb cccc", TextSelection::caret(5));
+        let d = caret_bar_origin(&coordinator.compose(&tree, &computed, &boxes, Some(down)));
+        assert_eq!(d.y, 16.0, "downstream → line 1 top (byte-identical to before)");
+        assert!((d.x - 0.0).abs() < 1e-4, "downstream → line 1 leading edge (x 0)");
+
+        // Upstream affinity → end of line 0.
+        let up = EditingView::new(
+            text,
+            "aaaa bbbb cccc",
+            TextSelection::caret(5).with_affinity(CaretAffinity::Upstream),
+        );
+        let u = caret_bar_origin(&coordinator.compose(&tree, &computed, &boxes, Some(up)));
+        assert_eq!(u.y, 0.0, "upstream → line 0 top");
+        let line0_trailing = SceneCoordinator::line_caret_x(&layout.lines()[0], 5);
+        assert!(line0_trailing > 0.0, "line 0 has a non-zero trailing edge");
+        assert!(
+            (u.x - line0_trailing).abs() < 1e-3,
+            "upstream → line 0 trailing pen x ({line0_trailing}), got {}",
+            u.x
+        );
     }
 
     #[test]
