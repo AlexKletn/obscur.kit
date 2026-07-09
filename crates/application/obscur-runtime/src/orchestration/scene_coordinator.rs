@@ -1632,7 +1632,8 @@ impl SceneCoordinator {
                             let range = segment.run().source();
                             let seg_text =
                                 content.get(range.start..range.end).unwrap_or_default();
-                            let run = positioned_run(segment, baseline, font_size, seg_text);
+                            let run =
+                                positioned_run(segment, baseline, font_size, seg_text, content);
                             let seg_origin = Point::new(line_left + seg_x, line_top);
                             node_paint.draw_text(seg_origin, run, brush.clone());
                             seg_x += segment.run().advance();
@@ -2019,17 +2020,42 @@ fn overflow_for_text(tree: &RetainedTree, computed: &ComputedStyles, node: NodeI
 /// so a faux italic/bold run is sheared/thickened at raster time (spec §5.18).
 /// For a single-font line (one segment) this reproduces the original single-run
 /// behavior exactly, with font `0` and no synthesis.
-fn positioned_run(segment: &ShapedRun, baseline: f32, font_size: f32, text: &str) -> GlyphRun {
+///
+/// A glyph whose source character is a non-printing **control** (a C0/C1 control,
+/// including the segment-break `'\n'` and `'\t'`) is dropped from the emitted run
+/// so it paints no visible `.notdef` tofu box (CSS Text 3 §4.1.1 — a preserved
+/// segment break is a zero-width forced break, not a rendered character). Its pen
+/// advance is still accumulated, so every following glyph keeps its position and
+/// the caret advance-walk (which sums every shaped glyph, control glyphs included)
+/// stays in exact agreement — the suppression is purely visual, leaving byte
+/// offsets, advances, and line breaks untouched. `content` is the full shaped
+/// display string the segment's glyph clusters index into. Text with no control
+/// characters is byte-identical to the pre-suppression run.
+fn positioned_run(
+    segment: &ShapedRun,
+    baseline: f32,
+    font_size: f32,
+    text: &str,
+    content: &str,
+) -> GlyphRun {
     let mut pen_x = 0.0_f32;
     let mut glyphs: Vec<PositionedGlyph> = Vec::new();
     for glyph in segment.run().glyphs() {
-        glyphs.push(PositionedGlyph::new(
-            glyph.glyph_id(),
-            glyph.cluster(),
-            pen_x + glyph.x_offset(),
-            baseline + glyph.y_offset(),
-            glyph.x_advance(),
-        ));
+        // A control character shapes to a `.notdef` tofu; suppress the visible
+        // glyph but keep advancing the pen so positions and caret offsets hold.
+        let suppressed = content
+            .get(glyph.cluster()..)
+            .and_then(|rest| rest.chars().next())
+            .is_some_and(char::is_control);
+        if !suppressed {
+            glyphs.push(PositionedGlyph::new(
+                glyph.glyph_id(),
+                glyph.cluster(),
+                pen_x + glyph.x_offset(),
+                baseline + glyph.y_offset(),
+                glyph.x_advance(),
+            ));
+        }
         pen_x += glyph.x_advance();
     }
     GlyphRun::new(glyphs, font_size, text)
@@ -7409,8 +7435,9 @@ mod tests {
         // (end of "ni" → display offset 4). The buffer text ("ab") is untouched.
         let advance = 16.0 * MockTextShaper::ADVANCE_RATIO;
         let (tree, computed, boxes, text) = editing_fixture("ab");
+        // Collapsed anchor (at == end == 2): the preedit is a pure insertion.
         let view = EditingView::new(text, "ab", TextSelection::caret(2))
-            .with_preedit(crate::orchestration::PreeditView::new("ni", 2, 2));
+            .with_preedit(crate::orchestration::PreeditView::new("ni", 2, 2, 2));
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, Some(view));
 
         // The displayed text is the spliced "abni", not the buffer "ab".
@@ -7442,6 +7469,67 @@ mod tests {
             (caret.0.origin.x - advance * 4.0).abs() < 1e-4,
             "caret sits at the preedit caret (display offset 4)"
         );
+        assert!(list.is_balanced(), "the display list stays balanced");
+    }
+
+    #[test]
+    fn preedit_over_a_selection_replaces_the_selected_span_in_the_display() {
+        // (IME §5.12) Composing over a non-empty selection `[1, 3)` ("bc" of
+        // "abcd") must show ONLY the preedit where the selection was: the DISPLAY
+        // replaces the composition anchor span, so preedit "ni" renders as "a·ni·d"
+        // = "anid", NOT "a·ni·bcd" = "anibcd" (preedit beside the still-selected
+        // text). The buffer text ("abcd") is untouched — this is display-only.
+        let (tree, computed, boxes, text) = editing_fixture("abcd");
+        let view = EditingView::new(text, "abcd", TextSelection::new(1, 3))
+            .with_preedit(crate::orchestration::PreeditView::new("ni", 1, 3, 2));
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, Some(view));
+
+        let drawn: String = text_runs(&list)
+            .iter()
+            .map(|(_, run, _)| run.text().to_owned())
+            .collect();
+        assert_eq!(
+            drawn, "anid",
+            "the preedit replaces the selected span in the display, hiding it"
+        );
+        assert!(list.is_balanced(), "the display list stays balanced");
+    }
+
+    #[test]
+    fn a_preserved_newline_paints_no_visible_glyph() {
+        // (Fix 3, CSS Text 3 §4.1.1) Under `white-space: pre-line` a preserved `\n`
+        // is a zero-width *forced* break: "ab\ncd" still splits into two lines, but
+        // the segment break must PAINT no glyph (a control char otherwise shapes to
+        // a `.notdef` tofu box). The first line's run carries glyphs for 'a' and
+        // 'b' only — no positioned glyph maps to the `\n` at byte 2 — so advances
+        // and caret byte offsets are untouched while the line still breaks.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let text = add_text_child(&mut tree, root, "ab\ncd");
+
+        let mut computed = ComputedStyles::new();
+        let mut style = ComputedStyle::new();
+        style.set(
+            PropertyId::WhiteSpace,
+            ComputedValue::keyword(obscur_style::property::layout_keyword::WHITE_SPACE_PRE_LINE),
+        );
+        computed.insert(text, style);
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(text, box_at(0.0, 0.0, 1000.0, 32.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        let runs = text_runs(&list);
+        assert_eq!(runs.len(), 2, "the \\n still forces a second line");
+        // No positioned glyph anywhere maps back to the `\n` byte (cluster 2).
+        let newline_glyphs = runs
+            .iter()
+            .flat_map(|(_, run, _)| run.glyphs())
+            .filter(|glyph| glyph.cluster() == 2)
+            .count();
+        assert_eq!(newline_glyphs, 0, "the \\n cluster paints no glyph");
+        assert_eq!(runs[0].1.len(), 2, "line 0 draws only 'a' and 'b'");
+        assert_eq!(runs[1].1.len(), 2, "line 1 draws only 'c' and 'd'");
         assert!(list.is_balanced(), "the display list stays balanced");
     }
 

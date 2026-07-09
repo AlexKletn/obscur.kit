@@ -59,6 +59,29 @@ use crate::orchestration::{alignment_for, direction_for, white_space_for};
 use crate::scheduler::{BackpressureDecision, FrameScheduler};
 use crate::transaction::ReconcileEnactor;
 
+/// The maximum gap, in microseconds, between two presses for them to count as a
+/// multi-click (the platform double-click window; 500 ms is the common default).
+const MULTI_CLICK_WINDOW_MICROS: u64 = 500_000;
+
+/// The maximum distance, in logical pixels, between two presses for them to count
+/// as a multi-click — a press that jumps farther starts a fresh count.
+const MULTI_CLICK_RADIUS: f32 = 4.0;
+
+/// The last [`PointerEventKind::Down`] press, retained so a rapid run of presses
+/// on the same target near the same point is recognised as a double/triple
+/// *click* (spec §5.11 editing engine — word/line selection via the pointer).
+#[derive(Debug, Clone, Copy)]
+struct PointerClick {
+    /// The interactive target the press landed on (`None` for empty space).
+    target: Option<NodeId>,
+    /// The press point in content space.
+    point: Point,
+    /// The press's logical timestamp, in microseconds.
+    time_micros: u64,
+    /// The running click count of this press (`1`, `2`, or `3`, then cycling).
+    count: u32,
+}
+
 /// The embeddable UI runtime: the application-core **integrator** the catalog
 /// mandates (spec §1.4, §3.4–§3.7).
 ///
@@ -155,6 +178,18 @@ pub struct UiRuntime {
     /// while this is set re-selects `[anchor, current]` over the same field; a
     /// [`PointerEventKind::Up`] clears it. `None` between presses (spec §5.11).
     text_drag: Option<(NodeId, usize)>,
+    /// The most recent [`PointerEventKind::Down`] press, used to detect a
+    /// double/triple *click* (a rapid run of presses on the same target at
+    /// nearly the same point) so the pointer path can select a word or line
+    /// under the cursor (spec §5.11 editing engine — word/line navigation).
+    /// `None` until the first press; see [`next_click_count`](Self::next_click_count).
+    last_click: Option<PointerClick>,
+    /// The click count of the current [`PointerEventKind::Down`]: `1` for a
+    /// single click (caret placement), `2` for a double click (word select),
+    /// `3` for a triple click (line select), cycling back to `1`. Resolved once
+    /// per press in [`handle_pointer`](Self::handle_pointer) and consumed by
+    /// [`begin_text_pointer`](Self::begin_text_pointer).
+    click_count: u32,
     /// The command-handler registry: application logic to run when a dispatched
     /// command fires, keyed by the command's [`InternedSymbol`] (spec §2.3,
     /// §3.1 — events flow up to a command, the command runs a handler).
@@ -425,6 +460,8 @@ impl UiRuntime {
             focused: None,
             press_target: None,
             text_drag: None,
+            last_click: None,
+            click_count: 1,
             handlers: HashMap::new(),
             text_input_handlers: HashMap::new(),
             change_handlers: HashMap::new(),
@@ -1748,9 +1785,15 @@ impl UiRuntime {
                 press_changed = true;
             }
             self.press_target = interactive_target;
-            // Click → caret: after `sync_editing_to_focus` has (re)seated the
-            // session for the clicked editable, place the caret at the click point
-            // and arm a potential drag-selection anchored there. A press on a
+            // Resolve the click count (single / double / triple) from this press's
+            // relationship to the previous one, so a double click can select the
+            // word and a triple click the line under the pointer (spec §5.11).
+            self.click_count =
+                self.next_click_count(interactive_target, event.position(), event.timestamp());
+            // Click → caret / word / line: after `sync_editing_to_focus` has
+            // (re)seated the session for the clicked editable, a single click places
+            // the caret and arms a potential drag-selection; a double click selects
+            // the word and a triple click the line under the point. A press on a
             // non-editable (or disabled) target clears any armed drag and leaves
             // the session untouched.
             self.begin_text_pointer(interactive_target, event.position());
@@ -2427,10 +2470,120 @@ impl UiRuntime {
         let Some(offset) = self.caret_offset_at(field, point) else {
             return;
         };
-        // A collapsed caret at the click; `SetSelection` is non-mutating, so
-        // `after_edit` (inside `apply_edit`) fires no `on-input`, only a frame.
-        self.apply_edit(EditCommand::SetSelection(TextSelection::caret(offset)));
-        self.text_drag = Some((field, offset));
+        match self.click_count {
+            // Double click: select the WORD under the pointer (word boundaries via
+            // `NavigationUnit::Word`, spec §5.11). No drag is armed — the selection
+            // is the whole word.
+            2 => self.select_word_at(field, offset),
+            // Triple click (or beyond): select the whole LINE under the pointer
+            // (logical line boundaries via `NavigationUnit::LineBoundary`; a
+            // single-line field's whole span, spec §5.11).
+            n if n >= 3 => self.select_line_at(field, offset),
+            // Single click: a collapsed caret at the click; `SetSelection` is
+            // non-mutating, so `after_edit` (inside `apply_edit`) fires no
+            // `on-input`, only a frame. Arms a potential drag-selection.
+            _ => {
+                self.apply_edit(EditCommand::SetSelection(TextSelection::caret(offset)));
+                self.text_drag = Some((field, offset));
+            }
+        }
+    }
+
+    /// Resolves the click count of a [`PointerEventKind::Down`] press at `point`
+    /// (content space) on `target` with logical timestamp `time_micros`: `1` for a
+    /// fresh click, `2` for a double click, `3` for a triple click, then cycling
+    /// back to `1` (spec §5.11 editing engine — pointer word/line selection).
+    ///
+    /// A press counts as a *repeat* of the previous one when it lands on the same
+    /// [`target`](PointerClick::target), within [`MULTI_CLICK_WINDOW_MICROS`] of
+    /// the previous press, and within [`MULTI_CLICK_RADIUS`] of its point — the
+    /// standard platform double-click test. Any press that fails one of these
+    /// conditions restarts the count at `1`. The resolved press is recorded as the
+    /// new [`last_click`](Self::last_click) so the next press can chain off it.
+    fn next_click_count(&mut self, target: Option<NodeId>, point: Point, time_micros: u64) -> u32 {
+        let count = self
+            .last_click
+            .filter(|prev| {
+                prev.target == target
+                    && time_micros.saturating_sub(prev.time_micros) <= MULTI_CLICK_WINDOW_MICROS
+                    && (point.x - prev.point.x).hypot(point.y - prev.point.y) <= MULTI_CLICK_RADIUS
+            })
+            // A run cycles 1 → 2 → 3 → 1 so a fourth rapid click collapses back to a
+            // single caret (matching platform multi-click behaviour) and the count
+            // stays bounded.
+            .map_or(1, |prev| (prev.count % 3) + 1);
+        self.last_click = Some(PointerClick {
+            target,
+            point,
+            time_micros,
+            count,
+        });
+        count
+    }
+
+    /// Selects the word containing byte `offset` in the focused editable `field`
+    /// (double-click, spec §5.11) using the buffer's `NavigationUnit::Word` engine.
+    ///
+    /// The word is bracketed by a forward word move from the click (to the word's
+    /// end) then a backward word extend (to its start), so the click may land
+    /// anywhere within — or at the leading edge of — the word. The buffer's word
+    /// motion is a simplified UAX-29 approximation (whitespace-delimited runs); the
+    /// resulting `[start, end)` is set through the standard non-mutating
+    /// [`apply_edit`](Self::apply_edit) choke point (a frame, no `on-input`). A
+    /// no-op when no session covers `field`.
+    fn select_word_at(&mut self, field: NodeId, offset: usize) {
+        let Some(session) = self.editing.as_mut().filter(|s| s.node() == field) else {
+            return;
+        };
+        let buffer = session.buffer_mut();
+        buffer.apply(EditCommand::SetSelection(TextSelection::caret(offset)));
+        buffer.apply(EditCommand::Move {
+            unit: NavigationUnit::Word,
+            direction: EditDirection::Forward,
+            extend: false,
+        });
+        buffer.apply(EditCommand::Move {
+            unit: NavigationUnit::Word,
+            direction: EditDirection::Backward,
+            extend: true,
+        });
+        let range = buffer.selection().range();
+        // Normalise to a forward selection (anchor at the word start) and flush the
+        // caret/selection through the standard non-mutating edit path.
+        self.apply_edit(EditCommand::SetSelection(TextSelection::new(
+            range.start,
+            range.end,
+        )));
+    }
+
+    /// Selects the whole logical line containing byte `offset` in the focused
+    /// editable `field` (triple-click, spec §5.11) using the buffer's
+    /// `NavigationUnit::LineBoundary` engine — the byte span between the enclosing
+    /// `'\n'` boundaries (or the whole text in a single-line field). The `[start,
+    /// end)` is set through the standard non-mutating
+    /// [`apply_edit`](Self::apply_edit) choke point. A no-op when no session covers
+    /// `field`.
+    fn select_line_at(&mut self, field: NodeId, offset: usize) {
+        let Some(session) = self.editing.as_mut().filter(|s| s.node() == field) else {
+            return;
+        };
+        let buffer = session.buffer_mut();
+        buffer.apply(EditCommand::SetSelection(TextSelection::caret(offset)));
+        buffer.apply(EditCommand::Move {
+            unit: NavigationUnit::LineBoundary,
+            direction: EditDirection::Backward,
+            extend: false,
+        });
+        buffer.apply(EditCommand::Move {
+            unit: NavigationUnit::LineBoundary,
+            direction: EditDirection::Forward,
+            extend: true,
+        });
+        let range = buffer.selection().range();
+        self.apply_edit(EditCommand::SetSelection(TextSelection::new(
+            range.start,
+            range.end,
+        )));
     }
 
     /// While a drag is armed, extends the selection from the press anchor to the
@@ -3389,6 +3542,7 @@ impl UiRuntime {
                 Some(comp) => view.with_preedit(PreeditView::new(
                     comp.preedit().text(),
                     comp.anchor().start,
+                    comp.anchor().end,
                     comp.preedit().caret(),
                 )),
                 None => view,
@@ -7929,6 +8083,72 @@ mod tests {
                 "click at the caret x of offset {i} returns {i}",
             );
         }
+    }
+
+    /// A mouse event at `(x, y)` carrying an explicit logical timestamp (µs), so a
+    /// test drives the multi-click detector's time window deterministically.
+    fn mouse_t(kind: PointerEventKind, x: f32, y: f32, t: u64) -> PointerEvent {
+        mouse(kind, x, y).with_timestamp(t)
+    }
+
+    #[test]
+    fn double_click_selects_the_word_under_the_pointer() {
+        // (a) Fix 1 (§5.11): a DOUBLE click — two presses on the same point within
+        // the multi-click window — selects the WORD under the pointer via
+        // `NavigationUnit::Word`. Clicking inside "ab" of "ab cd" selects "ab".
+        let (mut runtime, _mirror) = focused_editable("ab cd");
+        let ox = editing_text_origin_x(&runtime);
+        let x = ox + ADVANCE * 1.0; // inside the first word "ab"
+        let t = 1_000_000;
+        runtime.handle_pointer(mouse_t(PointerEventKind::Down, x, 25.0, t));
+        runtime.handle_pointer(mouse_t(PointerEventKind::Up, x, 25.0, t));
+        // The second press within the window is the double click.
+        runtime.handle_pointer(mouse_t(PointerEventKind::Down, x, 25.0, t + 1_000));
+        let sel = runtime.editing_selection().expect("session active");
+        assert!(!sel.is_collapsed(), "the double click opened a word selection");
+        assert_eq!(
+            (sel.start(), sel.end()),
+            (0, 2),
+            "the word 'ab' under the pointer is selected"
+        );
+    }
+
+    #[test]
+    fn triple_click_selects_the_line_under_the_pointer() {
+        // (b) Fix 1 (§5.11): a TRIPLE click selects the whole LINE under the pointer
+        // via `NavigationUnit::LineBoundary` — for a single-line field that is the
+        // whole value "ab cd".
+        let (mut runtime, _mirror) = focused_editable("ab cd");
+        let ox = editing_text_origin_x(&runtime);
+        let x = ox + ADVANCE * 1.0;
+        let t = 1_000_000;
+        runtime.handle_pointer(mouse_t(PointerEventKind::Down, x, 25.0, t));
+        runtime.handle_pointer(mouse_t(PointerEventKind::Up, x, 25.0, t));
+        runtime.handle_pointer(mouse_t(PointerEventKind::Down, x, 25.0, t + 1_000));
+        runtime.handle_pointer(mouse_t(PointerEventKind::Up, x, 25.0, t + 1_000));
+        // The third press within the window is the triple click.
+        runtime.handle_pointer(mouse_t(PointerEventKind::Down, x, 25.0, t + 2_000));
+        let sel = runtime.editing_selection().expect("session active");
+        assert_eq!(
+            (sel.start(), sel.end()),
+            (0, 5),
+            "the whole single line 'ab cd' is selected"
+        );
+    }
+
+    #[test]
+    fn single_click_still_collapses_the_caret_byte_identically() {
+        // (c) Fix 1 byte-identical guard: a lone click (outside any prior press's
+        // multi-click window) still collapses to a plain caret at the clicked
+        // boundary — unchanged from the pre-fix single-click behaviour.
+        let (mut runtime, _mirror) = focused_editable("ab cd");
+        let ox = editing_text_origin_x(&runtime);
+        let x = ox + ADVANCE * 4.0; // inside "cd"
+        runtime.handle_pointer(mouse_t(PointerEventKind::Down, x, 25.0, 1_000_000));
+        runtime.handle_pointer(mouse_t(PointerEventKind::Up, x, 25.0, 1_000_000));
+        let sel = runtime.editing_selection().expect("session active");
+        assert!(sel.is_collapsed(), "a single click collapses to a caret");
+        assert_eq!(sel.focus(), 4, "the caret sits at the clicked boundary");
     }
 
     // ---- Phase 4 final step: motion orchestration (style → motion → paint) ----

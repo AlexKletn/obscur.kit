@@ -578,13 +578,20 @@ pub(crate) fn display_text<'a>(
     };
     match view.preedit {
         // Composing: splice the uncommitted preedit into the buffer text for
-        // DISPLAY only (spec §5.12) and shape the result RAW.
+        // DISPLAY only (spec §5.12) and shape the result RAW. The preedit
+        // **replaces** the composition anchor span `[at, end)`, so composing over a
+        // non-empty selection shows just the preedit where the selection was (the
+        // selected text is hidden while composing) rather than the preedit beside
+        // the still-selected text. With a collapsed anchor (`at == end`, the common
+        // no-selection case) this is a pure insertion at `at` — byte-identical to
+        // the previous splice. The buffer is untouched; only the display changes.
         Some(preedit) => {
             let at = preedit.at.min(view.text.len());
+            let end = preedit.end.clamp(at, view.text.len());
             let mut spliced = String::with_capacity(view.text.len() + preedit.text.len());
             spliced.push_str(&view.text[..at]);
             spliced.push_str(preedit.text);
-            spliced.push_str(&view.text[at..]);
+            spliced.push_str(&view.text[end..]);
             Cow::Owned(spliced)
         }
         // Editing without a live composition: shape the raw session buffer, so the

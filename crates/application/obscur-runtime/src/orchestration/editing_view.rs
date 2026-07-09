@@ -53,10 +53,14 @@ pub struct EditingView<'a> {
 /// for DISPLAY (spec §5.12 IME).
 ///
 /// The preedit is *not* committed text: it is the uncommitted composition string
-/// shown inline at [`at`](Self::at) (a byte offset into the field's buffer text,
-/// the composition anchor's start) and rendered distinctly (an underline), but it
-/// is **never** inserted into the buffer until the composition commits. The
-/// compose phase splices `text` into the buffer text only to paint it.
+/// shown inline over the composition anchor `[at, end)` (byte offsets into the
+/// field's buffer text) and rendered distinctly (an underline), but it is
+/// **never** inserted into the buffer until the composition commits. The compose
+/// phase splices `text` into the buffer text only to paint it, **replacing** the
+/// anchor span `[at, end)` so a composition started over a non-empty selection
+/// shows just the preedit where the selection was — not the preedit alongside the
+/// still-selected text (spec §5.12). When the anchor is collapsed (`at == end`,
+/// the common no-selection case) the splice is a pure insertion at `at`.
 #[derive(Debug, Clone, Copy)]
 pub struct PreeditView<'a> {
     /// The uncommitted composition text shown inline.
@@ -64,17 +68,27 @@ pub struct PreeditView<'a> {
     /// The byte offset in the field's buffer text where the preedit is spliced for
     /// display — the composition anchor's start.
     pub at: usize,
+    /// The byte offset in the field's buffer text where the composition anchor
+    /// ends — the end of the span the preedit replaces for display. Equal to
+    /// [`at`](Self::at) when the anchor is collapsed (no selection under the
+    /// composition).
+    pub end: usize,
     /// The caret byte offset *within* [`text`](Self::text): where the IME wants
     /// the insertion point drawn inside the preedit.
     pub caret: usize,
 }
 
 impl<'a> PreeditView<'a> {
-    /// Creates a preedit view for `text` spliced at byte offset `at` with its
-    /// caret at byte `caret` within `text`.
+    /// Creates a preedit view for `text` replacing the composition anchor span
+    /// `[at, end)` for display, with its caret at byte `caret` within `text`.
     #[must_use]
-    pub(crate) const fn new(text: &'a str, at: usize, caret: usize) -> Self {
-        Self { text, at, caret }
+    pub(crate) const fn new(text: &'a str, at: usize, end: usize, caret: usize) -> Self {
+        Self {
+            text,
+            at,
+            end,
+            caret,
+        }
     }
 }
 
