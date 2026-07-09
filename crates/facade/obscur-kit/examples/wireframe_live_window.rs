@@ -73,7 +73,7 @@ use winit::window::{Window, WindowAttributes, WindowId};
 mod wireframe;
 
 use wireframe::{
-    CMD_BTN, CMD_CHK, CMD_FIELD, CMD_LINK, CMD_SEL, CMD_TRI, RADIO_COUNT, RADIO_LABELS,
+    CMD_AREA, CMD_BTN, CMD_CHK, CMD_FIELD, CMD_LINK, CMD_SEL, CMD_TRI, RADIO_COUNT, RADIO_LABELS,
     SELECT_COUNT, WireState, radio_command,
 };
 
@@ -177,6 +177,18 @@ impl WireframeWindow {
                 let mut st = s.borrow_mut();
                 text.clone_into(&mut st.field);
                 st.last_event = format!("Typed: {text:?}");
+            });
+        }
+        // Textarea — per-keystroke text mirrored into state, so the multi-line field
+        // is a controlled field too (its value tracks the session every frame). With
+        // the placeholder-override engine fix the uncontrolled case shows typed text
+        // as well, but mirroring keeps the textarea's value in sync with the buffer.
+        {
+            let s = state.clone();
+            runtime.on_text_input(CMD_AREA, move |text| {
+                let mut st = s.borrow_mut();
+                text.clone_into(&mut st.area);
+                st.last_event = format!("Typed area: {text:?}");
             });
         }
         // Text link — activation updates the status line.

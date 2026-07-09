@@ -29,7 +29,7 @@ use obscur_text::shaping::{
 };
 use obscur_tree::tree::RetainedTree;
 
-use super::scene_coordinator::is_editing_text_node;
+use super::scene_coordinator::editing_override;
 use super::scroll::overflow_scrolls;
 use super::{
     alignment_for, attributes_for, direction_for, display_text, families_for, grid_templates_from,
@@ -1282,7 +1282,7 @@ fn measure(
         // sized from the identical characters the compose pass paints, so its height
         // (line count) matches the painted lines. Letter-/word-spacing and tab stops
         // are applied post-shaping inside `measure_text_node`.
-        let active = editing.filter(|view| is_editing_text_node(tree, node, view.node));
+        let active = editing_override(tree, node, editing);
         let content = display_text(
             content,
             active,
@@ -1408,7 +1408,7 @@ fn arrange(
         // else runs `text-transform` (§2.1) + `white-space` collapsing (§4.1.1);
         // post-shape spacing (§8.1/§8.2) + tab stops (§4.3) follow inside
         // `measure_text_node`, so the arranged box matches the painted lines.
-        let active = editing.filter(|view| is_editing_text_node(tree, node, view.node));
+        let active = editing_override(tree, node, editing);
         let content = display_text(
             content,
             active,
@@ -3051,5 +3051,85 @@ mod tests {
         assert_eq!(boxes[&slot].size().height, 28.0);
         assert_eq!(boxes[&cap].origin().y, 40.0);
         assert_eq!(boxes[&cap].size().height, 14.0);
+    }
+
+    #[test]
+    fn placeholder_slot_is_measured_from_the_session_text_not_the_empty_value() {
+        // The measure↔compose invariant for the CSS `::placeholder` slot: an
+        // empty-valued field's ONLY text node is the `.placeholder` overlay. While a
+        // session with typed text is active, BOTH passes shape the SESSION buffer over
+        // that slot (`editing_override`), so the measured box is sized from the session
+        // text — matching the glyphs the compose pass paints there (no measure/paint
+        // skew). An empty session leaves the slot sized from the muted placeholder hint
+        // (`:placeholder-shown` holds). Single-line mock: 9.6 px/char, so the two cases
+        // differ purely by string length.
+        use obscur_text::selection::TextSelection;
+        let build = || {
+            let mut tree = RetainedTree::new();
+            let root = tree.alloc(NodeKind::Root);
+            tree.set_root(root);
+            let field = add_child(&mut tree, root, 700);
+            let overlay = add_child(&mut tree, field, 701);
+            // Mark the overlay element as the `.placeholder` pseudo-element.
+            {
+                use obscur_view::view::{StyleAttributes, ViewProperty, ViewValue, CLASS};
+                let attrs = StyleAttributes::extract(&[ViewProperty::new(
+                    CLASS,
+                    ViewValue::Text("placeholder".into()),
+                )]);
+                if let Some(n) = tree.get_mut(overlay) {
+                    n.set_attributes(attrs);
+                }
+            }
+            let hint = add_text_child(&mut tree, overlay, "x"); // a 1-char muted hint
+            let mut computed = ComputedStyles::new();
+            computed.insert(root, ComputedStyle::new());
+            computed.insert(field, ComputedStyle::new());
+            computed.insert(overlay, ComputedStyle::new());
+            computed.insert(hint, ComputedStyle::new());
+            (tree, computed, field, hint)
+        };
+        let coordinator = LayoutCoordinator::new();
+        let advance = 16.0 * 0.6; // mock advance per char
+
+        // Typed session "abcd" over the placeholder → the slot is sized from "abcd".
+        let (tree, computed, field, hint) = build();
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let typed = coordinator.layout_editing(
+            &tree,
+            &styles,
+            &computed,
+            &GridTemplates::new(),
+            Size::new(400.0, 200.0),
+            (0.0, 0.0),
+            &test_paragraph(),
+            None,
+            Some(EditingView::new(field, "abcd", TextSelection::caret(4))),
+        );
+        assert!(
+            (typed[&hint].size().width - advance * 4.0).abs() < 0.5,
+            "placeholder slot measured from the 4-char session, got {}",
+            typed[&hint].size().width,
+        );
+
+        // Empty session → the slot stays sized from the 1-char placeholder hint.
+        let (tree, computed, field, hint) = build();
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let empty = coordinator.layout_editing(
+            &tree,
+            &styles,
+            &computed,
+            &GridTemplates::new(),
+            Size::new(400.0, 200.0),
+            (0.0, 0.0),
+            &test_paragraph(),
+            None,
+            Some(EditingView::new(field, "", TextSelection::caret(0))),
+        );
+        assert!(
+            (empty[&hint].size().width - advance).abs() < 0.5,
+            "empty session leaves the slot sized from the 1-char placeholder hint, got {}",
+            empty[&hint].size().width,
+        );
     }
 }

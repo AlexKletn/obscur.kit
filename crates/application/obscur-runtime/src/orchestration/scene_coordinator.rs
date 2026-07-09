@@ -1479,7 +1479,14 @@ impl SceneCoordinator {
                     // and, below, the caret + selection highlight. `editing` is
                     // `None` on every non-editing frame, so this whole override
                     // path is inert and the retained content is drawn unchanged.
-                    let active = editing.filter(|view| is_editing_text_node(tree, node, view.node));
+                    // The role also decides the `.placeholder` overlay case: the
+                    // session overrides the placeholder slot only while it has typed
+                    // text (`:placeholder-shown` is false once the effective text is
+                    // non-empty), and then paints in the FIELD's ink, not the muted
+                    // hint color.
+                    let role = editing
+                        .map_or(EditingRole::None, |view| editing_role(tree, node, view.node));
+                    let active = editing.filter(|view| role.overrides(view));
                     // The displayed text, computed through the SAME `display_text`
                     // seam the layout (measure/arrange) pass uses, so this frame's
                     // box and the glyphs painted here shape the identical string
@@ -1513,7 +1520,17 @@ impl SceneCoordinator {
                         }
                         None => view.selection,
                     });
-                    let text_color = text_color_of(computed, node);
+                    // The ink for the glyphs, caret and preedit underline. Normally
+                    // the node's own computed `color`; but when the live session is
+                    // painted OVER the `.placeholder` overlay (typed text, not the
+                    // hint) it uses the editing FIELD's normal ink instead of the
+                    // overlay's muted placeholder color — so typed text is not muted.
+                    let text_color = match (active, role) {
+                        (Some(view), EditingRole::Placeholder) => {
+                            text_color_of(computed, view.node)
+                        }
+                        _ => text_color_of(computed, node),
+                    };
                     let brush = Brush::solid(text_color);
                     // Same per-node font size the layout phase measured with, so
                     // the drawn advances and baseline match the sized box.
@@ -3494,41 +3511,98 @@ fn scene_color_from(c: StyleColor) -> Color {
     Color::rgba(c.r, c.g, c.b, c.a)
 }
 
-/// Whether `node` is the text painted for the editing field `field`: either the
-/// field node itself (if it directly carries the text) or any descendant of it,
-/// found by walking `node`'s logical-parent chain toward the root.
+/// The role a text `node` plays for the editing session bound to `field` — which
+/// decides *whether* and *how* the live session buffer overrides the node's
+/// painted/measured text (CSS `::placeholder` / `:placeholder-shown` model).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum EditingRole {
+    /// `node` is not the editing field's text at all: the session never touches it.
+    None,
+    /// `node` is the field's ordinary editable text (the field itself, or a `Text`
+    /// descendant that is *not* under a `.placeholder` overlay): the session
+    /// **always** overrides it, even when the session text is empty (an emptied
+    /// field renders empty, byte-identical to the historical value path).
+    Value,
+    /// `node` is inside the field's `.placeholder` overlay (the CSS `::placeholder`
+    /// pseudo-element). By the `:placeholder-shown` model the placeholder is shown
+    /// *iff the field's effective displayed text is empty*: while editing, the
+    /// effective text is the SESSION buffer, not the stale value. So the session
+    /// overrides the placeholder slot **only while the session has typed text**
+    /// (`!text.is_empty()`); an empty session leaves the muted hint painted.
+    Placeholder,
+}
+
+impl EditingRole {
+    /// Whether the editing `view`'s session text overrides a node in this role
+    /// this frame: the field's value text always, its `.placeholder` overlay only
+    /// while the session buffer is non-empty (the `:placeholder-shown` rule).
+    #[must_use]
+    pub(super) fn overrides(self, view: &EditingView<'_>) -> bool {
+        match self {
+            Self::None => false,
+            Self::Value => true,
+            Self::Placeholder => !view.text.is_empty(),
+        }
+    }
+}
+
+/// Classifies `node` relative to the editing field `field`: the field's own text,
+/// its `.placeholder` overlay, or neither — found by walking `node`'s
+/// logical-parent chain toward the root.
 ///
 /// The editing session is bound to the editable *field* (the ancestor that binds
 /// `EVENT_INPUT`), but the glyphs live on a `Text` descendant; this maps that
-/// descendant back to its field so the compose phase can override its content and
-/// paint the caret/selection there. The walk is bounded by the tree size, so a
-/// malformed (cyclic) parent chain terminates deterministically instead of
-/// looping.
+/// descendant back to its field so the compose/measure phases can override its
+/// content and paint the caret/selection there. The walk is bounded by the tree
+/// size, so a malformed (cyclic) parent chain terminates deterministically instead
+/// of looping.
 ///
-/// The `.placeholder` overlay is **excluded**: it is the CSS `::placeholder`
-/// pseudo-element (a non-editable hint shown while `:placeholder-shown` holds),
-/// not the field's editable text, so text inside a `.placeholder` subtree is never
-/// treated as the editing field's text — the session never overwrites it with the
-/// typed value (no `placeholder + typed`) and paints no caret into it.
-pub(super) fn is_editing_text_node(tree: &RetainedTree, node: NodeId, field: NodeId) -> bool {
+/// A node reached through a `.placeholder` overlay (CSS `::placeholder`) on the way
+/// up to `field` is classified [`EditingRole::Placeholder`] rather than `Value`:
+/// the overlay is the `:placeholder-shown` hint, not the field's editable text, so
+/// the session overrides it only while it has typed text (see
+/// [`EditingRole::overrides`]) and, when it does, paints in the field's ink — not
+/// the overlay's muted color.
+pub(super) fn editing_role(tree: &RetainedTree, node: NodeId, field: NodeId) -> EditingRole {
     let mut current = node;
+    let mut in_placeholder = false;
     // At most `len` hops reach the root from any node in a well-formed tree; the
     // inclusive bound tolerates a self-parent without looping.
     for _ in 0..=tree.len() {
         if let Some(n) = tree.get(current)
             && n.attributes().has_class("placeholder")
         {
-            return false;
+            in_placeholder = true;
         }
         if current == field {
-            return true;
+            return if in_placeholder {
+                EditingRole::Placeholder
+            } else {
+                EditingRole::Value
+            };
         }
         match tree.get(current).and_then(|n| n.logical_parent().parent()) {
             Some(parent) => current = parent,
-            None => return false,
+            None => return EditingRole::None,
         }
     }
-    false
+    EditingRole::None
+}
+
+/// The editing session that overrides `node`'s text this frame, if any: the
+/// session view when `node` is the field's value text, or its `.placeholder`
+/// overlay while the session buffer is non-empty; `None` otherwise. Shared by the
+/// compose (scene) and measure/arrange (layout) passes so the box is sized from —
+/// and the glyphs painted from — the *same* string.
+pub(super) fn editing_override<'a>(
+    tree: &RetainedTree,
+    node: NodeId,
+    editing: Option<EditingView<'a>>,
+) -> Option<EditingView<'a>> {
+    let view = editing?;
+    editing_role(tree, node, view.node)
+        .overrides(&view)
+        .then_some(view)
 }
 
 #[cfg(test)]
@@ -7820,32 +7894,210 @@ mod tests {
     }
 
     #[test]
-    fn placeholder_overlay_text_is_not_the_fields_editable_text() {
-        // The `.placeholder` overlay (CSS `::placeholder`) is a non-editable hint,
-        // not the field's editable text: `is_editing_text_node` must return false
-        // for text inside a `.placeholder` subtree even though it descends from the
-        // editing field, so the compose override never overwrites it with the typed
-        // value nor paints a caret into it. A bare (non-placeholder) value text of
-        // the SAME field still resolves as editable.
+    fn placeholder_overlay_classifies_as_placeholder_role_not_value() {
+        // The `.placeholder` overlay (CSS `::placeholder`) is the `:placeholder-shown`
+        // hint, not the field's editable text: text inside a `.placeholder` subtree
+        // classifies as `EditingRole::Placeholder`, while the field's ordinary value
+        // text (and the field itself) classify as `EditingRole::Value`. This replaces
+        // the old boolean `is_editing_text_node`, which lumped the placeholder in with
+        // "not the field's text": under the CSS `:placeholder-shown` model the session
+        // DOES override the placeholder slot once it has typed text, so the placeholder
+        // needs its OWN role (whose `overrides` gates on the session buffer) rather than
+        // a flat false — that flat false was the regression (typed text never shown when
+        // the value was empty, because the placeholder was the only text node).
         let mut tree = RetainedTree::new();
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
         let field = add_child(&mut tree, root, 501);
-        // The `.placeholder` overlay element + its (skipped) hint text.
+        // The `.placeholder` overlay element + its hint text.
         let overlay = add_child(&mut tree, field, 502);
         set_class(&mut tree, overlay, "placeholder");
         let hint = add_text_child(&mut tree, overlay, "Type here…");
         // A separate, ordinary value text of the same field.
         let value = add_text_child(&mut tree, field, "x");
 
+        assert_eq!(
+            editing_role(&tree, hint, field),
+            EditingRole::Placeholder,
+            "placeholder hint text is the `::placeholder` slot, not editable value text"
+        );
+        assert_eq!(
+            editing_role(&tree, value, field),
+            EditingRole::Value,
+            "the field's ordinary value text is editable value text"
+        );
+        assert_eq!(
+            editing_role(&tree, field, field),
+            EditingRole::Value,
+            "the field itself is editable value text"
+        );
+
+        // The `overrides` gate encodes the `:placeholder-shown` rule: a Value node is
+        // always overridden by the session (even when empty), but the Placeholder slot
+        // is overridden only while the session buffer has typed text.
+        let empty = EditingView::new(field, "", TextSelection::caret(0));
+        let typed = EditingView::new(field, "abc", TextSelection::caret(3));
+        assert!(EditingRole::Value.overrides(&empty), "value text: session always overrides");
+        assert!(EditingRole::Value.overrides(&typed));
         assert!(
-            !is_editing_text_node(&tree, hint, field),
-            "placeholder hint text must NOT be treated as the field's editable text"
+            !EditingRole::Placeholder.overrides(&empty),
+            "empty session: the muted placeholder hint stays (placeholder-shown holds)"
         );
         assert!(
-            is_editing_text_node(&tree, value, field),
-            "the field's ordinary value text is still editable"
+            EditingRole::Placeholder.overrides(&typed),
+            "non-empty session: typed text overrides the placeholder slot"
         );
-        assert!(is_editing_text_node(&tree, field, field), "the field is itself editable");
+        assert!(!EditingRole::None.overrides(&typed));
+    }
+
+    /// An empty-valued field: a `field` element whose ONLY text is a `.placeholder`
+    /// overlay hint (the shape the widget emits while `:placeholder-shown` holds).
+    /// The field carries the normal `ink` `color`; the overlay + hint carry the
+    /// muted placeholder `color`. Returns the tree, styles, boxes (all one wide
+    /// line so nothing wraps), the field node, and the hint text node.
+    fn placeholder_fixture(
+        hint: &str,
+        ink: StyleColor,
+        placeholder: StyleColor,
+    ) -> (RetainedTree, ComputedStyles, LayoutBoxes, NodeId, NodeId) {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let field = add_child(&mut tree, root, 700);
+        let overlay = add_child(&mut tree, field, 701);
+        set_class(&mut tree, overlay, "placeholder");
+        let hint_text = add_text_child(&mut tree, overlay, hint);
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(field, with_color(ink));
+        computed.insert(overlay, with_color(placeholder));
+        computed.insert(hint_text, with_color(placeholder));
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(field, box_at(0.0, 0.0, 200.0, 16.0));
+        boxes.insert(overlay, box_at(0.0, 0.0, 200.0, 16.0));
+        boxes.insert(hint_text, box_at(0.0, 0.0, 200.0, 16.0));
+        (tree, computed, boxes, field, hint_text)
+    }
+
+    /// The FIELD's normal ink and the muted `.placeholder` hint color used by the
+    /// placeholder-override tests.
+    const FIELD_INK: StyleColor = StyleColor::rgba(1.0, 0.0, 0.0, 1.0);
+    const PLACEHOLDER_MUTED: StyleColor = StyleColor::rgba(0.6, 0.6, 0.6, 1.0);
+
+    #[test]
+    fn empty_valued_field_paints_typed_session_over_placeholder_in_field_ink() {
+        // (a) Regression, CSS `:placeholder-shown`: focus an empty-valued field
+        // (whose only text node is the `.placeholder` overlay) and type "abc" via the
+        // session. The effective displayed text is now the SESSION buffer (non-empty),
+        // so `:placeholder-shown` is FALSE — the session text paints OVER the
+        // placeholder slot, in the FIELD's ink (NOT the muted hint color), with a
+        // caret. Before the fix the muted placeholder showed and the typed text was
+        // never painted.
+        let (tree, computed, boxes, field, _hint) =
+            placeholder_fixture("Type here…", FIELD_INK, PLACEHOLDER_MUTED);
+        let view = EditingView::new(field, "abc", TextSelection::caret(3));
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, Some(view));
+
+        let runs = text_runs(&list);
+        assert_eq!(runs.len(), 1, "one painted run: the session text over the slot");
+        assert_eq!(runs[0].1.text(), "abc", "the placeholder slot paints the typed session text");
+        assert_eq!(
+            runs[0].2.as_solid().map(|b| b.color()),
+            Some(scene_color_from(FIELD_INK)),
+            "typed text over the placeholder uses the field's ink, not the muted hint color",
+        );
+        let carets = caret_fills(&list);
+        assert_eq!(carets.len(), 1, "a caret paints into the overridden placeholder slot");
+        assert_eq!(
+            carets[0].1.as_solid().map(|b| b.color()),
+            Some(scene_color_from(FIELD_INK)),
+            "the caret paints in the field's ink too",
+        );
+    }
+
+    #[test]
+    fn empty_valued_field_with_empty_session_keeps_the_muted_placeholder() {
+        // (b) An empty focused field with an EMPTY session: `:placeholder-shown` still
+        // holds (effective displayed text is empty), so the muted placeholder hint is
+        // painted in its OWN muted color and NO caret is drawn into it — the session
+        // does not override the slot when it has no typed text.
+        let (tree, computed, boxes, field, _hint) =
+            placeholder_fixture("Type here…", FIELD_INK, PLACEHOLDER_MUTED);
+        let view = EditingView::new(field, "", TextSelection::caret(0));
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, Some(view));
+
+        let runs = text_runs(&list);
+        assert_eq!(runs.len(), 1, "the muted placeholder hint still paints");
+        assert_eq!(runs[0].1.text(), "Type here…", "the hint text, not session text");
+        assert_eq!(
+            runs[0].2.as_solid().map(|b| b.color()),
+            Some(scene_color_from(PLACEHOLDER_MUTED)),
+            "an empty session leaves the placeholder in its muted color",
+        );
+        assert!(
+            caret_fills(&list).is_empty(),
+            "no caret is painted into a placeholder-shown slot",
+        );
+    }
+
+    #[test]
+    fn backspacing_a_field_to_empty_mid_edit_returns_the_muted_placeholder() {
+        // (c) Backspace to empty mid-edit: with a non-empty session the placeholder
+        // slot shows the typed text (field ink); once the session buffer is emptied
+        // the SAME slot returns to the muted placeholder hint and drops the caret —
+        // the override is driven live by the session buffer, frame to frame.
+        let (tree, computed, boxes, field, _hint) =
+            placeholder_fixture("Type here…", FIELD_INK, PLACEHOLDER_MUTED);
+        let coordinator = SceneCoordinator::new();
+
+        let typed = coordinator.compose(
+            &tree,
+            &computed,
+            &boxes,
+            Some(EditingView::new(field, "a", TextSelection::caret(1))),
+        );
+        assert_eq!(text_runs(&typed)[0].1.text(), "a", "typed char shows before backspace");
+        assert_eq!(caret_fills(&typed).len(), 1);
+
+        let emptied = coordinator.compose(
+            &tree,
+            &computed,
+            &boxes,
+            Some(EditingView::new(field, "", TextSelection::caret(0))),
+        );
+        assert_eq!(
+            text_runs(&emptied)[0].1.text(),
+            "Type here…",
+            "backspacing to empty returns the muted placeholder",
+        );
+        assert_eq!(
+            text_runs(&emptied)[0].2.as_solid().map(|b| b.color()),
+            Some(scene_color_from(PLACEHOLDER_MUTED)),
+        );
+        assert!(caret_fills(&emptied).is_empty(), "no caret once the placeholder is shown again");
+    }
+
+    #[test]
+    fn non_empty_value_field_is_byte_identical_regardless_of_the_placeholder_path() {
+        // (d) A field with a NON-EMPTY value renders/edits exactly as before this fix:
+        // its value text node (role `Value`, no `.placeholder`) is overridden by the
+        // session in the value node's OWN color, with exactly one caret. The
+        // placeholder override never fires — proving the change is confined to the
+        // empty-value case. The composed list is byte-identical to the plain editing
+        // fixture (same value node, same session).
+        let (tree, computed, boxes, value) = editing_fixture("hi");
+        let view = EditingView::new(value, "hi", TextSelection::caret(1));
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, Some(view));
+
+        let runs = text_runs(&list);
+        assert_eq!(runs.len(), 1, "one value run");
+        assert_eq!(runs[0].1.text(), "hi");
+        // `editing_fixture` paints red text; the run and caret keep the value node's
+        // own color (no field-ink placeholder detour).
+        let value_color = scene_color_from(StyleColor::rgba(1.0, 0.0, 0.0, 1.0));
+        assert_eq!(runs[0].2.as_solid().map(|b| b.color()), Some(value_color));
+        let carets = caret_fills(&list);
+        assert_eq!(carets.len(), 1, "exactly one caret on the value node");
+        assert_eq!(carets[0].1.as_solid().map(|b| b.color()), Some(value_color));
     }
 }
