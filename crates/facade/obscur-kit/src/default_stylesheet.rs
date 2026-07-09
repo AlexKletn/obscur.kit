@@ -107,12 +107,20 @@ input, textarea {\
    segment breaks (`\n`, CSS Text 3 §4.1.1) AND wraps at the box width, so pressing\
    Enter inserts a visible newline and long lines wrap. This white-space is the only\
    property that differs between the two — the box look is shared above. */\
+/* Intrinsic size: a native `<input>` defaults to ~`size=20` characters wide and a\
+   `<textarea>` to ~20 cols × a few rows. The engine has no `ch` unit, so approximate\
+   at the 14px UA font (~9px/char): input 180px wide (single line, clipped/scrolled),\
+   textarea 240px × 72px (multi-line, wraps). An author width/height overrides this. */\
 input {\
   white-space: nowrap;\
   overflow: hidden;\
+  width: 180px;\
 }\
 textarea {\
   white-space: pre-wrap;\
+  overflow: hidden;\
+  width: 240px;\
+  height: 72px;\
 }\
 input:hover, textarea:hover {\
   background: #f4f2ec;\
