@@ -28,8 +28,8 @@ use obscur_text::font::{
     FontSource, GenericFamily, MockFontResolver,
 };
 use obscur_text::layout::{
-    Hyphenator, LineStrut, NullHyphenator, ParagraphLayout, ParagraphLine, TextAlignment,
-    TextOverflow, WhiteSpace,
+    DefaultLineBreaker, Hyphenator, LineStrut, NullHyphenator, OverflowWrap, ParagraphLayout,
+    ParagraphLine, TextAlignment, TextOverflow, WhiteSpace, WordBreak,
 };
 use obscur_text::selection::TextSelection;
 use obscur_text::shaping::{
@@ -42,8 +42,9 @@ use obscur_tree::tree::RetainedTree;
 use super::stacking::{effective_paint_layer, effective_stacking_z, PaintLayer, PaintUnit};
 use super::{
     alignment_for, attributes_for, direction_for, display_text, families_for, letter_spacing_for,
-    line_height_for, overflow_for, root_font_size, tab_size_for, text_transform_for,
-    white_space_for, word_spacing_for, ComputedStyles, EditingView, LayoutBoxes, TabSize,
+    line_height_for, overflow_for, overflow_wrap_for, root_font_size, tab_size_for,
+    text_transform_for, white_space_for, word_break_for, word_spacing_for, ComputedStyles,
+    EditingView, LayoutBoxes, TabSize,
 };
 
 /// The width, in logical pixels, of the caret rectangle painted at the collapsed
@@ -339,6 +340,8 @@ impl SceneCoordinator {
         alignment: TextAlignment,
         overflow: TextOverflow,
         white_space: WhiteSpace,
+        overflow_wrap: OverflowWrap,
+        word_break: WordBreak,
         font_size: f32,
         max_width: f32,
         line_height_override: Option<f32>,
@@ -403,12 +406,17 @@ impl SceneCoordinator {
         } else {
             None
         };
+        // The replaceable line-break-opportunity port (spec §5.10, UAX #14): the
+        // built-in [`DefaultLineBreaker`], matching the measure pass exactly so the
+        // painted lines agree with the sized box. A UAX#14 adapter would inject here.
+        let line_breaker = DefaultLineBreaker;
         match self.hyphenator.as_deref() {
-            // No hyphenator and no ellipsis glyph: the exact pre-hyphenation path —
-            // no hyphen or ellipsis glyph is shaped, so the output (and the
-            // shaping-cache call count) is byte-identical to today. Clip truncation
-            // still applies through `overflow`, but only clips lines that overflow.
-            None if ellipsis.is_none() => ParagraphLayout::wrap_strut(
+            // No hyphenator and no ellipsis glyph: routed through the no-op
+            // hyphenator (byte-identical to plain wrapping) so the §5.2 controls and
+            // the breaker port thread through; no hyphen/ellipsis glyph is shaped, so
+            // the shaping-cache call count is unchanged. Clip truncation still
+            // applies through `overflow`, but only clips lines that overflow.
+            None if ellipsis.is_none() => ParagraphLayout::wrap_strut_hyphenated(
                 &runs,
                 content,
                 max_width,
@@ -418,6 +426,12 @@ impl SceneCoordinator {
                 overflow,
                 white_space,
                 tab_width,
+                &NullHyphenator,
+                None,
+                None,
+                overflow_wrap,
+                word_break,
+                &line_breaker,
             ),
             // Ellipsis without a hyphenator: wrap through the no-op hyphenator so
             // the shaped ellipsis glyph can be threaded into truncation.
@@ -434,6 +448,9 @@ impl SceneCoordinator {
                 &NullHyphenator,
                 None,
                 ellipsis,
+                overflow_wrap,
+                word_break,
+                &line_breaker,
             ),
             // Hyphenation on: shape the hyphen glyph so a break renders (and
             // measures) with a real advance, and wrap through the installed port.
@@ -452,6 +469,9 @@ impl SceneCoordinator {
                     hyphenator,
                     hyphen,
                     ellipsis,
+                    overflow_wrap,
+                    word_break,
+                    &line_breaker,
                 )
             }
         }
@@ -823,6 +843,8 @@ impl SceneCoordinator {
             alignment_for(style),
             overflow_for_text(tree, computed, node),
             white_space_for(style),
+            overflow_wrap_for(style),
+            word_break_for(style),
             font_size,
             box_width,
             line_height_for(style, font_size, root_font),
@@ -1538,6 +1560,8 @@ impl SceneCoordinator {
                         alignment,
                         overflow,
                         white_space,
+                        overflow_wrap_for(computed.get(&node)),
+                        word_break_for(computed.get(&node)),
                         font_size,
                         layout_box.size().width,
                         line_height_for(computed.get(&node), font_size, root_font),

@@ -1063,7 +1063,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 92] = [
+    const ALL: [PropertyId; 94] = [
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::BackgroundImage,
@@ -1154,9 +1154,15 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::WordSpacing,
         PropertyId::TextTransform,
         PropertyId::WhiteSpace,
+        PropertyId::OverflowWrap,
+        PropertyId::WordBreak,
         PropertyId::TabSize,
         PropertyId::Overflow,
     ];
+    // `word-wrap` is the legacy alias for `overflow-wrap` (CSS Text 3 §5.2).
+    if name.eq_ignore_ascii_case("word-wrap") {
+        return Some(PropertyId::OverflowWrap);
+    }
     ALL.into_iter()
         .find(|id| name.eq_ignore_ascii_case(id.name()))
 }
@@ -1485,6 +1491,8 @@ fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<Inte
         PropertyId::TextOverflow => Some(layout_keyword::text_overflow_from_name),
         PropertyId::TextTransform => Some(layout_keyword::text_transform_from_name),
         PropertyId::WhiteSpace => Some(layout_keyword::white_space_from_name),
+        PropertyId::OverflowWrap => Some(layout_keyword::overflow_wrap_from_name),
+        PropertyId::WordBreak => Some(layout_keyword::word_break_from_name),
         PropertyId::Overflow => Some(layout_keyword::overflow_from_name),
         _ => None,
     }
@@ -6082,6 +6090,65 @@ mod tests {
         );
         // CSS-wide keywords still take priority.
         assert_eq!(value_of("text-transform: inherit"), PropertyValue::Inherit);
+    }
+
+    #[test]
+    fn overflow_wrap_maps_to_reserved_symbols_and_word_wrap_is_an_alias() {
+        // CSS Text 3 §5.2: `overflow-wrap` and its legacy `word-wrap` alias both
+        // resolve to `PropertyId::OverflowWrap`.
+        assert_eq!(
+            property_id_from_name("overflow-wrap"),
+            Some(PropertyId::OverflowWrap)
+        );
+        assert_eq!(
+            property_id_from_name("word-wrap"),
+            Some(PropertyId::OverflowWrap)
+        );
+        assert_eq!(
+            property_id_from_name("WORD-WRAP"),
+            Some(PropertyId::OverflowWrap)
+        );
+        assert_eq!(
+            value_of("overflow-wrap: break-word"),
+            PropertyValue::Keyword(layout_keyword::OVERFLOW_WRAP_BREAK_WORD)
+        );
+        assert_eq!(
+            value_of("overflow-wrap: anywhere"),
+            PropertyValue::Keyword(layout_keyword::OVERFLOW_WRAP_ANYWHERE)
+        );
+        assert_eq!(
+            value_of("overflow-wrap: normal"),
+            PropertyValue::Keyword(layout_keyword::OVERFLOW_WRAP_NORMAL)
+        );
+        // The legacy alias lowers through the same closed keyword set.
+        assert_eq!(
+            value_of("word-wrap: break-word"),
+            PropertyValue::Keyword(layout_keyword::OVERFLOW_WRAP_BREAK_WORD)
+        );
+        // Both inherit by default (CSS Text 3 §5.2).
+        assert!(PropertyId::OverflowWrap.default_inheritance().is_inherited());
+    }
+
+    #[test]
+    fn word_break_maps_to_reserved_symbols() {
+        assert_eq!(
+            property_id_from_name("word-break"),
+            Some(PropertyId::WordBreak)
+        );
+        assert_eq!(
+            value_of("word-break: break-all"),
+            PropertyValue::Keyword(layout_keyword::WORD_BREAK_BREAK_ALL)
+        );
+        assert_eq!(
+            value_of("word-break: keep-all"),
+            PropertyValue::Keyword(layout_keyword::WORD_BREAK_KEEP_ALL)
+        );
+        assert_eq!(
+            value_of("word-break: normal"),
+            PropertyValue::Keyword(layout_keyword::WORD_BREAK_NORMAL)
+        );
+        assert_eq!(value_of("word-break: inherit"), PropertyValue::Inherit);
+        assert!(PropertyId::WordBreak.default_inheritance().is_inherited());
     }
 
     #[test]

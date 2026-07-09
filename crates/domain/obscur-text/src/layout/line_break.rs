@@ -125,6 +125,101 @@ impl LineBreak {
     }
 }
 
+/// Whether `ch` is a CJK **ideograph** — a large, well-defined set of Unicode
+/// blocks whose characters may line-break between one another by default (UAX #14
+/// class `ID`; CSS Text 3 §5.2 `word-break: normal`).
+///
+/// This is the Han-ideograph subset of UAX#14 class `ID`: the CJK Unified
+/// Ideographs and their extensions plus the compatibility ideographs. Kana and
+/// the CJK symbol/punctuation blocks (which carry additional tailoring rules) are
+/// deliberately excluded so the default breaker stays simple and deterministic;
+/// full UAX#14 tailoring is an adapter concern (see [`LineBreaker`]).
+#[must_use]
+pub(crate) fn is_cjk_ideograph(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x3400..=0x4DBF      // CJK Unified Ideographs Extension A
+        | 0x4E00..=0x9FFF    // CJK Unified Ideographs
+        | 0xF900..=0xFAFF    // CJK Compatibility Ideographs
+        | 0x2_0000..=0x2_A6DF // Extension B
+        | 0x2_A700..=0x2_EBEF // Extensions C–F
+        | 0x2_F800..=0x2_FA1F // CJK Compatibility Ideographs Supplement
+        | 0x3_0000..=0x3_134F // Extension G
+    )
+}
+
+/// A replaceable **line-break-opportunity port** (spec §5.10, UAX #14).
+///
+/// This is the seam through which a full Unicode line-breaking (UAX #14) or CJK
+/// adapter can supply break opportunities without changing the wrapping engine —
+/// the exact analogue of the [`Hyphenator`](super::Hyphenator) port for interior
+/// hyphenation. The domain wraps text through a `&dyn LineBreaker`; the default
+/// implementation ([`DefaultLineBreaker`]) reproduces the historical
+/// whitespace-and-forced-break behaviour plus basic inter-ideograph CJK breaks,
+/// while a host may install a tailored adapter behind the xtask boundary.
+///
+/// # Contract
+///
+/// - The returned breaks are byte offsets into `text` (UTF-8), each marking a
+///   position at which the following text may (soft) or must (hard) start a new
+///   line, in **ascending** offset order.
+/// - The result must be **deterministic**: the same `text` and `white_space`
+///   always yield the same opportunities, so the measure and compose passes agree
+///   on the same lines.
+///
+/// It is deliberately **object-safe** so the runtime can hold a
+/// `Box<dyn LineBreaker>` / pass a `&dyn LineBreaker`.
+pub trait LineBreaker {
+    /// Returns the line-break opportunities in `text` under a `white_space` mode,
+    /// in ascending offset order (spec §5.10, UAX #14).
+    fn opportunities(&self, text: &str, white_space: WhiteSpace) -> Vec<LineBreak>;
+}
+
+/// The domain-default [`LineBreaker`]: the simplified whitespace / forced-break
+/// opportunities of [`LineBreak::opportunities`], **plus** a soft break between
+/// two adjacent CJK ideographs so unspaced CJK text wraps out of the box (spec
+/// §5.10, UAX #14 class `ID`).
+///
+/// For text containing **no** CJK ideographs — the common Latin / Cyrillic /
+/// whitespace-delimited case — this is *byte-identical* to
+/// [`LineBreak::opportunities`]: the CJK pass adds nothing and the untouched
+/// vector is returned. A host installs a real [`LineBreaker`] adapter for full
+/// UAX#14 tailoring (kana, punctuation, `word-break: keep-all` letter clustering,
+/// …); `keep-all`'s suppression of these inter-ideograph breaks is applied by the
+/// wrapper, so it is honoured even with this default breaker.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DefaultLineBreaker;
+
+impl LineBreaker for DefaultLineBreaker {
+    fn opportunities(&self, text: &str, white_space: WhiteSpace) -> Vec<LineBreak> {
+        let mut breaks = LineBreak::opportunities(text, white_space);
+        // A break opportunity sits between two adjacent CJK ideographs, but only
+        // where soft wrapping is permitted (§3). This is additive: for text with
+        // no ideograph pair the loop pushes nothing and `breaks` is returned
+        // untouched (byte-identical to `LineBreak::opportunities`).
+        if white_space.wraps() {
+            let before = breaks.len();
+            let mut prev: Option<char> = None;
+            for (index, ch) in text.char_indices() {
+                if let Some(prev_ch) = prev
+                    && is_cjk_ideograph(prev_ch)
+                    && is_cjk_ideograph(ch)
+                {
+                    breaks.push(LineBreak::soft(index));
+                }
+                prev = Some(ch);
+            }
+            if breaks.len() != before {
+                // Merge the appended CJK breaks back into ascending order and drop
+                // any that coincide with an existing opportunity.
+                breaks.sort_unstable();
+                breaks.dedup();
+            }
+        }
+        breaks
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,5 +299,54 @@ mod tests {
         // `pre-wrap`: soft before "b" (byte 2) and hard after "\n" (byte 4).
         let breaks = LineBreak::opportunities("a b\nc", WhiteSpace::PreWrap);
         assert_eq!(breaks, vec![LineBreak::soft(2), LineBreak::hard(4)]);
+    }
+
+    #[test]
+    fn default_breaker_reproduces_opportunities_for_non_cjk_text() {
+        // Requirement (d): the port default is byte-identical to
+        // `LineBreak::opportunities` for every whitespace mode on Latin text.
+        for text in ["hello", "a b\nc", "aa bb cc", "é  x", "ab"] {
+            for mode in [
+                WhiteSpace::Normal,
+                WhiteSpace::Nowrap,
+                WhiteSpace::Pre,
+                WhiteSpace::PreWrap,
+                WhiteSpace::PreLine,
+            ] {
+                assert_eq!(
+                    DefaultLineBreaker.opportunities(text, mode),
+                    LineBreak::opportunities(text, mode),
+                    "{text:?} / {mode:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn default_breaker_adds_soft_break_between_adjacent_cjk_ideographs() {
+        // "中文字" — three CJK ideographs (3 bytes each): soft breaks before the
+        // 2nd (byte 3) and 3rd (byte 6) so unspaced CJK wraps out of the box.
+        let breaks = DefaultLineBreaker.opportunities("中文字", WhiteSpace::Normal);
+        assert_eq!(breaks, vec![LineBreak::soft(3), LineBreak::soft(6)]);
+        // A non-wrapping mode (`nowrap`) yields no CJK soft breaks.
+        assert!(DefaultLineBreaker
+            .opportunities("中文字", WhiteSpace::Nowrap)
+            .is_empty());
+    }
+
+    #[test]
+    fn default_breaker_is_object_safe() {
+        let breaker: &dyn LineBreaker = &DefaultLineBreaker;
+        assert!(breaker.opportunities("hello", WhiteSpace::Normal).is_empty());
+    }
+
+    #[test]
+    fn cjk_ideograph_range() {
+        assert!(is_cjk_ideograph('中'));
+        assert!(is_cjk_ideograph('字'));
+        assert!(!is_cjk_ideograph('a'));
+        assert!(!is_cjk_ideograph('Я'));
+        // Hiragana is deliberately excluded from the simplified default set.
+        assert!(!is_cjk_ideograph('あ'));
     }
 }

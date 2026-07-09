@@ -21,7 +21,8 @@ use obscur_text::font::{
     GenericFamily,
 };
 use obscur_text::layout::{
-    Hyphenator, LineStrut, NullHyphenator, ParagraphLayout, TextAlignment, TextOverflow, WhiteSpace,
+    DefaultLineBreaker, Hyphenator, LineStrut, NullHyphenator, OverflowWrap, ParagraphLayout,
+    TextAlignment, TextOverflow, WhiteSpace, WordBreak,
 };
 use obscur_text::shaping::{
     apply_spacing, apply_tab_stops, ParagraphShaper, ShapedGlyph, TextDirection,
@@ -32,9 +33,9 @@ use super::scene_coordinator::is_editing_text_node;
 use super::scroll::overflow_scrolls;
 use super::{
     alignment_for, attributes_for, direction_for, display_text, families_for, grid_templates_from,
-    letter_spacing_for, line_height_for, overflow_for, resolve_named_grid_areas,
-    resolve_named_grid_lines, tab_size_for, text_transform_for, white_space_for, word_spacing_for,
-    ComputedStyles, EditingView, GridTemplates, TabSize,
+    letter_spacing_for, line_height_for, overflow_for, overflow_wrap_for, resolve_named_grid_areas,
+    resolve_named_grid_lines, tab_size_for, text_transform_for, white_space_for, word_break_for,
+    word_spacing_for, ComputedStyles, EditingView, GridTemplates, TabSize,
 };
 
 /// The initial `font-size` (spec / CSS default), used as the `em`/`rem` base
@@ -388,6 +389,8 @@ fn measure_text_node(
     alignment: TextAlignment,
     overflow: TextOverflow,
     white_space: WhiteSpace,
+    overflow_wrap: OverflowWrap,
+    word_break: WordBreak,
     constraints: BoxConstraints,
     paragraph: &ParagraphShaper,
     hyphenator: Option<&dyn Hyphenator>,
@@ -449,12 +452,15 @@ fn measure_text_node(
     } else {
         None
     };
+    // The replaceable line-break-opportunity port (spec §5.10, UAX #14). The
+    // built-in [`DefaultLineBreaker`] supplies whitespace / forced breaks plus
+    // basic inter-ideograph CJK breaks; a UAX#14 adapter would be injected here.
+    let line_breaker = DefaultLineBreaker;
     let layout = match hyphenator {
-        // No hyphenator and no ellipsis glyph: the exact pre-hyphenation path — no
-        // hyphen or ellipsis glyph is shaped, so the measured size is byte-identical
-        // to whitespace-only wrapping (Clip truncation still applies through
-        // `overflow`, but only clips lines that actually overflow).
-        None if ellipsis.is_none() => ParagraphLayout::wrap_strut(
+        // No hyphenator and no ellipsis glyph: routed through the no-op hyphenator
+        // (byte-identical to plain wrapping, proven by `wrap`≡`wrap_hyphenated`) so
+        // the §5.2 emergency-break controls and the breaker port can be threaded.
+        None if ellipsis.is_none() => ParagraphLayout::wrap_strut_hyphenated(
             &runs,
             content,
             max_width,
@@ -464,6 +470,12 @@ fn measure_text_node(
             overflow,
             white_space,
             tab_width,
+            &NullHyphenator,
+            None,
+            None,
+            overflow_wrap,
+            word_break,
+            &line_breaker,
         ),
         // Ellipsis without a hyphenator: wrap through the no-op hyphenator so the
         // shaped ellipsis glyph can be threaded into truncation.
@@ -480,6 +492,9 @@ fn measure_text_node(
             &NullHyphenator,
             None,
             ellipsis,
+            overflow_wrap,
+            word_break,
+            &line_breaker,
         ),
         // Hyphenation on: shape the hyphen the same way the scene phase does, so a
         // hyphenated break measures with the identical advance it paints with.
@@ -499,6 +514,9 @@ fn measure_text_node(
                 hyphenator,
                 hyphen,
                 ellipsis,
+                overflow_wrap,
+                word_break,
+                &line_breaker,
             )
         }
     };
@@ -1280,6 +1298,8 @@ fn measure(
             alignment,
             overflow,
             white_space,
+            overflow_wrap_for(computed.get(&node)),
+            word_break_for(computed.get(&node)),
             constraints,
             paragraph,
             hyphenator,
@@ -1404,6 +1424,8 @@ fn arrange(
             alignment,
             overflow,
             white_space,
+            overflow_wrap_for(computed.get(&node)),
+            word_break_for(computed.get(&node)),
             constraints,
             paragraph,
             hyphenator,

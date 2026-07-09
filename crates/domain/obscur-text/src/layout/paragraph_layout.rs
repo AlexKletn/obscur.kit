@@ -8,8 +8,10 @@ use crate::font::FontId;
 use crate::shaping::{GlyphRun, ShapedGlyph, ShapedRun, TextDirection};
 use crate::span::TextRange;
 
+use super::line_break::is_cjk_ideograph;
 use super::{
-    Hyphenator, LineBreak, NullHyphenator, ParagraphLine, TextAlignment, TextOverflow, WhiteSpace,
+    DefaultLineBreaker, Hyphenator, LineBreak, LineBreaker, NullHyphenator, OverflowWrap,
+    ParagraphLine, TextAlignment, TextOverflow, WhiteSpace, WordBreak,
 };
 
 /// The inline **line-box strut** plus the used `line-height` (CSS 2.1 §10.8.1 /
@@ -334,6 +336,7 @@ impl ParagraphLayout {
         Self::wrap_core(
             runs, text, max_width, strut, &seg_metrics, alignment, overflow, white_space,
             0.0, 0.0, 0.0, hyphenator, hyphen_glyph, ellipsis_glyph,
+            &DefaultLineBreaker, OverflowWrap::Normal, WordBreak::Normal,
         )
     }
 
@@ -358,6 +361,7 @@ impl ParagraphLayout {
         Self::wrap_core(
             runs, text, max_width, strut, seg_metrics, alignment, overflow, white_space,
             tab_width, 0.0, 0.0, &NullHyphenator, None, None,
+            &DefaultLineBreaker, OverflowWrap::Normal, WordBreak::Normal,
         )
     }
 
@@ -380,6 +384,15 @@ impl ParagraphLayout {
     /// preserved tab is re-expanded from the start of *its own line* (CSS Text 3
     /// §4.3, see [`wrap_core`](Self::wrap_core)). `0.0` (or text with no `\t`)
     /// disables the pass and is byte-identical, as is a tab that stays on line 0.
+    ///
+    /// `overflow_wrap` / `word_break` are the resolved CSS Text 3 §5.2 controls
+    /// for the emergency (grapheme-cluster) break of an over-wide token, and
+    /// `line_breaker` is the replaceable [`LineBreaker`] port that supplies the
+    /// ordinary break opportunities. The defaults
+    /// ([`OverflowWrap::Normal`] + [`WordBreak::Normal`] +
+    /// [`DefaultLineBreaker`]) keep the historical behaviour exactly — an over-wide
+    /// unbreakable word overflows and no port is consulted beyond the built-in
+    /// breaker.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn wrap_strut_hyphenated(
@@ -395,10 +408,14 @@ impl ParagraphLayout {
         hyphenator: &dyn Hyphenator,
         hyphen_glyph: Option<ShapedGlyph>,
         ellipsis_glyph: Option<ShapedGlyph>,
+        overflow_wrap: OverflowWrap,
+        word_break: WordBreak,
+        line_breaker: &dyn LineBreaker,
     ) -> Self {
         Self::wrap_core(
             runs, text, max_width, strut, seg_metrics, alignment, overflow, white_space,
             tab_width, 0.0, 0.0, hyphenator, hyphen_glyph, ellipsis_glyph,
+            line_breaker, overflow_wrap, word_break,
         )
     }
 
@@ -438,8 +455,20 @@ impl ParagraphLayout {
         hyphenator: &dyn Hyphenator,
         hyphen_glyph: Option<ShapedGlyph>,
         ellipsis_glyph: Option<ShapedGlyph>,
+        line_breaker: &dyn LineBreaker,
+        overflow_wrap: OverflowWrap,
+        word_break: WordBreak,
     ) -> Self {
         let mut stream = Self::flatten(runs);
+
+        // The ordinary break opportunities from the replaceable port (spec §5.10,
+        // UAX #14). `word-break: keep-all` (CSS Text 3 §5.2) then suppresses any
+        // soft break sitting between two adjacent CJK ideographs, so the letters of
+        // CJK-context text are kept together even with the built-in breaker.
+        let mut breaks = line_breaker.opportunities(text, white_space);
+        if word_break.keeps_all() {
+            breaks.retain(|b| !Self::is_keep_all_suppressed(*b, text));
+        }
 
         // Author soft hyphens: the byte offset of every `U+00AD` char. Their
         // shaped glyphs are forced to zero advance so an untaken soft hyphen is
@@ -484,7 +513,7 @@ impl ParagraphLayout {
         };
 
         // Interior break offsets proposed by the hyphenator, one word at a time.
-        let hyphen_offsets = Self::hyphen_offsets(text, white_space, hyphenator);
+        let hyphen_offsets = Self::hyphen_offsets(text, &breaks, hyphenator);
 
         // A **non-finite** `max_width` (`f32::INFINITY`) is the explicit no-width
         // constraint (intrinsic / max-content measure); a finite `max_width >= 0`
@@ -512,13 +541,14 @@ impl ParagraphLayout {
         } else {
             Self::pack_lines(
                 &stream,
-                text,
                 max_width,
-                white_space,
+                &breaks,
                 &hyphen_offsets,
                 &soft,
                 &hang_ws,
                 hyphen_glyph,
+                overflow_wrap,
+                word_break,
             )
         };
 
@@ -553,7 +583,7 @@ impl ParagraphLayout {
         // `max_width`. Only meaningful under a positive constraint (the unbounded
         // and empty branches produce a single, non-justified last line).
         if alignment == TextAlignment::Justify && bounded {
-            Self::justify(&mut lines_glyphs, text, white_space, max_width);
+            Self::justify(&mut lines_glyphs, &breaks, max_width);
         }
 
         // Apply `text-overflow` truncation. Only lines that *still* overflow
@@ -755,14 +785,11 @@ impl ParagraphLayout {
     /// never split at a word edge.
     fn hyphen_offsets(
         text: &str,
-        white_space: WhiteSpace,
+        breaks: &[LineBreak],
         hyphenator: &dyn Hyphenator,
     ) -> HashSet<usize> {
         let mut offsets = HashSet::new();
-        let mut bounds: Vec<usize> = LineBreak::opportunities(text, white_space)
-            .iter()
-            .map(LineBreak::offset)
-            .collect();
+        let mut bounds: Vec<usize> = breaks.iter().map(LineBreak::offset).collect();
         bounds.push(text.len());
         let mut start = 0;
         for end in bounds {
@@ -790,21 +817,34 @@ impl ParagraphLayout {
     /// appended at each taken break so a visible hyphen renders. `hang_ws` is the
     /// set of collapsible-whitespace byte offsets, so a word's trailing space can
     /// be excluded from the fit test (it hangs, CSS Text 3 §3/§7.1).
-    // The stream, text, wrap width, mode, and the three break-offset sets plus the
-    // hyphen glyph are cohesive positional inputs of one internal packing step.
+    // The stream, wrap width, break list, and the three break-offset sets plus the
+    // hyphen glyph and the two §5.2 controls are cohesive positional inputs of one
+    // internal packing step.
     #[allow(clippy::too_many_arguments)]
     fn pack_lines(
         stream: &[Tagged],
-        text: &str,
         max_width: f32,
-        white_space: WhiteSpace,
+        breaks: &[LineBreak],
         hyphen_offsets: &HashSet<usize>,
         soft: &HashSet<usize>,
         hang_ws: &HashSet<usize>,
         hyphen_glyph: Option<ShapedGlyph>,
+        overflow_wrap: OverflowWrap,
+        word_break: WordBreak,
     ) -> Vec<PackedLine> {
         let mut queue: VecDeque<Word> =
-            Self::split_words(stream, text, white_space, hyphen_offsets, soft, hang_ws).into();
+            Self::split_words(stream, breaks, hyphen_offsets, soft, hang_ws).into();
+
+        // CSS Text 3 §5.2 emergency-break controls. `word-break: break-all` breaks
+        // greedily at ANY grapheme-cluster boundary (a soft-wrap opportunity exists
+        // between any two typographic units), so it also fills the *remaining*
+        // space on the current line mid-word rather than moving the whole word
+        // down. `overflow-wrap: break-word | anywhere` only breaks as a LAST RESORT
+        // — when the word does not fit even alone on a full line — to keep it from
+        // overflowing. `normal` + `normal` disables emergency breaking entirely, so
+        // an over-wide word overflows exactly as before (byte-identical).
+        let break_all = word_break.breaks_all();
+        let emergency = break_all || overflow_wrap.allows_emergency_break();
 
         let mut lines: Vec<PackedLine> = Vec::new();
         let mut current: Vec<Tagged> = Vec::new();
@@ -818,8 +858,11 @@ impl ParagraphLayout {
             // Greedy rule: a whole word that no longer fits the (non-empty) line
             // closes it. The word's own trailing collapsible whitespace **hangs**
             // (CSS Text 3 §3/§7.1), so it never counts toward the fit test —
-            // otherwise a line wraps one space too early.
+            // otherwise a line wraps one space too early. Under `word-break:
+            // break-all` we do NOT wholesale-close: the word may instead be split
+            // to fill the remaining space (§5.2), handled by the emergency step.
             if !current.is_empty()
+                && !break_all
                 && (current_width + word.width - word.trailing_ws) > max_width
             {
                 lines.push(PackedLine {
@@ -849,6 +892,54 @@ impl ParagraphLayout {
                 word_count = 0;
                 queue.push_front(split.tail);
                 continue;
+            }
+
+            // Emergency (grapheme-cluster) break (CSS Text 3 §5.2). No fitting
+            // hyphenation opportunity exists; if emergency breaking is enabled and
+            // the word overflows the remaining space, force a grapheme break.
+            if emergency && (word.width - word.trailing_ws) > remaining {
+                // `break-all` breaks at any boundary; `overflow-wrap` only when the
+                // word cannot fit alone on a full line (a true last resort).
+                let may_break = break_all || (word.width - word.trailing_ws) > max_width;
+                if may_break {
+                    if let Some(split) = Self::try_emergency_split(
+                        &word,
+                        remaining,
+                        current.is_empty(),
+                        hyphen_offsets,
+                        soft,
+                        hang_ws,
+                    ) {
+                        current.extend_from_slice(&split.head);
+                        word_count += 1;
+                        lines.push(PackedLine {
+                            glyphs: std::mem::take(&mut current),
+                            word_count,
+                            mandatory_break_after: false,
+                        });
+                        current_width = 0.0;
+                        word_count = 0;
+                        queue.push_front(split.tail);
+                        continue;
+                    }
+                    if !current.is_empty() {
+                        // Not even one grapheme fits the remainder: close the line
+                        // and retry the word on a fresh, full-width line. This
+                        // guarantees progress under `break-all`.
+                        lines.push(PackedLine {
+                            glyphs: std::mem::take(&mut current),
+                            word_count,
+                            mandatory_break_after: false,
+                        });
+                        current_width = 0.0;
+                        word_count = 0;
+                        queue.push_front(word);
+                        continue;
+                    }
+                    // Fresh line and no split point: the word is a single
+                    // unbreakable cluster wider than the box — place it whole (it
+                    // overflows by one grapheme), falling through below.
+                }
             }
 
             current.extend_from_slice(&word.glyphs);
@@ -939,6 +1030,103 @@ impl ParagraphLayout {
         Some(Split { head, tail })
     }
 
+    /// Attempts an **emergency** grapheme-cluster break of `word` so its head fits
+    /// within `limit`, returning the head glyphs and the remaining tail as a fresh
+    /// [`Word`] (CSS Text 3 §5.2 `overflow-wrap` / `word-break: break-all`).
+    ///
+    /// Unlike [`try_split`](Self::try_split) this inserts **no** hyphen glyph — an
+    /// emergency break is invisible. The largest prefix whose cumulative advance is
+    /// `<= limit` is taken, cut only at a **grapheme-cluster boundary**: glyph
+    /// clusters are UTF-8 byte offsets, so a boundary sits wherever the cluster
+    /// changes and the cut never lands inside a multi-glyph cluster (a base plus
+    /// its combining marks, or a ligature). Determinism follows from the greedy
+    /// left-to-right scan.
+    ///
+    /// Returns [`None`] when no break is warranted or possible:
+    /// - the word is a single glyph (nothing to split);
+    /// - no cluster fits `limit` and `line_empty` is false — the caller should
+    ///   close the current line and retry on a full-width line;
+    /// - the fitting prefix is the whole word (no interior boundary before the
+    ///   end) — the caller places it whole.
+    ///
+    /// When `line_empty` is true and not even the first cluster fits `limit`, the
+    /// first cluster is forced onto the (fresh) line so it overflows by a single
+    /// grapheme rather than looping forever — matching CSS, where one unbreakable
+    /// grapheme wider than its box still overflows.
+    fn try_emergency_split(
+        word: &Word,
+        limit: f32,
+        line_empty: bool,
+        hyphen_offsets: &HashSet<usize>,
+        soft: &HashSet<usize>,
+        hang_ws: &HashSet<usize>,
+    ) -> Option<Split> {
+        let glyphs = &word.glyphs;
+        if glyphs.len() < 2 {
+            return None;
+        }
+        // Greedily accumulate whole grapheme clusters up to `limit`.
+        let mut best_end = 0usize; // widest cluster-boundary head end with width <= limit
+        let mut first_end = 0usize; // end of the first cluster (forced-progress fallback)
+        let mut acc = 0.0_f32;
+        let mut index = 0usize;
+        while index < glyphs.len() {
+            let cluster = glyphs[index].glyph.cluster();
+            let mut width = 0.0_f32;
+            while index < glyphs.len() && glyphs[index].glyph.cluster() == cluster {
+                width += glyphs[index].glyph.x_advance();
+                index += 1;
+            }
+            if first_end == 0 {
+                first_end = index;
+            }
+            if acc + width <= limit {
+                acc += width;
+                best_end = index;
+            } else {
+                break;
+            }
+        }
+        let head_end = if best_end == 0 {
+            if line_empty {
+                first_end
+            } else {
+                return None;
+            }
+        } else {
+            best_end
+        };
+        if head_end == 0 || head_end >= glyphs.len() {
+            return None;
+        }
+        let head = glyphs[..head_end].to_vec();
+        let tail = Self::make_word(
+            glyphs[head_end..].to_vec(),
+            word.mandatory_break_after,
+            hyphen_offsets,
+            soft,
+            hang_ws,
+        );
+        Some(Split { head, tail })
+    }
+
+    /// Whether a soft `break` is suppressed by `word-break: keep-all` because it
+    /// sits between two adjacent CJK ideographs (CSS Text 3 §5.2).
+    ///
+    /// A mandatory (forced) break is never suppressed. A soft break at byte offset
+    /// `o` is suppressed when the character ending at `o` and the character
+    /// starting at `o` are both CJK ideographs — i.e. it is one of the implicit
+    /// inter-ideograph opportunities `keep-all` forbids.
+    fn is_keep_all_suppressed(break_point: LineBreak, text: &str) -> bool {
+        if break_point.is_mandatory() {
+            return false;
+        }
+        let offset = break_point.offset();
+        let before = text.get(..offset).and_then(|head| head.chars().next_back());
+        let after = char_at(text, offset);
+        matches!((before, after), (Some(a), Some(b)) if is_cjk_ideograph(a) && is_cjk_ideograph(b))
+    }
+
     /// Stretches every justification-eligible line so it fills `max_width`,
     /// distributing the extra space equally across the line's inter-word gaps
     /// (spec §5.10).
@@ -951,17 +1139,14 @@ impl ParagraphLayout {
     /// the word-final space); glyph ids and clusters are left intact, so the line's
     /// rendered width becomes exactly `max_width`. A line already at or past
     /// `max_width` gains nothing.
-    fn justify(lines: &mut [PackedLine], text: &str, white_space: WhiteSpace, max_width: f32) {
+    fn justify(lines: &mut [PackedLine], breaks: &[LineBreak], max_width: f32) {
         let Some(last) = lines.len().checked_sub(1) else {
             return;
         };
         // Byte offsets that begin a word (every break opportunity); a glyph whose
         // cluster equals one starts a new word, so the glyph before it ends a gap.
         let word_starts: std::collections::HashSet<usize> =
-            LineBreak::opportunities(text, white_space)
-                .iter()
-                .map(LineBreak::offset)
-                .collect();
+            breaks.iter().map(LineBreak::offset).collect();
         for (index, line) in lines.iter_mut().enumerate() {
             if index == last || line.mandatory_break_after || line.word_count < 2 {
                 continue;
@@ -1071,13 +1256,11 @@ impl ParagraphLayout {
     /// mandatory word — a forced empty line box.
     fn split_words(
         stream: &[Tagged],
-        text: &str,
-        white_space: WhiteSpace,
+        breaks: &[LineBreak],
         hyphen_offsets: &HashSet<usize>,
         soft: &HashSet<usize>,
         hang_ws: &HashSet<usize>,
     ) -> Vec<Word> {
-        let breaks = LineBreak::opportunities(text, white_space);
         let mut words: Vec<Word> = Vec::new();
         let mut glyphs: Vec<Tagged> = Vec::new();
         // Breaks are ascending by offset; `bi` is the next unconsumed break.
@@ -1816,6 +1999,9 @@ mod tests {
             &NullHyphenator,
             None,
             None,
+            &DefaultLineBreaker,
+            OverflowWrap::Normal,
+            WordBreak::Normal,
         );
         assert_eq!(layout.line_count(), 1);
         assert_eq!(layout.lines()[0].width(), 16.0);
@@ -2572,5 +2758,230 @@ mod tests {
             line_advances(&one_line, 0),
             vec![6.0, 6.0, 6.0, 6.0, 6.0, 10.0]
         );
+    }
+
+    // --- CSS Text 3 §5.2 overflow-wrap / word-break emergency breaks -----------
+
+    /// Wraps a single-font `runs`/`text` at `max_width` with the given §5.2
+    /// controls (through the default breaker, no hyphen/ellipsis), for the
+    /// emergency-break tests.
+    fn wrap_break(
+        runs: &[ShapedRun],
+        text: &str,
+        max_width: f32,
+        overflow: TextOverflow,
+        overflow_wrap: OverflowWrap,
+        word_break: WordBreak,
+    ) -> ParagraphLayout {
+        ParagraphLayout::wrap_strut_hyphenated(
+            runs,
+            text,
+            max_width,
+            LineStrut::new(12.0, 9.0, 3.0),
+            &|_| (9.0, 3.0),
+            TextAlignment::Start,
+            overflow,
+            WhiteSpace::Normal,
+            0.0,
+            &NullHyphenator,
+            None,
+            None,
+            overflow_wrap,
+            word_break,
+            &DefaultLineBreaker,
+        )
+    }
+
+    #[test]
+    fn overflow_wrap_break_word_wraps_a_long_token_at_grapheme_boundaries() {
+        // Requirement (a): a 12-glyph no-space token (advance 1 each) in a 5-wide
+        // box wraps across THREE lines at grapheme boundaries — 5 + 5 + 2 —
+        // instead of overflowing on one line, because `overflow-wrap: break-word`
+        // permits a last-resort break of a word that does not fit its own line.
+        let text = "aaaaaaaaaaaa";
+        let runs = vec![run(
+            0,
+            &(0..12).map(|i| (i, 1.0)).collect::<Vec<_>>(),
+            TextRange::new(0, 12),
+        )];
+        let layout = wrap_break(
+            &runs,
+            text,
+            5.0,
+            TextOverflow::Visible,
+            OverflowWrap::BreakWord,
+            WordBreak::Normal,
+        );
+        assert_eq!(layout.line_count(), 3);
+        assert_eq!(
+            line_glyphs(&layout, 0).iter().map(|g| g.0).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3, 4]
+        );
+        assert_eq!(
+            line_glyphs(&layout, 1).iter().map(|g| g.0).collect::<Vec<_>>(),
+            vec![5, 6, 7, 8, 9]
+        );
+        assert_eq!(
+            line_glyphs(&layout, 2).iter().map(|g| g.0).collect::<Vec<_>>(),
+            vec![10, 11]
+        );
+        // No hyphen glyph is inserted by an emergency break.
+        assert!(layout
+            .lines()
+            .iter()
+            .flat_map(|l| l.segments())
+            .flat_map(|s| s.run().glyphs())
+            .all(|g| g.glyph_id() == 1));
+    }
+
+    #[test]
+    fn word_break_break_all_breaks_a_latin_word_mid_word_greedily() {
+        // Requirement (b): `word-break: break-all` fills each line by splitting a
+        // Latin word mid-word at any grapheme boundary. Eight 2px glyphs in a 6px
+        // box → [0,1,2] / [3,4,5] / [6,7].
+        let text = "abcdefgh";
+        let runs = vec![run(
+            0,
+            &(0..8).map(|i| (i, 2.0)).collect::<Vec<_>>(),
+            TextRange::new(0, 8),
+        )];
+        let layout = wrap_break(
+            &runs,
+            text,
+            6.0,
+            TextOverflow::Visible,
+            OverflowWrap::Normal,
+            WordBreak::BreakAll,
+        );
+        assert_eq!(layout.line_count(), 3);
+        assert_eq!(
+            line_glyphs(&layout, 0).iter().map(|g| g.0).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+        assert_eq!(
+            line_glyphs(&layout, 1).iter().map(|g| g.0).collect::<Vec<_>>(),
+            vec![3, 4, 5]
+        );
+        assert_eq!(
+            line_glyphs(&layout, 2).iter().map(|g| g.0).collect::<Vec<_>>(),
+            vec![6, 7]
+        );
+    }
+
+    #[test]
+    fn break_all_fills_the_remaining_space_on_a_partial_line() {
+        // `break-all` (§5.2) fills the CURRENT line mid-word rather than moving the
+        // whole word down: "ab" (2 glyphs) then a 4-glyph word in a 4px box (1px
+        // glyphs). Line 0 packs "ab" + the first 2 graphemes of the next word.
+        let text = "ab cdef";
+        let runs = vec![run(
+            0,
+            &[(0, 1.0), (1, 1.0), (2, 1.0), (3, 1.0), (4, 1.0), (5, 1.0), (6, 1.0)],
+            TextRange::new(0, 7),
+        )];
+        let layout = wrap_break(
+            &runs,
+            text,
+            4.0,
+            TextOverflow::Visible,
+            OverflowWrap::Normal,
+            WordBreak::BreakAll,
+        );
+        // Line 0 = "ab c" (clusters 0,1,2=space,3): the space hangs, so "ab" + "c"
+        // fill the 4px line with the second word starting mid-line.
+        assert_eq!(
+            line_glyphs(&layout, 0).iter().map(|g| g.0).collect::<Vec<_>>(),
+            vec![0, 1, 2, 3]
+        );
+        assert!(layout.line_count() >= 2);
+    }
+
+    #[test]
+    fn default_normal_lets_an_over_wide_token_overflow_one_line() {
+        // Requirement (c): with the defaults (`overflow-wrap: normal` +
+        // `word-break: normal`) the same 12-glyph token stays on ONE overflowing
+        // line — byte-identical to the historical behaviour.
+        let text = "aaaaaaaaaaaa";
+        let runs = vec![run(
+            0,
+            &(0..12).map(|i| (i, 1.0)).collect::<Vec<_>>(),
+            TextRange::new(0, 12),
+        )];
+        let layout = wrap_break(
+            &runs,
+            text,
+            5.0,
+            TextOverflow::Visible,
+            OverflowWrap::Normal,
+            WordBreak::Normal,
+        );
+        assert_eq!(layout.line_count(), 1);
+        assert_eq!(layout.lines()[0].width(), 12.0);
+        // Byte-identical to plain `wrap` (which also uses the default breaker/modes).
+        let plain = ParagraphLayout::wrap(
+            &runs, text, 5.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Visible,
+            WhiteSpace::Normal,
+        );
+        assert_eq!(layout, plain);
+    }
+
+    #[test]
+    fn a_single_grapheme_wider_than_the_box_still_overflows() {
+        // Emergency breaking guarantees progress: a lone 8px glyph in a 5px box
+        // overflows by that one grapheme rather than looping. Two such glyphs → two
+        // one-glyph lines under `break-word`.
+        let text = "WW";
+        let runs = vec![run(0, &[(0, 8.0), (1, 8.0)], TextRange::new(0, 2))];
+        let layout = wrap_break(
+            &runs,
+            text,
+            5.0,
+            TextOverflow::Visible,
+            OverflowWrap::BreakWord,
+            WordBreak::Normal,
+        );
+        assert_eq!(layout.line_count(), 2);
+        assert_eq!(layout.lines()[0].width(), 8.0);
+        assert_eq!(layout.lines()[1].width(), 8.0);
+    }
+
+    #[test]
+    fn default_breaker_wraps_unspaced_cjk_between_ideographs() {
+        // Basic CJK out of the box: "中文字对" (4 ideographs, 3 bytes each,
+        // clusters 0,3,6,9; advance 6) in a 13px box wraps to "中文" / "字对" via
+        // the default breaker's inter-ideograph soft breaks — no adapter needed.
+        let text = "中文字对";
+        let runs = vec![run(0, &[(0, 6.0), (3, 6.0), (6, 6.0), (9, 6.0)], TextRange::new(0, 12))];
+        let layout = ParagraphLayout::wrap(
+            &runs, text, 13.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Visible,
+            WhiteSpace::Normal,
+        );
+        assert_eq!(layout.line_count(), 2);
+        assert_eq!(
+            line_glyphs(&layout, 0).iter().map(|g| g.0).collect::<Vec<_>>(),
+            vec![0, 3]
+        );
+        assert_eq!(
+            line_glyphs(&layout, 1).iter().map(|g| g.0).collect::<Vec<_>>(),
+            vec![6, 9]
+        );
+    }
+
+    #[test]
+    fn keep_all_suppresses_cjk_breaks_so_ideographs_stay_together() {
+        // `word-break: keep-all` (§5.2) drops the inter-ideograph opportunities, so
+        // the same CJK run stays on ONE (overflowing) line.
+        let text = "中文字对";
+        let runs = vec![run(0, &[(0, 6.0), (3, 6.0), (6, 6.0), (9, 6.0)], TextRange::new(0, 12))];
+        let layout = wrap_break(
+            &runs,
+            text,
+            13.0,
+            TextOverflow::Visible,
+            OverflowWrap::Normal,
+            WordBreak::KeepAll,
+        );
+        assert_eq!(layout.line_count(), 1);
+        assert_eq!(layout.lines()[0].width(), 24.0);
     }
 }

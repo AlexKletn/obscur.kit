@@ -163,6 +163,9 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::TextTransform,
     // Inherited white-space processing + tab-size (CSS Text 3 §3 / §4.3).
     PropertyId::WhiteSpace,
+    // Inherited line-break controls (CSS Text 3 §5.2).
+    PropertyId::OverflowWrap,
+    PropertyId::WordBreak,
     PropertyId::TabSize,
     // Overflow (pure paint/clip; no layout effect).
     PropertyId::Overflow,
@@ -443,6 +446,12 @@ impl StyleResolver {
             // absent value falls back to the runtime's default tab stop (§4.3).
             | PropertyId::WhiteSpace
             | PropertyId::TabSize
+            // `overflow-wrap` / `word-break` initial is `normal`; their keyword
+            // initials need the interner, so an absent value falls back to the
+            // runtime's default (`OverflowWrap::Normal` / `WordBreak::Normal`) —
+            // byte-for-byte identical to before they existed (CSS Text 3 §5.2).
+            | PropertyId::OverflowWrap
+            | PropertyId::WordBreak
             // `overflow` initial is `visible` (no clip); its keyword initial
             // likewise needs the interner, so an absent value falls back to the
             // coordinator's default (no added clip) — byte-for-byte identical.
@@ -1169,6 +1178,8 @@ mod tests {
                 | PropertyId::WordSpacing
                 | PropertyId::TextTransform
                 | PropertyId::WhiteSpace
+                | PropertyId::OverflowWrap
+                | PropertyId::WordBreak
                 | PropertyId::TabSize
                 | PropertyId::Overflow => {}
             }
@@ -1265,6 +1276,8 @@ mod tests {
             PropertyId::WordSpacing,
             PropertyId::TextTransform,
             PropertyId::WhiteSpace,
+            PropertyId::OverflowWrap,
+            PropertyId::WordBreak,
             PropertyId::TabSize,
             PropertyId::Overflow,
         ];

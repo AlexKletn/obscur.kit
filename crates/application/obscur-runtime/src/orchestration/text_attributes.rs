@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use obscur_style::computed::ComputedStyle;
 use obscur_style::property::{layout_keyword, Length, PropertyId, PropertyValue};
 use obscur_text::font::FontAttributes;
-use obscur_text::layout::{TextAlignment, TextOverflow, WhiteSpace};
+use obscur_text::layout::{OverflowWrap, TextAlignment, TextOverflow, WhiteSpace, WordBreak};
 use obscur_text::shaping::TextDirection;
 use obscur_text::span::{FontSlant, FontWeight};
 
@@ -387,6 +387,53 @@ pub(crate) fn white_space_for(computed: Option<&ComputedStyle>) -> WhiteSpace {
         Some(s) if s == layout_keyword::WHITE_SPACE_PRE_LINE => WhiteSpace::PreLine,
         // `normal` and everything else (including an absent property) → Normal.
         _ => WhiteSpace::Normal,
+    }
+}
+
+/// Resolves a text node's [`OverflowWrap`] from its computed `overflow-wrap`
+/// (the legacy `word-wrap` alias lowers to the same property; CSS Text 3 §5.2).
+///
+/// Reads [`PropertyId::OverflowWrap`] — a [`PropertyValue::Keyword`] backed by an
+/// `OVERFLOW_WRAP_*` reserved handle — mapping each handle to its variant. An
+/// absent property (or any unrecognised keyword) resolves to
+/// [`OverflowWrap::Normal`], the CSS initial, so an over-wide word overflows
+/// exactly as before the property existed.
+#[must_use]
+pub(crate) fn overflow_wrap_for(computed: Option<&ComputedStyle>) -> OverflowWrap {
+    let symbol = computed
+        .and_then(|style| style.get(PropertyId::OverflowWrap))
+        .and_then(|value| match value.value() {
+            PropertyValue::Keyword(symbol) => Some(*symbol),
+            _ => None,
+        });
+    match symbol {
+        Some(s) if s == layout_keyword::OVERFLOW_WRAP_BREAK_WORD => OverflowWrap::BreakWord,
+        Some(s) if s == layout_keyword::OVERFLOW_WRAP_ANYWHERE => OverflowWrap::Anywhere,
+        // `normal` and everything else (including an absent property) → Normal.
+        _ => OverflowWrap::Normal,
+    }
+}
+
+/// Resolves a text node's [`WordBreak`] from its computed `word-break`
+/// (CSS Text 3 §5.2).
+///
+/// Reads [`PropertyId::WordBreak`] — a [`PropertyValue::Keyword`] backed by a
+/// `WORD_BREAK_*` reserved handle — mapping each handle to its variant. An absent
+/// property (or any unrecognised keyword) resolves to [`WordBreak::Normal`], the
+/// CSS initial.
+#[must_use]
+pub(crate) fn word_break_for(computed: Option<&ComputedStyle>) -> WordBreak {
+    let symbol = computed
+        .and_then(|style| style.get(PropertyId::WordBreak))
+        .and_then(|value| match value.value() {
+            PropertyValue::Keyword(symbol) => Some(*symbol),
+            _ => None,
+        });
+    match symbol {
+        Some(s) if s == layout_keyword::WORD_BREAK_BREAK_ALL => WordBreak::BreakAll,
+        Some(s) if s == layout_keyword::WORD_BREAK_KEEP_ALL => WordBreak::KeepAll,
+        // `normal` and everything else (including an absent property) → Normal.
+        _ => WordBreak::Normal,
     }
 }
 

@@ -338,6 +338,18 @@ pub enum PropertyId {
     /// breaker (CSS Text 3 §3, §4.1.1). See the reserved `WHITE_SPACE_*` handles in
     /// [`crate::property::layout_keyword`].
     WhiteSpace,
+    /// The `overflow-wrap` property (Keyword-valued: `normal` (initial) /
+    /// `break-word` / `anywhere`; inherited). The legacy `word-wrap` name is an
+    /// alias for it. Permits a last-resort grapheme-cluster break of an over-wide
+    /// unbreakable word so it does not overflow its line (CSS Text 3 §5.2). See the
+    /// reserved `OVERFLOW_WRAP_*` handles in [`crate::property::layout_keyword`].
+    OverflowWrap,
+    /// The `word-break` property (Keyword-valued: `normal` (initial) / `break-all`
+    /// / `keep-all`; inherited). Selects the soft-wrap granularity: `break-all`
+    /// breaks between any two typographic units, `keep-all` forbids breaking
+    /// between CJK-context letters (CSS Text 3 §5.2). See the reserved
+    /// `WORD_BREAK_*` handles in [`crate::property::layout_keyword`].
+    WordBreak,
     /// The `tab-size` property (a unitless [`PropertyValue::Number`] multiple of a
     /// space advance, or a `<length>`; inherited; initial `8`). Sets the width of a
     /// preserved tab stop (CSS Text 3 §4.3).
@@ -452,6 +464,8 @@ impl PropertyId {
             Self::WordSpacing => "word-spacing",
             Self::TextTransform => "text-transform",
             Self::WhiteSpace => "white-space",
+            Self::OverflowWrap => "overflow-wrap",
+            Self::WordBreak => "word-break",
             Self::TabSize => "tab-size",
             Self::Overflow => "overflow",
         }
@@ -481,6 +495,9 @@ impl PropertyId {
             | Self::TextTransform
             // `white-space` and `tab-size` inherit (CSS Text 3 §3 / §4.3).
             | Self::WhiteSpace
+            // `overflow-wrap` and `word-break` inherit (CSS Text 3 §5.2).
+            | Self::OverflowWrap
+            | Self::WordBreak
             | Self::TabSize => Inheritance::Inherited,
             // Box / paint / layout properties reset on each element.
             Self::BackgroundColor

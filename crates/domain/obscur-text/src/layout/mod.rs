@@ -1,8 +1,10 @@
 //! Layout module.
+mod break_mode;
+pub use break_mode::{OverflowWrap, WordBreak};
 mod hyphenator;
 pub use hyphenator::{Hyphenator, NullHyphenator};
 mod line_break;
-pub use line_break::{BreakKind, LineBreak};
+pub use line_break::{BreakKind, DefaultLineBreaker, LineBreak, LineBreaker};
 mod paragraph_layout;
 pub use paragraph_layout::{LineStrut, ParagraphLayout};
 mod paragraph_line;

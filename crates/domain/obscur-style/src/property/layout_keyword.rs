@@ -154,6 +154,30 @@ pub const WHITE_SPACE_PRE_WRAP: InternedSymbol = InternedSymbol::from_raw(0x0000
 /// breaks, and soft-wrap.
 pub const WHITE_SPACE_PRE_LINE: InternedSymbol = InternedSymbol::from_raw(0x0000_2105);
 
+// ---- `overflow-wrap` keyword values (CSS Text 3 §5.2) ----
+
+/// The `overflow-wrap: normal` keyword (the initial): break only at ordinary
+/// opportunities; an over-wide unbreakable word overflows.
+pub const OVERFLOW_WRAP_NORMAL: InternedSymbol = InternedSymbol::from_raw(0x0000_2201);
+/// The `overflow-wrap: break-word` keyword: last-resort grapheme-cluster break of
+/// a word that does not fit its own line.
+pub const OVERFLOW_WRAP_BREAK_WORD: InternedSymbol = InternedSymbol::from_raw(0x0000_2202);
+/// The `overflow-wrap: anywhere` keyword: like `break-word` for the greedy line
+/// breaker (differs only in min-content intrinsic sizing).
+pub const OVERFLOW_WRAP_ANYWHERE: InternedSymbol = InternedSymbol::from_raw(0x0000_2203);
+
+// ---- `word-break` keyword values (CSS Text 3 §5.2) ----
+
+/// The `word-break: normal` keyword (the initial): ordinary word / CJK-ideograph
+/// break points only.
+pub const WORD_BREAK_NORMAL: InternedSymbol = InternedSymbol::from_raw(0x0000_2301);
+/// The `word-break: break-all` keyword: a break is allowed between any two
+/// typographic units (greedy mid-word breaking).
+pub const WORD_BREAK_BREAK_ALL: InternedSymbol = InternedSymbol::from_raw(0x0000_2302);
+/// The `word-break: keep-all` keyword: no break between the letters of
+/// CJK-context text (suppresses inter-ideograph opportunities).
+pub const WORD_BREAK_KEEP_ALL: InternedSymbol = InternedSymbol::from_raw(0x0000_2303);
+
 // ---- relative `font-weight` keyword values ----
 
 /// The `font-weight: bolder` keyword. Unlike the absolute weights (which lower
@@ -512,6 +536,37 @@ pub fn white_space_from_name(name: &str) -> Option<InternedSymbol> {
         "pre" => Some(WHITE_SPACE_PRE),
         "pre-wrap" => Some(WHITE_SPACE_PRE_WRAP),
         "pre-line" => Some(WHITE_SPACE_PRE_LINE),
+        _ => None,
+    }
+}
+
+/// Maps an `overflow-wrap` (a.k.a. legacy `word-wrap`) keyword string to its
+/// reserved [`InternedSymbol`] (CSS Text 3 §5.2).
+///
+/// The input is ASCII-lowercased before matching. Returns [`None`] for any
+/// keyword outside the closed `normal` / `break-word` / `anywhere` set.
+#[must_use]
+pub fn overflow_wrap_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "normal" => Some(OVERFLOW_WRAP_NORMAL),
+        "break-word" => Some(OVERFLOW_WRAP_BREAK_WORD),
+        "anywhere" => Some(OVERFLOW_WRAP_ANYWHERE),
+        _ => None,
+    }
+}
+
+/// Maps a `word-break` keyword string to its reserved [`InternedSymbol`]
+/// (CSS Text 3 §5.2).
+///
+/// The input is ASCII-lowercased before matching. Returns [`None`] for any
+/// keyword outside the closed `normal` / `break-all` / `keep-all` set
+/// (`break-word`, a deprecated `word-break` value, is not modelled here).
+#[must_use]
+pub fn word_break_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "normal" => Some(WORD_BREAK_NORMAL),
+        "break-all" => Some(WORD_BREAK_BREAK_ALL),
+        "keep-all" => Some(WORD_BREAK_KEEP_ALL),
         _ => None,
     }
 }
