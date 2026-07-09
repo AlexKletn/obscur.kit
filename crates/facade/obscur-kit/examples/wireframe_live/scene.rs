@@ -32,14 +32,17 @@
 //! 2. **Text Field** `<input>` — a live [`Input`] (click → focus ring + caret,
 //!    type → text) beside a disabled one.
 //! 3. **Textarea** `<textarea>` — a live [`Input`] (there is no dedicated textarea
-//!    widget; the UA `input, textarea { … }` rule styles both identically, so a
-//!    bare `Input` renders the same base look — noted here, not a separate control).
-//! 4. **Select** `<select>` — a live [`Select`] state machine: the header opens the
-//!    list (arrow ▲, all options inline), and a click while open picks the next
-//!    option and closes (arrow ▼, showing the chosen label). Per-**option**
-//!    hit-routing is NOT a bare-`Select` capability (the widget bubbles one event
-//!    for the whole control and always renders all options inline), so "pick" is a
-//!    cycle-to-next; noted. Beside it a disabled one.
+//!    widget). The UA sheet makes a bare `input` **single-line** (`white-space:
+//!    nowrap`); to act as a textarea this slot adds an author `.wf-area` class that
+//!    resets `white-space: normal` and gives it a definite `360×96` box, so the
+//!    value WRAPS inside that box — the multi-line look, still on the UA base.
+//! 4. **Select** `<select>` — a live [`Select`] state machine. Closed, the header
+//!    shows the current label + ▼. Open, the widget emits a real **dropdown popup**
+//!    — a `.select-list` of stacked `.select-option` rows positioned directly BELOW
+//!    the header (arrow ▲), the selected row inverted. A click while open picks the
+//!    next option and closes. Per-**option** hit-routing is NOT a bare-`Select`
+//!    capability (the widget bubbles one event for the whole control), so "pick" is
+//!    a cycle-to-next; noted. Beside it a disabled one.
 //! 5. **Checkbox** `<input type=checkbox>` — a live [`Checkbox`] (box `✓` on click),
 //!    a tri-state one, and a disabled one.
 //! 6. **Radio** `<input type=radio>` — a live group of three [`Radio`]s sharing one
@@ -119,8 +122,9 @@ pub const RADIO_LABELS: [&str; RADIO_COUNT] = ["Small", "Medium", "Large"];
 /// one") wraps and spills below the box. Single-word options render the field
 /// cleanly with no restyling (the whole point — no author CSS on the control).
 pub const SELECT_LABELS: [&str; SELECT_COUNT] = ["One", "Two", "Three"];
-/// The closed-state prompt shown before anything is picked (a single token, so it
-/// never wraps — see [`SELECT_LABELS`]).
+/// A single-token prompt used as the *disabled* select's sole option, so its
+/// header reads "Choose…" (the enabled select's header shows its own current label
+/// — the first option until one is picked). Single token so it never wraps.
 pub const SELECT_PROMPT: &str = "Choose…";
 
 /// The `<a>` element's stable component id (a raw semantic element the demo emits
@@ -237,6 +241,14 @@ pub fn stylesheet() -> &'static str {
 .wf-slot { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }\n\
 .wf-cap { height: 14px; color: #9b998f; font-size: 10px; font-weight: 600; }\n\
 \
+/* ---- Author-level field SIZING (a real form sizes its fields; the LOOK still\n\
+   comes from the UA sheet). The text field is single-line (UA `input` nowrap) at a\n\
+   definite width; the \"textarea\" is a live `Input` (so it inherits the UA `input`\n\
+   nowrap) and must MULTI-LINE, so it resets `white-space: normal` and wraps inside a\n\
+   definite box. ---- */\n\
+.wf-field { width: 220px; }\n\
+.wf-area { white-space: normal; width: 360px; height: 96px; }\n\
+\
 /* ---- Footer ---- */\n\
 .wf-footer { display: flex; flex-direction: row; justify-content: space-between; \
     padding: 8px 4px 0; }\n\
@@ -348,8 +360,9 @@ fn field_body(state: &WireState) -> ViewNode {
     body(vec![
         slot(
             "DEFAULT · LIVE",
-            control(
+            control_sized(
                 "field",
+                "wf-field",
                 Input::with_value(CMD_FIELD, state.field.clone())
                     .placeholder("Type here…")
                     .view(),
@@ -357,8 +370,9 @@ fn field_body(state: &WireState) -> ViewNode {
         ),
         slot(
             "DISABLED",
-            control(
+            control_sized(
                 "field-off",
+                "wf-field",
                 Input::with_value(CMD_FIELD_OFF, "read only").disabled(true).view(),
             ),
         ),
@@ -370,8 +384,9 @@ fn field_body(state: &WireState) -> ViewNode {
 fn area_body(state: &WireState) -> ViewNode {
     body(vec![slot(
         "MULTILINE · LIVE",
-        control(
+        control_sized(
             "area",
+            "wf-area",
             Input::with_value(CMD_AREA, state.area.clone())
                 .placeholder("Longer entered text…")
                 .view(),
@@ -393,17 +408,14 @@ fn select_body(state: &WireState) -> ViewNode {
     ])
 }
 
-/// The live select's bare view: while open, the real widget renders all options
-/// inline with the ▲ arrow; while closed, a proxy `Select` shows just the current
-/// label (or the prompt) with the ▼ arrow. Both fire [`CMD_SEL`], so a click opens
-/// (when closed) or picks-next + closes (when open) via the single handler.
+/// The live select's bare view — now rendered entirely by the real [`Select`]
+/// widget: the header (current label + ▼/▲ arrow) plus, while open, a real
+/// `.select-list` dropdown popup of `.select-option` rows below it (the selected
+/// one inverted). No proxy is needed any more — the widget renders its own list —
+/// so this simply defers to [`Select::view`]. A click fires [`CMD_SEL`]: open when
+/// closed, or pick-next + close when open, via the single shared handler.
 fn select_widget(state: &WireState) -> View {
-    if state.select.is_open() {
-        state.select.view()
-    } else {
-        let label = state.select.selected_label().unwrap_or(SELECT_PROMPT);
-        Select::new(CMD_SEL).with_options([label]).view()
-    }
+    state.select.view()
 }
 
 /// 05 · Checkbox: a live one, a tri-state one, and a disabled one.
@@ -480,6 +492,16 @@ fn slot(caption: &str, control: ViewNode) -> ViewNode {
 /// UA sheet styles it.
 fn control(id: &str, view: View) -> ViewNode {
     first_node(view).with_prop(ViewProperty::new(ID, ViewValue::Text(id.into())))
+}
+
+/// Like [`control`], but also attaches an author `class` to the control's root
+/// node — used to give the text fields / textarea their DEFINITE size (a real form
+/// sizes its fields). The control's *look* still comes entirely from the UA sheet;
+/// the class only sets width/height/white-space, not appearance.
+fn control_sized(id: &str, class: &str, view: View) -> ViewNode {
+    first_node(view)
+        .with_prop(ViewProperty::new(ID, ViewValue::Text(id.into())))
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
 }
 
 /// A bare `<a>` anchor element: a semantic element carrying the stable CSS type

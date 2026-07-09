@@ -102,6 +102,12 @@ input, textarea {\
   color: #2b2a27;\
   font-size: 14px;\
 }\
+/* A native `<input type=text>` is SINGLE-LINE: it never wraps (long text scrolls /\
+   clips). `textarea` keeps the initial `white-space: normal` so it wraps. This is\
+   the only property that differs between the two — the box look is shared above. */\
+input {\
+  white-space: nowrap;\
+}\
 input:hover, textarea:hover {\
   background: #f4f2ec;\
 }\
@@ -200,16 +206,23 @@ radio:disabled .radio-dot {\
   border-color: #b7b5ad;\
   background: #f2f0ea;\
 }\
+/* The select is a vertical column: a `.select-header` row (current label + arrow)\
+   and, while open, the `.select-list` popup below it. The box look (border, radius,\
+   fill) is on the outer; the interior padding is on the header. */\
 select {\
   display: flex;\
-  align-items: center;\
-  gap: 10px;\
-  padding: 11px 13px;\
+  flex-direction: column;\
   border: 1.5px solid #2b2a27;\
   border-radius: 2px;\
   background: #faf9f6;\
   color: #2b2a27;\
   font-size: 14px;\
+}\
+.select-header {\
+  display: flex;\
+  align-items: center;\
+  gap: 10px;\
+  padding: 11px 13px;\
 }\
 select:hover {\
   background: #e4e2db;\
@@ -228,6 +241,36 @@ select:disabled {\
   color: #2b2a27;\
 }\
 select:disabled .select-arrow {\
+  color: #b7b5ad;\
+}\
+/* The open dropdown popup: the option list rendered as a vertical stack of rows\
+   directly BELOW the header, in normal flow (a positioned popup subtree renders\
+   unreliably here). It grows the control's box downward. A hairline rule separates\
+   it from the header; each row keeps a fixed height (`flex-shrink: 0` so the column\
+   never squashes the rows to their text). */\
+.select-list {\
+  display: flex;\
+  flex-direction: column;\
+  border-top: 1.5px solid #2b2a27;\
+  background: #faf9f6;\
+}\
+.select-option {\
+  display: flex;\
+  align-items: center;\
+  flex-shrink: 0;\
+  height: 38px;\
+  padding: 0 13px;\
+  color: #2b2a27;\
+  font-size: 14px;\
+}\
+.select-option:hover {\
+  background: #e4e2db;\
+}\
+.select-option.selected {\
+  background: #2b2a27;\
+  color: #faf9f6;\
+}\
+.select-option.disabled {\
   color: #b7b5ad;\
 }\
 a {\

@@ -46,6 +46,23 @@ impl Select {
     /// (`.select-arrow`), in the widget sub-part id space (`..14`).
     const ARROW_ID: ComponentId = ComponentId::from_raw(0x00D0_0014);
 
+    /// Component id of the always-present **header** row sub-part
+    /// (`.select-header`) — the current label + arrow, carrying the box-interior
+    /// padding. The outer control is a vertical column of this header and (when
+    /// open) the option list. Sub-part id space (`..24`).
+    const HEADER_ID: ComponentId = ComponentId::from_raw(0x00D0_0024);
+
+    /// Component id of the open-popup option-list container sub-part
+    /// (`.select-list`), rendered in normal flow directly below the header.
+    /// Sub-part id space (`..44`).
+    const LIST_ID: ComponentId = ComponentId::from_raw(0x00D0_0044);
+
+    /// Base component id for the option rows of the open popup
+    /// (`.select-option`). Option `i` gets `OPTION_ID_BASE + i` so each row is a
+    /// DISTINCT box, matched positionally across reconciles. Sub-part id space
+    /// (`..34`).
+    const OPTION_ID_BASE: u64 = 0x00D0_0034;
+
     /// Interned name of the semantic-role property (`role`); shares the
     /// `0x00D1_NNXX` scheme with `NN = 04` (select): role=`00`, disabled=`01`,
     /// open=`02`, selected=`03`.
@@ -186,39 +203,84 @@ impl Select {
         SemanticRole::Menu
     }
 
-    /// Derives the semantic view: a [`COMPONENT_ID`] element carrying the role,
-    /// disabled and open state, the selected index as an integer property
-    /// (`-1` when nothing is selected), a click event bound to `command`,
-    /// each option as a [`Text`] child in order, and a trailing
-    /// `.select-arrow` indicator sub-part.
+    /// Derives the semantic view: a [`COMPONENT_ID`] outer element — the box and
+    /// the click/`:disabled` target — laid out as a **vertical column** of a
+    /// `.select-header` row and, while open, a `.select-list` popup.
     ///
-    /// The arrow carries an `open` state class (so a `select-arrow.open { … }`
-    /// or `select:disabled .select-arrow { … }` rule can key on it) and shows
-    /// the disclosure glyph as its text child — "▼" closed, "▲" open. The click
-    /// event and reserved `:disabled` attr stay on the OUTER control element.
+    /// The **header** (`.select-header`) is a row of the **current label** (the
+    /// selected option, else the first option, else empty — the browser-faithful
+    /// closed display) followed by a trailing `.select-arrow` indicator sub-part.
+    /// The arrow carries an `open` state class (so a `select-arrow.open { … }` or
+    /// `select:disabled .select-arrow { … }` rule can key on it) and shows the
+    /// disclosure glyph as its text child — "▼" closed, "▲" open.
+    ///
+    /// When [`is_open`](Self::is_open), a `.select-list` of `.select-option` rows
+    /// (one per option, the selected one also carrying a `selected` class) is
+    /// appended after the header, so the popup renders as a vertical stack directly
+    /// below it. The list is emitted **in normal flow** (not absolutely
+    /// positioned): the toolkit's layout/render of a positioned popup subtree is
+    /// unreliable here, so an in-flow list is the faithful, deterministic choice —
+    /// it grows the control's box downward rather than overlaying following content.
+    /// The click event and reserved `:disabled` attr stay on the OUTER element, so a
+    /// click anywhere in the control (header or a row) bubbles to the one handler.
     ///
     /// [`COMPONENT_ID`]: Self::COMPONENT_ID
     #[must_use]
     pub fn view(&self) -> View {
         let selected = self.selected.map_or(-1, |i| i64::try_from(i).unwrap_or(-1));
-        let mut children: Vec<ViewNode> = self
-            .options
-            .iter()
-            .map(|label| Text::new(label.clone()).into_view_node())
-            .collect();
-        // The disclosure-arrow indicator sub-part, appended after the options.
+        // Header label: the selected option, else the first option (a bare
+        // `<select>` shows its first option when nothing is picked), else empty.
+        let header_label: Box<str> = self
+            .selected_label()
+            .or_else(|| self.options.first().map(|s| &**s))
+            .unwrap_or("")
+            .into();
+        // The disclosure-arrow indicator sub-part.
         let (arrow_class, arrow_glyph) = if self.open {
             ("select-arrow open", "▲")
         } else {
             ("select-arrow", "▼")
         };
-        children.push(
-            ViewNode::element(Self::ARROW_ID)
-                .with_prop(ViewProperty::new(CLASS, ViewValue::from(arrow_class)))
-                .with_children(ViewFragment::from_nodes(vec![
-                    Text::new(arrow_glyph).into_view_node(),
-                ])),
-        );
+        let arrow = ViewNode::element(Self::ARROW_ID)
+            .with_prop(ViewProperty::new(CLASS, ViewValue::from(arrow_class)))
+            .with_children(ViewFragment::from_nodes(vec![
+                Text::new(arrow_glyph).into_view_node(),
+            ]));
+        // The header row: current label + arrow. Carries the box-interior padding.
+        let header = ViewNode::element(Self::HEADER_ID)
+            .with_prop(ViewProperty::new(CLASS, ViewValue::from("select-header")))
+            .with_children(ViewFragment::from_nodes(vec![
+                Text::new(header_label).into_view_node(),
+                arrow,
+            ]));
+        let mut children: Vec<ViewNode> = vec![header];
+        // The open dropdown popup: a `.select-list` of stacked `.select-option`
+        // rows, the selected one carrying a `selected` class. Absent when closed.
+        if self.open {
+            let options: Vec<ViewNode> = self
+                .options
+                .iter()
+                .enumerate()
+                .map(|(i, label)| {
+                    let class = if self.selected == Some(i) {
+                        "select-option selected"
+                    } else {
+                        "select-option"
+                    };
+                    let id = ComponentId::from_raw(Self::OPTION_ID_BASE + i as u64);
+                    ViewNode::element(id)
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::from(class)))
+                        .with_children(ViewFragment::from_nodes(vec![
+                            Text::new(label.clone()).into_view_node(),
+                        ]))
+                })
+                .collect();
+            children.push(
+                ViewNode::element(Self::LIST_ID)
+                    .with_prop(ViewProperty::new(CLASS, ViewValue::from("select-list")))
+                    .with_children(ViewFragment::from_nodes(options)),
+            );
+        }
         let node = ViewNode::element(Self::COMPONENT_ID)
             // Stable CSS type / local name so a UA (or author) `select { … }` type
             // selector matches this control (spec §4.13). Additive.
@@ -312,8 +374,24 @@ mod tests {
         assert_eq!(sample().semantic_role(), SemanticRole::Menu);
     }
 
+    /// The `.select-header` child of the outer select node (the label + arrow row).
+    fn header_of(children: &ViewFragment) -> &ViewFragment {
+        match &children.nodes()[0] {
+            ViewNode::Element { component, props, children, .. } => {
+                assert_eq!(*component, Select::HEADER_ID);
+                assert!(props.iter().any(|p| p.name() == CLASS
+                    && matches!(p.value(), ViewValue::Text(t) if &**t == "select-header")));
+                children
+            }
+            ViewNode::Text { .. } => panic!("expected the .select-header element"),
+        }
+    }
+
     #[test]
-    fn view_children_match_option_count() {
+    fn closed_view_is_header_row_with_label_and_arrow() {
+        // CLOSED: the outer has one child — the `.select-header` row of the
+        // current-label Text (the first option when nothing is picked) + the
+        // `.select-arrow` indicator. No option list is emitted while closed.
         let s = sample();
         let view = s.view();
         match &view.root().nodes()[0] {
@@ -325,11 +403,15 @@ mod tests {
                 ..
             } => {
                 assert_eq!(*component, Select::COMPONENT_ID);
-                // Three option children + the trailing `.select-arrow` indicator
-                // (was 3 before the wireframe arrow landed).
-                assert_eq!(children.len(), 4);
+                assert_eq!(children.len(), 1, "closed: header only, no list");
+                let head = header_of(children);
+                assert_eq!(head.nodes().len(), 2, "header = label + arrow");
+                match &head.nodes()[0] {
+                    ViewNode::Text { content, .. } => assert_eq!(&**content, "One"),
+                    ViewNode::Element { .. } => panic!("expected header label text"),
+                }
                 assert!(matches!(
-                    &children.nodes()[3],
+                    &head.nodes()[1],
                     ViewNode::Element { props, .. }
                         if props.iter().any(|p| p.name() == CLASS
                             && matches!(p.value(), ViewValue::Text(t) if t.starts_with("select-arrow")))
@@ -342,6 +424,55 @@ mod tests {
                 assert_eq!(events[0].command(), cmd());
             }
             ViewNode::Text { .. } => panic!("expected element root"),
+        }
+    }
+
+    #[test]
+    fn open_view_appends_a_select_list_of_options() {
+        // OPEN: the header plus a trailing `.select-list` popup whose children are
+        // one `.select-option` per option, the selected one carrying `selected`.
+        let mut s = sample();
+        s.select(1); // picks "Two", but also closes — reopen for the popup.
+        s.open();
+        let view = s.view();
+        let list = match &view.root().nodes()[0] {
+            ViewNode::Element { children, .. } => {
+                assert_eq!(children.len(), 2, "header + list");
+                header_of(children);
+                match &children.nodes()[1] {
+                    ViewNode::Element { component, props, children, .. } => {
+                        assert_eq!(*component, Select::LIST_ID);
+                        assert!(props.iter().any(|p| p.name() == CLASS
+                            && matches!(p.value(), ViewValue::Text(t) if &**t == "select-list")));
+                        children.clone()
+                    }
+                    ViewNode::Text { .. } => panic!("expected the .select-list element"),
+                }
+            }
+            ViewNode::Text { .. } => panic!("expected element root"),
+        };
+        assert_eq!(list.nodes().len(), 3, "one option row per option");
+        // The selected row (index 1) carries the `selected` class; the others do not.
+        for (i, opt) in list.nodes().iter().enumerate() {
+            match opt {
+                ViewNode::Element { component, props, .. } => {
+                    assert_eq!(*component, ComponentId::from_raw(Select::OPTION_ID_BASE + i as u64));
+                    let class = props
+                        .iter()
+                        .find(|p| p.name() == CLASS)
+                        .and_then(|p| match p.value() {
+                            ViewValue::Text(t) => Some(&**t),
+                            _ => None,
+                        })
+                        .expect("option class");
+                    if i == 1 {
+                        assert_eq!(class, "select-option selected");
+                    } else {
+                        assert_eq!(class, "select-option");
+                    }
+                }
+                ViewNode::Text { .. } => panic!("expected option element"),
+            }
         }
     }
 }

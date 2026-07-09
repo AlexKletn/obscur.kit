@@ -53,13 +53,20 @@ use obscur_kit::text_unicode::UnicodeTextItemizer;
 mod wireframe;
 
 use wireframe::{
-    CMD_BTN, CMD_CHK, CMD_FIELD, CMD_LINK, CMD_SEL, CMD_TRI, RADIO_COUNT, RADIO_LABELS,
+    CMD_AREA, CMD_BTN, CMD_CHK, CMD_FIELD, CMD_LINK, CMD_SEL, CMD_TRI, RADIO_COUNT, RADIO_LABELS,
     SELECT_COUNT, WireState, radio_command,
 };
 
 /// The logical extent each panel is laid out and rasterized under. Tall enough for
 /// the whole spec sheet (masthead + 7 cards + footer) plus the select's open list.
 const VIEWPORT: Size = Size::new(1240.0, 1560.0);
+
+/// A long single-line value typed into the text field — wider than the field's
+/// definite 220px, so it proves an `<input>` is single-line (clips, never wraps).
+const FIELD_TEXT: &str = "The quick brown fox jumped over";
+/// A long value typed into the textarea — long enough to wrap onto several lines
+/// within the definite 360px box (proving the wrap width is the box, not min-content).
+const AREA_TEXT: &str = "The quick brown fox jumps over the lazy dog and then it runs far away again today while the sun sets slowly behind the distant hills";
 
 fn main() {
     println!("== obscur-kit interactive Wireframe Kit — headless proof (CPU) ==\n");
@@ -102,9 +109,9 @@ fn main() {
     click(&mut runtime, &state, &sheets, "radio-1");
     assert_eq!(state.borrow().radio, 1, "radio group selected option 1 (Medium)");
 
-    // --- Select: open, then pick-next + close ------------------------------
+    // --- Select: open → pick-next → reopen so the popup shows a selected row ---
     click(&mut runtime, &state, &sheets, "select");
-    assert!(state.borrow().select.is_open(), "select opened (arrow ▲, options inline)");
+    assert!(state.borrow().select.is_open(), "select opened (arrow ▲)");
 
     click(&mut runtime, &state, &sheets, "select");
     assert!(!state.borrow().select.is_open(), "select closed after picking");
@@ -114,19 +121,80 @@ fn main() {
         "select committed the first option on pick-next from an empty selection"
     );
 
-    // --- Focus the field + type through the editing session ----------------
+    // Reopen so the interacted panel captures the dropdown popup WITH a selected
+    // (inverted) row, and assert the popup renders as a vertical stack of option
+    // rows positioned directly BELOW the header.
+    click(&mut runtime, &state, &sheets, "select");
+    assert!(state.borrow().select.is_open(), "select reopened for the popup capture");
+    assert_select_popup(&runtime);
+
+    // --- Field: type a LONG string; a single-line `input` must NOT wrap --------
     let field = node_by_id(&runtime, "field").expect("field node");
     let field_pt = center(&runtime, "field").expect("field laid out");
     runtime.handle_pointer(pointer(PointerEventKind::Down, field_pt));
     runtime.handle_pointer(pointer(PointerEventKind::Up, field_pt));
     let seed = state.borrow().field.clone();
     runtime.begin_text_editing(field, seed);
-    type_text(&mut runtime, "Typing");
+    type_text(&mut runtime, FIELD_TEXT);
     refresh(&mut runtime, &state, &sheets);
     assert!(
-        state.borrow().field.ends_with("Typing"),
-        "typed characters reached the field via the editing session (got {:?})",
+        state.borrow().field.ends_with(FIELD_TEXT),
+        "typed characters reached the field (got {:?})",
         state.borrow().field
+    );
+    let (_, field_size) = box_of(&runtime, "field").expect("field laid out");
+    println!("[measure] field box = {:.1} × {:.1}", field_size.width, field_size.height);
+    assert!(
+        (field_size.width - 220.0).abs() < 2.0,
+        "field keeps its definite 220px width (got {:.1})",
+        field_size.width,
+    );
+    assert!(
+        field_size.height < 56.0,
+        "single-line <input> did NOT wrap the long value — box stays one line high \
+         (got {:.1}; a wrapped 2-line box would be ~66+)",
+        field_size.height,
+    );
+
+    // --- Textarea: type a LONG string; `.wf-area` (white-space:normal, 360×96)
+    // must WRAP within its definite box, not early at min-content --------------
+    let area = node_by_id(&runtime, "area").expect("area node");
+    let area_pt = center(&runtime, "area").expect("area laid out");
+    runtime.handle_pointer(pointer(PointerEventKind::Down, area_pt));
+    runtime.handle_pointer(pointer(PointerEventKind::Up, area_pt));
+    let area_seed = state.borrow().area.clone();
+    runtime.begin_text_editing(area, area_seed);
+    type_text(&mut runtime, AREA_TEXT);
+    refresh(&mut runtime, &state, &sheets);
+    assert!(
+        state.borrow().area.ends_with(AREA_TEXT),
+        "typed characters reached the textarea (got {:?})",
+        state.borrow().area
+    );
+    let (_, area_size) = box_of(&runtime, "area").expect("area laid out");
+    let (_, area_text) = text_child_box(&runtime, "area").expect("area text laid out");
+    println!(
+        "[measure] area box = {:.1} × {:.1}; wrapped text = {:.1} × {:.1} (inner width ~334)",
+        area_size.width, area_size.height, area_text.width, area_text.height,
+    );
+    assert!(
+        (area_size.width - 360.0).abs() < 2.0,
+        "textarea keeps its definite 360px width (got {:.1})",
+        area_size.width,
+    );
+    assert!(
+        area_text.width > 280.0,
+        "textarea wraps at its REAL ~360px box (inner ~334), NOT early at min-content \
+         — widest laid-out line = {:.1}. If this is small (~a single word wide) with a \
+         tall text box, that is the definite-width→text-wrap propagation bug (DEFECT 1 \
+         step 3): report it, do not hack around it",
+        area_text.width,
+    );
+    assert!(
+        area_text.height > 24.0,
+        "textarea wrapped onto MULTIPLE lines within its box — text height {:.1} exceeds a \
+         single ~17px line (the field's single-line text)",
+        area_text.height,
     );
 
     // --- Hover the link (drives the `a:hover` bold) ------------------------
@@ -243,6 +311,14 @@ fn register_handlers(runtime: &mut UiRuntime, state: &Rc<RefCell<WireState>>) {
     }
     {
         let s = state.clone();
+        runtime.on_text_input(CMD_AREA, move |text| {
+            let mut st = s.borrow_mut();
+            text.clone_into(&mut st.area);
+            st.last_event = format!("Typed area: {text:?}");
+        });
+    }
+    {
+        let s = state.clone();
         runtime.on_command(CMD_LINK, move || {
             s.borrow_mut().last_event = "Link activated".to_owned();
         });
@@ -318,6 +394,108 @@ fn center(runtime: &UiRuntime, id: &str) -> Option<Point> {
     let origin = layout.origin();
     let size = layout.size();
     Some(Point::new(origin.x + 6.0, origin.y + size.height / 2.0))
+}
+
+/// The layout box (origin, size) of the control carrying reserved `id`.
+fn box_of(runtime: &UiRuntime, id: &str) -> Option<(Point, Size)> {
+    let node = node_by_id(runtime, id)?;
+    let lb = runtime.layout_boxes().get(&node)?;
+    Some((lb.origin(), lb.size()))
+}
+
+/// The layout box of the first direct **Text** child of the control `id` (an
+/// input/textarea renders its value as a single Text child; when it wraps, that
+/// box spans multiple lines — width = widest line, height = total).
+fn text_child_box(runtime: &UiRuntime, id: &str) -> Option<(Point, Size)> {
+    let parent = node_by_id(runtime, id)?;
+    let node = runtime.tree().get(parent)?;
+    for &child in node.children() {
+        let c = runtime.tree().get(child)?;
+        if c.kind().text().is_some() {
+            let lb = runtime.layout_boxes().get(&child)?;
+            return Some((lb.origin(), lb.size()));
+        }
+    }
+    None
+}
+
+/// Every node carrying the CSS `class`, in tree order.
+fn nodes_by_class(runtime: &UiRuntime, class: &str) -> Vec<NodeId> {
+    runtime
+        .tree()
+        .iter()
+        .filter(|(_, n)| n.attributes().classes().iter().any(|c| &**c == class))
+        .map(|(id, _)| id)
+        .collect()
+}
+
+/// Asserts the OPEN select's popup renders as a real dropdown: a `.select-list`
+/// container positioned directly BELOW the header, holding a vertical stack of
+/// `.select-option` rows (one per option), the selected row carrying `selected`.
+fn assert_select_popup(runtime: &UiRuntime) {
+    let header = *nodes_by_class(runtime, "select-header")
+        .first()
+        .expect("the select renders a `.select-header` row");
+    let header_lb = runtime.layout_boxes().get(&header).expect("header laid out");
+    let (header_origin, header_size) = (header_lb.origin(), header_lb.size());
+    let list = *nodes_by_class(runtime, "select-list")
+        .first()
+        .expect("an open select emits a `.select-list` popup");
+    let list_lb = runtime.layout_boxes().get(&list).expect("popup list laid out");
+    let list_top = list_lb.origin().y;
+    let header_bottom = header_origin.y + header_size.height;
+    // `top: 100%` anchors the list at the header's PADDING-box bottom, i.e. just
+    // inside the 1.5px bottom border — so the list top lands within a couple of px
+    // of the border-box bottom (never up at the header top: this is a real popup,
+    // not an inline row).
+    assert!(
+        list_top >= header_bottom - 4.0,
+        "the popup list sits BELOW the header (list top {:.1} vs header bottom {:.1})",
+        list_top,
+        header_bottom,
+    );
+    assert!(
+        list_top > header_origin.y + header_size.height * 0.5,
+        "the popup is a real dropdown below the header, not options inline at the top \
+         (list top {:.1}, header spans {:.1}..{:.1})",
+        list_top,
+        header_origin.y,
+        header_bottom,
+    );
+
+    // The option rows: one per option, stacked vertically (each strictly below the
+    // previous, sharing a left edge), and exactly one carries the `selected` class.
+    let options = nodes_by_class(runtime, "select-option");
+    assert_eq!(options.len(), SELECT_COUNT, "one `.select-option` row per option");
+    let mut prev_bottom = f32::MIN;
+    let mut left_edge: Option<f32> = None;
+    let mut selected_rows = 0usize;
+    for opt in &options {
+        let lb = runtime.layout_boxes().get(opt).expect("option row laid out");
+        let o = lb.origin();
+        assert!(
+            lb.size().height > 30.0,
+            "each option row is a full-height row, not a collapsed line (height {:.1})",
+            lb.size().height,
+        );
+        assert!(
+            o.y >= prev_bottom - 1.0,
+            "option rows are stacked vertically (row top {:.1} not below prev bottom {:.1})",
+            o.y,
+            prev_bottom,
+        );
+        prev_bottom = o.y + lb.size().height;
+        match left_edge {
+            None => left_edge = Some(o.x),
+            Some(x) => assert!((o.x - x).abs() < 1.0, "option rows share a left edge"),
+        }
+        let node = runtime.tree().get(*opt).expect("option node");
+        if node.attributes().classes().iter().any(|c| &**c == "selected") {
+            selected_rows += 1;
+        }
+    }
+    assert_eq!(selected_rows, 1, "exactly one option row is marked `selected` (inverted)");
+    println!("[check] select popup: {} rows stacked below header, one inverted", options.len());
 }
 
 /// Rasterizes the runtime's current committed scene into a fresh pixmap.
