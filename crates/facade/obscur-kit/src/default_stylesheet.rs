@@ -238,7 +238,11 @@ select:disabled {\
   background: #f2f0ea;\
   color: #b7b5ad;\
 }\
+/* The disclosure arrow is a fixed-size icon: a definite width keeps it from\
+   taking a fill-available flex base (auto-width flex items still fill here), so\
+   `.select-header`'s `space-between` has free space to push it to the right edge. */\
 .select-arrow {\
+  width: 12px;\
   color: #2b2a27;\
 }\
 select:disabled .select-arrow {\
