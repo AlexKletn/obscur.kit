@@ -184,6 +184,26 @@ pub struct UiRuntime {
     /// with the runtime-owned buffer. Exactly one handler per command (a later
     /// registration replaces an earlier one).
     text_input_handlers: HashMap<InternedSymbol, Box<dyn FnMut(&str)>>,
+    /// The **change** handler registry: application logic to run when a focused
+    /// editable *commits* its value (WHATWG HTML §4.10.5.5 — the `change` event
+    /// fires when the user commits an edit, i.e. on blur or, for a single-line
+    /// `input`, on `Enter`; *not* per keystroke and *not* on a focus click).
+    /// Keyed, like [`text_input_handlers`](Self::text_input_handlers), by the
+    /// command symbol the app binds `on-change → command` to in the View (via
+    /// [`EVENT_CHANGE`](obscur_view::view::EVENT_CHANGE) — an
+    /// [`Input`](../../obscur_widgets/input/struct.Input.html) binds it) and
+    /// registers for via [`on_change`](Self::on_change).
+    ///
+    /// A **separate** registry from [`handlers`](Self::handlers) and
+    /// [`text_input_handlers`](Self::text_input_handlers) precisely because an
+    /// editable binds `EVENT_INPUT` *and* `EVENT_CHANGE` to the *same* command
+    /// symbol: routing per-keystroke `input` and commit `change` through
+    /// distinct registries lets one app receive both without conflating them (an
+    /// `on_text_input` fires per char; an `on_change` fires once on commit with
+    /// the committed value). A change handler takes the field's **committed
+    /// text** (`FnMut(&str)`). Exactly one handler per command (a later
+    /// registration replaces an earlier one).
+    change_handlers: HashMap<InternedSymbol, Box<dyn FnMut(&str)>>,
     /// The runtime-owned editing session for the focused editable, if any (spec
     /// §5.11, §6.7). Seeded from the field's current text when focus lands on an
     /// editable (a node whose ancestor chain binds
@@ -407,6 +427,7 @@ impl UiRuntime {
             text_drag: None,
             handlers: HashMap::new(),
             text_input_handlers: HashMap::new(),
+            change_handlers: HashMap::new(),
             editing: None,
             commands: CommandRouter::new(),
             modifiers: Modifiers::new(),
@@ -1785,24 +1806,41 @@ impl UiRuntime {
 
     /// Resolves the **activation** command for `target`: a control is activated
     /// by a click or an Enter/Space keypress, and activation fires its
-    /// [`EVENT_CLICK`] command if one is bound (bubbling up its ancestors), else
-    /// its [`EVENT_CHANGE`] command (spec §2.3, §3.1).
+    /// [`EVENT_CLICK`] command if one is bound (bubbling up its ancestors), else —
+    /// for a **non-editable** control — its [`EVENT_CHANGE`] command (spec §2.3,
+    /// §3.1).
     ///
     /// This is the single mapping both pointer and keyboard activation share: a
-    /// button (bound to `on-click`) fires its click command; a checkbox/input
-    /// (bound to `on-change`) fires its change command. Click binds are checked
-    /// first, so a node carrying both prefers its click command, and the pre-
-    /// existing pointer behavior (a button click fires `EVENT_CLICK`) is
-    /// unchanged. Returns `None` when neither event is bound in the chain.
+    /// button (bound to `on-click`) fires its click command; a
+    /// checkbox/radio/select (bound to `on-change`, and *not* editable) fires its
+    /// change command *on the click* — for those controls the click **is** the
+    /// change (WHATWG HTML §4.10.5.5: a checkbox/radio `change` fires on the
+    /// toggling click; a `select`'s on the pick). Click binds are checked first,
+    /// so a node carrying both prefers its click command.
     ///
-    /// Finer-grained editing events — per-keystroke [`EVENT_INPUT`] text entry
-    /// and change-on-blur — are deliberately *not* activation and are a separate
-    /// follow-up.
+    /// A **text field is different.** For an *editable* control — one whose
+    /// ancestor chain binds [`EVENT_INPUT`] — `EVENT_CHANGE` is **not** a
+    /// pointer-click activation: per the HTML model a text field's `change` fires
+    /// once on **commit** (blur, or `Enter` for a single-line `input`) carrying the
+    /// committed value, and must *not* fire on a focus/click. So the change
+    /// fallback is deliberately skipped for an editable target here — a click into
+    /// a text field resolves no activation command — and the commit-change is fired
+    /// separately (see [`commit_editable_change`](Self::commit_editable_change),
+    /// driven by [`sync_editing_to_focus`](Self::sync_editing_to_focus) on blur and
+    /// the single-line `Enter` path). Per-keystroke [`EVENT_INPUT`] entry is
+    /// likewise not activation. Returns `None` when neither event applies.
     ///
     /// [`EVENT_INPUT`]: obscur_view::view::EVENT_INPUT
     fn activation_command_for(&self, target: NodeId) -> Option<InternedSymbol> {
-        self.command_for_event_bubbling(target, EVENT_CLICK)
-            .or_else(|| self.command_for_event_bubbling(target, EVENT_CHANGE))
+        if let Some(click) = self.command_for_event_bubbling(target, EVENT_CLICK) {
+            return Some(click);
+        }
+        // `EVENT_CHANGE`-on-click is a toggle/select activation only; for an
+        // editable field `change` is a commit event, so never resolve it here.
+        if self.editable_ancestor(target).is_some() {
+            return None;
+        }
+        self.command_for_event_bubbling(target, EVENT_CHANGE)
     }
 
     /// Activates the control at `node`: dispatches its
@@ -1914,6 +1952,91 @@ impl UiRuntime {
             self.request_frame(FrameReason::Input);
         }
         ran
+    }
+
+    /// Registers `handler` as the application logic to run when the focused
+    /// editable bound to `command` **commits** its value — the toolkit's `change`
+    /// event (WHATWG HTML §4.10.5.5 *Common input element APIs*: `change` fires
+    /// when the user commits an edit, i.e. on blur or, for a single-line `input`,
+    /// on `Enter`), replacing any handler previously registered for that command.
+    ///
+    /// The `command` symbol is app-owned and must be the **same** symbol the
+    /// application binds its `on-change` event to in the View (via
+    /// [`EVENT_CHANGE`](obscur_view::view::EVENT_CHANGE) — an
+    /// [`Input`](../../obscur_widgets/input/struct.Input.html) binds it). Unlike a
+    /// per-keystroke [`on_text_input`](Self::on_text_input) handler, a change
+    /// handler runs **once per edit session** — only when the value actually
+    /// changed since focus — and receives the field's **committed text**
+    /// (`FnMut(&str)`). Because it is a distinct registry from `on_text_input`, an
+    /// app can register both on the same field command and receive per-keystroke
+    /// `input` *and* a single commit `change` without conflation. Registering does
+    /// not itself schedule a frame.
+    ///
+    /// (A non-editable checkbox/radio/select fires its `EVENT_CHANGE` command
+    /// through the *activation* path on click — see
+    /// [`activation_command_for`](Self::activation_command_for) — so those keep
+    /// using [`on_command`](Self::on_command); this registry is for editable
+    /// text-field commits.)
+    pub fn on_change(&mut self, command: InternedSymbol, handler: impl FnMut(&str) + 'static) {
+        self.change_handlers.insert(command, Box::new(handler));
+    }
+
+    /// Returns whether a change (commit) handler is registered for `command`.
+    #[must_use]
+    pub fn has_change_handler(&self, command: InternedSymbol) -> bool {
+        self.change_handlers.contains_key(&command)
+    }
+
+    /// Runs the change handler registered for `command` (if any) with the field's
+    /// committed `text` and, when one ran, requests a [`FrameReason::Input`] frame.
+    /// Returns whether a handler actually ran. With no handler registered this is a
+    /// no-op that returns `false` and schedules no frame.
+    fn dispatch_change(&mut self, command: InternedSymbol, text: &str) -> bool {
+        let ran = if let Some(handler) = self.change_handlers.get_mut(&command) {
+            handler(text);
+            true
+        } else {
+            false
+        };
+        if ran {
+            self.request_frame(FrameReason::Input);
+        }
+        ran
+    }
+
+    /// Commits the active editing session's `change` event when its value is
+    /// dirty (differs from the last committed baseline / the value at focus) — the
+    /// shared entry point for the two HTML commit triggers on an editable text
+    /// field: **blur** (focus leaving the field, from
+    /// [`sync_editing_to_focus`](Self::sync_editing_to_focus)) and a single-line
+    /// **`Enter`** (from [`try_text_edit`](Self::try_text_edit)).
+    ///
+    /// Fires the editable node's [`EVENT_CHANGE`](obscur_view::view::EVENT_CHANGE)
+    /// command through the [`change_handlers`](Self::change_handlers) registry with
+    /// the committed text (WHATWG HTML §4.10.5.5: `change` fires on commit, once,
+    /// and only when the value actually changed). When `rebaseline` is set (an
+    /// `Enter` commit that keeps the field focused) the session's baseline is
+    /// advanced to the committed value first, so a later blur without further edits
+    /// does not re-fire. A no session, a clean value, or no `EVENT_CHANGE` binding
+    /// makes this a harmless no-op. Returns whether a change handler ran.
+    fn commit_editable_change(&mut self, rebaseline: bool) -> bool {
+        let Some(session) = self.editing.as_ref() else {
+            return false;
+        };
+        if !session.is_dirty() {
+            return false;
+        }
+        let node = session.node();
+        let text = session.text().to_owned();
+        if rebaseline {
+            if let Some(session) = self.editing.as_mut() {
+                session.mark_committed();
+            }
+        }
+        match self.tree.get(node).and_then(|n| n.command_for_event(EVENT_CHANGE)) {
+            Some(command) => self.dispatch_change(command, &text),
+            None => false,
+        }
     }
 
     /// Begins a fresh editing session on `node` seeded with `initial_text`
@@ -2121,13 +2244,34 @@ impl UiRuntime {
     /// session (seeded from the field's text, caret at the end) when focus is on
     /// an editable the session does not already cover, and clears the session
     /// when focus is not on any editable. Called whenever focus changes.
+    ///
+    /// **Blur commits `change`.** When focus *leaves* the field the current
+    /// session covers (focus moving to a different editable, a non-editable, or
+    /// nothing), that is a **commit** in the HTML sense (WHATWG HTML §4.10.5.5: a
+    /// text field's `change` fires when it loses focus after its value changed).
+    /// So before re-seating/clearing the session this dispatches the outgoing
+    /// field's [`EVENT_CHANGE`](obscur_view::view::EVENT_CHANGE) command with the
+    /// committed text — once, and only if the value actually changed since focus
+    /// (see [`commit_editable_change`](Self::commit_editable_change)). Re-focusing
+    /// the *same* field is not a blur, so the session (and its baseline) persists
+    /// untouched.
     fn sync_editing_to_focus(&mut self) {
-        match self.focused.and_then(|f| self.editable_ancestor(f)) {
+        let new_editable = self.focused.and_then(|f| self.editable_ancestor(f));
+        let current = self.editing.as_ref().map(TextEditSession::node);
+        // Same field (or both absent): no focus transition across an editable —
+        // leave the live session (caret/selection/baseline) exactly as it was.
+        if current == new_editable {
+            return;
+        }
+        // Focus is leaving `current` (an editable): blur → commit its `change`
+        // with the committed value if it changed since focus.
+        if current.is_some() {
+            self.commit_editable_change(false);
+        }
+        match new_editable {
             Some(node) => {
-                if self.editing.as_ref().map(TextEditSession::node) != Some(node) {
-                    let text = self.collect_editable_text(node);
-                    self.editing = Some(TextEditSession::seeded(node, text));
-                }
+                let text = self.collect_editable_text(node);
+                self.editing = Some(TextEditSession::seeded(node, text));
             }
             None => self.editing = None,
         }
@@ -2363,8 +2507,18 @@ impl UiRuntime {
                     // §4.1.1 segment break); a single-line `input`'s Enter is NOT
                     // consumed — it remains an activation/submit key (byte-identical).
                     NamedKey::Enter if self.is_multiline(node) => EditCommand::insert("\n"),
-                    // Enter (single-line) / Escape / Tab / etc. remain activation
-                    // or shortcut keys.
+                    // Enter in a SINGLE-LINE `input` is a **commit** (WHATWG HTML
+                    // §4.10.5.5 / §4.10.21.3 implicit form submission): it fires
+                    // `change` with the committed value (once, only if it changed
+                    // since focus), rebaselining so a later blur doesn't re-fire,
+                    // but inserts NOTHING and is NOT consumed as an edit — it falls
+                    // through (`return false`) to the activation/shortcut path so
+                    // Enter's routing is otherwise byte-identical.
+                    NamedKey::Enter => {
+                        self.commit_editable_change(true);
+                        return false;
+                    }
+                    // Escape / Tab / etc. remain activation or shortcut keys.
                     _ => return false,
                 };
                 self.apply_edit(command);
@@ -6514,6 +6668,192 @@ mod tests {
             "the box grew past the stale retained (1-line) height {stale_height} → measure reads \
              the SESSION, not the lagging retained tree (measured {measured_height})",
         );
+    }
+
+    // ---- EVENT_CHANGE as a COMMIT (blur / single-line Enter) event -----------
+    // The HTML `change`/`input` event model (WHATWG HTML §4.10.5.5 *Common input
+    // element APIs*): for a text field `input` fires per keystroke, while `change`
+    // fires ONCE on COMMIT (blur, or Enter for a single-line input) carrying the
+    // committed value — and NOT on a focus/click. (For a checkbox/radio/select the
+    // toggling click IS the change; that click→change path is covered by
+    // `clicking_a_checkbox_fires_its_change_command_via_activate`.)
+
+    /// Field `a`'s command (bound to BOTH `on-input` and `on-change`, as the
+    /// `Input` widget binds both symbols to one command).
+    const CMD_FIELD_A: InternedSymbol = InternedSymbol::from_raw(0x1301);
+    /// Field `b`'s command — a second editable to move focus to (blur `a`).
+    const CMD_FIELD_B: InternedSymbol = InternedSymbol::from_raw(0x1302);
+
+    /// A panel (100x100) with two editable single-line fields: `a` (y∈[0,50)) and
+    /// `b` (y∈[50,100)), each binding BOTH `on-input` and `on-change` to its own
+    /// command — mirroring the `Input` widget, which binds `EVENT_INPUT` and
+    /// `EVENT_CHANGE` to the same symbol. Neither carries a `type`, so both are
+    /// single-line (`Enter` = commit, not newline).
+    fn two_editable_fields_view() -> View {
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(600))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+                .with_children(ViewFragment::from_nodes(vec![
+                    ViewNode::element(ComponentId::from_raw(601))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("a".into())))
+                        .with_event(ViewEventBinding::new(EVENT_INPUT, CMD_FIELD_A))
+                        .with_event(ViewEventBinding::new(EVENT_CHANGE, CMD_FIELD_A)),
+                    ViewNode::element(ComponentId::from_raw(602))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("b".into())))
+                        .with_event(ViewEventBinding::new(EVENT_INPUT, CMD_FIELD_B))
+                        .with_event(ViewEventBinding::new(EVENT_CHANGE, CMD_FIELD_B)),
+                ])),
+        ]))
+    }
+
+    #[test]
+    fn clicking_into_a_text_field_fires_no_change() {
+        // (a) A click into an editable text field is a FOCUS, not a commit: it must
+        // resolve NO activation command and fire NO `change` (WHATWG HTML §4.10.5.5
+        // — a text field's `change` fires on commit, never on focus/click). This is
+        // the fix for the old bug where an editable's `EVENT_CHANGE` was resolved as
+        // a pointer-click activation and fired on every focus-click.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&two_editable_fields_view(), sheets);
+
+        let changes = Rc::new(Cell::new(0));
+        {
+            let c = changes.clone();
+            runtime.on_change(CMD_FIELD_A, move |_| c.set(c.get() + 1));
+        }
+
+        // Click into field `a` (Down+Up at (50, 25)).
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let up = runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 25.0));
+
+        assert!(runtime.focused().is_some(), "the click focused the field");
+        assert_eq!(
+            up.command(),
+            None,
+            "an editable click resolves NO activation command (change is not a click)"
+        );
+        assert_eq!(changes.get(), 0, "clicking into a text field fires NO change");
+    }
+
+    #[test]
+    fn input_fires_per_keystroke_and_change_fires_once_on_blur_with_the_committed_text() {
+        // (b) The full HTML input/change call sequence on a text field:
+        //   type "hi"  → `input` fires per char (×2), `change` fires 0×;
+        //   click into the (already-focused) field → `change` fires 0×;
+        //   blur (focus another field) → `change` fires ONCE with the committed "hi".
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&two_editable_fields_view(), sheets);
+
+        // Separate registries, both keyed by the SAME field command: per-keystroke
+        // `on_text_input` and commit `on_change` — proving they never conflate.
+        let inputs = Rc::new(RefCell::new(Vec::<String>::new()));
+        let committed = Rc::new(RefCell::new(Vec::<String>::new()));
+        {
+            let i = inputs.clone();
+            runtime.on_text_input(CMD_FIELD_A, move |t| i.borrow_mut().push(t.to_owned()));
+        }
+        {
+            let c = committed.clone();
+            runtime.on_change(CMD_FIELD_A, move |t| c.borrow_mut().push(t.to_owned()));
+        }
+
+        // Focus field `a`.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+
+        // Type "hi": each keystroke fires `input`, none fires `change`.
+        runtime.handle_key(char_press('h'));
+        runtime.handle_key(char_press('i'));
+        assert_eq!(&*inputs.borrow(), &["h".to_owned(), "hi".to_owned()], "input per keystroke");
+        assert!(committed.borrow().is_empty(), "typing fires NO change");
+
+        // Click again into the SAME field: still no commit, no change.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 25.0));
+        assert!(committed.borrow().is_empty(), "a focus-click fires NO change");
+
+        // Blur: move focus to field `b` (press at (50, 75)) — this COMMITS `a`.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0));
+        assert_eq!(
+            &*committed.borrow(),
+            &["hi".to_owned()],
+            "blur fires `change` ONCE with the committed text"
+        );
+        // `input` was not fired again by the blur.
+        assert_eq!(inputs.borrow().len(), 2, "blur fires no extra `input`");
+    }
+
+    #[test]
+    fn blur_of_an_unchanged_field_fires_no_change() {
+        // The HTML change model fires `change` only when the value ACTUALLY changed
+        // since focus: focusing a field and blurring it without editing fires
+        // nothing (WHATWG HTML §4.10.5.5).
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&two_editable_fields_view(), sheets);
+
+        let changes = Rc::new(Cell::new(0));
+        {
+            let c = changes.clone();
+            runtime.on_change(CMD_FIELD_A, move |_| c.set(c.get() + 1));
+        }
+
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0)); // focus a
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0)); // blur to b
+        assert_eq!(changes.get(), 0, "blurring an UNCHANGED field fires no change");
+    }
+
+    #[test]
+    fn enter_on_a_single_line_input_commits_change_without_inserting_and_does_not_refire() {
+        // (c) `Enter` in a single-line `input` is a COMMIT (WHATWG HTML §4.10.5.5 /
+        // implicit form submission §4.10.21.3): it fires `change` with the committed
+        // value but inserts NO newline (multiline insertion is a separate item), and
+        // rebaselines so a second `Enter` with no further edits does NOT re-fire.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&two_editable_fields_view(), sheets);
+
+        let committed = Rc::new(RefCell::new(Vec::<String>::new()));
+        {
+            let c = committed.clone();
+            runtime.on_change(CMD_FIELD_A, move |t| c.borrow_mut().push(t.to_owned()));
+        }
+
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0)); // focus a
+        runtime.handle_key(char_press('h'));
+        runtime.handle_key(char_press('i'));
+
+        // Enter: commit "hi", but insert nothing (the session text stays "hi").
+        runtime.handle_key(named_press(NamedKey::Enter));
+        assert_eq!(runtime.editing_text(), Some("hi"), "single-line Enter inserts NO newline");
+        assert_eq!(&*committed.borrow(), &["hi".to_owned()], "Enter committed `change` once");
+
+        // A second Enter with no edits does not re-fire (baseline was advanced).
+        runtime.handle_key(named_press(NamedKey::Enter));
+        assert_eq!(committed.borrow().len(), 1, "Enter with no new edit does not re-fire change");
+
+        // A subsequent blur (still unchanged since the Enter commit) also stays quiet.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0));
+        assert_eq!(committed.borrow().len(), 1, "blur after an Enter-commit does not re-fire");
+    }
+
+    #[test]
+    fn on_change_and_on_text_input_are_distinct_registries() {
+        // Guard the separation directly: registering only `on_text_input` for a
+        // field's command leaves `has_change_handler` false (and vice-versa), so an
+        // app can bind per-keystroke `input` and commit `change` independently even
+        // though the widget binds both events to one symbol.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.on_text_input(CMD_FIELD_A, |_| {});
+        assert!(runtime.has_text_input_handler(CMD_FIELD_A));
+        assert!(!runtime.has_change_handler(CMD_FIELD_A), "input registry is not the change registry");
+        runtime.on_change(CMD_FIELD_A, |_| {});
+        assert!(runtime.has_change_handler(CMD_FIELD_A));
     }
 
     // ---- Multi-line editing: textarea, Enter → newline, line-aware caret -------

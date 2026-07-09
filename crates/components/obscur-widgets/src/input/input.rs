@@ -172,10 +172,15 @@ impl Input {
 
     /// Derives the semantic view: a [`COMPONENT_ID`] element carrying the role,
     /// disabled state, current value, and placeholder as properties, plus two
-    /// event bindings to `command`: a per-keystroke [`EVENT_INPUT`] (each typed
-    /// character / `Backspace` drives the runtime's editing session, which
-    /// delivers the resulting field text to the app) and a
-    /// commit-on-blur/Enter [`EVENT_CHANGE`].
+    /// event bindings to `command` — the HTML `input`/`change` event model
+    /// (WHATWG HTML §4.10.5.5 *Common input element APIs*): a per-keystroke
+    /// [`EVENT_INPUT`] (each typed character / `Backspace` drives the runtime's
+    /// editing session, which delivers the resulting field text to the app) and a
+    /// commit-only [`EVENT_CHANGE`]. The widget only *declares* both bindings; the
+    /// runtime does the routing — for this editable it fires `change` on **commit**
+    /// (blur, or `Enter` for a single-line field) carrying the committed value, and
+    /// deliberately *not* on a focus click (unlike a checkbox/radio/select, whose
+    /// toggling click **is** the change).
     ///
     /// The current text is carried *both* as the [`PROP_VALUE`] property (the
     /// semantic / accessibility surface) *and*, when non-empty, as a single

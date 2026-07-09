@@ -45,6 +45,15 @@ pub(crate) struct TextEditSession {
     /// and the click inverse. `0.0` for a value that fits its box and for any
     /// wrapping (multi-line) field, which never scrolls horizontally.
     scroll_left: f32,
+    /// The last **committed** value — the baseline the HTML `change` event
+    /// compares against (WHATWG HTML §4.10.5.5 *Common input element APIs*: the
+    /// `change` event fires "when the user commits the value" and only when it
+    /// *differs* from the value the control had when it gained focus). Seeded to
+    /// the field's text at focus, advanced by an explicit commit (single-line
+    /// `Enter`) so a later blur without further edits does not re-fire, and
+    /// consulted by the runtime's blur/Enter commit path. Distinct from the live
+    /// [`buffer`](Self::buffer) text, which every keystroke mutates.
+    committed: String,
 }
 
 impl TextEditSession {
@@ -53,7 +62,11 @@ impl TextEditSession {
     /// user just tabbed/clicked into). The undo/redo history starts empty and no
     /// composition is active.
     pub(crate) fn seeded(node: NodeId, initial_text: impl Into<String>) -> Self {
-        let mut buffer = TextBuffer::from_text(initial_text);
+        // The seed text is the `change` baseline (the value at focus) *and* the
+        // buffer's initial content — clone it once for both.
+        let initial = initial_text.into();
+        let committed = initial.clone();
+        let mut buffer = TextBuffer::from_text(initial);
         // `from_text` seats the caret at 0; move it to the end of the seed text.
         let end = buffer.len();
         buffer.set_selection(TextSelection::caret(end));
@@ -62,6 +75,7 @@ impl TextEditSession {
             buffer,
             composition: None,
             scroll_left: 0.0,
+            committed,
         }
     }
 
@@ -69,6 +83,10 @@ impl TextEditSession {
     /// the undo/redo history, and drops any active composition — an explicit
     /// re-seed from the app.
     pub(crate) fn reseed(&mut self, text: impl Into<String>) {
+        // An explicit re-seed is a fresh value: it also resets the `change`
+        // baseline, so a commit after re-seeding compares against the new value.
+        let text = text.into();
+        self.committed.clone_from(&text);
         self.buffer = TextBuffer::from_text(text);
         let end = self.buffer.len();
         self.buffer.set_selection(TextSelection::caret(end));
@@ -106,6 +124,21 @@ impl TextEditSession {
     /// Returns the session's current text.
     pub(crate) fn text(&self) -> &str {
         self.buffer.text()
+    }
+
+    /// Returns whether the field's live text differs from the last committed
+    /// value — i.e. whether a commit (blur / single-line `Enter`) should fire a
+    /// `change` event (WHATWG HTML §4.10.5.5: `change` fires only when the value
+    /// actually changed since it was last committed / since focus).
+    pub(crate) fn is_dirty(&self) -> bool {
+        self.buffer.text() != self.committed
+    }
+
+    /// Marks the live text as the committed baseline, so a subsequent commit
+    /// without further edits does not re-fire `change`. Called after a
+    /// single-line `Enter` commit that keeps the field focused.
+    pub(crate) fn mark_committed(&mut self) {
+        self.committed = self.buffer.text().to_owned();
     }
 
     /// Returns the session's current selection (a collapsed selection is a plain
