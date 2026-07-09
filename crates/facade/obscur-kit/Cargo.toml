@@ -522,3 +522,14 @@ required-features = ["render-cpu", "text-harfrust", "text-unicode"]
 [[example]]
 name = "textarea_proof"
 required-features = ["render-cpu", "text-harfrust", "text-unicode"]
+
+# Proof: a multi-line <textarea> scrolls VERTICALLY to keep the caret's line in
+# view (CSS Overflow 3 §3.1 scroll-into-view + §scroll-container). Types more
+# lines than fit through the real editing keymap, rasterizes the scrolled state to
+# target/textarea_vscroll_proof.png, and asserts scroll_top > 0, the caret's line
+# is inside the box (offset by the container's −scroll_top transform), the top
+# lines clip out, and a scrollbar thumb paints. Needs the CPU renderer + text
+# stack; builds display-free.
+[[example]]
+name = "textarea_vscroll_proof"
+required-features = ["render-cpu", "text-harfrust", "text-unicode"]

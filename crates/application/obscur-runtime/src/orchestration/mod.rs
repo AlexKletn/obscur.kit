@@ -24,7 +24,7 @@ pub use render_coordinator::RenderCoordinator;
 mod scene_coordinator;
 pub use scene_coordinator::{ScrollPaint, SceneCoordinator};
 mod scroll;
-pub(crate) use scroll::{scroll_containers, ScrollContainer};
+pub(crate) use scroll::{overflow_scrolls, scroll_containers, ScrollContainer};
 mod stacking;
 mod style_coordinator;
 pub use style_coordinator::{ComputedStyles, StyleCoordinator};

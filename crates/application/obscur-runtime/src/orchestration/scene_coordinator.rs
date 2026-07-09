@@ -967,6 +967,40 @@ impl SceneCoordinator {
         Some(self.byte_at_line_x(&layout, target, content, style, target_x))
     }
 
+    /// The vertical extent a **multi-line** field needs to scroll the caret into
+    /// view: `(line_top, line_height, content_height)` for byte `index`, all
+    /// measured DOWN from the text box origin over the SAME wrapped
+    /// [`ParagraphLayout`] the caret paints from (spec §5.10). `line_top` /
+    /// `line_height` are the caret's line box (add `origin.y` for the absolute
+    /// paint y); `content_height` is the wrapped text's total height (its last
+    /// line's bottom). The runtime feeds these to the VERTICAL caret
+    /// scroll-into-view (CSS Overflow 3 §3.1) that keeps a `<textarea>`'s caret
+    /// line within its visible content box — the vertical analogue of
+    /// [`caret_advance_x`](Self::caret_advance_x). A single-line / empty layout
+    /// resolves to line 0 (`top` 0, the metric line height) with a
+    /// single-line-tall content height.
+    #[must_use]
+    pub(crate) fn caret_line_scroll_geometry(
+        &self,
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+        node: NodeId,
+        content: &str,
+        box_width: f32,
+        index: usize,
+    ) -> (f32, f32, f32) {
+        let font_size = font_size_of(computed, node);
+        let layout = self.shape_text_lines(tree, computed, node, content, box_width);
+        let (top, height, _x_offset, _x) = self.caret_line_geometry(&layout, font_size, index);
+        // The scrollable content height is the bottom-most wrapped line's edge
+        // (never less than the caret's own line, so a single line is exact).
+        let content_height = layout
+            .lines()
+            .last()
+            .map_or(top + height, |line| line.top() + line.height());
+        (top, height, content_height)
+    }
+
     /// Composes a paint-ordered [`DisplayList`] of background fills from the
     /// styled + laid-out tree.
     ///

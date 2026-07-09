@@ -111,6 +111,11 @@ input, textarea {\
    `<textarea>` to ~20 cols × a few rows. The engine has no `ch` unit, so approximate\
    at the 14px UA font (~9px/char): input 180px wide (single line, clipped/scrolled),\
    textarea 240px × 72px (multi-line, wraps). An author width/height overrides this. */\
+/* Overflow: a single-line `<input>` clips (`overflow: hidden`) and scrolls its run\
+   HORIZONTALLY to keep the caret in view (CSS Overflow 3 §3.1). A `<textarea>` is a\
+   VERTICAL scroll container (`overflow: auto`): content taller than its fixed height\
+   scrolls — a wheel/scrollbar move it, and typing scrolls the caret's line into view\
+   (§3.1 scroll-into-view), instead of being clipped away with no way to reach it. */\
 input {\
   white-space: nowrap;\
   overflow: hidden;\
@@ -118,7 +123,7 @@ input {\
 }\
 textarea {\
   white-space: pre-wrap;\
-  overflow: hidden;\
+  overflow: auto;\
   width: 240px;\
   height: 72px;\
 }\

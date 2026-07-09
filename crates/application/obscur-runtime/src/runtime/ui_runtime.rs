@@ -50,7 +50,7 @@ use super::{
 };
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::orchestration::{
-    root_font_size, scroll_containers, AnimatedKind, AnimationBinding, ComputedStyles,
+    overflow_scrolls, root_font_size, scroll_containers, AnimatedKind, AnimationBinding, ComputedStyles,
     CssMotionRules, EditingView, LayoutBoxes, LayoutCoordinator, MotionCoordinator, PreeditView,
     PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint, StyleCoordinator, StyleInputs,
     StyleMatchingCoordinator, TreeElement,
@@ -2909,6 +2909,11 @@ impl UiRuntime {
         // its content box (CSS Overflow 3 §3.1 scroll-into-view). A no-op for a
         // fitting or wrapping field.
         self.update_caret_scroll();
+        // The vertical analogue for a MULTILINE field (`<textarea>`): re-derive the
+        // overflow scroll container's `scroll_top` so the caret's LINE stays inside
+        // the field's content box (CSS Overflow 3 §3.1 scroll-into-view). A no-op
+        // for a single-line field or a textarea whose content fits.
+        self.update_multiline_caret_scroll();
         // A dispatched `on-input` already requested a full frame (a reconcile is
         // needed for the mirror / reseed); only schedule our own when it did not.
         if !dispatched {
@@ -3041,6 +3046,96 @@ impl UiRuntime {
         if let Some(session) = self.editing.as_mut() {
             session.set_scroll_left(scroll_left);
         }
+    }
+
+    /// Recomputes the focused **multiline** field's (`<textarea>`) vertical scroll
+    /// offset so its caret's LINE stays within the field's visible content height
+    /// `H` — the VERTICAL analogue of [`update_caret_scroll`](Self::update_caret_scroll)'s
+    /// horizontal single-line scroll (CSS Overflow 3 §3.1 scroll-into-view). Called
+    /// from [`after_edit`](Self::after_edit), so every path that moves the caret
+    /// (typing, `Enter`, delete, arrows incl. ArrowUp/Down, Home/End, click,
+    /// drag-select, select-all, undo/redo, IME commit) keeps the caret's line
+    /// visible.
+    ///
+    /// This drives the **same** per-node `scroll_top` the overflow scroll container
+    /// uses (the wheel + scrollbar move the same value), so the widget's `scroll_top`
+    /// map is the single source of truth: typing scrolls the container, and the
+    /// caret-follow, wheel, and scrollbar all move `scroll_top` (CSS Overflow 3
+    /// §scroll-container). Paint + hit-test already offset by it (the container's
+    /// `translate(0, −scroll_top)` brackets the field's subtree, so the editing run/
+    /// caret/selection move with it, and the pointer maps back through it), so this
+    /// method only has to place `scroll_top`.
+    ///
+    /// Only a multiline field whose computed `overflow` scrolls (`auto`/`scroll`)
+    /// **and** whose height is a definite `px` length participates — that is exactly
+    /// a fixed-height `<textarea>` whose content overflows rather than growing the
+    /// box. A single-line field, a `hidden`-overflow field, or an auto-height field
+    /// that grows to fit is left at `scroll_top == 0` (byte-identical, unscrolled).
+    ///
+    /// The clamp keeps the caret's line box within `[scroll_top, scroll_top + H]`,
+    /// `H` the field's content-box height: when the line top rises above the top
+    /// edge (`caret_top − scroll_top < 0`) `scroll_top` snaps to `caret_top`; when
+    /// the line bottom drops past the bottom edge (`caret_bottom − scroll_top > H`)
+    /// it snaps to `caret_bottom − H`. `scroll_top` is then clamped to
+    /// `0 ..= max(0, content_height − H)` so the field never scrolls past its
+    /// content (a field whose content fits resolves to `0`). Line geometry +
+    /// content height are measured from the live session text with the SAME wrapped
+    /// layout the caret paints from ([`SceneCoordinator::caret_line_scroll_geometry`]),
+    /// so paint and the scroll agree; the field/text boxes supply the definite
+    /// scrollport dimensions.
+    fn update_multiline_caret_scroll(&mut self) {
+        let Some(session) = self.editing.as_ref() else {
+            return;
+        };
+        let field = session.node();
+        // Only a multiline field with a scrolling, definite-height box scrolls
+        // vertically with the caret — the fixed-height `<textarea>` case.
+        if !self.is_multiline(field)
+            || !overflow_scrolls(&self.computed, field)
+            || !has_definite_px_height(self.computed.get(&field))
+        {
+            return;
+        }
+        let Some(text_node) = self.first_text_descendant(field) else {
+            return;
+        };
+        let (Some(text_box), Some(field_box)) =
+            (self.boxes.get(&text_node), self.boxes.get(&field))
+        else {
+            return;
+        };
+        // The field's visible content height `H` (border box minus vertical padding
+        // + border) — the scrollport the caret's line must stay within. A definite
+        // height keeps `field_box` stable across typing, so `H` is exact even before
+        // the grown frame lays out.
+        let h = field_content_height(self.computed.get(&field), field_box.size().height);
+        // The caret's line box top/bottom and the wrapped content height, measured
+        // from the text box origin over the live session text — the frame the
+        // container's `translate(0, −scroll_top)` shifts the painted line by.
+        let focus = session.selection().focus();
+        let (line_top, line_height, content_height) =
+            self.scene_composer.caret_line_scroll_geometry(
+                &self.tree,
+                &self.computed,
+                text_node,
+                session.text(),
+                text_box.size().width,
+                focus,
+            );
+        let caret_top = line_top;
+        let caret_bottom = line_top + line_height;
+        let mut scroll_top = self.scroll_top.get(&field).copied().unwrap_or(0.0);
+        // Scroll-into-view: keep the caret's line within `[scroll_top, scroll_top + H]`.
+        if caret_top - scroll_top < 0.0 {
+            scroll_top = caret_top;
+        }
+        if caret_bottom - scroll_top > h {
+            scroll_top = caret_bottom - h;
+        }
+        // Never scroll past the content (and never negative); a fitting textarea
+        // (`content_height ≤ H`) resolves to `0` — byte-identical, unscrolled.
+        scroll_top = scroll_top.clamp(0.0, (content_height - h).max(0.0));
+        self.scroll_top.insert(field, scroll_top);
     }
 
     /// Builds the hover chain for `target`: the target followed by its element
@@ -3688,6 +3783,19 @@ fn field_content_width(style: Option<&ComputedStyle>, border_box_width: f32) -> 
     (border_box_width - pad_left - pad_right - border_left - border_right).max(0.0)
 }
 
+/// The field's visible content **height** (its vertical scrollport) — the border
+/// box height minus the top/bottom padding + border edges. The VERTICAL analogue
+/// of [`field_content_width`]: the height a multiline `<textarea>`'s caret line
+/// must stay within as it scrolls vertically (CSS Overflow 3 §3.1). Never
+/// negative.
+fn field_content_height(style: Option<&ComputedStyle>, border_box_height: f32) -> f32 {
+    let pad_top = px_length_of(style, PropertyId::PaddingTop);
+    let pad_bottom = px_length_of(style, PropertyId::PaddingBottom);
+    let border_top = px_length_of(style, PropertyId::BorderTopWidth);
+    let border_bottom = px_length_of(style, PropertyId::BorderBottomWidth);
+    (border_box_height - pad_top - pad_bottom - border_top - border_bottom).max(0.0)
+}
+
 /// Whether a paragraph alignment offset is **independent of the available (box)
 /// width** — i.e. the line hugs the leading-left edge, so the offset is `0`
 /// regardless of the box width.
@@ -3718,6 +3826,22 @@ fn alignment_ignores_width(alignment: TextAlignment, direction: TextDirection) -
 fn has_definite_px_width(style: Option<&ComputedStyle>) -> bool {
     style
         .and_then(|s| s.get(PropertyId::Width))
+        .and_then(ComputedValue::as_length)
+        .and_then(Length::as_px)
+        .is_some()
+}
+
+/// Whether `style` carries a **definite** absolute-`px` `height` — a concrete
+/// length, not `auto`/content-based sizing (the vertical analogue of
+/// [`has_definite_px_width`]).
+///
+/// A definite-height field has a fixed box its content overflows (rather than
+/// growing to fit), so it is the field that scrolls VERTICALLY with the caret. An
+/// auto/percentage height returns `false`, so an auto-growing multiline field is
+/// never treated as a vertical scroll container.
+fn has_definite_px_height(style: Option<&ComputedStyle>) -> bool {
+    style
+        .and_then(|s| s.get(PropertyId::Height))
         .and_then(ComputedValue::as_length)
         .and_then(Length::as_px)
         .is_some()
@@ -7801,6 +7925,149 @@ mod tests {
             Some("ab"),
             "single-line Enter inserts no newline (activation, not an edit)",
         );
+    }
+
+    // ---- Multi-line VERTICAL caret scroll (textarea, CSS Overflow 3 §3.1) ------
+
+    /// Sheet for a **scrolling** `<textarea>`: like [`textarea_sheet`] but with a
+    /// fixed 60-px `height` and `overflow: auto`, so it is a VERTICAL scroll
+    /// container — content taller than 60 px (3 lines at the 20-px line-height)
+    /// overflows and scrolls, and the caret follows. No padding/border, so the
+    /// content box height is the full 60 px.
+    fn scrolling_textarea_sheet() -> Stylesheet {
+        use obscur_style::property::layout_keyword;
+        let mut field = vec![
+            BlockDeclaration::normal(PropertyId::Width, PropertyValue::Length(Length::px(300.0))),
+            BlockDeclaration::normal(PropertyId::Height, PropertyValue::Length(Length::px(60.0))),
+            BlockDeclaration::normal(PropertyId::LineHeight, PropertyValue::Length(Length::px(20.0))),
+            BlockDeclaration::normal(
+                PropertyId::WhiteSpace,
+                PropertyValue::Keyword(layout_keyword::WHITE_SPACE_PRE_WRAP),
+            ),
+        ];
+        field.push(overflow_auto());
+        Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![class_rule("panel", size(400.0, 200.0)), class_rule("area", field)],
+        )
+    }
+
+    /// Focuses the empty scrolling `<textarea>` and returns the runtime with an
+    /// (empty) session, ready for typing.
+    fn focused_scrolling_textarea() -> UiRuntime {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.on_text_input(CMD_INPUT, move |_| {});
+        let sheet = scrolling_textarea_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&textarea_view(""), sheets);
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 20.0, 10.0));
+        assert!(runtime.focused().is_some(), "the press focused the textarea");
+        runtime
+    }
+
+    /// Re-renders the scrolling-textarea seed view (retained text `""`; the SESSION
+    /// holds the typed value) so the field's grown box + scroll offset lay out.
+    fn render_scrolling_textarea_frame(runtime: &mut UiRuntime) -> DisplayList {
+        let sheet = scrolling_textarea_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let result = runtime.render_now(&textarea_view(""), sheets);
+        result.snapshot().display_list().clone()
+    }
+
+    #[test]
+    fn typing_past_the_box_scrolls_the_textarea_caret_line_into_view() {
+        // (a) Typing enough lines to exceed the 60-px (3-line) box scrolls the
+        // overflow container's `scroll_top` past 0 and keeps the caret's LINE inside
+        // the visible box (CSS Overflow 3 §3.1 scroll-into-view) — the vertical
+        // analogue of the single-line horizontal caret scroll.
+        let mut runtime = focused_scrolling_textarea();
+        // Six lines (120 px of content) in a 3-line (60 px) box; the caret ends on
+        // line 6.
+        type_multiline(&mut runtime, "l1\nl2\nl3\nl4\nl5\nl6");
+        let (field, _text) = textarea_nodes(&runtime);
+        // Lay out the grown box + scroll offset.
+        let list = render_scrolling_textarea_frame(&mut runtime);
+
+        // The overflow container scrolled: the caret at the bottom pushed `scroll_top`
+        // to its max (120 content − 60 box = 60).
+        let scroll_top = runtime.scroll_top(field);
+        assert!(scroll_top > 0.0, "typing past the box scrolls it (scroll_top {scroll_top})");
+        assert!((scroll_top - 60.0).abs() < 1e-3, "scrolled to the max (60): {scroll_top}");
+
+        // The painted caret line, offset by the container's `translate(0, −scroll_top)`,
+        // sits within the visible box's y-band — the last line is visible, not clipped.
+        let field_box = runtime.layout_boxes().get(&field).unwrap().bounds;
+        let caret = painted_caret_rect(&list).expect("a caret is painted");
+        let caret_top = caret.origin.y - scroll_top;
+        let caret_bottom = caret.bottom() - scroll_top;
+        assert!(
+            caret_top >= field_box.origin.y - 1e-3 && caret_bottom <= field_box.bottom() + 1e-3,
+            "caret line y [{caret_top}, {caret_bottom}] within the box [{}, {}]",
+            field_box.origin.y,
+            field_box.bottom(),
+        );
+        // The unscrolled caret sits below the box (the last line, before the scroll
+        // transform), proving the top lines are scrolled out + clipped.
+        assert!(
+            caret.origin.y > field_box.bottom(),
+            "the caret's unscrolled line is below the box (top lines scrolled out): {} vs {}",
+            caret.origin.y,
+            field_box.bottom(),
+        );
+
+        // A scroll transform brackets the content: `translate(0, −scroll_top)`.
+        let has_scroll_transform = list.commands().iter().any(|c| {
+            matches!(c, PaintCommand::PushTransform(t) if (t.coeffs[5] + scroll_top).abs() < 0.01)
+        });
+        assert!(has_scroll_transform, "the content is bracketed in a scroll transform");
+    }
+
+    #[test]
+    fn a_textarea_whose_content_fits_stays_unscrolled() {
+        // (b) A scrolling textarea whose content fits its 3-line box keeps
+        // `scroll_top == 0` — byte-identical to the unscrolled paint (the caret
+        // follow is a no-op when nothing overflows).
+        let mut runtime = focused_scrolling_textarea();
+        type_multiline(&mut runtime, "l1\nl2"); // 40 px of content in a 60-px box
+        let (field, _text) = textarea_nodes(&runtime);
+        let _ = render_scrolling_textarea_frame(&mut runtime);
+        assert_eq!(runtime.scroll_top(field), 0.0, "a fitting textarea does not scroll");
+    }
+
+    #[test]
+    fn the_wheel_still_scrolls_the_textarea_sharing_the_caret_scroll_top() {
+        // (c) The wheel/overflow path is intact and shares the SAME `scroll_top` the
+        // caret follow drives: after typing scrolls it to the max, a wheel-up gesture
+        // moves that same value back (CSS Overflow 3 §scroll-container).
+        let mut runtime = focused_scrolling_textarea();
+        type_multiline(&mut runtime, "l1\nl2\nl3\nl4\nl5\nl6");
+        let (field, _text) = textarea_nodes(&runtime);
+        let _ = render_scrolling_textarea_frame(&mut runtime);
+        let before = runtime.scroll_top(field);
+        assert!((before - 60.0).abs() < 1e-3, "caret follow put scroll_top at the max: {before}");
+
+        // Wheel up by 25 px over the field: the SAME container scrolls back.
+        let target = runtime.handle_scroll(-25.0, Point::new(20.0, 10.0));
+        assert_eq!(target, Some(field), "the wheel targets the textarea container");
+        let after = runtime.scroll_top(field);
+        assert!(
+            after < before && (after - 35.0).abs() < 1e-3,
+            "the wheel moved the shared scroll_top back (before {before}, after {after})",
+        );
+    }
+
+    #[test]
+    fn a_single_line_input_has_no_vertical_scroll() {
+        // (d) A single-line `input` (nowrap, `overflow: hidden`, not a textarea) never
+        // scrolls vertically: typing past its box leaves `scroll_top == 0` (only the
+        // horizontal scroll_left moves). Byte-identical to the pre-change behaviour.
+        let mut runtime = focused_scroll_field();
+        for c in "abcdefghijklmnopqrstuvwxyz".chars() {
+            runtime.handle_key(char_press(c));
+        }
+        let field = scroll_field_node(&runtime);
+        assert!(scroll_left_of(&runtime) > 0.0, "the single-line field scrolls horizontally");
+        assert_eq!(runtime.scroll_top(field), 0.0, "a single-line input has no vertical scroll");
     }
 
     // ---- IME composition: preedit (shown, not committed) + commit (§5.12) -----
