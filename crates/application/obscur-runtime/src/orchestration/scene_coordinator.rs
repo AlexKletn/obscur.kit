@@ -41,8 +41,8 @@ use obscur_tree::tree::RetainedTree;
 use super::stacking::{effective_paint_layer, effective_stacking_z, PaintLayer, PaintUnit};
 use super::{
     alignment_for, attributes_for, direction_for, display_text, families_for, letter_spacing_for,
-    line_height_for, overflow_for, tab_size_for, text_transform_for, white_space_for,
-    word_spacing_for, ComputedStyles, EditingView, LayoutBoxes, TabSize,
+    line_height_for, overflow_for, root_font_size, tab_size_for, text_transform_for,
+    white_space_for, word_spacing_for, ComputedStyles, EditingView, LayoutBoxes, TabSize,
 };
 
 /// The width, in logical pixels, of the caret rectangle painted at the collapsed
@@ -744,6 +744,10 @@ impl SceneCoordinator {
     ) -> ParagraphLayout {
         let style = computed.get(&node);
         let font_size = font_size_of(computed, node);
+        // Root `font-size` resolves any `rem` in the text metrics (CSS Values 4
+        // §5.1.1); `em` / `%` resolve against this node's `font_size`. Resolved
+        // identically to the layout phase so caret/hit-test lines match the box.
+        let root_font = root_font_size(computed, tree.root());
         self.shape_lines(
             content,
             &families_for(style),
@@ -754,10 +758,10 @@ impl SceneCoordinator {
             white_space_for(style),
             font_size,
             box_width,
-            line_height_for(style, font_size),
-            letter_spacing_for(style),
-            word_spacing_for(style),
-            tab_size_for(style),
+            line_height_for(style, font_size, root_font),
+            letter_spacing_for(style, font_size, root_font),
+            word_spacing_for(style, font_size, root_font),
+            tab_size_for(style, font_size, root_font),
         )
     }
 
@@ -1425,6 +1429,10 @@ impl SceneCoordinator {
                     // Same per-node font size the layout phase measured with, so
                     // the drawn advances and baseline match the sized box.
                     let font_size = font_size_of(computed, node);
+                    // Root `font-size` resolves any `rem` in the text metrics (CSS
+                    // Values 4 §5.1.1); `em` / `%` resolve against this node's
+                    // `font_size`. Same bases the layout phase measured with.
+                    let root_font = root_font_size(computed, tree.root());
                     // The node's authored `font-family` drives the fallback chain,
                     // and its `font-weight`/`font-style`/`direction` drive the
                     // shaping attributes and base direction — the SAME inputs the
@@ -1465,10 +1473,10 @@ impl SceneCoordinator {
                         white_space,
                         font_size,
                         layout_box.size().width,
-                        line_height_for(computed.get(&node), font_size),
-                        letter_spacing_for(computed.get(&node)),
-                        word_spacing_for(computed.get(&node)),
-                        tab_size_for(computed.get(&node)),
+                        line_height_for(computed.get(&node), font_size, root_font),
+                        letter_spacing_for(computed.get(&node), font_size, root_font),
+                        word_spacing_for(computed.get(&node), font_size, root_font),
+                        tab_size_for(computed.get(&node), font_size, root_font),
                     );
                     // Selection highlight, painted BEHIND the glyphs (emitted before
                     // the runs so the text shows over it): the documented

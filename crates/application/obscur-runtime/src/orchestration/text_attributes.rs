@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 
 use obscur_style::computed::ComputedStyle;
-use obscur_style::property::{layout_keyword, PropertyId, PropertyValue};
+use obscur_style::property::{layout_keyword, Length, PropertyId, PropertyValue};
 use obscur_text::font::FontAttributes;
 use obscur_text::layout::{TextAlignment, TextOverflow, WhiteSpace};
 use obscur_text::shaping::TextDirection;
@@ -150,25 +150,60 @@ pub(crate) fn overflow_for(computed: Option<&ComputedStyle>) -> TextOverflow {
 }
 
 /// Resolves a text node's authored `line-height` into a logical-pixel line box
-/// height from its computed `line-height` and `font_size` (§4.14, §5.10).
+/// height from its computed `line-height`, the node's own `font_size`, and the
+/// document `root_font_size` (§4.14, §5.10).
 ///
 /// Reads [`PropertyId::LineHeight`], returning:
 /// * `Some(multiple * font_size)` for a unitless [`PropertyValue::Number`]
 ///   (a multiple of the font size, the common `line-height: 1.5` form);
-/// * `Some(px)` for a [`PropertyValue::Length`] in absolute pixels
-///   (`line-height: 24px`);
-/// * [`None`] for the initial `normal` keyword, an absent property, a relative
-///   length unit, or any other value — the caller then falls back to the font's
-///   natural (metric) line height, keeping the default path byte-for-byte
-///   identical to pre-`line-height` behaviour.
+/// * `Some(px)` for a [`PropertyValue::Length`], with relative units resolved
+///   against the node's font context (CSS Values 4 §5.1.1): `px` verbatim
+///   (`line-height: 24px`), `em` × `font_size`, `rem` × `root_font_size`, and a
+///   percentage `pct% × font_size` (CSS 2.1 §10.8.1 / CSS Text 3 §8: a `%`
+///   line-height resolves against the element's own font size);
+/// * [`None`] for the initial `normal` keyword, an absent property, or any unit
+///   this metric does not resolve here (viewport units) — the caller then falls
+///   back to the font's natural (metric) line height, keeping the `normal`
+///   default byte-for-byte identical to pre-`line-height` behaviour.
+///
+/// The absolute-`px` path is unchanged (byte-identical to the previous
+/// `Length::as_px` reading); only the previously-dropped `em` / `rem` / `%`
+/// units now resolve instead of silently falling back.
 ///
 /// The same value drives both the layout measure/arrange pass and the scene
 /// compose pass, so the sized box height and the painted line spacing agree.
 #[must_use]
-pub(crate) fn line_height_for(computed: Option<&ComputedStyle>, font_size: f32) -> Option<f32> {
+pub(crate) fn line_height_for(
+    computed: Option<&ComputedStyle>,
+    font_size: f32,
+    root_font_size: f32,
+) -> Option<f32> {
     match computed?.get(PropertyId::LineHeight)?.value() {
         PropertyValue::Number(multiple) => Some(multiple * font_size),
-        PropertyValue::Length(length) => length.as_px().map(|px| px.0),
+        // CSS 2.1 §10.8.1: a percentage line-height is that percent of the
+        // element's own computed `font-size`.
+        PropertyValue::Length(Length::Percent(pct)) => Some(pct / 100.0 * font_size),
+        PropertyValue::Length(length) => length_to_px(*length, font_size, root_font_size),
+        _ => None,
+    }
+}
+
+/// Resolves a computed text-metric [`Length`] to logical pixels against the
+/// node's font context, per CSS Values 4 §5.1.1: `px` verbatim (byte-identical to
+/// the previous `Length::as_px` path), `em` × the node's own computed
+/// `font-size`, `rem` × the document root's computed `font-size`.
+///
+/// A percentage and the viewport units are **not** resolved here: `%` is
+/// property-specific (font-size-relative for `line-height` — handled by its
+/// caller — and invalid for `letter-spacing` / `word-spacing` / `tab-size`), and
+/// viewport units are a documented refinement, so both return [`None`] and each
+/// caller applies its own fallback (drop-to-`0`, the metric line height, or the
+/// initial tab size).
+fn length_to_px(length: Length, font_size: f32, root_font_size: f32) -> Option<f32> {
+    match length {
+        Length::Px(px) => Some(px.0),
+        Length::Em(factor) => Some(factor * font_size),
+        Length::Rem(factor) => Some(factor * root_font_size),
         _ => None,
     }
 }
@@ -176,40 +211,62 @@ pub(crate) fn line_height_for(computed: Option<&ComputedStyle>, font_size: f32) 
 /// Resolves a text node's `letter-spacing` into extra per-cluster tracking, in
 /// logical pixels, from its computed `letter-spacing` (CSS Text 3 §8.1).
 ///
-/// Reads [`PropertyId::LetterSpacing`]: an absolute [`PropertyValue::Length`]
-/// resolves to its pixel value (which may be negative); the initial `normal`
-/// keyword, an absent property, a non-pixel length unit (`em` etc., not resolved
-/// here — a documented refinement), or any other value resolves to `0.0`, so an
-/// unauthored text node adds no tracking and shapes byte-for-byte as before.
+/// Reads [`PropertyId::LetterSpacing`]: a [`PropertyValue::Length`] resolves to
+/// its pixel value (which may be negative) — `px` verbatim, `em` × the node's
+/// `font_size`, `rem` × `root_font_size` (CSS Values 4 §5.1.1); the initial
+/// `normal` keyword, an absent property, a percentage (letter-spacing does **not**
+/// accept `%` per CSS Text 3 §8.1 — dropped), or any other value resolves to
+/// `0.0`, so an unauthored text node adds no tracking and shapes byte-for-byte as
+/// before.
 ///
 /// The same value feeds **both** the layout measure/arrange pass and the scene
 /// compose pass (through the shared [`apply_spacing`](obscur_text::shaping::apply_spacing)
 /// seam) so the measured box width and the painted advances agree.
 #[must_use]
-pub(crate) fn letter_spacing_for(computed: Option<&ComputedStyle>) -> f32 {
-    length_px_of(computed, PropertyId::LetterSpacing)
+pub(crate) fn letter_spacing_for(
+    computed: Option<&ComputedStyle>,
+    font_size: f32,
+    root_font_size: f32,
+) -> f32 {
+    length_px_of(computed, PropertyId::LetterSpacing, font_size, root_font_size)
 }
 
 /// Resolves a text node's `word-spacing` into extra per-separator spacing, in
 /// logical pixels, from its computed `word-spacing` (CSS Text 3 §8.2).
 ///
 /// Reads [`PropertyId::WordSpacing`] with the same rules as
-/// [`letter_spacing_for`]: an absolute pixel length (possibly negative) resolves
-/// verbatim; `normal` / absent / non-pixel / other → `0.0`. Fed to the shared
-/// spacing seam on both the measure and compose passes so they cannot drift.
+/// [`letter_spacing_for`]: a length (possibly negative) resolves verbatim — `px`
+/// verbatim, `em` × `font_size`, `rem` × `root_font_size` (CSS Values 4 §5.1.1);
+/// `normal` / absent / a percentage (CSS Text 3 §8.2 — dropped) / other → `0.0`.
+/// Fed to the shared spacing seam on both the measure and compose passes so they
+/// cannot drift.
 #[must_use]
-pub(crate) fn word_spacing_for(computed: Option<&ComputedStyle>) -> f32 {
-    length_px_of(computed, PropertyId::WordSpacing)
+pub(crate) fn word_spacing_for(
+    computed: Option<&ComputedStyle>,
+    font_size: f32,
+    root_font_size: f32,
+) -> f32 {
+    length_px_of(computed, PropertyId::WordSpacing, font_size, root_font_size)
 }
 
-/// Reads `property` off `computed` as an absolute-pixel [`PropertyValue::Length`],
-/// or `0.0` for an absent property, a non-length value, or a non-pixel unit.
-fn length_px_of(computed: Option<&ComputedStyle>, property: PropertyId) -> f32 {
+/// Reads `property` off `computed` as a [`PropertyValue::Length`] resolved to
+/// logical pixels against the node's font context (`px` / `em` / `rem`, via
+/// [`length_to_px`]), or `0.0` for an absent property, a non-length value, or a
+/// unit not resolved for spacing (`%` — invalid for letter-/word-spacing — and
+/// the viewport units).
+fn length_px_of(
+    computed: Option<&ComputedStyle>,
+    property: PropertyId,
+    font_size: f32,
+    root_font_size: f32,
+) -> f32 {
     let Some(value) = computed.and_then(|style| style.get(property)) else {
         return 0.0;
     };
     match value.value() {
-        PropertyValue::Length(length) => length.as_px().map_or(0.0, |px| px.0),
+        PropertyValue::Length(length) => {
+            length_to_px(*length, font_size, root_font_size).unwrap_or(0.0)
+        }
         _ => 0.0,
     }
 }
@@ -515,22 +572,28 @@ impl TabSize {
 /// §4.3).
 ///
 /// Reads [`PropertyId::TabSize`]: a unitless [`PropertyValue::Number`] resolves to
-/// [`TabSize::Factor`] (a multiple of the space advance), an absolute pixel
-/// [`PropertyValue::Length`] to [`TabSize::Length`]. An absent property, the
-/// initial, or a non-pixel length resolves to the initial `8` spaces
+/// [`TabSize::Factor`] (a multiple of the space advance), a [`PropertyValue::Length`]
+/// to [`TabSize::Length`] with relative units resolved against the node's font
+/// context — `px` verbatim, `em` × `font_size`, `rem` × `root_font_size` (CSS
+/// Values 4 §5.1.1). An absent property, the initial, a percentage (invalid for
+/// `tab-size` per CSS Text 3 §4.3 — `<number>` or `<length>` only), or a viewport
+/// unit resolves to the initial `8` spaces
 /// ([`TabSize::Factor(8.0)`](TabSize::Factor)). Tabs only take effect under a
 /// preserving `white-space` mode (`pre` / `pre-wrap`); under a collapsing mode a
 /// tab has already become a space, so this value is unused.
 #[must_use]
-pub(crate) fn tab_size_for(computed: Option<&ComputedStyle>) -> TabSize {
+pub(crate) fn tab_size_for(
+    computed: Option<&ComputedStyle>,
+    font_size: f32,
+    root_font_size: f32,
+) -> TabSize {
     let Some(value) = computed.and_then(|style| style.get(PropertyId::TabSize)) else {
         return TabSize::Factor(8.0);
     };
     match value.value() {
         PropertyValue::Number(factor) => TabSize::Factor(factor.max(0.0)),
-        PropertyValue::Length(length) => length
-            .as_px()
-            .map_or(TabSize::Factor(8.0), |px| TabSize::Length(px.0.max(0.0))),
+        PropertyValue::Length(length) => length_to_px(*length, font_size, root_font_size)
+            .map_or(TabSize::Factor(8.0), |px| TabSize::Length(px.max(0.0))),
         _ => TabSize::Factor(8.0),
     }
 }
@@ -641,49 +704,95 @@ mod tests {
     #[test]
     fn line_height_resolves_number_length_and_falls_back_on_normal() {
         // Absent property / empty style → None (caller uses the metric line height).
-        assert_eq!(line_height_for(None, 16.0), None);
-        assert_eq!(line_height_for(Some(&ComputedStyle::new()), 16.0), None);
+        assert_eq!(line_height_for(None, 16.0, 16.0), None);
+        assert_eq!(line_height_for(Some(&ComputedStyle::new()), 16.0, 16.0), None);
         // A unitless number is a multiple of the font size: 1.5 × 16 = 24.
         let multiple = styled(PropertyId::LineHeight, PropertyValue::Number(1.5));
-        assert_eq!(line_height_for(Some(&multiple), 16.0), Some(24.0));
+        assert_eq!(line_height_for(Some(&multiple), 16.0, 16.0), Some(24.0));
         // The same multiple scales with the font size: 1.5 × 20 = 30.
-        assert_eq!(line_height_for(Some(&multiple), 20.0), Some(30.0));
-        // An absolute length is taken verbatim, independent of the font size.
+        assert_eq!(line_height_for(Some(&multiple), 20.0, 16.0), Some(30.0));
+        // An absolute length is taken verbatim, independent of the font size
+        // (byte-identical to the previous `as_px` path).
         let length = styled(
             PropertyId::LineHeight,
             PropertyValue::Length(Length::px(28.0)),
         );
-        assert_eq!(line_height_for(Some(&length), 16.0), Some(28.0));
+        assert_eq!(line_height_for(Some(&length), 16.0, 16.0), Some(28.0));
         // A keyword (`normal`) is unresolved here → None (metric fallback).
         let normal = styled(
             PropertyId::LineHeight,
             PropertyValue::Keyword(layout_keyword::FONT_STYLE_NORMAL),
         );
-        assert_eq!(line_height_for(Some(&normal), 16.0), None);
+        assert_eq!(line_height_for(Some(&normal), 16.0, 16.0), None);
+    }
+
+    #[test]
+    fn line_height_resolves_em_rem_and_percent() {
+        // `%` (CSS 2.1 §10.8.1): 150% × font-size 16 = 24.
+        let pct = styled(
+            PropertyId::LineHeight,
+            PropertyValue::Length(Length::Percent(150.0)),
+        );
+        assert_eq!(line_height_for(Some(&pct), 16.0, 16.0), Some(24.0));
+        // `em` (CSS Values 4 §5.1.1): 2em × font-size 16 = 32.
+        let em = styled(PropertyId::LineHeight, PropertyValue::Length(Length::Em(2.0)));
+        assert_eq!(line_height_for(Some(&em), 16.0, 16.0), Some(32.0));
+        // `rem` resolves against the ROOT font-size (10), NOT the node's (16):
+        // 1.5rem × 10 = 15.
+        let rem = styled(
+            PropertyId::LineHeight,
+            PropertyValue::Length(Length::Rem(1.5)),
+        );
+        assert_eq!(line_height_for(Some(&rem), 16.0, 10.0), Some(15.0));
     }
 
     #[test]
     fn spacing_defaults_zero_and_reads_px_lengths() {
         // Absent property and empty style → 0 (no tracking / no word spacing).
-        assert_eq!(letter_spacing_for(None), 0.0);
-        assert_eq!(word_spacing_for(None), 0.0);
-        assert_eq!(letter_spacing_for(Some(&ComputedStyle::new())), 0.0);
+        assert_eq!(letter_spacing_for(None, 16.0, 16.0), 0.0);
+        assert_eq!(word_spacing_for(None, 16.0, 16.0), 0.0);
+        assert_eq!(letter_spacing_for(Some(&ComputedStyle::new()), 16.0, 16.0), 0.0);
         // `normal` (a keyword) resolves to 0 for both.
         let ls_normal = styled(
             PropertyId::LetterSpacing,
             PropertyValue::Keyword(layout_keyword::FONT_STYLE_NORMAL),
         );
-        assert_eq!(letter_spacing_for(Some(&ls_normal)), 0.0);
-        // An absolute pixel length resolves verbatim, including a negative one.
+        assert_eq!(letter_spacing_for(Some(&ls_normal), 16.0, 16.0), 0.0);
+        // An absolute pixel length resolves verbatim, including a negative one
+        // (byte-identical to the previous `as_px` path).
         let ls = styled(PropertyId::LetterSpacing, PropertyValue::Length(Length::px(6.0)));
-        assert_eq!(letter_spacing_for(Some(&ls)), 6.0);
+        assert_eq!(letter_spacing_for(Some(&ls), 16.0, 16.0), 6.0);
         let ws = styled(PropertyId::WordSpacing, PropertyValue::Length(Length::px(12.0)));
-        assert_eq!(word_spacing_for(Some(&ws)), 12.0);
+        assert_eq!(word_spacing_for(Some(&ws), 16.0, 16.0), 12.0);
         let neg = styled(PropertyId::LetterSpacing, PropertyValue::Length(Length::px(-2.0)));
-        assert_eq!(letter_spacing_for(Some(&neg)), -2.0);
-        // A percentage / non-pixel length is not resolved here → 0.
+        assert_eq!(letter_spacing_for(Some(&neg), 16.0, 16.0), -2.0);
+        // A percentage is INVALID for letter-/word-spacing (CSS Text 3 §8.1/§8.2)
+        // and is not resolved here → 0.
         let pct = styled(PropertyId::LetterSpacing, PropertyValue::Length(Length::Percent(50.0)));
-        assert_eq!(letter_spacing_for(Some(&pct)), 0.0);
+        assert_eq!(letter_spacing_for(Some(&pct), 16.0, 16.0), 0.0);
+    }
+
+    #[test]
+    fn spacing_resolves_em_against_font_size_and_rem_against_root() {
+        // `letter-spacing: 0.25em` at font-size 16 → 0.25 × 16 = 4.
+        let ls_em = styled(
+            PropertyId::LetterSpacing,
+            PropertyValue::Length(Length::Em(0.25)),
+        );
+        assert_eq!(letter_spacing_for(Some(&ls_em), 16.0, 16.0), 4.0);
+        // `word-spacing: 0.25em` at font-size 16 → 4 (resolved, not dropped to 0).
+        let ws_em = styled(
+            PropertyId::WordSpacing,
+            PropertyValue::Length(Length::Em(0.25)),
+        );
+        assert_eq!(word_spacing_for(Some(&ws_em), 16.0, 16.0), 4.0);
+        // `letter-spacing: 1rem` resolves against the ROOT font-size (20), not the
+        // node's (16): 1 × 20 = 20.
+        let ls_rem = styled(
+            PropertyId::LetterSpacing,
+            PropertyValue::Length(Length::Rem(1.0)),
+        );
+        assert_eq!(letter_spacing_for(Some(&ls_rem), 16.0, 20.0), 20.0);
     }
 
     #[test]
@@ -770,16 +879,36 @@ mod tests {
     #[test]
     fn tab_size_defaults_eight_and_reads_number_and_length() {
         // Absent property / empty style → the initial `8` spaces.
-        assert_eq!(tab_size_for(None), TabSize::Factor(8.0));
-        assert_eq!(tab_size_for(Some(&ComputedStyle::new())), TabSize::Factor(8.0));
+        assert_eq!(tab_size_for(None, 16.0, 16.0), TabSize::Factor(8.0));
+        assert_eq!(
+            tab_size_for(Some(&ComputedStyle::new()), 16.0, 16.0),
+            TabSize::Factor(8.0)
+        );
         // A unitless number is a multiple of the space advance.
         let number = styled(PropertyId::TabSize, PropertyValue::Number(4.0));
-        assert_eq!(tab_size_for(Some(&number)), TabSize::Factor(4.0));
+        assert_eq!(tab_size_for(Some(&number), 16.0, 16.0), TabSize::Factor(4.0));
         assert_eq!(TabSize::Factor(4.0).resolve(10.0), 40.0);
-        // An absolute length is a fixed tab-stop width.
+        // An absolute length is a fixed tab-stop width (byte-identical to the
+        // previous `as_px` path).
         let length = styled(PropertyId::TabSize, PropertyValue::Length(Length::px(24.0)));
-        assert_eq!(tab_size_for(Some(&length)), TabSize::Length(24.0));
+        assert_eq!(tab_size_for(Some(&length), 16.0, 16.0), TabSize::Length(24.0));
         assert_eq!(TabSize::Length(24.0).resolve(10.0), 24.0);
+    }
+
+    #[test]
+    fn tab_size_resolves_em_and_rem_lengths() {
+        // `tab-size: 2em` at font-size 16 → a fixed 2 × 16 = 32px tab stop.
+        let em = styled(PropertyId::TabSize, PropertyValue::Length(Length::Em(2.0)));
+        assert_eq!(tab_size_for(Some(&em), 16.0, 16.0), TabSize::Length(32.0));
+        // `tab-size: 1rem` resolves against the ROOT font-size (20): 1 × 20 = 20px.
+        let rem = styled(PropertyId::TabSize, PropertyValue::Length(Length::Rem(1.0)));
+        assert_eq!(tab_size_for(Some(&rem), 16.0, 20.0), TabSize::Length(20.0));
+        // A percentage is invalid for `tab-size` → the initial `8` spaces.
+        let pct = styled(
+            PropertyId::TabSize,
+            PropertyValue::Length(Length::Percent(50.0)),
+        );
+        assert_eq!(tab_size_for(Some(&pct), 16.0, 16.0), TabSize::Factor(8.0));
     }
 
     #[test]

@@ -1245,7 +1245,11 @@ fn measure(
         let direction = direction_for(computed.get(&node));
         let alignment = alignment_for(computed.get(&node));
         let overflow = overflow_for_text(tree, computed, node);
-        let line_height = line_height_for(computed.get(&node), style.font_size);
+        // The document root's `font-size` resolves any `rem` in the text metrics
+        // below (CSS Values 4 §5.1.1); each metric's `em` / `%` resolves against
+        // this node's own `style.font_size`.
+        let root_font = root_font_size(computed, tree.root());
+        let line_height = line_height_for(computed.get(&node), style.font_size, root_font);
         let white_space = white_space_for(computed.get(&node));
         // The string to shape, via the SAME `display_text` seam the scene phase
         // composes with (CSS Text 3 §4.1.1): while this node is the focused
@@ -1276,9 +1280,9 @@ fn measure(
             paragraph,
             hyphenator,
             line_height,
-            letter_spacing_for(computed.get(&node)),
-            word_spacing_for(computed.get(&node)),
-            tab_size_for(computed.get(&node)),
+            letter_spacing_for(computed.get(&node), style.font_size, root_font),
+            word_spacing_for(computed.get(&node), style.font_size, root_font),
+            tab_size_for(computed.get(&node), style.font_size, root_font),
         );
     }
     let Some(algorithm) = algorithm_for(style.display, node, grid_templates, style.gap) else {
@@ -1369,7 +1373,10 @@ fn arrange(
         let direction = direction_for(computed.get(&node));
         let alignment = alignment_for(computed.get(&node));
         let overflow = overflow_for_text(tree, computed, node);
-        let line_height = line_height_for(computed.get(&node), style.font_size);
+        // The document root's `font-size` for any `rem` in the text metrics (CSS
+        // Values 4 §5.1.1); `em` / `%` resolve against this node's own font size.
+        let root_font = root_font_size(computed, tree.root());
+        let line_height = line_height_for(computed.get(&node), style.font_size, root_font);
         let white_space = white_space_for(computed.get(&node));
         // The SAME string the measure pass sizes and the scene phase paints, via the
         // shared `display_text` seam (CSS Text 3 §4.1.1): the focused editable's text
@@ -1397,9 +1404,9 @@ fn arrange(
             paragraph,
             hyphenator,
             line_height,
-            letter_spacing_for(computed.get(&node)),
-            word_spacing_for(computed.get(&node)),
-            tab_size_for(computed.get(&node)),
+            letter_spacing_for(computed.get(&node), style.font_size, root_font),
+            word_spacing_for(computed.get(&node), style.font_size, root_font),
+            tab_size_for(computed.get(&node), style.font_size, root_font),
         );
         boxes.insert(node, LayoutBox::new(Rect::new(origin, size)));
         return;
