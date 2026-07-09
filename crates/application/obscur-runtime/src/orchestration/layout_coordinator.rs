@@ -28,12 +28,13 @@ use obscur_text::shaping::{
 };
 use obscur_tree::tree::RetainedTree;
 
+use super::scene_coordinator::is_editing_text_node;
 use super::scroll::overflow_scrolls;
 use super::{
-    alignment_for, attributes_for, direction_for, families_for, grid_templates_from,
-    letter_spacing_for, line_height_for, overflow_for, process_text, resolve_named_grid_areas,
+    alignment_for, attributes_for, direction_for, display_text, families_for, grid_templates_from,
+    letter_spacing_for, line_height_for, overflow_for, resolve_named_grid_areas,
     resolve_named_grid_lines, tab_size_for, text_transform_for, white_space_for, word_spacing_for,
-    ComputedStyles, GridTemplates, TabSize,
+    ComputedStyles, EditingView, GridTemplates, TabSize,
 };
 
 /// The initial `font-size` (spec / CSS default), used as the `em`/`rem` base
@@ -276,6 +277,55 @@ impl LayoutCoordinator {
         paragraph: &ParagraphShaper,
         hyphenator: Option<&dyn Hyphenator>,
     ) -> LayoutBoxes {
+        // No editing session: every text leaf measures from the retained tree,
+        // byte-identical to before the editing-aware measure path existed.
+        self.layout_editing(
+            tree,
+            styles,
+            computed,
+            grid_templates,
+            viewport,
+            scroll_offset,
+            paragraph,
+            hyphenator,
+            None,
+        )
+    }
+
+    /// Lays out like [`layout_with_hyphenator`](Self::layout_with_hyphenator) but,
+    /// while a text-editing session is active, measures the **focused editable's**
+    /// text from the live session buffer instead of the (possibly lagging) retained
+    /// tree — the SAME string, with the SAME processing, the scene phase composes
+    /// (CSS Text 3 §4.1.1).
+    ///
+    /// The retained tree only catches up on the app's reactive rebuild, so between
+    /// a keystroke and that rebuild the tree value lags the session by a character.
+    /// Sizing the box from the retained value while the scene paints the session
+    /// buffer lets the arranged box (line count / width) disagree with the painted
+    /// glyphs — worst on a `white-space: normal` / `pre-wrap` field that wraps to a
+    /// different number of lines. Threading the same [`EditingView`] into both
+    /// passes makes them shape the identical string (raw buffer + the field's real
+    /// `white-space`, `process_text` skipped so caret byte offsets stay exact), so
+    /// the measured box height equals the painted line count. With `editing` =
+    /// [`None`] — or for any text node that is **not** the focused editable's text —
+    /// this is byte-for-byte
+    /// [`layout_with_hyphenator`](Self::layout_with_hyphenator).
+    // The editing view is the one added optional input over `layout_with_hyphenator`;
+    // the rest are the same cohesive layout inputs.
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub fn layout_editing(
+        &self,
+        tree: &RetainedTree,
+        styles: &LayoutStyles,
+        computed: &ComputedStyles,
+        grid_templates: &GridTemplates,
+        viewport: Size,
+        scroll_offset: (f32, f32),
+        paragraph: &ParagraphShaper,
+        hyphenator: Option<&dyn Hyphenator>,
+        editing: Option<EditingView<'_>>,
+    ) -> LayoutBoxes {
         let mut boxes = LayoutBoxes::new();
         let Some(root) = tree.root() else {
             return boxes;
@@ -297,6 +347,7 @@ impl LayoutCoordinator {
             viewport_rect,
             viewport_rect,
             scroll_offset,
+            editing,
             MAX_DEPTH,
         );
         boxes
@@ -1111,6 +1162,10 @@ struct RecMeasurer<'a> {
     paragraph: &'a ParagraphShaper,
     /// The hyphenator used to break an over-wide word in a text-leaf child.
     hyphenator: Option<&'a dyn Hyphenator>,
+    /// The active text-editing session view, so a text-leaf child that is the
+    /// focused editable's text measures the live session buffer (the SAME string
+    /// the scene phase paints); [`None`] on every non-editing frame.
+    editing: Option<EditingView<'a>>,
     /// Remaining recursion budget for children measured through this measurer.
     depth: u32,
 }
@@ -1127,6 +1182,7 @@ impl ChildMeasurer for RecMeasurer<'_> {
                 constraints,
                 self.paragraph,
                 self.hyphenator,
+                self.editing,
                 self.depth,
             ),
             // Out-of-range index: contribute nothing rather than panic.
@@ -1174,6 +1230,7 @@ fn measure(
     constraints: BoxConstraints,
     paragraph: &ParagraphShaper,
     hyphenator: Option<&dyn Hyphenator>,
+    editing: Option<EditingView<'_>>,
     depth: u32,
 ) -> Size {
     if depth == 0 {
@@ -1190,11 +1247,22 @@ fn measure(
         let overflow = overflow_for_text(tree, computed, node);
         let line_height = line_height_for(computed.get(&node), style.font_size);
         let white_space = white_space_for(computed.get(&node));
-        // `text-transform` (§2.1) then `white-space` collapsing (§4.1.1) rewrite
-        // the string BEFORE shaping, so the processed text flows through
-        // itemization/shaping and the paragraph cache key; letter-/word-spacing and
-        // tab stops are applied post-shaping inside `measure_text_node`.
-        let content = process_text(content, text_transform_for(computed.get(&node)), white_space);
+        // The string to shape, via the SAME `display_text` seam the scene phase
+        // composes with (CSS Text 3 §4.1.1): while this node is the focused
+        // editable's text, the live session buffer is shaped RAW (the field's real
+        // `white-space`, `text-transform`/collapsing skipped for exact caret byte
+        // offsets); otherwise `text-transform` (§2.1) then `white-space` collapsing
+        // (§4.1.1) rewrite the retained string BEFORE shaping. Either way the box is
+        // sized from the identical characters the compose pass paints, so its height
+        // (line count) matches the painted lines. Letter-/word-spacing and tab stops
+        // are applied post-shaping inside `measure_text_node`.
+        let active = editing.filter(|view| is_editing_text_node(tree, node, view.node));
+        let content = display_text(
+            content,
+            active,
+            text_transform_for(computed.get(&node)),
+            white_space,
+        );
         return measure_text_node(
             content.as_ref(),
             &style,
@@ -1229,6 +1297,7 @@ fn measure(
         children: &children,
         paragraph,
         hyphenator,
+        editing,
         depth: depth - 1,
     };
     let out = algorithm.layout(&style, &children, constraints, &mut measurer);
@@ -1283,6 +1352,7 @@ fn arrange(
     containing_block: Rect,
     viewport: Rect,
     scroll_offset: (f32, f32),
+    editing: Option<EditingView<'_>>,
     depth: u32,
 ) {
     if depth == 0 {
@@ -1301,10 +1371,19 @@ fn arrange(
         let overflow = overflow_for_text(tree, computed, node);
         let line_height = line_height_for(computed.get(&node), style.font_size);
         let white_space = white_space_for(computed.get(&node));
-        // Same pre-shape transform (§2.1) + white-space collapsing (§4.1.1) +
-        // post-shape spacing (§8.1/§8.2) + tab stops (§4.3) as the measure pass, so
-        // the arranged box matches the measured one.
-        let content = process_text(content, text_transform_for(computed.get(&node)), white_space);
+        // The SAME string the measure pass sizes and the scene phase paints, via the
+        // shared `display_text` seam (CSS Text 3 §4.1.1): the focused editable's text
+        // shapes its live session buffer RAW (exact caret byte offsets), everything
+        // else runs `text-transform` (§2.1) + `white-space` collapsing (§4.1.1);
+        // post-shape spacing (§8.1/§8.2) + tab stops (§4.3) follow inside
+        // `measure_text_node`, so the arranged box matches the painted lines.
+        let active = editing.filter(|view| is_editing_text_node(tree, node, view.node));
+        let content = display_text(
+            content,
+            active,
+            text_transform_for(computed.get(&node)),
+            white_space,
+        );
         let size = measure_text_node(
             content.as_ref(),
             &style,
@@ -1378,6 +1457,7 @@ fn arrange(
             children: &children,
             paragraph,
             hyphenator,
+            editing,
             depth: depth - 1,
         };
         algorithm.layout(&style, &children, child_constraints, &mut measurer)
@@ -1464,6 +1544,7 @@ fn arrange(
             descendant_cb,
             viewport,
             scroll_offset,
+            editing,
             depth - 1,
         );
     }
@@ -1483,6 +1564,7 @@ fn arrange(
             boxes,
             paragraph,
             hyphenator,
+            editing,
             depth - 1,
         );
     }
@@ -1513,6 +1595,7 @@ fn arrange_out_of_flow(
     boxes: &mut LayoutBoxes,
     paragraph: &ParagraphShaper,
     hyphenator: Option<&dyn Hyphenator>,
+    editing: Option<EditingView<'_>>,
     depth: u32,
 ) {
     if depth == 0 {
@@ -1538,6 +1621,7 @@ fn arrange_out_of_flow(
         BoxConstraints::loose(cb.size),
         paragraph,
         hyphenator,
+        editing,
         depth,
     );
     let rect = style
@@ -1564,6 +1648,7 @@ fn arrange_out_of_flow(
         cb,
         viewport,
         scroll_offset,
+        editing,
         depth,
     );
 }

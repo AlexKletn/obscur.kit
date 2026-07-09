@@ -1,7 +1,6 @@
 //! Composes a paint-ordered display list from the styled + laid-out tree:
 //! [`SceneCoordinator`].
 
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -40,8 +39,8 @@ use obscur_tree::tree::RetainedTree;
 
 use super::stacking::{effective_paint_layer, effective_stacking_z, PaintLayer, PaintUnit};
 use super::{
-    alignment_for, attributes_for, direction_for, families_for, letter_spacing_for,
-    line_height_for, overflow_for, process_text, tab_size_for, text_transform_for, white_space_for,
+    alignment_for, attributes_for, direction_for, display_text, families_for, letter_spacing_for,
+    line_height_for, overflow_for, tab_size_for, text_transform_for, white_space_for,
     word_spacing_for, ComputedStyles, EditingView, LayoutBoxes, TabSize,
 };
 
@@ -1129,48 +1128,28 @@ impl SceneCoordinator {
                     // `None` on every non-editing frame, so this whole override
                     // path is inert and the retained content is drawn unchanged.
                     let active = editing.filter(|view| is_editing_text_node(tree, node, view.node));
-                    // The displayed text. While composing, the IME preedit is
-                    // spliced into the session text at its anchor for DISPLAY only
-                    // (the buffer is untouched, spec §5.12); otherwise it is the
-                    // session text (editing) or the retained content (idle). The
-                    // spliced string is owned here so it outlives the shaping below.
-                    let mut spliced = String::new();
-                    let content: &str = match active {
-                        Some(view) => match view.preedit {
-                            Some(preedit) => {
-                                let at = preedit.at.min(view.text.len());
-                                spliced.push_str(&view.text[..at]);
-                                spliced.push_str(preedit.text);
-                                spliced.push_str(&view.text[at..]);
-                                &spliced
-                            }
-                            None => view.text,
-                        },
-                        None => retained_content,
-                    };
-                    // `text-transform` (§2.1) then `white-space` collapsing
-                    // (§4.1.1) rewrite the string BEFORE shaping so the processed
-                    // text flows through shaping and the paragraph cache key,
-                    // matching the layout pass which processes the retained content
-                    // identically. Both are applied only to IDLE display text:
-                    // while actively editing, the caret/selection use live buffer
-                    // byte offsets, so the shaped string is left untouched (exact
-                    // offsets). The field is wrapped by its OWN `white-space` in both
-                    // states, so a single-line `input` (`nowrap`, per the UA sheet)
-                    // stays one line while typing — it does NOT reflow like a
-                    // `<textarea>` — while a `pre-wrap` field keeps its literal
-                    // newlines and wraps at the box width.
+                    // The displayed text, computed through the SAME `display_text`
+                    // seam the layout (measure/arrange) pass uses, so this frame's
+                    // box and the glyphs painted here shape the identical string
+                    // (CSS Text 3 §4.1.1). While actively editing this node's text,
+                    // the live session buffer (with any IME preedit spliced in for
+                    // DISPLAY, spec §5.12) is shaped RAW — `text-transform` (§2.1)
+                    // and `white-space` collapsing (§4.1.1) are skipped so the
+                    // caret/selection can index the shaped string by live buffer
+                    // byte offsets; otherwise the retained content flows through
+                    // casing then whitespace processing. The field is wrapped by its
+                    // OWN `white-space` in both states, so a single-line `input`
+                    // (`nowrap`, per the UA sheet) stays one line while typing — it
+                    // does NOT reflow like a `<textarea>` — while a `pre-wrap` field
+                    // keeps its literal newlines and wraps at the box width.
                     let white_space = white_space_for(computed.get(&node));
-                    let transformed: Cow<'_, str> = if active.is_some() {
-                        Cow::Borrowed(content)
-                    } else {
-                        process_text(
-                            content,
-                            text_transform_for(computed.get(&node)),
-                            white_space,
-                        )
-                    };
-                    let content: &str = transformed.as_ref();
+                    let displayed = display_text(
+                        retained_content,
+                        active,
+                        text_transform_for(computed.get(&node)),
+                        white_space,
+                    );
+                    let content: &str = displayed.as_ref();
                     // The rendered caret/selection: while composing, the caret sits
                     // at the preedit's caret within the SPLICED display text; with
                     // no preedit it is the session's own selection (buffer offsets
@@ -3140,7 +3119,7 @@ fn scene_color_from(c: StyleColor) -> Color {
 /// not the field's editable text, so text inside a `.placeholder` subtree is never
 /// treated as the editing field's text — the session never overwrites it with the
 /// typed value (no `placeholder + typed`) and paints no caret into it.
-fn is_editing_text_node(tree: &RetainedTree, node: NodeId, field: NodeId) -> bool {
+pub(super) fn is_editing_text_node(tree: &RetainedTree, node: NodeId, field: NodeId) -> bool {
     let mut current = node;
     // At most `len` hops reach the root from any node in a well-formed tree; the
     // inclusive bound tolerates a self-parent without looping.

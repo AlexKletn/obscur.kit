@@ -1128,7 +1128,17 @@ impl UiRuntime {
             // borrow, and the same orchestrator sizes the boxes that the scene
             // phase later re-wraps and draws with — so height and painted line
             // count agree.
-            let boxes = self.layout.layout_with_hyphenator(
+            // Thread the runtime-owned editing session into the measure pass so the
+            // focused editable's text is SIZED from the live session buffer (the
+            // SAME string, RAW, that compose paints), not the retained tree value
+            // that lags by a keystroke — so the arranged box height (line count)
+            // equals the painted line count on a `white-space: normal`/`pre-wrap`
+            // field (CSS Text 3 §4.1.1). `None` when no session is active ⇒
+            // byte-identical to the retained-tree measure. `editing`, `layout`,
+            // `tree` and `scene_composer` are disjoint fields, so this is a legal
+            // split borrow.
+            let editing = self.editing_view();
+            let boxes = self.layout.layout_editing(
                 &self.tree,
                 &layout_styles,
                 &computed,
@@ -1139,6 +1149,7 @@ impl UiRuntime {
                 self.viewport_scroll,
                 self.scene_composer.paragraph(),
                 self.scene_composer.hyphenator(),
+                editing,
             );
             let relaid_out = !boxes.is_empty();
             self.boxes = boxes;
@@ -1176,29 +1187,12 @@ impl UiRuntime {
             self.resolve_element_images();
             // Thread the runtime-owned editing session into compose so the focused
             // editable paints its live session text plus a caret + selection
-            // highlight (spec §5.11). `scene_composer`, `tree`, `boxes` and
-            // `editing` are disjoint fields, so this shared borrow is legal; with no
-            // session the view is `None` and compose is byte-identical.
-            let editing = self.editing.as_ref().map(|session| {
-                // The field's live horizontal scroll offset, so compose translates
-                // the run/caret/selection/preedit by `−scroll_left` and the field's
-                // `overflow: hidden` clip hides the scrolled-out text (single-line
-                // text-control scroll model, CSS Overflow 3 §3.1). `0.0` for a
-                // fitting or wrapping field ⇒ byte-identical unscrolled paint.
-                let view = EditingView::new(session.node(), session.text(), session.selection())
-                    .with_scroll_left(session.scroll_left());
-                // While composing, attach the live preedit so compose splices it
-                // into the field for DISPLAY (underlined) with the caret at the
-                // preedit's caret — the buffer text is untouched (spec §5.12).
-                match session.composition().filter(|c| c.is_active()) {
-                    Some(comp) => view.with_preedit(PreeditView::new(
-                        comp.preedit().text(),
-                        comp.anchor().start,
-                        comp.preedit().caret(),
-                    )),
-                    None => view,
-                }
-            });
+            // highlight (spec §5.11) — the SAME [`EditingView`] the measure pass
+            // sized the box with, so paint and box agree (CSS Text 3 §4.1.1).
+            // `scene_composer`, `tree`, `boxes` and `editing` are disjoint fields, so
+            // this shared borrow is legal; with no session the view is `None` and
+            // compose is byte-identical.
+            let editing = self.editing_view();
             // Resolve each scroll container's live scroll offset + content height
             // (CSS Overflow 3 §scroll-container) from the retained boxes, so the
             // coordinator paints the scroll offset + scrollbar. Empty when no
@@ -2910,6 +2904,38 @@ impl UiRuntime {
     /// of every overflowing scroll container, keyed by [`NodeId`], for the scene
     /// coordinator to paint the scroll offset + scrollbar. Empty when nothing
     /// overflows → a byte-identical compose.
+    /// Borrows the runtime-owned editing session into the per-frame
+    /// [`EditingView`] that BOTH the layout (measure/arrange) and scene (compose)
+    /// passes consume, so the focused editable is sized and painted from the SAME
+    /// live session state (CSS Text 3 §4.1.1): the measure pass shapes the session
+    /// buffer to size the box, and compose paints the identical string plus the
+    /// caret/selection. The view carries the field node, the session `text`,
+    /// `selection`, `scroll_left`, and — while composing — the live IME preedit
+    /// (spec §5.12). [`None`] when no session is active, which leaves both passes
+    /// byte-identical to the non-editing path.
+    fn editing_view(&self) -> Option<EditingView<'_>> {
+        self.editing.as_ref().map(|session| {
+            // The field's live horizontal scroll offset, so compose translates the
+            // run/caret/selection/preedit by `−scroll_left` and the field's
+            // `overflow: hidden` clip hides the scrolled-out text (single-line
+            // text-control scroll model, CSS Overflow 3 §3.1). `0.0` for a fitting
+            // or wrapping field ⇒ byte-identical unscrolled paint. The measure pass
+            // ignores `scroll_left` (it does not change the shaped string).
+            let view = EditingView::new(session.node(), session.text(), session.selection())
+                .with_scroll_left(session.scroll_left());
+            // While composing, attach the live preedit so both passes splice it into
+            // the field for DISPLAY — the buffer text is untouched (spec §5.12).
+            match session.composition().filter(|c| c.is_active()) {
+                Some(comp) => view.with_preedit(PreeditView::new(
+                    comp.preedit().text(),
+                    comp.anchor().start,
+                    comp.preedit().caret(),
+                )),
+                None => view,
+            }
+        })
+    }
+
     fn scroll_paint(&self, computed: &ComputedStyles) -> HashMap<NodeId, ScrollPaint> {
         scroll_containers(&self.tree, computed, &self.boxes)
             .into_iter()
@@ -6269,6 +6295,137 @@ mod tests {
             (caret_x - (run_left + advance * 3.0)).abs() < 1e-3,
             "caret at the un-scrolled pen x: {caret_x} vs {}",
             run_left + advance * 3.0,
+        );
+    }
+
+    // ---- MEASURE↔COMPOSE editing consistency (CSS Text 3 §4.1.1) --------------
+
+    /// A `field` (bound to `on-input`) with a wrapping (`white-space: normal`)
+    /// text child, mirroring [`scroll_field_view`] but narrow so a space-separated
+    /// value wraps to several lines.
+    fn wrap_field_view(text: &str) -> View {
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(700))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+                .with_children(ViewFragment::from_nodes(vec![
+                    ViewNode::element(ComponentId::from_raw(701))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("wrapfield".into())))
+                        .with_event(ViewEventBinding::new(EVENT_INPUT, CMD_INPUT))
+                        .with_children(ViewFragment::from_nodes(vec![ViewNode::text(
+                            text.to_string(),
+                        )])),
+                ])),
+        ]))
+    }
+
+    /// Sheet for [`wrap_field_view`]: a 40px-wide `wrapfield` with an exact 20px
+    /// `line-height` and `white-space: normal`, so its text wraps at spaces and
+    /// every wrapped line is exactly 20px tall.
+    fn wrap_field_sheet() -> Stylesheet {
+        use obscur_style::property::layout_keyword;
+        let field = vec![
+            BlockDeclaration::normal(PropertyId::Width, PropertyValue::Length(Length::px(40.0))),
+            BlockDeclaration::normal(PropertyId::LineHeight, PropertyValue::Length(Length::px(20.0))),
+            BlockDeclaration::normal(
+                PropertyId::WhiteSpace,
+                PropertyValue::Keyword(layout_keyword::WHITE_SPACE_NORMAL),
+            ),
+        ];
+        Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![class_rule("panel", size(200.0, 100.0)), class_rule("wrapfield", field)],
+        )
+    }
+
+    /// Focuses the empty `wrapfield` and returns the runtime with an (empty) session.
+    fn focused_wrap_field() -> UiRuntime {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.on_text_input(CMD_INPUT, move |_| {});
+        let sheet = wrap_field_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&wrap_field_view(""), sheets);
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 20.0, 10.0));
+        assert!(runtime.focused().is_some(), "the press focused the wrap field");
+        runtime
+    }
+
+    /// The `wrapfield`'s text-leaf node id (root → panel → field → text).
+    fn wrap_text_node(runtime: &UiRuntime) -> NodeId {
+        let root = runtime.tree().root().expect("root after a frame");
+        let panel = runtime.tree().get(root).unwrap().children()[0];
+        let field = runtime.tree().get(panel).unwrap().children()[0];
+        runtime.tree().get(field).unwrap().children()[0]
+    }
+
+    /// Re-renders the seed view (retained text `""`) and returns the display list;
+    /// the SESSION still holds the typed value, so this is the lag frame.
+    fn render_wrap_frame(runtime: &mut UiRuntime) -> DisplayList {
+        let sheet = wrap_field_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let result = runtime.render_now(&wrap_field_view(""), sheets);
+        result.snapshot().display_list().clone()
+    }
+
+    #[test]
+    fn an_edited_wrapping_field_is_measured_from_its_session_so_box_equals_painted_lines() {
+        // The MEASURE↔COMPOSE invariant (CSS Text 3 §4.1.1): while a field is
+        // focused, its box is SIZED and PAINTED from the SAME session buffer with
+        // the SAME processing (raw, the field's real `white-space`). The retained
+        // tree lags the session between a keystroke and the app's reactive rebuild —
+        // here it stays `""` — so a pass reading the retained value would size a
+        // 1-line box while compose painted several lines. With the session threaded
+        // into measure, the arranged text box height equals the painted line count ×
+        // line-height, and differs from the stale retained box.
+        let mut runtime = focused_wrap_field();
+
+        // Baseline: the (empty) retained/session text box is a single 20px line.
+        let text_node = wrap_text_node(&runtime);
+        let stale_height = runtime
+            .layout_boxes()
+            .get(&text_node)
+            .expect("a text box")
+            .bounds
+            .size
+            .height;
+
+        // Type a space-separated value that wraps to several lines in the 40px box.
+        // (Enter→newline is a later campaign item, so wrapping is driven by spaces.)
+        for c in "aa aa aa aa".chars() {
+            runtime.handle_key(char_press(c));
+        }
+        assert_eq!(runtime.editing_text(), Some("aa aa aa aa"), "session holds the value");
+
+        // The lag frame: the retained text is still "", the session drives paint.
+        let list = render_wrap_frame(&mut runtime);
+        let text_node = wrap_text_node(&runtime);
+        let measured_height = runtime
+            .layout_boxes()
+            .get(&text_node)
+            .expect("a text box")
+            .bounds
+            .size
+            .height;
+        // One `DrawText` run is emitted per wrapped line, so the run count IS the
+        // painted line count.
+        let painted_lines = list
+            .commands()
+            .iter()
+            .filter(|c| matches!(c, PaintCommand::DrawText { .. }))
+            .count();
+
+        let line_height = 20.0_f32;
+        assert!(
+            painted_lines >= 2,
+            "the session buffer wraps to multiple lines (got {painted_lines})",
+        );
+        assert!(
+            (measured_height - painted_lines as f32 * line_height).abs() < 1e-3,
+            "measured box height {measured_height} == painted lines {painted_lines} × {line_height}",
+        );
+        assert!(
+            measured_height > stale_height + 1e-3,
+            "the box grew past the stale retained (1-line) height {stale_height} → measure reads \
+             the SESSION, not the lagging retained tree (measured {measured_height})",
         );
     }
 

@@ -10,6 +10,8 @@ use obscur_text::layout::{TextAlignment, TextOverflow, WhiteSpace};
 use obscur_text::shaping::TextDirection;
 use obscur_text::span::{FontSlant, FontWeight};
 
+use super::EditingView;
+
 /// Builds the [`FontAttributes`] (weight + slant) for a text node from its
 /// computed `font-weight` and `font-style` (§4.14, §5.10).
 ///
@@ -438,6 +440,52 @@ pub(crate) fn process_text(
     match collapse_white_space(&transformed, white_space) {
         Cow::Borrowed(_) => transformed,
         Cow::Owned(collapsed) => Cow::Owned(collapsed),
+    }
+}
+
+/// The string a text node **shapes** on a frame, unifying the layout
+/// (measure/arrange) and scene (compose) passes so both size and paint the
+/// *same* characters (CSS Text 3 §4.1.1).
+///
+/// When `active` is the [`EditingView`] of the focused editable whose text this
+/// node carries, the **live session buffer** is shaped RAW — `text-transform`
+/// (§2.1) and `white-space` collapsing (§4.1.1) are deliberately **skipped** so
+/// the caret's byte offsets stay exact — with any IME preedit spliced in at its
+/// anchor for DISPLAY only (the buffer is untouched, spec §5.12). Otherwise the
+/// retained `content` flows through the normal pre-shape pipeline: casing first
+/// (§2.1), then whitespace processing (§4.1.1).
+///
+/// Passing the identical `active` view to **both** passes is what guarantees the
+/// measured box height (line count) equals the painted line count while editing a
+/// multi-line / collapsible field: the retained tree lags the session by a
+/// keystroke, so a pass reading the retained value would size the box for the old
+/// text while the other painted the new. With no active session (`None`) this is
+/// exactly [`process_text`] — byte-for-byte the non-editing behaviour.
+#[must_use]
+pub(crate) fn display_text<'a>(
+    content: &'a str,
+    active: Option<EditingView<'a>>,
+    transform: TextTransform,
+    white_space: WhiteSpace,
+) -> Cow<'a, str> {
+    let Some(view) = active else {
+        // Idle (no session on this node): the ordinary pre-shape pipeline.
+        return process_text(content, transform, white_space);
+    };
+    match view.preedit {
+        // Composing: splice the uncommitted preedit into the buffer text for
+        // DISPLAY only (spec §5.12) and shape the result RAW.
+        Some(preedit) => {
+            let at = preedit.at.min(view.text.len());
+            let mut spliced = String::with_capacity(view.text.len() + preedit.text.len());
+            spliced.push_str(&view.text[..at]);
+            spliced.push_str(preedit.text);
+            spliced.push_str(&view.text[at..]);
+            Cow::Owned(spliced)
+        }
+        // Editing without a live composition: shape the raw session buffer, so the
+        // caret's buffer offsets equal the shaped-string offsets.
+        None => Cow::Borrowed(view.text),
     }
 }
 
