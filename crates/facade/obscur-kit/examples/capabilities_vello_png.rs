@@ -136,21 +136,20 @@ fn main() {
     );
 }
 
-/// The render scale: `CAP_SCALE` clamped to `1.0..=4.0`, **default 1.0**.
+/// The render scale: `CAP_SCALE` clamped to `1.0..=4.0`, **default 2.0**.
 ///
-/// Unlike the CPU driver (which supersamples at 2.0), the faithful Vello driver
-/// renders 1:1 by default so the `filter: blur()` card (§3) paints for real: the
-/// Vello filter pass composites the filtered subtree in *device* space, and under
-/// a `device_scale > 1` root transform the small blurred panel currently drops out
-/// of its filter layer. Rendering at scale 1.0 keeps the demo honest — the real
-/// Oklab gradient + linearRGB blur both show — without touching any engine crate.
-/// `CAP_SCALE=2` supersamples everything else crisply but loses the blur card.
+/// The Vello filter pass composites each filtered subtree in *device* space, and
+/// the scene converter now maps the filter bounds + gaussian radius through the
+/// root `device_scale` transform — so the `filter: blur()` card (§3) paints for
+/// real at any HiDPI scale (it previously dropped out under `device_scale > 1`).
+/// Supersampling at 2.0 renders everything crisply and also exercises that
+/// device-scale filter path. `CAP_SCALE=1` renders 1:1.
 fn render_scale() -> f32 {
     std::env::var("CAP_SCALE")
         .ok()
         .and_then(|raw| raw.trim().parse::<f32>().ok())
         .filter(|s| s.is_finite())
-        .map_or(1.0, |s| s.clamp(1.0, 4.0))
+        .map_or(2.0, |s| s.clamp(1.0, 4.0))
 }
 
 /// Acquires a **headless** wgpu device + queue (no surface). Returns [`None`] when

@@ -349,10 +349,22 @@ impl SceneConverter {
                             || layer_color_matrix(layer).is_some())
                         && layer.clip().and_then(Clip::bounds).is_some() =>
                 {
-                    let radius = layer_blur_radius(layer).unwrap_or(0.0);
                     let color_matrix = layer_color_matrix(layer);
-                    // The bounds are `Some` per the match guard.
-                    let bounds = layer.clip().and_then(Clip::bounds).unwrap_or_default();
+                    // The bounds are `Some` per the match guard. They come in the
+                    // layer's LOCAL space, but the sub-scene below is emitted under
+                    // `current` (which folds the root device-scale + any scroll
+                    // translate + ancestor transforms), so its content is drawn in
+                    // device space. The offscreen the renderer sizes/places from
+                    // `bounds` must be in that SAME device space, and the gaussian
+                    // radius must scale with it — otherwise at `device_scale > 1`
+                    // (HiDPI) the device-space content falls outside a logical-sized
+                    // offscreen and the filtered subtree drops out entirely. Map the
+                    // bounds through `current` and scale the radius by its linear
+                    // factor. At `current == identity` (scale 1, no scroll) this is a
+                    // no-op, so the scale-1 path stays byte-identical.
+                    let local = layer.clip().and_then(Clip::bounds).unwrap_or_default();
+                    let bounds = transform_rect(current, local);
+                    let radius = layer_blur_radius(layer).unwrap_or(0.0) * affine_scale(current);
                     let end = matching_layer_pop(commands, index);
                     let inner = &commands[index + 1..end];
                     // Build the bracketed subtree as its own scene. Sub-scenes never
@@ -593,6 +605,45 @@ fn matching_layer_pop(commands: &[PaintCommand], start: usize) -> usize {
         }
     }
     commands.len()
+}
+
+/// Maps an axis-aligned `rect` (a filter layer's local clip bounds) through the
+/// accumulated transform `a` and returns the bounding box of the result, in `a`'s
+/// target (device) space. For the usual scale + translate `a` (root device-scale,
+/// scroll offset, ancestor transforms) the box is exact; for a rotation it is the
+/// enclosing AABB, which still contains the whole filtered subtree. At
+/// `a == identity` it returns `rect` unchanged, keeping the scale-1 path
+/// byte-identical.
+#[allow(clippy::cast_possible_truncation)]
+fn transform_rect(a: Affine, rect: obscur_geometry::Rect) -> obscur_geometry::Rect {
+    let m = a.as_coeffs();
+    let map = |x: f64, y: f64| (m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]);
+    let x0 = f64::from(rect.origin.x);
+    let y0 = f64::from(rect.origin.y);
+    let x1 = f64::from(rect.right());
+    let y1 = f64::from(rect.bottom());
+    let corners = [map(x0, y0), map(x1, y0), map(x0, y1), map(x1, y1)];
+    let (mut min_x, mut min_y) = corners[0];
+    let (mut max_x, mut max_y) = corners[0];
+    for &(px, py) in &corners[1..] {
+        min_x = min_x.min(px);
+        min_y = min_y.min(py);
+        max_x = max_x.max(px);
+        max_y = max_y.max(py);
+    }
+    obscur_geometry::Rect::new(
+        obscur_geometry::Point::new(min_x as f32, min_y as f32),
+        obscur_geometry::Size::new((max_x - min_x) as f32, (max_y - min_y) as f32),
+    )
+}
+
+/// The linear (uniform) scale factor of `a`, `sqrt(|det|)` — used to scale a
+/// gaussian blur radius from logical to device pixels so the blur strength tracks
+/// the element's on-screen size. `1.0` for an identity/translate-only transform.
+#[allow(clippy::cast_possible_truncation)]
+fn affine_scale(a: Affine) -> f32 {
+    let m = a.as_coeffs();
+    (m[0] * m[3] - m[1] * m[2]).abs().sqrt() as f32
 }
 
 /// Converts an obscur-geometry [`AffineTransform`](obscur_geometry::AffineTransform)
@@ -1265,6 +1316,41 @@ mod tests {
         // is non-empty and carries no separate blur layer.
         let inline = SceneConverter::new().convert(&list);
         assert!(!inline.encoding().is_empty());
+    }
+
+    #[test]
+    fn blur_bounds_and_radius_follow_the_root_device_scale() {
+        use obscur_scene::layer::LayerEffect;
+
+        // A blur layer nested under a root `scale(2)` transform (as the runtime
+        // brackets the whole scene at `device_scale == 2` on HiDPI). The sub-scene
+        // is emitted in device space, so its bounds and radius must ALSO be in
+        // device space — otherwise the device-space content falls outside a
+        // logical-sized offscreen and the filtered subtree drops out (the empty
+        // "linearRGB blur" card bug).
+        let bounds = Rect::new(Point::new(2.0, 3.0), Size::new(20.0, 10.0));
+        let mut layer = SceneLayer::new().with_clip(Clip::rect(bounds));
+        layer.add_effect(LayerEffect::blur(6.0));
+        let list = DisplayList::from_commands(vec![
+            PaintCommand::PushTransform(obscur_geometry::AffineTransform::scale(2.0, 2.0)),
+            PaintCommand::PushLayer(layer),
+            PaintCommand::DrawPath {
+                path: rect_path(),
+                paint: Paint::solid_fill(Color::rgba(1.0, 0.0, 0.0, 1.0)),
+            },
+            PaintCommand::PopLayer,
+            PaintCommand::PopTransform,
+        ]);
+
+        let (_main, blurs) = SceneConverter::new().convert_with_blurs(&list);
+        assert_eq!(blurs.len(), 1);
+        // Bounds scaled to device space: origin (2,3)→(4,6), size (20,10)→(40,20).
+        assert_eq!(
+            blurs[0].bounds,
+            Rect::new(Point::new(4.0, 6.0), Size::new(40.0, 20.0))
+        );
+        // Radius scaled by the linear factor 2: 6 → 12.
+        assert!((blurs[0].radius - 12.0).abs() < 1e-4);
     }
 
     #[test]
