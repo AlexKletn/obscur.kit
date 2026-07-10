@@ -102,10 +102,14 @@ input, textarea {\
   color: #2b2a27;\
   font-size: 14px;\
 }\
-/* A native `<input type=text>` is SINGLE-LINE: it never wraps (long text scrolls /\
-   clips). A `<textarea>` is MULTI-LINE: `white-space: pre-wrap` preserves authored\
-   segment breaks (`\n`, CSS Text 3 §4.1.1) AND wraps at the box width, so pressing\
-   Enter inserts a visible newline and long lines wrap. This white-space is the only\
+/* A native `<input type=text>` is SINGLE-LINE: `white-space: pre` preserves every\
+   space the user types (no collapsing, and — crucially — no trailing-space HANG,\
+   CSS Text 3 §7.1) and never wraps, so a trailing space keeps its width and the\
+   caret advances past it (under a collapsing mode a trailing space hangs to zero\
+   width and the caret appears stuck). Long text scrolls / clips horizontally. A\
+   `<textarea>` is MULTI-LINE: `white-space: pre-wrap` preserves authored segment\
+   breaks (`\n`, CSS Text 3 §4.1.1) AND wraps at the box width, so pressing Enter\
+   inserts a visible newline and long lines wrap. This white-space is the only\
    property that differs between the two — the box look is shared above. */\
 /* Intrinsic size: a native `<input>` defaults to ~`size=20` characters wide and a\
    `<textarea>` to ~20 cols × a few rows. The engine has no `ch` unit, so approximate\
@@ -117,7 +121,7 @@ input, textarea {\
    scrolls — a wheel/scrollbar move it, and typing scrolls the caret's line into view\
    (§3.1 scroll-into-view), instead of being clipped away with no way to reach it. */\
 input {\
-  white-space: nowrap;\
+  white-space: pre;\
   overflow: hidden;\
   width: 180px;\
 }\
@@ -386,6 +390,35 @@ mod tests {
             compiled.errors.is_empty(),
             "UA CSS has syntax errors: {:?}",
             compiled.errors
+        );
+    }
+
+    #[test]
+    fn input_white_space_preserves_trailing_spaces_so_the_caret_follows_them() {
+        // A single-line `<input>` must use `white-space: pre`, NOT a collapsing mode
+        // (`normal`/`nowrap`). Under a collapsing mode a TRAILING space hangs to zero
+        // width (CSS Text 3 §7.1), so after typing a space the painted caret stays
+        // put — it does not follow the space. `pre` preserves every typed space (and
+        // still never wraps, keeping the field single-line), so the space keeps its
+        // width and the caret advances past it.
+        use crate::style::property::layout_keyword;
+        let sheet = ua_stylesheet();
+        let white_space = sheet
+            .rules()
+            .iter()
+            .filter(|rule| {
+                rule.selectors().selectors().iter().any(|complex| {
+                    complex.subject().simples() == [SimpleSelector::Type("input".into())]
+                })
+            })
+            .flat_map(|rule| rule.block())
+            .find(|d| d.property() == PropertyId::WhiteSpace)
+            .map(|d| d.value().clone());
+        assert_eq!(
+            white_space,
+            Some(PropertyValue::Keyword(layout_keyword::WHITE_SPACE_PRE)),
+            "UA `input` must be `white-space: pre` (preserving) so a trailing space \
+             keeps width and the caret follows it — a collapsing mode hangs it to zero",
         );
     }
 
