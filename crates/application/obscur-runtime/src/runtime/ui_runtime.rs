@@ -2768,6 +2768,13 @@ impl UiRuntime {
                         direction: EditDirection::Forward,
                         extend: shift,
                     },
+                    // Space produces a character in a focused text field. The
+                    // platform delivers it as a *named* key (`NamedKey::Space`, so a
+                    // control that is NOT being edited can use it for activation), so
+                    // the editing path — reached only with an active session — must
+                    // itself turn it into an inserted `' '` (replacing any selection);
+                    // otherwise the field would silently swallow every space.
+                    NamedKey::Space => EditCommand::insert(" "),
                     // ArrowUp/ArrowDown move the caret between wrapped lines in a
                     // MULTILINE field (spec §5.11). In a single-line `input` there is
                     // no line to move to, so they are NOT consumed here (byte-identical
@@ -8350,6 +8357,28 @@ mod tests {
                 "click at the caret x of offset {i} returns {i}",
             );
         }
+    }
+
+    #[test]
+    fn space_key_inserts_a_space_in_a_focused_field() {
+        // Regression: the platform delivers Space as `NamedKey::Space` (a control
+        // that is NOT being edited uses it for activation), NOT a `Character`, so
+        // the editing key path must itself turn it into an inserted `' '` —
+        // otherwise a focused field silently swallows every space. Type "ab",
+        // press Space, type "cd": the value is "ab cd".
+        let (mut runtime, mirror) = focused_editable("");
+        for c in ['a', 'b'] {
+            runtime.handle_key(char_press(c));
+        }
+        assert!(
+            runtime.handle_key(named_press(NamedKey::Space)).is_handled(),
+            "Space is consumed as an edit in a focused field",
+        );
+        for c in ['c', 'd'] {
+            runtime.handle_key(char_press(c));
+        }
+        assert_eq!(runtime.editing_text(), Some("ab cd"));
+        assert_eq!(mirror.borrow().as_str(), "ab cd", "the on-input mirror sees the space");
     }
 
     /// A mouse event at `(x, y)` carrying an explicit logical timestamp (µs), so a
