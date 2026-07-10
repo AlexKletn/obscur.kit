@@ -1595,6 +1595,20 @@ impl SceneCoordinator {
                     // model (`caret_advance_x`) used below, so paint and hit-test
                     // agree.
                     let scroll_left = active.map_or(0.0, |view| view.scroll_left);
+                    // A horizontally-scrolled single-line field must NOT
+                    // glyph-truncate: `text-overflow: clip`/`ellipsis` keeps only the
+                    // box-width *prefix* (CSS UI 3 §7), but scrolling translates the
+                    // run left to track the caret, so a truncated prefix would be
+                    // shifted off-screen and the box would render empty. When scrolled
+                    // we shape the FULL run (`Visible`) and let the field's
+                    // `overflow: hidden` clip-rect show only the scrolled window; the
+                    // unscrolled path (caret at head, `scroll_left == 0`) keeps the
+                    // authored truncation so a long value still clips at the box edge.
+                    let overflow = if scroll_left > 0.0 {
+                        TextOverflow::Visible
+                    } else {
+                        overflow
+                    };
                     // The wrapped multi-line paragraph the glyphs are drawn from
                     // (spec §5.10). The caret + selection resolve their (line, x, y)
                     // against THIS same layout — a byte's line by its wrapped range,

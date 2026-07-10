@@ -105,7 +105,27 @@ fn main() {
         "the head must be scrolled left of the box (run.left {run_left} < box.left {})",
         field_box.origin.x,
     );
-    println!("  ✓ caret is inside the box; the head is scrolled out and clipped (tail visible)");
+    // The run must be the FULL value, and its TAIL must actually land inside the
+    // box — the property a `text-overflow: clip` glyph-truncation would violate. A
+    // scrolled field must NOT truncate to the box-width prefix (that prefix is then
+    // translated off-screen left, leaving an empty box); it keeps the whole run and
+    // relies on the `overflow: hidden` clip-rect. So the run's advance width must
+    // EXCEED the field's content width (untruncated), and its right edge must sit
+    // inside the box near the right (where the tail + caret show).
+    let content_width = field_box.size.width - 8.0; // 4px padding each side
+    let (run_width, run_right) = run_extent_of(&scrolled).expect("a run in the scrolled frame");
+    println!("[scrolled] run width = {run_width:.1}  run.right = {run_right:.1}  content_w = {content_width:.1}");
+    assert!(
+        run_width > content_width + 0.5,
+        "the run must be the untruncated full value (width {run_width} > content {content_width})",
+    );
+    assert!(
+        run_right > field_box.origin.x && run_right <= box_right + 0.5,
+        "the tail must land inside the box (run.right {run_right} in ({:.1}, {:.1}])",
+        field_box.origin.x,
+        box_right,
+    );
+    println!("  ✓ caret is inside the box; the head is scrolled out and clipped; the full-run TAIL is visible");
 
     // --- Home: reset the scroll so the head is visible again.
     runtime.handle_key(named_press(NamedKey::Home));
@@ -188,6 +208,19 @@ fn caret_x_of(snapshot: &SceneSnapshot) -> Option<f32> {
 fn run_left_of(snapshot: &SceneSnapshot) -> Option<f32> {
     snapshot.display_list().commands().iter().find_map(|c| match c {
         PaintCommand::DrawText { origin, .. } => Some(origin.x),
+        _ => None,
+    })
+}
+
+/// The first `DrawText` run's advance width and right edge (`origin.x + Σadvance`).
+/// The right edge is where the last glyph (and the caret trailing it) paints; the
+/// width proves the run is the FULL value, not a box-width truncated prefix.
+fn run_extent_of(snapshot: &SceneSnapshot) -> Option<(f32, f32)> {
+    snapshot.display_list().commands().iter().find_map(|c| match c {
+        PaintCommand::DrawText { origin, run, .. } => {
+            let width: f32 = run.glyphs().iter().map(|g| g.advance()).sum();
+            Some((width, origin.x + width))
+        }
         _ => None,
     })
 }
