@@ -13,6 +13,8 @@ mod grid_lines;
 pub use grid_lines::resolve_named_grid_lines;
 mod grid_templates;
 pub use grid_templates::{grid_template_for, grid_templates_from, GridTemplates};
+mod inspect;
+pub use inspect::{overlay_commands, InspectInfo};
 mod layout_coordinator;
 pub use layout_coordinator::{LayoutBoxes, LayoutCoordinator, LayoutStyles, root_font_size};
 mod motion_coordinator;

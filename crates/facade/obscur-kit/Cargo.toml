@@ -365,6 +365,12 @@ required-features = [
 # `showcase_view()` Rust function at build time; this example `include!`s the
 # generated code and renders it — no `.okui` machinery at runtime. Real widgets
 # and `<img src>` render (the generated View carries real ComponentIds/symbols).
+# In-window inspect overlay (spec §7.6) → PNG proof: hover-highlight captured
+# headlessly through the real render + hit-test path.
+[[example]]
+name = "inspect_overlay_proof"
+required-features = ["render-cpu"]
+
 [[example]]
 name = "showcase_okui_codegen_png"
 required-features = [

@@ -41,6 +41,7 @@ use obscur_text::ime::CompositionEvent;
 use obscur_text::layout::{Hyphenator, TextAlignment};
 use obscur_text::selection::TextSelection;
 use obscur_text::shaping::{TextDirection, TextItemizer, TextShaper};
+use obscur_tree::node::NodeKind;
 use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::{View, EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT};
@@ -51,9 +52,9 @@ use super::{
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::orchestration::{
     overflow_scrolls, root_font_size, scroll_containers, AnimatedKind, AnimationBinding, ComputedStyles,
-    CssMotionRules, EditingView, LayoutBoxes, LayoutCoordinator, MotionCoordinator, PreeditView,
-    PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint, StyleCoordinator, StyleInputs,
-    StyleMatchingCoordinator, TreeElement,
+    overlay_commands, CssMotionRules, EditingView, InspectInfo, LayoutBoxes, LayoutCoordinator,
+    MotionCoordinator, PreeditView, PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint,
+    StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement,
 };
 use crate::orchestration::{alignment_for, direction_for, white_space_for};
 use crate::scheduler::{BackpressureDecision, FrameScheduler};
@@ -157,6 +158,10 @@ pub struct UiRuntime {
     /// The nodes currently under the pointer, topmost-first (hover target at
     /// index `0`).
     hover: HoverChain,
+    /// Whether the in-window inspect overlay is active (spec §7.6). When set, a
+    /// composed frame appends a highlight over the hovered node's border box so a
+    /// developer can debug the running UI directly in the window.
+    inspect_mode: bool,
     /// The node that currently holds focus, if any.
     ///
     /// Tracked directly rather than via
@@ -457,6 +462,7 @@ impl UiRuntime {
             computed: ComputedStyles::new(),
             spatial: SpatialIndex::new(),
             hover: HoverChain::new(),
+            inspect_mode: false,
             focused: None,
             press_target: None,
             text_drag: None,
@@ -1287,6 +1293,12 @@ impl UiRuntime {
                 &self.image_cache,
                 &scroll,
             );
+            // Inspect overlay (spec §7.6): when inspect mode is on, append a
+            // highlight over the hovered node's border box on top of the scene.
+            // A no-op (byte-identical) when inspect mode is off or nothing is
+            // hovered. Appended before the device-scale root so the highlight is
+            // in the same logical space as the layout boxes it traces.
+            let display_list = self.apply_inspect_overlay(display_list);
             // Telemetry: mark the compose phase and count paint commands (§7.9).
             let count = display_list.len() as u64;
             record_phase(
@@ -3327,6 +3339,67 @@ impl UiRuntime {
     #[must_use]
     pub fn hovered(&self) -> Option<NodeId> {
         self.hover.topmost()
+    }
+
+    /// Enables or disables the in-window inspect overlay (spec §7.6).
+    ///
+    /// When on, a composed frame highlights the hovered node's border box so the
+    /// running UI can be debugged directly in the window. Toggling requests an
+    /// [`FrameReason::Input`] frame so the highlight appears/disappears without
+    /// waiting for the next pointer move; a no-op when the state is unchanged.
+    pub fn set_inspect_mode(&mut self, on: bool) {
+        if self.inspect_mode != on {
+            self.inspect_mode = on;
+            self.request_frame(FrameReason::Input);
+        }
+    }
+
+    /// Returns whether the in-window inspect overlay is active.
+    #[must_use]
+    pub const fn inspect_mode(&self) -> bool {
+        self.inspect_mode
+    }
+
+    /// Returns a readout of the node currently under the pointer — its identity
+    /// (CSS `type#id.class`), component id, and absolute box — for a host to
+    /// print alongside the in-window highlight (spec §7.6). `None` when nothing
+    /// is hovered or the hovered node has no retained box yet.
+    #[must_use]
+    pub fn hovered_inspect(&self) -> Option<InspectInfo> {
+        let node = self.hovered()?;
+        let bounds = self.boxes.get(&node)?.bounds;
+        let (component, local_name, id, classes) = match self.tree.get(node) {
+            Some(record) => {
+                let component = match record.kind() {
+                    NodeKind::Element { component } => Some(*component),
+                    _ => None,
+                };
+                let attributes = record.attributes();
+                (
+                    component,
+                    attributes.local_name().map(str::to_owned),
+                    attributes.id().map(str::to_owned),
+                    attributes.classes().iter().map(|class| class.to_string()).collect(),
+                )
+            }
+            None => (None, None, None, Vec::new()),
+        };
+        Some(InspectInfo { node, component, local_name, id, classes, bounds })
+    }
+
+    /// Appends the inspect overlay for the hovered node to `display_list`, or
+    /// returns it unchanged when inspect mode is off, nothing is hovered, or the
+    /// hovered node has no retained box.
+    fn apply_inspect_overlay(&self, display_list: DisplayList) -> DisplayList {
+        if !self.inspect_mode {
+            return display_list;
+        }
+        let Some(bounds) = self.hovered().and_then(|node| self.boxes.get(&node)) else {
+            return display_list;
+        };
+        let mut commands = display_list.commands().to_vec();
+        commands.extend(overlay_commands(bounds.bounds));
+        DisplayList::from_commands(commands)
     }
 
     /// Returns the node that currently holds focus, if any.

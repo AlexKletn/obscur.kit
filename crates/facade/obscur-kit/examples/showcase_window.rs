@@ -97,7 +97,8 @@ use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
-use winit::keyboard::{Key, ModifiersState, PhysicalKey as WinitPhysicalKey};
+use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey as WinitPhysicalKey};
+use winit::keyboard::Key;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 #[path = "showcase/scene.rs"]
@@ -176,6 +177,10 @@ struct ShowcaseWindow {
     /// so the keyboard handler can recognise the Ctrl+zoom chords before text is
     /// forwarded to the runtime's editable.
     modifiers: ModifiersState,
+    /// The last node reported by the in-window inspector, so a hover-change
+    /// prints its readout at most once (tracked by raw id to avoid importing
+    /// `NodeId` into the example).
+    last_inspect_node: Option<u64>,
 }
 
 impl ShowcaseWindow {
@@ -241,6 +246,7 @@ impl ShowcaseWindow {
             zoom: 1.0,
             scroll_y: 0.0,
             modifiers: ModifiersState::empty(),
+            last_inspect_node: None,
         }
     }
 
@@ -515,6 +521,18 @@ impl ApplicationHandler for ShowcaseWindow {
                 self.cursor = (position.x, position.y);
                 let moved = PointerConverter::new().moved(PointerId::MOUSE, position);
                 self.runtime.handle_pointer(moved);
+                // In-window inspector: print the hovered element's readout once per
+                // hover change so the console names what the highlight is tracing.
+                if self.runtime.inspect_mode() {
+                    let info = self.runtime.hovered_inspect();
+                    let node = info.as_ref().map(|i| i.node.raw());
+                    if node != self.last_inspect_node {
+                        self.last_inspect_node = node;
+                        if let Some(info) = info {
+                            println!("[inspect] {info}");
+                        }
+                    }
+                }
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
@@ -569,6 +587,23 @@ impl ApplicationHandler for ShowcaseWindow {
                 }
             }
             WindowEvent::KeyboardInput { event, .. } => {
+                // F12 toggles the in-window inspect overlay (spec §7.6) — handled
+                // before forwarding so it never reaches a focused Input as text.
+                if event.state == ElementState::Pressed
+                    && event.physical_key == WinitPhysicalKey::Code(KeyCode::F12)
+                {
+                    let on = !self.runtime.inspect_mode();
+                    self.runtime.set_inspect_mode(on);
+                    self.last_inspect_node = None;
+                    println!(
+                        "[inspect] {}",
+                        if on { "ON — hover elements to highlight them; F12 to toggle off" } else { "OFF" }
+                    );
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                    return;
+                }
                 // Ctrl+zoom shortcuts are handled here FIRST (on key-down only),
                 // ahead of forwarding to the runtime, so a zoom chord adjusts the
                 // effective device scale instead of being typed into the Input.
