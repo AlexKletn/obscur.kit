@@ -26,6 +26,8 @@ mod layout_child;
 pub use layout_child::LayoutChild;
 mod layout_output;
 pub use layout_output::LayoutOutput;
+mod size_clamp;
+pub(crate) use size_clamp::clamp_content;
 mod positioned_layout;
 pub use positioned_layout::PositionedLayout;
 pub mod taffy;

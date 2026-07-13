@@ -4,7 +4,7 @@ use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
 use crate::model::{LayoutBox, LayoutStyle};
 
-use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
+use super::{clamp_content, ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 
 /// Normal-flow / block layout (spec §4.1, §4.2).
 ///
@@ -142,6 +142,15 @@ impl LayoutAlgorithm for FlowLayout {
                 style.box_sizing.content_extent(w, bp_x)
             })
             .max(0.0);
+        // Clamp the content width into the authored min/max-width (spec §4.2).
+        let content_width = clamp_content(
+            content_width,
+            style.min_width,
+            style.max_width,
+            constraints.max.width,
+            bp_x,
+            style.box_sizing,
+        );
 
         // Available content height for measuring children under (may be infinite).
         let avail_content_height = (constraints.max.height - bp_y).max(0.0);
@@ -225,6 +234,17 @@ impl LayoutAlgorithm for FlowLayout {
                 style.box_sizing.content_extent(h, bp_y)
             })
             .max(0.0);
+        // Clamp the content height into the authored min/max-height (spec §4.2) —
+        // e.g. `min-height: 100vh` fills a tall viewport even when the content is
+        // short. Previously dropped: flow honoured only the parent constraints.
+        let content_height = clamp_content(
+            content_height,
+            style.min_height,
+            style.max_height,
+            constraints.max.height,
+            bp_y,
+            style.box_sizing,
+        );
 
         let border_box = Size::new(content_width + bp_x, content_height + bp_y);
         let size = constraints.constrain(border_box);
@@ -303,6 +323,43 @@ mod tests {
         assert_eq!(boxes[1].origin(), Point::new(0.0, 28.0));
         // 20 + 8 gap + 30 = 58.
         assert_eq!(out.size(), Size::new(100.0, 58.0));
+    }
+
+    #[test]
+    fn min_height_floors_short_content() {
+        // Content is 20 tall, but `min-height: 200` floors the box to 200 — the
+        // §4.2 clamp flow used to drop (it honoured only parent constraints).
+        let style = LayoutStyle {
+            min_height: Dimension::Px(200.0),
+            ..LayoutStyle::default()
+        };
+        let children = [child(1)];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(100.0, 20.0)]);
+        let out = FlowLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(100.0, 1000.0)),
+            &mut measurer,
+        );
+        assert_eq!(out.size().height, 200.0);
+    }
+
+    #[test]
+    fn max_width_caps_content_width() {
+        // Available width is 100, but `max-width: 60` caps the box.
+        let style = LayoutStyle {
+            max_width: Dimension::Px(60.0),
+            ..LayoutStyle::default()
+        };
+        let children = [child(1)];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(100.0, 20.0)]);
+        let out = FlowLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(100.0, 1000.0)),
+            &mut measurer,
+        );
+        assert_eq!(out.size().width, 60.0);
     }
 
     #[test]

@@ -4,7 +4,7 @@ use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
 use crate::model::{AlignItems, Dimension, JustifyContent, LayoutBox, LayoutStyle};
 
-use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
+use super::{clamp_content, ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 
 /// The item's main-axis min / max dimensions for the container's flow direction:
 /// `width` bounds along a row, `height` bounds along a column.
@@ -414,7 +414,15 @@ impl LayoutAlgorithm for FlexLayout {
                 content_height
             };
 
-            let border_box = Size::new(content_width + bp_x, final_content_height + bp_y);
+            // Clamp the container's OWN box into its authored min/max (spec §4.2)
+            // — e.g. `min-height: 100vh` on a flex column fills a tall viewport.
+            let own_w = clamp_content(
+                content_width, style.min_width, style.max_width, constraints.max.width, bp_x, style.box_sizing,
+            );
+            let own_h = clamp_content(
+                final_content_height, style.min_height, style.max_height, constraints.max.height, bp_y, style.box_sizing,
+            );
+            let border_box = Size::new(own_w + bp_x, own_h + bp_y);
             return LayoutOutput::new(constraints.constrain(border_box), child_boxes);
         }
 
@@ -505,7 +513,14 @@ impl LayoutAlgorithm for FlexLayout {
             (w, content_height)
         };
 
-        let border_box = Size::new(final_content_width + bp_x, final_content_height + bp_y);
+        // Clamp the container's OWN box into its authored min/max (spec §4.2).
+        let own_w = clamp_content(
+            final_content_width, style.min_width, style.max_width, constraints.max.width, bp_x, style.box_sizing,
+        );
+        let own_h = clamp_content(
+            final_content_height, style.min_height, style.max_height, constraints.max.height, bp_y, style.box_sizing,
+        );
+        let border_box = Size::new(own_w + bp_x, own_h + bp_y);
         LayoutOutput::new(constraints.constrain(border_box), child_boxes)
     }
 }
@@ -1305,6 +1320,28 @@ mod tests {
         assert_eq!(boxes[0].size(), Size::new(100.0, 50.0));
         assert_eq!(boxes[1].origin(), Point::new(0.0, 50.0));
         assert_eq!(boxes[1].size(), Size::new(100.0, 50.0));
+    }
+
+    #[test]
+    fn container_min_height_floors_its_own_box() {
+        // A flex column whose content is 50 tall, under loose constraints, is
+        // floored to `min-height: 300` — the §4.2 clamp flex used to drop for the
+        // container's own box (it applied min/max only to items).
+        let mut style = container(
+            FlexDirection::Column,
+            JustifyContent::FlexStart,
+            AlignItems::Stretch,
+            0.0,
+        );
+        style.min_height = Dimension::Px(300.0);
+        let children = [fixed_basis(1, 50.0)];
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(200.0, 1000.0)),
+            &mut FixedChildMeasurer::default(),
+        );
+        assert_eq!(out.size().height, 300.0);
     }
 
     #[test]
