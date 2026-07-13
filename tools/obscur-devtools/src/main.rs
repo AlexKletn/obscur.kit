@@ -14,7 +14,9 @@ use std::process::ExitCode;
 
 use obscur_devtools::cli;
 use obscur_devtools::host;
-use obscur_devtools_protocol::message::{HandshakeResponse, PermissionScope, ScopeSet};
+use obscur_devtools_protocol::message::{
+    HandshakeResponse, InjectedEvent, PermissionScope, ScopeSet,
+};
 use obscur_devtools_server::transport::{ClientBound, SocketClient, SocketListener};
 
 fn main() -> ExitCode {
@@ -38,6 +40,7 @@ fn run(args: &[String]) -> Result<(), String> {
         "serve" => run_serve(rest),
         "inspect" => run_inspect(rest),
         "subscribe" => run_subscribe(rest),
+        "inject" => run_inject(rest),
         "ping" => run_ping(rest),
         "-h" | "--help" | "help" => {
             print_usage();
@@ -60,7 +63,7 @@ struct Options {
     endpoint: Endpoint,
     token: String,
     scopes: ScopeSet,
-    positional: Option<String>,
+    positionals: Vec<String>,
 }
 
 /// Parses `--tcp`/`--unix`/`--token`/`--scopes` plus one optional positional.
@@ -68,7 +71,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
     let mut endpoint = Endpoint::Tcp(None);
     let mut token = "dev".to_owned();
     let mut scopes = ScopeSet::all();
-    let mut positional = None;
+    let mut positionals = Vec::new();
 
     let mut index = 0;
     while index < args.len() {
@@ -98,11 +101,11 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
             other if other.starts_with("--") => {
                 return Err(format!("unknown option '{other}'"));
             }
-            value => positional = Some(value.to_owned()),
+            value => positionals.push(value.to_owned()),
         }
         index += 1;
     }
-    Ok(Options { endpoint, token, scopes, positional })
+    Ok(Options { endpoint, token, scopes, positionals })
 }
 
 /// Parses a comma-separated scope list (`read,subscribe`, `all`, `observer`).
@@ -161,8 +164,9 @@ fn connect_and_handshake(options: &Options) -> Result<SocketClient, String> {
 fn run_inspect(args: &[String]) -> Result<(), String> {
     let options = parse_options(args)?;
     let target_arg = options
-        .positional
-        .as_deref()
+        .positionals
+        .first()
+        .map(String::as_str)
         .ok_or("inspect needs a target (a name or 'all')")?;
     let targets = if target_arg == "all" {
         cli::all_targets()
@@ -183,7 +187,11 @@ fn run_inspect(args: &[String]) -> Result<(), String> {
 /// `subscribe <topic>`: connect, handshake, and print the subscription grant.
 fn run_subscribe(args: &[String]) -> Result<(), String> {
     let options = parse_options(args)?;
-    let topic_arg = options.positional.as_deref().ok_or("subscribe needs a topic")?;
+    let topic_arg = options
+        .positionals
+        .first()
+        .map(String::as_str)
+        .ok_or("subscribe needs a topic")?;
     let topic = cli::parse_topic(topic_arg).ok_or_else(|| format!("unknown topic '{topic_arg}'"))?;
 
     let mut client = connect_and_handshake(&options)?;
@@ -193,6 +201,41 @@ fn run_subscribe(args: &[String]) -> Result<(), String> {
         println!(
             "note: the socket transport answers request/reply; live event push is a server follow-up"
         );
+    }
+    Ok(())
+}
+
+/// `inject <down|up|click> <x> <y>`: connect, handshake, and inject synthetic
+/// pointer events at logical `(x, y)` — the write half of the agent loop.
+fn run_inject(args: &[String]) -> Result<(), String> {
+    let options = parse_options(args)?;
+    let kind = options
+        .positionals
+        .first()
+        .map(String::as_str)
+        .ok_or("inject needs: <down|up|click> <x> <y>")?;
+    let coord = |index: usize, axis: &str| {
+        options
+            .positionals
+            .get(index)
+            .and_then(|value| value.parse::<i32>().ok())
+            .ok_or_else(|| format!("inject needs an integer {axis}"))
+    };
+    let x = coord(1, "x")?;
+    let y = coord(2, "y")?;
+    let events = match kind {
+        "down" => vec![InjectedEvent::PointerDown { x, y }],
+        "up" => vec![InjectedEvent::PointerUp { x, y }],
+        "click" => {
+            vec![InjectedEvent::PointerDown { x, y }, InjectedEvent::PointerUp { x, y }]
+        }
+        other => return Err(format!("unknown inject kind '{other}' (down|up|click)")),
+    };
+
+    let mut client = connect_and_handshake(&options)?;
+    for (index, event) in events.into_iter().enumerate() {
+        let reply = cli::inject(&mut client, index as u64 + 1, event).map_err(|e| e.to_string())?;
+        println!("{}", cli::format_client_bound(&reply));
     }
     Ok(())
 }
@@ -238,6 +281,7 @@ fn print_usage() {
          obscur-devtools serve [--tcp | --unix <path>] [--token <t>] [--scopes <list>]\n  \
          obscur-devtools inspect <target|all> --tcp <addr> | --unix <path> [--token <t>]\n  \
          obscur-devtools subscribe <topic>    --tcp <addr> | --unix <path> [--token <t>]\n  \
+         obscur-devtools inject <down|up|click> <x> <y>  --tcp <addr> | --unix <path> [--token <t>]\n  \
          obscur-devtools ping                 --tcp <addr> | --unix <path> [--token <t>]\n\n\
          TARGETS: tree styles layout event-flow focus animations resources\n           \
          accessibility scene rendering caches plugin-state  (or 'all')\n\

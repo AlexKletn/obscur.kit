@@ -326,6 +326,7 @@ fn push_snapshot(buf: &mut Vec<u8>, snapshot: &SnapshotMessage) {
     for id in &snapshot.payload.entity_ids {
         push_u64(buf, *id);
     }
+    push_str(buf, &snapshot.payload.detail);
 }
 
 fn read_snapshot(cursor: &mut Cursor<'_>) -> Result<SnapshotMessage, WireError> {
@@ -338,7 +339,8 @@ fn read_snapshot(cursor: &mut Cursor<'_>) -> Result<SnapshotMessage, WireError> 
     for _ in 0..id_count {
         entity_ids.push(cursor.read_u64()?);
     }
-    let payload = SnapshotPayload::new(description, entity_count, entity_ids);
+    let detail = cursor.read_str()?.to_owned();
+    let payload = SnapshotPayload::new(description, entity_count, entity_ids).with_detail(detail);
     Ok(SnapshotMessage::new(command, target, payload))
 }
 

@@ -67,6 +67,11 @@ pub use obscur_okui_syntax as okui_syntax;
 pub use obscur_ui_ir as ui_ir;
 pub use obscur_ui_macros as ui_macros;
 
+// --- diagnostics: external DevTools (spec §7.6/§7.7) ---
+pub use obscur_devtools_protocol as devtools_protocol;
+pub use obscur_devtools_server as devtools_server;
+pub mod devtools;
+
 // --- optional adapters (feature-gated) ---
 #[cfg(feature = "accesskit")]
 pub use obscur_accessibility_accesskit as accesskit_bridge;

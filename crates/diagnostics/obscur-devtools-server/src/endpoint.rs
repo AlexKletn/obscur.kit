@@ -2,9 +2,9 @@
 
 use obscur_devtools_protocol::error::ProtocolError;
 use obscur_devtools_protocol::message::{
-    CommandId, CommandKind, CommandMessage, HandshakeRejection, HandshakeRequest,
-    HandshakeResponse, Inspectable, ProtocolVersion, ScopeSet, SnapshotMessage, Subscription,
-    Topic, VersionRange,
+    CommandId, CommandKind, CommandMessage, ControlAction, HandshakeRejection, HandshakeRequest,
+    HandshakeResponse, InjectedEvent, Inspectable, ProtocolVersion, ScopeSet, SnapshotMessage,
+    Subscription, Topic, VersionRange,
 };
 
 use crate::auth::Authenticator;
@@ -82,6 +82,12 @@ pub struct DevToolsEndpoint<S> {
     enabled: bool,
     control_excluded: bool,
     audit_log: Vec<AuditEntry>,
+    /// Authorized synthetic input events awaiting the host, in arrival order.
+    /// The endpoint never touches the runtime itself (spec §7.7); the host
+    /// drains these and applies them to its `UiRuntime` (host-provides-device).
+    pending_injections: Vec<InjectedEvent>,
+    /// Authorized control actions (pause/step/inspect-mode) awaiting the host.
+    pending_controls: Vec<ControlAction>,
 }
 
 impl<S: InspectSource> DevToolsEndpoint<S> {
@@ -102,6 +108,8 @@ impl<S: InspectSource> DevToolsEndpoint<S> {
             enabled: false,
             control_excluded: false,
             audit_log: Vec::new(),
+            pending_injections: Vec::new(),
+            pending_controls: Vec::new(),
         }
     }
 
@@ -196,10 +204,30 @@ impl<S: InspectSource> DevToolsEndpoint<S> {
             CommandKind::Unsubscribe(id) => {
                 Ok(CommandOutcome::Unsubscribed(self.subscriptions.unsubscribe(*id)))
             }
-            CommandKind::Control(_) | CommandKind::Inject(_) => {
+            CommandKind::Control(action) => {
+                self.pending_controls.push(*action);
+                Ok(CommandOutcome::Acknowledged(command.id))
+            }
+            CommandKind::Inject(event) => {
+                self.pending_injections.push(*event);
                 Ok(CommandOutcome::Acknowledged(command.id))
             }
         }
+    }
+
+    /// Removes and returns the synthetic input events queued by authorized
+    /// `Inject` commands since the last drain, in arrival order.
+    ///
+    /// The host calls this (typically once per frame) and applies each event to
+    /// its `UiRuntime` — the endpoint itself never drives the runtime (§7.7).
+    pub fn drain_injections(&mut self) -> Vec<InjectedEvent> {
+        std::mem::take(&mut self.pending_injections)
+    }
+
+    /// Removes and returns the control actions queued by authorized `Control`
+    /// commands since the last drain, in arrival order.
+    pub fn drain_controls(&mut self) -> Vec<ControlAction> {
+        std::mem::take(&mut self.pending_controls)
     }
 
     /// Convenience: inspect `target` directly through the runtime bridge,

@@ -10,8 +10,8 @@
 use std::io;
 
 use obscur_devtools_protocol::message::{
-    CommandId, CommandKind, CommandMessage, HandshakeRequest, HandshakeResponse, Inspectable,
-    PermissionScope, ProtocolVersion, ScopeSet, SnapshotMessage, Topic, VersionRange,
+    CommandId, CommandKind, CommandMessage, HandshakeRequest, HandshakeResponse, InjectedEvent,
+    Inspectable, PermissionScope, ProtocolVersion, ScopeSet, SnapshotMessage, Topic, VersionRange,
 };
 use obscur_devtools_server::transport::{ClientBound, SocketClient};
 
@@ -111,6 +111,19 @@ pub fn subscribe(client: &mut SocketClient, id: u64, topic: Topic) -> io::Result
     ))
 }
 
+/// Issues one `Inject` command carrying `event` (a synthetic pointer/key), the
+/// write half of the agent loop over the protocol.
+///
+/// # Errors
+///
+/// Returns an [`io::Error`] on any underlying socket failure.
+pub fn inject(client: &mut SocketClient, id: u64, event: InjectedEvent) -> io::Result<ClientBound> {
+    client.command(&CommandMessage::new(
+        CommandId::new(id),
+        CommandKind::Inject(event),
+    ))
+}
+
 /// Formats a handshake response as one human-readable line.
 #[must_use]
 pub fn format_handshake(response: &HandshakeResponse) -> String {
@@ -154,13 +167,22 @@ pub fn format_snapshot(message: &SnapshotMessage) -> String {
     } else {
         format!(" [{}]", join_ids(&message.payload.entity_ids))
     };
-    format!(
+    let mut line = format!(
         "{:<14} {:>4} entit{}  {}{ids}",
         target_label(message.target),
         message.payload.entity_count,
         if message.payload.entity_count == 1 { "y " } else { "ies" },
         message.payload.description,
-    )
+    );
+    // A rich host attaches a full structured rendering (e.g. the whole tree with
+    // per-node geometry + styles); print it indented under the summary line.
+    if !message.payload.detail.is_empty() {
+        for detail_line in message.payload.detail.lines() {
+            line.push_str("\n    ");
+            line.push_str(detail_line);
+        }
+    }
+    line
 }
 
 /// Formats any client-bound reply for display (used for non-snapshot replies).

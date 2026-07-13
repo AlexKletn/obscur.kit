@@ -76,6 +76,9 @@ obscur-okui-syntax = { workspace = true }
 obscur-okui-compiler = { workspace = true }
 obscur-css = { workspace = true }
 obscur-ui-macros = { workspace = true }
+# diagnostics: the external DevTools protocol + endpoint server (spec §7.6/§7.7)
+obscur-devtools-protocol = { workspace = true }
+obscur-devtools-server = { workspace = true }
 # optional adapters (behind features)
 obscur-resource-decode = { workspace = true, optional = true }
 obscur-resource-fs = { workspace = true, optional = true }
