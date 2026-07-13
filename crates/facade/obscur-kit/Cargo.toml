@@ -99,6 +99,13 @@ obscur-system-web = { workspace = true }
 # Real platform backends for the `windowed_counter` / `showcase_window` examples
 # only. Versions match the adapters the `full` feature re-exports
 # (obscur-window-winit pins winit 0.30; obscur-render-vello pins wgpu 29).
+# Build-time `.okui` → Rust codegen for the `showcase_okui_codegen_png` example
+# (see `build.rs`). Already normal dependencies; also needed at build time to run
+# the frontend pipeline that emits the generated view.
+[build-dependencies]
+obscur-okui-syntax = { workspace = true }
+obscur-okui-compiler = { workspace = true }
+
 [dev-dependencies]
 winit = "0.30"
 wgpu = "29"
@@ -346,6 +353,20 @@ required-features = [
 # `showcase_png` (no window or GPU), so it builds and runs display-free.
 [[example]]
 name = "showcase_okui_png"
+required-features = [
+    "render-cpu",
+    "resource-fs",
+    "resource-decode",
+    "text-harfrust",
+    "text-unicode",
+]
+
+# The `.okui` **codegen** path: `build.rs` compiles `showcase.okui` to a
+# `showcase_view()` Rust function at build time; this example `include!`s the
+# generated code and renders it — no `.okui` machinery at runtime. Real widgets
+# and `<img src>` render (the generated View carries real ComponentIds/symbols).
+[[example]]
+name = "showcase_okui_codegen_png"
 required-features = [
     "render-cpu",
     "resource-fs",
