@@ -1,11 +1,10 @@
 //! `UiIrViewBridge`: lowers compiled UI IR into a desired-view [`View`]
 //! (spec §2.15, §2.11).
 
-use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_ui_ir::document::{UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrValue};
+use obscur_ui_ir::name_binding;
 use obscur_view::view::{
-    CLASS, ID, TYPE, View, ViewEventBinding, ViewFragment, ViewKey, ViewNode, ViewProperty,
-    ViewValue,
+    View, ViewEventBinding, ViewFragment, ViewKey, ViewNode, ViewProperty, ViewValue,
 };
 
 /// Lowers a compiled [`UiIrDocument`] (or a bare [`UiIrNode`] subtree) into the
@@ -15,15 +14,16 @@ use obscur_view::view::{
 /// # Mapping
 ///
 /// - **Element / Component** → a [`ViewNode::Element`] whose
-///   [`ComponentId`] is derived deterministically from the tag/component name
-///   (a stable placeholder until a real name interner is threaded through — the
-///   numeric handle carries no external meaning). IR
-///   [`properties`](UiIrNode::properties) become [`ViewProperty`]s (the
-///   well-known `class`/`id`/`type` names map to the reserved
-///   [`CLASS`]/[`ID`]/[`TYPE`] symbols so the reconciler's CSS attributes flow
-///   through; every other name is deterministically interned). IR
-///   [`events`](UiIrNode::events) become [`ViewEventBinding`]s and the node's
-///   optional [`key`](UiIrNode::key) becomes a [`ViewKey`].
+///   [`ComponentId`](obscur_identity::ComponentId) is resolved through the shared
+///   [`name_binding`] registry: a built-in widget/primitive tag binds to its real
+///   `COMPONENT_ID`, every other tag to the generic `Container`. IR
+///   [`properties`](UiIrNode::properties) become [`ViewProperty`]s (the reserved
+///   `class`/`id`/`type`/`src`/`disabled`/`checked` attributes map to the
+///   `obscur-view` symbols the reconciler/matcher read; every other name is
+///   deterministically hashed). IR [`events`](UiIrNode::events) become
+///   [`ViewEventBinding`]s (`click`/`input`/`change` bind to the reserved
+///   `EVENT_*` symbols the runtime dispatcher resolves) and the node's optional
+///   [`key`](UiIrNode::key) becomes a [`ViewKey`].
 /// - **Text** → a [`ViewNode::Text`] carrying the literal content (and key, if
 ///   any).
 /// - **Fragment** → its children spliced into the surrounding fragment (a
@@ -79,18 +79,24 @@ impl UiIrViewBridge {
 }
 
 /// Lowers an element/component IR node into a single [`ViewNode::Element`].
+///
+/// Names bind through the shared [`name_binding`] registry: the tag resolves to
+/// a real [`ComponentId`](obscur_identity::ComponentId) (a built-in widget or
+/// primitive, else the generic `Container`), reserved attributes/events resolve
+/// to the `obscur-view` symbols the reconciler/matcher/dispatcher read, and the
+/// handler command resolves to a deterministic hashed symbol.
 fn lower_element(node: &UiIrNode) -> ViewNode {
-    let mut view = ViewNode::element(ComponentId::from_raw(hash_name_64(node.tag())));
+    let mut view = ViewNode::element(name_binding::component_id_for(node.tag()));
     for property in node.properties() {
         view = view.with_prop(ViewProperty::new(
-            intern_name(property.name()),
+            name_binding::attr_symbol(property.name()),
             lower_value(property.value()),
         ));
     }
     for event in node.events() {
         view = view.with_event(ViewEventBinding::new(
-            intern_name(event.event()),
-            intern_name(event.handler()),
+            name_binding::event_symbol(event.event()),
+            name_binding::fallback_symbol(event.handler()),
         ));
     }
     let children: ViewFragment = node
@@ -143,46 +149,12 @@ fn lower_key(expression: &UiIrExpression) -> ViewKey {
     }
 }
 
-/// Interns a property/event name into an [`InternedSymbol`].
-///
-/// The CSS-relevant `class`/`id`/`type` names map to the reserved
-/// [`CLASS`]/[`ID`]/[`TYPE`] symbols so the reconciler's style attributes flow
-/// through; any other name is hashed into a high symbol namespace (top bit set)
-/// that never collides with the reserved low range. This is a deterministic
-/// placeholder until a shared name interner is threaded through the pipeline.
-fn intern_name(name: &str) -> InternedSymbol {
-    match name {
-        "class" => CLASS,
-        "id" => ID,
-        "type" => TYPE,
-        other => InternedSymbol::from_raw(hash_name_32(other) | 0x8000_0000),
-    }
-}
-
-/// Deterministic FNV-1a 64-bit hash of a name into a component handle.
-fn hash_name_64(name: &str) -> u64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in name.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    hash
-}
-
-/// Deterministic FNV-1a 32-bit hash of a name into a symbol handle.
-fn hash_name_32(name: &str) -> u32 {
-    let mut hash: u32 = 0x811c_9dc5;
-    for byte in name.bytes() {
-        hash ^= u32::from(byte);
-        hash = hash.wrapping_mul(0x0100_0193);
-    }
-    hash
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use obscur_identity::ComponentId;
     use obscur_ui_ir::document::{UiIrEvent, UiIrProperty};
+    use obscur_view::view::{CLASS, EVENT_CLICK, ID, SRC};
 
     #[test]
     fn element_text_event_and_key_map_to_view_nodes() {
@@ -208,7 +180,8 @@ mod tests {
         else {
             panic!("expected an element");
         };
-        assert_eq!(*component, ComponentId::from_raw(hash_name_64("Button")));
+        // The `Button` tag binds to the real widget COMPONENT_ID, not a hash.
+        assert_eq!(*component, ComponentId::from_raw(0x00D0_0001));
         assert_eq!(key.as_ref(), Some(&ViewKey::from("k")));
 
         // The `id` property maps onto the reserved ID symbol as text.
@@ -216,13 +189,40 @@ mod tests {
         assert_eq!(props[0].name(), ID);
         assert_eq!(props[0].value(), &ViewValue::Text("save".into()));
 
+        // The `click` event binds to the reserved EVENT_CLICK symbol the runtime
+        // dispatcher resolves, so a real click reaches its command.
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].event(), intern_name("click"));
-        assert_eq!(events[0].command(), intern_name("submit"));
+        assert_eq!(events[0].event(), EVENT_CLICK);
+        assert_eq!(events[0].command(), name_binding::fallback_symbol("submit"));
 
         // The text child is a real text node.
         assert_eq!(children.len(), 1);
         assert_eq!(children.nodes()[0], ViewNode::text("Save"));
+    }
+
+    #[test]
+    fn img_src_reaches_the_reserved_src_symbol() {
+        // <img src="logo.png"/> — the image element binds to the real Image
+        // primitive and its `src` reaches the reserved SRC symbol the runtime
+        // resolves to decoded pixels (the old hash bridge dropped both).
+        let root = UiIrNode::element(1, "img").with_property(UiIrProperty::text("src", "logo.png"));
+        let view = UiIrViewBridge::document_to_view(&UiIrDocument::new(root));
+        let ViewNode::Element { component, props, .. } = &view.root().nodes()[0] else {
+            panic!("element");
+        };
+        assert_eq!(*component, ComponentId::from_raw(0x00C0_0003));
+        assert_eq!(props[0].name(), SRC);
+        assert_eq!(props[0].value(), &ViewValue::Text("logo.png".into()));
+    }
+
+    #[test]
+    fn generic_div_binds_to_the_container_primitive() {
+        let root = UiIrNode::element(1, "div").with_property(UiIrProperty::text("class", "row"));
+        let view = UiIrViewBridge::document_to_view(&UiIrDocument::new(root));
+        let ViewNode::Element { component, .. } = &view.root().nodes()[0] else {
+            panic!("element");
+        };
+        assert_eq!(*component, ComponentId::from_raw(0x00C0_0001));
     }
 
     #[test]
