@@ -9,3 +9,11 @@ publish = false
 
 [lints]
 workspace = true
+
+[dependencies]
+obscur-devtools-protocol = { workspace = true }
+obscur-devtools-server = { workspace = true }
+
+[[bin]]
+name = "obscur-devtools"
+path = "src/main.rs"
