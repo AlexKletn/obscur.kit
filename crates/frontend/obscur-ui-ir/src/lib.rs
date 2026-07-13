@@ -5,6 +5,7 @@
 pub mod codec;
 pub mod document;
 pub mod migration;
+pub mod name_binding;
 pub mod source;
 pub mod validation;
 pub mod version;
