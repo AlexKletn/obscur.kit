@@ -94,7 +94,7 @@ pub fn stylesheet() -> &'static str {
     "\
 * { box-sizing: border-box; }\n\
 #app { display: flex; flex-direction: column; gap: 14px; padding: 20px; \
-       background-color: #12151f; }\n\
+       min-height: 100vh; background-color: #12151f; }\n\
 .header { display: flex; flex-direction: column; gap: 4px; height: 62px; }\n\
 .title { color: #f5f7fa; font-size: 30px; font-weight: 700; height: 36px; }\n\
 .subtitle { color: #8b95ad; font-size: 15px; font-style: italic; height: 20px; }\n\

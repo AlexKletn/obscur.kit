@@ -374,6 +374,12 @@ required-features = [
 name = "inspect_overlay_proof"
 required-features = ["render-cpu"]
 
+# Agent-style headless inspection of the showcase scene: dumps the tree via
+# inspect_snapshot() at a configurable viewport (no window needed).
+[[example]]
+name = "showcase_inspect"
+required-features = ["render-cpu"]
+
 [[example]]
 name = "showcase_okui_codegen_png"
 required-features = [
