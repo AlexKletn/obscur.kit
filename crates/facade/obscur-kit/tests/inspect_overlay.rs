@@ -85,6 +85,42 @@ fn inspect_overlay_adds_a_highlight_over_the_hovered_box() {
 }
 
 #[test]
+fn inspect_snapshot_dumps_the_tree_with_geometry_and_styles() {
+    // The structured observe half of the agent loop: one call yields the whole
+    // tree as data an agent can assert on, without hovering or a window.
+    let sheet = compile(
+        "#root { width: 200px; height: 200px } \
+         .box { width: 100px; height: 60px; background-color: #22d3a6 }",
+    );
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 200.0));
+    runtime.render_now(&view(), std::slice::from_ref(&sheet));
+
+    let snapshot = runtime.inspect_snapshot();
+    assert!(snapshot.len() >= 2, "root + box at least");
+
+    // The `.box` node is present with its resolved absolute geometry and styles.
+    let box_node = snapshot
+        .nodes
+        .iter()
+        .find(|node| node.classes == vec!["box".to_owned()])
+        .expect("the .box node is in the dump");
+    let bounds = box_node.bounds.expect("the box was laid out");
+    assert!((bounds.size.width - 100.0).abs() < 1e-3, "{bounds:?}");
+    assert!((bounds.size.height - 60.0).abs() < 1e-3, "{bounds:?}");
+    let style_names: Vec<&str> = box_node.styles.iter().map(|(name, _)| name.as_str()).collect();
+    assert!(
+        style_names.contains(&"Width") && style_names.contains(&"BackgroundColor"),
+        "expected width + background in the dumped styles, got {:?}",
+        box_node.styles
+    );
+
+    // The Display renders an indented tree an agent (or a log) can read directly.
+    let rendered = snapshot.to_string();
+    assert!(rendered.contains(".box"), "{rendered}");
+    assert!(rendered.contains("100×60"), "{rendered}");
+}
+
+#[test]
 fn hovered_inspect_reports_the_box_identity_and_geometry() {
     let sheet = compile(
         "#root { width: 200px; height: 200px } .box { width: 100px; height: 60px }",

@@ -53,8 +53,8 @@ use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::orchestration::{
     overflow_scrolls, root_font_size, scroll_containers, AnimatedKind, AnimationBinding, ComputedStyles,
     overlay_commands, CssMotionRules, EditingView, InspectInfo, LayoutBoxes, LayoutCoordinator,
-    MotionCoordinator, PreeditView, PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint,
-    StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement,
+    MotionCoordinator, NodeInspection, PreeditView, PseudoStates, SceneCoordinator, ScrollContainer,
+    ScrollPaint, StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement, TreeInspection,
 };
 use crate::orchestration::{alignment_for, direction_for, white_space_for};
 use crate::scheduler::{BackpressureDecision, FrameScheduler};
@@ -3385,6 +3385,84 @@ impl UiRuntime {
             None => (None, None, None, Vec::new()),
         };
         Some(InspectInfo { node, component, local_name, id, classes, bounds })
+    }
+
+    /// Returns a full structured snapshot of the live tree — one
+    /// [`NodeInspection`] per node in pre-order — for an agent to observe and
+    /// assert on in a headless run (spec §7.6 inspectable tree/styles/layout).
+    ///
+    /// Each node carries its identity (kind, component, `type#id.class`), its
+    /// literal text (for text nodes), its absolute border box (when laid out this
+    /// frame), and a few key computed styles. This is the read half of the
+    /// agent debugging loop; the write half is
+    /// [`handle_pointer`](Self::handle_pointer)/[`handle_key`](Self::handle_key).
+    #[must_use]
+    pub fn inspect_snapshot(&self) -> TreeInspection {
+        let mut nodes = Vec::new();
+        if let Some(root) = self.tree.root() {
+            self.collect_inspection(root, None, 0, &mut nodes);
+        }
+        TreeInspection { nodes }
+    }
+
+    /// Appends `node` (and its subtree, pre-order) to `out` as [`NodeInspection`]s.
+    fn collect_inspection(
+        &self,
+        node: NodeId,
+        parent: Option<NodeId>,
+        depth: u32,
+        out: &mut Vec<NodeInspection>,
+    ) {
+        let Some(record) = self.tree.get(node) else {
+            return;
+        };
+        let (kind, component, text) = match record.kind() {
+            NodeKind::Element { component } => ("element", Some(*component), None),
+            NodeKind::Text { content } => ("text", None, Some(content.to_string())),
+            NodeKind::Root => ("group", None, None),
+            NodeKind::Synthetic { .. } => ("synthetic", None, None),
+        };
+        let attributes = record.attributes();
+        out.push(NodeInspection {
+            node,
+            parent,
+            depth,
+            kind,
+            component,
+            local_name: attributes.local_name().map(str::to_owned),
+            id: attributes.id().map(str::to_owned),
+            classes: attributes.classes().iter().map(|class| class.to_string()).collect(),
+            text,
+            bounds: self.boxes.get(&node).map(|layout_box| layout_box.bounds),
+            styles: self.inspect_styles(node),
+        });
+        // Clone the child ids so the immutable borrow of `record` ends before the
+        // recursive calls re-borrow `self`.
+        let children = record.children().to_vec();
+        for child in children {
+            self.collect_inspection(child, Some(node), depth + 1, out);
+        }
+    }
+
+    /// Reads a small, fixed set of the most diagnostic computed styles for `node`
+    /// as `(name, value)` pairs, omitting any the node did not resolve.
+    fn inspect_styles(&self, node: NodeId) -> Vec<(String, String)> {
+        const KEYS: &[PropertyId] = &[
+            PropertyId::Display,
+            PropertyId::Position,
+            PropertyId::Width,
+            PropertyId::Height,
+            PropertyId::Color,
+            PropertyId::BackgroundColor,
+        ];
+        let Some(style) = self.computed_style(node) else {
+            return Vec::new();
+        };
+        KEYS.iter()
+            .filter_map(|property| {
+                style.get(*property).map(|value| (format!("{property:?}"), format!("{value:?}")))
+            })
+            .collect()
     }
 
     /// Appends the inspect overlay for the hovered node to `display_list`, or

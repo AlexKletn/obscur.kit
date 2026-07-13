@@ -52,6 +52,10 @@ fn main() {
         println!("[inspect] highlighting: {info}");
     }
 
+    // The structured observe half of the agent loop: the whole tree as data.
+    println!("\n[inspect] tree snapshot (what an agent reads in a run):");
+    println!("{}\n", runtime.inspect_snapshot());
+
     let frame = runtime.render_now(&view(), std::slice::from_ref(&sheet));
     let snapshot = frame.snapshot().clone();
     println!("[scene] {} paint command(s)", snapshot.display_list().len());
