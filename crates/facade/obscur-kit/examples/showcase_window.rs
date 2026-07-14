@@ -344,13 +344,13 @@ impl ShowcaseWindow {
     fn sync_viewport(&mut self) {
         if let Some(surface) = self.surface.as_ref() {
             let config = surface.config();
-            let scale = self.effective_scale();
-            let viewport = Size::new(config.width as f32 / scale, config.height as f32 / scale);
-            self.runtime.set_viewport(viewport);
-            self.runtime.set_device_scale(scale);
+            let physical = Size::new(config.width as f32, config.height as f32);
+            // The kit's standard HiDPI mapping (device scale + logical viewport)
+            // in one call — no hand-rolled viewport arithmetic here.
+            self.runtime.set_surface(physical, self.effective_scale());
         }
-        // The fit/zoom just changed, so the scrollable range may have too — re-clamp
-        // and re-push the content offset.
+        // The scale/zoom just changed, so the scrollable range may have too —
+        // re-clamp and re-push the content offset.
         self.apply_scroll();
     }
 

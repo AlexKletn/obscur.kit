@@ -3585,6 +3585,27 @@ impl UiRuntime {
         self.viewport = viewport;
     }
 
+    /// Configures the runtime for a window surface in one call: sets the device
+    /// [`scale`](Self::set_device_scale) and derives the layout
+    /// [`viewport`](Self::set_viewport) from the surface's **physical** extent.
+    ///
+    /// This is the standard HiDPI mapping every windowed host needs (spec §5.2),
+    /// so a host does not hand-roll (and drift on) it: `scale` is the display
+    /// density (a windowing layer's `scale_factor`, optionally times a user zoom)
+    /// and the viewport is that physical extent in **logical** CSS pixels
+    /// (`physical / scale`). The UI therefore renders at its authored size for the
+    /// display density and reflows to the real window size on resize, rather than
+    /// being scaled to fit the window. The viewport divides by the *clamped*
+    /// device scale, so the two stay consistent.
+    ///
+    /// Does not itself schedule a frame; pair with
+    /// [`request_frame`](Self::request_frame)`(`[`FrameReason::WindowChange`]`)`.
+    pub fn set_surface(&mut self, physical: Size, scale: f32) {
+        self.set_device_scale(scale);
+        let effective = self.device_scale;
+        self.set_viewport(Size::new(physical.width / effective, physical.height / effective));
+    }
+
     /// Returns the current device-pixel scale (HiDPI factor × user zoom) the
     /// composed scene renders at. Default `1.0`.
     #[must_use]
@@ -5714,6 +5735,22 @@ mod tests {
         assert_eq!(runtime.device_scale(), 0.1, "non-finite clamps to 0.1");
         runtime.set_device_scale(2.5);
         assert_eq!(runtime.device_scale(), 2.5, "a sane value passes through");
+    }
+
+    #[test]
+    fn set_surface_maps_physical_extent_to_a_logical_viewport() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        // A 1000×600 physical surface at 2× density → a 500×300 logical viewport.
+        runtime.set_surface(Size::new(1000.0, 600.0), 2.0);
+        assert_eq!(runtime.device_scale(), 2.0);
+        assert_eq!(runtime.viewport(), Size::new(500.0, 300.0));
+        // At 1× the viewport equals the physical extent (no scaling).
+        runtime.set_surface(Size::new(890.0, 1140.0), 1.0);
+        assert_eq!(runtime.viewport(), Size::new(890.0, 1140.0));
+        // The viewport divides by the *clamped* scale, so the two never disagree.
+        runtime.set_surface(Size::new(100.0, 100.0), 0.0);
+        assert_eq!(runtime.device_scale(), 0.1);
+        assert_eq!(runtime.viewport(), Size::new(1000.0, 1000.0));
     }
 
     // ---- Content scroll offset: root translate + pointer coord mapping ----
