@@ -73,6 +73,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 use obscur_kit::bootstrap::KitBootstrap;
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -80,6 +81,7 @@ use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
 use obscur_kit::geometry::{Point, Size};
 use obscur_kit::identity::{InternedSymbol, RuntimeId};
+use obscur_kit::perf::FrameStats;
 use obscur_kit::interaction::command::KeyEvent;
 use obscur_kit::interaction::pointer::{PointerDevice, PointerEvent, PointerId};
 use obscur_kit::render::frame::{FrameSubmission, RenderFrame};
@@ -168,6 +170,12 @@ struct ShowcaseWindow {
     /// prints its readout at most once (tracked by raw id to avoid importing
     /// `NodeId` into the example).
     last_inspect_node: Option<u64>,
+    /// Rolling per-frame CPU (layout/compose) + present (GPU) timings.
+    frame_stats: FrameStats,
+    /// The start of the current one-second perf-report interval, and how many
+    /// frames have been presented in it, so `[perf]` logs a real present FPS.
+    report_start: Option<Instant>,
+    frames_this_interval: u32,
 }
 
 impl ShowcaseWindow {
@@ -234,6 +242,9 @@ impl ShowcaseWindow {
             scroll_y: 0.0,
             modifiers: ModifiersState::empty(),
             last_inspect_node: None,
+            frame_stats: FrameStats::default(),
+            report_start: None,
+            frames_this_interval: 0,
         }
     }
 
@@ -400,8 +411,12 @@ impl ShowcaseWindow {
         // the last committed snapshot so a bare expose repaints rather than blanks.
         // Run the due frame for its side effects; presents are silent — activity
         // is logged as EVENTS (clicks, input, resize), not once per frame.
+        // Time the CPU phase (reactive build → reconcile → style → layout →
+        // compose) separately from the GPU present so `[perf]` breaks the two out.
+        let cpu_start = Instant::now();
         self.runtime.run_due_frame_reactive();
         let snapshot = self.runtime.snapshot();
+        let cpu = cpu_start.elapsed();
 
         let (Some(surface), Some(renderer)) = (self.surface.as_ref(), self.renderer.as_mut())
         else {
@@ -417,6 +432,7 @@ impl ShowcaseWindow {
 
         // Present on-screen (offscreen render + blit-to-surface, the documented
         // Vello 0.9 pattern the counter example uses).
+        let present_start = Instant::now();
         match renderer.present_to_surface(&submission, surface) {
             Ok(_) => {}
             Err(error) => {
@@ -427,6 +443,38 @@ impl ShowcaseWindow {
                     surface.configure(device);
                 }
             }
+        }
+        let present = present_start.elapsed();
+
+        // Record the frame and report FPS + timings once per second. A redraw is
+        // requested every frame so the present rate (the `[perf]` FPS) is real
+        // rather than event-driven.
+        self.record_frame(cpu, present);
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    /// Records one frame's timings and prints a `[perf]` line once per second:
+    /// the real present FPS (frames this interval / elapsed) plus the rolling
+    /// CPU/GPU/frame timing breakdown from [`FrameStats`].
+    fn record_frame(&mut self, cpu: std::time::Duration, present: std::time::Duration) {
+        self.frame_stats.record(cpu, present);
+        self.frames_this_interval += 1;
+        let start = *self.report_start.get_or_insert_with(Instant::now);
+        let elapsed = start.elapsed();
+        if elapsed.as_secs_f32() >= 1.0 {
+            let fps = self.frames_this_interval as f32 / elapsed.as_secs_f32();
+            let ms = |d: std::time::Duration| d.as_secs_f32() * 1000.0;
+            println!(
+                "[perf] {fps:.0} fps · cpu {:.2}ms · gpu {:.2}ms · frame {:.2}ms (worst {:.2}ms)",
+                ms(self.frame_stats.avg_cpu()),
+                ms(self.frame_stats.avg_present()),
+                ms(self.frame_stats.avg_total()),
+                ms(self.frame_stats.max_total()),
+            );
+            self.report_start = Some(Instant::now());
+            self.frames_this_interval = 0;
         }
     }
 }

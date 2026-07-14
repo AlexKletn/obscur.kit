@@ -71,6 +71,7 @@ pub use obscur_ui_macros as ui_macros;
 pub use obscur_devtools_protocol as devtools_protocol;
 pub use obscur_devtools_server as devtools_server;
 pub mod devtools;
+pub mod perf;
 
 // --- optional adapters (feature-gated) ---
 #[cfg(feature = "accesskit")]
