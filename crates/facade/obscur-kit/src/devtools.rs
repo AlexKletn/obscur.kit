@@ -160,6 +160,15 @@ pub fn perf_payload(stats: &FrameStats) -> SnapshotPayload {
     .with_detail(detail)
 }
 
+/// Builds the full live inspect source a windowed host publishes each frame:
+/// [`inspect_source_from`] (tree/layout/styles/focus) plus the
+/// [`Inspectable::Rendering`] frame-perf snapshot from `stats`. One call so a
+/// host does not re-assemble the two every frame.
+#[must_use]
+pub fn live_source(runtime: &UiRuntime, stats: &FrameStats) -> SnapshotInspectSource {
+    inspect_source_from(runtime).with_snapshot(Inspectable::Rendering, perf_payload(stats))
+}
+
 /// A thread-shareable [`InspectSource`] whose backing snapshot the host swaps out
 /// each frame while a serving thread reads it (spec §7.6 host-provides-device).
 ///

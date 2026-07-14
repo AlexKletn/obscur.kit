@@ -81,14 +81,14 @@ use obscur_kit::css::compiler::StylesheetCompiler;
 use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
 use obscur_kit::geometry::{Point, Size};
-use obscur_kit::devtools::{inspect_source_from, perf_payload, SharedInspectSource};
-use obscur_kit::devtools_protocol::message::{Inspectable, ScopeSet};
+use obscur_kit::devtools::{live_source, SharedInspectSource};
+use obscur_kit::devtools_protocol::message::ScopeSet;
 use obscur_kit::devtools_server::auth::Authenticator;
 use obscur_kit::devtools_server::bridge::RuntimeBridge;
 use obscur_kit::devtools_server::endpoint::DevToolsEndpoint;
 use obscur_kit::devtools_server::transport::{SocketListener, SocketTransport};
 use obscur_kit::identity::{InternedSymbol, RuntimeId};
-use obscur_kit::perf::FrameStats;
+use obscur_kit::perf::FrameProfiler;
 use obscur_kit::interaction::command::KeyEvent;
 use obscur_kit::interaction::pointer::{PointerDevice, PointerEvent, PointerId};
 use obscur_kit::render::frame::{FrameSubmission, RenderFrame};
@@ -177,15 +177,12 @@ struct ShowcaseWindow {
     /// prints its readout at most once (tracked by raw id to avoid importing
     /// `NodeId` into the example).
     last_inspect_node: Option<u64>,
-    /// Rolling per-frame CPU (layout/compose) + present (GPU) timings.
-    frame_stats: FrameStats,
+    /// The kit's per-frame profiler: rolling CPU/present timings + a per-second
+    /// FPS report line (all timing logic lives in the kit, not here).
+    profiler: FrameProfiler,
     /// The live inspect source served to external DevTools clients; refreshed
     /// once per second with the tree/layout/styles + the `Rendering` perf snapshot.
     inspect: SharedInspectSource,
-    /// The start of the current one-second perf-report interval, and how many
-    /// frames have been presented in it, so `[perf]` logs a real present FPS.
-    report_start: Option<Instant>,
-    frames_this_interval: u32,
 }
 
 impl ShowcaseWindow {
@@ -252,9 +249,7 @@ impl ShowcaseWindow {
             scroll_y: 0.0,
             modifiers: ModifiersState::empty(),
             last_inspect_node: None,
-            frame_stats: FrameStats::default(),
-            report_start: None,
-            frames_this_interval: 0,
+            profiler: FrameProfiler::new(),
             inspect: SharedInspectSource::new(),
         }
     }
@@ -457,41 +452,16 @@ impl ShowcaseWindow {
         }
         let present = present_start.elapsed();
 
-        // Record the frame and report FPS + timings once per second. A redraw is
-        // requested every frame so the present rate (the `[perf]` FPS) is real
-        // rather than event-driven.
-        self.record_frame(cpu, present);
+        // Feed the kit profiler; once per second it returns a report line and we
+        // publish the live state (tree/layout/styles + Rendering=perf) to any
+        // connected DevTools client. A redraw is requested every frame so the
+        // present rate (the `[perf]` FPS) is real rather than event-driven.
+        if let Some(report) = self.profiler.record(cpu, present) {
+            println!("[perf] {report}");
+            self.inspect.set(live_source(&self.runtime, self.profiler.stats()));
+        }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
-        }
-    }
-
-    /// Records one frame's timings and prints a `[perf]` line once per second:
-    /// the real present FPS (frames this interval / elapsed) plus the rolling
-    /// CPU/GPU/frame timing breakdown from [`FrameStats`].
-    fn record_frame(&mut self, cpu: std::time::Duration, present: std::time::Duration) {
-        self.frame_stats.record(cpu, present);
-        self.frames_this_interval += 1;
-        let start = *self.report_start.get_or_insert_with(Instant::now);
-        let elapsed = start.elapsed();
-        if elapsed.as_secs_f32() >= 1.0 {
-            let fps = self.frames_this_interval as f32 / elapsed.as_secs_f32();
-            let ms = |d: std::time::Duration| d.as_secs_f32() * 1000.0;
-            println!(
-                "[perf] {fps:.0} fps · cpu {:.2}ms · gpu {:.2}ms · frame {:.2}ms (worst {:.2}ms)",
-                ms(self.frame_stats.avg_cpu()),
-                ms(self.frame_stats.avg_present()),
-                ms(self.frame_stats.avg_total()),
-                ms(self.frame_stats.max_total()),
-            );
-            // Publish the latest state to any connected DevTools client: the live
-            // tree/layout/styles plus the `Rendering` = frame-perf snapshot (§7.9).
-            self.inspect.set(
-                inspect_source_from(&self.runtime)
-                    .with_snapshot(Inspectable::Rendering, perf_payload(&self.frame_stats)),
-            );
-            self.report_start = Some(Instant::now());
-            self.frames_this_interval = 0;
         }
     }
 
