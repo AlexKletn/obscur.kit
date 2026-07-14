@@ -27,19 +27,19 @@
 //!   whose per-keystroke `on_text_input` handler mirrors the resulting text into
 //!   `state.input_text` so the reactive builder repaints the field.
 //!
-//! # Readable fit-to-width, wheel scroll & zoom
+//! # Device scale, wheel scroll & zoom
 //!
-//! The window is **device-scale aware** and renders the showcase at a **readable
-//! fit-to-width** scale rather than shrinking it: it picks a base scale so the
-//! [`SHOWCASE_WIDTH`]-wide design fills the window width (`physical_width /
-//! (SHOWCASE_WIDTH · FIT_MARGIN)`), points the runtime's viewport at
-//! `physical_extent / effective_scale`, and sets
+//! The window is **device-scale aware**: the render scale is the display's HiDPI
+//! `scale_factor` — **not tied to the window size**. It points the runtime's
+//! viewport at `physical_extent / effective_scale` and sets
 //! `UiRuntime::set_device_scale(effective_scale)` — the runtime then brackets the
 //! whole scene in a root `scale(s, s)` transform, so vectors, text, and gradients
-//! scale crisply at authored size. Any content taller than the window is reached
-//! by the **mouse wheel**, which drives a vertical `scroll_y` pushed to the runtime
-//! as `UiRuntime::set_content_offset` (a root `translate` composed with the device
-//! scale); when the showcase already fits, scroll simply clamps to `0`. A user
+//! rasterize crisply at their authored CSS size. Because the scale is fixed to the
+//! display density, **resizing the window reflows the layout** (the `1fr` gallery
+//! tracks divide the real width; the UI is *not* zoomed up and down with the
+//! window) — exactly like a real application. Any content taller than the window
+//! is reached by the **mouse wheel** (`scroll_y` → `UiRuntime::set_content_offset`,
+//! a root `translate`); when the content fits, scroll clamps to `0`. A user
 //! **zoom** multiplies on top: `Ctrl+=` / `Ctrl++` zoom in (cap 500%), `Ctrl+-`
 //! zooms out (min 30%), and `Ctrl+0` resets zoom **and** scroll. The initial window
 //! is 1000×700 *logical* pixels.
@@ -113,19 +113,6 @@ use showcase::ShowcaseState;
 const CMD_BUTTON: InternedSymbol = InternedSymbol::from_raw(0x5001);
 const CMD_CHECKBOX: InternedSymbol = InternedSymbol::from_raw(0x5002);
 const CMD_INPUT: InternedSymbol = InternedSymbol::from_raw(0x5003);
-
-/// The showcase's fixed logical design width/height (matches the `showcase_png`
-/// viewport, 1440×900). The window renders at a **readable fit-to-width** scale of
-/// `physical_width / (SHOWCASE_WIDTH * FIT_MARGIN)` so this whole width fills the
-/// window at authored size; anything taller than the window is wheel-scrolled.
-const SHOWCASE_WIDTH: f32 = 1440.0;
-/// The showcase's fixed logical design height — the scrollable content height used
-/// when clamping `scroll_y`.
-const SHOWCASE_HEIGHT: f32 = 900.0;
-
-/// A small margin factor so the fitted showcase does not sit edge-to-edge: the
-/// fit-to-width targets `SHOWCASE_WIDTH * FIT_MARGIN` logical px of viewport width.
-const FIT_MARGIN: f32 = 1.04;
 
 /// One wheel *line* of scroll, in logical content px, mapped to a comfortable step
 /// (a `LineDelta` of 1.0 scrolls this much content). `PixelDelta` deltas are used
@@ -250,40 +237,53 @@ impl ShowcaseWindow {
         }
     }
 
-    /// The base **fit-to-width** scale that makes the showcase render at readable,
-    /// authored size: the swapchain's physical width divided by the (slightly
-    /// margined) design width, so the [`SHOWCASE_WIDTH`]-wide design fills the
-    /// window width. Because `physical_width` already folds in the display's HiDPI
-    /// `scale_factor`, this stays HiDPI-sane without an explicit cap (it composes
-    /// with the runtime device scale). Clamped to a sane floor.
-    #[allow(clippy::cast_possible_truncation)]
-    fn fit_scale(&self) -> f32 {
-        let scale_factor = self.scale_factor as f32;
-        let Some(surface) = self.surface.as_ref() else {
-            return scale_factor;
-        };
-        let physical_width = surface.config().width as f32;
-        (physical_width / (SHOWCASE_WIDTH * FIT_MARGIN)).max(0.05)
+    /// The base device-pixel scale the UI renders at: the display's HiDPI
+    /// [`scale_factor`](Self::scale_factor) — **independent of the window size**.
+    ///
+    /// The scale is *not* tied to the window width (no fit-to-width zoom): the UI
+    /// renders at its natural CSS size for the display density, so widening or
+    /// narrowing the window changes the logical viewport and the layout reflows
+    /// (the `1fr` gallery tracks divide the available width), exactly like a real
+    /// application — rather than scaling the whole UI up and down. The user `zoom`
+    /// composes on top for an explicit magnify.
+    fn base_scale(&self) -> f32 {
+        (self.scale_factor as f32).max(0.05)
     }
 
-    /// The effective device-pixel scale the runtime renders at: the fit-to-width
-    /// scale times the user `zoom`. The viewport is the physical extent divided by
-    /// this, so at `zoom == 1.0` the showcase *width* fills the window and any
-    /// remaining height is reached by scrolling.
+    /// The effective device-pixel scale the runtime renders at: the display
+    /// density times the user `zoom`. The viewport is the physical extent divided
+    /// by this, so layout runs in logical CSS pixels that follow the real window
+    /// size and reflow on resize.
     fn effective_scale(&self) -> f32 {
-        self.fit_scale() * self.zoom
+        self.base_scale() * self.zoom
+    }
+
+    /// The tallest content extent actually laid out this frame, in **logical**
+    /// px — the largest bottom edge across the tree, read from the runtime's live
+    /// [`inspect_snapshot`](UiRuntime::inspect_snapshot). Used for the scroll
+    /// range, so scrolling reflects the real content rather than a fixed design
+    /// height (with `#app { min-height: 100vh }` this equals the viewport, so
+    /// there is nothing to scroll until the content genuinely overflows).
+    fn content_height_logical(&self) -> f32 {
+        self.runtime
+            .inspect_snapshot()
+            .nodes
+            .iter()
+            .filter_map(|node| node.bounds)
+            .map(|rect| rect.origin.y + rect.size.height)
+            .fold(0.0_f32, f32::max)
     }
 
     /// The maximum vertical scroll in **physical** px: how far past the bottom of
-    /// the window the fit-to-width content extends. `0` when the whole content
-    /// already fits (so `scroll_y` simply clamps to `0`, harmless).
+    /// the window the real content extends. `0` when the whole content already
+    /// fits (so `scroll_y` simply clamps to `0`, harmless).
     #[allow(clippy::cast_possible_truncation)]
     fn max_scroll_y(&self) -> f32 {
         let Some(surface) = self.surface.as_ref() else {
             return 0.0;
         };
         let physical_height = surface.config().height as f32;
-        let content_height = SHOWCASE_HEIGHT * self.effective_scale();
+        let content_height = self.content_height_logical() * self.effective_scale();
         (content_height - physical_height).max(0.0)
     }
 
@@ -303,13 +303,14 @@ impl ShowcaseWindow {
     fn log_scale_sanity(&self) {
         if let Some(surface) = self.surface.as_ref() {
             let (pw, ph) = (surface.config().width, surface.config().height);
+            let scale = self.effective_scale();
             println!(
-                "[scale] window {pw}×{ph} px · base_scale {:.3} · zoom {:.2} · effective_scale {:.3} · content {:.0}×{:.0} px · max_scroll {:.0} px",
-                self.fit_scale(),
+                "[scale] window {pw}×{ph} px · device_scale {:.3} · zoom {:.2} · effective_scale {:.3} · viewport {:.0}×{:.0} logical (reflows on resize) · max_scroll {:.0} px",
+                self.base_scale(),
                 self.zoom,
-                self.effective_scale(),
-                SHOWCASE_WIDTH * self.effective_scale(),
-                SHOWCASE_HEIGHT * self.effective_scale(),
+                scale,
+                pw as f32 / scale,
+                ph as f32 / scale,
                 self.max_scroll_y(),
             );
         }
