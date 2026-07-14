@@ -1318,6 +1318,7 @@ impl UiRuntime {
 
         // Close the frame span with a counter of how many phases actually ran,
         // so an observer can attribute work to this frame (spec §7.9).
+
         let phases_run = u64::from(plan.reconcile())
             + u64::from(plan.style())
             + u64::from(plan.layout())

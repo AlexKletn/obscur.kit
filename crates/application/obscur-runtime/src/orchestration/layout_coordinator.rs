@@ -149,12 +149,16 @@ impl LayoutCoordinator {
     /// text node to its arranged box width, so the measured height and the painted
     /// line count always agree.
     ///
-    /// # Redundant work (Phase 1)
+    /// # Redundant work
     ///
     /// The selected algorithm runs once per node during `arrange`, and each run
-    /// re-measures that node's children (which recurses). This is deterministic
-    /// and correct but does redundant measurement; a `LayoutCache` will remove
-    /// the redundancy in a later phase (spec §4.2). Text is reshaped per frame.
+    /// re-measures that node's children (which recurses). A per-pass
+    /// [`MeasureCache`] memoizes `measure(node, constraints)`, so a node sized
+    /// under identical constraints is measured (and its text shaped) **once per
+    /// frame** rather than once per ancestor — the dominant cost on a deep,
+    /// text-heavy tree (spec §4.2). Re-measures under *different* constraints
+    /// (intrinsic vs. final sizing) are still distinct; collapsing those needs an
+    /// intrinsic-size cache or incremental invalidation (a later phase).
     // The tree, the per-node side-tables, the viewport + scroll offset, and the
     // shaper are the cohesive inputs of one layout entry point.
     #[allow(clippy::too_many_arguments)]
@@ -334,6 +338,8 @@ impl LayoutCoordinator {
         // The root's containing block — and the fixed-positioning reference for
         // every `position: fixed` descendant — is the viewport rect at the origin.
         let viewport_rect = Rect::new(Point::ORIGIN, viewport);
+        // One measure memoization for the whole pass (see [`MeasureCache`]).
+        let cache = MeasureCache::default();
         arrange(
             tree,
             styles,
@@ -350,6 +356,7 @@ impl LayoutCoordinator {
             scroll_offset,
             editing,
             MAX_DEPTH,
+            &cache,
         );
         boxes
     }
@@ -1162,6 +1169,28 @@ fn padding_box(border_box: Rect, border: Insets) -> Rect {
     Rect::new(Point::new(x, y), Size::new(width, height))
 }
 
+/// A per-layout-pass memoization of [`measure`]: a `(node, constraints)` pair is
+/// sized **once per frame**, collapsing the redundant re-measurement (and text
+/// reshaping) the measure/arrange walk would otherwise do — `arrange(parent)`
+/// measures a subtree, then `arrange(child)` re-measures it under the same
+/// constraints, and so on down the depth. Keyed by the node and the constraint's
+/// four `f32` bit patterns (exact, no hashing/collisions). `RefCell` allows the
+/// short borrow for a lookup/insert to nest inside the recursive algorithm call
+/// that happens between them.
+type MeasureCache = std::cell::RefCell<HashMap<MeasureKey, Size>>;
+type MeasureKey = (NodeId, u32, u32, u32, u32);
+
+/// The exact cache key for `measure(node, constraints)`.
+fn measure_key(node: NodeId, constraints: BoxConstraints) -> MeasureKey {
+    (
+        node,
+        constraints.min.width.to_bits(),
+        constraints.min.height.to_bits(),
+        constraints.max.width.to_bits(),
+        constraints.max.height.to_bits(),
+    )
+}
+
 /// The [`ChildMeasurer`] the coordinator hands to an algorithm.
 ///
 /// It measures a child purely — by recursing into [`measure`] — and never
@@ -1190,6 +1219,8 @@ struct RecMeasurer<'a> {
     editing: Option<EditingView<'a>>,
     /// Remaining recursion budget for children measured through this measurer.
     depth: u32,
+    /// The shared per-frame measure memoization (see [`MeasureCache`]).
+    cache: &'a MeasureCache,
 }
 
 impl ChildMeasurer for RecMeasurer<'_> {
@@ -1206,6 +1237,7 @@ impl ChildMeasurer for RecMeasurer<'_> {
                 self.hyphenator,
                 self.editing,
                 self.depth,
+                self.cache,
             ),
             // Out-of-range index: contribute nothing rather than panic.
             None => Size::ZERO,
@@ -1254,9 +1286,16 @@ fn measure(
     hyphenator: Option<&dyn Hyphenator>,
     editing: Option<EditingView<'_>>,
     depth: u32,
+    cache: &MeasureCache,
 ) -> Size {
     if depth == 0 {
         return Size::ZERO;
+    }
+    // Memoize on (node, constraints): the arrange walk measures the same node
+    // under the same constraints many times per frame; return the first result.
+    let key = measure_key(node, constraints);
+    if let Some(&hit) = cache.borrow().get(&key) {
+        return hit;
     }
     let style = style_of(styles, node);
     // A text node is a constraint-aware leaf: shape + wrap to `max.width`,
@@ -1289,7 +1328,7 @@ fn measure(
             text_transform_for(computed.get(&node)),
             white_space,
         );
-        return measure_text_node(
+        let size = measure_text_node(
             content.as_ref(),
             &style,
             &fallback,
@@ -1308,6 +1347,8 @@ fn measure(
             word_spacing_for(computed.get(&node), style.font_size, root_font),
             tab_size_for(computed.get(&node), style.font_size, root_font),
         );
+        cache.borrow_mut().insert(key, size);
+        return size;
     }
     let Some(algorithm) = algorithm_for(style.display, node, grid_templates, style.gap) else {
         return Size::ZERO;
@@ -1327,9 +1368,12 @@ fn measure(
         hyphenator,
         editing,
         depth: depth - 1,
+        cache,
     };
     let out = algorithm.layout(&style, &children, constraints, &mut measurer);
-    out.size()
+    let size = out.size();
+    cache.borrow_mut().insert(key, size);
+    size
 }
 
 /// Arrange pass: lays `node` out under `constraints`, writes its **absolute**
@@ -1382,6 +1426,7 @@ fn arrange(
     scroll_offset: (f32, f32),
     editing: Option<EditingView<'_>>,
     depth: u32,
+    cache: &MeasureCache,
 ) {
     if depth == 0 {
         return;
@@ -1492,6 +1537,7 @@ fn arrange(
             hyphenator,
             editing,
             depth: depth - 1,
+            cache,
         };
         algorithm.layout(&style, &children, child_constraints, &mut measurer)
     };
@@ -1579,6 +1625,7 @@ fn arrange(
             scroll_offset,
             editing,
             depth - 1,
+            cache,
         );
     }
 
@@ -1599,6 +1646,7 @@ fn arrange(
             hyphenator,
             editing,
             depth - 1,
+            cache,
         );
     }
 }
@@ -1630,6 +1678,7 @@ fn arrange_out_of_flow(
     hyphenator: Option<&dyn Hyphenator>,
     editing: Option<EditingView<'_>>,
     depth: u32,
+    cache: &MeasureCache,
 ) {
     if depth == 0 {
         return;
@@ -1656,6 +1705,7 @@ fn arrange_out_of_flow(
         hyphenator,
         editing,
         depth,
+        cache,
     );
     let rect = style
         .inset
@@ -1683,6 +1733,7 @@ fn arrange_out_of_flow(
         scroll_offset,
         editing,
         depth,
+        cache,
     );
 }
 
