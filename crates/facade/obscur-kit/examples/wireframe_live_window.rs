@@ -45,10 +45,19 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::thread;
+use std::time::Instant;
 
 use obscur_kit::css::compiler::StylesheetCompiler;
 use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
+use obscur_kit::devtools::{inspect_source_from, perf_payload, SharedInspectSource};
+use obscur_kit::devtools_protocol::message::{Inspectable, ScopeSet};
+use obscur_kit::devtools_server::auth::Authenticator;
+use obscur_kit::devtools_server::bridge::RuntimeBridge;
+use obscur_kit::devtools_server::endpoint::DevToolsEndpoint;
+use obscur_kit::devtools_server::transport::{SocketListener, SocketTransport};
+use obscur_kit::perf::FrameStats;
 use obscur_kit::geometry::{Point, Size};
 use obscur_kit::identity::RuntimeId;
 use obscur_kit::interaction::command::KeyEvent;
@@ -96,6 +105,10 @@ struct WireframeWindow {
     scale_factor: f64,
     zoom: f32,
     modifiers: ModifiersState,
+    frame_stats: FrameStats,
+    report_start: Option<Instant>,
+    frames_this_interval: u32,
+    inspect: SharedInspectSource,
 }
 
 impl WireframeWindow {
@@ -212,6 +225,10 @@ impl WireframeWindow {
             scale_factor: 1.0,
             zoom: 1.0,
             modifiers: ModifiersState::empty(),
+            frame_stats: FrameStats::default(),
+            report_start: None,
+            frames_this_interval: 0,
+            inspect: SharedInspectSource::new(),
         }
     }
 
@@ -282,8 +299,10 @@ impl WireframeWindow {
     /// from the current state when one is due), read the committed scene, and
     /// present it on-screen via Vello.
     fn render_frame(&mut self) {
+        let cpu_start = Instant::now();
         self.runtime.run_due_frame_reactive();
         let snapshot = self.runtime.snapshot();
+        let cpu = cpu_start.elapsed();
 
         let (Some(surface), Some(renderer)) = (self.surface.as_ref(), self.renderer.as_mut())
         else {
@@ -294,6 +313,7 @@ impl WireframeWindow {
         let render_frame = RenderFrame::new(snapshot, physical_size);
         let submission = FrameSubmission::new(render_frame);
 
+        let present_start = Instant::now();
         match renderer.present_to_surface(&submission, surface) {
             Ok(_) => {}
             Err(error) => {
@@ -304,6 +324,72 @@ impl WireframeWindow {
                 }
             }
         }
+        let present = present_start.elapsed();
+
+        self.record_frame(cpu, present);
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    /// Records the frame's timings, prints a `[perf]` line once per second, and
+    /// republishes the live inspect source (tree/layout/styles + Rendering=perf)
+    /// for any connected DevTools client.
+    fn record_frame(&mut self, cpu: std::time::Duration, present: std::time::Duration) {
+        self.frame_stats.record(cpu, present);
+        self.frames_this_interval += 1;
+        let start = *self.report_start.get_or_insert_with(Instant::now);
+        let elapsed = start.elapsed();
+        if elapsed.as_secs_f32() >= 1.0 {
+            let fps = self.frames_this_interval as f32 / elapsed.as_secs_f32();
+            let ms = |d: std::time::Duration| d.as_secs_f32() * 1000.0;
+            println!(
+                "[perf] {fps:.0} fps · cpu {:.2}ms · gpu {:.2}ms · frame {:.2}ms (worst {:.2}ms)",
+                ms(self.frame_stats.avg_cpu()),
+                ms(self.frame_stats.avg_present()),
+                ms(self.frame_stats.avg_total()),
+                ms(self.frame_stats.max_total()),
+            );
+            self.inspect.set(
+                inspect_source_from(&self.runtime)
+                    .with_snapshot(Inspectable::Rendering, perf_payload(&self.frame_stats)),
+            );
+            self.report_start = Some(Instant::now());
+            self.frames_this_interval = 0;
+        }
+    }
+
+    /// Binds and serves a loopback, token-authed DevTools endpoint on a background
+    /// thread, so an external `obscur-devtools` client can inspect this live
+    /// window's real controls (tree/layout/styles) + frame perf (§7.6/§7.9).
+    fn start_devtools_endpoint(&self) {
+        let listener = match SocketListener::bind_loopback() {
+            Ok(listener) => listener,
+            Err(error) => {
+                eprintln!("[devtools] endpoint disabled (bind failed: {error})");
+                return;
+            }
+        };
+        if let Ok(Some(addr)) = listener.local_addr() {
+            println!(
+                "[devtools] live endpoint on {addr}\n\
+                 [devtools] try: obscur-devtools inspect all --tcp {addr} --token dev"
+            );
+        }
+        let shared = self.inspect.clone();
+        thread::spawn(move || devtools_serve(&listener, &shared));
+    }
+}
+
+/// Serves the DevTools endpoint over `listener` forever, one session at a time,
+/// each answering inspects from the shared, per-frame-refreshed `source`.
+fn devtools_serve(listener: &SocketListener, source: &SharedInspectSource) {
+    while let Ok(stream) = listener.accept() {
+        let mut authenticator = Authenticator::new();
+        authenticator.register_token("dev", ScopeSet::all_read());
+        let mut endpoint = DevToolsEndpoint::new(authenticator, RuntimeBridge::new(source.clone()));
+        endpoint.enable();
+        let _ = SocketTransport::new(stream).serve(&mut endpoint);
     }
 }
 
@@ -355,6 +441,7 @@ impl ApplicationHandler for WireframeWindow {
                         println!(
                             "wireframe window ready — hover/click the bare controls; their look is the UA default."
                         );
+                        self.start_devtools_endpoint();
                     }
                     Err(error) => {
                         eprintln!("failed to build the Vello device: {error}");
