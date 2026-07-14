@@ -20,12 +20,15 @@
 //! keeps the square at FULL size through the whole sweep (a naive component-wise
 //! matrix lerp would shrink it ~30% at the midpoint); the box rotates 0°→90°→0°.
 //!
-//! # Fit-to-width & HiDPI
+//! # Device scale & HiDPI
 //!
-//! The window is device-scale aware: it picks a base scale so the
-//! [`DESIGN_WIDTH`]-wide design fills the window width, points the runtime's
-//! viewport at `physical_extent / scale`, and sets the runtime device scale so
-//! the scene is bracketed in a root `scale()` and rasterizes crisply.
+//! The window is **device-scale aware**: the render scale is the display's HiDPI
+//! `scale_factor` — **not tied to the window size**. It points the runtime's
+//! viewport at `physical_extent / scale` and sets the runtime device scale so the
+//! scene is bracketed in a root `scale()` and rasterizes crisply at its authored
+//! CSS size. Because the scale is fixed to the display density, **resizing the
+//! window reflows the layout** — the UI is *not* zoomed up and down with the
+//! window — exactly like a real application.
 //!
 //! Run it (a display + a GPU adapter are required):
 //! `cargo run -p obscur-kit --example capabilities_window --features full`
@@ -63,14 +66,6 @@ use winit::window::{Window, WindowAttributes, WindowId};
 
 #[path = "capabilities/scene.rs"]
 mod capabilities;
-
-/// The demo's fixed logical design width — the window renders at a fit-to-width
-/// scale of `physical_width / (DESIGN_WIDTH * FIT_MARGIN)` so this whole width
-/// fills the window at authored size.
-const DESIGN_WIDTH: f32 = 1440.0;
-
-/// A small margin factor so the fitted demo does not sit edge-to-edge.
-const FIT_MARGIN: f32 = 1.02;
 
 /// The animation period in seconds: one full `0° → 90° → 0°` sweep.
 const CYCLE_SECS: f32 = 3.2;
@@ -118,27 +113,35 @@ impl CapabilitiesWindow {
         }
     }
 
-    /// The fit-to-width device scale: the swapchain's physical width over the
-    /// (slightly margined) design width, clamped to a sane floor.
+    /// The base device-pixel scale the UI renders at: the display's HiDPI
+    /// [`scale_factor`](Self::scale_factor) — **independent of the window size**.
+    ///
+    /// The scale is *not* tied to the window width (no fit-to-width zoom): the UI
+    /// renders at its natural CSS size for the display density, so widening or
+    /// narrowing the window changes the logical viewport and the layout reflows,
+    /// exactly like a real application — rather than scaling the whole UI up and
+    /// down with the window.
     #[allow(clippy::cast_possible_truncation)]
-    fn fit_scale(&self) -> f32 {
-        let Some(surface) = self.surface.as_ref() else {
-            return self.scale_factor as f32;
-        };
-        let physical_width = surface.config().width as f32;
-        (physical_width / (DESIGN_WIDTH * FIT_MARGIN)).max(0.05)
+    fn base_scale(&self) -> f32 {
+        (self.scale_factor as f32).max(0.05)
     }
 
     /// Re-syncs the runtime's viewport + device scale to the current swapchain
-    /// extent and fit scale (called after surface creation and on resize).
+    /// extent and display density (called after surface creation and on resize).
+    ///
+    /// The viewport is the swapchain's **physical** extent divided by the device
+    /// scale, so layout runs in **logical** CSS pixels that follow the real window
+    /// size and reflow on resize.
     #[allow(clippy::cast_possible_truncation)]
     fn sync_viewport(&mut self) {
         if let Some(surface) = self.surface.as_ref() {
             let config = surface.config();
-            let scale = self.fit_scale();
-            let viewport = Size::new(config.width as f32 / scale, config.height as f32 / scale);
-            self.runtime.set_viewport(viewport);
-            self.runtime.set_device_scale(scale);
+            // The kit's standard HiDPI mapping (device scale + logical viewport)
+            // in one call — no hand-rolled viewport arithmetic here.
+            self.runtime.set_surface(
+                Size::new(config.width as f32, config.height as f32),
+                self.base_scale(),
+            );
         }
     }
 

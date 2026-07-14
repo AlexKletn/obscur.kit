@@ -22,9 +22,12 @@
 //!   command has no handler, so activation resolves to nothing).
 //!
 //! The status line ("last event: … · clicks: N") updates every interaction so the
-//! events are visible. The window is device-scale aware and renders at a readable
-//! fit-to-width scale; the mouse wheel scrolls, and `Ctrl+=`/`Ctrl+-`/`Ctrl+0`
-//! zoom (this is the exact driver shape reused from `showcase_window.rs`).
+//! events are visible. The window is **device-scale aware**: the render scale is
+//! the display's HiDPI `scale_factor` — **not tied to the window size** — so
+//! resizing the window reflows the layout rather than zooming the whole UI up and
+//! down, exactly like a real application. Any content taller than the window is
+//! reached by the mouse wheel, and `Ctrl+=`/`Ctrl+-`/`Ctrl+0` apply a user zoom on
+//! top (this is the exact driver shape reused from `showcase_window.rs`).
 //!
 //! Run it (a display + a GPU adapter are required):
 //! `cargo run -p obscur-kit --example controls_window --features full`
@@ -74,15 +77,6 @@ use controls::{
     SELECT_COUNT, SELECT_LABELS, radio_command, select_option_command,
 };
 
-/// The gallery's fixed logical design width/height. The window renders at a
-/// readable fit-to-width scale of `physical_width / (CONTROLS_WIDTH * FIT_MARGIN)`
-/// so this whole width fills the window at authored size; taller content scrolls.
-const CONTROLS_WIDTH: f32 = 660.0;
-/// The gallery's fixed logical design height — the scrollable content height used
-/// when clamping `scroll_y`.
-const CONTROLS_HEIGHT: f32 = 760.0;
-/// A small margin factor so the fitted gallery does not sit edge-to-edge.
-const FIT_MARGIN: f32 = 1.04;
 /// One wheel *line* of scroll, in logical content px.
 const WHEEL_LINE_STEP: f32 = 64.0;
 /// The initial (and layout) window size in logical pixels.
@@ -197,18 +191,35 @@ impl ControlsWindow {
         }
     }
 
-    #[allow(clippy::cast_possible_truncation)]
-    fn fit_scale(&self) -> f32 {
-        let scale_factor = self.scale_factor as f32;
-        let Some(surface) = self.surface.as_ref() else {
-            return scale_factor;
-        };
-        let physical_width = surface.config().width as f32;
-        (physical_width / (CONTROLS_WIDTH * FIT_MARGIN)).max(0.05)
+    /// The base device-pixel scale the UI renders at: the display's HiDPI
+    /// [`scale_factor`](Self::scale_factor) — **independent of the window size**.
+    ///
+    /// The scale is *not* tied to the window width (no fit-to-width zoom): the UI
+    /// renders at its natural CSS size for the display density, so widening or
+    /// narrowing the window changes the logical viewport and the layout reflows,
+    /// exactly like a real application — rather than scaling the whole UI up and
+    /// down. The user `zoom` composes on top for an explicit magnify.
+    fn base_scale(&self) -> f32 {
+        (self.scale_factor as f32).max(0.05)
     }
 
     fn effective_scale(&self) -> f32 {
-        self.fit_scale() * self.zoom
+        self.base_scale() * self.zoom
+    }
+
+    /// The tallest content extent actually laid out this frame, in **logical**
+    /// px — the largest bottom edge across the tree, read from the runtime's live
+    /// [`inspect_snapshot`](UiRuntime::inspect_snapshot). Used for the scroll
+    /// range, so scrolling reflects the real content rather than a fixed design
+    /// height.
+    fn content_height_logical(&self) -> f32 {
+        self.runtime
+            .inspect_snapshot()
+            .nodes
+            .iter()
+            .filter_map(|node| node.bounds)
+            .map(|rect| rect.origin.y + rect.size.height)
+            .fold(0.0_f32, f32::max)
     }
 
     #[allow(clippy::cast_possible_truncation)]
@@ -217,7 +228,7 @@ impl ControlsWindow {
             return 0.0;
         };
         let physical_height = surface.config().height as f32;
-        let content_height = CONTROLS_HEIGHT * self.effective_scale();
+        let content_height = self.content_height_logical() * self.effective_scale();
         (content_height - physical_height).max(0.0)
     }
 
@@ -244,10 +255,12 @@ impl ControlsWindow {
     fn sync_viewport(&mut self) {
         if let Some(surface) = self.surface.as_ref() {
             let config = surface.config();
-            let scale = self.effective_scale();
-            let viewport = Size::new(config.width as f32 / scale, config.height as f32 / scale);
-            self.runtime.set_viewport(viewport);
-            self.runtime.set_device_scale(scale);
+            // The kit's standard HiDPI mapping (device scale + logical viewport)
+            // in one call — no hand-rolled viewport arithmetic here.
+            self.runtime.set_surface(
+                Size::new(config.width as f32, config.height as f32),
+                self.effective_scale(),
+            );
         }
         self.apply_scroll();
     }

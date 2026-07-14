@@ -24,25 +24,26 @@
 //! stylesheet swap plus a rebuild of the same `uikit::view(i)` with tab `i`
 //! highlighted.
 //!
-//! # Readable fit-to-width, wheel scroll & zoom
+//! # Device scale, wheel scroll & zoom
 //!
-//! The gallery is a tall fixed design ([`GALLERY_WIDTH`]×[`GALLERY_HEIGHT`] logical
-//! px). Rather than shrink the whole ~2080-px-tall gallery to fit the window height
-//! (which made everything tiny), the window renders at a **readable fit-to-width**
-//! scale: it picks a base scale so the [`GALLERY_WIDTH`]-wide design exactly fills
-//! the window width (`physical_width / (GALLERY_WIDTH · FIT_MARGIN)`), sets that as
-//! [`UiRuntime::set_device_scale`], and points the viewport at `physical_extent /
-//! effective_scale` — so layout runs in logical CSS pixels and the whole scene is
-//! bracketed by a root `scale(s, s)` and rasterizes crisply at authored size. The
-//! extra height that no longer fits is reached by **scrolling**: the mouse wheel
+//! The window is **device-scale aware**: the render scale is the display's HiDPI
+//! `scale_factor` — **not tied to the window size**. It hands the runtime its
+//! swapchain via [`UiRuntime::set_surface`], which points the viewport at
+//! `physical_extent / effective_scale` and sets the device scale to that same
+//! factor — the runtime then brackets the whole scene in a root `scale(s, s)`
+//! transform, so vectors, text, and gradients rasterize crisply at their authored
+//! CSS size. Because the scale is fixed to the display density, **resizing the
+//! window reflows the layout** (the gallery divides the real width; the UI is *not*
+//! zoomed up and down with the window) — exactly like a real application. Any
+//! content taller than the window is reached by **scrolling**: the mouse wheel
 //! drives a vertical `scroll_y`, pushed to the runtime as
 //! [`UiRuntime::set_content_offset`] (a root `translate` composed with the device
 //! scale). A user **zoom** multiplies on top: `Ctrl+=` / `Ctrl++` zoom in (cap
-//! 500%), `Ctrl+-` zooms out (min 30%), `Ctrl+0` resets zoom **and** scroll. Fit +
-//! scroll clamp are recomputed on resize / scale-factor change / zoom. Pointer
-//! coordinates map through the device scale + scroll offset automatically (the
-//! runtime divides by the scale and adds the offset back), so tab hit-testing is
-//! correct at any fit, zoom, or scroll position.
+//! 500%), `Ctrl+-` zooms out (min 30%), `Ctrl+0` resets zoom **and** scroll. The
+//! device scale + scroll clamp are recomputed on resize / scale-factor change /
+//! zoom. Pointer coordinates map through the device scale + scroll offset
+//! automatically (the runtime divides by the scale and adds the offset back), so
+//! tab hit-testing is correct at any scale, zoom, or scroll position.
 //!
 //! Run it (a display + a GPU adapter are required):
 //! `cargo run -p obscur-kit --example uikit_window --features full`
@@ -90,28 +91,14 @@ mod uikit;
 
 use uikit::{KIT_TAB_CMD, MATERIAL_INDEX};
 
-/// The gallery's fixed logical design width (matches the `uikit_*_png` viewport,
-/// 1280×2080). The window renders at a **readable fit-to-width** scale of
-/// `physical_width / (GALLERY_WIDTH * FIT_MARGIN)` so this whole width fills the
-/// window at authored size; the taller-than-window remainder is scrolled.
-const GALLERY_WIDTH: f32 = 1280.0;
-
-/// The gallery's fixed logical design height (matches the `uikit_*_png` viewport,
-/// 1280×2080). Used as the scrollable content height when clamping `scroll_y`.
-const GALLERY_HEIGHT: f32 = 2080.0;
-
-/// A small margin factor so the fitted gallery does not sit edge-to-edge: the
-/// fit-to-width targets `GALLERY_WIDTH * FIT_MARGIN` logical px of viewport width.
-const FIT_MARGIN: f32 = 1.04;
-
 /// One wheel *line* of scroll, in logical content px, mapped to a comfortable step
 /// (a `LineDelta` of 1.0 scrolls this much content). `PixelDelta` deltas are used
 /// as-is (already in physical px).
 const WHEEL_LINE_STEP: f32 = 64.0;
 
 /// The initial window size in *logical* pixels. A wide, moderately tall window so
-/// the fit-to-width render fills the window with readable-size content from the
-/// first frame and there is room to wheel-scroll the rest; freely resizable.
+/// the gallery renders at readable size from the first frame and there is room to
+/// wheel-scroll the rest; freely resizable (resize reflows the layout).
 const INITIAL_SIZE: Size = Size::new(1080.0, 900.0);
 
 /// The winit application: owns the window, the GPU-backed Vello renderer, the
@@ -145,8 +132,8 @@ struct UiKitWindow {
     cursor: (f64, f64),
     /// The window's current HiDPI device-pixel ratio (winit `scale_factor`).
     scale_factor: f64,
-    /// The user zoom factor (Ctrl+= / Ctrl+- / Ctrl+0), multiplied with the fit
-    /// scale to form the effective device scale. `1.0` is 100%.
+    /// The user zoom factor (Ctrl+= / Ctrl+- / Ctrl+0), multiplied with the
+    /// display density to form the effective device scale. `1.0` is 100%.
     zoom: f32,
     /// The vertical scroll offset in **physical** px (mouse-wheel driven), clamped
     /// to `0 ..= max(0, content_height*effective_scale - physical_height)`. Pushed
@@ -203,40 +190,52 @@ impl UiKitWindow {
         }
     }
 
-    /// The base **fit-to-width** scale that makes the gallery render at readable,
-    /// authored size: the swapchain's physical width divided by the (slightly
-    /// margined) gallery width, so the [`GALLERY_WIDTH`]-wide design fills the
-    /// window width. Because `physical_width` already folds in the display's HiDPI
-    /// `scale_factor`, this stays HiDPI-sane without an explicit cap (it composes
-    /// with the runtime device scale). Clamped to a sane floor.
-    #[allow(clippy::cast_possible_truncation)]
-    fn fit_scale(&self) -> f32 {
-        let scale_factor = self.scale_factor as f32;
-        let Some(surface) = self.surface.as_ref() else {
-            return scale_factor;
-        };
-        let physical_width = surface.config().width as f32;
-        (physical_width / (GALLERY_WIDTH * FIT_MARGIN)).max(0.05)
+    /// The base device-pixel scale the UI renders at: the display's HiDPI
+    /// [`scale_factor`](Self::scale_factor) — **independent of the window size**.
+    ///
+    /// The scale is *not* tied to the window width (no fit-to-width zoom): the
+    /// gallery renders at its natural CSS size for the display density, so widening
+    /// or narrowing the window changes the logical viewport and the layout reflows
+    /// (the gallery divides the available width), exactly like a real application —
+    /// rather than scaling the whole UI up and down. The user `zoom` composes on
+    /// top for an explicit magnify.
+    fn base_scale(&self) -> f32 {
+        (self.scale_factor as f32).max(0.05)
     }
 
-    /// The effective device-pixel scale the runtime renders at: the fit-to-width
-    /// scale times the user `zoom`. The viewport is the physical extent divided by
-    /// this, so at `zoom == 1.0` the gallery *width* fills the window and the
-    /// remaining height is reached by scrolling.
+    /// The effective device-pixel scale the runtime renders at: the display
+    /// density times the user `zoom`. The viewport is the physical extent divided
+    /// by this, so layout runs in logical CSS pixels that follow the real window
+    /// size and reflow on resize.
     fn effective_scale(&self) -> f32 {
-        self.fit_scale() * self.zoom
+        self.base_scale() * self.zoom
+    }
+
+    /// The tallest content extent actually laid out this frame, in **logical**
+    /// px — the largest bottom edge across the tree, read from the runtime's live
+    /// [`inspect_snapshot`](UiRuntime::inspect_snapshot). Used for the scroll
+    /// range, so scrolling reflects the real content rather than a fixed design
+    /// height.
+    fn content_height_logical(&self) -> f32 {
+        self.runtime
+            .inspect_snapshot()
+            .nodes
+            .iter()
+            .filter_map(|node| node.bounds)
+            .map(|rect| rect.origin.y + rect.size.height)
+            .fold(0.0_f32, f32::max)
     }
 
     /// The maximum vertical scroll in **physical** px: how far past the bottom of
-    /// the window the fit-to-width content extends. `0` when the whole content
-    /// already fits (so `scroll_y` simply clamps to `0`, harmless).
+    /// the window the real content extends. `0` when the whole content already fits
+    /// (so `scroll_y` simply clamps to `0`, harmless).
     #[allow(clippy::cast_possible_truncation)]
     fn max_scroll_y(&self) -> f32 {
         let Some(surface) = self.surface.as_ref() else {
             return 0.0;
         };
         let physical_height = surface.config().height as f32;
-        let content_height = GALLERY_HEIGHT * self.effective_scale();
+        let content_height = self.content_height_logical() * self.effective_scale();
         (content_height - physical_height).max(0.0)
     }
 
@@ -262,19 +261,26 @@ impl UiKitWindow {
     }
 
     /// Re-syncs the runtime's layout viewport and device scale to the current
-    /// swapchain extent, fit-to-height scale, and user zoom. Called after surface
+    /// swapchain extent, display density, and user zoom. Called after surface
     /// creation, on resize, on a scale-factor change, and after a zoom change.
+    ///
+    /// The viewport is the swapchain's **physical** extent divided by the effective
+    /// scale, so layout runs in **logical** CSS pixels; the runtime's device scale
+    /// is set to that same factor, so the composed scene is bracketed by a root
+    /// `scale(s, s)` and rasterizes crisply at physical resolution.
     #[allow(clippy::cast_possible_truncation)]
     fn sync_viewport(&mut self) {
         if let Some(surface) = self.surface.as_ref() {
             let config = surface.config();
-            let scale = self.effective_scale();
-            let viewport = Size::new(config.width as f32 / scale, config.height as f32 / scale);
-            self.runtime.set_viewport(viewport);
-            self.runtime.set_device_scale(scale);
+            // The kit's standard HiDPI mapping (device scale + logical viewport)
+            // in one call — no hand-rolled viewport arithmetic here.
+            self.runtime.set_surface(
+                Size::new(config.width as f32, config.height as f32),
+                self.effective_scale(),
+            );
         }
-        // The fit/zoom just changed, so the scrollable range may have too — re-clamp
-        // and re-push the content offset.
+        // The scale/zoom just changed, so the scrollable range may have too —
+        // re-clamp and re-push the content offset.
         self.apply_scroll();
     }
 
@@ -285,13 +291,14 @@ impl UiKitWindow {
     fn log_scale_sanity(&self) {
         if let Some(surface) = self.surface.as_ref() {
             let (pw, ph) = (surface.config().width, surface.config().height);
+            let scale = self.effective_scale();
             println!(
-                "[scale] window {pw}×{ph} px · base_scale {:.3} · zoom {:.2} · effective_scale {:.3} · content {:.0}×{:.0} px · max_scroll {:.0} px",
-                self.fit_scale(),
+                "[scale] window {pw}×{ph} px · device_scale {:.3} · zoom {:.2} · effective_scale {:.3} · viewport {:.0}×{:.0} logical (reflows on resize) · max_scroll {:.0} px",
+                self.base_scale(),
                 self.zoom,
-                self.effective_scale(),
-                GALLERY_WIDTH * self.effective_scale(),
-                GALLERY_HEIGHT * self.effective_scale(),
+                scale,
+                pw as f32 / scale,
+                ph as f32 / scale,
                 self.max_scroll_y(),
             );
         }

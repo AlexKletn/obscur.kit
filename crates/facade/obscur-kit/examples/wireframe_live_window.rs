@@ -25,9 +25,11 @@
 //! The demo's OWN stylesheet is **layout chrome only** (masthead / cards / captions
 //! / graph-paper page) — it never restyles a control, so the UA sheet is the whole
 //! source of the control look. The status line ("last event: … · clicks: N") updates
-//! every interaction. The window is device-scale aware and renders at a readable
-//! fit-to-width scale; the mouse wheel scrolls, and `Ctrl+=`/`Ctrl+-`/`Ctrl+0` zoom
-//! (the exact driver shape reused from `controls_window.rs` / `showcase_window.rs`).
+//! every interaction. The window is **device-scale aware**: the render scale is the
+//! display's HiDPI `scale_factor` — **not tied to the window size** — so resizing the
+//! window reflows the layout instead of zooming the whole UI up and down. The mouse
+//! wheel scrolls, and `Ctrl+=`/`Ctrl+-`/`Ctrl+0` zoom on top (the exact driver shape
+//! reused from `controls_window.rs` / `showcase_window.rs`).
 //!
 //! Run it (a display + a GPU adapter are required):
 //! `cargo run -p obscur-kit --example wireframe_live_window --features full`
@@ -77,12 +79,6 @@ use wireframe::{
     SELECT_COUNT, WireState, radio_command,
 };
 
-/// The spec sheet's fixed logical design width/height. The window renders at a
-/// readable fit-to-width scale of `physical_width / (WIRE_WIDTH * FIT_MARGIN)` so
-/// this whole width fills the window at authored size; taller content scrolls.
-const WIRE_WIDTH: f32 = 1240.0;
-/// A small margin factor so the fitted sheet does not sit edge-to-edge.
-const FIT_MARGIN: f32 = 1.04;
 /// One wheel *line* of scroll, in logical content px.
 const WHEEL_LINE_STEP: f32 = 64.0;
 /// The initial (and layout) window size in logical pixels.
@@ -219,18 +215,20 @@ impl WireframeWindow {
         }
     }
 
-    #[allow(clippy::cast_possible_truncation)]
-    fn fit_scale(&self) -> f32 {
-        let scale_factor = self.scale_factor as f32;
-        let Some(surface) = self.surface.as_ref() else {
-            return scale_factor;
-        };
-        let physical_width = surface.config().width as f32;
-        (physical_width / (WIRE_WIDTH * FIT_MARGIN)).max(0.05)
+    /// The base device-pixel scale the UI renders at: the display's HiDPI
+    /// [`scale_factor`](Self::scale_factor) — **independent of the window size**.
+    ///
+    /// The scale is *not* tied to the window width (no fit-to-width zoom): the UI
+    /// renders at its natural CSS size for the display density, so widening or
+    /// narrowing the window changes the logical viewport and the layout reflows,
+    /// exactly like a real application — rather than scaling the whole UI up and
+    /// down. The user `zoom` composes on top for an explicit magnify.
+    fn base_scale(&self) -> f32 {
+        (self.scale_factor as f32).max(0.05)
     }
 
     fn effective_scale(&self) -> f32 {
-        self.fit_scale() * self.zoom
+        self.base_scale() * self.zoom
     }
 
     /// Assembles a domain button [`PointerEvent`] at the tracked cursor.
@@ -250,10 +248,10 @@ impl WireframeWindow {
     fn sync_viewport(&mut self) {
         if let Some(surface) = self.surface.as_ref() {
             let config = surface.config();
-            let scale = self.effective_scale();
-            let viewport = Size::new(config.width as f32 / scale, config.height as f32 / scale);
-            self.runtime.set_viewport(viewport);
-            self.runtime.set_device_scale(scale);
+            let physical = Size::new(config.width as f32, config.height as f32);
+            // The kit's standard HiDPI mapping (device scale + logical viewport)
+            // in one call — no hand-rolled viewport arithmetic here.
+            self.runtime.set_surface(physical, self.effective_scale());
         }
     }
 
