@@ -10,11 +10,14 @@
 //! keeps the source `Send`-able onto the serving thread without borrowing the
 //! runtime.
 
+use std::sync::{Arc, Mutex};
+
 use obscur_devtools_protocol::message::{ControlAction, InjectedEvent, Inspectable, SnapshotPayload};
-use obscur_devtools_server::bridge::SnapshotInspectSource;
+use obscur_devtools_server::bridge::{InspectSource, SnapshotInspectSource};
 
 use crate::geometry::Point;
 use crate::interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind, PointerId};
+use crate::perf::FrameStats;
 use crate::runtime::UiRuntime;
 
 /// Builds a [`SnapshotInspectSource`] populated from `runtime`'s current live
@@ -127,5 +130,109 @@ pub fn apply_control(runtime: &mut UiRuntime, action: ControlAction) {
     match action {
         ControlAction::SetInspectMode(on) => runtime.set_inspect_mode(on),
         ControlAction::Pause | ControlAction::Resume | ControlAction::StepFrame => {}
+    }
+}
+
+/// Renders host-side frame performance ([`FrameStats`]) as the
+/// [`Inspectable::Rendering`] snapshot payload (spec §7.9), so an external
+/// DevTools client sees live FPS + CPU/GPU timings instead of a placeholder.
+///
+/// A host attaches it to the source it serves, e.g.
+/// `inspect_source_from(&rt).with_snapshot(Inspectable::Rendering, perf_payload(&stats))`.
+#[must_use]
+pub fn perf_payload(stats: &FrameStats) -> SnapshotPayload {
+    let ms = |d: std::time::Duration| d.as_secs_f32() * 1000.0;
+    let fps = stats.cost_fps();
+    let detail = format!(
+        "fps ~{:.0}\ncpu {:.2}ms (build→layout→compose)\ngpu {:.2}ms (present)\nframe {:.2}ms\nworst {:.2}ms\nsamples {}",
+        fps,
+        ms(stats.avg_cpu()),
+        ms(stats.avg_present()),
+        ms(stats.avg_total()),
+        ms(stats.max_total()),
+        stats.len(),
+    );
+    SnapshotPayload::new(
+        format!("~{fps:.0} fps · {:.2}ms/frame", ms(stats.avg_total())),
+        fps.round() as u64,
+        Vec::new(),
+    )
+    .with_detail(detail)
+}
+
+/// A thread-shareable [`InspectSource`] whose backing snapshot the host swaps out
+/// each frame while a serving thread reads it (spec §7.6 host-provides-device).
+///
+/// The host holds one handle and calls [`set`](Self::set) after every frame with
+/// a freshly built [`SnapshotInspectSource`] (e.g. from [`inspect_source_from`]
+/// plus [`perf_payload`]); a [`clone`](Clone::clone) handed to a
+/// [`DevToolsEndpoint`](obscur_devtools_server::endpoint::DevToolsEndpoint) on a
+/// serving thread answers every inspect from the latest snapshot. Cloning shares
+/// the same inner state (an `Arc`), so updates on one handle are visible on all.
+#[derive(Clone, Default)]
+pub struct SharedInspectSource {
+    inner: Arc<Mutex<SnapshotInspectSource>>,
+}
+
+impl SharedInspectSource {
+    /// Creates a shared source backed by an empty snapshot.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Replaces the backing snapshot with `source` (called each frame by the host).
+    ///
+    /// A poisoned lock (a serving thread panicked mid-read) is recovered rather
+    /// than propagated, so a DevTools client fault never takes down the host.
+    pub fn set(&self, source: SnapshotInspectSource) {
+        let mut guard = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        *guard = source;
+    }
+}
+
+impl InspectSource for SharedInspectSource {
+    fn snapshot(&self, target: Inspectable) -> SnapshotPayload {
+        self.inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .snapshot(target)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn perf_payload_reports_fps_and_timing_breakdown() {
+        let mut stats = FrameStats::default();
+        // Two 8ms frames → ~125 fps sustainable, 4ms cpu + 4ms gpu average.
+        stats.record(Duration::from_millis(4), Duration::from_millis(4));
+        stats.record(Duration::from_millis(4), Duration::from_millis(4));
+        let payload = perf_payload(&stats);
+        assert!(payload.description.contains("125 fps"), "{}", payload.description);
+        assert!(payload.detail.contains("gpu 4.00ms"), "{}", payload.detail);
+        assert!(payload.detail.contains("cpu 4.00ms"), "{}", payload.detail);
+        assert_eq!(payload.entity_count, 125);
+    }
+
+    #[test]
+    fn shared_source_serves_the_latest_set_snapshot() {
+        let shared = SharedInspectSource::new();
+        // Before any set: the empty snapshot's typed default (never a panic).
+        assert!(shared.snapshot(Inspectable::Rendering).entity_count == 0);
+
+        let mut stats = FrameStats::default();
+        stats.record(Duration::from_millis(5), Duration::from_millis(5));
+        shared.set(
+            SnapshotInspectSource::new()
+                .with_snapshot(Inspectable::Rendering, perf_payload(&stats)),
+        );
+        // A clone (as handed to a serving thread) sees the update through the Arc.
+        let served = shared.clone();
+        assert!(served.snapshot(Inspectable::Rendering).description.contains("fps"));
+        assert_eq!(served.snapshot(Inspectable::Rendering).entity_count, 100);
     }
 }

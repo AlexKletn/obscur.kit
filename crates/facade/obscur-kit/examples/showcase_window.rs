@@ -73,6 +73,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::thread;
 use std::time::Instant;
 
 use obscur_kit::bootstrap::KitBootstrap;
@@ -80,6 +81,12 @@ use obscur_kit::css::compiler::StylesheetCompiler;
 use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
 use obscur_kit::geometry::{Point, Size};
+use obscur_kit::devtools::{inspect_source_from, perf_payload, SharedInspectSource};
+use obscur_kit::devtools_protocol::message::{Inspectable, ScopeSet};
+use obscur_kit::devtools_server::auth::Authenticator;
+use obscur_kit::devtools_server::bridge::RuntimeBridge;
+use obscur_kit::devtools_server::endpoint::DevToolsEndpoint;
+use obscur_kit::devtools_server::transport::{SocketListener, SocketTransport};
 use obscur_kit::identity::{InternedSymbol, RuntimeId};
 use obscur_kit::perf::FrameStats;
 use obscur_kit::interaction::command::KeyEvent;
@@ -172,6 +179,9 @@ struct ShowcaseWindow {
     last_inspect_node: Option<u64>,
     /// Rolling per-frame CPU (layout/compose) + present (GPU) timings.
     frame_stats: FrameStats,
+    /// The live inspect source served to external DevTools clients; refreshed
+    /// once per second with the tree/layout/styles + the `Rendering` perf snapshot.
+    inspect: SharedInspectSource,
     /// The start of the current one-second perf-report interval, and how many
     /// frames have been presented in it, so `[perf]` logs a real present FPS.
     report_start: Option<Instant>,
@@ -245,6 +255,7 @@ impl ShowcaseWindow {
             frame_stats: FrameStats::default(),
             report_start: None,
             frames_this_interval: 0,
+            inspect: SharedInspectSource::new(),
         }
     }
 
@@ -473,9 +484,50 @@ impl ShowcaseWindow {
                 ms(self.frame_stats.avg_total()),
                 ms(self.frame_stats.max_total()),
             );
+            // Publish the latest state to any connected DevTools client: the live
+            // tree/layout/styles plus the `Rendering` = frame-perf snapshot (§7.9).
+            self.inspect.set(
+                inspect_source_from(&self.runtime)
+                    .with_snapshot(Inspectable::Rendering, perf_payload(&self.frame_stats)),
+            );
             self.report_start = Some(Instant::now());
             self.frames_this_interval = 0;
         }
+    }
+
+    /// Binds a loopback DevTools endpoint and serves it on a background thread,
+    /// so an external `obscur-devtools` client can inspect this live window — its
+    /// tree/layout/styles and the `Rendering` frame-perf snapshot (spec §7.6/§7.9).
+    /// Local-only and token-authenticated; a bind failure is non-fatal.
+    fn start_devtools_endpoint(&self) {
+        let listener = match SocketListener::bind_loopback() {
+            Ok(listener) => listener,
+            Err(error) => {
+                eprintln!("[devtools] endpoint disabled (bind failed: {error})");
+                return;
+            }
+        };
+        if let Ok(Some(addr)) = listener.local_addr() {
+            println!(
+                "[devtools] live endpoint on {addr}\n\
+                 [devtools] try: obscur-devtools inspect rendering --tcp {addr} --token dev   (or: tree | layout | all)"
+            );
+        }
+        let shared = self.inspect.clone();
+        thread::spawn(move || devtools_serve(&listener, &shared));
+    }
+}
+
+/// Serves the DevTools endpoint over `listener` forever, one session at a time,
+/// each answering inspects from the shared, per-frame-refreshed `source`.
+fn devtools_serve(listener: &SocketListener, source: &SharedInspectSource) {
+    while let Ok(stream) = listener.accept() {
+        let mut authenticator = Authenticator::new();
+        authenticator.register_token("dev", ScopeSet::all_read());
+        let mut endpoint = DevToolsEndpoint::new(authenticator, RuntimeBridge::new(source.clone()));
+        endpoint.enable();
+        // A client-side fault ends that session, not the server.
+        let _ = SocketTransport::new(stream).serve(&mut endpoint);
     }
 }
 
@@ -531,6 +583,7 @@ impl ApplicationHandler for ShowcaseWindow {
                         if let Some(window) = self.window.as_ref() {
                             window.request_redraw();
                         }
+                        self.start_devtools_endpoint();
                     }
                     Err(error) => {
                         eprintln!("failed to build the Vello device: {error}");
