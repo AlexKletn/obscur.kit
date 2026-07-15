@@ -1,10 +1,10 @@
 //! [`ReconcileEnactor`]: enacts a frame's root reconcile through the atomic
 //! transaction commit boundary (spec §3.2, §3.4 phase 4).
 
-use obscur_identity::VersionStamp;
+use obscur_identity::{NodeId, VersionStamp};
 use obscur_tree::reconciliation::{ReconciliationPlan, Reconciler};
 use obscur_tree::tree::RetainedTree;
-use obscur_view::view::View;
+use obscur_view::view::{View, ViewFragment};
 
 use super::transaction_commit::TransactionCommit;
 use super::transaction_error::TransactionError;
@@ -114,6 +114,54 @@ impl ReconcileEnactor {
         // 4. Commit atomically. Only a reconcile that changed the tree advances
         //    the version and carries operations; an idempotent pass commits
         //    empty and leaves the stamp untouched.
+        if plan.is_empty() {
+            return Ok((TransactionCommit::new(Vec::new(), self.version), plan));
+        }
+        self.version = self.version.bump();
+        Ok((
+            TransactionCommit::new(staged.into_operations(), self.version),
+            plan,
+        ))
+    }
+
+    /// Enacts a **subtree** reconcile — one mounted component's freshly rendered
+    /// output into its own children — through the same commit boundary, and
+    /// returns the committed record plus the structural deltas.
+    ///
+    /// This is the [`UiOperation::Rerender`] counterpart of
+    /// [`commit_root`](Self::commit_root): where a root replacement restates the
+    /// whole desired tree, a rerender restates exactly one component's output.
+    /// The tree below `node` is the only thing that can change, so a component
+    /// whose local state advanced costs its own subtree rather than the document.
+    ///
+    /// Version semantics match `commit_root` exactly: an idempotent rerender —
+    /// a component that re-rendered to the same output — commits empty and leaves
+    /// the stamp untouched, so a caller can tell a real change from a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`TransactionError`] from validation if the staged batch is
+    /// rejected *before* any mutation. A single [`UiOperation::Rerender`] is
+    /// always structurally valid, so this does not return `Err` in practice; the
+    /// `Result` keeps the validation gate total rather than assumed.
+    pub fn commit_subtree(
+        &mut self,
+        reconciler: &Reconciler,
+        tree: &mut RetainedTree,
+        node: NodeId,
+        desired: &ViewFragment,
+    ) -> Result<(TransactionCommit, ReconciliationPlan), TransactionError> {
+        // 1. Stage the normalized intent: re-render this component's subtree.
+        let mut staged = UiTransaction::new();
+        staged.push(UiOperation::Rerender { node });
+
+        // 2. Validate before application. On rejection nothing is mutated.
+        self.validator.validate(&staged)?;
+
+        // 3. Apply: the subtree-scoped reconcile is the underlying mechanism.
+        let plan = reconciler.reconcile(tree, node, desired);
+
+        // 4. Commit atomically, on the same terms as a root commit.
         if plan.is_empty() {
             return Ok((TransactionCommit::new(Vec::new(), self.version), plan));
         }

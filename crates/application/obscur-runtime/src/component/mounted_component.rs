@@ -32,6 +32,9 @@ pub struct MountedComponent {
     component: Box<dyn ErasedComponent>,
     /// Set by [`ComponentContext::request_update`] during a render or hook.
     needs_update: bool,
+    /// The runtime's dirty mark: this component's output is stale and must be
+    /// re-rendered. True from mount (nothing has rendered it yet).
+    needs_render: bool,
 }
 
 impl MountedComponent {
@@ -42,6 +45,8 @@ impl MountedComponent {
             instance,
             component,
             needs_update: false,
+            // A fresh instance has produced no output yet.
+            needs_render: true,
         }
     }
 
@@ -64,9 +69,16 @@ impl MountedComponent {
         self.needs_update
     }
 
-    /// Clears the re-render request; the runtime calls this when it services one.
-    pub const fn clear_needs_update(&mut self) {
-        self.needs_update = false;
+    /// Whether this component's output is stale and must be re-rendered.
+    #[must_use]
+    pub const fn needs_render(&self) -> bool {
+        self.needs_render
+    }
+
+    /// Marks the component's output stale — e.g. because the node's authored
+    /// props changed, so its typed props may decode differently.
+    pub const fn mark_dirty(&mut self) {
+        self.needs_render = true;
     }
 
     /// Advances the instance to `Mounted` and runs the component's `on_mount`.
@@ -76,6 +88,7 @@ impl MountedComponent {
             instance,
             component,
             needs_update,
+            ..
         } = self;
         let phase = instance.state();
         let mut ctx = ComponentContext::new(instance.scope_mut(), phase, needs_update);
@@ -93,6 +106,7 @@ impl MountedComponent {
             instance,
             component,
             needs_update,
+            ..
         } = self;
         let phase = instance.state();
         let mut ctx = ComponentContext::new(instance.scope_mut(), phase, needs_update);
@@ -112,11 +126,20 @@ impl MountedComponent {
             instance,
             component,
             needs_update,
+            ..
         } = self;
         // Read the phase before borrowing the scope mutably.
         let phase = instance.state();
         let mut ctx = ComponentContext::new(instance.scope_mut(), phase, needs_update);
-        component.render_erased(&mut ctx, props)
+        let view = component.render_erased(&mut ctx, props)?;
+
+        // A request raised DURING this render is honoured by the next frame, not
+        // by looping here: re-rendering it now would let a component that always
+        // requests an update spin the frame forever. So the dirty mark survives
+        // exactly when the component asked for it again.
+        self.needs_render = self.needs_update;
+        self.needs_update = false;
+        Ok(view)
     }
 }
 
@@ -128,6 +151,7 @@ impl fmt::Debug for MountedComponent {
         f.debug_struct("MountedComponent")
             .field("instance", &self.instance)
             .field("needs_update", &self.needs_update)
+            .field("needs_render", &self.needs_render)
             .finish_non_exhaustive()
     }
 }
@@ -245,22 +269,37 @@ mod tests {
     }
 
     #[test]
-    fn request_update_during_render_raises_the_flag_the_runtime_reads() {
+    fn a_fresh_instance_is_stale_until_it_renders() {
         let log = Rc::new(RefCell::new(Vec::new()));
-        let mut component = mounted(&log, true);
-        assert!(!component.needs_update());
+        let mut component = mounted(&log, false);
+        assert!(component.needs_render(), "nothing has rendered it yet");
         let _ = rendered_text(&mut component, 1);
-        assert!(component.needs_update(), "the component asked to re-render");
-        component.clear_needs_update();
-        assert!(!component.needs_update(), "servicing it clears the request");
+        assert!(!component.needs_render(), "its output is now current");
     }
 
     #[test]
-    fn a_component_that_asks_for_nothing_leaves_the_flag_down() {
+    fn request_update_during_render_keeps_it_stale_for_the_next_frame() {
+        // The component asks to re-render from inside its own render. Honouring
+        // that immediately would let it spin the frame forever, so the request
+        // survives as a dirty mark the NEXT frame services.
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let mut component = mounted(&log, true);
+        let _ = rendered_text(&mut component, 1);
+        assert!(component.needs_render(), "the request kept it stale");
+        assert!(
+            !component.needs_update(),
+            "the request itself is consumed, not left to re-fire"
+        );
+    }
+
+    #[test]
+    fn marking_dirty_stales_a_component_whose_props_changed() {
         let log = Rc::new(RefCell::new(Vec::new()));
         let mut component = mounted(&log, false);
         let _ = rendered_text(&mut component, 1);
-        assert!(!component.needs_update());
+        assert!(!component.needs_render());
+        component.mark_dirty();
+        assert!(component.needs_render());
     }
 
     #[test]

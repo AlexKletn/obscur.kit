@@ -920,9 +920,23 @@ impl UiRuntime {
         Some(self.run_frame(ctx, desired, sheets))
     }
 
-    /// Renders every mounted component and reconciles its output into that
+    /// Renders every component whose output is stale and reconciles it into that
     /// node's children, returning whether any of those sub-reconciles changed the
     /// tree.
+    ///
+    /// # Only the stale ones
+    ///
+    /// A component is stale when it has just mounted (nothing has rendered it),
+    /// when its node's authored props changed (its typed props may decode
+    /// differently), or when it asked to be re-rendered via
+    /// [`ComponentContext::request_update`]. Everything else keeps the output it
+    /// already has — this is what makes a component's state change cost its own
+    /// subtree rather than the document (spec §3.1: "dependency tracking
+    /// invalidates only consumers of changed values").
+    ///
+    /// Each render is enacted as a [`UiOperation::Rerender`] through the same
+    /// transaction boundary a root reconcile uses, so a component's output is
+    /// committed and versioned exactly like the root's.
     ///
     /// A component's props are decoded from the node's **retained** properties —
     /// the desired tree is already consumed by the time this runs, which is why
@@ -933,9 +947,11 @@ impl UiRuntime {
     /// A component's output may itself contain component-backed elements, which
     /// only exist (and so only mount) once that output is reconciled. Each pass
     /// therefore renders the components that appeared in the previous one, until a
-    /// pass produces no new instances. [`MAX_COMPONENT_RENDER_PASSES`] bounds it,
-    /// so a component that (directly or mutually) renders itself forever degrades
-    /// into a truncated tree plus a counter, rather than hanging the frame.
+    /// pass produces no new stale instances. Each component renders **at most
+    /// once** per frame: a request raised during its own render is honoured by the
+    /// next frame, so a component that always asks for an update cannot spin this
+    /// loop. [`MAX_COMPONENT_RENDER_PASSES`] additionally bounds mutual nesting,
+    /// so a self-rendering pair truncates the frame rather than hanging it.
     ///
     /// # A component whose props do not decode
     ///
@@ -947,7 +963,8 @@ impl UiRuntime {
         if self.components.is_empty() {
             return false;
         }
-        let mut pending: Vec<NodeId> = self.components.nodes().collect();
+        let mut pending: Vec<NodeId> = self.components.stale_nodes();
+        let mut done: HashSet<NodeId> = HashSet::new();
         let mut changed = false;
         let mut errors: u64 = 0;
         let mut rendered: u64 = 0;
@@ -958,6 +975,10 @@ impl UiRuntime {
             }
             let mut next = Vec::new();
             for node in std::mem::take(&mut pending) {
+                // At most once per frame, however many times it is re-requested.
+                if !done.insert(node) {
+                    continue;
+                }
                 // The node may have been removed by an earlier pass in this loop.
                 let Some(props) = self.tree.get(node).map(|n| n.props().to_vec()) else {
                     continue;
@@ -969,23 +990,22 @@ impl UiRuntime {
                     errors += 1;
                     continue;
                 };
-                // The render serviced any request the component made *before* it;
-                // a request raised during this render is honoured by the next
-                // frame, not by looping here.
-                mounted.clear_needs_update();
                 rendered += 1;
 
-                let plan = self.reconciler.reconcile(&mut self.tree, node, view.root());
+                let (_commit, plan) = self
+                    .enactor
+                    .commit_subtree(&self.reconciler, &mut self.tree, node, view.root())
+                    .expect("a component rerender is a single, structurally-valid Rerender");
                 changed |= !plan.is_empty();
                 self.components.sync(&mut self.tree, &plan);
                 // Only newly inserted nodes can have minted new instances.
-                next.extend(
-                    plan.iter()
-                        .filter(|op| op.is_insert())
-                        .map(|op| op.id())
-                        .filter(|id| self.components.get(*id).is_some())
-                        .collect::<Vec<_>>(),
-                );
+                let fresh: Vec<NodeId> = plan
+                    .iter()
+                    .filter(|op| op.is_insert())
+                    .map(|op| op.id())
+                    .filter(|id| self.components.get(*id).is_some())
+                    .collect();
+                next.extend(fresh);
             }
             pending = next;
         }
@@ -1473,6 +1493,15 @@ impl UiRuntime {
             self.scene.set_root(self.scaled_root(display_list));
         }
         let snapshot = self.scene.snapshot();
+
+        // A component that called `request_update` during its own render is still
+        // stale: the request is deliberately not serviced inside the frame that
+        // raised it (that would let a component spin the frame forever), so ask
+        // the scheduler for the next one. Coalescing is the scheduler's job, so
+        // many requesting components still cost one frame.
+        if self.components.has_stale() {
+            self.scheduler.request_reason(FrameReason::UiCommit);
+        }
 
         // Close the frame span with a counter of how many phases actually ran,
         // so an observer can attribute work to this frame (spec §7.9).
@@ -4507,6 +4536,7 @@ mod tests {
 
     mod components {
         use super::{runtime_id, viewport};
+        use crate::frame::FrameReason;
         use crate::runtime::UiRuntime;
         use obscur_identity::{ComponentId, InternedSymbol, NodeId};
         use obscur_view::component::{
@@ -4541,12 +4571,19 @@ mod tests {
         /// the state survived.
         struct Counter {
             total: LocalState<u32>,
+            /// Ask for exactly one more render, then settle — modelling a
+            /// component that advances its own state once.
+            self_updates: u32,
         }
 
         impl Component for Counter {
             type Props = CounterProps;
-            fn render(&mut self, _: &mut ComponentContext<'_>, props: &Self::Props) -> View {
+            fn render(&mut self, ctx: &mut ComponentContext<'_>, props: &Self::Props) -> View {
                 self.total.set(*self.total.get() + props.step);
+                if self.self_updates > 0 {
+                    self.self_updates -= 1;
+                    ctx.request_update();
+                }
                 View::from_fragment(ViewFragment::from_nodes(vec![ViewNode::text(
                     self.total.get().to_string(),
                 )]))
@@ -4554,7 +4591,9 @@ mod tests {
         }
 
         #[derive(Debug)]
-        struct CounterFactory;
+        struct CounterFactory {
+            self_updates: u32,
+        }
 
         impl ComponentFactory for CounterFactory {
             fn component_id(&self) -> ComponentId {
@@ -4569,19 +4608,24 @@ mod tests {
             fn create_component(&self) -> Box<dyn ErasedComponent> {
                 Box::new(Counter {
                     total: LocalState::new(0),
+                    self_updates: self.self_updates,
                 })
             }
         }
 
-        fn runtime_with_counter() -> UiRuntime {
+        fn runtime_with(self_updates: u32) -> UiRuntime {
             let mut runtime = UiRuntime::new(runtime_id(), viewport());
             runtime
                 .register_component(ComponentRegistration::new(
-                    Box::new(CounterFactory),
+                    Box::new(CounterFactory { self_updates }),
                     ComponentVersion::INITIAL,
                 ))
                 .expect("first registration");
             runtime
+        }
+
+        fn runtime_with_counter() -> UiRuntime {
+            runtime_with(0)
         }
 
         /// A view with one `<Counter step=N/>` element.
@@ -4634,6 +4678,92 @@ mod tests {
             assert_eq!(component_node(&runtime), node, "the node was reused");
             assert_eq!(runtime.mounted_component_count(), 1, "no remount");
             assert_eq!(rendered_text(&runtime), "5", "2 + 3: the state persisted");
+        }
+
+        #[test]
+        fn request_update_schedules_a_frame_and_is_serviced_by_the_next_one() {
+            // The loop `ComponentContext::request_update` was written for, and
+            // which had no reader at all until now: the component asks from inside
+            // its own render, the frame does NOT service it (that would spin), the
+            // scheduler is asked for another, and that frame re-renders it.
+            let mut runtime = runtime_with(1);
+            runtime.render_now(&counter_view(2), &[]);
+            assert_eq!(rendered_text(&runtime), "2");
+            assert_eq!(
+                runtime.peek_frame_reason(),
+                Some(FrameReason::UiCommit),
+                "the pending request scheduled a frame"
+            );
+
+            // The scheduled frame services it — rebuilding the SAME view, so the
+            // re-render is driven purely by the component's own request.
+            runtime
+                .run_due_frame(&counter_view(2), &[])
+                .expect("the requested frame is due");
+            assert_eq!(rendered_text(&runtime), "4", "2 + 2: it re-rendered once");
+
+            // It asked only once, so it now settles: no further frame is pending.
+            assert_eq!(
+                runtime.peek_frame_reason(),
+                None,
+                "a settled component stops requesting frames"
+            );
+        }
+
+        #[test]
+        fn only_the_component_whose_props_changed_re_renders() {
+            // THE incremental-invalidation property for components (§3.1:
+            // "dependency tracking invalidates only consumers of changed values").
+            // Two sibling counters; only the first one's props change. Before this,
+            // every structural frame re-rendered EVERY mounted component, so both
+            // totals would advance.
+            let view = |a: i64, b: i64| {
+                View::from_fragment(ViewFragment::from_nodes(vec![
+                    ViewNode::element(COUNTER)
+                        .with_prop(ViewProperty::new(step(), ViewValue::Int(a))),
+                    ViewNode::element(COUNTER)
+                        .with_prop(ViewProperty::new(step(), ViewValue::Int(b))),
+                ]))
+            };
+            let text_at = |runtime: &UiRuntime, index: usize| {
+                let root = runtime.tree().root().expect("a root");
+                let host = runtime.tree().get(root).expect("live").children()[index];
+                let child = runtime.tree().get(host).expect("live").children()[0];
+                match runtime.tree().get(child).expect("live").kind() {
+                    obscur_tree::node::NodeKind::Text { content } => content.to_string(),
+                    other => panic!("expected text, got {other:?}"),
+                }
+            };
+
+            let mut runtime = runtime_with_counter();
+            runtime.render_now(&view(2, 10), &[]);
+            assert_eq!(text_at(&runtime, 0), "2");
+            assert_eq!(text_at(&runtime, 1), "10");
+
+            // Only the first counter's `step` changes.
+            runtime.render_now(&view(3, 10), &[]);
+            assert_eq!(text_at(&runtime, 0), "5", "2 + 3: it re-rendered");
+            assert_eq!(
+                text_at(&runtime, 1),
+                "10",
+                "the untouched sibling must NOT have re-rendered"
+            );
+        }
+
+        #[test]
+        fn an_unchanged_frame_re_renders_nothing() {
+            // Re-rendering an identical view touches no component at all: every
+            // instance's output is already current.
+            let mut runtime = runtime_with_counter();
+            runtime.render_now(&counter_view(2), &[]);
+            assert_eq!(rendered_text(&runtime), "2");
+
+            runtime.render_now(&counter_view(2), &[]);
+            assert_eq!(
+                rendered_text(&runtime),
+                "2",
+                "an identical frame must not re-run render (it would read 4)"
+            );
         }
 
         #[test]

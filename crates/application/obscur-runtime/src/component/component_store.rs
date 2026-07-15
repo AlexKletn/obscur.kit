@@ -92,6 +92,27 @@ impl ComponentStore {
         self.mounted.iter().map(|(node, _)| node)
     }
 
+    /// Every mounted node whose component's output is stale and must be
+    /// re-rendered — the only ones a frame needs to touch.
+    #[must_use]
+    pub fn stale_nodes(&self) -> Vec<NodeId> {
+        self.mounted
+            .iter()
+            .filter(|(_, mounted)| mounted.needs_render())
+            .map(|(node, _)| node)
+            .collect()
+    }
+
+    /// Whether any mounted component is waiting to be re-rendered.
+    ///
+    /// A host reads this after a frame: a component that asked to update during
+    /// its own render is serviced by the *next* frame, so someone has to schedule
+    /// one.
+    #[must_use]
+    pub fn has_stale(&self) -> bool {
+        self.mounted.iter().any(|(_, m)| m.needs_render())
+    }
+
     /// Brings the store in line with a reconcile that just ran: mounts an
     /// instance for every inserted node whose component kind is registered, and
     /// unmounts every removed node's instance.
@@ -101,15 +122,23 @@ impl ComponentStore {
     /// *here* rather than from inside the reconciler, which lives in the domain
     /// tier and can neither see a registry nor accumulate state.
     ///
-    /// `Update` and `Move` ops are intentionally ignored: they change a node's
-    /// content or position, not its existence, so the instance (and its local
-    /// state) rides along untouched. That is the whole point of keyed identity.
+    /// An `Update` op keeps the instance — the node's identity did not change, so
+    /// its local state rides along, which is the whole point of keyed identity —
+    /// but marks it stale, because the node's authored props changed and the
+    /// component's typed props may now decode differently.
+    ///
+    /// A `Move` op is ignored outright: it repositions a node without touching
+    /// its content, so the component's output is still correct.
     pub fn sync(&mut self, tree: &mut RetainedTree, plan: &ReconciliationPlan) {
         for op in plan {
             if op.is_insert() {
                 self.mount(tree, op.id());
             } else if op.is_remove() {
                 self.unmount(tree, op.id());
+            } else if op.is_update()
+                && let Some(mounted) = self.mounted.get_mut(op.id())
+            {
+                mounted.mark_dirty();
             }
         }
     }
