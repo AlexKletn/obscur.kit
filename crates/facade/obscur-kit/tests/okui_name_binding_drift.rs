@@ -149,3 +149,63 @@ fn contracted_events_use_the_reserved_event_symbols() {
         }
     }
 }
+
+// ---- #[derive(Contract)] prop symbols (§2.13) -----------------------------
+//
+// A contract's prop symbol is only useful if it equals the symbol the desired
+// view tree actually carries on that property. The derive computes it at
+// expansion time; this pins the result against the real view-side constants.
+
+#[derive(obscur_kit::ui_macros::Contract)]
+#[expect(dead_code, reason = "the fields exist to be reflected into the contract")]
+struct ProbeProps {
+    /// A reserved attribute name: must resolve to `view::DISABLED`, not a hash.
+    disabled: bool,
+    /// A non-reserved name whose FNV hash does NOT already carry the top bit,
+    /// so a bare hash and the real fallback symbol genuinely differ.
+    placeholder: String,
+    /// Optional → a defaulted (non-required) prop.
+    label: Option<String>,
+}
+
+#[test]
+fn derived_prop_symbols_match_the_view_tree_symbols() {
+    let contract = ProbeProps::contract();
+    let symbols: Vec<_> = contract.props.iter().map(|p| p.name).collect();
+
+    // The reserved name resolves to the shared constant, not to any hash.
+    assert!(symbols.contains(&view::DISABLED), "derived `disabled` must be view::DISABLED");
+    // The non-reserved names resolve through the same registry the view uses.
+    assert!(symbols.contains(&name_binding::attr_symbol("placeholder")));
+    assert!(symbols.contains(&name_binding::attr_symbol("label")));
+}
+
+#[test]
+fn a_derived_contract_can_be_checked_against_a_real_view_node() {
+    // The end-to-end point: build a node the way the view layer does, and the
+    // derived contract's symbols line up with the props it carries. Before the
+    // symbols were unified this comparison could not succeed for `disabled`.
+    use obscur_kit::view::view::{ViewNode, ViewProperty, ViewValue};
+
+    let node = ViewNode::element(obscur_kit::identity::ComponentId::from_raw(1))
+        .with_prop(ViewProperty::new(view::DISABLED, ViewValue::Bool(true)))
+        .with_prop(ViewProperty::new(
+            name_binding::attr_symbol("placeholder"),
+            ViewValue::Text("type here".into()),
+        ));
+    let ViewNode::Element { props, .. } = &node else {
+        panic!("an element");
+    };
+
+    let contract = ProbeProps::contract();
+    for prop in &contract.props {
+        // Every REQUIRED prop of the contract is findable on the node by symbol.
+        if prop.required {
+            assert!(
+                props.iter().any(|p| p.name() == prop.name),
+                "required prop {:?} not found on the node by symbol",
+                prop.name
+            );
+        }
+    }
+}

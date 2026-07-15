@@ -2,26 +2,32 @@
 //!
 //! This module turns a props struct into an inherent `impl` exposing a
 //! `contract()` associated function that builds a fully-typed
-//! [`::obscur_view::component::ComponentContract`]. It is pure token-in /
-//! token-out logic: the macro crate emits leading-`::` paths as tokens and does
-//! **not** depend on `obscur-view` or `obscur-identity`.
+//! [`::obscur_view::component::ComponentContract`]. The macro crate emits
+//! leading-`::` paths as tokens, so the *generated* code depends on
+//! `obscur-view`/`obscur-identity` while this crate does not.
 //!
 //! # Stable-id scheme
 //!
 //! [`::obscur_identity::InternedSymbol`] and
 //! [`::obscur_identity::ComponentId`] are opaque `from_raw` handles, and there
-//! is no compile-time interner available during derive expansion. To keep ids
-//! deterministic across builds, each id is computed at expansion time by
-//! hashing the relevant textual string with an inline FNV-1a:
+//! is no compile-time interner available during derive expansion, so every id is
+//! computed at expansion time and only the resulting integer literal is emitted.
 //!
-//! - the component id is `ComponentId::from_raw(fnv64(component_name))` (`u64`),
-//! - every symbol (component name, each field/event name, and each field's
-//!   normalized type string) is
-//!   `InternedSymbol::from_raw(fnv32(string))` (`u32`).
+//! There are two *different* schemes here, and the distinction is load-bearing:
 //!
-//! The hash is evaluated in the proc-macro and only the resulting integer
-//! literal is emitted into the generated tokens; the generated code never calls
-//! back into the hash helpers.
+//! - **Names that also exist in the desired view tree** — each prop/event field
+//!   name — are resolved through the shared `obscur_ui_ir::name_binding`
+//!   registry ([`name_symbol`] / [`event_name_symbol`]), because a contract's
+//!   prop symbol is only useful if it equals the `ViewProperty::name()` a real
+//!   node carries. `name_binding` maps reserved names (`class`, `id`, `type`,
+//!   `src`, `disabled`, `checked`; `click`, `input`, `change`) to fixed low
+//!   constants and everything else to `fnv32(name) | 0x8000_0000`. A bare
+//!   `fnv32` — which this derive used to emit — agrees with that only by luck,
+//!   whenever the hash happens to already carry the top bit.
+//! - **Names that exist only inside the contract model** — the component name
+//!   symbol, the component id, and each field's normalized *type* string — have
+//!   no view-tree counterpart to agree with, so they stay plain FNV-1a
+//!   ([`fnv32`] / [`fnv64`]).
 
 use proc_macro2::{Literal, TokenStream};
 use quote::{ToTokens, quote};
@@ -245,10 +251,15 @@ impl FieldModel {
         if self.attrs.skip {
             return None;
         }
-        let name_sym = Literal::u32_unsuffixed(fnv32(&self.name));
+        // The NAME symbol must be the one the desired view tree actually carries,
+        // so it is resolved through the shared `name_binding` registry rather
+        // than hashed here (see `name_symbol`/`event_name_symbol`). The TYPE
+        // symbol is an opaque type identity that names no view property, so it
+        // stays a plain FNV hash.
         let type_sym = Literal::u32_unsuffixed(fnv32(&self.type_string));
 
         if self.attrs.event {
+            let name_sym = Literal::u32_unsuffixed(event_name_symbol(&self.name));
             let mut event = quote! {
                 ::obscur_view::contract::EventContract::new(
                     ::obscur_identity::InternedSymbol::from_raw(#name_sym),
@@ -266,6 +277,7 @@ impl FieldModel {
 
         // Props: an `Option<...>` or an explicit `#[contract(default)]` become a
         // defaulted (non-required) prop; every other field is required.
+        let name_sym = Literal::u32_unsuffixed(name_symbol(&self.name));
         let optional = self.is_option || self.attrs.default;
         let prop = quote! {
             ::obscur_view::contract::PropContract::new(
@@ -377,6 +389,32 @@ fn normalized_type_string(ty: &Type) -> String {
 }
 
 /// FNV-1a 32-bit hash of `s`, used to derive stable [`InternedSymbol`] ids.
+/// The [`InternedSymbol`] raw value a **property** name has in the desired view
+/// tree, resolved through the shared `name_binding` registry.
+///
+/// This must not be a bare hash. `name_binding::attr_symbol` maps a handful of
+/// reserved names (`class`, `id`, `type`, `src`, `disabled`, `checked`) to fixed
+/// low constants, and every other name to `fnv32(name) | 0x8000_0000`. A bare
+/// `fnv32` therefore disagrees with the real view symbol for every reserved name
+/// and for every other name whose hash does not already have the top bit set —
+/// i.e. it happens to agree about half the time, by luck. Resolving through the
+/// registry is what makes a contract's prop symbol comparable to the
+/// `ViewProperty::name()` a node actually carries.
+///
+/// [`InternedSymbol`]: obscur_identity::InternedSymbol
+fn name_symbol(name: &str) -> u32 {
+    obscur_ui_ir::name_binding::attr_symbol(name).raw()
+}
+
+/// The [`InternedSymbol`] raw value an **event** name has in the desired view
+/// tree, resolved through the shared `name_binding` registry — the event-side
+/// mirror of [`name_symbol`], and reserved for `click`/`input`/`change`.
+///
+/// [`InternedSymbol`]: obscur_identity::InternedSymbol
+fn event_name_symbol(name: &str) -> u32 {
+    obscur_ui_ir::name_binding::event_symbol(name).raw()
+}
+
 fn fnv32(s: &str) -> u32 {
     const OFFSET: u32 = 0x811c_9dc5;
     const PRIME: u32 = 0x0100_0193;
@@ -402,7 +440,7 @@ fn fnv64(s: &str) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{ContractDerive, fnv32, fnv64};
+    use super::{ContractDerive, event_name_symbol, fnv32, fnv64, name_symbol};
     use quote::quote;
 
     /// Collapses generated tokens to a single-spaced string for tolerant
@@ -510,10 +548,55 @@ mod tests {
                 original: String,
             }
         });
-        let custom_sym = fnv32("customName");
-        let original_sym = fnv32("original");
+        // Resolved through `name_binding`, NOT a bare hash — see `name_symbol`.
+        let custom_sym = name_symbol("customName");
+        let original_sym = name_symbol("original");
         assert!(generated.contains(&format!("from_raw ({custom_sym})")));
         assert!(!generated.contains(&format!("from_raw ({original_sym})")));
+    }
+
+    #[test]
+    fn prop_name_symbols_are_the_ones_the_view_tree_carries() {
+        // The bug this pins: a bare `fnv32` disagrees with the real view symbol
+        // for every RESERVED name, and for any other name whose hash lacks the
+        // top bit — so it matched only about half the time, by luck. A contract
+        // whose prop symbol does not equal `ViewProperty::name()` can never be
+        // checked against a real node.
+        let generated = expand_to_string(quote! {
+            struct MyProps {
+                disabled: bool,
+                placeholder: String,
+            }
+        });
+
+        // `disabled` is reserved: a low fixed constant, not a hash at all.
+        let disabled = name_symbol("disabled");
+        assert_eq!(disabled, 0x0000_0005, "reserved DISABLED symbol");
+        assert!(generated.contains(&format!("from_raw ({disabled})")), "{generated}");
+        assert!(
+            !generated.contains(&format!("from_raw ({})", fnv32("disabled"))),
+            "the bare hash must not appear: {generated}"
+        );
+
+        // `placeholder` is not reserved: fallback = hash | 0x8000_0000, and its
+        // hash does NOT already carry the top bit, so the two really differ.
+        let placeholder = name_symbol("placeholder");
+        assert_eq!(placeholder, fnv32("placeholder") | 0x8000_0000);
+        assert_ne!(placeholder, fnv32("placeholder"));
+        assert!(generated.contains(&format!("from_raw ({placeholder})")), "{generated}");
+    }
+
+    #[test]
+    fn event_name_symbols_use_the_reserved_event_handles() {
+        let generated = expand_to_string(quote! {
+            struct MyProps {
+                #[contract(event)]
+                click: u32,
+            }
+        });
+        // `click` is a reserved event symbol, not a hash.
+        let click = event_name_symbol("click");
+        assert!(generated.contains(&format!("from_raw ({click})")), "{generated}");
     }
 
     #[test]
