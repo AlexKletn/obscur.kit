@@ -1,6 +1,8 @@
 //! DevTools transports: the in-process loopback and a real local-socket
 //! transport, plus their shared wire codec (spec §7.6/§7.7).
 
+mod event_queue;
+pub use event_queue::EventQueue;
 mod local_transport;
 pub use local_transport::{ClientBound, LocalTransport, ServerBound};
 mod wire_codec;

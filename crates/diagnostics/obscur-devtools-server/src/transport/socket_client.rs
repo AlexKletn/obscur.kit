@@ -73,6 +73,34 @@ impl SocketClient {
         self.exchange(&ServerBound::Command(command.clone()))
     }
 
+    /// Reads one **unsolicited** message the server pushed, without sending
+    /// anything (spec §7.6 live inspectable state).
+    ///
+    /// Every other method here writes then reads; a pushed event has no request to
+    /// pair with, so it needs its own read. Returns [`None`] when the server closed
+    /// the connection.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`io::Error`] on a socket failure or an undecodable frame.
+    pub fn receive(&mut self) -> io::Result<Option<ClientBound>> {
+        let Some(frame) = self.stream.read_frame()? else {
+            return Ok(None);
+        };
+        WireCodec::decode_client_bound(&frame)
+            .map(Some)
+            .map_err(|error| unexpected(&error.to_string()))
+    }
+
+    /// Sets how long a [`receive`](Self::receive) waits before giving up.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`io::Error`] if the underlying socket rejects the timeout.
+    pub fn set_read_timeout(&mut self, timeout: Option<std::time::Duration>) -> io::Result<()> {
+        self.stream.set_read_timeout(timeout)
+    }
+
     /// Writes one server-bound message and reads exactly one reply.
     fn exchange(&mut self, message: &ServerBound) -> io::Result<ClientBound> {
         self.stream.write_frame(&WireCodec::encode_server_bound(message))?;

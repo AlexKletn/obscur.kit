@@ -25,7 +25,8 @@ use obscur_devtools_protocol::message::MESSAGE_LIMIT;
 
 use crate::bridge::InspectSource;
 use crate::endpoint::{CommandOutcome, DevToolsEndpoint};
-use crate::transport::{ClientBound, ServerBound, SocketStream, WireCodec};
+use crate::transport::{ClientBound, EventQueue, ServerBound, SocketStream, WireCodec};
+use std::time::Duration;
 
 /// Serves a [`DevToolsEndpoint`] over one framed local-socket connection.
 ///
@@ -95,6 +96,67 @@ impl SocketTransport {
         while self.serve_one(endpoint)? {}
         Ok(())
     }
+
+    /// Drives `endpoint` like [`serve`](Self::serve), additionally **pushing**
+    /// queued events to subscribers between client messages (spec §7.6).
+    ///
+    /// This is what makes the endpoint live rather than poll-only: a host states
+    /// what happened by pushing onto `events` from its own thread, and this loop
+    /// fans each out through the endpoint — so subscription state, scopes and
+    /// authentication stay exactly where they were, on this thread.
+    ///
+    /// # Why a read timeout
+    ///
+    /// A blocking read parks here until the client speaks, so a queued event could
+    /// not be written until the client happened to send something — which is not a
+    /// push. `poll` bounds the wait: the loop wakes, drains the queue, and goes
+    /// back to reading. It is the *maximum* latency of a push, not a busy-wait —
+    /// nothing spins, the thread sleeps in `read` between wakes.
+    ///
+    /// An event for a topic nobody subscribed to fans out to nothing and writes
+    /// nothing, so an unwatched host pays only the wake.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`io::Error`] on any underlying socket read/write failure. A
+    /// read that merely timed out is not a failure and does not end the session.
+    pub fn serve_with_events<S: InspectSource>(
+        &mut self,
+        endpoint: &mut DevToolsEndpoint<S>,
+        events: &EventQueue,
+        poll: Duration,
+    ) -> io::Result<()> {
+        self.stream.set_read_timeout(Some(poll))?;
+        loop {
+            match self.serve_one(endpoint) {
+                Ok(true) => {}
+                // The client hung up or the message limit was reached.
+                Ok(false) => return Ok(()),
+                Err(error) if is_timeout(&error) => {}
+                Err(error) => return Err(error),
+            }
+            for (topic, kind) in events.drain() {
+                // The ENDPOINT decides who hears it — this loop never inspects or
+                // bypasses a subscription.
+                for event in endpoint.fan_out(topic, &kind) {
+                    self.stream
+                        .write_frame(&WireCodec::encode_client_bound(&ClientBound::Event(event)))?;
+                }
+            }
+        }
+    }
+}
+
+/// Whether `error` is a read that simply timed out rather than a broken socket.
+///
+/// Platforms disagree on which kind a socket read timeout reports, so both are
+/// accepted; treating either as fatal would end a healthy session on its first
+/// quiet interval.
+fn is_timeout(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+    )
 }
 
 /// Feeds one decoded client message through the endpoint and maps its typed
@@ -225,4 +287,115 @@ mod tests {
             );
         });
     }
+
+    #[test]
+    fn a_subscriber_receives_a_pushed_event_it_never_asked_for() {
+        // THE §7.6 gap this closes: the endpoint was request/reply only. `fan_out`
+        // built events and nothing ever wrote one to a socket, so "live inspectable
+        // state" was really "polled state".
+        use crate::transport::EventQueue;
+        use obscur_devtools_protocol::message::{EventKind, Topic};
+
+        let listener = SocketListener::bind_loopback().expect("bind");
+        let addr = listener.local_addr().expect("addr").expect("tcp addr");
+        let events = EventQueue::new();
+        let host_side = events.clone();
+
+        let handle = std::thread::spawn(move || {
+            let mut auth = Authenticator::new();
+            auth.register_token("dev", ScopeSet::all_read().with(PermissionScope::Subscribe));
+            let mut endpoint =
+                DevToolsEndpoint::new(auth, RuntimeBridge::new(SnapshotInspectSource::new()));
+            endpoint.enable();
+            let stream = listener.accept().expect("accept");
+            let mut transport = SocketTransport::new(stream);
+            transport
+                .serve_with_events(&mut endpoint, &events, Duration::from_millis(5))
+                .expect("serve");
+        });
+
+        let mut client = SocketClient::connect_loopback(addr).expect("connect");
+        assert!(client.handshake(&handshake("dev")).expect("io").is_accepted());
+        // Subscribe, so the endpoint knows this client wants frame events.
+        let reply = client
+            .command(&CommandMessage::new(
+                CommandId::new(1),
+                CommandKind::Subscribe(Topic::Frames),
+            ))
+            .expect("subscribe io");
+        assert!(matches!(reply, ClientBound::Subscription(_)), "{reply:?}");
+
+        // The HOST states what happened, from its own thread. It never touches the
+        // endpoint, so authentication and scopes stay on the serving side.
+        assert!(host_side.push(Topic::Frames, EventKind::FrameCommitted { id: 42 }));
+
+        // …and it arrives with no request paired to it.
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("timeout");
+        let pushed = client.receive().expect("io").expect("an event was pushed");
+        match pushed {
+            ClientBound::Event(event) => {
+                assert_eq!(event.kind, EventKind::FrameCommitted { id: 42 });
+                assert_eq!(event.topic, Topic::Frames);
+            }
+            other => panic!("expected a pushed event, got {other:?}"),
+        }
+
+        drop(client);
+        handle.join().expect("join");
+    }
+
+    #[test]
+    fn an_event_on_an_unsubscribed_topic_is_pushed_to_nobody() {
+        // Fan-out stays the endpoint's decision: a host cannot reach a client that
+        // did not ask, however loudly it pushes.
+        use crate::transport::EventQueue;
+        use obscur_devtools_protocol::message::{EventKind, Topic};
+
+        let listener = SocketListener::bind_loopback().expect("bind");
+        let addr = listener.local_addr().expect("addr").expect("tcp addr");
+        let events = EventQueue::new();
+        let host_side = events.clone();
+
+        let handle = std::thread::spawn(move || {
+            let mut auth = Authenticator::new();
+            auth.register_token("dev", ScopeSet::all_read().with(PermissionScope::Subscribe));
+            let mut endpoint =
+                DevToolsEndpoint::new(auth, RuntimeBridge::new(SnapshotInspectSource::new()));
+            endpoint.enable();
+            let stream = listener.accept().expect("accept");
+            let mut transport = SocketTransport::new(stream);
+            transport
+                .serve_with_events(&mut endpoint, &events, Duration::from_millis(5))
+                .expect("serve");
+        });
+
+        let mut client = SocketClient::connect_loopback(addr).expect("connect");
+        assert!(client.handshake(&handshake("dev")).expect("io").is_accepted());
+        // Subscribed to Frames only.
+        let _ = client
+            .command(&CommandMessage::new(
+                CommandId::new(1),
+                CommandKind::Subscribe(Topic::Frames),
+            ))
+            .expect("subscribe io");
+
+        // An event on a DIFFERENT topic.
+        assert!(host_side.push(Topic::Diagnostics, EventKind::FrameCommitted { id: 1 }));
+
+        // Nothing arrives: the read times out rather than delivering it.
+        client
+            .set_read_timeout(Some(Duration::from_millis(150)))
+            .expect("timeout");
+        let outcome = client.receive();
+        assert!(
+            outcome.is_err(),
+            "an unsubscribed topic must push nothing, got {outcome:?}"
+        );
+
+        drop(client);
+        handle.join().expect("join");
+    }
+
 }

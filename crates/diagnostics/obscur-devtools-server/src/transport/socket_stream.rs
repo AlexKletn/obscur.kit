@@ -16,6 +16,7 @@
 
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
+use std::time::Duration;
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
 
@@ -32,6 +33,32 @@ pub const MAX_FRAME_LEN: usize = 1 << 20;
 #[derive(Debug)]
 pub struct SocketStream {
     inner: Inner,
+    /// How far the in-progress [`read_frame`](Self::read_frame) has got.
+    ///
+    /// A framed reader and a read timeout do not mix unless the reader is
+    /// **resumable**: a timeout can land after some of a frame has arrived, and
+    /// discarding those bytes would make the next call read the frame's own tail as
+    /// a length prefix — desyncing the stream permanently. Progress therefore lives
+    /// here, across calls, so a timed-out read resumes exactly where it stopped.
+    reading: ReadState,
+}
+
+/// How far the current frame has been read.
+#[derive(Debug)]
+enum ReadState {
+    /// Reading the `u32` length prefix; `filled` bytes of it have arrived.
+    Header { buf: [u8; 4], filled: usize },
+    /// The length is known; `filled` bytes of the body have arrived.
+    Body { buf: Vec<u8>, filled: usize },
+}
+
+impl Default for ReadState {
+    fn default() -> Self {
+        Self::Header {
+            buf: [0; 4],
+            filled: 0,
+        }
+    }
 }
 
 /// The concrete kernel stream behind a [`SocketStream`].
@@ -48,14 +75,62 @@ impl SocketStream {
     /// Wraps an accepted or connected loopback TCP stream.
     #[must_use]
     pub fn from_tcp(stream: TcpStream) -> Self {
-        Self { inner: Inner::Tcp(stream) }
+        Self {
+            inner: Inner::Tcp(stream),
+            reading: ReadState::default(),
+        }
     }
 
     /// Wraps an accepted or connected Unix domain stream.
     #[cfg(unix)]
     #[must_use]
     pub fn from_unix(stream: UnixStream) -> Self {
-        Self { inner: Inner::Unix(stream) }
+        Self {
+            inner: Inner::Unix(stream),
+            reading: ReadState::default(),
+        }
+    }
+
+    /// Sets how long a [`read_frame`](Self::read_frame) waits before giving up,
+    /// or clears the timeout with [`None`].
+    ///
+    /// A serving loop needs this to stay responsive to work that is not a client
+    /// message: without a timeout it blocks in `read` forever, so an event a host
+    /// wants to *push* could never be written until the client happened to send
+    /// something first — which is not a push at all.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`io::Error`] if the underlying socket rejects the timeout.
+    pub fn set_read_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
+        match &self.inner {
+            Inner::Tcp(stream) => stream.set_read_timeout(timeout),
+            #[cfg(unix)]
+            Inner::Unix(stream) => stream.set_read_timeout(timeout),
+        }
+    }
+
+    /// Clones the handle so one side can read while another writes.
+    ///
+    /// Both handles refer to the same kernel socket, which is full-duplex: a push
+    /// written on the clone lands even while the original is parked in `read`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`io::Error`] if the underlying socket cannot be duplicated.
+    pub fn try_clone(&self) -> io::Result<Self> {
+        let inner = match &self.inner {
+            Inner::Tcp(stream) => Inner::Tcp(stream.try_clone()?),
+            #[cfg(unix)]
+            Inner::Unix(stream) => Inner::Unix(stream.try_clone()?),
+        };
+        // The clone starts its own read state: partial progress belongs to the
+        // handle that made it, and two handles reading one socket would interleave
+        // bytes anyway.
+        Ok(Self {
+            inner,
+            reading: ReadState::default(),
+        })
     }
 
     /// Writes one framed message body: a `u32` little-endian length prefix
@@ -90,44 +165,73 @@ impl SocketStream {
     /// Returns an [`io::Error`] on a truncated frame, a length above
     /// [`MAX_FRAME_LEN`], or any underlying socket read failure.
     pub fn read_frame(&mut self) -> io::Result<Option<Vec<u8>>> {
-        let mut len_bytes = [0u8; 4];
-        if !self.read_full_or_eof(&mut len_bytes)? {
-            return Ok(None);
-        }
-        let len = usize::try_from(u32::from_le_bytes(len_bytes)).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidData, "frame length overflows usize")
-        })?;
-        if len > MAX_FRAME_LEN {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "declared frame length exceeds MAX_FRAME_LEN",
-            ));
-        }
-        let mut body = vec![0u8; len];
-        self.read_exact(&mut body)?;
-        Ok(Some(body))
-    }
-
-    /// Fills `buf` completely, returning `Ok(false)` if the stream ended cleanly
-    /// before the first byte, and an error if it ended mid-buffer.
-    fn read_full_or_eof(&mut self, buf: &mut [u8]) -> io::Result<bool> {
-        let mut filled = 0;
-        while filled < buf.len() {
-            match self.read(&mut buf[filled..]) {
-                Ok(0) if filled == 0 => return Ok(false),
-                Ok(0) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        "stream ended mid-frame-header",
-                    ));
+        loop {
+            match &mut self.reading {
+                ReadState::Header { buf, filled } => {
+                    // A clean EOF is only clean *between* frames.
+                    let at_start = *filled == 0;
+                    if !fill(&mut self.inner, buf, filled, at_start)? {
+                        return Ok(None);
+                    }
+                    let len = usize::try_from(u32::from_le_bytes(*buf)).map_err(|_| {
+                        io::Error::new(io::ErrorKind::InvalidData, "frame length overflows usize")
+                    })?;
+                    if len > MAX_FRAME_LEN {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "declared frame length exceeds MAX_FRAME_LEN",
+                        ));
+                    }
+                    self.reading = ReadState::Body {
+                        buf: vec![0u8; len],
+                        filled: 0,
+                    };
                 }
-                Ok(n) => filled += n,
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-                Err(e) => return Err(e),
+                ReadState::Body { buf, filled } => {
+                    // Never a clean EOF: the header promised these bytes.
+                    if !fill(&mut self.inner, buf, filled, false)? {
+                        return Ok(None);
+                    }
+                    let body = std::mem::take(buf);
+                    self.reading = ReadState::default();
+                    return Ok(Some(body));
+                }
             }
         }
-        Ok(true)
     }
+
+}
+
+/// Fills `buf` from `filled` onward, advancing `filled` by whatever arrives.
+///
+/// Returns `Ok(true)` once `buf` is full, `Ok(false)` on a clean end of stream —
+/// which is only clean when `at_start`, i.e. nothing of this frame had arrived
+/// yet; an EOF mid-frame is a truncated message, not a polite disconnect.
+///
+/// **`filled` is the caller's state, not a local.** On a would-block/timeout the
+/// error propagates with `filled` already advanced past the bytes that did land,
+/// so the next call resumes rather than re-reading them as a fresh frame header.
+fn fill(inner: &mut Inner, buf: &mut [u8], filled: &mut usize, at_start: bool) -> io::Result<bool> {
+    while *filled < buf.len() {
+        let read = match inner {
+            Inner::Tcp(stream) => stream.read(&mut buf[*filled..]),
+            #[cfg(unix)]
+            Inner::Unix(stream) => stream.read(&mut buf[*filled..]),
+        };
+        match read {
+            Ok(0) if at_start && *filled == 0 => return Ok(false),
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "stream ended mid-frame",
+                ));
+            }
+            Ok(n) => *filled += n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(true)
 }
 
 impl Read for SocketStream {
