@@ -22,11 +22,16 @@ use super::{ChildMatcher, IdentityMatch, ReconciliationOp, ReconciliationPlan};
 /// is compatible with an existing one (matching by key across reorders, per spec
 /// §2.11), and mints a fresh id only when it must.
 ///
-/// Only **structure**, **identity**, **text content**, the CSS-relevant
-/// **style attributes** (local name, id, class list), and the element's
-/// **event bindings** (`event → command`) are reconciled here. The remaining
-/// element props flow to style/components downstream and are *not* stored on the
-/// retained node by this crate.
+/// **Structure**, **identity**, **text content**, an element's **full authored
+/// property list** (plus the CSS-relevant [`StyleAttributes`] derived from it),
+/// and its **event bindings** (`event → command`) are all reconciled here.
+///
+/// Properties are retained rather than projected away because values flow *down*
+/// (spec §3.1) and the desired tree is gone by the time downstream phases run: a
+/// component's typed props are decoded from the retained list after reconcile,
+/// exactly as a fired event finds its command in the retained bindings. The
+/// change check compares the whole list, so a change to *any* authored prop — not
+/// just a CSS-relevant one — yields an `Update`.
 ///
 /// Every pass returns a [`ReconciliationPlan`] describing what it did. The engine
 /// is deterministic and panic-free, and is defensive about stale ids.
@@ -129,12 +134,13 @@ impl Reconciler {
                             }
                         }
                         ViewNode::Element { props, events, .. } => {
-                            // Refresh both CSS-relevant attributes and the event
-                            // bindings from the latest desired node. Combine into
-                            // a single Update op so a node yields at most one.
-                            let attrs_changed = apply_attributes(tree, id, props);
+                            // Refresh the authored properties (and the attributes
+                            // derived from them) and the event bindings from the
+                            // latest desired node. Combine into a single Update op
+                            // so a node yields at most one.
+                            let props_changed = apply_props(tree, id, props);
                             let events_changed = apply_events(tree, id, events);
-                            if attrs_changed || events_changed {
+                            if props_changed || events_changed {
                                 plan.push(ReconciliationOp::Update { id });
                             }
                         }
@@ -144,10 +150,10 @@ impl Reconciler {
                 }
                 IdentityMatch::Create => {
                     let id = tree.alloc(node_kind_of(node));
-                    // Newly created element nodes carry their style attributes
-                    // and event bindings.
+                    // Newly created element nodes carry their authored properties
+                    // (and the attributes derived from them) and event bindings.
                     if let ViewNode::Element { props, events, .. } = node {
-                        apply_attributes(tree, id, props);
+                        apply_props(tree, id, props);
                         apply_events(tree, id, events);
                     }
                     plan.push(ReconciliationOp::Insert { id, parent, index });
@@ -252,15 +258,22 @@ fn apply_text_content(tree: &mut RetainedTree, id: NodeId, content: &str) -> boo
 /// Refreshes a node's CSS-relevant style attributes from a desired element's
 /// props, returning `true` if they actually changed. A no-op (returning
 /// `false`) if `id` is stale or the extracted attributes equal the current ones.
-fn apply_attributes(tree: &mut RetainedTree, id: NodeId, props: &[ViewProperty]) -> bool {
-    let attributes = StyleAttributes::extract(props);
+fn apply_props(tree: &mut RetainedTree, id: NodeId, props: &[ViewProperty]) -> bool {
     let Some(node) = tree.get_mut(id) else {
         return false;
     };
-    if node.attributes() == &attributes {
+    // Compare the FULL property list, not the derived attributes. Attributes are
+    // only the CSS-relevant projection, so diffing them would miss a change to
+    // any other authored prop (a component's `label`, say) and report the node
+    // unchanged — which would leave the component rendering a stale value, and
+    // would wrongly let the frame skip layout.
+    if node.props() == props {
         return false;
     }
-    node.set_attributes(attributes);
+    node.set_props(Box::from(props));
+    // Attributes are derived from the props, so they are re-extracted together
+    // and can never drift out of step with them.
+    node.set_attributes(StyleAttributes::extract(props));
     true
 }
 
@@ -496,6 +509,60 @@ mod tests {
         assert_eq!(attrs.id(), Some("main"));
         let classes: Vec<&str> = attrs.classes().iter().map(AsRef::as_ref).collect();
         assert_eq!(classes, ["counter", "primary"]);
+    }
+
+    #[test]
+    fn a_non_css_prop_survives_reconcile_and_its_change_yields_an_update() {
+        // Before props were retained, only the CSS-relevant projection survived,
+        // so an authored `label` was DROPPED — and changing it produced no
+        // `Update` at all, because the derived attributes were identical. Values
+        // flow down (§3.1), so the value has to still be there afterwards.
+        use obscur_identity::InternedSymbol;
+        use obscur_view::view::{ViewProperty, ViewValue};
+
+        let label = InternedSymbol::from_raw(0x8000_00AA);
+        let node = |text: &str| {
+            el(1).with_prop(ViewProperty::new(label, ViewValue::Text(text.into())))
+        };
+
+        let (mut tree, root) = tree_with_root();
+        let plan = Reconciler::new().reconcile(
+            &mut tree,
+            root,
+            &ViewFragment::from_nodes(vec![node("OK")]),
+        );
+        assert_eq!(plan.iter().filter(|op| op.is_insert()).count(), 1);
+
+        let id = child_ids(&tree, root)[0];
+        assert_eq!(
+            tree.get(id).expect("live").props(),
+            &[ViewProperty::new(label, ViewValue::Text("OK".into()))],
+            "the authored prop is retained, not projected away"
+        );
+
+        // An identical pass is still a no-op.
+        let plan = Reconciler::new().reconcile(
+            &mut tree,
+            root,
+            &ViewFragment::from_nodes(vec![node("OK")]),
+        );
+        assert!(plan.is_empty(), "an unchanged prop must not report a change");
+
+        // Changing ONLY the non-CSS prop now reports an Update and takes effect.
+        let plan = Reconciler::new().reconcile(
+            &mut tree,
+            root,
+            &ViewFragment::from_nodes(vec![node("Cancel")]),
+        );
+        assert_eq!(
+            plan.iter().filter(|op| matches!(op, ReconciliationOp::Update { .. })).count(),
+            1,
+            "a changed non-CSS prop must yield an Update"
+        );
+        assert_eq!(
+            tree.get(id).expect("live").props()[0].value(),
+            &ViewValue::Text("Cancel".into())
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! A retained tree node — the anchor of UI identity.
 
 use obscur_identity::{InternedSymbol, NodeId, StableKey};
-use obscur_view::view::{StyleAttributes, ViewEventBinding};
+use obscur_view::view::{StyleAttributes, ViewEventBinding, ViewProperty};
 
 use super::{LogicalParent, NodeFlags, NodeGeneration, NodeKind, VisualParent};
 
@@ -16,7 +16,9 @@ use super::{LogicalParent, NodeFlags, NodeGeneration, NodeKind, VisualParent};
 /// A node has an independently settable **logical** parent (structure /
 /// style-theme scope) and **visual** parent (paint location). These coincide for
 /// ordinary nodes but diverge for portalled nodes (spec §4.14).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Because the retained `props` carry a [`ViewValue`](obscur_view::view::ViewValue)
+/// — which holds an `f64` — this type is `PartialEq` but not `Eq`.
+#[derive(Debug, Clone, PartialEq)]
 pub struct RetainedNode {
     /// Stable node identity.
     pub id: NodeId,
@@ -44,6 +46,18 @@ pub struct RetainedNode {
     /// (spec §2.3, §3.1). Empty for non-element nodes and elements with no
     /// events.
     pub event_bindings: Box<[ViewEventBinding]>,
+    /// The desired node's **full** property list, copied during reconciliation.
+    ///
+    /// [`attributes`](Self::attributes) above is only the CSS-relevant projection
+    /// of these (local name, id, class list, boolean states); every other authored
+    /// property — a component's `label`, `placeholder`, or any custom prop — lives
+    /// only here. Values flow *down* (spec §3.1), and a component's typed props
+    /// are decoded from this list after the frame's reconcile, so it is retained
+    /// for exactly the reason [`event_bindings`](Self::event_bindings) is: the
+    /// runtime must be able to look it up later, once the desired tree is gone.
+    ///
+    /// Empty for non-element nodes and elements that carry no properties.
+    pub props: Box<[ViewProperty]>,
 }
 
 impl RetainedNode {
@@ -62,6 +76,7 @@ impl RetainedNode {
             key: None,
             attributes: StyleAttributes::new(),
             event_bindings: Box::default(),
+            props: Box::default(),
         }
     }
 
@@ -163,6 +178,20 @@ impl RetainedNode {
     /// Sets this node's event bindings, replacing any previous value.
     pub fn set_event_bindings(&mut self, event_bindings: Box<[ViewEventBinding]>) {
         self.event_bindings = event_bindings;
+    }
+
+    /// Returns the node's full authored property list.
+    #[must_use]
+    pub fn props(&self) -> &[ViewProperty] {
+        &self.props
+    }
+
+    /// Sets this node's properties, replacing any previous value.
+    ///
+    /// Callers that want [`attributes`](Self::attributes) to stay in step must
+    /// re-derive them; the reconciler does both together.
+    pub fn set_props(&mut self, props: Box<[ViewProperty]>) {
+        self.props = props;
     }
 
     /// Returns the ordered child links.
