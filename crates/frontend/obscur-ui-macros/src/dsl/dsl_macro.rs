@@ -387,8 +387,115 @@ fn parse_attr(input: ParseStream) -> syn::Result<DslAttr> {
     }
 }
 
+/// Rejects an expression outside the pure-read subset §2.10 allows.
+///
+/// # A positive allow-list, not a deny-list
+///
+/// The match names what an expression **may** be and rejects everything else, so
+/// a shape nobody thought about is refused rather than admitted. That direction
+/// is the whole point: the alternative — listing what is forbidden — is only ever
+/// as good as the imagination of whoever wrote the list, and §2.10's forbidden
+/// side ("I/O", "direct service access") names *effects*, which no syntactic
+/// list can enumerate.
+///
+/// It matters now in a way it did not before. A binding used to be emitted as a
+/// string — `{do_io()}` produced the harmless text `"do_io()"`. It is now emitted
+/// as real Rust, so the same expression would compile and run. The restriction had
+/// no teeth until the language did.
+///
+/// # What is allowed, and why each
+///
+/// * **paths** and **field access** — §2.10's props, read-only state, loop locals
+///   and field access. The whole point of a binding.
+/// * **literals** — a constant is a read of nothing.
+/// * **comparisons and logical operators**, and `!` / `-` — named by §2.10.
+/// * **arithmetic** — not named by either side, and allowed here because every
+///   §2.10 *forbidden* item is an effect, and arithmetic has none. Refusing
+///   `{a + b}` while allowing `{a > b}` would be a rule about spelling rather
+///   than about what an expression does.
+/// * **parentheses** and **indexing** — grouping and a field access by another
+///   name.
+/// * **method calls** — the honest gap, see below.
+/// * **`&`/`*`** — a borrow or deref of a read is still a read.
+///
+/// Everything else is rejected, which by construction covers §2.10's forbidden
+/// list: assignment and compound assignment, `await` and `async` blocks, closures,
+/// `unsafe`, macros, loops, `?`, and **free function calls** — the
+/// "unconstrained arbitrary function calls" §2.10 names, which stay refused until
+/// something declares which functions are its "explicitly exported pure" ones.
+///
+/// # The gap this does not close
+///
+/// A **method call** is allowed. §2.10 permits Option/null checks (`.is_some()`),
+/// formatting and translations, and all three are method calls in Rust — but so
+/// is `.write_to_disk()`, and nothing here can tell them apart. Narrowing this
+/// needs the same registry of exported pure functions that free calls are waiting
+/// on; until it exists, refusing all method calls would forbid `{maybe.is_some()}`,
+/// which §2.10 explicitly allows. Recorded rather than silently decided.
+/// Whether `op` mutates its left operand (`+=`, `-=`, …).
+///
+/// A separate question from "is it a binary operator", because `syn` gives the
+/// compound-assignment operators the same `Expr::Binary` node as `+` and `==`.
+fn is_assigning_op(op: syn::BinOp) -> bool {
+    matches!(
+        op,
+        syn::BinOp::AddAssign(_)
+            | syn::BinOp::SubAssign(_)
+            | syn::BinOp::MulAssign(_)
+            | syn::BinOp::DivAssign(_)
+            | syn::BinOp::RemAssign(_)
+            | syn::BinOp::BitXorAssign(_)
+            | syn::BinOp::BitAndAssign(_)
+            | syn::BinOp::BitOrAssign(_)
+            | syn::BinOp::ShlAssign(_)
+            | syn::BinOp::ShrAssign(_)
+    )
+}
+
+fn check_expression(expr: &Expr) -> syn::Result<()> {
+    match expr {
+        // A read of a name, a field, or a constant.
+        Expr::Path(_) | Expr::Lit(_) => Ok(()),
+        Expr::Field(inner) => check_expression(&inner.base),
+        Expr::Paren(inner) => check_expression(&inner.expr),
+        Expr::Index(inner) => {
+            check_expression(&inner.expr)?;
+            check_expression(&inner.index)
+        }
+        Expr::Reference(inner) => check_expression(&inner.expr),
+        Expr::Unary(inner) => check_expression(&inner.expr),
+        // `syn` files compound assignment (`+=`) under `Binary`, not under
+        // `Assign` — so admitting every binary operator would admit the mutation
+        // §2.10 forbids. The operator is checked, not just the operands.
+        Expr::Binary(inner) => {
+            if is_assigning_op(inner.op) {
+                return Err(syn::Error::new_spanned(
+                    expr,
+                    "assignment is not allowed in a `.okui` expression (spec §2.10)",
+                ));
+            }
+            check_expression(&inner.left)?;
+            check_expression(&inner.right)
+        }
+        Expr::Cast(inner) => check_expression(&inner.expr),
+        // See "the gap this does not close".
+        Expr::MethodCall(inner) => {
+            check_expression(&inner.receiver)?;
+            inner.args.iter().try_for_each(check_expression)
+        }
+        _ => Err(syn::Error::new_spanned(
+            expr,
+            "this expression is outside what `.okui` allows (spec §2.10): an \
+             expression may read props, state and loop locals, access fields, \
+             compare, and combine with logical operators — it may not assign, \
+             mutate, await, or call a function that has not been declared pure",
+        )),
+    }
+}
+
 /// Classifies a braced attribute expression into a resolved [`PropValue`].
 fn classify_prop_value(expr: &Expr) -> syn::Result<PropValue> {
+    check_expression(expr)?;
     if let Expr::Lit(ExprLit { lit, .. }) = expr {
         return Ok(match lit {
             Lit::Str(value) => PropValue::Text(value.value()),
@@ -591,5 +698,103 @@ mod tests {
         assert!(DslMacro::to_document(quote! {}).is_err(), "empty input");
         assert!(DslMacro::to_document(quote! { <a></b> }).is_err(), "mismatched tag");
         assert!(DslMacro::to_document(quote! { <div> }).is_err(), "missing closing tag");
+    }
+
+    /// Whether `source` parses as an expression §2.10 admits.
+    fn admits(source: &str) -> bool {
+        let expr: Expr = syn::parse_str(source).expect("the probe itself must parse");
+        check_expression(&expr).is_ok()
+    }
+
+    #[test]
+    fn the_allow_list_admits_every_read_shape_the_spec_names() {
+        // §2.10: props, read-only state, loop/template locals, field access,
+        // comparisons, logical operators, Option/null checks.
+        for source in [
+            "open",                  // a prop / state / loop local
+            "user.name",             // field access
+            "user.profile.city",     // nested field access
+            "42",                    // a literal
+            "count > 0",             // a comparison
+            "a == b",                // another
+            "open && !closed",       // logical operators
+            "(a || b) && c",         // grouping
+            "items[0]",              // indexing
+            "maybe.is_some()",       // an Option check — a method call in Rust
+            "count + 1",             // arithmetic: pure, and named by neither side
+            "&user.name",            // a borrow of a read is a read
+        ] {
+            assert!(admits(source), "§2.10 allows `{source}`");
+        }
+    }
+
+    #[test]
+    fn the_allow_list_refuses_every_effect_the_spec_forbids() {
+        // §2.10's forbidden list: assignment, arbitrary mutation, I/O, async work,
+        // unconstrained arbitrary function calls, direct service access. Each is
+        // refused by refusing its *shape* — there is no way to spell the effect.
+        for source in [
+            "count = 1",             // assignment
+            "count += 1",            // compound assignment
+            "fetch().await",         // async work
+            "load_config()",         // an unconstrained free call
+            "std::fs::read(path)",   // I/O, which is a free call
+            "|x| x + 1",             // a closure
+            "vec![1, 2]",            // a macro
+            "unsafe { ptr() }",      // unsafe
+            "maybe?",                // `?`
+            "loop { }",              // not an expression anyone reads
+        ] {
+            assert!(!admits(source), "§2.10 forbids `{source}`");
+        }
+    }
+
+    #[test]
+    fn a_method_call_is_the_gap_the_allow_list_does_not_close() {
+        // Recorded, not hidden. §2.10 allows Option/null checks, formatting and
+        // translations — all method calls in Rust — so refusing method calls
+        // wholesale would forbid what the spec permits. Nothing here can tell
+        // `.is_some()` from `.write_to_disk()`, and guessing would be worse than
+        // saying so: both are admitted until a registry of exported pure
+        // functions exists, which is the same thing free calls wait on.
+        assert!(admits("maybe.is_some()"), "which §2.10 allows");
+        assert!(
+            admits("services.db().query()"),
+            "and this, which it does not — the gap, stated"
+        );
+        // The receiver and the arguments are still walked, so the gap is exactly
+        // one level wide: a *free* call cannot hide inside a method call.
+        assert!(!admits("thing.method(load_config())"));
+        assert!(!admits("load_config().method()"));
+    }
+
+    #[test]
+    fn an_effect_nested_inside_a_read_is_still_refused() {
+        // The walk is recursive, so hiding a call under a comparison does not
+        // launder it — which is the difference between checking the shape and
+        // checking the top of the shape.
+        assert!(!admits("count > load_limit()"));
+        assert!(!admits("user.name == fetch().await"));
+        assert!(!admits("(a && do_io())"));
+        assert!(!admits("items[index()]"));
+    }
+
+    #[test]
+    fn a_forbidden_expression_is_a_compile_error_at_the_authors_code() {
+        // Not a diagnostic collected somewhere: the macro fails, so the author's
+        // build stops on the line they wrote.
+        let error = DslMacro::to_document(quote! { <span class={load_config()}/> })
+            .expect_err("a free call must be refused");
+        assert!(
+            error.to_string().contains("§2.10"),
+            "the error should say which rule: {error}"
+        );
+    }
+
+    #[test]
+    fn an_ordinary_binding_still_compiles() {
+        // The regression guard: the overwhelming majority of bindings are reads.
+        assert!(DslMacro::to_document(quote! { <span class={label}/> }).is_ok());
+        assert!(DslMacro::to_document(quote! { <span class={user.name}/> }).is_ok());
     }
 }
