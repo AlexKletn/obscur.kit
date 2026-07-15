@@ -51,17 +51,17 @@ use std::time::Instant;
 use obscur_kit::css::compiler::StylesheetCompiler;
 use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
-use obscur_kit::devtools::{live_source, SharedInspectSource};
+use obscur_kit::devtools::{SharedInspectSource, live_source};
 use obscur_kit::devtools_protocol::message::ScopeSet;
 use obscur_kit::devtools_server::auth::Authenticator;
 use obscur_kit::devtools_server::bridge::RuntimeBridge;
 use obscur_kit::devtools_server::endpoint::DevToolsEndpoint;
 use obscur_kit::devtools_server::transport::{SocketListener, SocketTransport};
-use obscur_kit::perf::FrameProfiler;
 use obscur_kit::geometry::{Point, Size};
 use obscur_kit::identity::RuntimeId;
 use obscur_kit::interaction::command::KeyEvent;
 use obscur_kit::interaction::pointer::{PointerDevice, PointerEvent, PointerId};
+use obscur_kit::perf::FrameProfiler;
 use obscur_kit::render::frame::{FrameSubmission, RenderFrame};
 use obscur_kit::render::renderer::RendererId;
 use obscur_kit::render_vello::renderer::{VelloDevice, VelloRenderer, VelloSurface};
@@ -168,7 +168,10 @@ impl WireframeWindow {
             runtime.on_command(CMD_SEL, move || {
                 let mut st = s.borrow_mut();
                 if st.select.is_open() {
-                    let next = st.select.selected_index().map_or(0, |i| (i + 1) % SELECT_COUNT);
+                    let next = st
+                        .select
+                        .selected_index()
+                        .map_or(0, |i| (i + 1) % SELECT_COUNT);
                     st.select.select(next);
                     st.last_event = format!("Selected {}", wireframe::SELECT_LABELS[next]);
                 } else {
@@ -305,7 +308,10 @@ impl WireframeWindow {
             return;
         };
 
-        let physical_size = Size::new(surface.config().width as f32, surface.config().height as f32);
+        let physical_size = Size::new(
+            surface.config().width as f32,
+            surface.config().height as f32,
+        );
         let render_frame = RenderFrame::new(snapshot, physical_size);
         let submission = FrameSubmission::new(render_frame);
 
@@ -327,7 +333,8 @@ impl WireframeWindow {
             // Building a live source walks + formats the whole tree, so only
             // pay for it while a DevTools client is actually attached.
             if self.inspect.has_client() {
-                self.inspect.set(live_source(&self.runtime, self.profiler.stats()));
+                self.inspect
+                    .set(live_source(&self.runtime, self.profiler.stats()));
             }
         }
         if let Some(window) = self.window.as_ref() {
@@ -485,7 +492,8 @@ impl ApplicationHandler for WireframeWindow {
                 };
                 #[allow(clippy::cast_possible_truncation)]
                 let cursor = Point::new(self.cursor.0 as f32, self.cursor.1 as f32);
-                self.runtime.handle_scroll(-step_px / self.effective_scale(), cursor);
+                self.runtime
+                    .handle_scroll(-step_px / self.effective_scale(), cursor);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
@@ -512,7 +520,8 @@ impl ApplicationHandler for WireframeWindow {
                     if let Some(physical) = KeyboardConverter::physical_key(code) {
                         let logical = KeyboardConverter::logical_key(&event.logical_key);
                         let pressed = event.state == ElementState::Pressed;
-                        self.runtime.handle_key(KeyEvent::new(physical, logical, pressed));
+                        self.runtime
+                            .handle_key(KeyEvent::new(physical, logical, pressed));
                         if let Some(window) = self.window.as_ref() {
                             window.request_redraw();
                         }

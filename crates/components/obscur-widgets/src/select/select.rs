@@ -74,7 +74,6 @@ impl Select {
     /// Interned name of the `selected` index property (`-1` = no selection).
     const PROP_SELECTED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0403);
 
-
     /// Creates an enabled, closed, option-less select that fires `command` when
     /// a choice is committed.
     #[must_use]
@@ -377,7 +376,12 @@ mod tests {
     /// The `.select-header` child of the outer select node (the label + arrow row).
     fn header_of(children: &ViewFragment) -> &ViewFragment {
         match &children.nodes()[0] {
-            ViewNode::Element { component, props, children, .. } => {
+            ViewNode::Element {
+                component,
+                props,
+                children,
+                ..
+            } => {
                 assert_eq!(*component, Select::HEADER_ID);
                 assert!(props.iter().any(|p| p.name() == CLASS
                     && matches!(p.value(), ViewValue::Text(t) if &**t == "select-header")));
@@ -440,7 +444,12 @@ mod tests {
                 assert_eq!(children.len(), 2, "header + list");
                 header_of(children);
                 match &children.nodes()[1] {
-                    ViewNode::Element { component, props, children, .. } => {
+                    ViewNode::Element {
+                        component,
+                        props,
+                        children,
+                        ..
+                    } => {
                         assert_eq!(*component, Select::LIST_ID);
                         assert!(props.iter().any(|p| p.name() == CLASS
                             && matches!(p.value(), ViewValue::Text(t) if &**t == "select-list")));
@@ -455,8 +464,13 @@ mod tests {
         // The selected row (index 1) carries the `selected` class; the others do not.
         for (i, opt) in list.nodes().iter().enumerate() {
             match opt {
-                ViewNode::Element { component, props, .. } => {
-                    assert_eq!(*component, ComponentId::from_raw(Select::OPTION_ID_BASE + i as u64));
+                ViewNode::Element {
+                    component, props, ..
+                } => {
+                    assert_eq!(
+                        *component,
+                        ComponentId::from_raw(Select::OPTION_ID_BASE + i as u64)
+                    );
                     let class = props
                         .iter()
                         .find(|p| p.name() == CLASS)

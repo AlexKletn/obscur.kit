@@ -27,7 +27,9 @@ pub(crate) fn families_for(computed: Option<&ComputedStyle>) -> FontFallback {
         .and_then(|value| value.value().as_font_families());
     match names {
         Some(list) if !list.is_empty() => FontFallback::from_families(
-            list.iter().map(|name| FontFamily::from_name(name)).collect(),
+            list.iter()
+                .map(|name| FontFamily::from_name(name))
+                .collect(),
         ),
         _ => FontFallback::default_chain(),
     }

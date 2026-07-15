@@ -126,12 +126,12 @@ impl ComponentInstance {
 
 #[cfg(test)]
 mod tests {
-    use obscur_identity::SignalId;
     use super::ComponentInstance;
     use crate::component::InstanceId;
     use crate::lifecycle::LifecycleState;
     use crate::state::StateGeneration;
     use obscur_identity::ComponentId;
+    use obscur_identity::SignalId;
 
     fn instance() -> ComponentInstance {
         ComponentInstance::new(InstanceId::from_raw(1), ComponentId::from_raw(7))

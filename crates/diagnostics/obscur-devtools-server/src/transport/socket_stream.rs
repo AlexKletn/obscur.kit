@@ -16,9 +16,9 @@
 
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
-use std::time::Duration;
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
+use std::time::Duration;
 
 /// The largest single frame payload the transport will read, in bytes.
 ///
@@ -199,7 +199,6 @@ impl SocketStream {
             }
         }
     }
-
 }
 
 /// Fills `buf` from `filled` onward, advancing `filled` by whatever arrives.

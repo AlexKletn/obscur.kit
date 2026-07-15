@@ -60,7 +60,10 @@ impl LocalTransport {
     /// Creates an empty transport with both queues drained.
     #[must_use]
     pub fn new() -> Self {
-        Self { to_server: VecDeque::new(), to_client: VecDeque::new() }
+        Self {
+            to_server: VecDeque::new(),
+            to_client: VecDeque::new(),
+        }
     }
 
     /// Enqueues a client→server message.
@@ -71,7 +74,9 @@ impl LocalTransport {
     /// already holds [`MESSAGE_LIMIT`] messages.
     pub fn send_to_server(&mut self, message: ServerBound) -> Result<(), ProtocolError> {
         if self.to_server.len() >= MESSAGE_LIMIT {
-            return Err(ProtocolError::LimitExceeded { limit: MESSAGE_LIMIT });
+            return Err(ProtocolError::LimitExceeded {
+                limit: MESSAGE_LIMIT,
+            });
         }
         self.to_server.push_back(message);
         Ok(())
@@ -91,7 +96,9 @@ impl LocalTransport {
     /// already holds [`MESSAGE_LIMIT`] messages.
     pub fn push_to_client(&mut self, message: ClientBound) -> Result<(), ProtocolError> {
         if self.to_client.len() >= MESSAGE_LIMIT {
-            return Err(ProtocolError::LimitExceeded { limit: MESSAGE_LIMIT });
+            return Err(ProtocolError::LimitExceeded {
+                limit: MESSAGE_LIMIT,
+            });
         }
         self.to_client.push_back(message);
         Ok(())
@@ -126,10 +133,8 @@ mod tests {
     #[test]
     fn round_trips_a_command_and_a_response() {
         let mut transport = LocalTransport::new();
-        let command = CommandMessage::new(
-            CommandId::new(1),
-            CommandKind::Inspect(Inspectable::Tree),
-        );
+        let command =
+            CommandMessage::new(CommandId::new(1), CommandKind::Inspect(Inspectable::Tree));
         transport
             .send_to_server(ServerBound::Command(command.clone()))
             .expect("under limit");
@@ -145,21 +150,24 @@ mod tests {
         transport
             .push_to_client(ClientBound::Snapshot(snapshot.clone()))
             .expect("under limit");
-        assert_eq!(transport.poll_client(), Some(ClientBound::Snapshot(snapshot)));
+        assert_eq!(
+            transport.poll_client(),
+            Some(ClientBound::Snapshot(snapshot))
+        );
         assert_eq!(transport.poll_client(), None);
     }
 
     #[test]
     fn handshake_is_server_bound() {
         let mut transport = LocalTransport::new();
-        let request = HandshakeRequest::new(
-            VersionRange::exact(ProtocolVersion::CURRENT),
-            "token",
-        );
+        let request = HandshakeRequest::new(VersionRange::exact(ProtocolVersion::CURRENT), "token");
         transport
             .send_to_server(ServerBound::Handshake(request.clone()))
             .expect("under limit");
-        assert_eq!(transport.poll_server(), Some(ServerBound::Handshake(request)));
+        assert_eq!(
+            transport.poll_server(),
+            Some(ServerBound::Handshake(request))
+        );
     }
 
     #[test]
@@ -175,7 +183,9 @@ mod tests {
         assert_eq!(transport.pending_to_server(), MESSAGE_LIMIT);
         assert_eq!(
             transport.send_to_server(ServerBound::Command(command)),
-            Err(ProtocolError::LimitExceeded { limit: MESSAGE_LIMIT })
+            Err(ProtocolError::LimitExceeded {
+                limit: MESSAGE_LIMIT
+            })
         );
     }
 
@@ -189,7 +199,9 @@ mod tests {
         }
         assert_eq!(
             transport.push_to_client(ClientBound::Acknowledged(CommandId::new(0))),
-            Err(ProtocolError::LimitExceeded { limit: MESSAGE_LIMIT })
+            Err(ProtocolError::LimitExceeded {
+                limit: MESSAGE_LIMIT
+            })
         );
     }
 }

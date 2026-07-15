@@ -280,7 +280,17 @@ mod tests {
     fn reserved_symbols_are_outside_the_hash_namespace() {
         // Every reserved symbol lives in the low range (top bit clear), so the
         // fallback hash can never alias one.
-        for symbol in [CLASS, ID, TYPE, SRC, DISABLED, CHECKED, EVENT_CLICK, EVENT_INPUT, EVENT_CHANGE] {
+        for symbol in [
+            CLASS,
+            ID,
+            TYPE,
+            SRC,
+            DISABLED,
+            CHECKED,
+            EVENT_CLICK,
+            EVENT_INPUT,
+            EVENT_CHANGE,
+        ] {
             assert_eq!(symbol.raw() & 0x8000_0000, 0);
         }
     }

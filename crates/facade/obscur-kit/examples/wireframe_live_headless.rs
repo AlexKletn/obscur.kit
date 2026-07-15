@@ -73,7 +73,11 @@ fn main() {
 
     // The UA default sheet — the ONLY thing that styles the bare controls.
     let ua = obscur_kit::ua_stylesheet();
-    println!("[ua] installed default sheet: {} rule(s) at {:?}", ua.rules().len(), ua.origin());
+    println!(
+        "[ua] installed default sheet: {} rule(s) at {:?}",
+        ua.rules().len(),
+        ua.origin()
+    );
 
     let state = Rc::new(RefCell::new(WireState::default()));
     // Author sheet = LAYOUT CHROME ONLY (masthead / cards / captions / page). It
@@ -101,20 +105,33 @@ fn main() {
 
     // --- Toggles: checkbox, tri-state, radio -------------------------------
     click(&mut runtime, &state, &sheets, "chk");
-    assert!(state.borrow().check.is_checked(), "checkbox toggled to checked");
+    assert!(
+        state.borrow().check.is_checked(),
+        "checkbox toggled to checked"
+    );
 
     click(&mut runtime, &state, &sheets, "chk-tri");
-    assert!(state.borrow().tri.is_checked(), "tri-state advanced from mixed to checked");
+    assert!(
+        state.borrow().tri.is_checked(),
+        "tri-state advanced from mixed to checked"
+    );
 
     click(&mut runtime, &state, &sheets, "radio-1");
-    assert_eq!(state.borrow().radio, 1, "radio group selected option 1 (Medium)");
+    assert_eq!(
+        state.borrow().radio,
+        1,
+        "radio group selected option 1 (Medium)"
+    );
 
     // --- Select: open → pick-next → reopen so the popup shows a selected row ---
     click(&mut runtime, &state, &sheets, "select");
     assert!(state.borrow().select.is_open(), "select opened (arrow ▲)");
 
     click(&mut runtime, &state, &sheets, "select");
-    assert!(!state.borrow().select.is_open(), "select closed after picking");
+    assert!(
+        !state.borrow().select.is_open(),
+        "select closed after picking"
+    );
     assert_eq!(
         state.borrow().select.selected_index(),
         Some(0),
@@ -125,7 +142,10 @@ fn main() {
     // (inverted) row, and assert the popup renders as a vertical stack of option
     // rows positioned directly BELOW the header.
     click(&mut runtime, &state, &sheets, "select");
-    assert!(state.borrow().select.is_open(), "select reopened for the popup capture");
+    assert!(
+        state.borrow().select.is_open(),
+        "select reopened for the popup capture"
+    );
     assert_select_popup(&runtime);
 
     // --- Field: type a LONG string; a single-line `input` must NOT wrap --------
@@ -143,7 +163,10 @@ fn main() {
         state.borrow().field
     );
     let (_, field_size) = box_of(&runtime, "field").expect("field laid out");
-    println!("[measure] field box = {:.1} × {:.1}", field_size.width, field_size.height);
+    println!(
+        "[measure] field box = {:.1} × {:.1}",
+        field_size.width, field_size.height
+    );
     assert!(
         (field_size.width - 220.0).abs() < 2.0,
         "field keeps its definite 220px width (got {:.1})",
@@ -279,19 +302,30 @@ fn verify_demo_scrolls() {
 
     // Drive it exactly as the wheel does: scroll the sheet down by 400 logical px.
     let landed = runtime.scroll_by(app, 400.0);
-    assert!(landed > 0.0, "#app scrolls — its content overflows the viewport (got {landed})");
+    assert!(
+        landed > 0.0,
+        "#app scrolls — its content overflows the viewport (got {landed})"
+    );
     assert_eq!(runtime.scroll_top(app), landed, "scroll_top advanced");
     runtime.render_now(&view, &sheets);
 
     // The scrolled frame carries a translate(0,-scroll_top) wrapping the content.
     let snapshot = runtime.snapshot();
-    let scrolled_by = snapshot.display_list().commands().iter().find_map(|c| match c {
-        obscur_kit::scene::command::PaintCommand::PushTransform(t) if t.coeffs[5] < 0.0 => {
-            Some(-t.coeffs[5])
-        }
-        _ => None,
-    });
-    assert_eq!(scrolled_by, Some(landed), "the sheet is translated up by scroll_top");
+    let scrolled_by = snapshot
+        .display_list()
+        .commands()
+        .iter()
+        .find_map(|c| match c {
+            obscur_kit::scene::command::PaintCommand::PushTransform(t) if t.coeffs[5] < 0.0 => {
+                Some(-t.coeffs[5])
+            }
+            _ => None,
+        });
+    assert_eq!(
+        scrolled_by,
+        Some(landed),
+        "the sheet is translated up by scroll_top"
+    );
     let scrolled = capture_at(&mut runtime, &mut renderer, SCROLL_VIEWPORT);
 
     let combined = stitch(&[&idle, &scrolled]);
@@ -309,12 +343,18 @@ fn verify_demo_scrolls() {
 }
 
 /// Rasterizes the runtime's committed scene into a fresh pixmap sized to `size`.
-fn capture_at(runtime: &mut UiRuntime, renderer: &mut CpuRenderer, size: Size) -> tiny_skia::Pixmap {
+fn capture_at(
+    runtime: &mut UiRuntime,
+    renderer: &mut CpuRenderer,
+    size: Size,
+) -> tiny_skia::Pixmap {
     let snapshot = runtime.snapshot();
     let frame = RenderFrame::new(snapshot, size);
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(size));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
@@ -366,7 +406,10 @@ fn register_handlers(runtime: &mut UiRuntime, state: &Rc<RefCell<WireState>>) {
                 // Bare `Select` bubbles one event for the whole control, so "pick"
                 // is a cycle-to-next (per-option hit-routing is not a bare-widget
                 // capability). select() commits + closes.
-                let next = st.select.selected_index().map_or(0, |i| (i + 1) % SELECT_COUNT);
+                let next = st
+                    .select
+                    .selected_index()
+                    .map_or(0, |i| (i + 1) % SELECT_COUNT);
                 st.select.select(next);
                 st.last_event = format!("Selected {}", wireframe::SELECT_LABELS[next]);
             } else {
@@ -510,12 +553,18 @@ fn assert_select_popup(runtime: &UiRuntime) {
     let header = *nodes_by_class(runtime, "select-header")
         .first()
         .expect("the select renders a `.select-header` row");
-    let header_lb = runtime.layout_boxes().get(&header).expect("header laid out");
+    let header_lb = runtime
+        .layout_boxes()
+        .get(&header)
+        .expect("header laid out");
     let (header_origin, header_size) = (header_lb.origin(), header_lb.size());
     let list = *nodes_by_class(runtime, "select-list")
         .first()
         .expect("an open select emits a `.select-list` popup");
-    let list_lb = runtime.layout_boxes().get(&list).expect("popup list laid out");
+    let list_lb = runtime
+        .layout_boxes()
+        .get(&list)
+        .expect("popup list laid out");
     let list_top = list_lb.origin().y;
     let header_bottom = header_origin.y + header_size.height;
     // `top: 100%` anchors the list at the header's PADDING-box bottom, i.e. just
@@ -540,12 +589,19 @@ fn assert_select_popup(runtime: &UiRuntime) {
     // The option rows: one per option, stacked vertically (each strictly below the
     // previous, sharing a left edge), and exactly one carries the `selected` class.
     let options = nodes_by_class(runtime, "select-option");
-    assert_eq!(options.len(), SELECT_COUNT, "one `.select-option` row per option");
+    assert_eq!(
+        options.len(),
+        SELECT_COUNT,
+        "one `.select-option` row per option"
+    );
     let mut prev_bottom = f32::MIN;
     let mut left_edge: Option<f32> = None;
     let mut selected_rows = 0usize;
     for opt in &options {
-        let lb = runtime.layout_boxes().get(opt).expect("option row laid out");
+        let lb = runtime
+            .layout_boxes()
+            .get(opt)
+            .expect("option row laid out");
         let o = lb.origin();
         assert!(
             lb.size().height > 30.0,
@@ -564,12 +620,23 @@ fn assert_select_popup(runtime: &UiRuntime) {
             Some(x) => assert!((o.x - x).abs() < 1.0, "option rows share a left edge"),
         }
         let node = runtime.tree().get(*opt).expect("option node");
-        if node.attributes().classes().iter().any(|c| &**c == "selected") {
+        if node
+            .attributes()
+            .classes()
+            .iter()
+            .any(|c| &**c == "selected")
+        {
             selected_rows += 1;
         }
     }
-    assert_eq!(selected_rows, 1, "exactly one option row is marked `selected` (inverted)");
-    println!("[check] select popup: {} rows stacked below header, one inverted", options.len());
+    assert_eq!(
+        selected_rows, 1,
+        "exactly one option row is marked `selected` (inverted)"
+    );
+    println!(
+        "[check] select popup: {} rows stacked below header, one inverted",
+        options.len()
+    );
 }
 
 /// Rasterizes the runtime's current committed scene into a fresh pixmap.
@@ -578,7 +645,9 @@ fn capture(runtime: &mut UiRuntime, renderer: &mut CpuRenderer) -> tiny_skia::Pi
     let frame = RenderFrame::new(snapshot, VIEWPORT);
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
@@ -593,7 +662,14 @@ fn stitch(panels: &[&tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     let paint = tiny_skia::PixmapPaint::default();
     let mut x = 0i32;
     for panel in panels {
-        out.draw_pixmap(x, 0, panel.as_ref(), &paint, tiny_skia::Transform::identity(), None);
+        out.draw_pixmap(
+            x,
+            0,
+            panel.as_ref(),
+            &paint,
+            tiny_skia::Transform::identity(),
+            None,
+        );
         x += panel.width() as i32 + gap as i32;
     }
     out

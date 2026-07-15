@@ -329,15 +329,21 @@ mod tests {
         let breaks = DefaultLineBreaker.opportunities("中文字", WhiteSpace::Normal);
         assert_eq!(breaks, vec![LineBreak::soft(3), LineBreak::soft(6)]);
         // A non-wrapping mode (`nowrap`) yields no CJK soft breaks.
-        assert!(DefaultLineBreaker
-            .opportunities("中文字", WhiteSpace::Nowrap)
-            .is_empty());
+        assert!(
+            DefaultLineBreaker
+                .opportunities("中文字", WhiteSpace::Nowrap)
+                .is_empty()
+        );
     }
 
     #[test]
     fn default_breaker_is_object_safe() {
         let breaker: &dyn LineBreaker = &DefaultLineBreaker;
-        assert!(breaker.opportunities("hello", WhiteSpace::Normal).is_empty());
+        assert!(
+            breaker
+                .opportunities("hello", WhiteSpace::Normal)
+                .is_empty()
+        );
     }
 
     #[test]

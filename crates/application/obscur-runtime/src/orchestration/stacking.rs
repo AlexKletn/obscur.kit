@@ -54,7 +54,7 @@ use std::collections::{HashMap, HashSet};
 use obscur_identity::NodeId;
 use obscur_scene::command::PaintCommand;
 use obscur_style::computed::{ComputedStyle, ComputedValue};
-use obscur_style::property::{layout_keyword, PropertyId, PropertyValue};
+use obscur_style::property::{PropertyId, PropertyValue, layout_keyword};
 use obscur_tree::tree::RetainedTree;
 
 use super::ComputedStyles;
@@ -467,7 +467,11 @@ mod tests {
 
         let zmap = effective_stacking_z(&tree, &computed);
         assert_eq!(zmap.get(&a), Some(&3));
-        assert_eq!(zmap.get(&b), Some(&3), "descendant stacks with its z ancestor");
+        assert_eq!(
+            zmap.get(&b),
+            Some(&3),
+            "descendant stacks with its z ancestor"
+        );
     }
 
     #[test]
@@ -640,9 +644,27 @@ mod tests {
         // Regression guard at the sort level: equal (z, layer) units keep
         // `tree_index` (document) order — byte-identical to the pre-fix sequence.
         let mut units = vec![
-            PaintUnit { z: 0, layer: PaintLayer::NonPositioned, tree_index: 3, order: PaintUnit::PAINT_ORDER, commands: Vec::new() },
-            PaintUnit { z: 0, layer: PaintLayer::NonPositioned, tree_index: 1, order: PaintUnit::PAINT_ORDER, commands: Vec::new() },
-            PaintUnit { z: 0, layer: PaintLayer::NonPositioned, tree_index: 2, order: PaintUnit::PAINT_ORDER, commands: Vec::new() },
+            PaintUnit {
+                z: 0,
+                layer: PaintLayer::NonPositioned,
+                tree_index: 3,
+                order: PaintUnit::PAINT_ORDER,
+                commands: Vec::new(),
+            },
+            PaintUnit {
+                z: 0,
+                layer: PaintLayer::NonPositioned,
+                tree_index: 1,
+                order: PaintUnit::PAINT_ORDER,
+                commands: Vec::new(),
+            },
+            PaintUnit {
+                z: 0,
+                layer: PaintLayer::NonPositioned,
+                tree_index: 2,
+                order: PaintUnit::PAINT_ORDER,
+                commands: Vec::new(),
+            },
         ];
         units.sort_by_key(|u| (u.z, u.layer, u.tree_index, u.order));
         assert_eq!(

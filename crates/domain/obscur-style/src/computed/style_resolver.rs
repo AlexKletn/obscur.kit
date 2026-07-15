@@ -36,7 +36,7 @@
 use crate::cascade::ResolvedDeclarations;
 use crate::computed::{ComputedStyle, ComputedValue};
 use crate::property::{
-    layout_keyword, InheritedProperty, Length, PropertyId, PropertyValue, StyleColor,
+    InheritedProperty, Length, PropertyId, PropertyValue, StyleColor, layout_keyword,
 };
 use obscur_identity::InternedSymbol;
 use std::collections::{HashMap, HashSet};
@@ -514,7 +514,8 @@ impl StyleResolver {
 
         // Steps 2–3: compute each property.
         for &property in COMPUTED_PROPERTIES {
-            if let Some(value) = self.resolve_property(property, cascaded, &effective, parent, rtl) {
+            if let Some(value) = self.resolve_property(property, cascaded, &effective, parent, rtl)
+            {
                 style.set(property, value);
             }
         }
@@ -608,8 +609,7 @@ impl StyleResolver {
                     && let PropertyValue::Keyword(symbol) = value
                     && let Some(bolder) = relative_weight_is_bolder(symbol)
                 {
-                    let resolved =
-                        resolve_relative_font_weight(parent_font_weight(parent), bolder);
+                    let resolved = resolve_relative_font_weight(parent_font_weight(parent), bolder);
                     return Some(ComputedValue::number(resolved));
                 }
                 self.resolve_specified(property, value, parent)
@@ -1008,7 +1008,8 @@ mod tests {
         parent.set(PropertyId::FontWeight, ComputedValue::number(700.0));
 
         // `font-weight` inherits: a child with none takes the parent's weight.
-        let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), Some(&parent));
+        let computed =
+            resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), Some(&parent));
         assert_eq!(weight_of(&computed), Some(700.0));
     }
 
@@ -1037,7 +1038,11 @@ mod tests {
 
         // `z-index` does not inherit: a child with no authored value takes the
         // initial (`auto`, left unresolved), NOT the parent's numeric level.
-        let child = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), Some(&computed));
+        let child = resolver.resolve(
+            &ResolvedDeclarations::new(),
+            &HashMap::new(),
+            Some(&computed),
+        );
         assert_eq!(child.get(PropertyId::ZIndex), None);
     }
 
@@ -1153,8 +1158,11 @@ mod tests {
         );
         // Border does not inherit: a child with no authored border takes the
         // initial (width 0, style/color unset), NOT the parent's red border.
-        let child =
-            resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), Some(&computed));
+        let child = resolver.resolve(
+            &ResolvedDeclarations::new(),
+            &HashMap::new(),
+            Some(&computed),
+        );
         assert_eq!(child.get(PropertyId::BorderTopColor), None);
         assert_eq!(
             child
@@ -1409,7 +1417,10 @@ mod tests {
     fn authored_typography_flows_to_computed_style() {
         let resolver = StyleResolver::new();
         let mut cascaded = ResolvedDeclarations::new();
-        cascaded.insert(PropertyId::FontSize, PropertyValue::Length(Length::px(24.0)));
+        cascaded.insert(
+            PropertyId::FontSize,
+            PropertyValue::Length(Length::px(24.0)),
+        );
         cascaded.insert(
             PropertyId::FontFamily,
             PropertyValue::font_families(["Foo", "sans-serif"]),
@@ -1434,7 +1445,9 @@ mod tests {
         let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
 
         assert_eq!(
-            computed.get(PropertyId::FontSize).and_then(ComputedValue::as_length),
+            computed
+                .get(PropertyId::FontSize)
+                .and_then(ComputedValue::as_length),
             Some(Length::px(24.0))
         );
         assert_eq!(
@@ -1444,20 +1457,30 @@ mod tests {
             Some(2)
         );
         assert_eq!(
-            computed.get(PropertyId::FontStyle).map(ComputedValue::value),
+            computed
+                .get(PropertyId::FontStyle)
+                .map(ComputedValue::value),
             Some(&PropertyValue::Keyword(layout_keyword::FONT_STYLE_ITALIC))
         );
         assert_eq!(
-            computed.get(PropertyId::Direction).map(ComputedValue::value),
+            computed
+                .get(PropertyId::Direction)
+                .map(ComputedValue::value),
             Some(&PropertyValue::Keyword(layout_keyword::DIRECTION_RTL))
         );
         assert_eq!(
-            computed.get(PropertyId::TextAlign).map(ComputedValue::value),
+            computed
+                .get(PropertyId::TextAlign)
+                .map(ComputedValue::value),
             Some(&PropertyValue::Keyword(layout_keyword::TEXT_ALIGN_CENTER))
         );
         assert_eq!(
-            computed.get(PropertyId::TextOverflow).map(ComputedValue::value),
-            Some(&PropertyValue::Keyword(layout_keyword::TEXT_OVERFLOW_ELLIPSIS))
+            computed
+                .get(PropertyId::TextOverflow)
+                .map(ComputedValue::value),
+            Some(&PropertyValue::Keyword(
+                layout_keyword::TEXT_OVERFLOW_ELLIPSIS
+            ))
         );
     }
 
@@ -1470,21 +1493,33 @@ mod tests {
             PropertyId::FlexDirection,
             PropertyValue::Keyword(layout_keyword::FLEX_COLUMN),
         );
-        cascaded.insert(PropertyId::MarginTop, PropertyValue::Length(Length::px(8.0)));
-        cascaded.insert(PropertyId::MinWidth, PropertyValue::Length(Length::px(50.0)));
+        cascaded.insert(
+            PropertyId::MarginTop,
+            PropertyValue::Length(Length::px(8.0)),
+        );
+        cascaded.insert(
+            PropertyId::MinWidth,
+            PropertyValue::Length(Length::px(50.0)),
+        );
 
         let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
 
         assert_eq!(
-            computed.get(PropertyId::FlexDirection).map(ComputedValue::value),
+            computed
+                .get(PropertyId::FlexDirection)
+                .map(ComputedValue::value),
             Some(&PropertyValue::Keyword(layout_keyword::FLEX_COLUMN))
         );
         assert_eq!(
-            computed.get(PropertyId::MarginTop).and_then(ComputedValue::as_length),
+            computed
+                .get(PropertyId::MarginTop)
+                .and_then(ComputedValue::as_length),
             Some(Length::px(8.0))
         );
         assert_eq!(
-            computed.get(PropertyId::MinWidth).and_then(ComputedValue::as_length),
+            computed
+                .get(PropertyId::MinWidth)
+                .and_then(ComputedValue::as_length),
             Some(Length::px(50.0))
         );
     }
@@ -1528,7 +1563,9 @@ mod tests {
         // Concrete CSS initials equal the downstream defaults, so no output moves.
         assert_eq!(computed.opacity(), Some(1.0));
         assert_eq!(
-            computed.get(PropertyId::Width).and_then(ComputedValue::as_length),
+            computed
+                .get(PropertyId::Width)
+                .and_then(ComputedValue::as_length),
             Some(Length::Auto)
         );
         for id in [
@@ -1544,7 +1581,9 @@ mod tests {
             );
         }
         assert_eq!(
-            computed.get(PropertyId::FontSize).and_then(ComputedValue::as_length),
+            computed
+                .get(PropertyId::FontSize)
+                .and_then(ComputedValue::as_length),
             Some(Length::px(16.0))
         );
     }
@@ -1597,7 +1636,11 @@ mod tests {
         assert_eq!(tracks, &[GridTrack::Fixed(Length::px(40.0))]);
         // Unauthored on a child: not inherited, so it is absent (runtime defaults
         // to the `[Auto]` implicit-track sizing).
-        let child = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), Some(&computed));
+        let child = resolver.resolve(
+            &ResolvedDeclarations::new(),
+            &HashMap::new(),
+            Some(&computed),
+        );
         assert!(child.get(PropertyId::GridAutoRows).is_none());
     }
 
@@ -1640,12 +1683,17 @@ mod tests {
     fn inherited_font_size_flows_from_parent() {
         let resolver = StyleResolver::new();
         let mut parent = ComputedStyle::new();
-        parent.set(PropertyId::FontSize, ComputedValue::length(Length::px(30.0)));
+        parent.set(
+            PropertyId::FontSize,
+            ComputedValue::length(Length::px(30.0)),
+        );
 
         let computed =
             resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), Some(&parent));
         assert_eq!(
-            computed.get(PropertyId::FontSize).and_then(ComputedValue::as_length),
+            computed
+                .get(PropertyId::FontSize)
+                .and_then(ComputedValue::as_length),
             Some(Length::px(30.0))
         );
     }
@@ -1710,7 +1758,10 @@ mod tests {
             assert_eq!(margin(&ltr, PropertyId::MarginRight), Some(Length::px(0.0)));
 
             let rtl = resolve(&cascaded, true);
-            assert_eq!(margin(&rtl, PropertyId::MarginRight), Some(Length::px(10.0)));
+            assert_eq!(
+                margin(&rtl, PropertyId::MarginRight),
+                Some(Length::px(10.0))
+            );
             assert_eq!(margin(&rtl, PropertyId::MarginLeft), Some(Length::px(0.0)));
         }
 
@@ -1757,7 +1808,10 @@ mod tests {
             cascaded.insert_with_priority(PropertyId::MarginLeft, px(1.0), at(1));
 
             let style = resolve(&cascaded, false);
-            assert_eq!(margin(&style, PropertyId::MarginLeft), Some(Length::px(1.0)));
+            assert_eq!(
+                margin(&style, PropertyId::MarginLeft),
+                Some(Length::px(1.0))
+            );
         }
 
         #[test]
@@ -1777,7 +1831,10 @@ mod tests {
             cascaded.insert_with_priority(PropertyId::MarginLeft, px(1.0), at(99));
 
             let style = resolve(&cascaded, false);
-            assert_eq!(margin(&style, PropertyId::MarginLeft), Some(Length::px(2.0)));
+            assert_eq!(
+                margin(&style, PropertyId::MarginLeft),
+                Some(Length::px(2.0))
+            );
         }
 
         #[test]
@@ -1807,5 +1864,4 @@ mod tests {
             assert_eq!(style.get(PropertyId::MarginInlineStart), None);
         }
     }
-
 }

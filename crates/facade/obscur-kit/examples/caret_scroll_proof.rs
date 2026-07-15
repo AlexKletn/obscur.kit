@@ -41,7 +41,7 @@ use obscur_kit::text::font::{FontAttributes, FontFamily, FontId, GenericFamily};
 use obscur_kit::text_harfrust::{FontRegistry, HarfrustShaper};
 use obscur_kit::text_unicode::UnicodeTextItemizer;
 use obscur_kit::view::view::{
-    View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue, CLASS, EVENT_INPUT,
+    CLASS, EVENT_INPUT, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -82,12 +82,23 @@ fn main() {
     for c in VALUE.chars() {
         runtime.handle_key(char_press(c));
     }
-    println!("[type] entered {:?} ({} chars)", VALUE, VALUE.chars().count());
+    println!(
+        "[type] entered {:?} ({} chars)",
+        VALUE,
+        VALUE.chars().count()
+    );
 
     // The scrolled ("tail") frame.
-    let scrolled = runtime.render_now(&field_view(""), sheets).snapshot().clone();
+    let scrolled = runtime
+        .render_now(&field_view(""), sheets)
+        .snapshot()
+        .clone();
     let field = field_node(&runtime);
-    let field_box = runtime.layout_boxes().get(&field).expect("field box").bounds;
+    let field_box = runtime
+        .layout_boxes()
+        .get(&field)
+        .expect("field box")
+        .bounds;
     let box_right = field_box.origin.x + field_box.size.width;
     let caret_x = caret_x_of(&scrolled).expect("a caret in the scrolled frame");
     let run_left = run_left_of(&scrolled).expect("a run in the scrolled frame");
@@ -114,7 +125,9 @@ fn main() {
     // inside the box near the right (where the tail + caret show).
     let content_width = field_box.size.width - 8.0; // 4px padding each side
     let (run_width, run_right) = run_extent_of(&scrolled).expect("a run in the scrolled frame");
-    println!("[scrolled] run width = {run_width:.1}  run.right = {run_right:.1}  content_w = {content_width:.1}");
+    println!(
+        "[scrolled] run width = {run_width:.1}  run.right = {run_right:.1}  content_w = {content_width:.1}"
+    );
     assert!(
         run_width > content_width + 0.5,
         "the run must be the untruncated full value (width {run_width} > content {content_width})",
@@ -125,11 +138,16 @@ fn main() {
         field_box.origin.x,
         box_right,
     );
-    println!("  ✓ caret is inside the box; the head is scrolled out and clipped; the full-run TAIL is visible");
+    println!(
+        "  ✓ caret is inside the box; the head is scrolled out and clipped; the full-run TAIL is visible"
+    );
 
     // --- Home: reset the scroll so the head is visible again.
     runtime.handle_key(named_press(NamedKey::Home));
-    let reset = runtime.render_now(&field_view(""), sheets).snapshot().clone();
+    let reset = runtime
+        .render_now(&field_view(""), sheets)
+        .snapshot()
+        .clone();
     let head_run_left = run_left_of(&reset).expect("a run in the reset frame");
     println!(
         "[home] run.left = {:.1}  (box x∈[{:.1}, {:.1}])",
@@ -195,34 +213,46 @@ fn field_node(runtime: &UiRuntime) -> NodeId {
 
 /// The painted caret's x (the thin, width-1 fill), if present.
 fn caret_x_of(snapshot: &SceneSnapshot) -> Option<f32> {
-    snapshot.display_list().commands().iter().find_map(|c| match c {
-        PaintCommand::DrawPath { path, .. } => path
-            .bounds()
-            .filter(|r| (r.size.width - 1.0).abs() < 1e-3)
-            .map(|r| r.origin.x),
-        _ => None,
-    })
+    snapshot
+        .display_list()
+        .commands()
+        .iter()
+        .find_map(|c| match c {
+            PaintCommand::DrawPath { path, .. } => path
+                .bounds()
+                .filter(|r| (r.size.width - 1.0).abs() < 1e-3)
+                .map(|r| r.origin.x),
+            _ => None,
+        })
 }
 
 /// The first `DrawText` run's origin x (the run's left edge, `origin − scroll`).
 fn run_left_of(snapshot: &SceneSnapshot) -> Option<f32> {
-    snapshot.display_list().commands().iter().find_map(|c| match c {
-        PaintCommand::DrawText { origin, .. } => Some(origin.x),
-        _ => None,
-    })
+    snapshot
+        .display_list()
+        .commands()
+        .iter()
+        .find_map(|c| match c {
+            PaintCommand::DrawText { origin, .. } => Some(origin.x),
+            _ => None,
+        })
 }
 
 /// The first `DrawText` run's advance width and right edge (`origin.x + Σadvance`).
 /// The right edge is where the last glyph (and the caret trailing it) paints; the
 /// width proves the run is the FULL value, not a box-width truncated prefix.
 fn run_extent_of(snapshot: &SceneSnapshot) -> Option<(f32, f32)> {
-    snapshot.display_list().commands().iter().find_map(|c| match c {
-        PaintCommand::DrawText { origin, run, .. } => {
-            let width: f32 = run.glyphs().iter().map(|g| g.advance()).sum();
-            Some((width, origin.x + width))
-        }
-        _ => None,
-    })
+    snapshot
+        .display_list()
+        .commands()
+        .iter()
+        .find_map(|c| match c {
+            PaintCommand::DrawText { origin, run, .. } => {
+                let width: f32 = run.glyphs().iter().map(|g| g.advance()).sum();
+                Some((width, origin.x + width))
+            }
+            _ => None,
+        })
 }
 
 /// Boots a runtime + CPU renderer with the text stack wired (best-effort font).
@@ -241,7 +271,9 @@ fn rasterize(renderer: &mut CpuRenderer, snapshot: &SceneSnapshot) -> tiny_skia:
     let frame = RenderFrame::new(snapshot.clone(), VIEWPORT);
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
@@ -290,7 +322,12 @@ fn named_press(named: NamedKey) -> KeyEvent {
 }
 
 fn mouse(kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
-    PointerEvent::new(PointerId::MOUSE, PointerDevice::Mouse, kind, Point::new(x, y))
+    PointerEvent::new(
+        PointerId::MOUSE,
+        PointerDevice::Mouse,
+        kind,
+        Point::new(x, y),
+    )
 }
 
 /// The workspace-relative output path `target/<name>`.

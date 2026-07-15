@@ -311,7 +311,12 @@ impl GaussianBlur {
     /// panel shape — so only the panel area is frosted and its corners stay sharp
     /// outside the radius. Recorded into `encoder`; the caller submits after the
     /// prior segment composites so the backdrop is fully painted first.
-    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::too_many_arguments)]
+    #[allow(
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::too_many_arguments
+    )]
     pub fn render_backdrop(
         &self,
         device: &wgpu::Device,
@@ -345,7 +350,11 @@ impl GaussianBlur {
             wgpu::TexelCopyTextureInfo {
                 texture: accum,
                 mip_level: 0,
-                origin: wgpu::Origin3d { x: rx0, y: ry0, z: 0 },
+                origin: wgpu::Origin3d {
+                    x: rx0,
+                    y: ry0,
+                    z: 0,
+                },
                 aspect: wgpu::TextureAspect::All,
             },
             wgpu::TexelCopyTextureInfo {
@@ -497,11 +506,26 @@ impl GaussianBlur {
         // mask_enabled, aa) + (premultiply, 0, 0, 0) — 20 f32 / 80 bytes, matching
         // the WGSL struct.
         let uniform = f32s_to_bytes(&[
-            rect[0], rect[1], rect[2], rect[3],
-            mask.panel[0], mask.panel[1], mask.panel[2], mask.panel[3],
-            mask.radii[0], mask.radii[1], mask.radii[2], mask.radii[3],
-            mask.quad[0], mask.quad[1], mask.enabled(), mask.aa,
-            if premultiply { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0,
+            rect[0],
+            rect[1],
+            rect[2],
+            rect[3],
+            mask.panel[0],
+            mask.panel[1],
+            mask.panel[2],
+            mask.panel[3],
+            mask.radii[0],
+            mask.radii[1],
+            mask.radii[2],
+            mask.radii[3],
+            mask.quad[0],
+            mask.quad[1],
+            mask.enabled(),
+            mask.aa,
+            if premultiply { 1.0 } else { 0.0 },
+            0.0,
+            0.0,
+            0.0,
         ]);
         let buffer = uniform_buffer(device, &uniform, "obscur-gaussian-composite-uniform");
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -552,7 +576,6 @@ impl GaussianBlur {
             },
         ]
     }
-
 }
 
 /// The optional rounded-rect mask a [`composite_pass`](GaussianBlur::composite_pass)
@@ -756,7 +779,10 @@ mod tests {
             linear > gamma + 0.15,
             "linear blur ({linear}) should be well above gamma blur ({gamma}) at the boundary"
         );
-        assert!(linear > 0.70, "linear crossover {linear} should be ~sRGB-encode(0.5)");
+        assert!(
+            linear > 0.70,
+            "linear crossover {linear} should be ~sRGB-encode(0.5)"
+        );
     }
 
     #[test]
@@ -774,6 +800,9 @@ mod tests {
         // returned unchanged — a zero-radius blur is a pass-through.
         let row = vec![0.0, 0.25, 0.5, 0.75, 1.0];
         let linear = blur_at(&row, 2, 0.0001, true);
-        assert!((linear - 0.5).abs() < 1e-3, "degenerate blur changed the center: {linear}");
+        assert!(
+            (linear - 0.5).abs() < 1e-3,
+            "degenerate blur changed the center: {linear}"
+        );
     }
 }

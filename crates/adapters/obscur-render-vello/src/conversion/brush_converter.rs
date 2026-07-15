@@ -35,8 +35,7 @@ use super::color_converter::ColorConverter;
 /// stylesheet is a future extension — the domain model does not yet carry an
 /// authored interpolation space, so Oklab (the CSS default) is applied
 /// unconditionally.
-const GRADIENT_INTERPOLATION_CS: peniko::color::ColorSpaceTag =
-    peniko::color::ColorSpaceTag::Oklab;
+const GRADIENT_INTERPOLATION_CS: peniko::color::ColorSpaceTag = peniko::color::ColorSpaceTag::Oklab;
 
 /// Number of linear sub-segments each authored stop pair is split into when
 /// densifying in Oklab. `N` segments insert `N - 1` interior Oklab-interpolated
@@ -208,7 +207,10 @@ impl BrushConverter {
                 )));
             }
             // Exact authored end stop of this pair.
-            out.push(peniko::ColorStop::from((b.offset(), self.color.convert(b.color()))));
+            out.push(peniko::ColorStop::from((
+                b.offset(),
+                self.color.convert(b.color()),
+            )));
         }
         out
     }
@@ -313,10 +315,25 @@ mod tests {
                 assert_eq!(gradient.stops.len(), DENSIFY_SEGMENTS + 1);
                 assert_eq!(gradient.extend, peniko::Extend::Pad);
                 // CSS Images 4 default interpolation space is Oklab.
-                assert_eq!(gradient.interpolation_cs, peniko::color::ColorSpaceTag::Oklab);
+                assert_eq!(
+                    gradient.interpolation_cs,
+                    peniko::color::ColorSpaceTag::Oklab
+                );
                 // Endpoints stay EXACT: first stop black, last stop white.
-                let first = gradient.stops.first().expect("first stop").color.to_alpha_color::<peniko::color::Srgb>().to_rgba8();
-                let last = gradient.stops.last().expect("last stop").color.to_alpha_color::<peniko::color::Srgb>().to_rgba8();
+                let first = gradient
+                    .stops
+                    .first()
+                    .expect("first stop")
+                    .color
+                    .to_alpha_color::<peniko::color::Srgb>()
+                    .to_rgba8();
+                let last = gradient
+                    .stops
+                    .last()
+                    .expect("last stop")
+                    .color
+                    .to_alpha_color::<peniko::color::Srgb>()
+                    .to_rgba8();
                 assert_eq!((first.r, first.g, first.b), (0, 0, 0));
                 assert_eq!((last.r, last.g, last.b), (255, 255, 255));
                 assert_eq!(gradient.stops.first().unwrap().offset, 0.0);
@@ -341,7 +358,10 @@ mod tests {
             peniko::Brush::Gradient(gradient) => {
                 assert_eq!(gradient.stops.len(), DENSIFY_SEGMENTS + 1);
                 assert!(matches!(gradient.kind, peniko::GradientKind::Radial(_)));
-                assert_eq!(gradient.interpolation_cs, peniko::color::ColorSpaceTag::Oklab);
+                assert_eq!(
+                    gradient.interpolation_cs,
+                    peniko::color::ColorSpaceTag::Oklab
+                );
             }
             other => panic!("expected Gradient, got {other:?}"),
         }
@@ -367,7 +387,10 @@ mod tests {
         let t = BrushConverter::brush_transform(&g).expect("ellipse carries a brush transform");
         // Center is a fixed point of the scale-about-center transform.
         let c = t * kurbo::Point::new(5.0, 5.0);
-        assert!((c.x - 5.0).abs() < 1e-9 && (c.y - 5.0).abs() < 1e-9, "center fixed: {c:?}");
+        assert!(
+            (c.x - 5.0).abs() < 1e-9 && (c.y - 5.0).abs() < 1e-9,
+            "center fixed: {c:?}"
+        );
         // A point one x-radius right stays put (x unscaled); one x-radius "down"
         // maps to ry away (y scaled by 1/3): 5 + 30/3 = 15.
         let down = t * kurbo::Point::new(5.0, 35.0);
@@ -391,7 +414,10 @@ mod tests {
             peniko::Brush::Gradient(gradient) => {
                 assert_eq!(gradient.stops.len(), DENSIFY_SEGMENTS + 1);
                 assert!(matches!(gradient.kind, peniko::GradientKind::Sweep(_)));
-                assert_eq!(gradient.interpolation_cs, peniko::color::ColorSpaceTag::Oklab);
+                assert_eq!(
+                    gradient.interpolation_cs,
+                    peniko::color::ColorSpaceTag::Oklab
+                );
             }
             other => panic!("expected Gradient, got {other:?}"),
         }
@@ -419,8 +445,7 @@ mod tests {
             srgb_g,
         );
         assert!(
-            u16::from(rgba8.r) + u16::from(rgba8.g) + u16::from(rgba8.b)
-                > srgb_r + srgb_g,
+            u16::from(rgba8.r) + u16::from(rgba8.g) + u16::from(rgba8.b) > srgb_r + srgb_g,
             "Oklab midpoint {rgba8:?} must be brighter than the sRGB midpoint (127,64,0)",
         );
     }
@@ -439,10 +464,25 @@ mod tests {
             peniko::Brush::Gradient(gradient) => {
                 // Offsets are non-decreasing across the dense list.
                 let offsets: Vec<f32> = gradient.stops.iter().map(|s| s.offset).collect();
-                assert!(offsets.windows(2).all(|w| w[0] <= w[1]), "monotonic: {offsets:?}");
+                assert!(
+                    offsets.windows(2).all(|w| w[0] <= w[1]),
+                    "monotonic: {offsets:?}"
+                );
                 // Exact authored endpoints.
-                let first = gradient.stops.first().unwrap().color.to_alpha_color::<peniko::color::Srgb>().to_rgba8();
-                let last = gradient.stops.last().unwrap().color.to_alpha_color::<peniko::color::Srgb>().to_rgba8();
+                let first = gradient
+                    .stops
+                    .first()
+                    .unwrap()
+                    .color
+                    .to_alpha_color::<peniko::color::Srgb>()
+                    .to_rgba8();
+                let last = gradient
+                    .stops
+                    .last()
+                    .unwrap()
+                    .color
+                    .to_alpha_color::<peniko::color::Srgb>()
+                    .to_rgba8();
                 assert_eq!((first.r, first.g, first.b), (255, 0, 0));
                 assert_eq!((last.r, last.g), (0, 128));
             }

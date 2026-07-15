@@ -236,8 +236,14 @@ mod tests {
         assert!(doc.uses_current_color());
 
         // One parse, drawn in whatever the theme says — no reparse involved.
-        assert_eq!(doc.resolved(green())[0].1, obscur_scene::paint::Paint::solid_fill(green()));
-        assert_eq!(doc.resolved(blue())[0].1, obscur_scene::paint::Paint::solid_fill(blue()));
+        assert_eq!(
+            doc.resolved(green())[0].1,
+            obscur_scene::paint::Paint::solid_fill(green())
+        );
+        assert_eq!(
+            doc.resolved(blue())[0].1,
+            obscur_scene::paint::Paint::solid_fill(blue())
+        );
     }
 
     #[test]
@@ -277,7 +283,10 @@ mod tests {
 
         let doc = SvgVectorizer::new().vectorize(SRC).expect("valid svg");
         assert_eq!(doc.shapes()[0].fill, None, "fill=none carries no paint");
-        assert_eq!(doc.shapes()[0].stroke, Some((VectorPaint::CurrentColor, 2.0)));
+        assert_eq!(
+            doc.shapes()[0].stroke,
+            Some((VectorPaint::CurrentColor, 2.0))
+        );
     }
 
     #[test]

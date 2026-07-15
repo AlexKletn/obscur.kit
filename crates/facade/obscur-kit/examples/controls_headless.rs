@@ -85,7 +85,10 @@ fn main() {
 
     // --- Toggles: checkbox, tri-state, radio, open the select --------------
     click(&mut runtime, &state, &sheets, "chk");
-    assert!(state.borrow().check.is_checked(), "checkbox toggled to checked");
+    assert!(
+        state.borrow().check.is_checked(),
+        "checkbox toggled to checked"
+    );
 
     click(&mut runtime, &state, &sheets, "chk-tri");
     assert!(
@@ -113,7 +116,11 @@ fn main() {
     // Release completes the click → the button's command bumps the counter.
     runtime.handle_pointer(pointer(PointerEventKind::Up, btn));
     refresh(&mut runtime, &state, &sheets);
-    assert_eq!(state.borrow().click_count, 1, "button release fired one click");
+    assert_eq!(
+        state.borrow().click_count,
+        1,
+        "button release fired one click"
+    );
 
     // --- Pick a select option (closes the popup onto option 1) -------------
     click(&mut runtime, &state, &sheets, "sel-opt-1");
@@ -122,7 +129,10 @@ fn main() {
         Some(1),
         "select committed option 1"
     );
-    assert!(!state.borrow().select.is_open(), "select closed after picking");
+    assert!(
+        !state.borrow().select.is_open(),
+        "select closed after picking"
+    );
 
     // --- Focus the field + type through the editing session ----------------
     let field = node_by_id(&runtime, "field").expect("field node");
@@ -221,8 +231,14 @@ fn register_handlers(runtime: &mut UiRuntime, state: &Rc<RefCell<GalleryState>>)
         runtime.on_command(CMD_SEL_TOGGLE, move || {
             let mut st = s.borrow_mut();
             st.select.toggle_open();
-            st.last_event =
-                format!("Select {}", if st.select.is_open() { "opened" } else { "closed" });
+            st.last_event = format!(
+                "Select {}",
+                if st.select.is_open() {
+                    "opened"
+                } else {
+                    "closed"
+                }
+            );
         });
     }
     for i in 0..SELECT_COUNT {
@@ -258,14 +274,23 @@ fn refresh(runtime: &mut UiRuntime, state: &Rc<RefCell<GalleryState>>, sheets: &
 /// Rebuilds + renders like [`refresh`] but is named for the pseudo-state panels:
 /// it re-applies the runtime's *current* interaction pseudo-states (hover / active
 /// / focus, already recomputed by the preceding pointer events) to the paint.
-fn render_current(runtime: &mut UiRuntime, state: &Rc<RefCell<GalleryState>>, sheets: &[Stylesheet]) {
+fn render_current(
+    runtime: &mut UiRuntime,
+    state: &Rc<RefCell<GalleryState>>,
+    sheets: &[Stylesheet],
+) {
     refresh(runtime, state, sheets);
 }
 
 /// Clicks the control identified by `id`: a full press + release on its box (in
 /// the padding region, left of the label, so the control element itself is the hit
 /// target — not its text child), then a refresh so the mutated state is laid out.
-fn click(runtime: &mut UiRuntime, state: &Rc<RefCell<GalleryState>>, sheets: &[Stylesheet], id: &str) {
+fn click(
+    runtime: &mut UiRuntime,
+    state: &Rc<RefCell<GalleryState>>,
+    sheets: &[Stylesheet],
+    id: &str,
+) {
     let p = center(runtime, id).unwrap_or_else(|| panic!("control {id:?} is laid out"));
     runtime.handle_pointer(pointer(PointerEventKind::Down, p));
     runtime.handle_pointer(pointer(PointerEventKind::Up, p));
@@ -329,7 +354,9 @@ fn capture(runtime: &mut UiRuntime, renderer: &mut CpuRenderer) -> tiny_skia::Pi
     let frame = RenderFrame::new(snapshot, VIEWPORT);
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 

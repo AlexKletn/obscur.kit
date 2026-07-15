@@ -90,7 +90,8 @@ impl JsonValue {
     #[must_use]
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn as_u32(&self) -> Option<u32> {
-        self.as_f64().map(|value| value.max(0.0).min(f64::from(u32::MAX)) as u32)
+        self.as_f64()
+            .map(|value| value.max(0.0).min(f64::from(u32::MAX)) as u32)
     }
 
     /// Returns the elements if this is an array.
@@ -192,7 +193,10 @@ mod tests {
     fn serializes_nested_object_in_insertion_order() {
         let value = JsonValue::object([
             ("b", JsonValue::int(1)),
-            ("a", JsonValue::array([JsonValue::Bool(false), JsonValue::Null])),
+            (
+                "a",
+                JsonValue::array([JsonValue::Bool(false), JsonValue::Null]),
+            ),
         ]);
         assert_eq!(value.to_string(), "{\"b\":1,\"a\":[false,null]}");
     }

@@ -146,7 +146,10 @@ mod tests {
 
     #[test]
     fn min_content_offers_nothing_and_gets_the_unbreakable_width() {
-        let mut m = Paragraph { min: 30.0, max: 200.0 };
+        let mut m = Paragraph {
+            min: 30.0,
+            max: 200.0,
+        };
         assert_eq!(probe(&one(), 0.0, 100.0, &mut m), 30.0);
     }
 
@@ -154,10 +157,16 @@ mod tests {
     fn max_content_offers_unbounded_space_and_gets_the_single_line_width() {
         // The probe must not hand the child infinity as its *size*: the child
         // clamps to what it actually wants, and that is what comes back.
-        let mut m = Paragraph { min: 30.0, max: 200.0 };
+        let mut m = Paragraph {
+            min: 30.0,
+            max: 200.0,
+        };
         let width = probe(&one(), f32::INFINITY, 100.0, &mut m);
         assert_eq!(width, 200.0);
-        assert!(width.is_finite(), "an unbounded offer must yield a finite want");
+        assert!(
+            width.is_finite(),
+            "an unbounded offer must yield a finite want"
+        );
     }
 
     #[test]
@@ -193,7 +202,10 @@ mod tests {
     #[test]
     fn fit_content_takes_the_content_when_it_fits() {
         // max-content (200) <= stretch (500) → the box shrinks to its content.
-        let mut m = Paragraph { min: 30.0, max: 200.0 };
+        let mut m = Paragraph {
+            min: 30.0,
+            max: 200.0,
+        };
         let width = intrinsic_inline_size(Dimension::FitContent, &one(), 500.0, 100.0, &mut m);
         assert_eq!(width, Some(200.0));
     }
@@ -202,7 +214,10 @@ mod tests {
     fn fit_content_falls_back_to_the_space_available_when_content_is_wider() {
         // stretch (100) < max-content (200), and 100 is still above min-content
         // (30) → the box takes the space it is given.
-        let mut m = Paragraph { min: 30.0, max: 200.0 };
+        let mut m = Paragraph {
+            min: 30.0,
+            max: 200.0,
+        };
         let width = intrinsic_inline_size(Dimension::FitContent, &one(), 100.0, 100.0, &mut m);
         assert_eq!(width, Some(100.0));
     }
@@ -211,15 +226,25 @@ mod tests {
     fn fit_content_never_squeezes_below_min_content() {
         // stretch (10) is narrower than min-content (30): the unbreakable word
         // wins and the box overflows, as CSS 2.1 §10.3.5 requires.
-        let mut m = Paragraph { min: 30.0, max: 200.0 };
+        let mut m = Paragraph {
+            min: 30.0,
+            max: 200.0,
+        };
         let width = intrinsic_inline_size(Dimension::FitContent, &one(), 10.0, 100.0, &mut m);
         assert_eq!(width, Some(30.0));
     }
 
     #[test]
     fn a_non_intrinsic_width_is_not_this_functions_business() {
-        let mut m = Paragraph { min: 30.0, max: 200.0 };
-        for dim in [Dimension::Auto, Dimension::Px(50.0), Dimension::Percent(50.0)] {
+        let mut m = Paragraph {
+            min: 30.0,
+            max: 200.0,
+        };
+        for dim in [
+            Dimension::Auto,
+            Dimension::Px(50.0),
+            Dimension::Percent(50.0),
+        ] {
             assert_eq!(
                 intrinsic_inline_size(dim, &one(), 100.0, 100.0, &mut m),
                 None,
@@ -232,7 +257,10 @@ mod tests {
     fn min_content_and_max_content_disagree_for_wrappable_content() {
         // The whole point of having two: if these ever returned the same number
         // for a paragraph, the probes are not actually probing.
-        let mut m = Paragraph { min: 30.0, max: 200.0 };
+        let mut m = Paragraph {
+            min: 30.0,
+            max: 200.0,
+        };
         let min = intrinsic_inline_size(Dimension::MinContent, &one(), 100.0, 100.0, &mut m);
         let max = intrinsic_inline_size(Dimension::MaxContent, &one(), 100.0, 100.0, &mut m);
         assert_eq!(min, Some(30.0));

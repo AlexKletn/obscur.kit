@@ -10,12 +10,11 @@ use obscur_layout::algorithm::{
 };
 use obscur_layout::model::{
     AlignItems, AlignSelf, BoxSizing, Dimension, FlexDirection, FlexWrap, Inset, JustifyContent,
-    Margin, MarginEdges,
-    LayoutBox, LayoutDisplay, LayoutStyle, Position,
+    LayoutBox, LayoutDisplay, LayoutStyle, Margin, MarginEdges, Position,
 };
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{
-    layout_keyword, GridLineValue, Length, LengthContext, PropertyId, PropertyValue,
+    GridLineValue, Length, LengthContext, PropertyId, PropertyValue, layout_keyword,
 };
 use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontId, FontMetrics, FontSource,
@@ -26,17 +25,18 @@ use obscur_text::layout::{
     TextAlignment, TextOverflow, WhiteSpace, WordBreak,
 };
 use obscur_text::shaping::{
-    apply_spacing, apply_tab_stops, ParagraphShaper, ShapedGlyph, TextDirection,
+    ParagraphShaper, ShapedGlyph, TextDirection, apply_spacing, apply_tab_stops,
 };
 use obscur_tree::tree::RetainedTree;
 
 use super::scene_coordinator::editing_override;
 use super::scroll::overflow_scrolls;
 use super::{
-    alignment_for, attributes_for, direction_for, display_text, families_for, grid_templates_from,
-    letter_spacing_for, line_height_for, overflow_for, overflow_wrap_for, resolve_named_grid_areas,
+    ComputedStyles, EditingView, GridTemplates, TabSize, alignment_for, attributes_for,
+    direction_for, display_text, families_for, grid_templates_from, letter_spacing_for,
+    line_height_for, overflow_for, overflow_wrap_for, resolve_named_grid_areas,
     resolve_named_grid_lines, tab_size_for, text_transform_for, white_space_for, word_break_for,
-    word_spacing_for, ComputedStyles, EditingView, GridTemplates, TabSize,
+    word_spacing_for,
 };
 
 /// The initial `font-size` (spec / CSS default), used as the `em`/`rem` base
@@ -447,7 +447,14 @@ fn measure_text_node(
     // spacing into the advances through the SAME seam the compose pass uses, so
     // the width measured here matches the width painted later (§8.1 / §8.2).
     let runs = apply_spacing(
-        paragraph.shape_paragraph(content, fallback, attributes, &measure_face(), font_size, direction),
+        paragraph.shape_paragraph(
+            content,
+            fallback,
+            attributes,
+            &measure_face(),
+            font_size,
+            direction,
+        ),
         content,
         letter_spacing,
         word_spacing,
@@ -457,12 +464,14 @@ fn measure_text_node(
     // The same `tab_width` is threaded into `wrap` so a tab on a soft-wrapped line
     // can be re-measured from THAT line's start, which this pre-wrap pass — with no
     // line-break info — cannot do (it resets its pen only at a hard `\n`).
-    let tab_width =
-        tab_stop_width(tab_size, paragraph, fallback, attributes, direction, font_size, content);
+    let tab_width = tab_stop_width(
+        tab_size, paragraph, fallback, attributes, direction, font_size, content,
+    );
     let runs = apply_tab_stops(runs, content, tab_width);
     // A text node's own horizontal border/padding shrinks the wrap width; it is
     // almost always zero, but subtract it defensively so the content fits.
-    let horizontal = style.padding.left + style.padding.right + style.border.left + style.border.right;
+    let horizontal =
+        style.padding.left + style.padding.right + style.border.left + style.border.right;
     let max_width = (constraints.max.width - horizontal).max(0.0);
     // `text-overflow: ellipsis` needs a shaped ellipsis glyph (shaped the same way
     // the scene phase does, so a truncated line measures with the identical
@@ -576,7 +585,14 @@ fn measure_hyphen_glyph(
     font_size: f32,
 ) -> Option<ShapedGlyph> {
     paragraph
-        .shape_paragraph("-", fallback, attributes, &measure_face(), font_size, direction)
+        .shape_paragraph(
+            "-",
+            fallback,
+            attributes,
+            &measure_face(),
+            font_size,
+            direction,
+        )
         .iter()
         .flat_map(|run| run.run().glyphs().iter().copied())
         .next()
@@ -600,7 +616,14 @@ fn measure_ellipsis_glyph(
     font_size: f32,
 ) -> Option<ShapedGlyph> {
     paragraph
-        .shape_paragraph("…", fallback, attributes, &measure_face(), font_size, direction)
+        .shape_paragraph(
+            "…",
+            fallback,
+            attributes,
+            &measure_face(),
+            font_size,
+            direction,
+        )
         .iter()
         .flat_map(|run| run.run().glyphs().iter().copied())
         .next()
@@ -652,7 +675,14 @@ fn measure_space_advance(
     font_size: f32,
 ) -> f32 {
     paragraph
-        .shape_paragraph(" ", fallback, attributes, &measure_face(), font_size, direction)
+        .shape_paragraph(
+            " ",
+            fallback,
+            attributes,
+            &measure_face(),
+            font_size,
+            direction,
+        )
         .iter()
         .flat_map(|run| run.run().glyphs().iter())
         .map(ShapedGlyph::x_advance)
@@ -873,7 +903,9 @@ fn grid_auto_flow_of(computed: &ComputedStyle) -> GridAutoFlow {
     match keyword_sym(computed, PropertyId::GridAutoFlow) {
         Some(sym) if sym == layout_keyword::GRID_AUTO_FLOW_COLUMN => GridAutoFlow::Column,
         Some(sym) if sym == layout_keyword::GRID_AUTO_FLOW_ROW_DENSE => GridAutoFlow::RowDense,
-        Some(sym) if sym == layout_keyword::GRID_AUTO_FLOW_COLUMN_DENSE => GridAutoFlow::ColumnDense,
+        Some(sym) if sym == layout_keyword::GRID_AUTO_FLOW_COLUMN_DENSE => {
+            GridAutoFlow::ColumnDense
+        }
         _ => GridAutoFlow::Row,
     }
 }
@@ -1776,9 +1808,12 @@ fn arrange(
         // `(0, 0)` and a sticky child is still below its inset threshold, the sticky
         // delta is `(0, 0)` too, so the default path is unchanged.
         let (dx, dy) = if child_style.position.is_sticky() {
-            child_style
-                .inset
-                .sticky_offset(static_origin, child_rel.size(), containing_block, scrollport)
+            child_style.inset.sticky_offset(
+                static_origin,
+                child_rel.size(),
+                containing_block,
+                scrollport,
+            )
         } else {
             child_style.relative_offset(containing.width, containing.height)
         };
@@ -1945,7 +1980,12 @@ mod tests {
     impl TextItemizer for TwoScriptItemizer {
         fn itemize(&self, _text: &str, _base: TextDirection) -> Vec<TextItem> {
             vec![
-                TextItem::new(TextRange::new(0, 2), ScriptTag::LATIN, TextDirection::LeftToRight, 0),
+                TextItem::new(
+                    TextRange::new(0, 2),
+                    ScriptTag::LATIN,
+                    TextDirection::LeftToRight,
+                    0,
+                ),
                 TextItem::new(
                     TextRange::new(2, 6),
                     ScriptTag::CYRILLIC,
@@ -2039,11 +2079,17 @@ mod tests {
         use obscur_style::property::LengthExpr;
         let mut computed = ComputedStyle::new();
         // font-size 16px -> em resolves against it; viewport 800x600 -> vw/vh.
-        computed.set(PropertyId::FontSize, ComputedValue::length(Length::px(16.0)));
+        computed.set(
+            PropertyId::FontSize,
+            ComputedValue::length(Length::px(16.0)),
+        );
         computed.set(PropertyId::Width, ComputedValue::length(Length::Em(3.0)));
         computed.set(PropertyId::Height, ComputedValue::length(Length::Vw(5.0)));
         // rem uses the document root font size (20), not the node font size.
-        computed.set(PropertyId::MinWidth, ComputedValue::length(Length::Rem(2.0)));
+        computed.set(
+            PropertyId::MinWidth,
+            ComputedValue::length(Length::Rem(2.0)),
+        );
         // calc(10px + 2em) = 42.
         computed.set(
             PropertyId::MaxWidth,
@@ -2062,7 +2108,10 @@ mod tests {
     #[test]
     fn mapping_resolves_relative_gap_to_pixels() {
         let mut computed = ComputedStyle::new();
-        computed.set(PropertyId::FontSize, ComputedValue::length(Length::px(10.0)));
+        computed.set(
+            PropertyId::FontSize,
+            ComputedValue::length(Length::px(10.0)),
+        );
         computed.set(PropertyId::Gap, ComputedValue::length(Length::Em(2.0)));
         let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert_eq!(style.gap, 20.0); // 2em of 10px
@@ -2072,7 +2121,10 @@ mod tests {
     fn root_font_size_reads_root_node_defaulting_to_sixteen() {
         let mut computed = ComputedStyles::new();
         let mut root = ComputedStyle::new();
-        root.set(PropertyId::FontSize, ComputedValue::length(Length::px(24.0)));
+        root.set(
+            PropertyId::FontSize,
+            ComputedValue::length(Length::px(24.0)),
+        );
         computed.insert(NodeId::from_raw(1), root);
         assert_eq!(root_font_size(&computed, Some(NodeId::from_raw(1))), 24.0);
         // Absent root or missing font-size falls back to the initial 16px.
@@ -2315,9 +2367,17 @@ mod tests {
             (0.0, 0.0),
             &test_paragraph(),
         );
-        assert_eq!(boxes[&a].origin(), Point::new(0.0, 50.0), "scroll 0: a at static");
+        assert_eq!(
+            boxes[&a].origin(),
+            Point::new(0.0, 50.0),
+            "scroll 0: a at static"
+        );
         assert_eq!(boxes[&leaf].origin(), Point::new(0.0, 50.0));
-        assert_eq!(boxes[&b].origin(), Point::new(0.0, 100.0), "sibling in flow");
+        assert_eq!(
+            boxes[&b].origin(),
+            Point::new(0.0, 100.0),
+            "sibling in flow"
+        );
 
         // scroll (0,100): sticky_lower = 100 + 10 = 110 > static 50, clamp upper =
         // cb.bottom(1000) - h(50) = 950 → a sticks at y=110; its leaf rides along;
@@ -2331,9 +2391,21 @@ mod tests {
             (0.0, 100.0),
             &test_paragraph(),
         );
-        assert_eq!(boxes[&a].origin(), Point::new(0.0, 110.0), "sticks at scrollport+inset");
-        assert_eq!(boxes[&leaf].origin(), Point::new(0.0, 110.0), "subtree rides along");
-        assert_eq!(boxes[&b].origin(), Point::new(0.0, 100.0), "sibling unmoved (in flow)");
+        assert_eq!(
+            boxes[&a].origin(),
+            Point::new(0.0, 110.0),
+            "sticks at scrollport+inset"
+        );
+        assert_eq!(
+            boxes[&leaf].origin(),
+            Point::new(0.0, 110.0),
+            "subtree rides along"
+        );
+        assert_eq!(
+            boxes[&b].origin(),
+            Point::new(0.0, 100.0),
+            "sibling unmoved (in flow)"
+        );
 
         // Huge scroll: sticky_lower far below cb → pinned at cb.bottom - h = 950.
         let boxes = coordinator.layout(
@@ -2345,8 +2417,16 @@ mod tests {
             (0.0, 5000.0),
             &test_paragraph(),
         );
-        assert_eq!(boxes[&a].origin(), Point::new(0.0, 950.0), "pinned within CB");
-        assert_eq!(boxes[&b].origin(), Point::new(0.0, 100.0), "sibling still unmoved");
+        assert_eq!(
+            boxes[&a].origin(),
+            Point::new(0.0, 950.0),
+            "pinned within CB"
+        );
+        assert_eq!(
+            boxes[&b].origin(),
+            Point::new(0.0, 100.0),
+            "sibling still unmoved"
+        );
     }
 
     #[test]
@@ -2726,7 +2806,10 @@ mod tests {
             ComputedValue::keyword(layout_keyword::DISPLAY_FLEX),
         );
         // Box model.
-        computed.set(PropertyId::MarginTop, ComputedValue::length(Length::px(1.0)));
+        computed.set(
+            PropertyId::MarginTop,
+            ComputedValue::length(Length::px(1.0)),
+        );
         computed.set(
             PropertyId::MarginRight,
             ComputedValue::length(Length::px(2.0)),
@@ -2756,7 +2839,10 @@ mod tests {
             ComputedValue::length(Length::px(8.0)),
         );
         // Sizing constraints.
-        computed.set(PropertyId::MinWidth, ComputedValue::length(Length::px(10.0)));
+        computed.set(
+            PropertyId::MinWidth,
+            ComputedValue::length(Length::px(10.0)),
+        );
         computed.set(
             PropertyId::MinHeight,
             ComputedValue::length(Length::px(11.0)),
@@ -2797,10 +2883,7 @@ mod tests {
         let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
 
         assert_eq!(style.display, LayoutDisplay::Flex);
-        assert_eq!(
-            style.margin,
-            MarginEdges::px(1.0, 2.0, 3.0, 4.0)
-        );
+        assert_eq!(style.margin, MarginEdges::px(1.0, 2.0, 3.0, 4.0));
         assert_eq!(
             style.padding,
             Insets {
@@ -2834,8 +2917,13 @@ mod tests {
         let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert_eq!(style.display, LayoutDisplay::Grid);
         assert!(
-            algorithm_for(LayoutDisplay::Grid, NodeId::from_raw(1), &GridTemplates::new(), 0.0)
-                .is_some()
+            algorithm_for(
+                LayoutDisplay::Grid,
+                NodeId::from_raw(1),
+                &GridTemplates::new(),
+                0.0
+            )
+            .is_some()
         );
     }
 
@@ -2846,7 +2934,10 @@ mod tests {
             PropertyId::Display,
             ComputedValue::keyword(layout_keyword::DISPLAY_NONE),
         );
-        assert_eq!(layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None).display, LayoutDisplay::None);
+        assert_eq!(
+            layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None).display,
+            LayoutDisplay::None
+        );
     }
 
     #[test]
@@ -2943,7 +3034,8 @@ mod tests {
 
         let coordinator = LayoutCoordinator::new();
         let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
-        let templates = coordinator.grid_templates_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
+        let templates =
+            coordinator.grid_templates_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert!(templates.contains_key(&root), "root authored a template");
 
         let boxes = coordinator.layout(
@@ -2992,7 +3084,10 @@ mod tests {
         let mut computed = ComputedStyles::new();
         let mut root_style = ComputedStyle::new();
         root_style.set(PropertyId::Width, ComputedValue::length(Length::px(width)));
-        root_style.set(PropertyId::Height, ComputedValue::length(Length::px(height)));
+        root_style.set(
+            PropertyId::Height,
+            ComputedValue::length(Length::px(height)),
+        );
         computed.insert(root, root_style);
 
         let coordinator = LayoutCoordinator::new();
@@ -3025,7 +3120,10 @@ mod tests {
         let mut computed = ComputedStyles::new();
         let mut root_style = ComputedStyle::new();
         root_style.set(PropertyId::Width, ComputedValue::length(Length::px(width)));
-        root_style.set(PropertyId::Height, ComputedValue::length(Length::px(height)));
+        root_style.set(
+            PropertyId::Height,
+            ComputedValue::length(Length::px(height)),
+        );
         computed.insert(root, root_style);
 
         let coordinator = LayoutCoordinator::new();
@@ -3070,7 +3168,11 @@ mod tests {
         // Widest line is "aaaa " but its trailing space now HANGS (CSS Text 3
         // §3/§7.1), so the used width is 4·9.6 = 38.4 (was 5·9.6 = 48 when the
         // trailing space wrongly counted) — still within the 50px container.
-        assert!((text_box.size().width - 38.4).abs() < 1e-3, "width {}", text_box.size().width);
+        assert!(
+            (text_box.size().width - 38.4).abs() < 1e-3,
+            "width {}",
+            text_box.size().width
+        );
     }
 
     #[test]
@@ -3115,7 +3217,11 @@ mod tests {
         let text_box = text_box_in_container("aaaa bbbb cccc", 1000.0, 200.0);
         assert_eq!(text_box.size().height, 16.0);
         // Full run advance: 14 chars · 9.6 = 134.4.
-        assert!((text_box.size().width - 134.4).abs() < 1e-3, "width {}", text_box.size().width);
+        assert!(
+            (text_box.size().width - 134.4).abs() < 1e-3,
+            "width {}",
+            text_box.size().width
+        );
     }
 
     #[test]
@@ -3124,7 +3230,11 @@ mod tests {
         let text_box = text_box_in_container("hi", 1000.0, 200.0);
         assert_eq!(text_box.size().height, 16.0);
         // 2 chars · 9.6 = 19.2.
-        assert!((text_box.size().width - 19.2).abs() < 1e-3, "width {}", text_box.size().width);
+        assert!(
+            (text_box.size().width - 19.2).abs() < 1e-3,
+            "width {}",
+            text_box.size().width
+        );
     }
 
     #[test]
@@ -3151,7 +3261,10 @@ mod tests {
         root_style.set(PropertyId::Height, ComputedValue::length(Length::px(200.0)));
         computed.insert(root, root_style);
         let mut text_computed = ComputedStyle::new();
-        text_computed.set(PropertyId::FontSize, ComputedValue::length(Length::px(20.0)));
+        text_computed.set(
+            PropertyId::FontSize,
+            ComputedValue::length(Length::px(20.0)),
+        );
         computed.insert(text, text_computed);
 
         let coordinator = LayoutCoordinator::new();
@@ -3168,7 +3281,11 @@ mod tests {
         );
         let text_box = boxes[&text];
         // 4 chars · (20 · 0.6) = 48.0 wide, one line 20 tall.
-        assert!((text_box.size().width - 48.0).abs() < 1e-3, "width {}", text_box.size().width);
+        assert!(
+            (text_box.size().width - 48.0).abs() < 1e-3,
+            "width {}",
+            text_box.size().width
+        );
         assert_eq!(text_box.size().height, 20.0);
     }
 
@@ -3238,7 +3355,10 @@ mod tests {
             .with_height(Dimension::Px(14.0));
 
         let mut styles = LayoutStyles::new();
-        styles.insert(root, LayoutStyle::default().with_display(LayoutDisplay::Block));
+        styles.insert(
+            root,
+            LayoutStyle::default().with_display(LayoutDisplay::Block),
+        );
         styles.insert(row, flex_row_start);
         styles.insert(col, col_style);
         styles.insert(slot, slot_style);
@@ -3287,7 +3407,7 @@ mod tests {
             let overlay = add_child(&mut tree, field, 701);
             // Mark the overlay element as the `.placeholder` pseudo-element.
             {
-                use obscur_view::view::{StyleAttributes, ViewProperty, ViewValue, CLASS};
+                use obscur_view::view::{CLASS, StyleAttributes, ViewProperty, ViewValue};
                 let attrs = StyleAttributes::extract(&[ViewProperty::new(
                     CLASS,
                     ViewValue::Text("placeholder".into()),

@@ -9,7 +9,11 @@
 //! This closes the gap that the `Image` primitive built a node whose `src` never
 //! became painted pixels: the primitive now RENDERS.
 #![forbid(unsafe_code)]
-#![cfg(all(feature = "resource-fs", feature = "resource-decode", feature = "render-cpu"))]
+#![cfg(all(
+    feature = "resource-fs",
+    feature = "resource-decode",
+    feature = "render-cpu"
+))]
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -28,7 +32,7 @@ use obscur_kit::render_cpu::renderer::CpuRenderer;
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::scene::command::PaintCommand;
 use obscur_kit::style::matching::Stylesheet;
-use obscur_kit::view::view::{View, ViewFragment, ViewProperty, ViewValue, CLASS};
+use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewProperty, ViewValue};
 
 /// The fixed viewport every test renders under, so geometry is deterministic.
 const VIEWPORT: f32 = 64.0;
@@ -94,7 +98,11 @@ fn image_primitive_src_reaches_paint_and_the_cpu_backend() {
         .iter()
         .filter(|c| matches!(c, PaintCommand::DrawImage { .. }))
         .collect();
-    assert_eq!(draw_images.len(), 1, "the Image primitive paints one DrawImage");
+    assert_eq!(
+        draw_images.len(),
+        1,
+        "the Image primitive paints one DrawImage"
+    );
     let PaintCommand::DrawImage {
         tile,
         region,
@@ -127,8 +135,16 @@ fn image_primitive_src_reaches_paint_and_the_cpu_backend() {
     let pixmap = renderer.pixmap().expect("a rasterized frame");
 
     let px = pixmap.pixel(20, 15).expect("pixel inside the box");
-    assert!(px.red() > 200, "center pixel is red (image), got r={}", px.red());
-    assert!(px.alpha() > 200, "center pixel is opaque, got a={}", px.alpha());
+    assert!(
+        px.red() > 200,
+        "center pixel is red (image), got r={}",
+        px.red()
+    );
+    assert!(
+        px.alpha() > 200,
+        "center pixel is opaque, got a={}",
+        px.alpha()
+    );
 }
 
 #[test]

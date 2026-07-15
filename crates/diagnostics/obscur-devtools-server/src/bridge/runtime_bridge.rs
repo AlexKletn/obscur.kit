@@ -1,8 +1,6 @@
 //! Runtime bridge: serves `Inspect` commands into snapshots (spec §7.6/§7.8).
 
-use obscur_devtools_protocol::message::{
-    CommandId, Inspectable, SnapshotMessage, SnapshotPayload,
-};
+use obscur_devtools_protocol::message::{CommandId, Inspectable, SnapshotMessage, SnapshotPayload};
 
 /// A source of live inspectable state the bridge queries on the host's behalf.
 ///

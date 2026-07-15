@@ -168,7 +168,10 @@ mod tests {
 
         // It is the SECOND child — proving the match is by test-id, not position.
         let root = runtime.tree().root().expect("a root");
-        assert_eq!(runtime.tree().get(root).expect("live").children()[1], resolved);
+        assert_eq!(
+            runtime.tree().get(root).expect("live").children()[1],
+            resolved
+        );
     }
 
     #[test]
@@ -234,7 +237,10 @@ mod tests {
         let point = Point::new(12.0, 34.0);
         let target = SelectorTarget::coordinate(point);
         assert_eq!(SelectorResolver::new().resolve(&runtime, &target), None);
-        assert_eq!(SelectorResolver::new().point_for(&runtime, &target), Some(point));
+        assert_eq!(
+            SelectorResolver::new().point_for(&runtime, &target),
+            Some(point)
+        );
     }
 
     #[test]

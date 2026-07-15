@@ -112,7 +112,9 @@ mod tests {
 
     #[test]
     fn with_x_advance_replaces_only_the_advance() {
-        let glyph = ShapedGlyph::new(42, 3, 6.0).with_offset(1.5, -2.0).with_x_advance(10.0);
+        let glyph = ShapedGlyph::new(42, 3, 6.0)
+            .with_offset(1.5, -2.0)
+            .with_x_advance(10.0);
         assert_eq!(glyph.x_advance(), 10.0);
         // Identity, cluster, and placement offsets are untouched.
         assert_eq!(glyph.glyph_id(), 42);

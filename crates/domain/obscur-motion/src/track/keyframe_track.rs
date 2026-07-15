@@ -300,7 +300,8 @@ mod tests {
 
     #[test]
     fn from_endpoints_is_a_linear_two_stop_track() {
-        let track = KeyframeTrack::from_endpoints(MotionValue::scalar(20.0), MotionValue::scalar(80.0));
+        let track =
+            KeyframeTrack::from_endpoints(MotionValue::scalar(20.0), MotionValue::scalar(80.0));
         assert_eq!(track.len(), 2);
         assert_eq!(track.sample(0.0), MotionValue::scalar(20.0));
         assert_eq!(track.sample(0.5), MotionValue::scalar(50.0));

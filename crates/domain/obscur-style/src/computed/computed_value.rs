@@ -245,9 +245,8 @@ mod tests {
             )),
             BackgroundLayer::Url("x.png".into()),
         ]);
-        let value =
-            ComputedValue::from_concrete(PropertyValue::BackgroundLayers(layers.clone()))
-                .expect("a background-layer list is a concrete computed value");
+        let value = ComputedValue::from_concrete(PropertyValue::BackgroundLayers(layers.clone()))
+            .expect("a background-layer list is a concrete computed value");
         assert_eq!(value.as_background_layers(), Some(&*layers));
     }
 

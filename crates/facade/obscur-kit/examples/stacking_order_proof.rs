@@ -38,7 +38,7 @@ use obscur_kit::runtime::orchestration::{ComputedStyles, LayoutBoxes, SceneCoord
 use obscur_kit::scene::command::DisplayList;
 use obscur_kit::scene::scene::{SceneGeneration, SceneSnapshot};
 use obscur_kit::style::computed::{ComputedStyle, ComputedValue};
-use obscur_kit::style::property::{layout_keyword, PropertyId, StyleColor};
+use obscur_kit::style::property::{PropertyId, StyleColor, layout_keyword};
 use obscur_kit::tree::node::{LogicalParent, NodeKind};
 use obscur_kit::tree::tree::RetainedTree;
 
@@ -84,7 +84,10 @@ fn main() {
     computed.insert(n, positioned_z(red, -2.0)); // positioned z:-2 → layer 2 (below)
 
     let mut boxes: LayoutBoxes = HashMap::new();
-    boxes.insert(root, LayoutBox::new(Rect::new(Point::new(0.0, 0.0), VIEWPORT)));
+    boxes.insert(
+        root,
+        LayoutBox::new(Rect::new(Point::new(0.0, 0.0), VIEWPORT)),
+    );
     boxes.insert(b, LayoutBox::new(box_b));
     boxes.insert(a, LayoutBox::new(box_a));
     boxes.insert(s, LayoutBox::new(box_s));
@@ -219,8 +222,14 @@ fn verify(
         is_blue(lo),
         "B2 NOT fixed: overlap {left_overlap:?} should be BLUE (positioned z:auto on top), got {lo:?}"
     );
-    assert!(is_blue(rgb(pixmap, b_only.0, b_only.1)), "B-only should be blue");
-    assert!(is_green(rgb(pixmap, a_only.0, a_only.1)), "A-only should be green");
+    assert!(
+        is_blue(rgb(pixmap, b_only.0, b_only.1)),
+        "B-only should be blue"
+    );
+    assert!(
+        is_green(rgb(pixmap, a_only.0, a_only.1)),
+        "A-only should be green"
+    );
 
     // Right: the negative-z positioned box N (red) paints UNDER the earlier
     // non-positioned block S (yellow) at the overlap, despite coming LATER.
@@ -229,11 +238,21 @@ fn verify(
         is_yellow(ro),
         "negative-z NOT below: overlap {right_overlap:?} should be YELLOW (non-positioned on top), got {ro:?}"
     );
-    assert!(is_yellow(rgb(pixmap, s_only.0, s_only.1)), "S-only should be yellow");
-    assert!(is_red(rgb(pixmap, n_only.0, n_only.1)), "N-only should be red");
+    assert!(
+        is_yellow(rgb(pixmap, s_only.0, s_only.1)),
+        "S-only should be yellow"
+    );
+    assert!(
+        is_red(rgb(pixmap, n_only.0, n_only.1)),
+        "N-only should be red"
+    );
 
-    println!("[verify] left overlap {left_overlap:?} is BLUE — positioned z:auto lifts above a later non-positioned block");
-    println!("[verify] right overlap {right_overlap:?} is YELLOW — negative-z positioned paints under an earlier non-positioned block");
+    println!(
+        "[verify] left overlap {left_overlap:?} is BLUE — positioned z:auto lifts above a later non-positioned block"
+    );
+    println!(
+        "[verify] right overlap {right_overlap:?} is YELLOW — negative-z positioned paints under an earlier non-positioned block"
+    );
     println!("[verify] OK — CSS 2.1 §9.9 seven-layer paint order");
 }
 

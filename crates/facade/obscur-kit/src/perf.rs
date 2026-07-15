@@ -108,7 +108,11 @@ impl FrameStats {
     /// The worst (largest) total frame time in the window.
     #[must_use]
     pub fn max_total(&self) -> Duration {
-        self.samples.iter().map(|s| s.total()).max().unwrap_or(Duration::ZERO)
+        self.samples
+            .iter()
+            .map(|s| s.total())
+            .max()
+            .unwrap_or(Duration::ZERO)
     }
 
     /// The sustainable FPS implied by the mean frame cost (`1000 / avg_total_ms`)
@@ -239,7 +243,11 @@ mod tests {
         assert_eq!(stats.avg_total(), dur(8000));
         assert_eq!(stats.max_total(), dur(8000));
         // 8ms/frame → ~125 fps sustainable.
-        assert!((stats.cost_fps() - 125.0).abs() < 0.5, "{}", stats.cost_fps());
+        assert!(
+            (stats.cost_fps() - 125.0).abs() < 0.5,
+            "{}",
+            stats.cost_fps()
+        );
     }
 
     #[test]
@@ -257,7 +265,9 @@ mod tests {
     fn profiler_reports_once_per_interval() {
         // A zero interval reports on every frame; the line names fps + timings.
         let mut p = FrameProfiler::with_interval(Duration::ZERO);
-        let line = p.record(dur(2000), dur(6000)).expect("zero interval reports immediately");
+        let line = p
+            .record(dur(2000), dur(6000))
+            .expect("zero interval reports immediately");
         assert!(line.contains("fps"), "{line}");
         assert!(line.contains("gpu 6.00ms"), "{line}");
         assert_eq!(p.stats().len(), 1);

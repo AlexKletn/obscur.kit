@@ -53,7 +53,12 @@ fn button_sheet() -> Stylesheet {
 
 /// A left-button pointer event of `kind` at `(x, y)`.
 fn mouse(kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
-    PointerEvent::new(PointerId::MOUSE, PointerDevice::Mouse, kind, Point::new(x, y))
+    PointerEvent::new(
+        PointerId::MOUSE,
+        PointerDevice::Mouse,
+        kind,
+        Point::new(x, y),
+    )
 }
 
 /// The content of the first text node in the retained tree — the button's label,
@@ -101,7 +106,10 @@ fn clicking_a_real_button_through_the_runtime_dispatches_and_re_renders() {
         "clicking the Button resolved to its bound command"
     );
     assert_eq!(count.get(), 1, "the registered handler mutated the state");
-    assert!(runtime.has_pending_frame(), "the dispatch requested a frame");
+    assert!(
+        runtime.has_pending_frame(),
+        "the dispatch requested a frame"
+    );
 
     // Reactive re-render: the builder rebuilds the button from the mutated state,
     // so its label — the retained tree's text — now shows "1".

@@ -81,7 +81,10 @@ fn children_text_and_nesting_survive_expansion() {
     };
     let kids = children.nodes();
     assert_eq!(kids.len(), 2);
-    assert_eq!(prop(&kids[0], "class"), Some(&ViewValue::Text("row".into())));
+    assert_eq!(
+        prop(&kids[0], "class"),
+        Some(&ViewValue::Text("row".into()))
+    );
     let ViewNode::Text { content, .. } = &kids[1] else {
         panic!("the bare string literal lowers to a text node");
     };

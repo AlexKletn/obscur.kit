@@ -310,11 +310,13 @@ mod tests {
     fn equality_includes_state_flags() {
         // A state change is observed by equality, so reconcile re-applies attributes
         // and the node restyles.
-        let disabled = StyleAttributes::extract(&[ViewProperty::new(DISABLED, ViewValue::Bool(true))]);
+        let disabled =
+            StyleAttributes::extract(&[ViewProperty::new(DISABLED, ViewValue::Bool(true))]);
         let enabled = StyleAttributes::extract(&[]);
         assert_ne!(disabled, enabled);
 
-        let checked = StyleAttributes::extract(&[ViewProperty::new(CHECKED, ViewValue::Bool(true))]);
+        let checked =
+            StyleAttributes::extract(&[ViewProperty::new(CHECKED, ViewValue::Bool(true))]);
         let unchecked = StyleAttributes::extract(&[]);
         assert_ne!(checked, unchecked);
     }
@@ -323,13 +325,16 @@ mod tests {
     fn extracts_readonly_state_flag_independent_of_disabled() {
         // `readonly` is a distinct boolean state from `disabled` (WHATWG HTML
         // §attr-input-readonly): a field can carry either, both, or neither.
-        let readonly = StyleAttributes::extract(&[ViewProperty::new(READONLY, ViewValue::Bool(true))]);
+        let readonly =
+            StyleAttributes::extract(&[ViewProperty::new(READONLY, ViewValue::Bool(true))]);
         assert!(readonly.is_readonly());
         assert!(!readonly.is_disabled());
         assert!(!readonly.is_empty());
 
         // Bare presence counts as set; an explicit false does not.
-        assert!(StyleAttributes::extract(&[ViewProperty::new(READONLY, ViewValue::Null)]).is_readonly());
+        assert!(
+            StyleAttributes::extract(&[ViewProperty::new(READONLY, ViewValue::Null)]).is_readonly()
+        );
         let off = StyleAttributes::extract(&[ViewProperty::new(READONLY, ViewValue::Bool(false))]);
         assert!(!off.is_readonly());
         assert!(off.is_empty());
@@ -346,7 +351,8 @@ mod tests {
     fn equality_includes_readonly_flag() {
         // A readonly change is observed by equality, so reconcile re-applies
         // attributes and the runtime sees the state change.
-        let readonly = StyleAttributes::extract(&[ViewProperty::new(READONLY, ViewValue::Bool(true))]);
+        let readonly =
+            StyleAttributes::extract(&[ViewProperty::new(READONLY, ViewValue::Bool(true))]);
         let normal = StyleAttributes::extract(&[]);
         assert_ne!(readonly, normal);
     }

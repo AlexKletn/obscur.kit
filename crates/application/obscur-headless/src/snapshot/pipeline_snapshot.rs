@@ -399,7 +399,10 @@ mod tests {
         assert_eq!(a11y.root(), snapshot.tree().root());
         // The button element surfaces a Button role.
         let has_button = a11y.iter().any(|(_, n)| n.role() == SemanticRole::Button);
-        assert!(has_button, "the button element becomes a Button semantic node");
+        assert!(
+            has_button,
+            "the button element becomes a Button semantic node"
+        );
     }
 
     #[test]

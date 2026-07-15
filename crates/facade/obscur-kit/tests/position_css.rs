@@ -67,7 +67,11 @@ fn drive_view(css: &str, view: &View) -> UiRuntime {
 
 /// The absolute size `(width, height)` of a node's layout box.
 fn box_size(rt: &UiRuntime, node: NodeId) -> (f32, f32) {
-    let b = rt.layout_boxes().get(&node).copied().expect("node has a box");
+    let b = rt
+        .layout_boxes()
+        .get(&node)
+        .copied()
+        .expect("node has a box");
     (b.size().width, b.size().height)
 }
 
@@ -91,7 +95,11 @@ fn leaf_node(rt: &UiRuntime, a: NodeId) -> NodeId {
 
 /// The absolute origin `(x, y)` of a node's layout box.
 fn origin(rt: &UiRuntime, node: NodeId) -> (f32, f32) {
-    let b = rt.layout_boxes().get(&node).copied().expect("node has a box");
+    let b = rt
+        .layout_boxes()
+        .get(&node)
+        .copied()
+        .expect("node has a box");
     (b.origin().x, b.origin().y)
 }
 
@@ -187,7 +195,11 @@ fn absolute_sibling_is_out_of_flow_and_positioned_by_insets() {
     approx(box_size(&rt, a).1, 50.0, "a keeps its own height");
 
     // The auto-height container reflects only `.a` (50), not `.b`.
-    approx(box_size(&rt, container).1, 50.0, "container height is only a's 50");
+    approx(
+        box_size(&rt, container).1,
+        50.0,
+        "container height is only a's 50",
+    );
 
     // `.b` is placed at (left, top) = (20, 10) with its explicit 40x30 size.
     approx(origin(&rt, b).0, 20.0, "b.x = left inset");
@@ -266,19 +278,47 @@ fn sticky_child_clamps_on_scroll_leaving_sibling_in_flow() {
     let k = kids(&rt);
     let (a_node, b_node) = (k[1], k[2]);
     let leaf_node = rt.tree().get(a_node).unwrap().children().to_vec()[0];
-    approx(origin(&rt, a_node).1, 50.0, "scroll 0: sticky a at static y=50");
-    approx(origin(&rt, leaf_node).1, 50.0, "scroll 0: leaf at a's content origin");
-    approx(origin(&rt, b_node).1, 90.0, "scroll 0: sibling b below a (flow)");
+    approx(
+        origin(&rt, a_node).1,
+        50.0,
+        "scroll 0: sticky a at static y=50",
+    );
+    approx(
+        origin(&rt, leaf_node).1,
+        50.0,
+        "scroll 0: leaf at a's content origin",
+    );
+    approx(
+        origin(&rt, b_node).1,
+        90.0,
+        "scroll 0: sibling b below a (flow)",
+    );
 
     // Frame 2: scroll the viewport 100px down — the sticky child sticks to the
     // scrollport top plus its `top:10px` inset (used top 110), within its CB.
     rt.set_viewport_scroll(0.0, 100.0);
     let r2 = rt.render_now(&view, std::slice::from_ref(&sheet));
     assert!(r2.relaid_out(), "second frame re-arranged boxes");
-    approx(origin(&rt, a_node).1, 110.0, "scroll 100: a sticks at scrollport+inset (110)");
-    approx(origin(&rt, leaf_node).1, 110.0, "scroll 100: the sticky subtree rides along");
-    approx(origin(&rt, b_node).1, 90.0, "scroll 100: sibling b unmoved (stays in flow)");
-    approx(origin(&rt, a_node).0, 0.0, "no horizontal inset → a.x unchanged");
+    approx(
+        origin(&rt, a_node).1,
+        110.0,
+        "scroll 100: a sticks at scrollport+inset (110)",
+    );
+    approx(
+        origin(&rt, leaf_node).1,
+        110.0,
+        "scroll 100: the sticky subtree rides along",
+    );
+    approx(
+        origin(&rt, b_node).1,
+        90.0,
+        "scroll 100: sibling b unmoved (stays in flow)",
+    );
+    approx(
+        origin(&rt, a_node).0,
+        0.0,
+        "no horizontal inset → a.x unchanged",
+    );
 }
 
 // End-to-end: two overlapping `position: absolute` boxes with `background-color`
@@ -306,8 +346,16 @@ fn z_index_orders_overlapping_absolute_fills_by_stacking() {
     let wrap = container_node(&rt);
     let kids = rt.tree().get(wrap).unwrap().children().to_vec();
     let (node_a, node_b) = (kids[0], kids[1]);
-    let bounds_a = rt.layout_boxes().get(&node_a).expect("boxa laid out").bounds;
-    let bounds_b = rt.layout_boxes().get(&node_b).expect("boxb laid out").bounds;
+    let bounds_a = rt
+        .layout_boxes()
+        .get(&node_a)
+        .expect("boxa laid out")
+        .bounds;
+    let bounds_b = rt
+        .layout_boxes()
+        .get(&node_b)
+        .expect("boxb laid out")
+        .bounds;
 
     // Locate each node's background fill in the composed command stream by its
     // arranged rectangle.

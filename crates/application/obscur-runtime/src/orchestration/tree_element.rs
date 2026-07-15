@@ -82,11 +82,7 @@ impl<'a> TreeElement<'a> {
     /// [`previous_sibling_element`](MatchElement::previous_sibling_element))
     /// preserves the source.
     #[must_use]
-    pub const fn with_pseudo(
-        tree: &'a RetainedTree,
-        id: NodeId,
-        pseudo: &'a PseudoStates,
-    ) -> Self {
+    pub const fn with_pseudo(tree: &'a RetainedTree, id: NodeId, pseudo: &'a PseudoStates) -> Self {
         Self {
             tree,
             id,
@@ -438,7 +434,11 @@ mod tests {
         let mut states = crate::orchestration::PseudoStates::new();
         states.set(button, PseudoState::HOVER);
         let hovered_disabled = TreeElement::with_pseudo(&tree, button, &states);
-        assert!(hovered_disabled.pseudo_state().contains(PseudoState::DISABLED));
+        assert!(
+            hovered_disabled
+                .pseudo_state()
+                .contains(PseudoState::DISABLED)
+        );
         assert!(hovered_disabled.pseudo_state().contains(PseudoState::HOVER));
 
         // The `:disabled` / `:checked` selectors actually match the right node.

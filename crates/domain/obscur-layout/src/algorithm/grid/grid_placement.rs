@@ -139,8 +139,8 @@ impl GridPlacement {
 /// template still open implicit tracks).
 fn resolve_axis(start: GridLine, end: GridLine, num_tracks: usize) -> (Option<usize>, usize) {
     let tracks_i32 = i32::try_from(num_tracks).unwrap_or(i32::MAX);
-    let has_negative = matches!(start, GridLine::Line(a) if a < 0)
-        || matches!(end, GridLine::Line(b) if b < 0);
+    let has_negative =
+        matches!(start, GridLine::Line(a) if a < 0) || matches!(end, GridLine::Line(b) if b < 0);
     // Normalise a negative (from-end) line to a positive 1-based line: `-1` is the
     // last line (`num_tracks + 1`), i.e. `num_tracks + 2 + a` for a negative `a`;
     // clamped to a valid `≥ 1` line. Positive/`Auto`/`Span` edges pass through.

@@ -170,7 +170,7 @@ mod tests {
 
     impl TextShaper for SharedCountingShaper {
         fn shape(&self, request: &ShapingRequest) -> GlyphRun {
-            self.0 .0.set(self.0 .0.get() + 1);
+            self.0.0.set(self.0.0.get() + 1);
             MockTextShaper::new().shape(request)
         }
         fn can_shape(&self, _face: &FontFace) -> bool {
@@ -198,11 +198,14 @@ mod tests {
         let _ = shaper.shape(&ShapingRequest::new("b", mono_face(), 16.0)); // text
         let _ = shaper.shape(&ShapingRequest::new("a", mono_face(), 18.0)); // size
         let _ = shaper.shape(
-            &ShapingRequest::new("a", mono_face(), 16.0)
-                .with_direction(TextDirection::RightToLeft), // direction
+            &ShapingRequest::new("a", mono_face(), 16.0).with_direction(TextDirection::RightToLeft), // direction
         );
         let _ = shaper.shape(&ShapingRequest::new("a", mono_face(), 16.0).with_language("en")); // language
-        assert_eq!(counter.0.get(), 5, "each distinct key must reach the inner shaper");
+        assert_eq!(
+            counter.0.get(),
+            5,
+            "each distinct key must reach the inner shaper"
+        );
     }
 
     #[test]
@@ -230,7 +233,11 @@ mod tests {
             let run = cached.shape(&request);
             // Still correct despite the bound.
             assert_eq!(run, MockTextShaper::new().shape(&request));
-            assert!(cached.len() <= cap, "cache exceeded capacity: {}", cached.len());
+            assert!(
+                cached.len() <= cap,
+                "cache exceeded capacity: {}",
+                cached.len()
+            );
         }
         assert!(cached.len() <= cap);
     }

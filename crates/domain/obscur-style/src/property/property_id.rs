@@ -1113,10 +1113,7 @@ mod tests {
 
     #[test]
     fn grid_areas_names_and_not_inherited() {
-        assert_eq!(
-            PropertyId::GridTemplateAreas.name(),
-            "grid-template-areas"
-        );
+        assert_eq!(PropertyId::GridTemplateAreas.name(), "grid-template-areas");
         assert_eq!(PropertyId::GridArea.name(), "grid-area");
         assert!(
             !PropertyId::GridTemplateAreas

@@ -88,11 +88,7 @@ pub fn handshake(client: &mut SocketClient, token: &str) -> io::Result<Handshake
 /// # Errors
 ///
 /// Returns an [`io::Error`] on any underlying socket failure.
-pub fn inspect(
-    client: &mut SocketClient,
-    id: u64,
-    target: Inspectable,
-) -> io::Result<ClientBound> {
+pub fn inspect(client: &mut SocketClient, id: u64, target: Inspectable) -> io::Result<ClientBound> {
     client.command(&CommandMessage::new(
         CommandId::new(id),
         CommandKind::Inspect(target),
@@ -171,7 +167,11 @@ pub fn format_snapshot(message: &SnapshotMessage) -> String {
         "{:<14} {:>4} entit{}  {}{ids}",
         target_label(message.target),
         message.payload.entity_count,
-        if message.payload.entity_count == 1 { "y " } else { "ies" },
+        if message.payload.entity_count == 1 {
+            "y "
+        } else {
+            "ies"
+        },
         message.payload.description,
     );
     // A rich host attaches a full structured rendering (e.g. the whole tree with

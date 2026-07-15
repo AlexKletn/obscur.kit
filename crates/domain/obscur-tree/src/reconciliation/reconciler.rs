@@ -539,9 +539,8 @@ mod tests {
         use obscur_view::view::{ViewProperty, ViewValue};
 
         let label = InternedSymbol::from_raw(0x8000_00AA);
-        let node = |text: &str| {
-            el(1).with_prop(ViewProperty::new(label, ViewValue::Text(text.into())))
-        };
+        let node =
+            |text: &str| el(1).with_prop(ViewProperty::new(label, ViewValue::Text(text.into())));
 
         let (mut tree, root) = tree_with_root();
         let plan = Reconciler::new().reconcile(
@@ -564,7 +563,10 @@ mod tests {
             root,
             &ViewFragment::from_nodes(vec![node("OK")]),
         );
-        assert!(plan.is_empty(), "an unchanged prop must not report a change");
+        assert!(
+            plan.is_empty(),
+            "an unchanged prop must not report a change"
+        );
 
         // Changing ONLY the non-CSS prop now reports an Update and takes effect.
         let plan = Reconciler::new().reconcile(
@@ -573,7 +575,9 @@ mod tests {
             &ViewFragment::from_nodes(vec![node("Cancel")]),
         );
         assert_eq!(
-            plan.iter().filter(|op| matches!(op, ReconciliationOp::Update { .. })).count(),
+            plan.iter()
+                .filter(|op| matches!(op, ReconciliationOp::Update { .. }))
+                .count(),
             1,
             "a changed non-CSS prop must yield an Update"
         );
@@ -607,7 +611,11 @@ mod tests {
             keyed_el(1, "e").with_prop(ViewProperty::new(SRC, ViewValue::Text(src.into())))
         };
 
-        let _ = recon.reconcile(&mut tree, root, &ViewFragment::from_nodes(vec![with_src("a.png")]));
+        let _ = recon.reconcile(
+            &mut tree,
+            root,
+            &ViewFragment::from_nodes(vec![with_src("a.png")]),
+        );
         let id = child_ids(&tree, root)[0];
         assert_eq!(
             tree.get(id).expect("live").attributes().image_source(),
@@ -615,8 +623,11 @@ mod tests {
         );
 
         // Changing the src re-applies the attributes and emits one Update op.
-        let plan =
-            recon.reconcile(&mut tree, root, &ViewFragment::from_nodes(vec![with_src("b.png")]));
+        let plan = recon.reconcile(
+            &mut tree,
+            root,
+            &ViewFragment::from_nodes(vec![with_src("b.png")]),
+        );
         assert_eq!(child_ids(&tree, root)[0], id);
         assert_eq!(
             tree.get(id).expect("live").attributes().image_source(),
@@ -720,7 +731,10 @@ mod tests {
             &[ViewEventBinding::new(click, increment)]
         );
         assert_eq!(node.command_for_event(click), Some(increment));
-        assert_eq!(node.command_for_event(InternedSymbol::from_raw(0xDEAD)), None);
+        assert_eq!(
+            node.command_for_event(InternedSymbol::from_raw(0xDEAD)),
+            None
+        );
     }
 
     #[test]
@@ -747,9 +761,7 @@ mod tests {
 
         let (mut tree, root) = tree_with_root();
         let recon = Reconciler::new();
-        let bound = |command| {
-            keyed_el(1, "e").with_event(ViewEventBinding::new(click, command))
-        };
+        let bound = |command| keyed_el(1, "e").with_event(ViewEventBinding::new(click, command));
 
         let _ = recon.reconcile(
             &mut tree,

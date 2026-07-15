@@ -61,7 +61,10 @@ fn item_size(css: &str) -> (f32, f32) {
     let root = runtime.tree().root().expect("a root");
     let page = runtime.tree().get(root).expect("live").children()[0];
     let item: NodeId = runtime.tree().get(page).expect("live").children()[0];
-    let layout = runtime.layout_boxes().get(&item).expect("the item is laid out");
+    let layout = runtime
+        .layout_boxes()
+        .get(&item)
+        .expect("the item is laid out");
     (layout.size().width, layout.size().height)
 }
 
@@ -157,9 +160,18 @@ fn ch_and_em_are_different_bases() {
     let (em_width, _) = item_size(&format!(
         "{PAGE}\n.item {{ font-size: 20px; width: 10em; height: 10px }}"
     ));
-    assert!((em_width - 200.0).abs() < 1e-3, "10em at 20px = 200, got {em_width}");
-    assert!((ch_width - 120.0).abs() < 1e-3, "10ch at 20px = 120, got {ch_width}");
-    assert!(ch_width < em_width, "a `0` is narrower than an em in this face");
+    assert!(
+        (em_width - 200.0).abs() < 1e-3,
+        "10em at 20px = 200, got {em_width}"
+    );
+    assert!(
+        (ch_width - 120.0).abs() < 1e-3,
+        "10ch at 20px = 120, got {ch_width}"
+    );
+    assert!(
+        ch_width < em_width,
+        "a `0` is narrower than an em in this face"
+    );
 }
 
 #[test]
@@ -170,7 +182,10 @@ fn ch_composes_with_calc_end_to_end() {
         "{PAGE}\n.item {{ font-size: 16px; width: calc(10ch + 8px); height: 10px }}"
     ));
     let expected = 10.0 * RATIO * 16.0 + 8.0;
-    assert!((width - expected).abs() < 1e-3, "want {expected}, got {width}");
+    assert!(
+        (width - expected).abs() < 1e-3,
+        "want {expected}, got {width}"
+    );
 }
 
 #[test]

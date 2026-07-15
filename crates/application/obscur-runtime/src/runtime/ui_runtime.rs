@@ -1,10 +1,10 @@
 //! The embeddable UI runtime and application-core integrator: [`UiRuntime`].
 
 use obscur_task::{BlockingExecutor, TaskId, TaskResult, TaskScope};
-use std::sync::Arc;
-use std::sync::mpsc::{Receiver, Sender, channel};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 use obscur_accessibility::port::AccessibilityBridge;
 use obscur_accessibility::tree::{SemanticSnapshot, SemanticTree};
@@ -14,6 +14,7 @@ use obscur_diagnostics::{
     TelemetrySink,
 };
 use obscur_geometry::{AffineTransform, Point, Size};
+use obscur_identity::SignalId;
 use obscur_identity::{InternedSymbol, NodeId, RuntimeId};
 use obscur_interaction::command::{
     CommandRouter, KeyEvent, LogicalKey, Modifier, Modifiers, NamedKey, Shortcut,
@@ -21,6 +22,7 @@ use obscur_interaction::command::{
 use obscur_interaction::hover::{HoverChain, HoverTransition};
 use obscur_interaction::pointer::{PointerEvent, PointerEventKind};
 use obscur_interaction::spatial::{HitTest, SpatialIndex};
+use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_motion::scheduler::MotionScheduler;
 use obscur_motion::timeline::{Timeline, TimelineId};
 use obscur_motion::track::{Keyframe, KeyframeTrack};
@@ -35,7 +37,6 @@ use obscur_scene::color::AlphaMode;
 use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::paint::{SceneImage, SceneVector};
 use obscur_scene::scene::{Scene, SceneSnapshot};
-use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::invalidation::StyleInvalidation;
 use obscur_style::matching::{MediaEnvironment, Stylesheet};
@@ -49,10 +50,9 @@ use obscur_text::selection::TextSelection;
 use obscur_text::shaping::{TextDirection, TextItemizer, TextShaper};
 use obscur_tree::node::NodeKind;
 use obscur_tree::reconciliation::Reconciler;
-use obscur_view::component::{ComponentRegistration, RegistryError};
-use obscur_identity::SignalId;
 use obscur_tree::tree::RetainedTree;
-use obscur_view::view::{View, EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT};
+use obscur_view::component::{ComponentRegistration, RegistryError};
+use obscur_view::view::{EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, View};
 
 use super::{
     FrameBudget, FramePlan, KeyDispatch, PointerDispatch, SemanticTreeBuilder, TextEditSession,
@@ -61,16 +61,16 @@ use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::invalidation::{Invalidation, InvalidationReason, InvalidationRouter};
 use std::collections::VecDeque;
 
+use crate::component::ComponentStore;
 use crate::orchestration::{
-    overflow_scrolls, root_font_size, scroll_containers, AnimatedKind, AnimationBinding, ComputedStyles,
-    DragCoordinator, DragOutcome,
-    overlay_commands, CssMotionRules, EditingView, InspectInfo, LayoutBoxes, LayoutCoordinator,
-    MotionCoordinator, NodeInspection, PreeditView, PseudoStates, SceneCoordinator, ScrollContainer,
-    ScrollPaint, StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement, TreeInspection,
+    AnimatedKind, AnimationBinding, ComputedStyles, CssMotionRules, DragCoordinator, DragOutcome,
+    EditingView, InspectInfo, LayoutBoxes, LayoutCoordinator, MotionCoordinator, NodeInspection,
+    PreeditView, PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint, StyleCoordinator,
+    StyleInputs, StyleMatchingCoordinator, TreeElement, TreeInspection, overflow_scrolls,
+    overlay_commands, root_font_size, scroll_containers,
 };
 use crate::orchestration::{alignment_for, direction_for, white_space_for};
 use crate::scheduler::{BackpressureDecision, FrameScheduler};
-use crate::component::ComponentStore;
 
 /// How many times [`UiRuntime::render_components`] re-renders newly appeared
 /// components within one frame before giving up.
@@ -81,8 +81,8 @@ use crate::component::ComponentStore;
 /// mutually, would otherwise spin the frame forever. Exceeding it truncates that
 /// frame's tree instead of hanging, and the `component.rendered` counter shows it.
 const MAX_COMPONENT_RENDER_PASSES: usize = 32;
-use crate::transaction::{ReconcileEnactor, TransactionCommit};
 use super::{InputDispatch, InputEvent};
+use crate::transaction::{ReconcileEnactor, TransactionCommit};
 use obscur_data_transfer::drag::{DragSession, DragSource, DropTarget};
 
 /// The maximum gap, in microseconds, between two presses for them to count as a
@@ -693,7 +693,8 @@ impl UiRuntime {
                 result,
             } => match result {
                 Ok(image) => {
-                    let metadata = ResourceMetadata::new().with_intrinsic_size(intrinsic_of(&image));
+                    let metadata =
+                        ResourceMetadata::new().with_intrinsic_size(intrinsic_of(&image));
                     // The hub owns the staleness verdict; `false` means this job
                     // was superseded, so its pixels must not reach the cache.
                     if !self.resource_hub.complete(handle, version, metadata) {
@@ -805,10 +806,9 @@ impl UiRuntime {
         handle: ResourceHandle,
         version: ResourceVersion,
     ) {
-        let (Some(loader), Some(decoder)) = (
-            self.resource_loader.clone(),
-            self.resource_decoder.clone(),
-        ) else {
+        let (Some(loader), Some(decoder)) =
+            (self.resource_loader.clone(), self.resource_decoder.clone())
+        else {
             return;
         };
         let outcome = move || ResourceOutcome::Image {
@@ -1156,7 +1156,9 @@ impl UiRuntime {
             dispatches.push(match event {
                 InputEvent::Pointer(event) => InputDispatch::Pointer(self.handle_pointer(event)),
                 InputEvent::Key(event) => InputDispatch::Key(self.handle_key(event)),
-                InputEvent::Composition(event) => InputDispatch::Composition(self.handle_ime(event)),
+                InputEvent::Composition(event) => {
+                    InputDispatch::Composition(self.handle_ime(event))
+                }
                 InputEvent::Scroll { delta, position } => {
                     InputDispatch::Scroll(self.handle_scroll(delta, position))
                 }
@@ -1189,7 +1191,10 @@ impl UiRuntime {
     /// commit was empty and no frame was requested.
     ///
     /// [`ProvisionalTransaction`]: crate::transaction::ProvisionalTransaction
-    pub fn apply_transaction(&mut self, commit: &TransactionCommit) -> Option<BackpressureDecision> {
+    pub fn apply_transaction(
+        &mut self,
+        commit: &TransactionCommit,
+    ) -> Option<BackpressureDecision> {
         if commit.is_empty() {
             return None;
         }
@@ -1647,7 +1652,12 @@ impl UiRuntime {
     /// motion (`Animation`) frame does **not** re-reconcile, and an idle
     /// diagnostics capture recalculates nothing and simply re-presents the
     /// retained scene.
-    fn run_frame(&mut self, ctx: FrameContext, desired: &View, sheets: &[Stylesheet]) -> FrameResult {
+    fn run_frame(
+        &mut self,
+        ctx: FrameContext,
+        desired: &View,
+        sheets: &[Stylesheet],
+    ) -> FrameResult {
         // Phase 5 (§3.4): classify what this frame must recalculate. The first
         // frame over an empty tree is always full so every retained output
         // exists before later frames can reuse it.
@@ -2099,8 +2109,13 @@ impl UiRuntime {
         let mut timeline = Timeline::new(id, duration);
         timeline.start();
         self.motion.register(timeline);
-        self.animations
-            .push(AnimationBinding::new(id, node, property, resolved_track, kind));
+        self.animations.push(AnimationBinding::new(
+            id,
+            node,
+            property,
+            resolved_track,
+            kind,
+        ));
 
         self.request_frame(FrameReason::Animation);
         id
@@ -2660,7 +2675,11 @@ impl UiRuntime {
     ///
     /// Reuses [`hover_chain_for`](Self::hover_chain_for) for the ancestor walk,
     /// which is the same target-plus-ancestors sequence hover already computes.
-    fn command_for_event_bubbling(&self, target: NodeId, event: InternedSymbol) -> Option<InternedSymbol> {
+    fn command_for_event_bubbling(
+        &self,
+        target: NodeId,
+        event: InternedSymbol,
+    ) -> Option<InternedSymbol> {
         self.hover_chain_for(Some(target))
             .into_iter()
             .find_map(|node| self.tree.get(node).and_then(|n| n.command_for_event(event)))
@@ -2675,9 +2694,11 @@ impl UiRuntime {
     /// control. `:hover` is deliberately unaffected (CSS still hovers a disabled
     /// element), so only the *behavioural* paths gate on this, not styling.
     fn is_within_disabled(&self, node: NodeId) -> bool {
-        self.hover_chain_for(Some(node))
-            .into_iter()
-            .any(|n| self.tree.get(n).is_some_and(|el| el.attributes().is_disabled()))
+        self.hover_chain_for(Some(node)).into_iter().any(|n| {
+            self.tree
+                .get(n)
+                .is_some_and(|el| el.attributes().is_disabled())
+        })
     }
 
     /// Whether `node` lies within a **readonly** control — the node itself or any
@@ -2694,9 +2715,11 @@ impl UiRuntime {
     /// ([`apply_edit`](Self::apply_edit) mutating commands and
     /// [`handle_ime`](Self::handle_ime)), never focus / caret / selection.
     fn is_within_readonly(&self, node: NodeId) -> bool {
-        self.hover_chain_for(Some(node))
-            .into_iter()
-            .any(|n| self.tree.get(n).is_some_and(|el| el.attributes().is_readonly()))
+        self.hover_chain_for(Some(node)).into_iter().any(|n| {
+            self.tree
+                .get(n)
+                .is_some_and(|el| el.attributes().is_readonly())
+        })
     }
 
     /// Resolves the **activation** command for `target`: a control is activated
@@ -2936,7 +2959,11 @@ impl UiRuntime {
                 session.mark_committed();
             }
         }
-        match self.tree.get(node).and_then(|n| n.command_for_event(EVENT_CHANGE)) {
+        match self
+            .tree
+            .get(node)
+            .and_then(|n| n.command_for_event(EVENT_CHANGE))
+        {
             Some(command) => self.dispatch_change(command, &text),
             None => false,
         }
@@ -3075,7 +3102,10 @@ impl UiRuntime {
                 // `apply_edit` runs `after_edit`: it fires the field's `on-input`
                 // with the resulting text and requests an input frame. The preedit
                 // was never inserted, so an empty anchor makes this an insert.
-                self.apply_edit(EditCommand::Replace { range: anchor, text });
+                self.apply_edit(EditCommand::Replace {
+                    range: anchor,
+                    text,
+                });
                 true
             }
             ImeFollowUp::None => false,
@@ -3102,12 +3132,14 @@ impl UiRuntime {
     /// [`EVENT_INPUT`](obscur_view::view::EVENT_INPUT). Returns `None` when no
     /// node in the chain is editable.
     fn editable_ancestor(&self, target: NodeId) -> Option<NodeId> {
-        self.hover_chain_for(Some(target)).into_iter().find(|&node| {
-            self.tree
-                .get(node)
-                .and_then(|n| n.command_for_event(EVENT_INPUT))
-                .is_some()
-        })
+        self.hover_chain_for(Some(target))
+            .into_iter()
+            .find(|&node| {
+                self.tree
+                    .get(node)
+                    .and_then(|n| n.command_for_event(EVENT_INPUT))
+                    .is_some()
+            })
     }
 
     /// Whether the editable `node` is a **multi-line** field (a `<textarea>`): it
@@ -3414,7 +3446,9 @@ impl UiRuntime {
         let Some(current) = self.caret_offset_at(field, point) else {
             return;
         };
-        self.apply_edit(EditCommand::SetSelection(TextSelection::new(anchor, current)));
+        self.apply_edit(EditCommand::SetSelection(TextSelection::new(
+            anchor, current,
+        )));
     }
 
     /// Resolves the byte offset in the focused editable `field`'s text at pointer
@@ -3506,7 +3540,8 @@ impl UiRuntime {
 
         let shift = self.modifiers.contains(Modifier::Shift);
         let alt = self.modifiers.contains(Modifier::Alt);
-        let cmd = self.modifiers.contains(Modifier::Ctrl) || self.modifiers.contains(Modifier::Meta);
+        let cmd =
+            self.modifiers.contains(Modifier::Ctrl) || self.modifiers.contains(Modifier::Meta);
 
         match event.logical() {
             // Editing chords: Ctrl/Meta (+Shift) letter — select-all / undo / redo.
@@ -3523,18 +3558,12 @@ impl UiRuntime {
                         true
                     }
                     'z' if !shift => {
-                        let changed = self
-                            .editing
-                            .as_mut()
-                            .is_some_and(|s| s.buffer_mut().undo());
+                        let changed = self.editing.as_mut().is_some_and(|s| s.buffer_mut().undo());
                         self.after_edit(changed);
                         true
                     }
                     'z' | 'y' => {
-                        let changed = self
-                            .editing
-                            .as_mut()
-                            .is_some_and(|s| s.buffer_mut().redo());
+                        let changed = self.editing.as_mut().is_some_and(|s| s.buffer_mut().redo());
                         self.after_edit(changed);
                         true
                     }
@@ -3715,10 +3744,14 @@ impl UiRuntime {
     fn after_edit(&mut self, mutating: bool) {
         let mut dispatched = false;
         if mutating
-            && let Some((node, text)) =
-                self.editing.as_ref().map(|s| (s.node(), s.text().to_owned()))
-            && let Some(command) =
-                self.tree.get(node).and_then(|n| n.command_for_event(EVENT_INPUT))
+            && let Some((node, text)) = self
+                .editing
+                .as_ref()
+                .map(|s| (s.node(), s.text().to_owned()))
+            && let Some(command) = self
+                .tree
+                .get(node)
+                .and_then(|n| n.command_for_event(EVENT_INPUT))
         {
             dispatched = self.dispatch_text_input(command, &text);
         }
@@ -4178,12 +4211,23 @@ impl UiRuntime {
                     component,
                     attributes.local_name().map(str::to_owned),
                     attributes.id().map(str::to_owned),
-                    attributes.classes().iter().map(|class| class.to_string()).collect(),
+                    attributes
+                        .classes()
+                        .iter()
+                        .map(|class| class.to_string())
+                        .collect(),
                 )
             }
             None => (None, None, None, Vec::new()),
         };
-        Some(InspectInfo { node, component, local_name, id, classes, bounds })
+        Some(InspectInfo {
+            node,
+            component,
+            local_name,
+            id,
+            classes,
+            bounds,
+        })
     }
 
     /// Snapshots the non-style inputs the layout phase reads (see
@@ -4339,7 +4383,11 @@ impl UiRuntime {
             component,
             local_name: attributes.local_name().map(str::to_owned),
             id: attributes.id().map(str::to_owned),
-            classes: attributes.classes().iter().map(|class| class.to_string()).collect(),
+            classes: attributes
+                .classes()
+                .iter()
+                .map(|class| class.to_string())
+                .collect(),
             text,
             bounds: self.boxes.get(&node).map(|layout_box| layout_box.bounds),
             styles: self.inspect_styles(node),
@@ -4368,7 +4416,9 @@ impl UiRuntime {
         };
         KEYS.iter()
             .filter_map(|property| {
-                style.get(*property).map(|value| (format!("{property:?}"), format!("{value:?}")))
+                style
+                    .get(*property)
+                    .map(|value| (format!("{property:?}"), format!("{value:?}")))
             })
             .collect()
     }
@@ -4520,7 +4570,10 @@ impl UiRuntime {
     pub fn set_surface(&mut self, physical: Size, scale: f32) {
         self.set_device_scale(scale);
         let effective = self.device_scale;
-        self.set_viewport(Size::new(physical.width / effective, physical.height / effective));
+        self.set_viewport(Size::new(
+            physical.width / effective,
+            physical.height / effective,
+        ));
     }
 
     /// Returns the current device-pixel scale (HiDPI factor × user zoom) the
@@ -4574,8 +4627,16 @@ impl UiRuntime {
     /// Does not itself schedule a frame; a host typically pairs this with
     /// [`request_frame`](Self::request_frame)`(`[`FrameReason::WindowChange`]`)`.
     pub fn set_content_offset(&mut self, x: f32, y: f32) {
-        let ox = if x.is_finite() { x } else { self.content_offset.0 };
-        let oy = if y.is_finite() { y } else { self.content_offset.1 };
+        let ox = if x.is_finite() {
+            x
+        } else {
+            self.content_offset.0
+        };
+        let oy = if y.is_finite() {
+            y
+        } else {
+            self.content_offset.1
+        };
         self.content_offset = (ox, oy);
     }
 
@@ -5055,8 +5116,7 @@ fn record_phase(
     // and nothing narrower — there is no single node a whole layout phase is
     // about — so `node`/`resource` stay empty rather than being invented.
     sink.record_span(
-        &PerformanceSpan::new(name, subsystem)
-            .with_attribution(SpanAttribution::frame(frame)),
+        &PerformanceSpan::new(name, subsystem).with_attribution(SpanAttribution::frame(frame)),
     );
     let mut counter = PerformanceCounter::new(subsystem, label);
     counter.add(metric);
@@ -5198,7 +5258,10 @@ mod tests {
     }
 
     fn counter_child(runtime: &UiRuntime) -> NodeId {
-        let root = runtime.tree().root().expect("tree has a root after a frame");
+        let root = runtime
+            .tree()
+            .root()
+            .expect("tree has a root after a frame");
         runtime.tree().get(root).unwrap().children().to_vec()[0]
     }
 
@@ -5352,7 +5415,11 @@ mod tests {
             runtime.render_now(&counter_view(2), &[]);
 
             assert_eq!(runtime.mounted_component_count(), 1);
-            assert_eq!(rendered_text(&runtime), "2", "the decoded step reached render");
+            assert_eq!(
+                rendered_text(&runtime),
+                "2",
+                "the decoded step reached render"
+            );
         }
 
         #[test]
@@ -5437,9 +5504,7 @@ mod tests {
             let mut runtime = runtime_tracking(STORE);
             runtime.render_now(&counter_view(2), &[]);
             runtime.notify_signal(STORE);
-            runtime
-                .run_due_frame(&counter_view(2), &[])
-                .expect("due");
+            runtime.run_due_frame(&counter_view(2), &[]).expect("due");
             assert_eq!(rendered_text(&runtime), "4");
             // Re-tracked at the new generation: nothing further is pending.
             assert_eq!(runtime.peek_frame_reason(), None);
@@ -5596,7 +5661,12 @@ mod tests {
             assert_eq!(runtime.mounted_component_count(), 0);
             let node = component_node(&runtime);
             assert!(
-                runtime.tree().get(node).expect("live").children().is_empty(),
+                runtime
+                    .tree()
+                    .get(node)
+                    .expect("live")
+                    .children()
+                    .is_empty(),
                 "an unregistered element gets no component output"
             );
         }
@@ -5729,7 +5799,8 @@ mod tests {
     #[test]
     fn url_background_image_resolves_and_paints_a_draw_image() {
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        runtime.set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
+        runtime
+            .set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
 
         let sheet = img_stylesheet();
         let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
@@ -5759,7 +5830,8 @@ mod tests {
         // A `<img>` element's own `src` loads + decodes into the cache (same path as
         // background images) and paints one DrawImage over its 100×50 box.
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        runtime.set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
+        runtime
+            .set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
         let sheet = counter_stylesheet();
         let result = runtime.render_now(&img_src_view("logo"), std::slice::from_ref(&sheet));
         assert_eq!(
@@ -5903,8 +5975,15 @@ mod tests {
         // classified from its reason alone runs every phase and would have pulled
         // the new node in; this one knows the tree cannot have changed, because no
         // operation said it did — so the extra node is not adopted.
-        assert!(!result.reconciled(), "a style-only transaction does not reconcile");
-        assert_eq!(runtime.tree().len(), before, "the tree really was left alone");
+        assert!(
+            !result.reconciled(),
+            "a style-only transaction does not reconcile"
+        );
+        assert_eq!(
+            runtime.tree().len(),
+            before,
+            "the tree really was left alone"
+        );
         assert!(result.restyled(), "but it does restyle");
         assert!(result.composed());
 
@@ -6337,7 +6416,11 @@ mod tests {
             .computed_style(button)
             .and_then(|s| s.get(PropertyId::BackgroundColor))
             .and_then(ComputedValue::as_color);
-        assert_eq!(bg, Some(ua_fill()), "UA default background must show through");
+        assert_eq!(
+            bg,
+            Some(ua_fill()),
+            "UA default background must show through"
+        );
     }
 
     #[test]
@@ -6372,7 +6455,11 @@ mod tests {
             Some(StyleColor::rgba(0.8, 0.0, 0.0, 1.0)),
             "author sheet (GlobalApp) must beat the UA default (SystemDefault)"
         );
-        assert_ne!(bg, Some(ua_fill()), "the UA value must NOT survive the override");
+        assert_ne!(
+            bg,
+            Some(ua_fill()),
+            "the UA value must NOT survive the override"
+        );
     }
 
     #[test]
@@ -6433,7 +6520,11 @@ mod tests {
             CascadeOrigin::GlobalApp,
             vec![
                 button_type_rule(background(ua_fill().r, ua_fill().g, ua_fill().b)),
-                button_disabled_rule(background(disabled_fill.r, disabled_fill.g, disabled_fill.b)),
+                button_disabled_rule(background(
+                    disabled_fill.r,
+                    disabled_fill.g,
+                    disabled_fill.b,
+                )),
             ],
         );
         let sheets = std::slice::from_ref(&sheet);
@@ -6554,7 +6645,11 @@ mod tests {
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
         runtime.render_now(&view, sheets);
         let node = counter_child(&runtime);
-        let cold_box = runtime.layout_boxes().get(&node).copied().expect("a laid-out box");
+        let cold_box = runtime
+            .layout_boxes()
+            .get(&node)
+            .copied()
+            .expect("a laid-out box");
 
         runtime.set_pseudo_state(node, PseudoState::HOVER);
         runtime.request_frame(FrameReason::Input);
@@ -6566,7 +6661,10 @@ mod tests {
             !hot.relaid_out(),
             "a paint-only hover must not relayout — the retained boxes are provably valid"
         );
-        assert!(hot.restyled(), "it still restyles so the fill reaches paint");
+        assert!(
+            hot.restyled(),
+            "it still restyles so the fill reaches paint"
+        );
         assert!(hot.composed(), "and still re-composes");
         assert_eq!(
             runtime.layout_boxes().get(&node).copied(),
@@ -6594,7 +6692,10 @@ mod tests {
 
         assert!(hot.relaid_out(), "a width change must relayout");
         assert_eq!(
-            runtime.layout_boxes().get(&node).map(|b| b.bounds.size.width),
+            runtime
+                .layout_boxes()
+                .get(&node)
+                .map(|b| b.bounds.size.width),
             Some(200.0),
             "the hovered box grew to its hover width"
         );
@@ -6613,22 +6714,36 @@ mod tests {
         runtime.set_root_view(box_view);
         runtime.set_stylesheets(vec![sheet]);
         runtime.request_frame(FrameReason::UiCommit);
-        let first = runtime.run_due_frame_reactive().expect("the first frame is due");
+        let first = runtime
+            .run_due_frame_reactive()
+            .expect("the first frame is due");
         assert!(first.relaid_out(), "the first frame arranges the boxes");
 
         let node = counter_child(&runtime);
-        let cold_box = runtime.layout_boxes().get(&node).copied().expect("a laid-out box");
+        let cold_box = runtime
+            .layout_boxes()
+            .get(&node)
+            .copied()
+            .expect("a laid-out box");
 
         runtime.set_pseudo_state(node, PseudoState::HOVER);
         runtime.request_frame(FrameReason::UiCommit);
-        let hot = runtime.run_due_frame_reactive().expect("the hover frame is due");
+        let hot = runtime
+            .run_due_frame_reactive()
+            .expect("the hover frame is due");
 
-        assert!(!hot.reconciled(), "the rebuilt view is identical: reconcile commits empty");
+        assert!(
+            !hot.reconciled(),
+            "the rebuilt view is identical: reconcile commits empty"
+        );
         assert!(
             !hot.relaid_out(),
             "a paint-only hover must be layout-free on the reactive path as well"
         );
-        assert!(hot.restyled(), "it still restyles so the fill reaches paint");
+        assert!(
+            hot.restyled(),
+            "it still restyles so the fill reaches paint"
+        );
         assert_eq!(
             runtime.layout_boxes().get(&node).copied(),
             Some(cold_box),
@@ -6660,18 +6775,24 @@ mod tests {
         }
         runtime.set_stylesheets(vec![sheet]);
         runtime.request_frame(FrameReason::UiCommit);
-        runtime.run_due_frame_reactive().expect("the first frame is due");
+        runtime
+            .run_due_frame_reactive()
+            .expect("the first frame is due");
 
         // An identical rebuild: provably layout-free (the control for the assert
         // below — it proves the next frame's relayout is caused by the TEXT).
         runtime.request_frame(FrameReason::UiCommit);
-        let same = runtime.run_due_frame_reactive().expect("the repeat frame is due");
+        let same = runtime
+            .run_due_frame_reactive()
+            .expect("the repeat frame is due");
         assert!(!same.relaid_out(), "an identical rebuild is layout-free");
 
         // Now the state changes the text the builder emits.
         *label.borrow_mut() = "two".to_owned();
         runtime.request_frame(FrameReason::UiCommit);
-        let changed = runtime.run_due_frame_reactive().expect("the commit frame is due");
+        let changed = runtime
+            .run_due_frame_reactive()
+            .expect("the commit frame is due");
         assert!(changed.reconciled(), "the new text is a real tree change");
         assert!(changed.relaid_out(), "changed text must relayout");
     }
@@ -6708,7 +6829,11 @@ mod tests {
             1,
             "a changed transitioned property registers a running timeline"
         );
-        assert_eq!(box_width(&runtime, child), 100.0, "starts from the old value");
+        assert_eq!(
+            box_width(&runtime, child),
+            100.0,
+            "starts from the old value"
+        );
 
         // Advance halfway: the sampled width interpolates linearly to 150.
         runtime.advance_motion(0.5);
@@ -6719,8 +6844,16 @@ mod tests {
         // Advance to the end: the timeline finishes and the width settles at 200.
         runtime.advance_motion(0.5);
         let _ = runtime.render_now(&view, sheets);
-        assert_eq!(box_width(&runtime, child), 200.0, "settles at the new value");
-        assert_eq!(runtime.active_animations(), 0, "finished timeline is pruned");
+        assert_eq!(
+            box_width(&runtime, child),
+            200.0,
+            "settles at the new value"
+        );
+        assert_eq!(
+            runtime.active_animations(),
+            0,
+            "finished timeline is pruned"
+        );
     }
 
     #[test]
@@ -6785,7 +6918,11 @@ mod tests {
 
         // A second frame must not re-register it (started-set guards it).
         let _ = runtime.render_now(&view, sheets);
-        assert_eq!(runtime.active_animations(), 1, "registered once, not per frame");
+        assert_eq!(
+            runtime.active_animations(),
+            1,
+            "registered once, not per frame"
+        );
     }
 
     #[test]
@@ -6840,8 +6977,11 @@ mod tests {
             vec!["frame", "reconcile", "style", "layout", "compose"]
         );
         // Each phase recorded a cost counter, plus the closing phases_run tally.
-        let counter_labels: Vec<&str> =
-            sink.counters.iter().map(PerformanceCounter::label).collect();
+        let counter_labels: Vec<&str> = sink
+            .counters
+            .iter()
+            .map(PerformanceCounter::label)
+            .collect();
         assert_eq!(
             counter_labels,
             vec![
@@ -7049,9 +7189,7 @@ mod tests {
     // ---- Phase 3 step 2: input dispatch (hit-test → hover/focus → pseudo) ----
 
     use obscur_geometry::Point;
-    use obscur_interaction::command::{
-        KeyEvent, LogicalKey, Modifier, PhysicalKey, Shortcut,
-    };
+    use obscur_interaction::command::{KeyEvent, LogicalKey, Modifier, PhysicalKey, Shortcut};
     use obscur_interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind, PointerId};
     use obscur_style::selector::PseudoClassSelector;
 
@@ -7088,7 +7226,10 @@ mod tests {
     fn size(width: f32, height: f32) -> Vec<BlockDeclaration> {
         vec![
             BlockDeclaration::normal(PropertyId::Width, PropertyValue::Length(Length::px(width))),
-            BlockDeclaration::normal(PropertyId::Height, PropertyValue::Length(Length::px(height))),
+            BlockDeclaration::normal(
+                PropertyId::Height,
+                PropertyValue::Length(Length::px(height)),
+            ),
         ]
     }
 
@@ -7207,7 +7348,10 @@ mod tests {
                 .with_prop(ViewProperty::new(DISABLED, ViewValue::Bool(true)))
                 .with_event(ViewEventBinding::new(EVENT_CLICK, cmd)),
         ]));
-        let sheet = Stylesheet::new(CascadeOrigin::GlobalApp, vec![class_rule("a", size(100.0, 50.0))]);
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![class_rule("a", size(100.0, 50.0))],
+        );
 
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
         let ran = Rc::new(Cell::new(false));
@@ -7219,12 +7363,23 @@ mod tests {
 
         // Press inside the disabled control: it takes NO focus.
         runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
-        assert_eq!(runtime.focused(), None, "a disabled control must not take focus");
-        assert!(runtime.editing_text().is_none(), "a disabled control seats no editing session");
+        assert_eq!(
+            runtime.focused(),
+            None,
+            "a disabled control must not take focus"
+        );
+        assert!(
+            runtime.editing_text().is_none(),
+            "a disabled control seats no editing session"
+        );
 
         // Release on it activates NOTHING — no command reported, no handler ran.
         let dispatch = runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 25.0));
-        assert_eq!(dispatch.command(), None, "a disabled control reports no activation command");
+        assert_eq!(
+            dispatch.command(),
+            None,
+            "a disabled control reports no activation command"
+        );
         assert!(!ran.get(), "a disabled control fires no activation command");
 
         // `:hover` is unaffected — CSS still hovers a disabled element.
@@ -7269,7 +7424,10 @@ mod tests {
         scroller.push(overflow_auto());
         Stylesheet::new(
             CascadeOrigin::GlobalApp,
-            vec![class_rule("scroller", scroller), class_rule("row", size(200.0, 40.0))],
+            vec![
+                class_rule("scroller", scroller),
+                class_rule("row", size(200.0, 40.0)),
+            ],
         )
     }
 
@@ -7293,8 +7451,16 @@ mod tests {
         // scroll_by advances, clamped to content_height − scrollport = 240 − 120.
         assert_eq!(runtime.scroll_by(scroller, 80.0), 80.0);
         assert_eq!(runtime.scroll_top(scroller), 80.0);
-        assert_eq!(runtime.scroll_by(scroller, 1000.0), 120.0, "clamps to the scrollable range");
-        assert_eq!(runtime.scroll_by(scroller, -1000.0), 0.0, "clamps at the top");
+        assert_eq!(
+            runtime.scroll_by(scroller, 1000.0),
+            120.0,
+            "clamps to the scrollable range"
+        );
+        assert_eq!(
+            runtime.scroll_by(scroller, -1000.0),
+            0.0,
+            "clamps at the top"
+        );
         // set_scroll_top clamps identically; a non-container node is ignored.
         runtime.set_scroll_top(scroller, 60.0);
         assert_eq!(runtime.scroll_top(scroller), 60.0);
@@ -7317,17 +7483,18 @@ mod tests {
             .iter()
             .filter(|c| matches!(c, PaintCommand::PushTransform(t) if t.coeffs[5] != 0.0))
             .count();
-        assert_eq!(idle_translates, 0, "scroll transform is elided at scroll_top == 0");
+        assert_eq!(
+            idle_translates, 0,
+            "scroll transform is elided at scroll_top == 0"
+        );
 
         // Scrolled: a PushTransform(translate(0,-80)) wraps the content.
         runtime.scroll_by(scroller, 80.0);
         let _ = runtime.render_now(&scroller_view(), sheets);
         let scrolled = runtime.snapshot();
-        let has = scrolled
-            .display_list()
-            .commands()
-            .iter()
-            .any(|c| matches!(c, PaintCommand::PushTransform(t) if (t.coeffs[5] + 80.0).abs() < 0.01));
+        let has = scrolled.display_list().commands().iter().any(
+            |c| matches!(c, PaintCommand::PushTransform(t) if (t.coeffs[5] + 80.0).abs() < 0.01),
+        );
         assert!(has, "scrolled content is wrapped in translate(0,-80)");
     }
 
@@ -7340,12 +7507,16 @@ mod tests {
         let (scroller, rows) = scroller_nodes(&runtime);
 
         // Idle: a click at the top of the scrollport lands on row 0.
-        let hit = runtime.handle_pointer(mouse(PointerEventKind::Move, 100.0, 20.0)).target();
+        let hit = runtime
+            .handle_pointer(mouse(PointerEventKind::Move, 100.0, 20.0))
+            .target();
         assert_eq!(hit, Some(rows[0]), "idle: (100,20) hits row 0");
 
         // Scroll up two rows: the SAME point now maps to row 2 (content y 20+80).
         runtime.scroll_by(scroller, 80.0);
-        let hit = runtime.handle_pointer(mouse(PointerEventKind::Move, 100.0, 20.0)).target();
+        let hit = runtime
+            .handle_pointer(mouse(PointerEventKind::Move, 100.0, 20.0))
+            .target();
         assert_eq!(hit, Some(rows[2]), "scrolled: (100,20) hits row 2");
     }
 
@@ -7357,14 +7528,31 @@ mod tests {
         let mut b = UiRuntime::new(runtime_id(), viewport());
         let sheet = interaction_sheet();
         let sheets = std::slice::from_ref(&sheet);
-        let list_a = a.render_now(&panel_view(), sheets).snapshot().display_list().commands().to_vec();
+        let list_a = a
+            .render_now(&panel_view(), sheets)
+            .snapshot()
+            .display_list()
+            .commands()
+            .to_vec();
         // Populate b, then drive the scroll API against a non-container node (inert).
         let _ = b.render_now(&panel_view(), sheets);
         let (panel, _a, _b) = panel_nodes(&b);
         b.set_scroll_top(panel, 40.0);
-        assert_eq!(b.scroll_top(panel), 0.0, "a non-overflowing node owns no scroll position");
-        let list_b = b.render_now(&panel_view(), sheets).snapshot().display_list().commands().to_vec();
-        assert_eq!(list_a, list_b, "no scroll container ⇒ byte-identical display list");
+        assert_eq!(
+            b.scroll_top(panel),
+            0.0,
+            "a non-overflowing node owns no scroll position"
+        );
+        let list_b = b
+            .render_now(&panel_view(), sheets)
+            .snapshot()
+            .display_list()
+            .commands()
+            .to_vec();
+        assert_eq!(
+            list_a, list_b,
+            "no scroll container ⇒ byte-identical display list"
+        );
     }
 
     // ---- Device scale (HiDPI): root scale transform + pointer coord mapping ----
@@ -7378,7 +7566,10 @@ mod tests {
             d.extend(background(0.1, 0.2, 0.3));
             d
         };
-        let sheet = Stylesheet::new(CascadeOrigin::GlobalApp, vec![class_rule("panel", panel_decls)]);
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![class_rule("panel", panel_decls)],
+        );
         let sheets = std::slice::from_ref(&sheet);
 
         // Scale 2.0: the composed list is bracketed by a single root
@@ -7392,7 +7583,9 @@ mod tests {
         assert!(list.len() >= 3, "at least the two brackets plus content");
         assert_eq!(
             list.commands().first(),
-            Some(&PaintCommand::PushTransform(AffineTransform::scale(2.0, 2.0))),
+            Some(&PaintCommand::PushTransform(AffineTransform::scale(
+                2.0, 2.0
+            ))),
             "the list opens with the root device-scale transform",
         );
         assert_eq!(
@@ -7415,7 +7608,9 @@ mod tests {
         );
 
         // The scaled list is exactly the plain list wrapped in the two brackets.
-        let mut expected = vec![PaintCommand::PushTransform(AffineTransform::scale(2.0, 2.0))];
+        let mut expected = vec![PaintCommand::PushTransform(AffineTransform::scale(
+            2.0, 2.0,
+        ))];
         expected.extend_from_slice(plain_list.commands());
         expected.push(PaintCommand::PopTransform);
         assert_eq!(list.commands(), expected.as_slice());
@@ -7465,7 +7660,8 @@ mod tests {
         let _ = base.render_now(&panel_view(), sheets);
         let (_panel, a, b) = panel_nodes(&base);
         assert_eq!(
-            base.handle_pointer(mouse(PointerEventKind::Move, 50.0, 75.0)).target(),
+            base.handle_pointer(mouse(PointerEventKind::Move, 50.0, 75.0))
+                .target(),
             Some(b),
         );
 
@@ -7474,7 +7670,9 @@ mod tests {
         scaled.set_device_scale(2.0);
         let _ = scaled.render_now(&panel_view(), sheets);
         assert_eq!(
-            scaled.handle_pointer(mouse(PointerEventKind::Move, 100.0, 150.0)).target(),
+            scaled
+                .handle_pointer(mouse(PointerEventKind::Move, 100.0, 150.0))
+                .target(),
             Some(b),
             "physical (100,150) / 2 = logical (50,75) hits the same node as scale-1 (50,75)",
         );
@@ -7482,7 +7680,9 @@ mod tests {
         // And physical (50, 75) at scale 2 maps to logical (25, 37.5) → `a`
         // (y ∈ [0, 50)), proving the coordinates were actually divided.
         assert_eq!(
-            scaled.handle_pointer(mouse(PointerEventKind::Move, 50.0, 75.0)).target(),
+            scaled
+                .handle_pointer(mouse(PointerEventKind::Move, 50.0, 75.0))
+                .target(),
             Some(a),
         );
     }
@@ -7525,7 +7725,10 @@ mod tests {
             d.extend(background(0.1, 0.2, 0.3));
             d
         };
-        let sheet = Stylesheet::new(CascadeOrigin::GlobalApp, vec![class_rule("panel", panel_decls)]);
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![class_rule("panel", panel_decls)],
+        );
         let sheets = std::slice::from_ref(&sheet);
 
         // Offset (0, 100) at scale 1.0: the list is bracketed by a single root
@@ -7538,7 +7741,9 @@ mod tests {
         assert!(list.is_balanced(), "the wrapped list stays balanced");
         assert_eq!(
             list.commands().first(),
-            Some(&PaintCommand::PushTransform(AffineTransform::translate(0.0, -100.0))),
+            Some(&PaintCommand::PushTransform(AffineTransform::translate(
+                0.0, -100.0
+            ))),
             "offset 100 translates content up by 100 (scale·translate reduces to translate at s=1)",
         );
         assert_eq!(list.commands().last(), Some(&PaintCommand::PopTransform));
@@ -7554,7 +7759,9 @@ mod tests {
                 .any(|c| matches!(c, PaintCommand::PushTransform(_))),
             "no root transform at offset (0,0) + scale 1.0",
         );
-        let mut expected = vec![PaintCommand::PushTransform(AffineTransform::translate(0.0, -100.0))];
+        let mut expected = vec![PaintCommand::PushTransform(AffineTransform::translate(
+            0.0, -100.0,
+        ))];
         expected.extend_from_slice(plain_list.commands());
         expected.push(PaintCommand::PopTransform);
         assert_eq!(list.commands(), expected.as_slice());
@@ -7567,7 +7774,10 @@ mod tests {
             d.extend(background(0.1, 0.2, 0.3));
             d
         };
-        let sheet = Stylesheet::new(CascadeOrigin::GlobalApp, vec![class_rule("panel", panel_decls)]);
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![class_rule("panel", panel_decls)],
+        );
         let sheets = std::slice::from_ref(&sheet);
 
         // scale 2 + offset (0, 100) → root = scale(2)·translate(0, -100).
@@ -7595,7 +7805,8 @@ mod tests {
         let _ = base.render_now(&panel_view(), sheets);
         let (_panel, a, b) = panel_nodes(&base);
         assert_eq!(
-            base.handle_pointer(mouse(PointerEventKind::Move, 50.0, 25.0)).target(),
+            base.handle_pointer(mouse(PointerEventKind::Move, 50.0, 25.0))
+                .target(),
             Some(a),
         );
 
@@ -7606,14 +7817,18 @@ mod tests {
         scrolled.set_content_offset(0.0, 100.0);
         let _ = scrolled.render_now(&panel_view(), sheets);
         assert_eq!(
-            scrolled.handle_pointer(mouse(PointerEventKind::Move, 50.0, -75.0)).target(),
+            scrolled
+                .handle_pointer(mouse(PointerEventKind::Move, 50.0, -75.0))
+                .target(),
             Some(a),
             "physical y -75 + offset 100 = content y 25 hits `a`",
         );
 
         // physical (50, -25) → content y = 75 → `b` (y ∈ [50, 100)).
         assert_eq!(
-            scrolled.handle_pointer(mouse(PointerEventKind::Move, 50.0, -25.0)).target(),
+            scrolled
+                .handle_pointer(mouse(PointerEventKind::Move, 50.0, -25.0))
+                .target(),
             Some(b),
         );
     }
@@ -7631,7 +7846,8 @@ mod tests {
         let (_panel, _a, b) = panel_nodes(&rt);
         // physical y -50 → -25 + 100 = content y 75 → `b`.
         assert_eq!(
-            rt.handle_pointer(mouse(PointerEventKind::Move, 100.0, -50.0)).target(),
+            rt.handle_pointer(mouse(PointerEventKind::Move, 100.0, -50.0))
+                .target(),
             Some(b),
             "physical (100,-50): x=100/2=50, y=-50/2+100=75 → `b`",
         );
@@ -7666,7 +7882,10 @@ mod tests {
             .handle_pointer(mouse(PointerEventKind::Move, 50.0, 75.0))
             .target();
 
-        assert_eq!(default_list, explicit_list, "offset (0,0) changes no commands");
+        assert_eq!(
+            default_list, explicit_list,
+            "offset (0,0) changes no commands"
+        );
         assert_eq!(d_target, e_target, "offset (0,0) changes no hit-test");
     }
 
@@ -7675,9 +7894,17 @@ mod tests {
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
         runtime.set_content_offset(10.0, 20.0);
         runtime.set_content_offset(f32::NAN, 40.0);
-        assert_eq!(runtime.content_offset(), (10.0, 40.0), "NaN x keeps prior x");
+        assert_eq!(
+            runtime.content_offset(),
+            (10.0, 40.0),
+            "NaN x keeps prior x"
+        );
         runtime.set_content_offset(50.0, f32::INFINITY);
-        assert_eq!(runtime.content_offset(), (50.0, 40.0), "inf y keeps prior y");
+        assert_eq!(
+            runtime.content_offset(),
+            (50.0, 40.0),
+            "inf y keeps prior y"
+        );
     }
 
     #[test]
@@ -7693,7 +7920,10 @@ mod tests {
         // Point at b, which schedules an Input frame; render it.
         let dispatch = runtime.handle_pointer(mouse(PointerEventKind::Move, 50.0, 75.0));
         assert!(dispatch.hover_changed());
-        assert!(runtime.has_pending_frame(), "hover change requested a frame");
+        assert!(
+            runtime.has_pending_frame(),
+            "hover change requested a frame"
+        );
         let hot = runtime
             .run_due_frame(&panel_view(), sheets)
             .expect("the input-requested frame is due");
@@ -8018,7 +8248,11 @@ mod tests {
         value.set(42);
         runtime.request_frame(FrameReason::UiCommit);
         runtime.run_due_frame_reactive().expect("second frame due");
-        assert_eq!(tree_text(&runtime), "42", "the builder's new output rendered");
+        assert_eq!(
+            tree_text(&runtime),
+            "42",
+            "the builder's new output rendered"
+        );
     }
 
     #[test]
@@ -8069,7 +8303,11 @@ mod tests {
         runtime
             .run_due_frame(&counter_reactive_view(5), sheets)
             .expect("frame due");
-        assert_eq!(tree_text(&runtime), "5", "run_due_frame used the passed view");
+        assert_eq!(
+            tree_text(&runtime),
+            "5",
+            "run_due_frame used the passed view"
+        );
     }
 
     #[test]
@@ -8339,7 +8577,11 @@ mod tests {
         // No shortcut is bound, so nothing resolved through the router...
         assert_eq!(enter.command(), None);
         // ...but Enter activated the focused button's click command.
-        assert_eq!(counter.get(), 1, "Enter activated the button's click handler");
+        assert_eq!(
+            counter.get(),
+            1,
+            "Enter activated the button's click handler"
+        );
     }
 
     #[test]
@@ -8393,7 +8635,11 @@ mod tests {
         let up = runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 75.0));
 
         assert_eq!(up.target(), Some(b));
-        assert_eq!(up.command(), Some(CMD_B), "click still resolves EVENT_CLICK");
+        assert_eq!(
+            up.command(),
+            Some(CMD_B),
+            "click still resolves EVENT_CLICK"
+        );
         assert_eq!(counter.get(), 1);
     }
 
@@ -8492,12 +8738,18 @@ mod tests {
 
         // Type 'h' then 'i': each keystroke edits the app's own string.
         let h = runtime.handle_key(char_press('h'));
-        assert_eq!(h.command(), None, "a plain char resolves no shortcut command");
+        assert_eq!(
+            h.command(),
+            None,
+            "a plain char resolves no shortcut command"
+        );
         runtime.handle_key(char_press('i'));
         assert_eq!(&*text.borrow(), "hi", "typing edited the app's string");
 
         // The reactive re-render reflects the edited string.
-        runtime.run_due_frame_reactive().expect("re-render frame due");
+        runtime
+            .run_due_frame_reactive()
+            .expect("re-render frame due");
         assert_eq!(tree_text(&runtime), "hi", "the rebuilt view shows the text");
 
         // Backspace deletes the last character; the re-render follows.
@@ -8506,8 +8758,14 @@ mod tests {
             Some(LogicalKey::named(NamedKey::Backspace)),
         ));
         assert_eq!(&*text.borrow(), "h", "Backspace deleted the last char");
-        runtime.run_due_frame_reactive().expect("re-render frame due");
-        assert_eq!(tree_text(&runtime), "h", "the rebuilt view shows the deletion");
+        runtime
+            .run_due_frame_reactive()
+            .expect("re-render frame due");
+        assert_eq!(
+            tree_text(&runtime),
+            "h",
+            "the rebuilt view shows the deletion"
+        );
     }
 
     #[test]
@@ -8532,7 +8790,10 @@ mod tests {
 
         // Focus the editable by pressing inside it; the runtime auto-seeds.
         runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
-        assert!(runtime.focused().is_some(), "the press focused the editable");
+        assert!(
+            runtime.focused().is_some(),
+            "the press focused the editable"
+        );
         assert_eq!(
             runtime.editing_text(),
             Some(""),
@@ -8540,11 +8801,23 @@ mod tests {
         );
         let sel = runtime.editing_selection().expect("session active");
         assert!(sel.is_collapsed());
-        assert_eq!(sel.focus(), 0, "caret seeded at offset 0 in the empty field");
+        assert_eq!(
+            sel.focus(),
+            0,
+            "caret seeded at offset 0 in the empty field"
+        );
 
         runtime.handle_key(char_press('x'));
-        assert_eq!(runtime.editing_text(), Some("x"), "typing yields exactly the typed text");
-        assert_eq!(&*mirror.borrow(), "x", "on-input delivered exactly \"x\", not the placeholder");
+        assert_eq!(
+            runtime.editing_text(),
+            Some("x"),
+            "typing yields exactly the typed text"
+        );
+        assert_eq!(
+            &*mirror.borrow(),
+            "x",
+            "on-input delivered exactly \"x\", not the placeholder"
+        );
     }
 
     #[test]
@@ -8624,7 +8897,10 @@ mod tests {
         assert!(!runtime.has_text_input_handler(CMD_INPUT));
 
         let dispatch = runtime.handle_key(char_press('h'));
-        assert!(dispatch.is_handled(), "the key still routed to the focused node");
+        assert!(
+            dispatch.is_handled(),
+            "the key still routed to the focused node"
+        );
         assert_eq!(dispatch.command(), None, "no shortcut resolved");
     }
 
@@ -8654,7 +8930,10 @@ mod tests {
         let _ = runtime.render_now(&input_reactive_view(seed), sheets);
         // Press inside `b` to focus the editable; the runtime seeds the session.
         runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
-        assert!(runtime.focused().is_some(), "the press focused the editable");
+        assert!(
+            runtime.focused().is_some(),
+            "the press focused the editable"
+        );
         (runtime, mirror)
     }
 
@@ -8715,11 +8994,19 @@ mod tests {
         runtime.handle_key(KeyEvent::press(PhysicalKey::ControlLeft, None));
         runtime.handle_key(char_press('a')); // Ctrl+A -> SelectAll
         let sel = runtime.editing_selection().unwrap();
-        assert_eq!((sel.start(), sel.end()), (0, 2), "select-all covers the field");
+        assert_eq!(
+            (sel.start(), sel.end()),
+            (0, 2),
+            "select-all covers the field"
+        );
         runtime.handle_key(KeyEvent::release(PhysicalKey::ControlLeft, None));
 
         runtime.handle_key(char_press('Z'));
-        assert_eq!(runtime.editing_text(), Some("Z"), "typing replaced everything");
+        assert_eq!(
+            runtime.editing_text(),
+            Some("Z"),
+            "typing replaced everything"
+        );
     }
 
     #[test]
@@ -8735,8 +9022,16 @@ mod tests {
         // A sentinel proves the caret move does not re-fire the handler.
         *mirror.borrow_mut() = String::from("SENTINEL");
         runtime.handle_key(named_press(NamedKey::ArrowLeft));
-        assert_eq!(runtime.editing_text(), Some("hi!"), "text intact after a move");
-        assert_eq!(&*mirror.borrow(), "SENTINEL", "a caret move does not fire on-input");
+        assert_eq!(
+            runtime.editing_text(),
+            Some("hi!"),
+            "text intact after a move"
+        );
+        assert_eq!(
+            &*mirror.borrow(),
+            "SENTINEL",
+            "a caret move does not fire on-input"
+        );
     }
 
     // ---- Controlled-value reseed while focused (Defect A) --------------------
@@ -8786,14 +9081,24 @@ mod tests {
             runtime.handle_key(char_press(c));
         }
         runtime.run_due_frame_reactive().expect("rebuild frame");
-        assert_eq!(runtime.editing_text(), Some("abc"), "typing filled the session");
-        assert_eq!(tree_text(&runtime), "abc", "the passthrough value reached the tree");
+        assert_eq!(
+            runtime.editing_text(),
+            Some("abc"),
+            "typing filled the session"
+        );
+        assert_eq!(
+            tree_text(&runtime),
+            "abc",
+            "the passthrough value reached the tree"
+        );
 
         // The app rewrites the bound value to something else while still focused
         // (a "Clear"-style set, out of band from the session's own edits).
         *value.borrow_mut() = "reset".to_string();
         runtime.request_frame(FrameReason::UiCommit);
-        runtime.run_due_frame_reactive().expect("external-rewrite frame");
+        runtime
+            .run_due_frame_reactive()
+            .expect("external-rewrite frame");
 
         assert_eq!(
             runtime.editing_text(),
@@ -8818,14 +9123,30 @@ mod tests {
 
         runtime.handle_key(char_press('a'));
         runtime.run_due_frame_reactive().expect("rebuild after 'a'");
-        assert_eq!(runtime.editing_text(), Some("A"), "the model uppercased 'a' → 'A'");
-        assert_eq!(runtime.editing_selection().unwrap().focus(), 1, "caret at the end");
+        assert_eq!(
+            runtime.editing_text(),
+            Some("A"),
+            "the model uppercased 'a' → 'A'"
+        );
+        assert_eq!(
+            runtime.editing_selection().unwrap().focus(),
+            1,
+            "caret at the end"
+        );
 
         runtime.handle_key(char_press('b'));
         runtime.run_due_frame_reactive().expect("rebuild after 'b'");
-        assert_eq!(runtime.editing_text(), Some("AB"), "typing keeps uppercasing");
+        assert_eq!(
+            runtime.editing_text(),
+            Some("AB"),
+            "typing keeps uppercasing"
+        );
         assert_eq!(tree_text(&runtime), "AB");
-        assert_eq!(runtime.editing_selection().unwrap().focus(), 2, "caret stays sane at the end");
+        assert_eq!(
+            runtime.editing_selection().unwrap().focus(),
+            2,
+            "caret stays sane at the end"
+        );
     }
 
     #[test]
@@ -8844,13 +9165,23 @@ mod tests {
         runtime.handle_key(named_press(NamedKey::ArrowLeft));
         runtime.handle_key(named_press(NamedKey::ArrowLeft));
         runtime.handle_key(named_press(NamedKey::ArrowLeft));
-        assert_eq!(runtime.editing_selection().unwrap().focus(), 2, "caret in the middle");
+        assert_eq!(
+            runtime.editing_selection().unwrap().focus(),
+            2,
+            "caret in the middle"
+        );
 
         // A reactive frame with UNCHANGED state must not reseed (retained == the
         // session's own value), so the caret is preserved where the user left it.
         runtime.request_frame(FrameReason::UiCommit);
-        runtime.run_due_frame_reactive().expect("no-op rebuild frame");
-        assert_eq!(runtime.editing_text(), Some("hello"), "text untouched (no reseed)");
+        runtime
+            .run_due_frame_reactive()
+            .expect("no-op rebuild frame");
+        assert_eq!(
+            runtime.editing_text(),
+            Some("hello"),
+            "text untouched (no reseed)"
+        );
         assert_eq!(
             runtime.editing_selection().unwrap().focus(),
             2,
@@ -8919,7 +9250,11 @@ mod tests {
         // the whole value — none of which is gated on readonly.
         let (mut runtime, _mirror, _changed) = focused_readonly("hi");
         assert!(runtime.focused().is_some(), "a readonly field takes focus");
-        assert_eq!(runtime.editing_text(), Some("hi"), "session seeded from its value");
+        assert_eq!(
+            runtime.editing_text(),
+            Some("hi"),
+            "session seeded from its value"
+        );
         let sel = runtime.editing_selection().expect("session active");
         assert!(sel.is_collapsed(), "caret placed (collapsed) on focus");
 
@@ -8928,9 +9263,20 @@ mod tests {
         runtime.handle_key(char_press('a'));
         runtime.handle_key(KeyEvent::release(PhysicalKey::ControlLeft, None));
         let sel = runtime.editing_selection().expect("session active");
-        assert!(!sel.is_collapsed(), "select-all selected the text (selectable)");
-        assert_eq!((sel.start(), sel.end()), (0, 2), "the whole value is selected");
-        assert_eq!(runtime.editing_text(), Some("hi"), "selecting did not change the value");
+        assert!(
+            !sel.is_collapsed(),
+            "select-all selected the text (selectable)"
+        );
+        assert_eq!(
+            (sel.start(), sel.end()),
+            (0, 2),
+            "the whole value is selected"
+        );
+        assert_eq!(
+            runtime.editing_text(),
+            Some("hi"),
+            "selecting did not change the value"
+        );
     }
 
     #[test]
@@ -8943,7 +9289,11 @@ mod tests {
         runtime.handle_key(char_press('x'));
         assert_eq!(runtime.editing_text(), Some("hi"), "typing inserts nothing");
         runtime.handle_key(named_press(NamedKey::Backspace));
-        assert_eq!(runtime.editing_text(), Some("hi"), "Backspace deletes nothing");
+        assert_eq!(
+            runtime.editing_text(),
+            Some("hi"),
+            "Backspace deletes nothing"
+        );
         runtime.handle_key(named_press(NamedKey::Delete));
         assert_eq!(runtime.editing_text(), Some("hi"), "Delete deletes nothing");
         assert_eq!(&*mirror.borrow(), "", "no mutating edit fired on-input");
@@ -8960,8 +9310,14 @@ mod tests {
         // IME is a mutation entry too: a composition commit on a readonly field is
         // inert — the buffer is unchanged and no `on-input` fires.
         let (mut runtime, mirror, _changed) = focused_readonly("ab");
-        assert!(!runtime.handle_ime(CompositionEvent::Start), "readonly rejects IME start");
-        assert!(!runtime.handle_ime(CompositionEvent::Commit("に".into())), "readonly rejects IME commit");
+        assert!(
+            !runtime.handle_ime(CompositionEvent::Start),
+            "readonly rejects IME start"
+        );
+        assert!(
+            !runtime.handle_ime(CompositionEvent::Commit("に".into())),
+            "readonly rejects IME commit"
+        );
         assert_eq!(runtime.editing_text(), Some("ab"), "IME committed nothing");
         assert_eq!(&*mirror.borrow(), "", "no on-input fired");
     }
@@ -8978,7 +9334,10 @@ mod tests {
 
         runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
         assert_eq!(runtime.focused(), Some(a));
-        assert!(runtime.editing_text().is_none(), "non-editable focus has no session");
+        assert!(
+            runtime.editing_text().is_none(),
+            "non-editable focus has no session"
+        );
 
         let dispatch = runtime.handle_key(char_press('a'));
         assert_eq!(dispatch.target(), Some(a), "routed to the focused node");
@@ -9030,9 +9389,9 @@ mod tests {
             .commands()
             .iter()
             .find_map(|c| match c {
-                obscur_scene::command::PaintCommand::DrawPath { path, .. } => path
-                    .bounds()
-                    .filter(|r| (r.size.width - 1.0).abs() < 1e-6),
+                obscur_scene::command::PaintCommand::DrawPath { path, .. } => {
+                    path.bounds().filter(|r| (r.size.width - 1.0).abs() < 1e-6)
+                }
                 _ => None,
             })
             .expect("a thin caret fill");
@@ -9085,7 +9444,10 @@ mod tests {
         ];
         Stylesheet::new(
             CascadeOrigin::GlobalApp,
-            vec![class_rule("panel", size(200.0, 100.0)), class_rule("field", field)],
+            vec![
+                class_rule("panel", size(200.0, 100.0)),
+                class_rule("field", field),
+            ],
         )
     }
 
@@ -9112,7 +9474,11 @@ mod tests {
 
     /// The field's current horizontal scroll offset (reads the private session).
     fn scroll_left_of(runtime: &UiRuntime) -> f32 {
-        runtime.editing.as_ref().expect("active session").scroll_left()
+        runtime
+            .editing
+            .as_ref()
+            .expect("active session")
+            .scroll_left()
     }
 
     /// Re-renders the seed view and returns the frame's display list — compose
@@ -9160,7 +9526,11 @@ mod tests {
         );
 
         let field = scroll_field_node(&runtime);
-        let field_box = runtime.layout_boxes().get(&field).expect("a field box").bounds;
+        let field_box = runtime
+            .layout_boxes()
+            .get(&field)
+            .expect("a field box")
+            .bounds;
         let box_right = field_box.origin.x + field_box.size.width;
 
         let list = render_scroll_frame(&mut runtime);
@@ -9189,8 +9559,16 @@ mod tests {
         assert!(scroll_left_of(&runtime) > 0.0, "scrolled while typing");
 
         runtime.handle_key(named_press(NamedKey::Home));
-        assert_eq!(runtime.editing_selection().unwrap().focus(), 0, "caret at start");
-        assert_eq!(scroll_left_of(&runtime), 0.0, "Home resets scroll_left to 0");
+        assert_eq!(
+            runtime.editing_selection().unwrap().focus(),
+            0,
+            "caret at start"
+        );
+        assert_eq!(
+            scroll_left_of(&runtime),
+            0.0,
+            "Home resets scroll_left to 0"
+        );
 
         let field = scroll_field_node(&runtime);
         let field_left = runtime.layout_boxes().get(&field).unwrap().bounds.origin.x;
@@ -9227,7 +9605,10 @@ mod tests {
             focus, expected,
             "click on a scrolled field resolves the scrolled byte (advance {advance}, scroll {scroll_left})",
         );
-        assert!(focus > 1, "the resolved byte is not the head character: {focus}");
+        assert!(
+            focus > 1,
+            "the resolved byte is not the head character: {focus}"
+        );
     }
 
     #[test]
@@ -9267,7 +9648,10 @@ mod tests {
                 .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
                 .with_children(ViewFragment::from_nodes(vec![
                     ViewNode::element(ComponentId::from_raw(701))
-                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("wrapfield".into())))
+                        .with_prop(ViewProperty::new(
+                            CLASS,
+                            ViewValue::Text("wrapfield".into()),
+                        ))
                         .with_event(ViewEventBinding::new(EVENT_INPUT, CMD_INPUT))
                         .with_children(ViewFragment::from_nodes(vec![ViewNode::text(
                             text.to_string(),
@@ -9283,7 +9667,10 @@ mod tests {
         use obscur_style::property::layout_keyword;
         let field = vec![
             BlockDeclaration::normal(PropertyId::Width, PropertyValue::Length(Length::px(40.0))),
-            BlockDeclaration::normal(PropertyId::LineHeight, PropertyValue::Length(Length::px(20.0))),
+            BlockDeclaration::normal(
+                PropertyId::LineHeight,
+                PropertyValue::Length(Length::px(20.0)),
+            ),
             BlockDeclaration::normal(
                 PropertyId::WhiteSpace,
                 PropertyValue::Keyword(layout_keyword::WHITE_SPACE_NORMAL),
@@ -9291,7 +9678,10 @@ mod tests {
         ];
         Stylesheet::new(
             CascadeOrigin::GlobalApp,
-            vec![class_rule("panel", size(200.0, 100.0)), class_rule("wrapfield", field)],
+            vec![
+                class_rule("panel", size(200.0, 100.0)),
+                class_rule("wrapfield", field),
+            ],
         )
     }
 
@@ -9303,7 +9693,10 @@ mod tests {
         let sheets = std::slice::from_ref(&sheet);
         let _ = runtime.render_now(&wrap_field_view(""), sheets);
         runtime.handle_pointer(mouse(PointerEventKind::Down, 20.0, 10.0));
-        assert!(runtime.focused().is_some(), "the press focused the wrap field");
+        assert!(
+            runtime.focused().is_some(),
+            "the press focused the wrap field"
+        );
         runtime
     }
 
@@ -9352,7 +9745,11 @@ mod tests {
         for c in "aa aa aa aa".chars() {
             runtime.handle_key(char_press(c));
         }
-        assert_eq!(runtime.editing_text(), Some("aa aa aa aa"), "session holds the value");
+        assert_eq!(
+            runtime.editing_text(),
+            Some("aa aa aa aa"),
+            "session holds the value"
+        );
 
         // The lag frame: the retained text is still "", the session drives paint.
         let list = render_wrap_frame(&mut runtime);
@@ -9475,7 +9872,10 @@ mod tests {
         let relaid = runtime
             .run_due_frame(&textarea_view(""), sheets)
             .expect("the Input frame is due");
-        assert!(relaid.relaid_out(), "the multiline edit relaid out the grown box");
+        assert!(
+            relaid.relaid_out(),
+            "the multiline edit relaid out the grown box"
+        );
     }
 
     // ---- EVENT_CHANGE as a COMMIT (blur / single-line Enter) event -----------
@@ -9542,7 +9942,11 @@ mod tests {
             None,
             "an editable click resolves NO activation command (change is not a click)"
         );
-        assert_eq!(changes.get(), 0, "clicking into a text field fires NO change");
+        assert_eq!(
+            changes.get(),
+            0,
+            "clicking into a text field fires NO change"
+        );
     }
 
     #[test]
@@ -9575,13 +9979,20 @@ mod tests {
         // Type "hi": each keystroke fires `input`, none fires `change`.
         runtime.handle_key(char_press('h'));
         runtime.handle_key(char_press('i'));
-        assert_eq!(&*inputs.borrow(), &["h".to_owned(), "hi".to_owned()], "input per keystroke");
+        assert_eq!(
+            &*inputs.borrow(),
+            &["h".to_owned(), "hi".to_owned()],
+            "input per keystroke"
+        );
         assert!(committed.borrow().is_empty(), "typing fires NO change");
 
         // Click again into the SAME field: still no commit, no change.
         runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
         runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 25.0));
-        assert!(committed.borrow().is_empty(), "a focus-click fires NO change");
+        assert!(
+            committed.borrow().is_empty(),
+            "a focus-click fires NO change"
+        );
 
         // Blur: move focus to field `b` (press at (50, 75)) — this COMMITS `a`.
         runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0));
@@ -9612,7 +10023,11 @@ mod tests {
 
         runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0)); // focus a
         runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0)); // blur to b
-        assert_eq!(changes.get(), 0, "blurring an UNCHANGED field fires no change");
+        assert_eq!(
+            changes.get(),
+            0,
+            "blurring an UNCHANGED field fires no change"
+        );
     }
 
     #[test]
@@ -9638,16 +10053,32 @@ mod tests {
 
         // Enter: commit "hi", but insert nothing (the session text stays "hi").
         runtime.handle_key(named_press(NamedKey::Enter));
-        assert_eq!(runtime.editing_text(), Some("hi"), "single-line Enter inserts NO newline");
-        assert_eq!(&*committed.borrow(), &["hi".to_owned()], "Enter committed `change` once");
+        assert_eq!(
+            runtime.editing_text(),
+            Some("hi"),
+            "single-line Enter inserts NO newline"
+        );
+        assert_eq!(
+            &*committed.borrow(),
+            &["hi".to_owned()],
+            "Enter committed `change` once"
+        );
 
         // A second Enter with no edits does not re-fire (baseline was advanced).
         runtime.handle_key(named_press(NamedKey::Enter));
-        assert_eq!(committed.borrow().len(), 1, "Enter with no new edit does not re-fire change");
+        assert_eq!(
+            committed.borrow().len(),
+            1,
+            "Enter with no new edit does not re-fire change"
+        );
 
         // A subsequent blur (still unchanged since the Enter commit) also stays quiet.
         runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0));
-        assert_eq!(committed.borrow().len(), 1, "blur after an Enter-commit does not re-fire");
+        assert_eq!(
+            committed.borrow().len(),
+            1,
+            "blur after an Enter-commit does not re-fire"
+        );
     }
 
     #[test]
@@ -9659,7 +10090,10 @@ mod tests {
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
         runtime.on_text_input(CMD_FIELD_A, |_| {});
         assert!(runtime.has_text_input_handler(CMD_FIELD_A));
-        assert!(!runtime.has_change_handler(CMD_FIELD_A), "input registry is not the change registry");
+        assert!(
+            !runtime.has_change_handler(CMD_FIELD_A),
+            "input registry is not the change registry"
+        );
         runtime.on_change(CMD_FIELD_A, |_| {});
         assert!(runtime.has_change_handler(CMD_FIELD_A));
     }
@@ -9694,7 +10128,10 @@ mod tests {
         use obscur_style::property::layout_keyword;
         let field = vec![
             BlockDeclaration::normal(PropertyId::Width, PropertyValue::Length(Length::px(300.0))),
-            BlockDeclaration::normal(PropertyId::LineHeight, PropertyValue::Length(Length::px(20.0))),
+            BlockDeclaration::normal(
+                PropertyId::LineHeight,
+                PropertyValue::Length(Length::px(20.0)),
+            ),
             BlockDeclaration::normal(
                 PropertyId::WhiteSpace,
                 PropertyValue::Keyword(layout_keyword::WHITE_SPACE_PRE_WRAP),
@@ -9702,7 +10139,10 @@ mod tests {
         ];
         Stylesheet::new(
             CascadeOrigin::GlobalApp,
-            vec![class_rule("panel", size(400.0, 200.0)), class_rule("area", field)],
+            vec![
+                class_rule("panel", size(400.0, 200.0)),
+                class_rule("area", field),
+            ],
         )
     }
 
@@ -9714,7 +10154,10 @@ mod tests {
         let sheets = std::slice::from_ref(&sheet);
         let _ = runtime.render_now(&textarea_view(""), sheets);
         runtime.handle_pointer(mouse(PointerEventKind::Down, 20.0, 10.0));
-        assert!(runtime.focused().is_some(), "the press focused the textarea");
+        assert!(
+            runtime.focused().is_some(),
+            "the press focused the textarea"
+        );
         runtime
     }
 
@@ -9766,7 +10209,11 @@ mod tests {
         // painted caret sits on the SECOND line (y ≈ line-height) at x ≈ 0.
         let mut runtime = focused_textarea();
         type_multiline(&mut runtime, "ab\n");
-        assert_eq!(runtime.editing_text(), Some("ab\n"), "Enter inserted a newline");
+        assert_eq!(
+            runtime.editing_text(),
+            Some("ab\n"),
+            "Enter inserted a newline"
+        );
         assert_eq!(
             runtime.editing_selection().unwrap().focus(),
             3,
@@ -9774,7 +10221,12 @@ mod tests {
         );
 
         let (_, text_node) = textarea_nodes(&runtime);
-        let text_origin = runtime.layout_boxes().get(&text_node).unwrap().bounds.origin;
+        let text_origin = runtime
+            .layout_boxes()
+            .get(&text_node)
+            .unwrap()
+            .bounds
+            .origin;
         let list = render_textarea_frame(&mut runtime);
         let caret = painted_caret_rect(&list).expect("a caret is painted");
         assert!(
@@ -9797,7 +10249,11 @@ mod tests {
         let mut runtime = focused_textarea();
         type_multiline(&mut runtime, "ab\ncd");
         assert_eq!(runtime.editing_text(), Some("ab\ncd"));
-        assert_eq!(runtime.editing_selection().unwrap().focus(), 5, "caret at end");
+        assert_eq!(
+            runtime.editing_selection().unwrap().focus(),
+            5,
+            "caret at end"
+        );
 
         runtime.handle_key(named_press(NamedKey::ArrowUp));
         assert_eq!(
@@ -9824,7 +10280,12 @@ mod tests {
         type_multiline(&mut runtime, "ab\ncd");
 
         let (_, text_node) = textarea_nodes(&runtime);
-        let text_origin = runtime.layout_boxes().get(&text_node).unwrap().bounds.origin;
+        let text_origin = runtime
+            .layout_boxes()
+            .get(&text_node)
+            .unwrap()
+            .bounds
+            .origin;
         let list = render_textarea_frame(&mut runtime);
         let caret = painted_caret_rect(&list).expect("a caret");
         let advance = 16.0_f32 * obscur_text::shaping::MockTextShaper::ADVANCE_RATIO;
@@ -9857,9 +10318,18 @@ mod tests {
         let _ = render_textarea_frame(&mut runtime);
 
         let (_, text_node) = textarea_nodes(&runtime);
-        let origin = runtime.layout_boxes().get(&text_node).unwrap().bounds.origin;
+        let origin = runtime
+            .layout_boxes()
+            .get(&text_node)
+            .unwrap()
+            .bounds
+            .origin;
         // Click into line 2 (y ∈ [20, 40)), a little in from the left.
-        runtime.handle_pointer(mouse(PointerEventKind::Down, origin.x + 12.0, origin.y + 25.0));
+        runtime.handle_pointer(mouse(
+            PointerEventKind::Down,
+            origin.x + 12.0,
+            origin.y + 25.0,
+        ));
         let focus = runtime.editing_selection().unwrap().focus();
         assert!(
             (3..=5).contains(&focus),
@@ -9897,7 +10367,10 @@ mod tests {
         let mut field = vec![
             BlockDeclaration::normal(PropertyId::Width, PropertyValue::Length(Length::px(300.0))),
             BlockDeclaration::normal(PropertyId::Height, PropertyValue::Length(Length::px(60.0))),
-            BlockDeclaration::normal(PropertyId::LineHeight, PropertyValue::Length(Length::px(20.0))),
+            BlockDeclaration::normal(
+                PropertyId::LineHeight,
+                PropertyValue::Length(Length::px(20.0)),
+            ),
             BlockDeclaration::normal(
                 PropertyId::WhiteSpace,
                 PropertyValue::Keyword(layout_keyword::WHITE_SPACE_PRE_WRAP),
@@ -9906,7 +10379,10 @@ mod tests {
         field.push(overflow_auto());
         Stylesheet::new(
             CascadeOrigin::GlobalApp,
-            vec![class_rule("panel", size(400.0, 200.0)), class_rule("area", field)],
+            vec![
+                class_rule("panel", size(400.0, 200.0)),
+                class_rule("area", field),
+            ],
         )
     }
 
@@ -9919,7 +10395,10 @@ mod tests {
         let sheets = std::slice::from_ref(&sheet);
         let _ = runtime.render_now(&textarea_view(""), sheets);
         runtime.handle_pointer(mouse(PointerEventKind::Down, 20.0, 10.0));
-        assert!(runtime.focused().is_some(), "the press focused the textarea");
+        assert!(
+            runtime.focused().is_some(),
+            "the press focused the textarea"
+        );
         runtime
     }
 
@@ -9949,8 +10428,14 @@ mod tests {
         // The overflow container scrolled: the caret at the bottom pushed `scroll_top`
         // to its max (120 content − 60 box = 60).
         let scroll_top = runtime.scroll_top(field);
-        assert!(scroll_top > 0.0, "typing past the box scrolls it (scroll_top {scroll_top})");
-        assert!((scroll_top - 60.0).abs() < 1e-3, "scrolled to the max (60): {scroll_top}");
+        assert!(
+            scroll_top > 0.0,
+            "typing past the box scrolls it (scroll_top {scroll_top})"
+        );
+        assert!(
+            (scroll_top - 60.0).abs() < 1e-3,
+            "scrolled to the max (60): {scroll_top}"
+        );
 
         // The painted caret line, offset by the container's `translate(0, −scroll_top)`,
         // sits within the visible box's y-band — the last line is visible, not clipped.
@@ -9977,7 +10462,10 @@ mod tests {
         let has_scroll_transform = list.commands().iter().any(|c| {
             matches!(c, PaintCommand::PushTransform(t) if (t.coeffs[5] + scroll_top).abs() < 0.01)
         });
-        assert!(has_scroll_transform, "the content is bracketed in a scroll transform");
+        assert!(
+            has_scroll_transform,
+            "the content is bracketed in a scroll transform"
+        );
     }
 
     #[test]
@@ -9989,7 +10477,11 @@ mod tests {
         type_multiline(&mut runtime, "l1\nl2"); // 40 px of content in a 60-px box
         let (field, _text) = textarea_nodes(&runtime);
         let _ = render_scrolling_textarea_frame(&mut runtime);
-        assert_eq!(runtime.scroll_top(field), 0.0, "a fitting textarea does not scroll");
+        assert_eq!(
+            runtime.scroll_top(field),
+            0.0,
+            "a fitting textarea does not scroll"
+        );
     }
 
     #[test]
@@ -10002,11 +10494,18 @@ mod tests {
         let (field, _text) = textarea_nodes(&runtime);
         let _ = render_scrolling_textarea_frame(&mut runtime);
         let before = runtime.scroll_top(field);
-        assert!((before - 60.0).abs() < 1e-3, "caret follow put scroll_top at the max: {before}");
+        assert!(
+            (before - 60.0).abs() < 1e-3,
+            "caret follow put scroll_top at the max: {before}"
+        );
 
         // Wheel up by 25 px over the field: the SAME container scrolls back.
         let target = runtime.handle_scroll(-25.0, Point::new(20.0, 10.0));
-        assert_eq!(target, Some(field), "the wheel targets the textarea container");
+        assert_eq!(
+            target,
+            Some(field),
+            "the wheel targets the textarea container"
+        );
         let after = runtime.scroll_top(field);
         assert!(
             after < before && (after - 35.0).abs() < 1e-3,
@@ -10024,8 +10523,15 @@ mod tests {
             runtime.handle_key(char_press(c));
         }
         let field = scroll_field_node(&runtime);
-        assert!(scroll_left_of(&runtime) > 0.0, "the single-line field scrolls horizontally");
-        assert_eq!(runtime.scroll_top(field), 0.0, "a single-line input has no vertical scroll");
+        assert!(
+            scroll_left_of(&runtime) > 0.0,
+            "the single-line field scrolls horizontally"
+        );
+        assert_eq!(
+            runtime.scroll_top(field),
+            0.0,
+            "a single-line input has no vertical scroll"
+        );
     }
 
     // ---- IME composition: preedit (shown, not committed) + commit (§5.12) -----
@@ -10057,25 +10563,51 @@ mod tests {
         // buffer becomes "abに", the composition is cleared, and the field's
         // `on-input` fires with the resulting text.
         let (mut runtime, mirror) = focused_editable("ab");
-        assert_eq!(runtime.editing_selection().unwrap().focus(), 2, "caret at end");
+        assert_eq!(
+            runtime.editing_selection().unwrap().focus(),
+            2,
+            "caret at end"
+        );
 
         assert!(runtime.handle_ime(CompositionEvent::Start), "start applied");
         assert!(
-            runtime.handle_ime(CompositionEvent::Update(obscur_text::ime::Preedit::new("ni"))),
+            runtime.handle_ime(CompositionEvent::Update(obscur_text::ime::Preedit::new(
+                "ni"
+            ))),
             "update applied"
         );
 
-        assert_eq!(runtime.editing_text(), Some("ab"), "buffer unchanged by preedit");
-        assert_eq!(runtime.composition_preedit(), Some("ni"), "preedit is shown");
-        assert_eq!(composed_text(&mut runtime, "ab"), "abni", "preedit spliced for display");
+        assert_eq!(
+            runtime.editing_text(),
+            Some("ab"),
+            "buffer unchanged by preedit"
+        );
+        assert_eq!(
+            runtime.composition_preedit(),
+            Some("ni"),
+            "preedit is shown"
+        );
+        assert_eq!(
+            composed_text(&mut runtime, "ab"),
+            "abni",
+            "preedit spliced for display"
+        );
 
         assert!(
             runtime.handle_ime(CompositionEvent::Commit(Box::from("に"))),
             "commit applied"
         );
-        assert_eq!(runtime.editing_text(), Some("abに"), "commit folded the text in");
+        assert_eq!(
+            runtime.editing_text(),
+            Some("abに"),
+            "commit folded the text in"
+        );
         assert_eq!(runtime.composition_preedit(), None, "composition cleared");
-        assert_eq!(&*mirror.borrow(), "abに", "EVENT_INPUT fired with the committed text");
+        assert_eq!(
+            &*mirror.borrow(),
+            "abに",
+            "EVENT_INPUT fired with the committed text"
+        );
     }
 
     #[test]
@@ -10084,14 +10616,27 @@ mod tests {
         // untouched: "ab" in, "ab" out, no preedit.
         let (mut runtime, mirror) = focused_editable("ab");
         runtime.handle_ime(CompositionEvent::Start);
-        runtime.handle_ime(CompositionEvent::Update(obscur_text::ime::Preedit::new("ni")));
+        runtime.handle_ime(CompositionEvent::Update(obscur_text::ime::Preedit::new(
+            "ni",
+        )));
         assert_eq!(runtime.composition_preedit(), Some("ni"));
 
-        assert!(runtime.handle_ime(CompositionEvent::Cancel), "cancel applied");
-        assert_eq!(runtime.editing_text(), Some("ab"), "buffer unchanged by cancel");
+        assert!(
+            runtime.handle_ime(CompositionEvent::Cancel),
+            "cancel applied"
+        );
+        assert_eq!(
+            runtime.editing_text(),
+            Some("ab"),
+            "buffer unchanged by cancel"
+        );
         assert_eq!(runtime.composition_preedit(), None, "preedit dropped");
         assert_eq!(&*mirror.borrow(), "", "cancel fires no EVENT_INPUT");
-        assert_eq!(composed_text(&mut runtime, "ab"), "ab", "display back to buffer text");
+        assert_eq!(
+            composed_text(&mut runtime, "ab"),
+            "ab",
+            "display back to buffer text"
+        );
     }
 
     #[test]
@@ -10099,9 +10644,14 @@ mod tests {
         // (c) With no focused editable there is no session, so every composition
         // event is a no-op returning false — and no session springs into being.
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        assert!(!runtime.handle_ime(CompositionEvent::Start), "start no-op with no session");
         assert!(
-            !runtime.handle_ime(CompositionEvent::Update(obscur_text::ime::Preedit::new("x"))),
+            !runtime.handle_ime(CompositionEvent::Start),
+            "start no-op with no session"
+        );
+        assert!(
+            !runtime.handle_ime(CompositionEvent::Update(obscur_text::ime::Preedit::new(
+                "x"
+            ))),
             "update no-op with no session"
         );
         assert!(
@@ -10120,7 +10670,9 @@ mod tests {
         // the text origin. The caret (width ~1) is a separate fill.
         let (mut runtime, _mirror) = focused_editable("ab");
         runtime.handle_ime(CompositionEvent::Start);
-        runtime.handle_ime(CompositionEvent::Update(obscur_text::ime::Preedit::new("ni")));
+        runtime.handle_ime(CompositionEvent::Update(obscur_text::ime::Preedit::new(
+            "ni",
+        )));
 
         let sheet = interaction_sheet();
         let sheets = std::slice::from_ref(&sheet);
@@ -10186,7 +10738,10 @@ mod tests {
             .commands()
             .to_vec();
 
-        assert_eq!(plain_cmds, cycled_cmds, "a cancelled composition leaves paint byte-identical");
+        assert_eq!(
+            plain_cmds, cycled_cmds,
+            "a cancelled composition leaves paint byte-identical"
+        );
     }
 
     // ---- Mouse caret positioning + drag selection (this step) ----------------
@@ -10228,11 +10783,19 @@ mod tests {
 
         runtime.handle_pointer(mouse(PointerEventKind::Down, ox, 25.0));
         runtime.handle_pointer(mouse(PointerEventKind::Up, ox, 25.0));
-        assert_eq!(runtime.editing_selection().unwrap().focus(), 0, "click at the start → 0");
+        assert_eq!(
+            runtime.editing_selection().unwrap().focus(),
+            0,
+            "click at the start → 0"
+        );
 
         runtime.handle_pointer(mouse(PointerEventKind::Down, ox + ADVANCE * 6.0, 25.0));
         runtime.handle_pointer(mouse(PointerEventKind::Up, ox + ADVANCE * 6.0, 25.0));
-        assert_eq!(runtime.editing_selection().unwrap().focus(), 5, "click past the end → 5");
+        assert_eq!(
+            runtime.editing_selection().unwrap().focus(),
+            5,
+            "click past the end → 5"
+        );
     }
 
     #[test]
@@ -10244,8 +10807,16 @@ mod tests {
         let ox = editing_text_origin_x(&runtime);
         runtime.handle_pointer(mouse(PointerEventKind::Down, ox + ADVANCE * 3.0, 25.0));
         let up = runtime.handle_pointer(mouse(PointerEventKind::Up, ox + ADVANCE * 3.0, 25.0));
-        assert_eq!(up.command(), None, "a click on a text field resolves no activation command");
-        assert_eq!(runtime.editing_selection().unwrap().focus(), 3, "the caret still moved to 3");
+        assert_eq!(
+            up.command(),
+            None,
+            "a click on a text field resolves no activation command"
+        );
+        assert_eq!(
+            runtime.editing_selection().unwrap().focus(),
+            3,
+            "the caret still moved to 3"
+        );
     }
 
     #[test]
@@ -10257,12 +10828,20 @@ mod tests {
         let ox = editing_text_origin_x(&runtime);
 
         runtime.handle_pointer(mouse(PointerEventKind::Down, ox + ADVANCE * 1.0, 25.0));
-        assert_eq!(runtime.editing_selection().unwrap().focus(), 1, "press caret at 1");
+        assert_eq!(
+            runtime.editing_selection().unwrap().focus(),
+            1,
+            "press caret at 1"
+        );
 
         runtime.handle_pointer(mouse(PointerEventKind::Move, ox + ADVANCE * 4.0, 25.0));
         let sel = runtime.editing_selection().unwrap();
         assert!(!sel.is_collapsed(), "the drag opened a selection");
-        assert_eq!((sel.anchor(), sel.focus()), (1, 4), "range [1,4) anchored at the press");
+        assert_eq!(
+            (sel.anchor(), sel.focus()),
+            (1, 4),
+            "range [1,4) anchored at the press"
+        );
 
         runtime.handle_pointer(mouse(PointerEventKind::Up, ox + ADVANCE * 4.0, 25.0));
         runtime.handle_pointer(mouse(PointerEventKind::Move, ox + ADVANCE * 2.0, 25.0));
@@ -10287,7 +10866,10 @@ mod tests {
         runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
         runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 25.0));
         assert_eq!(runtime.focused(), Some(a));
-        assert!(runtime.editing_text().is_none(), "no editable clicked → no session");
+        assert!(
+            runtime.editing_text().is_none(),
+            "no editable clicked → no session"
+        );
     }
 
     #[test]
@@ -10322,14 +10904,20 @@ mod tests {
             runtime.handle_key(char_press(c));
         }
         assert!(
-            runtime.handle_key(named_press(NamedKey::Space)).is_handled(),
+            runtime
+                .handle_key(named_press(NamedKey::Space))
+                .is_handled(),
             "Space is consumed as an edit in a focused field",
         );
         for c in ['c', 'd'] {
             runtime.handle_key(char_press(c));
         }
         assert_eq!(runtime.editing_text(), Some("ab cd"));
-        assert_eq!(mirror.borrow().as_str(), "ab cd", "the on-input mirror sees the space");
+        assert_eq!(
+            mirror.borrow().as_str(),
+            "ab cd",
+            "the on-input mirror sees the space"
+        );
     }
 
     /// A mouse event at `(x, y)` carrying an explicit logical timestamp (µs), so a
@@ -10352,7 +10940,10 @@ mod tests {
         // The second press within the window is the double click.
         runtime.handle_pointer(mouse_t(PointerEventKind::Down, x, 25.0, t + 1_000));
         let sel = runtime.editing_selection().expect("session active");
-        assert!(!sel.is_collapsed(), "the double click opened a word selection");
+        assert!(
+            !sel.is_collapsed(),
+            "the double click opened a word selection"
+        );
         assert_eq!(
             (sel.start(), sel.end()),
             (0, 2),
@@ -10545,7 +11136,10 @@ mod tests {
 
         // t = 0 -> opacity 0.
         runtime.apply_motion_overlay(&mut computed);
-        assert_eq!(computed.get(&node).and_then(ComputedStyle::opacity), Some(0.0));
+        assert_eq!(
+            computed.get(&node).and_then(ComputedStyle::opacity),
+            Some(0.0)
+        );
 
         // t = 0.5 -> opacity ~0.5.
         runtime.advance_motion(0.5);
@@ -10559,7 +11153,10 @@ mod tests {
         // t = 1 -> opacity 1 and the animation deactivates.
         runtime.advance_motion(0.5);
         runtime.apply_motion_overlay(&mut computed);
-        assert_eq!(computed.get(&node).and_then(ComputedStyle::opacity), Some(1.0));
+        assert_eq!(
+            computed.get(&node).and_then(ComputedStyle::opacity),
+            Some(1.0)
+        );
         assert_eq!(runtime.active_animations(), 0);
     }
 
@@ -10782,7 +11379,10 @@ mod tests {
     fn first_frame_runs_all_phases_even_when_the_reason_is_input() {
         // Classification: the first frame over an empty tree is full regardless
         // of reason, so the tree, styles, boxes and scene all exist.
-        assert_eq!(FramePlan::for_frame(FrameReason::Input, true), FramePlan::full());
+        assert_eq!(
+            FramePlan::for_frame(FrameReason::Input, true),
+            FramePlan::full()
+        );
 
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
         let view = counter_view();
@@ -11014,7 +11614,12 @@ mod tests {
             use obscur_text::shaping::{ScriptTag, TextDirection, TextItem};
             use obscur_text::span::TextRange;
             vec![
-                TextItem::new(TextRange::new(0, 2), ScriptTag::LATIN, TextDirection::LeftToRight, 0),
+                TextItem::new(
+                    TextRange::new(0, 2),
+                    ScriptTag::LATIN,
+                    TextDirection::LeftToRight,
+                    0,
+                ),
                 TextItem::new(
                     TextRange::new(2, 6),
                     ScriptTag::CYRILLIC,
@@ -11153,7 +11758,8 @@ mod tests {
         // The capability default is not a degradation: without the port the
         // runtime behaves exactly as it always did — the image is ready THIS frame.
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        runtime.set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
+        runtime
+            .set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
 
         let sheet = img_stylesheet();
         let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
@@ -11168,7 +11774,8 @@ mod tests {
         // the result and asks for a ResourceCompletion frame, which paints it.
         let executor = Arc::new(QueuedExecutor::default());
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        runtime.set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
+        runtime
+            .set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
         runtime.set_blocking_executor(executor.clone());
 
         let sheet = img_stylesheet();
@@ -11182,7 +11789,11 @@ mod tests {
 
         // The job finishes on its own thread and posts a typed message back.
         executor.run_all();
-        assert_eq!(runtime.poll_resource_tasks(), 1, "the completion was applied");
+        assert_eq!(
+            runtime.poll_resource_tasks(),
+            1,
+            "the completion was applied"
+        );
         assert_eq!(
             runtime.peek_frame_reason(),
             Some(FrameReason::ResourceCompletion),
@@ -11199,7 +11810,8 @@ mod tests {
     fn polling_with_nothing_finished_costs_nothing() {
         let executor = Arc::new(QueuedExecutor::default());
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        runtime.set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
+        runtime
+            .set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
         runtime.set_blocking_executor(executor.clone());
         let sheet = img_stylesheet();
         runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
@@ -11229,5 +11841,4 @@ mod tests {
             .clone();
         assert_eq!(draw_image_count(&list), 0, "a failed load paints nothing");
     }
-
 }

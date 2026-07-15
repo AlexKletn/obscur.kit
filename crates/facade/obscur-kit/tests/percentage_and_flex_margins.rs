@@ -89,7 +89,10 @@ fn the_margin_shorthand_resolves_every_edge_against_the_width() {
 fn a_percentage_margin_offsets_a_definite_width_box() {
     let (x, _, width) = item_box(BLOCK, "width: 100px; margin-left: 50%; height: 10px");
     assert!((x - 150.0).abs() < 1e-3, "50% of 300 = 150, got {x}");
-    assert!((width - 100.0).abs() < 1e-3, "the box keeps its width, got {width}");
+    assert!(
+        (width - 100.0).abs() < 1e-3,
+        "the box keeps its width, got {width}"
+    );
 }
 
 #[test]
@@ -107,7 +110,10 @@ const FLEX: &str = "display: flex; width: 300px; height: 50px";
 #[test]
 fn a_flex_items_auto_margin_pushes_it_to_the_end_of_the_line() {
     let (x, _, width) = item_box(FLEX, "width: 100px; height: 10px; margin-left: auto");
-    assert!((width - 100.0).abs() < 1e-3, "the item keeps its width, got {width}");
+    assert!(
+        (width - 100.0).abs() < 1e-3,
+        "the item keeps its width, got {width}"
+    );
     assert!(
         (x - 200.0).abs() < 1e-3,
         "`margin-left: auto` absorbs all 200 of free space, got {x}"

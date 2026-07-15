@@ -43,7 +43,10 @@ fn item_origin(css: &str) -> (f32, f32) {
     let root = runtime.tree().root().expect("a root");
     let page = runtime.tree().get(root).expect("live").children()[0];
     let item: NodeId = runtime.tree().get(page).expect("live").children()[0];
-    let layout = runtime.layout_boxes().get(&item).expect("the item is laid out");
+    let layout = runtime
+        .layout_boxes()
+        .get(&item)
+        .expect("the item is laid out");
     (layout.origin().x, layout.origin().y)
 }
 
@@ -56,7 +59,10 @@ fn padding_inline_start_is_the_left_edge_under_ltr() {
     let (x, _) = item_origin(&format!(
         ".page {{ width: 300px; height: 300px; padding-inline-start: 40px }}\n{ITEM}"
     ));
-    assert!((x - 40.0).abs() < 1e-3, "ltr: inline-start is the left edge, got x={x}");
+    assert!(
+        (x - 40.0).abs() < 1e-3,
+        "ltr: inline-start is the left edge, got x={x}"
+    );
 }
 
 #[test]
@@ -80,7 +86,10 @@ fn padding_block_start_is_the_top_edge_in_either_direction() {
             ".page {{ width: 300px; height: 300px; direction: {direction}; \
               padding-block-start: 25px }}\n{ITEM}"
         ));
-        assert!((y - 25.0).abs() < 1e-3, "{direction}: block-start is the top, got y={y}");
+        assert!(
+            (y - 25.0).abs() < 1e-3,
+            "{direction}: block-start is the top, got y={y}"
+        );
     }
 }
 
@@ -90,7 +99,10 @@ fn inset_inline_start_positions_from_the_leading_edge() {
         "{PAGE}\n.page {{ position: relative }}\n\
          .item {{ width: 50px; height: 50px; position: absolute; inset-inline-start: 40px }}"
     ));
-    assert!((x - 40.0).abs() < 1e-3, "ltr: inset-inline-start is `left`, got x={x}");
+    assert!(
+        (x - 40.0).abs() < 1e-3,
+        "ltr: inset-inline-start is `left`, got x={x}"
+    );
 
     // Under rtl it is `right`: 300 − 40 − 50 = 210.
     let (rtl_x, _) = item_origin(&format!(
@@ -111,13 +123,19 @@ fn a_later_logical_declaration_beats_an_earlier_physical_one_end_to_end() {
         ".page {{ width: 300px; height: 300px; padding-left: 10px; \
           padding-inline-start: 40px }}\n{ITEM}"
     ));
-    assert!((x - 40.0).abs() < 1e-3, "the later declaration wins, got x={x}");
+    assert!(
+        (x - 40.0).abs() < 1e-3,
+        "the later declaration wins, got x={x}"
+    );
 
     let (x, _) = item_origin(&format!(
         ".page {{ width: 300px; height: 300px; padding-inline-start: 40px; \
           padding-left: 10px }}\n{ITEM}"
     ));
-    assert!((x - 10.0).abs() < 1e-3, "and the other way round, got x={x}");
+    assert!(
+        (x - 10.0).abs() < 1e-3,
+        "and the other way round, got x={x}"
+    );
 }
 
 #[test]
@@ -128,7 +146,10 @@ fn margin_inline_start_is_the_left_edge_under_ltr_and_the_right_under_rtl() {
     let (ltr, _) = item_origin(&format!(
         "{PAGE}\n.item {{ width: 50px; height: 50px; margin-inline-start: 40px }}"
     ));
-    assert!((ltr - 40.0).abs() < 1e-3, "ltr: inline-start insets from the left, got x={ltr}");
+    assert!(
+        (ltr - 40.0).abs() < 1e-3,
+        "ltr: inline-start insets from the left, got x={ltr}"
+    );
 
     let (rtl, _) = item_origin(&format!(
         ".page {{ width: 300px; height: 300px; direction: rtl }}\n\

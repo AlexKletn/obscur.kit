@@ -352,7 +352,11 @@ impl UiKitWindow {
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
-        println!("[zoom] {:.0}% (device scale {:.2})", self.zoom * 100.0, self.effective_scale());
+        println!(
+            "[zoom] {:.0}% (device scale {:.2})",
+            self.zoom * 100.0,
+            self.effective_scale()
+        );
         true
     }
 
@@ -511,7 +515,11 @@ impl ApplicationHandler for UiKitWindow {
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
-                println!("[scroll] y = {:.0} px (max {:.0})", self.scroll_y, self.max_scroll_y());
+                println!(
+                    "[scroll] y = {:.0} px (max {:.0})",
+                    self.scroll_y,
+                    self.max_scroll_y()
+                );
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 self.modifiers = modifiers.state();
@@ -539,7 +547,8 @@ impl ApplicationHandler for UiKitWindow {
                     if let Some(physical) = KeyboardConverter::physical_key(code) {
                         let logical = KeyboardConverter::logical_key(&event.logical_key);
                         let pressed = event.state == ElementState::Pressed;
-                        self.runtime.handle_key(KeyEvent::new(physical, logical, pressed));
+                        self.runtime
+                            .handle_key(KeyEvent::new(physical, logical, pressed));
                     }
                 }
             }

@@ -7,8 +7,8 @@ use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
 
 use crate::orchestration::{
-    root_font_size, LayoutCoordinator, SceneCoordinator, StyleCoordinator, StyleInputs,
-    StyleMatchingCoordinator,
+    LayoutCoordinator, SceneCoordinator, StyleCoordinator, StyleInputs, StyleMatchingCoordinator,
+    root_font_size,
 };
 use crate::transaction::ReconcileEnactor;
 
@@ -135,8 +135,7 @@ impl FramePipeline {
 
         // 2. Match: build cascade inputs from the sheets against the fresh tree,
         //    gating `@media`/`@container` rules by this frame's viewport (§4.13).
-        let environment =
-            MediaEnvironment::viewport(ctx.viewport().width, ctx.viewport().height);
+        let environment = MediaEnvironment::viewport(ctx.viewport().width, ctx.viewport().height);
         let inputs = StyleMatchingCoordinator::new().build_inputs_env(tree, sheets, &environment);
 
         // 3-5. Style over the matched inputs, layout, and compose.

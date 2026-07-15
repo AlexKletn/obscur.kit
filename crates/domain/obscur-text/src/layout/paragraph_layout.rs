@@ -334,9 +334,23 @@ impl ParagraphLayout {
         let strut = LineStrut::new(line_height, baseline, line_height - baseline);
         let seg_metrics = move |_font: FontId| (strut.ascent, strut.descent);
         Self::wrap_core(
-            runs, text, max_width, strut, &seg_metrics, alignment, overflow, white_space,
-            0.0, 0.0, 0.0, hyphenator, hyphen_glyph, ellipsis_glyph,
-            &DefaultLineBreaker, OverflowWrap::Normal, WordBreak::Normal,
+            runs,
+            text,
+            max_width,
+            strut,
+            &seg_metrics,
+            alignment,
+            overflow,
+            white_space,
+            0.0,
+            0.0,
+            0.0,
+            hyphenator,
+            hyphen_glyph,
+            ellipsis_glyph,
+            &DefaultLineBreaker,
+            OverflowWrap::Normal,
+            WordBreak::Normal,
         )
     }
 
@@ -359,9 +373,23 @@ impl ParagraphLayout {
         tab_width: f32,
     ) -> Self {
         Self::wrap_core(
-            runs, text, max_width, strut, seg_metrics, alignment, overflow, white_space,
-            tab_width, 0.0, 0.0, &NullHyphenator, None, None,
-            &DefaultLineBreaker, OverflowWrap::Normal, WordBreak::Normal,
+            runs,
+            text,
+            max_width,
+            strut,
+            seg_metrics,
+            alignment,
+            overflow,
+            white_space,
+            tab_width,
+            0.0,
+            0.0,
+            &NullHyphenator,
+            None,
+            None,
+            &DefaultLineBreaker,
+            OverflowWrap::Normal,
+            WordBreak::Normal,
         )
     }
 
@@ -413,9 +441,23 @@ impl ParagraphLayout {
         line_breaker: &dyn LineBreaker,
     ) -> Self {
         Self::wrap_core(
-            runs, text, max_width, strut, seg_metrics, alignment, overflow, white_space,
-            tab_width, 0.0, 0.0, hyphenator, hyphen_glyph, ellipsis_glyph,
-            line_breaker, overflow_wrap, word_break,
+            runs,
+            text,
+            max_width,
+            strut,
+            seg_metrics,
+            alignment,
+            overflow,
+            white_space,
+            tab_width,
+            0.0,
+            0.0,
+            hyphenator,
+            hyphen_glyph,
+            ellipsis_glyph,
+            line_breaker,
+            overflow_wrap,
+            word_break,
         )
     }
 
@@ -878,8 +920,14 @@ impl ParagraphLayout {
             // fresh) line: try to break it at the last fitting opportunity.
             let remaining = max_width - current_width;
             if word.width > remaining
-                && let Some(split) =
-                    Self::try_split(&word, remaining, hyphen_glyph, hyphen_offsets, soft, hang_ws)
+                && let Some(split) = Self::try_split(
+                    &word,
+                    remaining,
+                    hyphen_glyph,
+                    hyphen_offsets,
+                    soft,
+                    hang_ws,
+                )
             {
                 current.extend_from_slice(&split.head);
                 word_count += 1;
@@ -1163,7 +1211,11 @@ impl ParagraphLayout {
     /// The `max_width - line_width` surplus is split equally across the gaps, so a
     /// line with `g` gaps grows to exactly `max_width`. Nothing happens when the
     /// line has no interior gap or is already at/over `max_width`.
-    fn justify_line(glyphs: &mut [Tagged], word_starts: &std::collections::HashSet<usize>, max_width: f32) {
+    fn justify_line(
+        glyphs: &mut [Tagged],
+        word_starts: &std::collections::HashSet<usize>,
+        max_width: f32,
+    ) {
         let line_width: f32 = glyphs.iter().map(|t| t.glyph.x_advance()).sum();
         let extra = max_width - line_width;
         if extra <= 0.0 {
@@ -1232,8 +1284,9 @@ impl ParagraphLayout {
             .copied();
         glyphs.truncate(kept);
         if let (Some(glyph), Some(carrier)) = (ellipsis, carrier) {
-            let ellipsis = ShapedGlyph::new(glyph.glyph_id(), carrier.glyph.cluster(), glyph.x_advance())
-                .with_offset(glyph.x_offset(), glyph.y_offset());
+            let ellipsis =
+                ShapedGlyph::new(glyph.glyph_id(), carrier.glyph.cluster(), glyph.x_advance())
+                    .with_offset(glyph.x_offset(), glyph.y_offset());
             glyphs.push(Tagged {
                 glyph: ellipsis,
                 ..carrier
@@ -1307,9 +1360,21 @@ impl ParagraphLayout {
             bi += 1;
         }
         if !glyphs.is_empty() {
-            words.push(Self::make_word(glyphs, trailing_hard, hyphen_offsets, soft, hang_ws));
+            words.push(Self::make_word(
+                glyphs,
+                trailing_hard,
+                hyphen_offsets,
+                soft,
+                hang_ws,
+            ));
         } else if trailing_hard {
-            words.push(Self::make_word(Vec::new(), true, hyphen_offsets, soft, hang_ws));
+            words.push(Self::make_word(
+                Vec::new(),
+                true,
+                hyphen_offsets,
+                soft,
+                hang_ws,
+            ));
         }
         words
     }
@@ -1422,9 +1487,7 @@ impl ParagraphLayout {
             }
 
             // The segment ends where the next segment begins (or the line end).
-            let seg_end = glyphs
-                .get(index)
-                .map_or(line_end, |t| t.glyph.cluster());
+            let seg_end = glyphs.get(index).map_or(line_end, |t| t.glyph.cluster());
             let range = TextRange::new(seg_start.min(seg_end), seg_start.max(seg_end));
             let run = GlyphRun::new(run_glyphs, direction, font_size, range);
             segments.push(
@@ -1560,7 +1623,12 @@ mod tests {
     fn single_ltr_run_level_zero_is_unchanged() {
         // A pure-LTR line (level 0) keeps its logical order and level.
         let text = "abc";
-        let runs = vec![run_lvl(0, 0, &[(0, 6.0), (1, 6.0), (2, 6.0)], TextRange::new(0, 3))];
+        let runs = vec![run_lvl(
+            0,
+            0,
+            &[(0, 6.0), (1, 6.0), (2, 6.0)],
+            TextRange::new(0, 3),
+        )];
         assert_eq!(visual_segments(&runs, text), vec![(0, 0)]);
     }
 
@@ -1580,7 +1648,13 @@ mod tests {
 
         // Left-to-right pen positions place the three segments in that order.
         let layout = ParagraphLayout::wrap(
-            &runs, text, 1000.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Clip,
+            &runs,
+            text,
+            1000.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Clip,
             WhiteSpace::Normal,
         );
         let segs = layout.lines()[0].segments();
@@ -1732,7 +1806,11 @@ mod tests {
     #[test]
     fn single_run_reproduces_one_line_one_segment() {
         let text = "abc";
-        let runs = vec![run(0, &[(0, 6.0), (1, 6.0), (2, 6.0)], TextRange::new(0, 3))];
+        let runs = vec![run(
+            0,
+            &[(0, 6.0), (1, 6.0), (2, 6.0)],
+            TextRange::new(0, 3),
+        )];
         let layout = ParagraphLayout::wrap(
             &runs,
             text,
@@ -1826,7 +1904,13 @@ mod tests {
             TextRange::new(0, 5),
         )];
         let layout = ParagraphLayout::wrap(
-            &runs, text, 0.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Visible,
+            &runs,
+            text,
+            0.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Visible,
             WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 3);
@@ -1838,9 +1922,19 @@ mod tests {
         // box stays on ONE line (overflow is a separate concern). "ab cd" (five
         // 6px glyphs = 30) in a 12px box.
         let text = "ab cd";
-        let runs = vec![run(0, &[(0, 6.0), (1, 6.0), (2, 6.0), (3, 6.0), (4, 6.0)], TextRange::new(0, 5))];
+        let runs = vec![run(
+            0,
+            &[(0, 6.0), (1, 6.0), (2, 6.0), (3, 6.0), (4, 6.0)],
+            TextRange::new(0, 5),
+        )];
         let layout = ParagraphLayout::wrap(
-            &runs, text, 12.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Visible,
+            &runs,
+            text,
+            12.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Visible,
             WhiteSpace::Nowrap,
         );
         assert_eq!(layout.line_count(), 1);
@@ -1853,9 +1947,19 @@ mod tests {
         // never soft-wrap. "ab\ncd" in a wide box → two lines split at the `\n`.
         // Clusters skip the `\n` byte (2): 0,1,3,4.
         let text = "ab\ncd";
-        let runs = vec![run(0, &[(0, 6.0), (1, 6.0), (3, 6.0), (4, 6.0)], TextRange::new(0, 5))];
+        let runs = vec![run(
+            0,
+            &[(0, 6.0), (1, 6.0), (3, 6.0), (4, 6.0)],
+            TextRange::new(0, 5),
+        )];
         let layout = ParagraphLayout::wrap(
-            &runs, text, 100.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Clip,
+            &runs,
+            text,
+            100.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Clip,
             WhiteSpace::Pre,
         );
         assert_eq!(layout.line_count(), 2);
@@ -1907,13 +2011,25 @@ mod tests {
             TextRange::new(0, 8),
         )];
         let layout = ParagraphLayout::wrap(
-            &runs, text, 35.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Clip,
+            &runs,
+            text,
+            35.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Clip,
             WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 2);
         // Line 1 is "aa bb " (clusters 0..5) with the trailing space hung → 30.
         assert_eq!(layout.lines()[0].width(), 30.0);
-        assert_eq!(line_glyphs(&layout, 0).iter().map(|g| g.0).collect::<Vec<_>>(), vec![0, 1, 2, 3, 4, 5]);
+        assert_eq!(
+            line_glyphs(&layout, 0)
+                .iter()
+                .map(|g| g.0)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2, 3, 4, 5]
+        );
         assert_eq!(layout.lines()[1].width(), 12.0);
     }
 
@@ -1929,7 +2045,13 @@ mod tests {
             TextRange::new(0, 6),
         )];
         let layout = ParagraphLayout::wrap(
-            &runs, text, 40.0, 12.0, 9.0, TextAlignment::Right, TextOverflow::Clip,
+            &runs,
+            text,
+            40.0,
+            12.0,
+            9.0,
+            TextAlignment::Right,
+            TextOverflow::Clip,
             WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 1);
@@ -1947,7 +2069,14 @@ mod tests {
         let runs = vec![run(0, &[(0, 6.0), (1, 6.0)], TextRange::new(0, 3))];
         for mode in [WhiteSpace::Pre, WhiteSpace::PreWrap] {
             let layout = ParagraphLayout::wrap(
-                &runs, text, 100.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Clip, mode,
+                &runs,
+                text,
+                100.0,
+                12.0,
+                9.0,
+                TextAlignment::Start,
+                TextOverflow::Clip,
+                mode,
             );
             assert_eq!(layout.line_count(), 2, "{mode:?}");
             assert_eq!(layout.lines()[0].width(), 12.0);
@@ -1963,9 +2092,19 @@ mod tests {
         // never inflates its line. "ab\ncd" (6px) → line 0 width 12, not 18.
         let text = "ab\ncd";
         // Clusters 0,1,2(\n),3,4 — the `\n` glyph IS present, advance 6.
-        let runs = vec![run(0, &[(0, 6.0), (1, 6.0), (2, 6.0), (3, 6.0), (4, 6.0)], TextRange::new(0, 5))];
+        let runs = vec![run(
+            0,
+            &[(0, 6.0), (1, 6.0), (2, 6.0), (3, 6.0), (4, 6.0)],
+            TextRange::new(0, 5),
+        )];
         let layout = ParagraphLayout::wrap(
-            &runs, text, 100.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Clip,
+            &runs,
+            text,
+            100.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Clip,
             WhiteSpace::Pre,
         );
         assert_eq!(layout.line_count(), 2);
@@ -2029,7 +2168,13 @@ mod tests {
         )];
         // max_width 40 fits "ab cd " (36) but not "+ef" (48), so "ef" wraps.
         let layout = ParagraphLayout::wrap(
-            &runs, text, 40.0, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
+            &runs,
+            text,
+            40.0,
+            12.0,
+            9.0,
+            TextAlignment::Justify,
+            TextOverflow::Clip,
             WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 2);
@@ -2067,7 +2212,13 @@ mod tests {
         )];
         // max_width 50 fits "aa bb cc " (45) but not "+dd" (55): "dd" wraps.
         let layout = ParagraphLayout::wrap(
-            &runs, text, 50.0, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
+            &runs,
+            text,
+            50.0,
+            12.0,
+            9.0,
+            TextAlignment::Justify,
+            TextOverflow::Clip,
             WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 2);
@@ -2112,7 +2263,13 @@ mod tests {
         // natural used width. Its trailing space now HANGS (CSS Text 3 §3/§7.1),
         // so the used width is 32 ("abcd"), not the old 40 that counted the space.
         let layout = ParagraphLayout::wrap(
-            &runs, text, 44.0, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
+            &runs,
+            text,
+            44.0,
+            12.0,
+            9.0,
+            TextAlignment::Justify,
+            TextOverflow::Clip,
             WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 2);
@@ -2139,7 +2296,13 @@ mod tests {
             TextRange::new(0, 8),
         )];
         let layout = ParagraphLayout::wrap(
-            &runs, text, 100.0, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
+            &runs,
+            text,
+            100.0,
+            12.0,
+            9.0,
+            TextAlignment::Justify,
+            TextOverflow::Clip,
             WhiteSpace::PreLine,
         );
         assert_eq!(layout.line_count(), 2);
@@ -2155,11 +2318,26 @@ mod tests {
         let text = "ab cd ef";
         let runs = vec![run(
             0,
-            &[(0, 6.0), (1, 6.0), (2, 6.0), (3, 6.0), (4, 6.0), (5, 6.0), (6, 6.0), (7, 6.0)],
+            &[
+                (0, 6.0),
+                (1, 6.0),
+                (2, 6.0),
+                (3, 6.0),
+                (4, 6.0),
+                (5, 6.0),
+                (6, 6.0),
+                (7, 6.0),
+            ],
             TextRange::new(0, 8),
         )];
         let layout = ParagraphLayout::wrap(
-            &runs, text, f32::INFINITY, 12.0, 9.0, TextAlignment::Justify, TextOverflow::Clip,
+            &runs,
+            text,
+            f32::INFINITY,
+            12.0,
+            9.0,
+            TextAlignment::Justify,
+            TextOverflow::Clip,
             WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 1);
@@ -2171,15 +2349,31 @@ mod tests {
         // Non-justify alignments keep offsetting via x_offset and never widen
         // glyphs, so the line width stays natural.
         let text = "ab cd";
-        let runs = vec![run(0, &[(0, 6.0), (1, 6.0), (2, 6.0), (3, 6.0), (4, 6.0)], TextRange::new(0, 5))];
+        let runs = vec![run(
+            0,
+            &[(0, 6.0), (1, 6.0), (2, 6.0), (3, 6.0), (4, 6.0)],
+            TextRange::new(0, 5),
+        )];
         let center = ParagraphLayout::wrap(
-            &runs, text, 100.0, 12.0, 9.0, TextAlignment::Center, TextOverflow::Clip,
+            &runs,
+            text,
+            100.0,
+            12.0,
+            9.0,
+            TextAlignment::Center,
+            TextOverflow::Clip,
             WhiteSpace::Normal,
         );
         assert_eq!(center.lines()[0].width(), 30.0);
         assert_eq!(center.lines()[0].x_offset(), 35.0);
         let right = ParagraphLayout::wrap(
-            &runs, text, 100.0, 12.0, 9.0, TextAlignment::Right, TextOverflow::Clip,
+            &runs,
+            text,
+            100.0,
+            12.0,
+            9.0,
+            TextAlignment::Right,
+            TextOverflow::Clip,
             WhiteSpace::Normal,
         );
         assert_eq!(right.lines()[0].width(), 30.0);
@@ -2224,7 +2418,13 @@ mod tests {
             TextRange::new(0, 14),
         )];
         let plain = ParagraphLayout::wrap(
-            &runs, text, 50.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Clip,
+            &runs,
+            text,
+            50.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Clip,
             WhiteSpace::Normal,
         );
         let hyphenated = ParagraphLayout::wrap_hyphenated(
@@ -2286,7 +2486,10 @@ mod tests {
 
         // Tail line: "nate" (clusters 5..8), no hyphen, width 24.
         let tail = line_glyphs(&layout, 1);
-        assert_eq!(tail.iter().map(|g| g.0).collect::<Vec<_>>(), vec![5, 6, 7, 8]);
+        assert_eq!(
+            tail.iter().map(|g| g.0).collect::<Vec<_>>(),
+            vec![5, 6, 7, 8]
+        );
         assert_eq!(layout.lines()[1].width(), 24.0);
     }
 
@@ -2461,7 +2664,10 @@ mod tests {
         let kept = line_glyphs(&layout, 0);
         // Two source glyphs (clusters 0,1) then the ellipsis (id 888, cluster 1).
         assert_eq!(kept.len(), 3);
-        assert_eq!(kept[..2].iter().map(|g| g.0).collect::<Vec<_>>(), vec![0, 1]);
+        assert_eq!(
+            kept[..2].iter().map(|g| g.0).collect::<Vec<_>>(),
+            vec![0, 1]
+        );
         assert_eq!(kept[2], (1, 5.0, 888));
     }
 
@@ -2501,7 +2707,13 @@ mod tests {
         // Unconstrained width (the non-finite `INFINITY` sentinel) is a single,
         // never-truncated line even under a truncating policy. (Was `0.0`, which is
         // now a finite 0-width box that clips.)
-        let unconstrained = truncated(5, f32::INFINITY, TextAlignment::Start, TextOverflow::Clip, None);
+        let unconstrained = truncated(
+            5,
+            f32::INFINITY,
+            TextAlignment::Start,
+            TextOverflow::Clip,
+            None,
+        );
         assert_eq!(line_glyphs(&unconstrained, 0).len(), 5);
     }
 
@@ -2670,7 +2882,13 @@ mod tests {
             run(1, &[(3, 8.0), (5, 8.0)], TextRange::new(3, 7)),
         ];
         let legacy = ParagraphLayout::wrap(
-            &runs, text, 20.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Clip,
+            &runs,
+            text,
+            20.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Clip,
             WhiteSpace::Normal,
         );
         let strut = ParagraphLayout::wrap_strut(
@@ -2814,24 +3032,35 @@ mod tests {
         );
         assert_eq!(layout.line_count(), 3);
         assert_eq!(
-            line_glyphs(&layout, 0).iter().map(|g| g.0).collect::<Vec<_>>(),
+            line_glyphs(&layout, 0)
+                .iter()
+                .map(|g| g.0)
+                .collect::<Vec<_>>(),
             vec![0, 1, 2, 3, 4]
         );
         assert_eq!(
-            line_glyphs(&layout, 1).iter().map(|g| g.0).collect::<Vec<_>>(),
+            line_glyphs(&layout, 1)
+                .iter()
+                .map(|g| g.0)
+                .collect::<Vec<_>>(),
             vec![5, 6, 7, 8, 9]
         );
         assert_eq!(
-            line_glyphs(&layout, 2).iter().map(|g| g.0).collect::<Vec<_>>(),
+            line_glyphs(&layout, 2)
+                .iter()
+                .map(|g| g.0)
+                .collect::<Vec<_>>(),
             vec![10, 11]
         );
         // No hyphen glyph is inserted by an emergency break.
-        assert!(layout
-            .lines()
-            .iter()
-            .flat_map(|l| l.segments())
-            .flat_map(|s| s.run().glyphs())
-            .all(|g| g.glyph_id() == 1));
+        assert!(
+            layout
+                .lines()
+                .iter()
+                .flat_map(|l| l.segments())
+                .flat_map(|s| s.run().glyphs())
+                .all(|g| g.glyph_id() == 1)
+        );
     }
 
     #[test]
@@ -2855,15 +3084,24 @@ mod tests {
         );
         assert_eq!(layout.line_count(), 3);
         assert_eq!(
-            line_glyphs(&layout, 0).iter().map(|g| g.0).collect::<Vec<_>>(),
+            line_glyphs(&layout, 0)
+                .iter()
+                .map(|g| g.0)
+                .collect::<Vec<_>>(),
             vec![0, 1, 2]
         );
         assert_eq!(
-            line_glyphs(&layout, 1).iter().map(|g| g.0).collect::<Vec<_>>(),
+            line_glyphs(&layout, 1)
+                .iter()
+                .map(|g| g.0)
+                .collect::<Vec<_>>(),
             vec![3, 4, 5]
         );
         assert_eq!(
-            line_glyphs(&layout, 2).iter().map(|g| g.0).collect::<Vec<_>>(),
+            line_glyphs(&layout, 2)
+                .iter()
+                .map(|g| g.0)
+                .collect::<Vec<_>>(),
             vec![6, 7]
         );
     }
@@ -2876,7 +3114,15 @@ mod tests {
         let text = "ab cdef";
         let runs = vec![run(
             0,
-            &[(0, 1.0), (1, 1.0), (2, 1.0), (3, 1.0), (4, 1.0), (5, 1.0), (6, 1.0)],
+            &[
+                (0, 1.0),
+                (1, 1.0),
+                (2, 1.0),
+                (3, 1.0),
+                (4, 1.0),
+                (5, 1.0),
+                (6, 1.0),
+            ],
             TextRange::new(0, 7),
         )];
         let layout = wrap_break(
@@ -2890,7 +3136,10 @@ mod tests {
         // Line 0 = "ab c" (clusters 0,1,2=space,3): the space hangs, so "ab" + "c"
         // fill the 4px line with the second word starting mid-line.
         assert_eq!(
-            line_glyphs(&layout, 0).iter().map(|g| g.0).collect::<Vec<_>>(),
+            line_glyphs(&layout, 0)
+                .iter()
+                .map(|g| g.0)
+                .collect::<Vec<_>>(),
             vec![0, 1, 2, 3]
         );
         assert!(layout.line_count() >= 2);
@@ -2919,7 +3168,13 @@ mod tests {
         assert_eq!(layout.lines()[0].width(), 12.0);
         // Byte-identical to plain `wrap` (which also uses the default breaker/modes).
         let plain = ParagraphLayout::wrap(
-            &runs, text, 5.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Visible,
+            &runs,
+            text,
+            5.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Visible,
             WhiteSpace::Normal,
         );
         assert_eq!(layout, plain);
@@ -2951,18 +3206,34 @@ mod tests {
         // clusters 0,3,6,9; advance 6) in a 13px box wraps to "中文" / "字对" via
         // the default breaker's inter-ideograph soft breaks — no adapter needed.
         let text = "中文字对";
-        let runs = vec![run(0, &[(0, 6.0), (3, 6.0), (6, 6.0), (9, 6.0)], TextRange::new(0, 12))];
+        let runs = vec![run(
+            0,
+            &[(0, 6.0), (3, 6.0), (6, 6.0), (9, 6.0)],
+            TextRange::new(0, 12),
+        )];
         let layout = ParagraphLayout::wrap(
-            &runs, text, 13.0, 12.0, 9.0, TextAlignment::Start, TextOverflow::Visible,
+            &runs,
+            text,
+            13.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Visible,
             WhiteSpace::Normal,
         );
         assert_eq!(layout.line_count(), 2);
         assert_eq!(
-            line_glyphs(&layout, 0).iter().map(|g| g.0).collect::<Vec<_>>(),
+            line_glyphs(&layout, 0)
+                .iter()
+                .map(|g| g.0)
+                .collect::<Vec<_>>(),
             vec![0, 3]
         );
         assert_eq!(
-            line_glyphs(&layout, 1).iter().map(|g| g.0).collect::<Vec<_>>(),
+            line_glyphs(&layout, 1)
+                .iter()
+                .map(|g| g.0)
+                .collect::<Vec<_>>(),
             vec![6, 9]
         );
     }
@@ -2972,7 +3243,11 @@ mod tests {
         // `word-break: keep-all` (§5.2) drops the inter-ideograph opportunities, so
         // the same CJK run stays on ONE (overflowing) line.
         let text = "中文字对";
-        let runs = vec![run(0, &[(0, 6.0), (3, 6.0), (6, 6.0), (9, 6.0)], TextRange::new(0, 12))];
+        let runs = vec![run(
+            0,
+            &[(0, 6.0), (3, 6.0), (6, 6.0), (9, 6.0)],
+            TextRange::new(0, 12),
+        )];
         let layout = wrap_break(
             &runs,
             text,

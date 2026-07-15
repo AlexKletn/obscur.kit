@@ -87,7 +87,11 @@ impl GridTemplate {
     /// content-sized `auto` for that axis (byte-identical to the historical
     /// all-`Auto` implicit tracks).
     #[must_use]
-    pub fn with_auto_tracks(mut self, auto_columns: Vec<TrackSize>, auto_rows: Vec<TrackSize>) -> Self {
+    pub fn with_auto_tracks(
+        mut self,
+        auto_columns: Vec<TrackSize>,
+        auto_rows: Vec<TrackSize>,
+    ) -> Self {
         self.auto_columns = auto_columns;
         self.auto_rows = auto_rows;
         self

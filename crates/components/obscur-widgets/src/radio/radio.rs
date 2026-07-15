@@ -227,7 +227,10 @@ mod tests {
 
     #[test]
     fn semantic_role_is_radio_button() {
-        assert_eq!(Radio::new("A", cmd()).semantic_role(), SemanticRole::RadioButton);
+        assert_eq!(
+            Radio::new("A", cmd()).semantic_role(),
+            SemanticRole::RadioButton
+        );
     }
 
     #[test]
@@ -242,7 +245,10 @@ mod tests {
             }
         };
         assert_eq!(attrs(&Radio::new("A", cmd()).view()), (false, false));
-        assert_eq!(attrs(&Radio::new("A", cmd()).selected(true).view()), (true, false));
+        assert_eq!(
+            attrs(&Radio::new("A", cmd()).selected(true).view()),
+            (true, false)
+        );
         assert_eq!(
             attrs(&Radio::new("A", cmd()).selected(true).disabled(true).view()),
             (true, true)
@@ -256,7 +262,9 @@ mod tests {
         let dot_kids = |view: &View| -> usize {
             match &view.root().nodes()[0] {
                 ViewNode::Element { children, .. } => match &children.nodes()[0] {
-                    ViewNode::Element { props, children, .. } => {
+                    ViewNode::Element {
+                        props, children, ..
+                    } => {
                         assert!(props.iter().any(|p| p.name() == CLASS
                             && matches!(p.value(), ViewValue::Text(t) if &**t == "radio-dot")));
                         children.nodes().len()
@@ -274,7 +282,12 @@ mod tests {
     fn view_has_indicator_and_label_children() {
         let view = Radio::new("Opt", cmd()).view();
         match &view.root().nodes()[0] {
-            ViewNode::Element { component, events, children, .. } => {
+            ViewNode::Element {
+                component,
+                events,
+                children,
+                ..
+            } => {
                 assert_eq!(*component, Radio::COMPONENT_ID);
                 assert_eq!(events[0].command(), cmd());
                 assert_eq!(children.nodes().len(), 2);

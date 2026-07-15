@@ -10,8 +10,8 @@
 use std::collections::HashMap;
 
 use obscur_scene::clip::Clip;
-use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::color::AlphaMode;
+use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::layer::{CompositionMode, LayerEffect, SceneLayer};
 use obscur_scene::paint::{BlendMode, Brush, Paint, SceneImage};
 use obscur_scene::text::GlyphRun;
@@ -779,7 +779,13 @@ fn draw_inset_shadow(
         &box_shape,
     );
     // (2) Paint the shadow color across the whole box interior.
-    scene.fill(peniko::Fill::NonZero, transform, peniko_color, None, &box_shape);
+    scene.fill(
+        peniko::Fill::NonZero,
+        transform,
+        peniko_color,
+        None,
+        &box_shape,
+    );
 
     // (3) Punch out the lit interior (box deflated by `spread`, shifted by
     // `offset`), blurred, leaving only the inner frame.
@@ -907,7 +913,13 @@ fn draw_image(
             f64::from(region.origin.x + region.size.width),
             f64::from(region.origin.y + region.size.height),
         );
-        scene.push_layer(peniko::Fill::NonZero, peniko::BlendMode::default(), 1.0, transform, &clip);
+        scene.push_layer(
+            peniko::Fill::NonZero,
+            peniko::BlendMode::default(),
+            1.0,
+            transform,
+            &clip,
+        );
     }
 
     let (i0, i1) = tile_index_range(
@@ -1124,8 +1136,8 @@ mod tests {
         use std::sync::Arc;
 
         // A 0×0 image has no pixels to sample: it is skipped, not encoded.
-        let image = SceneImage::new(0, 0, Arc::from(Vec::new()), AlphaMode::Straight)
-            .expect("0x0 image");
+        let image =
+            SceneImage::new(0, 0, Arc::from(Vec::new()), AlphaMode::Straight).expect("0x0 image");
         let rect = Rect::new(Point::new(0.0, 0.0), Size::new(8.0, 8.0));
         let list = DisplayList::from_commands(vec![PaintCommand::DrawImage {
             image,
@@ -1270,12 +1282,8 @@ mod tests {
         let mut converter = SceneConverter::new();
         converter.register_font(1, FontData::new(Blob::from(vec![9u8]), 0));
         assert!(converter.font_for(2).is_none());
-        let run = GlyphRun::new(
-            vec![PositionedGlyph::new(1, 0, 0.0, 16.0, 9.6)],
-            16.0,
-            "x",
-        )
-        .with_font(2);
+        let run =
+            GlyphRun::new(vec![PositionedGlyph::new(1, 0, 0.0, 16.0, 9.6)], 16.0, "x").with_font(2);
         let list = DisplayList::from_commands(vec![PaintCommand::DrawText {
             origin: Point::new(0.0, 0.0),
             run,
@@ -1305,12 +1313,18 @@ mod tests {
 
         let (main, blurs) = SceneConverter::new().convert_with_blurs(&list);
         // The blurred content moved to a sub-scene, so the main scene is empty.
-        assert!(main.encoding().is_empty(), "blurred content omitted from main");
+        assert!(
+            main.encoding().is_empty(),
+            "blurred content omitted from main"
+        );
         assert_eq!(blurs.len(), 1);
         assert_eq!(blurs[0].bounds, bounds);
         assert_eq!(blurs[0].radius, 6.0);
         // The sub-scene actually holds the bracketed draw.
-        assert!(!blurs[0].scene.encoding().is_empty(), "sub-scene has the content");
+        assert!(
+            !blurs[0].scene.encoding().is_empty(),
+            "sub-scene has the content"
+        );
 
         // Back-compat: `convert` draws the same content inline (un-blurred), so it
         // is non-empty and carries no separate blur layer.
@@ -1378,12 +1392,22 @@ mod tests {
         ]);
 
         let (main, filters) = SceneConverter::new().convert_with_blurs(&list);
-        assert!(main.encoding().is_empty(), "filtered content omitted from main");
+        assert!(
+            main.encoding().is_empty(),
+            "filtered content omitted from main"
+        );
         assert_eq!(filters.len(), 1);
         assert_eq!(filters[0].bounds, bounds);
         assert_eq!(filters[0].radius, 0.0, "color-only filter has no blur");
-        assert_eq!(filters[0].color_matrix, Some(matrix), "matrix carried through");
-        assert!(!filters[0].scene.encoding().is_empty(), "sub-scene has the content");
+        assert_eq!(
+            filters[0].color_matrix,
+            Some(matrix),
+            "matrix carried through"
+        );
+        assert!(
+            !filters[0].scene.encoding().is_empty(),
+            "sub-scene has the content"
+        );
     }
 
     #[test]
@@ -1419,9 +1443,7 @@ mod tests {
         }
         match &segments[1] {
             SceneSegment::Backdrop {
-                bounds: b,
-                blur,
-                ..
+                bounds: b, blur, ..
             } => {
                 assert_eq!(*b, bounds);
                 assert_eq!(*blur, 10.0);

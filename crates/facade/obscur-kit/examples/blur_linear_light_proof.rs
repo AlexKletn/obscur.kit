@@ -132,9 +132,7 @@ fn main() {
     // trips). Sample points well inside each flat area.
     let green_deep = px(120, 120);
     let red_deep = px(35, 120);
-    println!(
-        "[flat] deep green = {green_deep:?} (≈ #00ff00), deep red = {red_deep:?} (≈ #ff0000)"
-    );
+    println!("[flat] deep green = {green_deep:?} (≈ #00ff00), deep red = {red_deep:?} (≈ #ff0000)");
     assert!(
         green_deep[1] > 250 && green_deep[0] < 8,
         "flat green interior drifted under blur: {green_deep:?}"

@@ -4,7 +4,7 @@
 use obscur_identity::NodeId;
 use obscur_motion::timeline::TimelineId;
 use obscur_motion::track::KeyframeTrack;
-use obscur_style::property::{Length, PropertyValue, PropertyId};
+use obscur_style::property::{Length, PropertyId, PropertyValue};
 
 /// How a sampled scalar [`MotionValue`](obscur_motion::value::MotionValue) is
 /// lowered into a concrete [`PropertyValue`] for a computed-style override.

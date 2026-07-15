@@ -142,14 +142,7 @@ impl TextShaper for HarfrustShaper {
     fn shape(&self, request: &ShapingRequest) -> GlyphRun {
         let text = request.text();
         let source = TextRange::new(0, text.len());
-        let empty = || {
-            GlyphRun::new(
-                Vec::new(),
-                request.direction(),
-                request.font_size(),
-                source,
-            )
-        };
+        let empty = || GlyphRun::new(Vec::new(), request.direction(), request.font_size(), source);
 
         if text.is_empty() {
             return empty();
@@ -272,9 +265,7 @@ const fn map_direction(direction: TextDirection) -> Direction {
 mod tests {
     use super::*;
     use crate::FontRegistry;
-    use obscur_text::font::{
-        FontAttributes, FontFamily, FontMetrics, FontSource, GenericFamily,
-    };
+    use obscur_text::font::{FontAttributes, FontFamily, FontMetrics, FontSource, GenericFamily};
 
     /// Builds [`test_font_with_metrics`] with the idealized-matching vertical
     /// metrics (ascender 800 / descender −200 / lineGap 0 at 1000 upem).
@@ -643,8 +634,14 @@ mod tests {
         // The wiring bug this guards: a font-less shaper installed WITHOUT the
         // registry's table shapes real glyphs but sizes every line box by ratio.
         let shaper = HarfrustShaper::without_font();
-        assert_eq!(shaper.line_metrics_for(FontId::PRIMARY, 20.0).line_height(), 20.0);
-        assert_eq!(shaper.line_metrics_for(FontId::new(4), 20.0).baseline(), 16.0);
+        assert_eq!(
+            shaper.line_metrics_for(FontId::PRIMARY, 20.0).line_height(),
+            20.0
+        );
+        assert_eq!(
+            shaper.line_metrics_for(FontId::new(4), 20.0).baseline(),
+            16.0
+        );
         assert_eq!(shaper.idealized_line_metrics(), 2);
     }
 

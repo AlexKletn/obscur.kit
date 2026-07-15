@@ -1,7 +1,9 @@
 //! Deterministic replay of an [`EventRecording`] against test infrastructure (spec §7.13).
 
 use crate::input::SyntheticInput;
-use crate::replay::event_recording::{EnvironmentChange, EventRecording, RecordedEvent, SchedulerReason};
+use crate::replay::event_recording::{
+    EnvironmentChange, EventRecording, RecordedEvent, SchedulerReason,
+};
 use crate::replay::replay_result::{ReplayResult, ReplayStatus};
 
 /// The sink a [`ReplaySession`] drives while replaying a recording.
@@ -255,7 +257,10 @@ mod tests {
     use obscur_identity::NodeId;
 
     fn input(raw: u64) -> SyntheticInput {
-        SyntheticInput::pointer_down(SelectorTarget::node(NodeId::from_raw(raw)), PointerButton::Primary)
+        SyntheticInput::pointer_down(
+            SelectorTarget::node(NodeId::from_raw(raw)),
+            PointerButton::Primary,
+        )
     }
 
     fn sample_recording() -> EventRecording {
@@ -333,7 +338,13 @@ mod tests {
                 accepted: true,
             },
         );
-        rec.record(1, RecordedEvent::ResourceVersion { resource: 3, version: 9 });
+        rec.record(
+            1,
+            RecordedEvent::ResourceVersion {
+                resource: 3,
+                version: 9,
+            },
+        );
         rec.record(
             2,
             RecordedEvent::EnvironmentChange(EnvironmentChange::WindowResized {
@@ -346,11 +357,17 @@ mod tests {
         let mut target = CollectingReplayTarget::new();
         session.replay(&mut target);
 
-        assert_eq!(target.scheduler_decisions, vec![(SchedulerReason::Frame, true)]);
+        assert_eq!(
+            target.scheduler_decisions,
+            vec![(SchedulerReason::Frame, true)]
+        );
         assert_eq!(target.resource_versions, vec![(3, 9)]);
         assert_eq!(
             target.environment_changes,
-            vec![EnvironmentChange::WindowResized { width: 800, height: 600 }]
+            vec![EnvironmentChange::WindowResized {
+                width: 800,
+                height: 600
+            }]
         );
     }
 

@@ -93,9 +93,7 @@ impl StyleMatcher {
                 for block_decl in rule.block() {
                     let order = source_order;
                     source_order = source_order.wrapping_add(1);
-                    if condition_holds
-                        && let Some(specificity) = specificity
-                    {
+                    if condition_holds && let Some(specificity) = specificity {
                         collected.push(Declaration::new(
                             block_decl.property(),
                             block_decl.value().clone(),

@@ -109,7 +109,10 @@ mod tests {
         ] {
             assert_eq!(dim.resolve(100.0), None);
             assert!(dim.is_intrinsic());
-            assert!(!dim.is_auto(), "intrinsic is not `auto`, even though both resolve to None");
+            assert!(
+                !dim.is_auto(),
+                "intrinsic is not `auto`, even though both resolve to None"
+            );
         }
         assert!(!Dimension::Auto.is_intrinsic());
         assert!(!Dimension::Px(1.0).is_intrinsic());

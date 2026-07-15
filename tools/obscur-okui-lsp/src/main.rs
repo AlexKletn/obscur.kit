@@ -99,9 +99,7 @@ fn report(
         write_symbol(out, symbol, 1)?;
     }
 
-    let has_errors = diagnostics
-        .iter()
-        .any(|d| d.severity == LspSeverity::Error);
+    let has_errors = diagnostics.iter().any(|d| d.severity == LspSeverity::Error);
     Ok(has_errors)
 }
 

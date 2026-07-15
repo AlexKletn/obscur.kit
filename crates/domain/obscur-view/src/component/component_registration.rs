@@ -134,7 +134,6 @@ mod tests {
         fn create_component(&self) -> Box<dyn ErasedComponent> {
             Box::new(StubComponent)
         }
-
     }
 
     fn registration(raw: u64) -> ComponentRegistration {

@@ -67,7 +67,8 @@ mod tests {
         let mut scope = SubscriptionScope::new();
         let mut flag = false;
         let signals = SignalGenerations::new();
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Unmounted, &mut flag, &signals);
+        let mut ctx =
+            ComponentContext::new(&mut scope, LifecycleState::Unmounted, &mut flag, &signals);
         let mut unmount = UnmountContext::new(&mut ctx);
         assert_eq!(unmount.context().phase(), LifecycleState::Unmounted);
     }

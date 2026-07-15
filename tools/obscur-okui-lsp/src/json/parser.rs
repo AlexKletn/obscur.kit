@@ -15,7 +15,10 @@ use crate::json::{JsonError, JsonValue};
 /// Returns a [`JsonError`] when `input` is not a single well-formed JSON value.
 pub fn parse(input: &str) -> Result<JsonValue, JsonError> {
     let chars: Vec<char> = input.chars().collect();
-    let mut parser = ParseState { chars: &chars, pos: 0 };
+    let mut parser = ParseState {
+        chars: &chars,
+        pos: 0,
+    };
     parser.skip_whitespace();
     let value = parser.value()?;
     parser.skip_whitespace();
@@ -259,7 +262,10 @@ mod tests {
     #[test]
     fn parses_object_and_array() {
         let value = parse("{\"a\":[1,2],\"b\":{\"c\":true}}").unwrap();
-        assert_eq!(value.get("a").and_then(JsonValue::as_array).unwrap().len(), 2);
+        assert_eq!(
+            value.get("a").and_then(JsonValue::as_array).unwrap().len(),
+            2
+        );
         assert_eq!(
             value.get("b").and_then(|b| b.get("c")),
             Some(&JsonValue::Bool(true))

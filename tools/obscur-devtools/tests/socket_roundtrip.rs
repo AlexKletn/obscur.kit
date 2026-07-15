@@ -12,7 +12,10 @@ use obscur_devtools_server::transport::{ClientBound, SocketClient, SocketListene
 
 /// Binds a loopback host serving exactly one session with `token`/`scopes`, and
 /// returns its address plus the server thread's join handle.
-fn spawn_host(token: &'static str, scopes: ScopeSet) -> (std::net::SocketAddr, thread::JoinHandle<()>) {
+fn spawn_host(
+    token: &'static str,
+    scopes: ScopeSet,
+) -> (std::net::SocketAddr, thread::JoinHandle<()>) {
     let listener = SocketListener::bind_loopback().expect("bind");
     let addr = listener.local_addr().expect("addr").expect("tcp addr");
     let handle = thread::spawn(move || {
@@ -27,7 +30,10 @@ fn handshake_then_inspect_returns_seeded_snapshots() {
 
     let mut client = SocketClient::connect_loopback(addr).expect("connect");
     let response = cli::handshake(&mut client, "dev").expect("handshake io");
-    assert!(matches!(response, HandshakeResponse::Accepted { .. }), "{response:?}");
+    assert!(
+        matches!(response, HandshakeResponse::Accepted { .. }),
+        "{response:?}"
+    );
 
     // Inspect two targets on the SAME session; the seeded live-state comes back.
     let ClientBound::Snapshot(tree) = cli::inspect(&mut client, 1, Inspectable::Tree).expect("io")
@@ -37,7 +43,8 @@ fn handshake_then_inspect_returns_seeded_snapshots() {
     assert_eq!(tree.target, Inspectable::Tree);
     assert_eq!(tree.payload.entity_count, 13);
 
-    let ClientBound::Snapshot(scene) = cli::inspect(&mut client, 2, Inspectable::Scene).expect("io")
+    let ClientBound::Snapshot(scene) =
+        cli::inspect(&mut client, 2, Inspectable::Scene).expect("io")
     else {
         panic!("expected a scene snapshot");
     };
@@ -56,7 +63,11 @@ fn every_target_is_inspectable_over_the_socket() {
     let (addr, handle) = spawn_host("dev", ScopeSet::all_read());
 
     let mut client = SocketClient::connect_loopback(addr).expect("connect");
-    assert!(cli::handshake(&mut client, "dev").expect("io").is_accepted());
+    assert!(
+        cli::handshake(&mut client, "dev")
+            .expect("io")
+            .is_accepted()
+    );
 
     for (index, target) in cli::all_targets().into_iter().enumerate() {
         let reply = cli::inspect(&mut client, index as u64 + 1, target).expect("io");
@@ -89,7 +100,11 @@ fn read_only_session_cannot_control_but_a_subscribe_is_granted() {
     let (addr, handle) = spawn_host("dev", ScopeSet::observer());
 
     let mut client = SocketClient::connect_loopback(addr).expect("connect");
-    assert!(cli::handshake(&mut client, "dev").expect("io").is_accepted());
+    assert!(
+        cli::handshake(&mut client, "dev")
+            .expect("io")
+            .is_accepted()
+    );
 
     // observer() grants read + subscribe, so a Subscribe is granted...
     let reply = cli::subscribe(&mut client, 1, Topic::Frames).expect("io");

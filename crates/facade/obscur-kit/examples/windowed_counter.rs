@@ -463,8 +463,9 @@ impl ApplicationHandler for WindowedCounter {
                     if let Some(physical) = KeyboardConverter::physical_key(code) {
                         let logical = KeyboardConverter::logical_key(&event.logical_key);
                         let pressed = event.state == ElementState::Pressed;
-                        let dispatch =
-                            self.runtime.handle_key(KeyEvent::new(physical, logical, pressed));
+                        let dispatch = self
+                            .runtime
+                            .handle_key(KeyEvent::new(physical, logical, pressed));
                         if let Some(command) = dispatch.command() {
                             println!("[key] resolved command: {command:?}");
                         }

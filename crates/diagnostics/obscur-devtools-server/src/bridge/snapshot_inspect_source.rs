@@ -35,7 +35,9 @@ impl SnapshotInspectSource {
     /// typed [`default_payload`] rather than to `Null`'s placeholder.
     #[must_use]
     pub fn new() -> Self {
-        Self { snapshots: BTreeMap::new() }
+        Self {
+            snapshots: BTreeMap::new(),
+        }
     }
 
     /// Registers `payload` for `target`, returning the updated source (builder
@@ -60,7 +62,9 @@ impl SnapshotInspectSource {
 
 impl InspectSource for SnapshotInspectSource {
     fn snapshot(&self, target: Inspectable) -> SnapshotPayload {
-        self.registered(target).cloned().unwrap_or_else(|| default_payload(target))
+        self.registered(target)
+            .cloned()
+            .unwrap_or_else(|| default_payload(target))
     }
 }
 
@@ -106,8 +110,10 @@ mod tests {
 
     #[test]
     fn returns_registered_snapshot_not_null() {
-        let source = SnapshotInspectSource::new()
-            .with_snapshot(Inspectable::Layout, SnapshotPayload::new("layout", 4, vec![1, 2]));
+        let source = SnapshotInspectSource::new().with_snapshot(
+            Inspectable::Layout,
+            SnapshotPayload::new("layout", 4, vec![1, 2]),
+        );
         let payload = source.snapshot(Inspectable::Layout);
         assert_eq!(&*payload.description, "layout");
         assert_eq!(payload.entity_count, 4);
@@ -133,8 +139,10 @@ mod tests {
 
     #[test]
     fn serves_through_the_runtime_bridge() {
-        let source = SnapshotInspectSource::new()
-            .with_snapshot(Inspectable::Focus, SnapshotPayload::new("focused", 1, vec![42]));
+        let source = SnapshotInspectSource::new().with_snapshot(
+            Inspectable::Focus,
+            SnapshotPayload::new("focused", 1, vec![42]),
+        );
         let bridge = RuntimeBridge::new(source);
         let message = bridge.inspect(CommandId::new(5), Inspectable::Focus);
         assert_eq!(message.command, CommandId::new(5));

@@ -120,9 +120,11 @@ impl DiagnosticSubscription {
             }
             OverflowStrategy::DropNewest => false,
             OverflowStrategy::Coalesce => {
-                if let Some(slot) = self.buffer.iter_mut().find(|d| {
-                    d.code == diagnostic.code && d.subsystem == diagnostic.subsystem
-                }) {
+                if let Some(slot) = self
+                    .buffer
+                    .iter_mut()
+                    .find(|d| d.code == diagnostic.code && d.subsystem == diagnostic.subsystem)
+                {
                     // Merge: retain the newest occurrence in place.
                     *slot = diagnostic.clone();
                     true
@@ -158,9 +160,7 @@ impl DiagnosticSubscription {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagnostic::{
-        Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem,
-    };
+    use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem};
 
     fn diag(severity: DiagnosticSeverity, code: &'static str) -> Diagnostic {
         Diagnostic::new(

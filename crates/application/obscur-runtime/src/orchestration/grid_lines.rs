@@ -84,11 +84,15 @@ pub fn resolve_named_grid_lines(
             &columns,
             placement.column_end(),
         );
-        let row_start = resolve_edge(style, PropertyId::GridRowStart, &rows, placement.row_start());
+        let row_start = resolve_edge(
+            style,
+            PropertyId::GridRowStart,
+            &rows,
+            placement.row_start(),
+        );
         let row_end = resolve_edge(style, PropertyId::GridRowEnd, &rows, placement.row_end());
 
-        layout.grid_placement =
-            GridPlacement::new(column_start, column_end, row_start, row_end);
+        layout.grid_placement = GridPlacement::new(column_start, column_end, row_start, row_end);
     }
 }
 

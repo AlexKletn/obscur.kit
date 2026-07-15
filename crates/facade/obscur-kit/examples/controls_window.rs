@@ -148,8 +148,14 @@ impl ControlsWindow {
             runtime.on_command(CMD_SEL_TOGGLE, move || {
                 let mut st = s.borrow_mut();
                 st.select.toggle_open();
-                st.last_event =
-                    format!("Select {}", if st.select.is_open() { "opened" } else { "closed" });
+                st.last_event = format!(
+                    "Select {}",
+                    if st.select.is_open() {
+                        "opened"
+                    } else {
+                        "closed"
+                    }
+                );
             });
         }
         // Select options — one handler per option; select() closes the popup.
@@ -368,7 +374,9 @@ impl ApplicationHandler for ControlsWindow {
                         if let Some(window) = self.window.as_ref() {
                             window.request_redraw();
                         }
-                        println!("controls window ready — hover, click, type, toggle, open the select.");
+                        println!(
+                            "controls window ready — hover, click, type, toggle, open the select."
+                        );
                     }
                     Err(error) => {
                         eprintln!("failed to build the Vello device: {error}");
@@ -454,7 +462,8 @@ impl ApplicationHandler for ControlsWindow {
                     if let Some(physical) = KeyboardConverter::physical_key(code) {
                         let logical = KeyboardConverter::logical_key(&event.logical_key);
                         let pressed = event.state == ElementState::Pressed;
-                        self.runtime.handle_key(KeyEvent::new(physical, logical, pressed));
+                        self.runtime
+                            .handle_key(KeyEvent::new(physical, logical, pressed));
                         if let Some(window) = self.window.as_ref() {
                             window.request_redraw();
                         }

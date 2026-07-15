@@ -49,7 +49,16 @@ mod tests {
 
     #[test]
     fn the_stable_selectors_collide_with_no_other_reserved_symbol() {
-        for other in [CLASS, ID, TYPE, SRC, DISABLED, CHECKED, READONLY, EVENT_CLICK] {
+        for other in [
+            CLASS,
+            ID,
+            TYPE,
+            SRC,
+            DISABLED,
+            CHECKED,
+            READONLY,
+            EVENT_CLICK,
+        ] {
             assert_ne!(TEST_ID, other);
             assert_ne!(AUTOMATION_ID, other);
         }

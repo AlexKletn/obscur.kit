@@ -67,7 +67,10 @@ fn main() {
     );
 
     let mut builder = DisplayListBuilder::new();
-    builder.fill_rect(Rect::new(Point::new(0.0, 0.0), VIEWPORT), Brush::solid(page));
+    builder.fill_rect(
+        Rect::new(Point::new(0.0, 0.0), VIEWPORT),
+        Brush::solid(page),
+    );
 
     // Left: the §5.5-normalized rounded box.
     builder.fill(Path::rounded_rect(wide_box, normalized), Brush::solid(card));
@@ -84,7 +87,10 @@ fn main() {
         (0.0, 0.0),
         false,
     );
-    builder.fill(Path::rounded_rect(shadow_box, box_radii), Brush::solid(card));
+    builder.fill(
+        Path::rounded_rect(shadow_box, box_radii),
+        Brush::solid(card),
+    );
 
     let list = builder.build();
     println!("[scene] {} paint command(s)", list.commands().len());
@@ -115,7 +121,9 @@ fn render(list: DisplayList) -> tiny_skia::Pixmap {
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
     let mut renderer = CpuRenderer::new(RendererId::from_raw(1));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
@@ -144,9 +152,17 @@ fn verify_left(pixmap: &tiny_skia::Pixmap, box_rect: Rect, radius: f32) {
     // The mid-height left edge reaches the box bound (box blue).
     let edge_reaches = is_box(left + 1, mid_y);
 
-    println!("[verify left]  corner rounded away={corner_rounded}, mid-edge reaches box={edge_reaches}");
-    assert!(corner_rounded, "the box corner must be rounded (not overflowing square)");
-    assert!(edge_reaches, "the box must still fill to its mid-height edge");
+    println!(
+        "[verify left]  corner rounded away={corner_rounded}, mid-edge reaches box={edge_reaches}"
+    );
+    assert!(
+        corner_rounded,
+        "the box corner must be rounded (not overflowing square)"
+    );
+    assert!(
+        edge_reaches,
+        "the box must still fill to its mid-height edge"
+    );
 }
 
 /// Right panel: the shadow extends beyond the box straight edge by ~`spread`, and
@@ -168,16 +184,27 @@ fn verify_right(pixmap: &tiny_skia::Pixmap, box_rect: Rect, spread: f32) {
     let mid_y = (box_rect.origin.y + box_rect.size.height / 2.0) as u32;
 
     // A few px left of the box, at mid-height: the outset shadow extends here.
-    let extends = is_shadow(left.saturating_sub((spread as u32).saturating_sub(2)), mid_y);
+    let extends = is_shadow(
+        left.saturating_sub((spread as u32).saturating_sub(2)),
+        mid_y,
+    );
     // Diagonally out at the box's top-left corner region the shadow's LARGER round
     // still covers a point that the box's own 10px round would not reach.
     let diag_x = left.saturating_sub(2);
     let diag_y = (box_rect.origin.y + 4.0) as u32;
     let corner_shadow = is_shadow(diag_x, diag_y);
 
-    println!("[verify right] shadow extends past edge={extends}, larger corner round={corner_shadow}");
-    assert!(extends, "the outset shadow must extend beyond the box edge by ~spread");
-    assert!(corner_shadow, "the shadow's grown corner must reach beyond the box corner");
+    println!(
+        "[verify right] shadow extends past edge={extends}, larger corner round={corner_shadow}"
+    );
+    assert!(
+        extends,
+        "the outset shadow must extend beyond the box edge by ~spread"
+    );
+    assert!(
+        corner_shadow,
+        "the shadow's grown corner must reach beyond the box corner"
+    );
 }
 
 /// The workspace-relative output path `target/<name>`.

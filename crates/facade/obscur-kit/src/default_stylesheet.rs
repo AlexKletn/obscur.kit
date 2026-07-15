@@ -374,7 +374,10 @@ mod tests {
                 .iter()
                 .any(|d| d.property() == PropertyId::BackgroundColor)
         });
-        assert!(has_button_bg, "UA sheet must style `button` with a background");
+        assert!(
+            has_button_bg,
+            "UA sheet must style `button` with a background"
+        );
     }
 
     #[test]

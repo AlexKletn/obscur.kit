@@ -4,7 +4,7 @@ use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
 use crate::model::{AlignItems, Dimension, JustifyContent, LayoutBox, LayoutStyle, Margin};
 
-use super::{clamp_content, ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
+use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput, clamp_content};
 
 /// The item's main-axis min / max dimensions for the container's flow direction:
 /// `width` bounds along a row, `height` bounds along a column.
@@ -60,7 +60,13 @@ fn content_max_main(
     } else {
         Size::new(container_cross, f32::INFINITY)
     };
-    let measured = measurer.measure_child(index, BoxConstraints { min: Size::ZERO, max });
+    let measured = measurer.measure_child(
+        index,
+        BoxConstraints {
+            min: Size::ZERO,
+            max,
+        },
+    );
     if is_row {
         measured.width
     } else {
@@ -488,10 +494,20 @@ impl LayoutAlgorithm for FlexLayout {
             // Clamp the container's OWN box into its authored min/max (spec §4.2)
             // — e.g. `min-height: 100vh` on a flex column fills a tall viewport.
             let own_w = clamp_content(
-                content_width, style.min_width, style.max_width, constraints.max.width, bp_x, style.box_sizing,
+                content_width,
+                style.min_width,
+                style.max_width,
+                constraints.max.width,
+                bp_x,
+                style.box_sizing,
             );
             let own_h = clamp_content(
-                final_content_height, style.min_height, style.max_height, constraints.max.height, bp_y, style.box_sizing,
+                final_content_height,
+                style.min_height,
+                style.max_height,
+                constraints.max.height,
+                bp_y,
+                style.box_sizing,
             );
             let border_box = Size::new(own_w + bp_x, own_h + bp_y);
             return LayoutOutput::new(constraints.constrain(border_box), child_boxes);
@@ -578,19 +594,37 @@ impl LayoutAlgorithm for FlexLayout {
             style.width.resolve(constraints.max.width).is_none()
         };
         let (final_content_width, final_content_height) = if is_row {
-            let h = if cross_is_auto { total_cross } else { content_height };
+            let h = if cross_is_auto {
+                total_cross
+            } else {
+                content_height
+            };
             (content_width, h)
         } else {
-            let w = if cross_is_auto { total_cross } else { content_width };
+            let w = if cross_is_auto {
+                total_cross
+            } else {
+                content_width
+            };
             (w, content_height)
         };
 
         // Clamp the container's OWN box into its authored min/max (spec §4.2).
         let own_w = clamp_content(
-            final_content_width, style.min_width, style.max_width, constraints.max.width, bp_x, style.box_sizing,
+            final_content_width,
+            style.min_width,
+            style.max_width,
+            constraints.max.width,
+            bp_x,
+            style.box_sizing,
         );
         let own_h = clamp_content(
-            final_content_height, style.min_height, style.max_height, constraints.max.height, bp_y, style.box_sizing,
+            final_content_height,
+            style.min_height,
+            style.max_height,
+            constraints.max.height,
+            bp_y,
+            style.box_sizing,
         );
         let border_box = Size::new(own_w + bp_x, own_h + bp_y);
         LayoutOutput::new(constraints.constrain(border_box), child_boxes)
@@ -860,15 +894,15 @@ fn place_line(args: LineArgs) -> PlacedLine {
                     cross_style.width
                 };
                 let has_explicit = cross_dim.resolve(container_cross).is_some();
-                let cross = if item_align(cross_style, style) == AlignItems::Stretch && !has_explicit
-                {
-                    // A stretch fills the line cross, but must still stop at the
-                    // item's own cross max (§9.4 step 11) — `base_cross` came from
-                    // `cross_item_size` already clamped, this path did not.
-                    clamp_cross(lc, cross_style, is_row, container_cross)
-                } else {
-                    base_cross[pos]
-                };
+                let cross =
+                    if item_align(cross_style, style) == AlignItems::Stretch && !has_explicit {
+                        // A stretch fills the line cross, but must still stop at the
+                        // item's own cross max (§9.4 step 11) — `base_cross` came from
+                        // `cross_item_size` already clamped, this path did not.
+                        clamp_cross(lc, cross_style, is_row, container_cross)
+                    } else {
+                        base_cross[pos]
+                    };
                 cross_size.push(cross);
             }
             line_cross = lc;
@@ -934,7 +968,6 @@ fn place_line(args: LineArgs) -> PlacedLine {
             }
         }
     };
-
 
     // Steps 7 & 8: position each item and map back to (x, y).
     let mut cursor = leading;
@@ -1027,11 +1060,7 @@ fn resolve_flexible_lengths(
     // min/max bounds.
     let factor = |pos: usize| -> f32 {
         let s = &children[line[pos]].style;
-        if growing {
-            s.flex_grow
-        } else {
-            s.flex_shrink
-        }
+        if growing { s.flex_grow } else { s.flex_shrink }
     };
 
     let mut target = vec![0.0_f32; n];
@@ -1109,8 +1138,8 @@ fn resolve_flexible_lengths(
             if sum_scaled > 0.0 {
                 for pos in 0..n {
                     if !frozen[pos] {
-                        target[pos] =
-                            flex_base[line[pos]] - remaining.abs() * scaled_shrink(pos) / sum_scaled;
+                        target[pos] = flex_base[line[pos]]
+                            - remaining.abs() * scaled_shrink(pos) / sum_scaled;
                     }
                 }
             }
@@ -1325,8 +1354,16 @@ mod tests {
             &mut measurer,
         );
         let b = out.child_boxes();
-        assert_eq!(b[0].size().height, 20.0, "inherits flex-start: measured cross");
-        assert_eq!(b[1].size().height, 100.0, "align-self: stretch fills the cross");
+        assert_eq!(
+            b[0].size().height,
+            20.0,
+            "inherits flex-start: measured cross"
+        );
+        assert_eq!(
+            b[1].size().height,
+            100.0,
+            "align-self: stretch fills the cross"
+        );
     }
 
     #[test]
@@ -2292,10 +2329,8 @@ mod tests {
         // natural width, so under a bounded row it FILLS the row and reports an
         // unbounded max-content (a flex/flow container with auto width — the
         // disclosure arrow), creating shrink pressure just like `.select-header`.
-        let mut measurer = FixedChildMeasurer::new(vec![
-            Size::new(28.0, 14.0),
-            Size::new(f32::INFINITY, 14.0),
-        ]);
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(28.0, 14.0), Size::new(f32::INFINITY, 14.0)]);
         let out = FlexLayout.layout(
             &style,
             &children,
@@ -2393,7 +2428,10 @@ mod tests {
         approx(b[2].origin().y, 80.0);
         // Exactly ONE measure per item (the flex-base measure) — the §4.5
         // content-floor measure is elided (pre-fix this was TWO per item).
-        assert_eq!(measurer.calls, 3, "no extra §4.5 content measure in the common case");
+        assert_eq!(
+            measurer.calls, 3,
+            "no extra §4.5 content measure in the common case"
+        );
     }
 
     /// The card-collapse §4.5 fix is preserved with its extra measure taken ONLY for
@@ -2428,6 +2466,9 @@ mod tests {
         approx(b[1].origin().y, 80.0);
         // Two base measures + one content measure for the single clamped item = 3
         // (NOT 4 — the unclamped item spends no content measure).
-        assert_eq!(measurer.calls, 3, "only the clamped item spends a §4.5 measure");
+        assert_eq!(
+            measurer.calls, 3,
+            "only the clamped item spends a §4.5 measure"
+        );
     }
 }

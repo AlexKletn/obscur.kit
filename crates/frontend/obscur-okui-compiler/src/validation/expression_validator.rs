@@ -136,8 +136,7 @@ pub fn check_expression(expr: &Expr) -> Result<(), String> {
 }
 
 /// What a caller is told when an expression is outside §2.10's subset.
-pub const FORBIDDEN_MESSAGE: &str =
-    "this expression is outside what `.okui` allows (spec §2.10): an expression may \
+pub const FORBIDDEN_MESSAGE: &str = "this expression is outside what `.okui` allows (spec §2.10): an expression may \
      read props, state and loop locals, access fields, compare, and combine with \
      logical operators — it may not assign, mutate, await, or call a function that \
      has not been declared pure";
@@ -256,10 +255,6 @@ impl ExpressionValidator {
     }
 }
 
-
-
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,7 +311,11 @@ mod tests {
 
         let doc = document("<span>{std::fs::read(p)}</span>");
         let diagnostics = validator.validate_document(&doc);
-        assert_eq!(diagnostics.len(), 1, "a free call in a body must be refused");
+        assert_eq!(
+            diagnostics.len(),
+            1,
+            "a free call in a body must be refused"
+        );
         assert!(diagnostics[0].message().contains("§2.10"));
 
         // Nested, so the recursion is proven to carry the check down.
@@ -355,7 +354,11 @@ mod tests {
         let doc = document("<T x={a = b}/>");
         let diagnostics = validator.validate_document(&doc);
         assert_eq!(diagnostics.len(), 1);
-        assert!(diagnostics[0].message().contains("§2.10"), "{:?}", diagnostics[0]);
+        assert!(
+            diagnostics[0].message().contains("§2.10"),
+            "{:?}",
+            diagnostics[0]
+        );
     }
 
     #[test]
@@ -364,6 +367,10 @@ mod tests {
         let doc = document("<Root><Child y={load_config()}/></Root>");
         let diagnostics = validator.validate_document(&doc);
         assert_eq!(diagnostics.len(), 1, "the nested element is walked");
-        assert!(diagnostics[0].message().contains("§2.10"), "{:?}", diagnostics[0]);
+        assert!(
+            diagnostics[0].message().contains("§2.10"),
+            "{:?}",
+            diagnostics[0]
+        );
     }
 }

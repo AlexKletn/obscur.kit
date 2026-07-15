@@ -71,9 +71,11 @@ impl UiIrViewBridge {
                 vec![view]
             }
             UiIrNodeKind::Element | UiIrNodeKind::Component => vec![lower_element(node)],
-            UiIrNodeKind::Fragment | UiIrNodeKind::Conditional | UiIrNodeKind::Loop => {
-                node.children().iter().flat_map(Self::node_to_view_nodes).collect()
-            }
+            UiIrNodeKind::Fragment | UiIrNodeKind::Conditional | UiIrNodeKind::Loop => node
+                .children()
+                .iter()
+                .flat_map(Self::node_to_view_nodes)
+                .collect(),
         }
     }
 }
@@ -143,7 +145,9 @@ fn lower_key(expression: &UiIrExpression) -> ViewKey {
         UiIrExpression::Literal(UiIrValue::Bool(flag)) => {
             ViewKey::from(if *flag { "true" } else { "false" })
         }
-        UiIrExpression::Literal(UiIrValue::Float(number)) => ViewKey::from(number.to_string().as_str()),
+        UiIrExpression::Literal(UiIrValue::Float(number)) => {
+            ViewKey::from(number.to_string().as_str())
+        }
         UiIrExpression::Literal(UiIrValue::Null) => ViewKey::from("null"),
         UiIrExpression::Call { name, .. } => ViewKey::from(name.as_ref()),
     }
@@ -207,7 +211,10 @@ mod tests {
         // resolves to decoded pixels (the old hash bridge dropped both).
         let root = UiIrNode::element(1, "img").with_property(UiIrProperty::text("src", "logo.png"));
         let view = UiIrViewBridge::document_to_view(&UiIrDocument::new(root));
-        let ViewNode::Element { component, props, .. } = &view.root().nodes()[0] else {
+        let ViewNode::Element {
+            component, props, ..
+        } = &view.root().nodes()[0]
+        else {
             panic!("element");
         };
         assert_eq!(*component, ComponentId::from_raw(0x00C0_0003));
@@ -236,7 +243,12 @@ mod tests {
 
         let view = UiIrViewBridge::document_to_view(&doc);
         assert_eq!(view.root().len(), 2);
-        assert!(view.root().nodes().iter().all(|n| matches!(n, ViewNode::Element { .. })));
+        assert!(
+            view.root()
+                .nodes()
+                .iter()
+                .all(|n| matches!(n, ViewNode::Element { .. }))
+        );
     }
 
     #[test]

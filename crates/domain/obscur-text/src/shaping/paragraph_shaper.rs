@@ -483,7 +483,14 @@ mod tests {
         let default = face("Fallback");
         assert_eq!(
             shaper
-                .shape_paragraph("abВГ", &chain(), &attrs(), &default, 16.0, TextDirection::LeftToRight)
+                .shape_paragraph(
+                    "abВГ",
+                    &chain(),
+                    &attrs(),
+                    &default,
+                    16.0,
+                    TextDirection::LeftToRight
+                )
                 .len(),
             1
         );
@@ -494,8 +501,14 @@ mod tests {
         resolver.register(ScriptTag::CYRILLIC, FontId::new(1), face("Cyrillic"));
         shaper.set_resolver(Box::new(resolver));
 
-        let runs =
-            shaper.shape_paragraph("abВГ", &chain(), &attrs(), &default, 16.0, TextDirection::LeftToRight);
+        let runs = shaper.shape_paragraph(
+            "abВГ",
+            &chain(),
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        );
         assert_eq!(runs.len(), 2);
         assert_eq!(runs[0].font(), FontId::new(0));
         assert_eq!(runs[1].font(), FontId::new(1));
@@ -547,7 +560,10 @@ mod tests {
         );
         assert_eq!(rtl_runs.len(), 1);
         assert_eq!(rtl_runs[0].level(), 1);
-        assert!(rtl_runs[0].level() % 2 == 1, "RTL item must carry an odd level");
+        assert!(
+            rtl_runs[0].level() % 2 == 1,
+            "RTL item must carry an odd level"
+        );
     }
 
     /// A resolver that always resolves to font 0 with both synthesis flags set,
@@ -560,7 +576,10 @@ mod tests {
             &self,
             _request: &crate::font::FontResolveRequest,
         ) -> Option<crate::font::ResolvedFont> {
-            Some(crate::font::ResolvedFont::new(FontId::new(0), face("Synth")).with_synthesis(true, true))
+            Some(
+                crate::font::ResolvedFont::new(FontId::new(0), face("Synth"))
+                    .with_synthesis(true, true),
+            )
         }
     }
 
@@ -660,8 +679,22 @@ mod tests {
         let calls = Rc::new(Cell::new(0));
         let shaper = counting_shaper(calls.clone());
         let default = face("Fallback");
-        let a = shaper.shape_paragraph("hello", &chain(), &attrs(), &default, 16.0, TextDirection::LeftToRight);
-        let b = shaper.shape_paragraph("hello", &chain(), &attrs(), &default, 16.0, TextDirection::LeftToRight);
+        let a = shaper.shape_paragraph(
+            "hello",
+            &chain(),
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        );
+        let b = shaper.shape_paragraph(
+            "hello",
+            &chain(),
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        );
         assert_eq!(calls.get(), 1, "second identical call must hit the cache");
         assert_eq!(a, b);
         assert_eq!(shaper.cache_len(), 1);
@@ -680,18 +713,74 @@ mod tests {
         let other_face = face("OtherFallback");
 
         // Baseline, then one changed dimension per call.
-        let _ = shaper.shape_paragraph("hi", &chain(), &attrs(), &default, 16.0, TextDirection::LeftToRight);
-        let _ = shaper.shape_paragraph("bye", &chain(), &attrs(), &default, 16.0, TextDirection::LeftToRight); // text
-        let _ = shaper.shape_paragraph("hi", &chain(), &attrs(), &default, 18.0, TextDirection::LeftToRight); // size
-        let _ = shaper.shape_paragraph("hi", &chain(), &attrs(), &default, 16.0, TextDirection::RightToLeft); // direction
-        let _ = shaper.shape_paragraph("hi", &other_family, &attrs(), &default, 16.0, TextDirection::LeftToRight); // families
-        let _ = shaper.shape_paragraph("hi", &chain(), &other_attrs, &default, 16.0, TextDirection::LeftToRight); // attributes
-        let _ = shaper.shape_paragraph("hi", &chain(), &attrs(), &other_face, 16.0, TextDirection::LeftToRight); // default_face
+        let _ = shaper.shape_paragraph(
+            "hi",
+            &chain(),
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        );
+        let _ = shaper.shape_paragraph(
+            "bye",
+            &chain(),
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        ); // text
+        let _ = shaper.shape_paragraph(
+            "hi",
+            &chain(),
+            &attrs(),
+            &default,
+            18.0,
+            TextDirection::LeftToRight,
+        ); // size
+        let _ = shaper.shape_paragraph(
+            "hi",
+            &chain(),
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::RightToLeft,
+        ); // direction
+        let _ = shaper.shape_paragraph(
+            "hi",
+            &other_family,
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        ); // families
+        let _ = shaper.shape_paragraph(
+            "hi",
+            &chain(),
+            &other_attrs,
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        ); // attributes
+        let _ = shaper.shape_paragraph(
+            "hi",
+            &chain(),
+            &attrs(),
+            &other_face,
+            16.0,
+            TextDirection::LeftToRight,
+        ); // default_face
         assert_eq!(calls.get(), 7, "each distinct key must reach the itemizer");
         assert_eq!(shaper.cache_len(), 7);
 
         // Re-issuing the baseline is a hit, not an eighth itemize.
-        let _ = shaper.shape_paragraph("hi", &chain(), &attrs(), &default, 16.0, TextDirection::LeftToRight);
+        let _ = shaper.shape_paragraph(
+            "hi",
+            &chain(),
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        );
         assert_eq!(calls.get(), 7, "the baseline repeat must hit the cache");
     }
 
@@ -710,9 +799,30 @@ mod tests {
             Box::new(MockTextShaper::new()),
         );
         let default = face("Fallback");
-        let direct = uncached.shape_paragraph("abВГ", &chain(), &attrs(), &default, 16.0, TextDirection::LeftToRight);
-        let via_cache = cached.shape_paragraph("abВГ", &chain(), &attrs(), &default, 16.0, TextDirection::LeftToRight);
-        let via_cache_again = cached.shape_paragraph("abВГ", &chain(), &attrs(), &default, 16.0, TextDirection::LeftToRight);
+        let direct = uncached.shape_paragraph(
+            "abВГ",
+            &chain(),
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        );
+        let via_cache = cached.shape_paragraph(
+            "abВГ",
+            &chain(),
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        );
+        let via_cache_again = cached.shape_paragraph(
+            "abВГ",
+            &chain(),
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        );
         assert_eq!(direct, via_cache);
         assert_eq!(direct, via_cache_again);
     }
@@ -729,7 +839,14 @@ mod tests {
         let default = face("Fallback");
         for i in 0..50 {
             let text = format!("t{i}");
-            let runs = shaper.shape_paragraph(&text, &chain(), &attrs(), &default, 12.0, TextDirection::LeftToRight);
+            let runs = shaper.shape_paragraph(
+                &text,
+                &chain(),
+                &attrs(),
+                &default,
+                12.0,
+                TextDirection::LeftToRight,
+            );
             // Correct despite the bound.
             let uncached = ParagraphShaper::new(
                 Box::new(SingleRunItemizer::new()),
@@ -738,9 +855,20 @@ mod tests {
             );
             assert_eq!(
                 runs,
-                uncached.shape_paragraph(&text, &chain(), &attrs(), &default, 12.0, TextDirection::LeftToRight)
+                uncached.shape_paragraph(
+                    &text,
+                    &chain(),
+                    &attrs(),
+                    &default,
+                    12.0,
+                    TextDirection::LeftToRight
+                )
             );
-            assert!(shaper.cache_len() <= cap, "cache exceeded capacity: {}", shaper.cache_len());
+            assert!(
+                shaper.cache_len() <= cap,
+                "cache exceeded capacity: {}",
+                shaper.cache_len()
+            );
         }
     }
 
@@ -752,7 +880,14 @@ mod tests {
             Box::new(MockTextShaper::new()),
         );
         let default = face("Fallback");
-        let before = shaper.shape_paragraph("abВГ", &chain(), &attrs(), &default, 16.0, TextDirection::LeftToRight);
+        let before = shaper.shape_paragraph(
+            "abВГ",
+            &chain(),
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        );
         assert_eq!(before.len(), 1);
         assert_eq!(shaper.cache_len(), 1);
 
@@ -761,7 +896,14 @@ mod tests {
         shaper.set_itemizer(Box::new(TwoScriptItemizer));
         assert_eq!(shaper.cache_len(), 0, "port swap must flush the cache");
         shaper.set_resolver(Box::new(two_font_resolver()));
-        let after = shaper.shape_paragraph("abВГ", &chain(), &attrs(), &default, 16.0, TextDirection::LeftToRight);
+        let after = shaper.shape_paragraph(
+            "abВГ",
+            &chain(),
+            &attrs(),
+            &default,
+            16.0,
+            TextDirection::LeftToRight,
+        );
         assert_eq!(after.len(), 2);
     }
 

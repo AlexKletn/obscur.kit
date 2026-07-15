@@ -80,17 +80,17 @@ use obscur_kit::bootstrap::KitBootstrap;
 use obscur_kit::css::compiler::StylesheetCompiler;
 use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
-use obscur_kit::geometry::{Point, Size};
-use obscur_kit::devtools::{live_source, SharedInspectSource};
+use obscur_kit::devtools::{SharedInspectSource, live_source};
 use obscur_kit::devtools_protocol::message::ScopeSet;
 use obscur_kit::devtools_server::auth::Authenticator;
 use obscur_kit::devtools_server::bridge::RuntimeBridge;
 use obscur_kit::devtools_server::endpoint::DevToolsEndpoint;
 use obscur_kit::devtools_server::transport::{SocketListener, SocketTransport};
+use obscur_kit::geometry::{Point, Size};
 use obscur_kit::identity::{InternedSymbol, RuntimeId};
-use obscur_kit::perf::FrameProfiler;
 use obscur_kit::interaction::command::KeyEvent;
 use obscur_kit::interaction::pointer::{PointerDevice, PointerEvent, PointerId};
+use obscur_kit::perf::FrameProfiler;
 use obscur_kit::render::frame::{FrameSubmission, RenderFrame};
 use obscur_kit::render::renderer::RendererId;
 use obscur_kit::render_vello::renderer::{VelloDevice, VelloRenderer, VelloSurface};
@@ -106,8 +106,8 @@ use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
 use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
-use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey as WinitPhysicalKey};
 use winit::keyboard::Key;
+use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey as WinitPhysicalKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 #[path = "showcase/scene.rs"]
@@ -403,7 +403,11 @@ impl ShowcaseWindow {
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
-        println!("[zoom] {:.0}% (device scale {:.2})", self.zoom * 100.0, self.effective_scale());
+        println!(
+            "[zoom] {:.0}% (device scale {:.2})",
+            self.zoom * 100.0,
+            self.effective_scale()
+        );
         true
     }
 
@@ -461,7 +465,8 @@ impl ShowcaseWindow {
             // Building a live source walks + formats the whole tree, so only
             // pay for it while a DevTools client is actually attached.
             if self.inspect.has_client() {
-                self.inspect.set(live_source(&self.runtime, self.profiler.stats()));
+                self.inspect
+                    .set(live_source(&self.runtime, self.profiler.stats()));
             }
         }
         if let Some(window) = self.window.as_ref() {
@@ -646,7 +651,11 @@ impl ApplicationHandler for ShowcaseWindow {
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
-                println!("[scroll] y = {:.0} px (max {:.0})", self.scroll_y, self.max_scroll_y());
+                println!(
+                    "[scroll] y = {:.0} px (max {:.0})",
+                    self.scroll_y,
+                    self.max_scroll_y()
+                );
             }
             WindowEvent::ModifiersChanged(modifiers) => {
                 // Track the live modifier chord so the Ctrl+zoom shortcuts below
@@ -675,7 +684,11 @@ impl ApplicationHandler for ShowcaseWindow {
                     self.last_inspect_node = None;
                     println!(
                         "[inspect] {}",
-                        if on { "ON — hover elements to highlight them; F12 to toggle off" } else { "OFF" }
+                        if on {
+                            "ON — hover elements to highlight them; F12 to toggle off"
+                        } else {
+                            "OFF"
+                        }
                     );
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();
@@ -699,7 +712,8 @@ impl ApplicationHandler for ShowcaseWindow {
                     if let Some(physical) = KeyboardConverter::physical_key(code) {
                         let logical = KeyboardConverter::logical_key(&event.logical_key);
                         let pressed = event.state == ElementState::Pressed;
-                        self.runtime.handle_key(KeyEvent::new(physical, logical, pressed));
+                        self.runtime
+                            .handle_key(KeyEvent::new(physical, logical, pressed));
                         if let Some(window) = self.window.as_ref() {
                             window.request_redraw();
                         }
@@ -748,8 +762,11 @@ fn compile(css: &str) -> Stylesheet {
 fn stage_image_asset() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("obscur-kit-showcase-win-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create asset dir");
-    std::fs::write(dir.join(showcase::IMAGE_ASSET_NAME), showcase::image_asset_bytes())
-        .expect("write image asset");
+    std::fs::write(
+        dir.join(showcase::IMAGE_ASSET_NAME),
+        showcase::image_asset_bytes(),
+    )
+    .expect("write image asset");
     dir
 }
 

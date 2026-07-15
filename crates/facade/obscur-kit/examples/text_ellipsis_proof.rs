@@ -79,11 +79,17 @@ fn main() {
          width: 60px; padding: 0; white-space: nowrap; overflow: hidden; }";
 
     // Probe: the ellipsis glyph alone in a wide box → its font glyph index.
-    let (_, probe) = render_block(&css(base, "probe", "text-overflow: clip; width: 200px;"), "\u{2026}");
+    let (_, probe) = render_block(
+        &css(base, "probe", "text-overflow: clip; width: 200px;"),
+        "\u{2026}",
+    );
     let ellipsis_id = probe.last().expect("ellipsis probe has a glyph").id;
 
     // Natural width of the phrase in a WIDE nowrap box: proves it exceeds the box.
-    let (_, natural) = render_block(&css(base, "natural", "text-overflow: clip; width: 400px;"), PHRASE);
+    let (_, natural) = render_block(
+        &css(base, "natural", "text-overflow: clip; width: 400px;"),
+        PHRASE,
+    );
     let natural_width: f32 = natural.iter().map(|g| g.advance).sum();
 
     // A: ellipsis truncation in the narrow box. B: clip control on the same phrase.
@@ -117,7 +123,11 @@ fn verify(ellipsis_id: u32, natural_width: f32, ellipsis: &[Glyph], clip: &[Glyp
     let is_mock = ellipsis_id == ELLIPSIS_CP;
     println!(
         "[probe] ellipsis glyph index = {ellipsis_id}{}",
-        if is_mock { " (== U+2026, reference mock)" } else { " (real font glyph index for …)" }
+        if is_mock {
+            " (== U+2026, reference mock)"
+        } else {
+            " (real font glyph index for …)"
+        }
     );
 
     // The box (60px) really is narrower than the phrase's natural width.
@@ -210,8 +220,13 @@ fn render_block(css: &str, content: &str) -> (tiny_skia::Pixmap, Vec<Glyph>) {
     let frame = RenderFrame::new(snapshot, VIEWPORT);
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
-    (renderer.pixmap().expect("a rasterized frame").clone(), glyphs)
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
+    (
+        renderer.pixmap().expect("a rasterized frame").clone(),
+        glyphs,
+    )
 }
 
 /// The view: a single `.block` element wrapping one text node.
@@ -228,14 +243,29 @@ fn block_view(content: &str) -> View {
 /// Vertically stacks `pixmaps` into one image with thin gray dividers.
 fn stack(pixmaps: &[tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     let gap = 2u32;
-    let width = pixmaps.iter().map(tiny_skia::Pixmap::width).max().unwrap_or(1);
-    let height: u32 = pixmaps.iter().map(|p| p.height() + gap).sum::<u32>().saturating_sub(gap);
+    let width = pixmaps
+        .iter()
+        .map(tiny_skia::Pixmap::width)
+        .max()
+        .unwrap_or(1);
+    let height: u32 = pixmaps
+        .iter()
+        .map(|p| p.height() + gap)
+        .sum::<u32>()
+        .saturating_sub(gap);
     let mut out = tiny_skia::Pixmap::new(width, height.max(1)).expect("combined pixmap");
     out.fill(tiny_skia::Color::from_rgba8(0xd0, 0xcd, 0xc7, 0xff));
     let paint = tiny_skia::PixmapPaint::default();
     let mut y = 0i32;
     for px in pixmaps {
-        out.draw_pixmap(0, y, px.as_ref(), &paint, tiny_skia::Transform::identity(), None);
+        out.draw_pixmap(
+            0,
+            y,
+            px.as_ref(),
+            &paint,
+            tiny_skia::Transform::identity(),
+            None,
+        );
         y += (px.height() + gap) as i32;
     }
     out

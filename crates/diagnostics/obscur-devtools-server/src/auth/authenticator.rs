@@ -30,7 +30,11 @@ impl Authenticator {
     /// [`register_token`](Self::register_token) before any session can connect.
     #[must_use]
     pub fn new() -> Self {
-        Self { tokens: HashMap::new(), exclude_control: false, exclude_inject: false }
+        Self {
+            tokens: HashMap::new(),
+            exclude_control: false,
+            exclude_inject: false,
+        }
     }
 
     /// Creates a production authenticator that strips the `Control` and
@@ -41,7 +45,11 @@ impl Authenticator {
     /// never steer or inject into the runtime.
     #[must_use]
     pub fn production() -> Self {
-        Self { tokens: HashMap::new(), exclude_control: true, exclude_inject: true }
+        Self {
+            tokens: HashMap::new(),
+            exclude_control: true,
+            exclude_inject: true,
+        }
     }
 
     /// Returns a copy of this authenticator that excludes the `Control` scope

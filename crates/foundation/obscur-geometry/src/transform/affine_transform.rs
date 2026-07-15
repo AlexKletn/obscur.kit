@@ -114,8 +114,14 @@ mod tests {
 
     #[test]
     fn scale_and_translate_coeffs() {
-        assert_eq!(AffineTransform::scale(2.0, 3.0).coeffs, [2.0, 0.0, 0.0, 3.0, 0.0, 0.0]);
-        assert_eq!(AffineTransform::translate(5.0, 6.0).coeffs, [1.0, 0.0, 0.0, 1.0, 5.0, 6.0]);
+        assert_eq!(
+            AffineTransform::scale(2.0, 3.0).coeffs,
+            [2.0, 0.0, 0.0, 3.0, 0.0, 0.0]
+        );
+        assert_eq!(
+            AffineTransform::translate(5.0, 6.0).coeffs,
+            [1.0, 0.0, 0.0, 1.0, 5.0, 6.0]
+        );
     }
 
     #[test]

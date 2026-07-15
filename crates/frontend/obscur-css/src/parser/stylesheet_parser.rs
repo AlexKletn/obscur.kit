@@ -1237,10 +1237,7 @@ mod tests {
         let sheet = StylesheetParser::new(&src).parse();
         assert_eq!(sheet.unsupported.len(), 1);
         assert_eq!(sheet.unsupported[0].name(), "@container");
-        assert_eq!(
-            sheet.unsupported[0].kind(),
-            UnsupportedFeatureKind::AtRule
-        );
+        assert_eq!(sheet.unsupported[0].kind(), UnsupportedFeatureKind::AtRule);
         // Reported, but still parsed: the rule is not dropped from the AST.
         assert!(
             sheet

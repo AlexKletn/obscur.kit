@@ -55,7 +55,10 @@ fn main() {
 
     // The View is ordinary code now — just call the generated function.
     let view = showcase_view();
-    println!("[codegen] {} root view node(s) from the build-time generated view", view.root().len());
+    println!(
+        "[codegen] {} root view node(s) from the build-time generated view",
+        view.root().len()
+    );
 
     let sheet = compile_css(stylesheet());
     let asset_dir = stage_image_asset();
@@ -85,7 +88,9 @@ fn main() {
     let frame = RenderFrame::new(snapshot, VIEWPORT);
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     let pixmap = renderer.pixmap().expect("a rasterized frame");
 
     let png = pixmap.encode_png().expect("encode png");
@@ -158,8 +163,11 @@ fn compile_css(css: &str) -> Stylesheet {
 fn stage_image_asset() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("obscur-kit-okui-codegen-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create asset dir");
-    std::fs::write(dir.join(showcase::IMAGE_ASSET_NAME), showcase::image_asset_bytes())
-        .expect("write image asset");
+    std::fs::write(
+        dir.join(showcase::IMAGE_ASSET_NAME),
+        showcase::image_asset_bytes(),
+    )
+    .expect("write image asset");
     dir
 }
 

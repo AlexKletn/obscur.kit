@@ -124,7 +124,10 @@ mod tests {
         };
         let out = r.offset(8.0);
         assert_eq!(out.top_left, 18.0);
-        assert_eq!(out.top_right, 0.0, "a sharp corner stays sharp under +spread");
+        assert_eq!(
+            out.top_right, 0.0,
+            "a sharp corner stays sharp under +spread"
+        );
         assert_eq!(out.bottom_right, 18.0);
     }
 
@@ -148,7 +151,12 @@ mod tests {
         let out = r.normalized(rect(200.0, 40.0));
         let f = 40.0 / 60.0;
         let expected = 30.0 * f;
-        for got in [out.top_left, out.top_right, out.bottom_right, out.bottom_left] {
+        for got in [
+            out.top_left,
+            out.top_right,
+            out.bottom_right,
+            out.bottom_left,
+        ] {
             assert!((got - expected).abs() < 1e-4, "got {got}, want {expected}");
         }
         // None of the scaled radii exceeds the half-extents.

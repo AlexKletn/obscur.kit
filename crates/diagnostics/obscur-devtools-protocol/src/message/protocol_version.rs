@@ -51,7 +51,10 @@ impl VersionRange {
     /// Creates a range covering exactly one version.
     #[must_use]
     pub const fn exact(version: ProtocolVersion) -> Self {
-        Self { min: version, max: version }
+        Self {
+            min: version,
+            max: version,
+        }
     }
 
     /// Returns whether `version` falls within this (inclusive) range.
@@ -69,7 +72,11 @@ impl VersionRange {
     pub fn negotiate(self, client: Self) -> Option<ProtocolVersion> {
         // The highest candidate both sides could speak is the lower of the two
         // maxima; it is valid only when it is at least both minima.
-        let candidate = if self.max <= client.max { self.max } else { client.max };
+        let candidate = if self.max <= client.max {
+            self.max
+        } else {
+            client.max
+        };
         if self.min <= candidate && client.min <= candidate {
             Some(candidate)
         } else {

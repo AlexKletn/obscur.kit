@@ -61,11 +61,7 @@ impl Server {
     /// # Errors
     ///
     /// Propagates I/O errors from the transport.
-    pub fn run<R: BufRead, W: Write>(
-        &mut self,
-        reader: &mut R,
-        writer: &mut W,
-    ) -> io::Result<()> {
+    pub fn run<R: BufRead, W: Write>(&mut self, reader: &mut R, writer: &mut W) -> io::Result<()> {
         while let Some(body) = read_message(reader)? {
             let Ok(message) = parse(&body) else {
                 // A frame we cannot parse and cannot attribute to an id: skip it.
@@ -130,7 +126,9 @@ impl Server {
         let Some(uri) = doc.and_then(|d| d.get("uri")).and_then(JsonValue::as_str) else {
             return Vec::new();
         };
-        let version = doc.and_then(|d| d.get("version")).and_then(JsonValue::as_i64);
+        let version = doc
+            .and_then(|d| d.get("version"))
+            .and_then(JsonValue::as_i64);
         let text = doc
             .and_then(|d| d.get("text"))
             .and_then(JsonValue::as_str)
@@ -149,7 +147,9 @@ impl Server {
             return Vec::new();
         };
         let uri = uri.to_owned();
-        let version = doc.and_then(|d| d.get("version")).and_then(JsonValue::as_i64);
+        let version = doc
+            .and_then(|d| d.get("version"))
+            .and_then(JsonValue::as_i64);
         // Full-text sync: the last content change carries the whole document.
         let text = params
             .and_then(|p| p.get("contentChanges"))
@@ -206,7 +206,9 @@ impl Server {
         };
         let index = LineIndex::new(&text);
         let position = message.get("params").and_then(|p| p.get("position"));
-        let line = position.and_then(|p| p.get("line")).and_then(JsonValue::as_u32);
+        let line = position
+            .and_then(|p| p.get("line"))
+            .and_then(JsonValue::as_u32);
         let character = position
             .and_then(|p| p.get("character"))
             .and_then(JsonValue::as_u32);
@@ -327,7 +329,10 @@ fn notification(method: &str, params: JsonValue) -> JsonValue {
 fn diagnostic_to_json(text: &str, index: &LineIndex, diagnostic: &LspDiagnostic) -> JsonValue {
     JsonValue::object([
         ("range", range_to_json(text, index, diagnostic.range)),
-        ("severity", JsonValue::int(i64::from(diagnostic.severity.code()))),
+        (
+            "severity",
+            JsonValue::int(i64::from(diagnostic.severity.code())),
+        ),
         ("source", JsonValue::string(diagnostic.source)),
         ("message", JsonValue::string(diagnostic.message.to_string())),
     ])
@@ -339,7 +344,10 @@ fn symbol_to_json(text: &str, index: &LineIndex, symbol: &DocumentSymbol) -> Jso
     JsonValue::object([
         ("name", JsonValue::string(symbol.name.to_string())),
         ("detail", JsonValue::string(symbol.kind.label())),
-        ("kind", JsonValue::int(i64::from(lsp_symbol_kind(symbol.kind)))),
+        (
+            "kind",
+            JsonValue::int(i64::from(lsp_symbol_kind(symbol.kind))),
+        ),
         ("range", range.clone()),
         ("selectionRange", range),
         (
@@ -401,12 +409,7 @@ fn analyzer_to_lsp_position(text: &str, index: &LineIndex, position: Position) -
 
 /// Converts an LSP `(line, utf16_char)` position to an analyzer byte-column
 /// [`Position`] via the document's [`LineIndex`].
-fn lsp_to_analyzer_position(
-    text: &str,
-    index: &LineIndex,
-    line: u32,
-    character: u32,
-) -> Position {
+fn lsp_to_analyzer_position(text: &str, index: &LineIndex, line: u32, character: u32) -> Position {
     let line_start = index.position_to_offset(Position::new(line, 0));
     let mut byte = line_start;
     let mut utf16 = 0u32;
@@ -460,12 +463,22 @@ mod tests {
 
     #[test]
     fn initialize_returns_capabilities() {
-        let out = run_server(&["{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"]);
+        let out =
+            run_server(&["{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}"]);
         assert_eq!(out.len(), 1);
-        let caps = out[0].get("result").and_then(|r| r.get("capabilities")).unwrap();
-        assert_eq!(caps.get("textDocumentSync").and_then(JsonValue::as_i64), Some(1));
+        let caps = out[0]
+            .get("result")
+            .and_then(|r| r.get("capabilities"))
+            .unwrap();
+        assert_eq!(
+            caps.get("textDocumentSync").and_then(JsonValue::as_i64),
+            Some(1)
+        );
         assert_eq!(caps.get("hoverProvider"), Some(&JsonValue::Bool(true)));
-        assert_eq!(caps.get("documentSymbolProvider"), Some(&JsonValue::Bool(true)));
+        assert_eq!(
+            caps.get("documentSymbolProvider"),
+            Some(&JsonValue::Bool(true))
+        );
         // The id round-trips exactly.
         assert_eq!(out[0].get("id").and_then(JsonValue::as_i64), Some(1));
     }
@@ -477,10 +490,19 @@ mod tests {
             "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file:///a.okui\",\"version\":1,\"text\":\"<Button>oops\"}}}",
         ]);
         assert_eq!(out.len(), 1);
-        assert_eq!(out[0].get("method").and_then(JsonValue::as_str), Some("textDocument/publishDiagnostics"));
+        assert_eq!(
+            out[0].get("method").and_then(JsonValue::as_str),
+            Some("textDocument/publishDiagnostics")
+        );
         let params = out[0].get("params").unwrap();
-        assert_eq!(params.get("uri").and_then(JsonValue::as_str), Some("file:///a.okui"));
-        let diags = params.get("diagnostics").and_then(JsonValue::as_array).unwrap();
+        assert_eq!(
+            params.get("uri").and_then(JsonValue::as_str),
+            Some("file:///a.okui")
+        );
+        let diags = params
+            .get("diagnostics")
+            .and_then(JsonValue::as_array)
+            .unwrap();
         assert!(!diags.is_empty(), "expected at least one diagnostic");
         // Diagnostics carry a range and a severity code.
         let first = &diags[0];
@@ -496,11 +518,25 @@ mod tests {
         ]);
         assert_eq!(out.len(), 2);
         // First publish (well-formed) has no diagnostics; second (broken) has some.
-        let first = out[0].get("params").and_then(|p| p.get("diagnostics")).and_then(JsonValue::as_array).unwrap();
+        let first = out[0]
+            .get("params")
+            .and_then(|p| p.get("diagnostics"))
+            .and_then(JsonValue::as_array)
+            .unwrap();
         assert!(first.is_empty(), "well-formed document: {first:?}");
-        let second = out[1].get("params").and_then(|p| p.get("diagnostics")).and_then(JsonValue::as_array).unwrap();
+        let second = out[1]
+            .get("params")
+            .and_then(|p| p.get("diagnostics"))
+            .and_then(JsonValue::as_array)
+            .unwrap();
         assert!(!second.is_empty());
-        assert_eq!(out[1].get("params").and_then(|p| p.get("version")).and_then(JsonValue::as_i64), Some(2));
+        assert_eq!(
+            out[1]
+                .get("params")
+                .and_then(|p| p.get("version"))
+                .and_then(JsonValue::as_i64),
+            Some(2)
+        );
     }
 
     #[test]
@@ -512,11 +548,20 @@ mod tests {
         // out[0] is publishDiagnostics; out[1] is the documentSymbol response.
         let result = out[1].get("result").and_then(JsonValue::as_array).unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].get("name").and_then(JsonValue::as_str), Some("Col"));
+        assert_eq!(
+            result[0].get("name").and_then(JsonValue::as_str),
+            Some("Col")
+        );
         assert_eq!(result[0].get("kind").and_then(JsonValue::as_i64), Some(5));
-        let children = result[0].get("children").and_then(JsonValue::as_array).unwrap();
+        let children = result[0]
+            .get("children")
+            .and_then(JsonValue::as_array)
+            .unwrap();
         assert_eq!(children.len(), 1);
-        assert_eq!(children[0].get("name").and_then(JsonValue::as_str), Some("Row"));
+        assert_eq!(
+            children[0].get("name").and_then(JsonValue::as_str),
+            Some("Row")
+        );
     }
 
     #[test]
@@ -527,7 +572,11 @@ mod tests {
             "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file:///a.okui\"},\"position\":{\"line\":0,\"character\":6}}}",
         ]);
         let result = out[1].get("result").unwrap();
-        let value = result.get("contents").and_then(|c| c.get("value")).and_then(JsonValue::as_str).unwrap();
+        let value = result
+            .get("contents")
+            .and_then(|c| c.get("value"))
+            .and_then(JsonValue::as_str)
+            .unwrap();
         assert!(value.contains("Row"), "hover contents: {value}");
         assert!(result.get("range").is_some());
     }
@@ -543,9 +592,14 @@ mod tests {
 
     #[test]
     fn unknown_request_yields_method_not_found() {
-        let out = run_server(&["{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/completion\",\"params\":{}}"]);
+        let out = run_server(&[
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/completion\",\"params\":{}}",
+        ]);
         assert_eq!(
-            out[0].get("error").and_then(|e| e.get("code")).and_then(JsonValue::as_i64),
+            out[0]
+                .get("error")
+                .and_then(|e| e.get("code"))
+                .and_then(JsonValue::as_i64),
             Some(METHOD_NOT_FOUND)
         );
     }
@@ -570,7 +624,11 @@ mod tests {
             "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didClose\",\"params\":{\"textDocument\":{\"uri\":\"file:///a.okui\"}}}",
         ]);
         assert_eq!(out.len(), 2);
-        let cleared = out[1].get("params").and_then(|p| p.get("diagnostics")).and_then(JsonValue::as_array).unwrap();
+        let cleared = out[1]
+            .get("params")
+            .and_then(|p| p.get("diagnostics"))
+            .and_then(JsonValue::as_array)
+            .unwrap();
         assert!(cleared.is_empty());
     }
 

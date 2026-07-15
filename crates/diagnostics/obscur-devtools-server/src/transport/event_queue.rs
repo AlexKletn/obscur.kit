@@ -131,7 +131,10 @@ mod tests {
         // not leak memory because its inspector stalled.
         let queue = EventQueue::new();
         for id in 0..MESSAGE_LIMIT {
-            assert!(queue.push(Topic::Frames, frame(id as u64)), "within the limit");
+            assert!(
+                queue.push(Topic::Frames, frame(id as u64)),
+                "within the limit"
+            );
         }
         assert_eq!(queue.len(), MESSAGE_LIMIT);
 

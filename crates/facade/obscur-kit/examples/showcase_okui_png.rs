@@ -82,7 +82,10 @@ fn main() {
     //    to a typed `Document`. Parser is total: it never panics.
     let parsed = Parser::new().parse(SOURCE);
     let parse_errors = parsed.errors().len();
-    println!("[parse] {} node(s) · {parse_errors} parse error(s)", SOURCE.lines().count());
+    println!(
+        "[parse] {} node(s) · {parse_errors} parse error(s)",
+        SOURCE.lines().count()
+    );
     for error in parsed.errors() {
         println!("  parse: {error:?}");
     }
@@ -139,7 +142,9 @@ fn main() {
     let frame = RenderFrame::new(snapshot, VIEWPORT);
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     let pixmap = renderer.pixmap().expect("a rasterized frame");
 
     let png = pixmap.encode_png().expect("encode png");
@@ -214,8 +219,11 @@ fn compile_css(css: &str) -> Stylesheet {
 fn stage_image_asset() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("obscur-kit-okui-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create asset dir");
-    std::fs::write(dir.join(showcase::IMAGE_ASSET_NAME), showcase::image_asset_bytes())
-        .expect("write image asset");
+    std::fs::write(
+        dir.join(showcase::IMAGE_ASSET_NAME),
+        showcase::image_asset_bytes(),
+    )
+    .expect("write image asset");
     dir
 }
 

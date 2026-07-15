@@ -1,7 +1,7 @@
 //! `Subscription`: an owned token representing one registered subscription.
 
-use obscur_identity::SignalId;
 use crate::state::StateGeneration;
+use obscur_identity::SignalId;
 
 /// Opaque identifier for a subscription within a single
 /// [`SubscriptionScope`](crate::state::SubscriptionScope).
@@ -87,14 +87,18 @@ impl Subscription {
 
 #[cfg(test)]
 mod tests {
-    use obscur_identity::SignalId;
     use super::{Subscription, SubscriptionId};
     use crate::state::StateGeneration;
+    use obscur_identity::SignalId;
 
     #[test]
     fn accessors_round_trip() {
         let source = SignalId::from_raw(9);
-        let sub = Subscription::new(SubscriptionId::from_raw(3), source, StateGeneration::INITIAL);
+        let sub = Subscription::new(
+            SubscriptionId::from_raw(3),
+            source,
+            StateGeneration::INITIAL,
+        );
         assert_eq!(sub.id().raw(), 3);
         assert_eq!(sub.source(), source);
         assert_eq!(sub.observed_generation(), StateGeneration::INITIAL);

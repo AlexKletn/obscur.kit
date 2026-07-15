@@ -85,8 +85,12 @@ fn retab_run(run: &ShapedRun, text: &str, tab_width: f32, pen: &mut f32) -> Shap
             out
         })
         .collect();
-    let retabbed_run =
-        GlyphRun::new(retabbed, source.direction(), source.font_size(), source.source());
+    let retabbed_run = GlyphRun::new(
+        retabbed,
+        source.direction(),
+        source.font_size(),
+        source.source(),
+    );
     ShapedRun::new(run.font(), retabbed_run)
         .with_level(run.level())
         .with_synthesis(run.synth_oblique(), run.synth_bold())

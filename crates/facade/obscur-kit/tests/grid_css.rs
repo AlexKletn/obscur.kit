@@ -85,7 +85,10 @@ fn drive(css: &str, n: usize, width: f32, height: f32) -> (UiRuntime, Vec<NodeId
     let sheet = compile(css);
     let view = grid_view(n);
     let result = rt.render_now(&view, std::slice::from_ref(&sheet));
-    assert!(result.restyled(), "authored grid CSS resolved computed styles");
+    assert!(
+        result.restyled(),
+        "authored grid CSS resolved computed styles"
+    );
     assert!(result.relaid_out(), "the styled tree arranged layout boxes");
     let root = rt.tree().root().expect("root after a frame");
     let container = rt.tree().get(root).unwrap().children().to_vec()[0];
@@ -101,7 +104,11 @@ fn container(rt: &UiRuntime) -> NodeId {
 
 /// The absolute origin `(x, y)` and size `(w, h)` of a node's layout box.
 fn geom(rt: &UiRuntime, node: NodeId) -> (f32, f32, f32, f32) {
-    let b = rt.layout_boxes().get(&node).copied().expect("node has a box");
+    let b = rt
+        .layout_boxes()
+        .get(&node)
+        .copied()
+        .expect("node has a box");
     (b.origin().x, b.origin().y, b.size().width, b.size().height)
 }
 
@@ -125,7 +132,11 @@ fn fixed_and_fr_columns_against_explicit_width() {
         500.0,
         200.0,
     );
-    approx(geom(&rt, container(&rt)).2, 400.0, "container is its authored 400px");
+    approx(
+        geom(&rt, container(&rt)).2,
+        400.0,
+        "container is its authored 400px",
+    );
     let (ax, _, aw, _) = geom(&rt, k[0]);
     let (bx, _, bw, _) = geom(&rt, k[1]);
     let (cx, _, cw, _) = geom(&rt, k[2]);
@@ -193,7 +204,11 @@ fn explicit_fixed_rows_and_container_height() {
         300.0,
         400.0,
     );
-    approx(geom(&rt, container(&rt)).3, 200.0, "container is its authored 200px tall");
+    approx(
+        geom(&rt, container(&rt)).3,
+        200.0,
+        "container is its authored 200px tall",
+    );
     let (_, ay, aw, ah) = geom(&rt, k[0]);
     let (_, by, _, bh) = geom(&rt, k[1]);
     approx(ay, 0.0, "a.y (row0 at top)");
@@ -284,7 +299,11 @@ fn grid_auto_rows_sizes_wrapped_rows() {
     let (_, dy, _, dh) = geom(&rt, k[3]);
     approx(ay, 0.0, "a.y (row0)");
     approx(by, 0.0, "b.y (row0)");
-    approx(cy, 40.0, "c.y (row1 — the 40px implicit auto-row, not the 10px content)");
+    approx(
+        cy,
+        40.0,
+        "c.y (row1 — the 40px implicit auto-row, not the 10px content)",
+    );
     approx(dy, 40.0, "d.y (row1)");
     approx(ch, 40.0, "c.height (fills the 40px implicit row)");
     approx(dh, 40.0, "d.height (fills the 40px implicit row)");
@@ -325,7 +344,11 @@ fn justify_content_center_centers_the_column_block() {
         400.0,
         200.0,
     );
-    approx(geom(&rt, container(&rt)).2, 200.0, "container is its authored 200px");
+    approx(
+        geom(&rt, container(&rt)).2,
+        200.0,
+        "container is its authored 200px",
+    );
     let (ax, _, aw, _) = geom(&rt, k[0]);
     let (bx, _, bw, _) = geom(&rt, k[1]);
     approx(aw, 50.0, "a.width (50px fixed track keeps its size)");
@@ -348,7 +371,11 @@ fn align_content_end_pushes_the_row_block_to_the_bottom() {
         300.0,
         400.0,
     );
-    approx(geom(&rt, container(&rt)).3, 200.0, "container is its authored 200px tall");
+    approx(
+        geom(&rt, container(&rt)).3,
+        200.0,
+        "container is its authored 200px tall",
+    );
     let (_, ay, _, ah) = geom(&rt, k[0]);
     let (_, by, _, _) = geom(&rt, k[1]);
     approx(ah, 50.0, "a.height (50px fixed row keeps its size)");

@@ -52,10 +52,10 @@ use obscur_kit::view::view::{
     CHECKED, CLASS, DISABLED, EVENT_CLICK, ID, View, ViewEventBinding, ViewNode, ViewProperty,
     ViewValue,
 };
+use obscur_kit::widgets::button::Button;
 use obscur_kit::widgets::checkbox::Checkbox;
 use obscur_kit::widgets::input::Input;
 use obscur_kit::widgets::select::Select;
-use obscur_kit::widgets::button::Button;
 
 // ---------------------------------------------------------------------------
 // Command symbols the interactive controls fire. Made `pub` so BOTH drivers
@@ -246,7 +246,10 @@ input:disabled { color: #6b7280; background-color: #191c24; \
 pub fn view(state: &GalleryState) -> View {
     let header = section_bare(vec![
         text("title", "obscur.kit — interactive control gallery"),
-        text("subtitle", "hover · click · focus · type · toggle · open — live pseudo-classes"),
+        text(
+            "subtitle",
+            "hover · click · focus · type · toggle · open — live pseudo-classes",
+        ),
         el(
             "status",
             vec![text_inline(&format!(
@@ -380,7 +383,10 @@ fn select_block(state: &GalleryState) -> Vec<ViewNode> {
             Container::new()
                 .with_children(options)
                 .into_view_node()
-                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("select-list".into()))),
+                .with_prop(ViewProperty::new(
+                    CLASS,
+                    ViewValue::Text("select-list".into()),
+                )),
         );
     }
 

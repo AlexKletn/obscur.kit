@@ -22,7 +22,10 @@ impl HandshakeRequest {
     /// Creates a handshake request.
     #[must_use]
     pub fn new(client_versions: VersionRange, token: impl Into<Box<str>>) -> Self {
-        Self { client_versions, token: token.into() }
+        Self {
+            client_versions,
+            token: token.into(),
+        }
     }
 }
 
@@ -111,7 +114,9 @@ mod tests {
         assert!(!resp.is_accepted());
         assert_eq!(
             resp,
-            HandshakeResponse::Rejected { reason: HandshakeRejection::Unauthorized }
+            HandshakeResponse::Rejected {
+                reason: HandshakeRejection::Unauthorized
+            }
         );
     }
 }

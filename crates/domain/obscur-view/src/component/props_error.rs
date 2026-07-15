@@ -93,6 +93,9 @@ mod tests {
             expected: "bool",
         }
         .to_string();
-        assert!(mismatch.contains("#7") && mismatch.contains("bool"), "{mismatch}");
+        assert!(
+            mismatch.contains("#7") && mismatch.contains("bool"),
+            "{mismatch}"
+        );
     }
 }

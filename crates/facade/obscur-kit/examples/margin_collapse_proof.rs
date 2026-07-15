@@ -29,9 +29,7 @@ use std::path::PathBuf;
 use obscur_geometry::BoxConstraints;
 use obscur_kit::geometry::{Point, Rect, Size};
 use obscur_kit::identity::{ComponentId, NodeId};
-use obscur_kit::layout::algorithm::{
-    FixedChildMeasurer, FlowLayout, LayoutAlgorithm, LayoutChild,
-};
+use obscur_kit::layout::algorithm::{FixedChildMeasurer, FlowLayout, LayoutAlgorithm, LayoutChild};
 use obscur_kit::layout::model::{LayoutBox, LayoutStyle, MarginEdges};
 use obscur_kit::render::frame::{FrameSubmission, RenderFrame};
 use obscur_kit::render::target::{BitmapTarget, RenderTarget};
@@ -135,7 +133,10 @@ fn main() {
     let mut computed: ComputedStyles = HashMap::new();
     computed.insert(root, background(white));
     let mut boxes: LayoutBoxes = HashMap::new();
-    boxes.insert(root, LayoutBox::new(Rect::new(Point::new(0.0, 0.0), VIEWPORT)));
+    boxes.insert(
+        root,
+        LayoutBox::new(Rect::new(Point::new(0.0, 0.0), VIEWPORT)),
+    );
 
     let mut raw = 10u64;
     // For each case: run the REAL FlowLayout, self-assert the y-positions, then
@@ -173,10 +174,7 @@ fn main() {
         let container = element(&mut tree, root, raw);
         raw += 1;
         computed.insert(container, background(grey));
-        boxes.insert(
-            container,
-            LayoutBox::new(Rect::new(origin, out.size())),
-        );
+        boxes.insert(container, LayoutBox::new(Rect::new(origin, out.size())));
 
         // Children absolute = container origin + FlowLayout child box; blue A,
         // green B, spacer (zero height) skipped.

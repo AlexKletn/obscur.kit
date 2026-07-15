@@ -1,7 +1,7 @@
 //! `Image`: a raster/vector image primitive (spec §2.6, §5.16).
 
 use obscur_identity::{ComponentId, InternedSymbol};
-use obscur_view::view::{View, ViewNode, ViewProperty, ViewValue, SRC};
+use obscur_view::view::{SRC, View, ViewNode, ViewProperty, ViewValue};
 
 /// A reference to an image resource drawn into the view tree.
 ///

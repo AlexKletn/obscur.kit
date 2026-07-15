@@ -68,7 +68,8 @@ impl DisplayListBuilder {
     /// `brush`. This is a leaf command; the run's glyphs were shaped once in the
     /// `obscur-text` domain. Returns `&mut Self` for chaining.
     pub fn draw_text(&mut self, origin: Point, run: GlyphRun, brush: Brush) -> &mut Self {
-        self.commands.push(PaintCommand::DrawText { origin, run, brush });
+        self.commands
+            .push(PaintCommand::DrawText { origin, run, brush });
         self
     }
 
@@ -328,7 +329,11 @@ mod tests {
             "hello",
         );
         let mut builder = DisplayListBuilder::new();
-        builder.draw_text(Point::new(3.0, 7.0), run.clone(), Brush::solid(Color::WHITE));
+        builder.draw_text(
+            Point::new(3.0, 7.0),
+            run.clone(),
+            Brush::solid(Color::WHITE),
+        );
 
         assert!(builder.is_balanced());
         let list = builder.build();

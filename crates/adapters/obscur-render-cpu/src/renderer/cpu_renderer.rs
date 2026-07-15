@@ -73,9 +73,6 @@ use std::sync::Arc;
 
 use obscur_capability::SupportLevel;
 use obscur_geometry::{AffineTransform, CornerRadii, Point, Rect, Size};
-use skrifa::instance::{LocationRef, Size as SkrifaSize};
-use skrifa::outline::DrawSettings;
-use skrifa::{FontRef, GlyphId, MetadataProvider};
 use obscur_render::frame::{FrameSubmission, PresentResult};
 use obscur_render::target::RenderTarget;
 use obscur_render::{Renderer, RendererCapabilities, RendererError, RendererId};
@@ -85,6 +82,9 @@ use obscur_scene::command::PaintCommand;
 use obscur_scene::paint::{Brush, Paint, SceneImage};
 use obscur_scene::path::{FillRule, Path, PathSegment};
 use obscur_scene::text::GlyphRun;
+use skrifa::instance::{LocationRef, Size as SkrifaSize};
+use skrifa::outline::DrawSettings;
+use skrifa::{FontRef, GlyphId, MetadataProvider};
 
 use crate::error::CpuRenderError;
 use crate::renderer::glyph_pen::GlyphPathPen;
@@ -145,7 +145,8 @@ impl CpuRenderer {
     /// both and the two backends draw the same faces. The bytes are stored (shared
     /// via [`Arc`]) and a borrowed [`FontRef`] is rebuilt per draw.
     pub fn register_font(&mut self, id: u32, font_bytes: Vec<u8>) {
-        self.fonts.insert(id, Arc::from(font_bytes.into_boxed_slice()));
+        self.fonts
+            .insert(id, Arc::from(font_bytes.into_boxed_slice()));
     }
 
     /// The pixels of the most recently rendered frame, or `None` before the
@@ -355,9 +356,10 @@ impl Renderer for CpuRenderer {
                 // honored here (only its opacity) — a documented approximation.
                 PaintCommand::PushLayer(layer) => {
                     if layer.opacity() < 1.0 {
-                        match targets.last().and_then(|top| {
-                            tiny_skia::Pixmap::new(top.width(), top.height())
-                        }) {
+                        match targets
+                            .last()
+                            .and_then(|top| tiny_skia::Pixmap::new(top.width(), top.height()))
+                        {
                             Some(offscreen) => {
                                 targets.push(offscreen);
                                 layer_stack.push(Some(layer.opacity().clamp(0.0, 1.0)));
@@ -399,15 +401,7 @@ impl Renderer for CpuRenderer {
                         continue;
                     };
                     draw_shadow_approx(
-                        pixmap,
-                        *rect,
-                        *radii,
-                        *color,
-                        *spread,
-                        *offset,
-                        *inset,
-                        clip,
-                        current,
+                        pixmap, *rect, *radii, *color, *spread, *offset, *inset, clip, current,
                     );
                 }
                 PaintCommand::DrawImage {
@@ -421,7 +415,9 @@ impl Renderer for CpuRenderer {
                     let Some(pixmap) = targets.last_mut() else {
                         continue;
                     };
-                    draw_image(pixmap, image, *tile, *region, *repeat_x, *repeat_y, clip, current);
+                    draw_image(
+                        pixmap, image, *tile, *region, *repeat_x, *repeat_y, clip, current,
+                    );
                 }
                 // `backdrop-filter` (frosted glass) is a GPU-class effect: it needs
                 // to blur the already-composited frame in place, which the software
@@ -820,7 +816,11 @@ fn draw_image(
             transform,
         )
     };
-    let effective_clip = if contained { clip } else { region_mask.as_ref() };
+    let effective_clip = if contained {
+        clip
+    } else {
+        region_mask.as_ref()
+    };
 
     // Tile index ranges: `[i0, i1] × [j0, j1]` copies stepping by tile w/h from the
     // tile origin, covering `region`. A non-repeating axis is the single index 0.
@@ -1144,12 +1144,7 @@ mod tests {
 
         let red = Color::rgba(1.0, 0.0, 0.0, 1.0);
         let blue = Color::rgba(0.0, 0.0, 1.0, 1.0);
-        let stops = || {
-            vec![
-                GradientStop::new(0.0, red),
-                GradientStop::new(1.0, blue),
-            ]
-        };
+        let stops = || vec![GradientStop::new(0.0, red), GradientStop::new(1.0, blue)];
         // Both approximate to the first stop (red), per the effect-split policy.
         let radial = Brush::Radial(RadialGradient::new(Point::new(5.0, 5.0), 10.0, stops()));
         assert_eq!(brush_color(&radial), Some(red));
@@ -1294,7 +1289,12 @@ mod tests {
 
     /// As [`glyph_submission`], but tags the run for synthetic styling: `oblique`
     /// shears the glyph, `bold` thickens it.
-    fn glyph_submission_synth(gid: u32, font_id: u32, oblique: bool, bold: bool) -> FrameSubmission {
+    fn glyph_submission_synth(
+        gid: u32,
+        font_id: u32,
+        oblique: bool,
+        bold: bool,
+    ) -> FrameSubmission {
         let run = GlyphRun::new(
             vec![PositionedGlyph::new(gid, 0, 0.0, 100.0, 90.0)],
             100.0,
@@ -1397,7 +1397,11 @@ mod tests {
         assert_eq!(off.alpha(), 0, "first gap is empty");
         // The next dash (x=20) paints again.
         let on2 = pixmap.pixel(20, 4).expect("second on-dash pixel");
-        assert!(on2.alpha() > 200, "second dash painted: alpha={}", on2.alpha());
+        assert!(
+            on2.alpha() > 200,
+            "second dash painted: alpha={}",
+            on2.alpha()
+        );
     }
 
     #[test]
@@ -1443,7 +1447,10 @@ mod tests {
             SupportLevel::Emulated
         );
         // The general `filter` / `backdrop-filter` have no software approximation.
-        assert_eq!(renderer.supports_effect("filter"), SupportLevel::Unavailable);
+        assert_eq!(
+            renderer.supports_effect("filter"),
+            SupportLevel::Unavailable
+        );
         assert_eq!(
             renderer.supports_effect("backdrop-filter"),
             SupportLevel::Unavailable
@@ -1606,7 +1613,10 @@ mod tests {
 
         // Inside the region: red.
         let inside = pixmap.pixel(8, 8).expect("region center");
-        assert!(inside.red() > 200 && inside.blue() < 40, "region interior is red");
+        assert!(
+            inside.red() > 200 && inside.blue() < 40,
+            "region interior is red"
+        );
         // Outside the region (but the tile would cover it): clipped to white.
         let outside = pixmap.pixel(1, 1).expect("outside-region pixel");
         assert!(
@@ -1691,7 +1701,11 @@ mod tests {
         // Half-opacity red over white → pink (red high, green/blue mid).
         let px = pixmap.pixel(8, 8).expect("center pixel exists");
         assert!(px.red() > 200, "red high: {}", px.red());
-        assert!(px.green() > 90 && px.green() < 180, "green mid: {}", px.green());
+        assert!(
+            px.green() > 90 && px.green() < 180,
+            "green mid: {}",
+            px.green()
+        );
     }
 
     #[test]
@@ -1729,7 +1743,11 @@ mod tests {
 
         // Text is no longer a no-op: a pixel inside the first glyph cell is opaque.
         let inside = pixmap.pixel(5, 8).expect("pixel exists");
-        assert!(inside.alpha() > 200, "glyph cell painted: {}", inside.alpha());
+        assert!(
+            inside.alpha() > 200,
+            "glyph cell painted: {}",
+            inside.alpha()
+        );
         // A pixel well outside any cell stays transparent.
         assert_eq!(pixmap.pixel(28, 28).expect("pixel exists").alpha(), 0);
     }
@@ -1791,7 +1809,11 @@ mod tests {
         // alpha (0.5 of opaque black), not fully opaque.
         let inside = pixmap.pixel(9, 9).expect("pixel exists");
         assert!(inside.alpha() > 60, "shadow painted: {}", inside.alpha());
-        assert!(inside.alpha() < 200, "shadow is reduced alpha: {}", inside.alpha());
+        assert!(
+            inside.alpha() < 200,
+            "shadow is reduced alpha: {}",
+            inside.alpha()
+        );
         // A pixel outside the offset rect (top-left corner) is untouched.
         assert_eq!(pixmap.pixel(0, 0).expect("pixel exists").alpha(), 0);
     }
@@ -1870,7 +1892,10 @@ mod tests {
 
         // The shifted rect covers (12,2)-(20,10): (15,5) is opaque red.
         let shifted = pixmap.pixel(15, 5).expect("pixel exists");
-        assert!(shifted.red() > 200 && shifted.alpha() > 200, "translated rect painted");
+        assert!(
+            shifted.red() > 200 && shifted.alpha() > 200,
+            "translated rect painted"
+        );
         // The untransformed position (5,5) is now empty.
         assert_eq!(pixmap.pixel(5, 5).expect("pixel exists").alpha(), 0);
     }
@@ -1916,9 +1941,21 @@ mod tests {
         let pixmap = render_commands(cmds, 16.0);
         let px = pixmap.pixel(8, 8).expect("center pixel");
         // Black at 0.5 over white ⇒ mid-grey (~128), not 0 and not 255.
-        assert!(px.red() > 90 && px.red() < 170, "mid-grey red: {}", px.red());
-        assert!(px.green() > 90 && px.green() < 170, "mid-grey green: {}", px.green());
-        assert!(px.blue() > 90 && px.blue() < 170, "mid-grey blue: {}", px.blue());
+        assert!(
+            px.red() > 90 && px.red() < 170,
+            "mid-grey red: {}",
+            px.red()
+        );
+        assert!(
+            px.green() > 90 && px.green() < 170,
+            "mid-grey green: {}",
+            px.green()
+        );
+        assert!(
+            px.blue() > 90 && px.blue() < 170,
+            "mid-grey blue: {}",
+            px.blue()
+        );
     }
 
     #[test]
@@ -1949,7 +1986,11 @@ mod tests {
             non_overlap.red()
         );
         // And it really is a group blend (grey, not opaque black).
-        assert!(overlap.red() > 90, "group blended to grey, not black: {}", overlap.red());
+        assert!(
+            overlap.red() > 90,
+            "group blended to grey, not black: {}",
+            overlap.red()
+        );
     }
 
     #[test]
@@ -1979,7 +2020,10 @@ mod tests {
             nested_red > single_red,
             "nested 0.5*0.5 (~0.25, red {nested_red}) is lighter than single 0.5 (~0.5, red {single_red})"
         );
-        assert!(nested_red > 160, "nested ~0.25 over white ≈ 191: {nested_red}");
+        assert!(
+            nested_red > 160,
+            "nested ~0.25 over white ≈ 191: {nested_red}"
+        );
     }
 
     #[test]
@@ -1987,7 +2031,13 @@ mod tests {
         use obscur_scene::layer::SceneLayer;
         // A trivial (opacity 1.0) layer must not change any pixel vs. drawing the
         // box directly — the passthrough regression guard.
-        let plain = vec![rect_fill_cmd(4.0, 4.0, 8.0, 8.0, Color::rgba(1.0, 0.0, 0.0, 1.0))];
+        let plain = vec![rect_fill_cmd(
+            4.0,
+            4.0,
+            8.0,
+            8.0,
+            Color::rgba(1.0, 0.0, 0.0, 1.0),
+        )];
         let layered = vec![
             PaintCommand::PushLayer(SceneLayer::new()),
             rect_fill_cmd(4.0, 4.0, 8.0, 8.0, Color::rgba(1.0, 0.0, 0.0, 1.0)),
@@ -2044,7 +2094,11 @@ mod tests {
 
         // A pixel well inside the outline is opaque.
         let inside = pixmap.pixel(50, 65).expect("pixel exists");
-        assert!(inside.alpha() > 200, "glyph interior painted: {}", inside.alpha());
+        assert!(
+            inside.alpha() > 200,
+            "glyph interior painted: {}",
+            inside.alpha()
+        );
 
         // A pixel the OLD box-coverage fallback would have filled but the real
         // outline leaves empty (left of the square's x=10 edge, on the baseline

@@ -27,11 +27,7 @@ pub struct SnapshotPayload {
 impl SnapshotPayload {
     /// Creates a snapshot payload with no detail.
     #[must_use]
-    pub fn new(
-        description: impl Into<Box<str>>,
-        entity_count: u64,
-        entity_ids: Vec<u64>,
-    ) -> Self {
+    pub fn new(description: impl Into<Box<str>>, entity_count: u64, entity_ids: Vec<u64>) -> Self {
         Self {
             description: description.into(),
             entity_count,
@@ -74,7 +70,11 @@ impl SnapshotMessage {
     /// Creates a snapshot message.
     #[must_use]
     pub fn new(command: CommandId, target: Inspectable, payload: SnapshotPayload) -> Self {
-        Self { command, target, payload }
+        Self {
+            command,
+            target,
+            payload,
+        }
     }
 }
 

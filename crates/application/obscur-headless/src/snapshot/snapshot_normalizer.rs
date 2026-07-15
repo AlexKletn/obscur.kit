@@ -213,8 +213,11 @@ mod tests {
         assert!(normalized.image().is_none(), "no backend attached an image");
 
         // Deterministic across captures.
-        let again = SnapshotNormalizer::new()
-            .normalize(&PipelineSnapshot::capture(host.tree(), &inputs, viewport));
+        let again = SnapshotNormalizer::new().normalize(&PipelineSnapshot::capture(
+            host.tree(),
+            &inputs,
+            viewport,
+        ));
         assert_eq!(normalized, again);
     }
 

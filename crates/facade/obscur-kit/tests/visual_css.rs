@@ -23,7 +23,7 @@ use obscur_kit::scene::color::Color;
 use obscur_kit::scene::command::PaintCommand;
 use obscur_kit::scene::paint::Brush;
 use obscur_kit::style::matching::Stylesheet;
-use obscur_kit::view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue, CLASS};
+use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
 /// The fixed viewport every test renders under, so geometry is deterministic.
 const VIEWPORT: f32 = 300.0;
@@ -61,11 +61,7 @@ fn fills_colored(commands: &[PaintCommand], want: Color) -> Vec<Rect> {
                     && (color.g - want.g).abs() < 1e-3
                     && (color.b - want.b).abs() < 1e-3
                     && (color.a - want.a).abs() < 1e-3;
-                if close {
-                    path.bounds()
-                } else {
-                    None
-                }
+                if close { path.bounds() } else { None }
             }
             _ => None,
         })
@@ -121,10 +117,7 @@ fn authored_border_paints_four_red_edge_fills() {
             obscur_kit::geometry::Point::new(x, y + h - 2.0),
             Size::new(w, 2.0),
         ),
-        Rect::new(
-            obscur_kit::geometry::Point::new(x, y),
-            Size::new(2.0, h),
-        ),
+        Rect::new(obscur_kit::geometry::Point::new(x, y), Size::new(2.0, h)),
     ];
     for (got, want) in red.iter().zip(expected) {
         assert!(
@@ -209,7 +202,11 @@ fn authored_border_radius_rounds_background_and_clips_subtree() {
     assert!(curved_red, "the rounded background is a curved path");
 
     let green = fills_colored(commands, Color::rgba(0.0, 1.0, 0.0, 1.0));
-    assert_eq!(green.len(), 1, "the clipped child still paints its background");
+    assert_eq!(
+        green.len(),
+        1,
+        "the clipped child still paints its background"
+    );
 }
 
 // An authored `background: linear-gradient(...)` reaches paint through the real
@@ -257,9 +254,15 @@ fn authored_linear_gradient_background_paints_gradient_fill() {
     // 90deg (to right): the gradient axis runs horizontally across the box at its
     // vertical center.
     let cy = bounds.origin.y + bounds.size.height / 2.0;
-    assert!((g.start().x - bounds.origin.x).abs() < 1e-2, "start at left edge");
+    assert!(
+        (g.start().x - bounds.origin.x).abs() < 1e-2,
+        "start at left edge"
+    );
     assert!((g.start().y - cy).abs() < 1e-2);
-    assert!((g.end().x - bounds.right()).abs() < 1e-2, "end at right edge");
+    assert!(
+        (g.end().x - bounds.right()).abs() < 1e-2,
+        "end at right edge"
+    );
     assert!((g.end().y - cy).abs() < 1e-2);
 }
 
@@ -404,7 +407,10 @@ fn authored_box_shadow_paints_draw_shadow_behind_background() {
         .iter()
         .position(|c| matches!(c, PaintCommand::DrawPath { .. }))
         .expect("the background fill is present");
-    assert!(shadow_idx < fill_idx, "drop shadow paints behind the background");
+    assert!(
+        shadow_idx < fill_idx,
+        "drop shadow paints behind the background"
+    );
 }
 
 // Regression guard: an element with no authored `box-shadow` emits no DrawShadow.
@@ -520,7 +526,10 @@ fn authored_transform_brackets_subtree_with_push_pop_transform() {
 
     // The transform opens first (outermost) and closes last.
     let Some(PaintCommand::PushTransform(affine)) = commands.first() else {
-        panic!("expected a leading PushTransform, got {:?}", commands.first());
+        panic!(
+            "expected a leading PushTransform, got {:?}",
+            commands.first()
+        );
     };
     // A pure translation commutes with the origin wrapping: exactly translate(30, 40).
     assert_eq!(*affine, AffineTransform::translate(30.0, 40.0));
@@ -536,7 +545,10 @@ fn authored_transform_brackets_subtree_with_push_pop_transform() {
         .iter()
         .position(|c| matches!(c, PaintCommand::DrawPath { .. }))
         .expect("the background fill is present");
-    assert!(push_idx < fill_idx && fill_idx < pop_idx, "fill is inside the transform");
+    assert!(
+        push_idx < fill_idx && fill_idx < pop_idx,
+        "fill is inside the transform"
+    );
 }
 
 // Regression guard: an element with no authored `transform` emits no transform
@@ -612,9 +624,7 @@ fn authored_opacity_brackets_group_layer_and_composites_on_cpu() {
         layer.opacity()
     );
     assert!(
-        commands
-            .iter()
-            .any(|c| matches!(c, PaintCommand::PopLayer)),
+        commands.iter().any(|c| matches!(c, PaintCommand::PopLayer)),
         "the group layer is balanced by a PopLayer"
     );
 
@@ -636,7 +646,9 @@ fn authored_opacity_brackets_group_layer_and_composites_on_cpu() {
         .expect("the CPU backend renders the frame");
     let pixmap = renderer.pixmap().expect("a frame was rendered");
     let cx = (bounds.origin.x + bounds.size.width / 2.0).round().max(0.0) as u32;
-    let cy = (bounds.origin.y + bounds.size.height / 2.0).round().max(0.0) as u32;
+    let cy = (bounds.origin.y + bounds.size.height / 2.0)
+        .round()
+        .max(0.0) as u32;
     let px = pixmap.pixel(cx, cy).expect("the box's center pixel");
     // Opaque black at group opacity 0.5 over transparent ⇒ premultiplied alpha
     // ~128: composited, neither fully opaque (per-element would keep 255 for an
@@ -744,13 +756,20 @@ fn border_top_colored_collapsed_box_points_down() {
     let commands = result.snapshot().display_list().commands();
 
     let pts = triangle_pts(commands, Color::rgba(1.0, 0.0, 0.0, 1.0));
-    assert_eq!(pts.len(), 4, "one closed triangle quad (two shared vertices)");
+    assert_eq!(
+        pts.len(),
+        4,
+        "one closed triangle quad (two shared vertices)"
+    );
     let ys = distinct_ys(&pts);
     assert_eq!(ys.len(), 2, "a vertical triangle spans exactly two rows");
     // Apex (the single vertex) sits BELOW the base (the two shared vertices).
     let base_y = ys.iter().copied().fold(f32::INFINITY, f32::min);
     let apex_y = ys.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let base_count = pts.iter().filter(|&&(_, y)| (y - base_y).abs() < 1e-3).count();
+    let base_count = pts
+        .iter()
+        .filter(|&&(_, y)| (y - base_y).abs() < 1e-3)
+        .count();
     assert!(
         base_count >= 2 && apex_y > base_y,
         "border-top → apex below base (▼): base_y={base_y}, apex_y={apex_y}, pts={pts:?}"
@@ -763,7 +782,10 @@ fn border_top_colored_collapsed_box_points_down() {
 fn border_bottom_colored_collapsed_box_points_up() {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
     let sheet = compile(TRI_SHEET);
-    let result = rt.render_now(&host_with_tri("tri tri-bottom"), std::slice::from_ref(&sheet));
+    let result = rt.render_now(
+        &host_with_tri("tri tri-bottom"),
+        std::slice::from_ref(&sheet),
+    );
     let commands = result.snapshot().display_list().commands();
 
     let pts = triangle_pts(commands, Color::rgba(0.0, 1.0, 0.0, 1.0));
@@ -772,7 +794,10 @@ fn border_bottom_colored_collapsed_box_points_up() {
     assert_eq!(ys.len(), 2, "a vertical triangle spans exactly two rows");
     let base_y = ys.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let apex_y = ys.iter().copied().fold(f32::INFINITY, f32::min);
-    let base_count = pts.iter().filter(|&&(_, y)| (y - base_y).abs() < 1e-3).count();
+    let base_count = pts
+        .iter()
+        .filter(|&&(_, y)| (y - base_y).abs() < 1e-3)
+        .count();
     assert!(
         base_count >= 2 && apex_y < base_y,
         "border-bottom → apex above base (▲): base_y={base_y}, apex_y={apex_y}, pts={pts:?}"
@@ -792,10 +817,17 @@ fn border_left_colored_collapsed_box_points_right() {
     let pts = triangle_pts(commands, Color::rgba(0.0, 0.0, 1.0, 1.0));
     assert_eq!(pts.len(), 4, "one closed triangle quad");
     let xs = distinct_xs(&pts);
-    assert_eq!(xs.len(), 2, "a horizontal triangle spans exactly two columns");
+    assert_eq!(
+        xs.len(),
+        2,
+        "a horizontal triangle spans exactly two columns"
+    );
     let base_x = xs.iter().copied().fold(f32::INFINITY, f32::min);
     let apex_x = xs.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let base_count = pts.iter().filter(|&&(x, _)| (x - base_x).abs() < 1e-3).count();
+    let base_count = pts
+        .iter()
+        .filter(|&&(x, _)| (x - base_x).abs() < 1e-3)
+        .count();
     assert!(
         base_count >= 2 && apex_x > base_x,
         "border-left → apex right of base (▶): base_x={base_x}, apex_x={apex_x}, pts={pts:?}"
@@ -808,16 +840,26 @@ fn border_left_colored_collapsed_box_points_right() {
 fn border_right_colored_collapsed_box_points_left() {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
     let sheet = compile(TRI_SHEET);
-    let result = rt.render_now(&host_with_tri("tri tri-right"), std::slice::from_ref(&sheet));
+    let result = rt.render_now(
+        &host_with_tri("tri tri-right"),
+        std::slice::from_ref(&sheet),
+    );
     let commands = result.snapshot().display_list().commands();
 
     let pts = triangle_pts(commands, Color::rgba(1.0, 1.0, 0.0, 1.0));
     assert_eq!(pts.len(), 4, "one closed triangle quad");
     let xs = distinct_xs(&pts);
-    assert_eq!(xs.len(), 2, "a horizontal triangle spans exactly two columns");
+    assert_eq!(
+        xs.len(),
+        2,
+        "a horizontal triangle spans exactly two columns"
+    );
     let base_x = xs.iter().copied().fold(f32::NEG_INFINITY, f32::max);
     let apex_x = xs.iter().copied().fold(f32::INFINITY, f32::min);
-    let base_count = pts.iter().filter(|&&(x, _)| (x - base_x).abs() < 1e-3).count();
+    let base_count = pts
+        .iter()
+        .filter(|&&(x, _)| (x - base_x).abs() < 1e-3)
+        .count();
     assert!(
         base_count >= 2 && apex_x < base_x,
         "border-right → apex left of base (◀): base_x={base_x}, apex_x={apex_x}, pts={pts:?}"
@@ -838,7 +880,12 @@ fn collapsed_content_box_occupies_its_border_widths() {
         .root()
         .and_then(|r| rt.tree().get(r).unwrap().children().first().copied());
     let tri = host.and_then(|h| rt.tree().get(h).unwrap().children().first().copied());
-    let bounds = rt.layout_boxes().get(&tri.unwrap()).copied().unwrap().bounds;
+    let bounds = rt
+        .layout_boxes()
+        .get(&tri.unwrap())
+        .copied()
+        .unwrap()
+        .bounds;
     assert!(
         (bounds.size.width - 10.0).abs() < 1e-3 && (bounds.size.height - 6.0).abs() < 1e-3,
         "collapsed content-box border box = its border widths (10×6), got {:?}",

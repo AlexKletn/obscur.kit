@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 
 use obscur_style::computed::ComputedStyle;
-use obscur_style::property::{layout_keyword, Length, PropertyId, PropertyValue};
+use obscur_style::property::{Length, PropertyId, PropertyValue, layout_keyword};
 use obscur_text::font::FontAttributes;
 use obscur_text::layout::{OverflowWrap, TextAlignment, TextOverflow, WhiteSpace, WordBreak};
 use obscur_text::shaping::TextDirection;
@@ -228,7 +228,12 @@ pub(crate) fn letter_spacing_for(
     font_size: f32,
     root_font_size: f32,
 ) -> f32 {
-    length_px_of(computed, PropertyId::LetterSpacing, font_size, root_font_size)
+    length_px_of(
+        computed,
+        PropertyId::LetterSpacing,
+        font_size,
+        root_font_size,
+    )
 }
 
 /// Resolves a text node's `word-spacing` into extra per-separator spacing, in
@@ -741,7 +746,10 @@ mod tests {
     fn overflow_defaults_to_clip_and_maps_ellipsis() {
         // Absent property and an empty style both resolve to Clip (the CSS initial).
         assert_eq!(overflow_for(None), TextOverflow::Clip);
-        assert_eq!(overflow_for(Some(&ComputedStyle::new())), TextOverflow::Clip);
+        assert_eq!(
+            overflow_for(Some(&ComputedStyle::new())),
+            TextOverflow::Clip
+        );
         // Each reserved handle maps to its variant.
         let clip = styled(
             PropertyId::TextOverflow,
@@ -759,7 +767,10 @@ mod tests {
     fn line_height_resolves_number_length_and_falls_back_on_normal() {
         // Absent property / empty style → None (caller uses the metric line height).
         assert_eq!(line_height_for(None, 16.0, 16.0), None);
-        assert_eq!(line_height_for(Some(&ComputedStyle::new()), 16.0, 16.0), None);
+        assert_eq!(
+            line_height_for(Some(&ComputedStyle::new()), 16.0, 16.0),
+            None
+        );
         // A unitless number is a multiple of the font size: 1.5 × 16 = 24.
         let multiple = styled(PropertyId::LineHeight, PropertyValue::Number(1.5));
         assert_eq!(line_height_for(Some(&multiple), 16.0, 16.0), Some(24.0));
@@ -789,7 +800,10 @@ mod tests {
         );
         assert_eq!(line_height_for(Some(&pct), 16.0, 16.0), Some(24.0));
         // `em` (CSS Values 4 §5.1.1): 2em × font-size 16 = 32.
-        let em = styled(PropertyId::LineHeight, PropertyValue::Length(Length::Em(2.0)));
+        let em = styled(
+            PropertyId::LineHeight,
+            PropertyValue::Length(Length::Em(2.0)),
+        );
         assert_eq!(line_height_for(Some(&em), 16.0, 16.0), Some(32.0));
         // `rem` resolves against the ROOT font-size (10), NOT the node's (16):
         // 1.5rem × 10 = 15.
@@ -805,7 +819,10 @@ mod tests {
         // Absent property and empty style → 0 (no tracking / no word spacing).
         assert_eq!(letter_spacing_for(None, 16.0, 16.0), 0.0);
         assert_eq!(word_spacing_for(None, 16.0, 16.0), 0.0);
-        assert_eq!(letter_spacing_for(Some(&ComputedStyle::new()), 16.0, 16.0), 0.0);
+        assert_eq!(
+            letter_spacing_for(Some(&ComputedStyle::new()), 16.0, 16.0),
+            0.0
+        );
         // `normal` (a keyword) resolves to 0 for both.
         let ls_normal = styled(
             PropertyId::LetterSpacing,
@@ -814,15 +831,27 @@ mod tests {
         assert_eq!(letter_spacing_for(Some(&ls_normal), 16.0, 16.0), 0.0);
         // An absolute pixel length resolves verbatim, including a negative one
         // (byte-identical to the previous `as_px` path).
-        let ls = styled(PropertyId::LetterSpacing, PropertyValue::Length(Length::px(6.0)));
+        let ls = styled(
+            PropertyId::LetterSpacing,
+            PropertyValue::Length(Length::px(6.0)),
+        );
         assert_eq!(letter_spacing_for(Some(&ls), 16.0, 16.0), 6.0);
-        let ws = styled(PropertyId::WordSpacing, PropertyValue::Length(Length::px(12.0)));
+        let ws = styled(
+            PropertyId::WordSpacing,
+            PropertyValue::Length(Length::px(12.0)),
+        );
         assert_eq!(word_spacing_for(Some(&ws), 16.0, 16.0), 12.0);
-        let neg = styled(PropertyId::LetterSpacing, PropertyValue::Length(Length::px(-2.0)));
+        let neg = styled(
+            PropertyId::LetterSpacing,
+            PropertyValue::Length(Length::px(-2.0)),
+        );
         assert_eq!(letter_spacing_for(Some(&neg), 16.0, 16.0), -2.0);
         // A percentage is INVALID for letter-/word-spacing (CSS Text 3 §8.1/§8.2)
         // and is not resolved here → 0.
-        let pct = styled(PropertyId::LetterSpacing, PropertyValue::Length(Length::Percent(50.0)));
+        let pct = styled(
+            PropertyId::LetterSpacing,
+            PropertyValue::Length(Length::Percent(50.0)),
+        );
         assert_eq!(letter_spacing_for(Some(&pct), 16.0, 16.0), 0.0);
     }
 
@@ -858,9 +887,18 @@ mod tests {
         );
         let cases = [
             (layout_keyword::TEXT_TRANSFORM_NONE, TextTransform::None),
-            (layout_keyword::TEXT_TRANSFORM_UPPERCASE, TextTransform::Uppercase),
-            (layout_keyword::TEXT_TRANSFORM_LOWERCASE, TextTransform::Lowercase),
-            (layout_keyword::TEXT_TRANSFORM_CAPITALIZE, TextTransform::Capitalize),
+            (
+                layout_keyword::TEXT_TRANSFORM_UPPERCASE,
+                TextTransform::Uppercase,
+            ),
+            (
+                layout_keyword::TEXT_TRANSFORM_LOWERCASE,
+                TextTransform::Lowercase,
+            ),
+            (
+                layout_keyword::TEXT_TRANSFORM_CAPITALIZE,
+                TextTransform::Capitalize,
+            ),
         ];
         for (symbol, expected) in cases {
             let style = styled(PropertyId::TextTransform, PropertyValue::Keyword(symbol));
@@ -877,7 +915,10 @@ mod tests {
     #[test]
     fn white_space_defaults_normal_and_maps_keywords() {
         assert_eq!(white_space_for(None), WhiteSpace::Normal);
-        assert_eq!(white_space_for(Some(&ComputedStyle::new())), WhiteSpace::Normal);
+        assert_eq!(
+            white_space_for(Some(&ComputedStyle::new())),
+            WhiteSpace::Normal
+        );
         let cases = [
             (layout_keyword::WHITE_SPACE_NORMAL, WhiteSpace::Normal),
             (layout_keyword::WHITE_SPACE_NOWRAP, WhiteSpace::Nowrap),
@@ -915,9 +956,15 @@ mod tests {
         // `pre` preserves runs of spaces, tabs, and segment breaks verbatim.
         let out = collapse_white_space("a    b\n\tc", WhiteSpace::Pre);
         assert_eq!(out, "a    b\n\tc");
-        assert!(matches!(out, Cow::Borrowed(_)), "pre with no CR is zero-copy");
+        assert!(
+            matches!(out, Cow::Borrowed(_)),
+            "pre with no CR is zero-copy"
+        );
         // `\r\n` / `\r` normalise to a single `\n` even under a preserving mode.
-        assert_eq!(collapse_white_space("a\r\nb\rc", WhiteSpace::Pre), "a\nb\nc");
+        assert_eq!(
+            collapse_white_space("a\r\nb\rc", WhiteSpace::Pre),
+            "a\nb\nc"
+        );
     }
 
     #[test]
@@ -940,12 +987,18 @@ mod tests {
         );
         // A unitless number is a multiple of the space advance.
         let number = styled(PropertyId::TabSize, PropertyValue::Number(4.0));
-        assert_eq!(tab_size_for(Some(&number), 16.0, 16.0), TabSize::Factor(4.0));
+        assert_eq!(
+            tab_size_for(Some(&number), 16.0, 16.0),
+            TabSize::Factor(4.0)
+        );
         assert_eq!(TabSize::Factor(4.0).resolve(10.0), 40.0);
         // An absolute length is a fixed tab-stop width (byte-identical to the
         // previous `as_px` path).
         let length = styled(PropertyId::TabSize, PropertyValue::Length(Length::px(24.0)));
-        assert_eq!(tab_size_for(Some(&length), 16.0, 16.0), TabSize::Length(24.0));
+        assert_eq!(
+            tab_size_for(Some(&length), 16.0, 16.0),
+            TabSize::Length(24.0)
+        );
         assert_eq!(TabSize::Length(24.0).resolve(10.0), 24.0);
     }
 

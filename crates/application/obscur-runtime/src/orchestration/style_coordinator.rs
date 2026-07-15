@@ -121,7 +121,7 @@ mod tests {
     use super::*;
     use obscur_style::cascade::ResolvedDeclarations;
     use obscur_style::computed::ComputedValue;
-    use obscur_style::property::{layout_keyword, PropertyId, PropertyValue, StyleColor};
+    use obscur_style::property::{PropertyId, PropertyValue, StyleColor, layout_keyword};
 
     fn node(raw: u64) -> NodeId {
         NodeId::from_raw(raw)

@@ -171,7 +171,6 @@ mod tests {
         fn create_component(&self) -> Box<dyn ErasedComponent> {
             Box::new(StubComponent)
         }
-
     }
 
     fn registration(raw: u64) -> ComponentRegistration {
@@ -228,7 +227,12 @@ mod tests {
         let mut scope = SubscriptionScope::new();
         let mut needs_update = false;
         let signals = SignalGenerations::new();
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut needs_update, &signals);
+        let mut ctx = ComponentContext::new(
+            &mut scope,
+            LifecycleState::Mounted,
+            &mut needs_update,
+            &signals,
+        );
         let view = component
             .render_erased(&mut ctx, &[])
             .expect("the stub props decode from anything");

@@ -144,7 +144,10 @@ mod tests {
     #[test]
     fn at_limit_is_not_exceeded() {
         let b = FrameBudget::unbounded().with_reconcile_nodes(3);
-        assert!(b.check_reconcile(3).is_none(), "exactly at the limit is fine");
+        assert!(
+            b.check_reconcile(3).is_none(),
+            "exactly at the limit is fine"
+        );
     }
 
     #[test]

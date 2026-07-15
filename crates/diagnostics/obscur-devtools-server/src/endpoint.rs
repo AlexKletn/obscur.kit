@@ -179,31 +179,31 @@ impl<S: InspectSource> DevToolsEndpoint<S> {
     /// is issued to a control-excluded endpoint, and
     /// [`ProtocolError::LimitExceeded`] when a subscription would exceed the
     /// limit.
-    pub fn dispatch(
-        &mut self,
-        command: &CommandMessage,
-    ) -> Result<CommandOutcome, ProtocolError> {
+    pub fn dispatch(&mut self, command: &CommandMessage) -> Result<CommandOutcome, ProtocolError> {
         let required = command.required_scope();
         if !self.granted.contains(required) {
             return Err(ProtocolError::Unauthorized { required });
         }
         if command.is_dangerous() {
-            self.audit_log.push(AuditEntry::new(command.id, command.kind.clone()));
+            self.audit_log
+                .push(AuditEntry::new(command.id, command.kind.clone()));
         }
         if self.control_excluded && matches!(command.kind, CommandKind::Control(_)) {
             return Err(ProtocolError::ControlDisabled);
         }
         match &command.kind {
-            CommandKind::Inspect(target) => {
-                Ok(CommandOutcome::Snapshot(self.bridge.inspect(command.id, *target)))
-            }
+            CommandKind::Inspect(target) => Ok(CommandOutcome::Snapshot(
+                self.bridge.inspect(command.id, *target),
+            )),
             CommandKind::Subscribe(topic) => {
                 let id = self.subscriptions.subscribe(*topic)?;
-                Ok(CommandOutcome::Subscribed(Subscription::granted(id, *topic)))
+                Ok(CommandOutcome::Subscribed(Subscription::granted(
+                    id, *topic,
+                )))
             }
-            CommandKind::Unsubscribe(id) => {
-                Ok(CommandOutcome::Unsubscribed(self.subscriptions.unsubscribe(*id)))
-            }
+            CommandKind::Unsubscribe(id) => Ok(CommandOutcome::Unsubscribed(
+                self.subscriptions.unsubscribe(*id),
+            )),
             CommandKind::Control(action) => {
                 self.pending_controls.push(*action);
                 Ok(CommandOutcome::Acknowledged(command.id))
@@ -349,10 +349,7 @@ mod tests {
     #[test]
     fn handshake_rejects_incompatible_version() {
         let mut ep = endpoint_with(ScopeSet::all(), "dev");
-        let request = HandshakeRequest::new(
-            VersionRange::exact(ProtocolVersion::new(2, 0)),
-            "dev",
-        );
+        let request = HandshakeRequest::new(VersionRange::exact(ProtocolVersion::new(2, 0)), "dev");
         assert_eq!(
             ep.handshake(&request),
             HandshakeResponse::rejected(HandshakeRejection::VersionUnsupported)
@@ -374,10 +371,7 @@ mod tests {
     fn read_only_session_can_inspect() {
         let mut ep = endpoint_with(ScopeSet::all_read(), "dev");
         ep.handshake(&handshake("dev"));
-        let cmd = CommandMessage::new(
-            CommandId::new(1),
-            CommandKind::Inspect(Inspectable::Tree),
-        );
+        let cmd = CommandMessage::new(CommandId::new(1), CommandKind::Inspect(Inspectable::Tree));
         let outcome = ep.dispatch(&cmd).expect("read is authorised");
         match outcome {
             CommandOutcome::Snapshot(msg) => {
@@ -398,7 +392,9 @@ mod tests {
         );
         assert_eq!(
             ep.dispatch(&cmd),
-            Err(ProtocolError::Unauthorized { required: PermissionScope::Control })
+            Err(ProtocolError::Unauthorized {
+                required: PermissionScope::Control
+            })
         );
         assert!(ep.audit_log().is_empty());
     }
@@ -421,8 +417,8 @@ mod tests {
     fn control_excluded_endpoint_refuses_control() {
         let mut auth = Authenticator::new();
         auth.register_token("dev", ScopeSet::all());
-        let mut ep = DevToolsEndpoint::new(auth, RuntimeBridge::new(FixedSource))
-            .with_control_excluded();
+        let mut ep =
+            DevToolsEndpoint::new(auth, RuntimeBridge::new(FixedSource)).with_control_excluded();
         ep.enable();
         ep.handshake(&handshake("dev"));
         assert!(ep.control_excluded());
@@ -437,13 +433,12 @@ mod tests {
     fn unconnected_session_is_unauthorized() {
         let mut ep = endpoint_with(ScopeSet::all(), "dev");
         // No handshake performed: granted scopes are empty.
-        let cmd = CommandMessage::new(
-            CommandId::new(5),
-            CommandKind::Inspect(Inspectable::Tree),
-        );
+        let cmd = CommandMessage::new(CommandId::new(5), CommandKind::Inspect(Inspectable::Tree));
         assert_eq!(
             ep.dispatch(&cmd),
-            Err(ProtocolError::Unauthorized { required: PermissionScope::Read })
+            Err(ProtocolError::Unauthorized {
+                required: PermissionScope::Read
+            })
         );
     }
 

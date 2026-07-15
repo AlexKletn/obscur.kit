@@ -75,7 +75,6 @@ impl Input {
     /// Interned name of the `readonly` state property (`NN = 02`, suffix `04`).
     const PROP_READONLY: InternedSymbol = InternedSymbol::from_raw(0x00D1_0204);
 
-
     /// Creates an empty, enabled input with no placeholder that fires `command`
     /// on change.
     #[must_use]
@@ -275,10 +274,7 @@ impl Input {
                 Self::PROP_READONLY,
                 ViewValue::Bool(self.readonly),
             ))
-            .with_prop(ViewProperty::new(
-                Self::PROP_VALUE,
-                ViewValue::from(value),
-            ))
+            .with_prop(ViewProperty::new(Self::PROP_VALUE, ViewValue::from(value)))
             .with_prop(ViewProperty::new(
                 Self::PROP_PLACEHOLDER,
                 ViewValue::from(&*self.placeholder),
@@ -366,7 +362,10 @@ mod tests {
         // SelectAll is non-mutating (selectable), so the buffer applied it: the whole
         // value is now selected while the text is unchanged.
         assert_eq!(i.value(), "seed");
-        assert!(!i.buffer().selection().is_collapsed(), "select-all selected the text");
+        assert!(
+            !i.buffer().selection().is_collapsed(),
+            "select-all selected the text"
+        );
     }
 
     #[test]
@@ -378,8 +377,9 @@ mod tests {
         match &view.root().nodes()[0] {
             ViewNode::Element { props, .. } => {
                 assert!(
-                    props.iter().any(|p| p.name() == ATTR_READONLY
-                        && *p.value() == ViewValue::Bool(true)),
+                    props
+                        .iter()
+                        .any(|p| p.name() == ATTR_READONLY && *p.value() == ViewValue::Bool(true)),
                     "readonly field emits the reserved READONLY attr"
                 );
                 assert!(

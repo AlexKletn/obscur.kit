@@ -279,7 +279,10 @@ mod tests {
             Dimension::Px(30.0),
             Size::new(40.0, 30.0),
         );
-        assert_eq!(rect, Rect::new(Point::new(120.0, 110.0), Size::new(40.0, 30.0)));
+        assert_eq!(
+            rect,
+            Rect::new(Point::new(120.0, 110.0), Size::new(40.0, 30.0))
+        );
     }
 
     #[test]
@@ -298,7 +301,10 @@ mod tests {
             Size::new(20.0, 20.0),
         );
         // 100 + 200 - 0 - 20 = 280 on each axis.
-        assert_eq!(rect, Rect::new(Point::new(280.0, 280.0), Size::new(20.0, 20.0)));
+        assert_eq!(
+            rect,
+            Rect::new(Point::new(280.0, 280.0), Size::new(20.0, 20.0))
+        );
     }
 
     #[test]
@@ -330,7 +336,10 @@ mod tests {
             Dimension::Auto,
             Size::new(40.0, 30.0),
         );
-        assert_eq!(rect, Rect::new(Point::new(100.0, 100.0), Size::new(40.0, 30.0)));
+        assert_eq!(
+            rect,
+            Rect::new(Point::new(100.0, 100.0), Size::new(40.0, 30.0))
+        );
     }
 
     #[test]
@@ -416,7 +425,10 @@ mod tests {
         // = 30 < static 50 → sticks upward to used top 30. dy = 30 - 50 = -20.
         let scrollport = Rect::new(Point::new(0.0, -240.0), port);
         let (_dx, dy) = inset.sticky_offset(static_pos, node, cb, scrollport);
-        assert_eq!(dy, -20.0, "bottom sticky pulls the node up to the sticky line");
+        assert_eq!(
+            dy, -20.0,
+            "bottom sticky pulls the node up to the sticky line"
+        );
     }
 
     /// With no inset on an axis, that axis is not sticky (zero delta).

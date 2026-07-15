@@ -139,10 +139,7 @@ impl FramePlan {
         let mut layout = LayoutInvalidation::new();
         let mut reconcile = false;
         for &op in commit.operations() {
-            reconcile |= matches!(
-                op,
-                UiOperation::ReplaceRoot | UiOperation::Rerender { .. }
-            );
+            reconcile |= matches!(op, UiOperation::ReplaceRoot | UiOperation::Rerender { .. });
             router.route(op.invalidation(), &mut style, &mut layout);
         }
         Self {
@@ -231,9 +228,7 @@ impl FramePlan {
     const fn reason_is_structural(reason: FrameReason) -> bool {
         matches!(
             reason,
-            FrameReason::UiCommit
-                | FrameReason::ExternalRender
-                | FrameReason::ResourceCompletion
+            FrameReason::UiCommit | FrameReason::ExternalRender | FrameReason::ResourceCompletion
         )
     }
 
@@ -324,7 +319,8 @@ mod tests {
     #[test]
     fn a_subtree_rerender_reconciles_too() {
         // A component's output can change its subtree's structure.
-        let plan = FramePlan::for_transaction(&commit(vec![UiOperation::Rerender { node: node() }]));
+        let plan =
+            FramePlan::for_transaction(&commit(vec![UiOperation::Rerender { node: node() }]));
         assert!(plan.reconcile());
         assert!(plan.style());
         assert!(plan.layout());
@@ -364,7 +360,10 @@ mod tests {
             "two commits between frames: the frame owes both"
         );
         // Merging with an idle plan changes nothing.
-        assert_eq!(style_only.merged_with(FramePlan::for_transaction(&commit(Vec::new()))), style_only);
+        assert_eq!(
+            style_only.merged_with(FramePlan::for_transaction(&commit(Vec::new()))),
+            style_only
+        );
     }
 
     #[test]
@@ -393,7 +392,10 @@ mod tests {
         // yet must still restyle and re-compose so the pseudo-state reaches paint.
         let plan = FramePlan::for_frame(FrameReason::Input, false);
         assert!(!plan.reconcile(), "an input frame does not reconcile");
-        assert!(plan.style(), "an input frame restyles (pseudo-state changed)");
+        assert!(
+            plan.style(),
+            "an input frame restyles (pseudo-state changed)"
+        );
         assert!(plan.layout());
         assert!(plan.compose());
         assert!(!plan.is_idle());
@@ -417,7 +419,10 @@ mod tests {
     fn text_edit_over_an_empty_tree_is_still_full() {
         // The first-frame guard wins over the compose-only short-circuit: with no
         // retained tree there is nothing to reuse, so every phase must run.
-        assert_eq!(FramePlan::for_frame(FrameReason::TextEdit, true), FramePlan::full());
+        assert_eq!(
+            FramePlan::for_frame(FrameReason::TextEdit, true),
+            FramePlan::full()
+        );
     }
 
     #[test]

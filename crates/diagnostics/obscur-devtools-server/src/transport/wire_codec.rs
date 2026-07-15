@@ -307,10 +307,20 @@ fn push_injected_event(buf: &mut Vec<u8>, event: InjectedEvent) {
 
 fn read_injected_event(cursor: &mut Cursor<'_>) -> Result<InjectedEvent, WireError> {
     match cursor.read_u8()? {
-        0 => Ok(InjectedEvent::PointerDown { x: cursor.read_i32()?, y: cursor.read_i32()? }),
-        1 => Ok(InjectedEvent::PointerUp { x: cursor.read_i32()?, y: cursor.read_i32()? }),
-        2 => Ok(InjectedEvent::KeyDown { key: cursor.read_u32()? }),
-        3 => Ok(InjectedEvent::KeyUp { key: cursor.read_u32()? }),
+        0 => Ok(InjectedEvent::PointerDown {
+            x: cursor.read_i32()?,
+            y: cursor.read_i32()?,
+        }),
+        1 => Ok(InjectedEvent::PointerUp {
+            x: cursor.read_i32()?,
+            y: cursor.read_i32()?,
+        }),
+        2 => Ok(InjectedEvent::KeyDown {
+            key: cursor.read_u32()?,
+        }),
+        3 => Ok(InjectedEvent::KeyUp {
+            key: cursor.read_u32()?,
+        }),
         other => Err(WireError::UnknownTag(other)),
     }
 }
@@ -348,7 +358,11 @@ fn push_event(buf: &mut Vec<u8>, event: &ProtocolEvent) {
     push_u64(buf, event.subscription.raw());
     push_u8(buf, topic_tag(event.topic));
     match &event.kind {
-        EventKind::Diagnostic { severity, code, message } => {
+        EventKind::Diagnostic {
+            severity,
+            code,
+            message,
+        } => {
             push_u8(buf, 0);
             push_u8(buf, severity_tag(*severity));
             push_str(buf, code);
@@ -372,7 +386,9 @@ fn read_event(cursor: &mut Cursor<'_>) -> Result<ProtocolEvent, WireError> {
             code: cursor.read_str()?.into(),
             message: cursor.read_str()?.into(),
         },
-        1 => EventKind::FrameCommitted { id: cursor.read_u64()? },
+        1 => EventKind::FrameCommitted {
+            id: cursor.read_u64()?,
+        },
         2 => EventKind::FocusChanged,
         3 => EventKind::LifecycleChanged,
         other => return Err(WireError::UnknownTag(other)),
@@ -390,7 +406,11 @@ fn read_subscription(cursor: &mut Cursor<'_>) -> Result<Subscription, WireError>
     let id = SubscriptionId::new(cursor.read_u64()?);
     let topic = read_topic(cursor)?;
     let granted = cursor.read_u8()? != 0;
-    Ok(if granted { Subscription::granted(id, topic) } else { Subscription::denied(id, topic) })
+    Ok(if granted {
+        Subscription::granted(id, topic)
+    } else {
+        Subscription::denied(id, topic)
+    })
 }
 
 // --- ProtocolError ---------------------------------------------------------
@@ -415,7 +435,9 @@ fn push_protocol_error(buf: &mut Vec<u8>, error: &ProtocolError) {
 fn read_protocol_error(cursor: &mut Cursor<'_>) -> Result<ProtocolError, WireError> {
     match cursor.read_u8()? {
         0 => Ok(ProtocolError::VersionUnsupported),
-        1 => Ok(ProtocolError::Unauthorized { required: read_scope(cursor)? }),
+        1 => Ok(ProtocolError::Unauthorized {
+            required: read_scope(cursor)?,
+        }),
         2 => Ok(ProtocolError::LimitExceeded {
             limit: usize::try_from(cursor.read_u64()?).unwrap_or(usize::MAX),
         }),
@@ -626,7 +648,10 @@ impl<'a> Cursor<'a> {
 
     fn take(&mut self, n: usize) -> Result<&'a [u8], WireError> {
         let end = self.pos.checked_add(n).ok_or(WireError::UnexpectedEof)?;
-        let slice = self.data.get(self.pos..end).ok_or(WireError::UnexpectedEof)?;
+        let slice = self
+            .data
+            .get(self.pos..end)
+            .ok_or(WireError::UnexpectedEof)?;
         self.pos = end;
         Ok(slice)
     }
@@ -722,10 +747,7 @@ mod tests {
                     message: "slow".into(),
                 },
             )),
-            ClientBound::Subscription(Subscription::granted(
-                SubscriptionId::new(1),
-                Topic::Focus,
-            )),
+            ClientBound::Subscription(Subscription::granted(SubscriptionId::new(1), Topic::Focus)),
             ClientBound::Acknowledged(CommandId::new(12)),
             ClientBound::Error(ProtocolError::Unauthorized {
                 required: PermissionScope::Control,
@@ -747,10 +769,8 @@ mod tests {
                     set = set.with(scope);
                 }
             }
-            let response = ClientBound::Handshake(HandshakeResponse::accepted(
-                ProtocolVersion::CURRENT,
-                set,
-            ));
+            let response =
+                ClientBound::Handshake(HandshakeResponse::accepted(ProtocolVersion::CURRENT, set));
             let bytes = WireCodec::encode_client_bound(&response);
             assert_eq!(WireCodec::decode_client_bound(&bytes), Ok(response));
         }
@@ -771,11 +791,17 @@ mod tests {
 
     #[test]
     fn unknown_tag_is_rejected() {
-        assert_eq!(WireCodec::decode_server_bound(&[9]), Err(WireError::UnknownTag(9)));
+        assert_eq!(
+            WireCodec::decode_server_bound(&[9]),
+            Err(WireError::UnknownTag(9))
+        );
     }
 
     #[test]
     fn wire_error_maps_to_malformed_message() {
-        assert_eq!(ProtocolError::from(WireError::UnexpectedEof), ProtocolError::MalformedMessage);
+        assert_eq!(
+            ProtocolError::from(WireError::UnexpectedEof),
+            ProtocolError::MalformedMessage
+        );
     }
 }

@@ -39,8 +39,8 @@ use obscur_kit::text::font::{FontAttributes, FontFamily, FontId, GenericFamily};
 use obscur_kit::text_harfrust::{FontRegistry, HarfrustShaper};
 use obscur_kit::text_unicode::UnicodeTextItemizer;
 use obscur_kit::view::view::{
-    View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue, CLASS, EVENT_INPUT,
-    TYPE,
+    CLASS, EVENT_INPUT, TYPE, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
+    ViewValue,
 };
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -82,7 +82,10 @@ fn main() {
     let _ = runtime.render_now(&field_view(""), sheets);
     // Focus the field by pressing inside it (near its top-left content).
     runtime.handle_pointer(mouse(PointerEventKind::Down, 40.0, 40.0));
-    assert!(runtime.focused().is_some(), "the press focused the textarea");
+    assert!(
+        runtime.focused().is_some(),
+        "the press focused the textarea"
+    );
 
     // Type the value through the REAL key path: printable chars as character keys,
     // each `\n` as an Enter press (a textarea inserts a newline; an input would not).
@@ -102,13 +105,25 @@ fn main() {
 
     // Render the multi-line frame (measured from the session), holding the caret at
     // the end of "line three" (line 3, 0-based index 2).
-    let snapshot = runtime.render_now(&field_view(""), sheets).snapshot().clone();
+    let snapshot = runtime
+        .render_now(&field_view(""), sheets)
+        .snapshot()
+        .clone();
     let text_node = text_leaf(&runtime);
-    let text_origin = runtime.layout_boxes().get(&text_node).expect("text box").bounds.origin;
+    let text_origin = runtime
+        .layout_boxes()
+        .get(&text_node)
+        .expect("text box")
+        .bounds
+        .origin;
 
     // One DrawText run per wrapped line: collect them top-to-bottom.
     let mut lines = text_runs(&snapshot);
-    lines.sort_by(|a, b| a.0.y.partial_cmp(&b.0.y).unwrap_or(std::cmp::Ordering::Equal));
+    lines.sort_by(|a, b| {
+        a.0.y
+            .partial_cmp(&b.0.y)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let line_count = lines.len();
     println!("[layout] painted {line_count} wrapped line(s):");
     for (i, (origin, width)) in lines.iter().enumerate() {
@@ -221,12 +236,16 @@ fn text_runs(snapshot: &SceneSnapshot) -> Vec<(Point, f32)> {
 /// (`line-height`), so it is distinguished from the field's 1px-wide, full-height
 /// border edges (which are also width-1 fills).
 fn caret_rect_of(snapshot: &SceneSnapshot) -> Option<obscur_kit::geometry::Rect> {
-    snapshot.display_list().commands().iter().find_map(|c| match c {
-        PaintCommand::DrawPath { path, .. } => path.bounds().filter(|r| {
-            (r.size.width - 1.0).abs() < 1e-3 && (r.size.height - LINE_HEIGHT).abs() < 1.0
-        }),
-        _ => None,
-    })
+    snapshot
+        .display_list()
+        .commands()
+        .iter()
+        .find_map(|c| match c {
+            PaintCommand::DrawPath { path, .. } => path.bounds().filter(|r| {
+                (r.size.width - 1.0).abs() < 1e-3 && (r.size.height - LINE_HEIGHT).abs() < 1.0
+            }),
+            _ => None,
+        })
 }
 
 /// Boots a runtime + CPU renderer with the text stack wired (best-effort font).
@@ -245,7 +264,9 @@ fn rasterize(renderer: &mut CpuRenderer, snapshot: &SceneSnapshot) -> tiny_skia:
     let frame = RenderFrame::new(snapshot.clone(), VIEWPORT);
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
@@ -270,7 +291,12 @@ fn named_press(named: NamedKey) -> KeyEvent {
 }
 
 fn mouse(kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
-    PointerEvent::new(PointerId::MOUSE, PointerDevice::Mouse, kind, Point::new(x, y))
+    PointerEvent::new(
+        PointerId::MOUSE,
+        PointerDevice::Mouse,
+        kind,
+        Point::new(x, y),
+    )
 }
 
 /// The workspace-relative output path `target/<name>`.

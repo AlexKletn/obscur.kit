@@ -120,7 +120,10 @@ pub fn view(active_theme: usize) -> View {
 /// The sticky top bar: a `KIT` brand mark then the row of eight theme tabs, the
 /// `active` one brightened with a 2px underline.
 fn switcher(active: usize) -> ViewNode {
-    let brand = el("kit-brand", vec![el("kit-logo", vec![]), text("kit-brand-name", "KIT")]);
+    let brand = el(
+        "kit-brand",
+        vec![el("kit-logo", vec![]), text("kit-brand-name", "KIT")],
+    );
     let tabs: Vec<ViewNode> = THEME_NAMES
         .iter()
         .enumerate()
@@ -234,7 +237,11 @@ fn selection_card() -> ViewNode {
         "sel-col wide-gap",
         vec![toggle_row(true, "On"), toggle_row(false, "Off")],
     );
-    card("col", "SELECTION", vec![el("sel-cols", vec![checks, radios, toggles])])
+    card(
+        "col",
+        "SELECTION",
+        vec![el("sel-cols", vec![checks, radios, toggles])],
+    )
 }
 
 fn check_row(boxclass: &str, inner: Vec<ViewNode>, label: &str) -> ViewNode {
@@ -246,7 +253,11 @@ fn check_row(boxclass: &str, inner: Vec<ViewNode>, label: &str) -> ViewNode {
 
 fn radio_row(on: bool, label: &str) -> ViewNode {
     let ring = if on { "radio-on" } else { "radio-off" };
-    let inner = if on { vec![el("radio-dot", vec![])] } else { vec![] };
+    let inner = if on {
+        vec![el("radio-dot", vec![])]
+    } else {
+        vec![]
+    };
     el("sel-item", vec![el(ring, inner), text("sel-text", label)])
 }
 
@@ -282,7 +293,11 @@ fn fields_card() -> ViewNode {
             text("field-error-text", "Enter a valid address"),
         ],
     );
-    card("col", "TEXT FIELDS", vec![el("field-col", vec![filled, outlined, error])])
+    card(
+        "col",
+        "TEXT FIELDS",
+        vec![el("field-col", vec![filled, outlined, error])],
+    )
 }
 
 fn menu_card() -> ViewNode {
@@ -304,7 +319,10 @@ fn menu_card() -> ViewNode {
     let chips = el(
         "chips-row",
         vec![
-            el("chip chip-filled", vec![text("chip-check", "✓"), text("chip-text", "Design")]),
+            el(
+                "chip chip-filled",
+                vec![text("chip-check", "✓"), text("chip-text", "Design")],
+            ),
             el("chip chip-outlined", vec![text("chip-text", "Research")]),
             el("chip chip-outlined", vec![text("chip-text", "Ops")]),
         ],
@@ -321,7 +339,10 @@ fn cardlist_card() -> ViewNode {
             text("mini-sub", "Updated 2 days ago · 14 pages"),
             el(
                 "mini-actions",
-                vec![btn("btn-filled btn-sm", "Open"), btn("btn-text btn-sm", "Share")],
+                vec![
+                    btn("btn-filled btn-sm", "Open"),
+                    btn("btn-text btn-sm", "Share"),
+                ],
             ),
         ],
     );
@@ -340,8 +361,14 @@ fn person(avatar_class: &str, initials: &str, name: &str, email: &str) -> ViewNo
     el(
         "person",
         vec![
-            el(&format!("avatar {avatar_class}"), vec![text("avatar-text", initials)]),
-            el("person-meta", vec![text("person-name", name), text("person-email", email)]),
+            el(
+                &format!("avatar {avatar_class}"),
+                vec![text("avatar-text", initials)],
+            ),
+            el(
+                "person-meta",
+                vec![text("person-name", name), text("person-email", email)],
+            ),
             text("person-menu", "⋮"),
         ],
     )
@@ -378,7 +405,14 @@ fn navigation_card() -> ViewNode {
 }
 
 fn nav_tab(label: &str, active: bool) -> ViewNode {
-    let mut kids = vec![text(if active { "nav-tab-label active" } else { "nav-tab-label" }, label)];
+    let mut kids = vec![text(
+        if active {
+            "nav-tab-label active"
+        } else {
+            "nav-tab-label"
+        },
+        label,
+    )];
     if active {
         kids.push(el("nav-tab-underline", vec![]));
     }
@@ -387,7 +421,11 @@ fn nav_tab(label: &str, active: bool) -> ViewNode {
 
 fn nav_item(active: bool, dot: &str, label: &str) -> ViewNode {
     el(
-        if active { "nav-item active" } else { "nav-item" },
+        if active {
+            "nav-item active"
+        } else {
+            "nav-item"
+        },
         vec![el(dot, vec![]), text("nav-item-text", label)],
     )
 }
@@ -446,7 +484,11 @@ fn sliders_card() -> ViewNode {
         "spinner-row",
         vec![el("spinner", vec![]), text("spinner-text", "Loading…")],
     );
-    card("col", "SLIDERS · PROGRESS", vec![head, slider, progress_label, progress, spinner])
+    card(
+        "col",
+        "SLIDERS · PROGRESS",
+        vec![head, slider, progress_label, progress, spinner],
+    )
 }
 
 fn table_card() -> ViewNode {
@@ -488,7 +530,10 @@ fn feedback_card() -> ViewNode {
         vec![
             btn("btn-filled btn-dialog", "Open dialog"),
             btn("btn-outlined btn-wide", "Show snackbar"),
-            el("chip chip-tonal chip-wide", vec![text("chip-text", "Hover for tooltip")]),
+            el(
+                "chip chip-tonal chip-wide",
+                vec![text("chip-text", "Hover for tooltip")],
+            ),
         ],
     );
     card("full feedback-c", "FEEDBACK · OVERLAYS", vec![row])

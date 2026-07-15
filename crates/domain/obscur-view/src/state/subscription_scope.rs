@@ -1,8 +1,8 @@
 //! `SubscriptionScope`: owns subscriptions and releases them on drop.
 
-use obscur_identity::SignalId;
 use crate::state::state_generation::StateGeneration;
 use crate::state::subscription::{Subscription, SubscriptionId};
+use obscur_identity::SignalId;
 
 /// Owns a group of [`Subscription`]s and guarantees they are released together.
 ///
@@ -104,9 +104,9 @@ impl Drop for SubscriptionScope {
 
 #[cfg(test)]
 mod tests {
-    use obscur_identity::SignalId;
     use super::SubscriptionScope;
     use crate::state::StateGeneration;
+    use obscur_identity::SignalId;
 
     #[test]
     fn new_scope_is_empty() {

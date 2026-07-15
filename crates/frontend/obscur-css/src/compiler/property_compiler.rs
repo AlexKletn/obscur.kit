@@ -25,10 +25,11 @@ use obscur_identity::InternedSymbol;
 use obscur_scene::color::convert;
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{
-    layout_keyword, BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize,
-    BoxShadow, ConicGradient, Corner, CustomProperty, FilterOp, GradientStop, GridAreaTemplate,
-    GridLineValue, GridTrack, GridTrackList, Length, LinearGradient, ObjectFit, PropertyId,
-    PropertyValue, RadialGradient, RadialShape, RadialSize, StyleColor, Transform, TransformOrigin,
+    BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow,
+    ConicGradient, Corner, CustomProperty, FilterOp, GradientStop, GridAreaTemplate, GridLineValue,
+    GridTrack, GridTrackList, Length, LinearGradient, ObjectFit, PropertyId, PropertyValue,
+    RadialGradient, RadialShape, RadialSize, StyleColor, Transform, TransformOrigin,
+    layout_keyword,
 };
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
@@ -153,19 +154,42 @@ impl PropertyCompiler {
             return expand_background(decl, specificity, origin, source_order, selector, interner);
         }
         if decl.name.eq_ignore_ascii_case("border-color") {
-            return expand_border_color(decl, specificity, origin, source_order, selector, interner);
+            return expand_border_color(
+                decl,
+                specificity,
+                origin,
+                source_order,
+                selector,
+                interner,
+            );
         }
         if decl.name.eq_ignore_ascii_case("border-style") {
             return expand_border_style(decl, specificity, origin, source_order, selector);
         }
         if decl.name.eq_ignore_ascii_case("border") {
-            return expand_border(decl, BORDER_SIDES, specificity, origin, source_order, selector, interner);
+            return expand_border(
+                decl,
+                BORDER_SIDES,
+                specificity,
+                origin,
+                source_order,
+                selector,
+                interner,
+            );
         }
         if decl.name.eq_ignore_ascii_case("outline") {
             return expand_outline(decl, specificity, origin, source_order, selector, interner);
         }
         if let Some(side) = border_side_shorthand(&decl.name) {
-            return expand_border(decl, side, specificity, origin, source_order, selector, interner);
+            return expand_border(
+                decl,
+                side,
+                specificity,
+                origin,
+                source_order,
+                selector,
+                interner,
+            );
         }
         if let Some((start, end)) = grid_line_shorthand_sides(&decl.name) {
             return expand_grid_line_shorthand(
@@ -184,8 +208,8 @@ impl PropertyCompiler {
         // The two-longhand shorthands: `place-*` (`<align> <justify>`) and the
         // logical box-model pairs (`<start> <end>`). Different families, identical
         // shape — see `expand_pair_shorthand`.
-        if let Some((first, second)) = place_shorthand_sides(&decl.name)
-            .or_else(|| logical_pair_shorthand_sides(&decl.name))
+        if let Some((first, second)) =
+            place_shorthand_sides(&decl.name).or_else(|| logical_pair_shorthand_sides(&decl.name))
         {
             return expand_pair_shorthand(
                 decl,
@@ -272,11 +296,9 @@ fn expand_box_shorthand(
     interner: &mut CssSymbolInterner,
 ) -> Vec<CompiledDeclaration> {
     let unsupported = || {
-        vec![CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
-            value_unsupported_kind(&decl.value),
-            &*decl.name,
-            decl.span,
-        ))]
+        vec![CompiledDeclaration::Unsupported(
+            UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
+        )]
     };
     let mut components = Vec::new();
     for value in &decl.value {
@@ -385,7 +407,10 @@ struct BorderComponents {
 /// none of the three, or a second component of a category already seen, makes the
 /// whole shorthand unparseable ([`None`]). An all-absent (empty) value is [`Some`]
 /// with every field [`None`]; the caller reports that as unsupported.
-fn classify_border(values: &[ParsedValue], interner: &mut CssSymbolInterner) -> Option<BorderComponents> {
+fn classify_border(
+    values: &[ParsedValue],
+    interner: &mut CssSymbolInterner,
+) -> Option<BorderComponents> {
     let mut out = BorderComponents {
         width: None,
         style: None,
@@ -473,11 +498,9 @@ fn expand_border(
     interner: &mut CssSymbolInterner,
 ) -> Vec<CompiledDeclaration> {
     let unsupported = || {
-        vec![CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
-            value_unsupported_kind(&decl.value),
-            &*decl.name,
-            decl.span,
-        ))]
+        vec![CompiledDeclaration::Unsupported(
+            UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
+        )]
     };
     let Some(components) = classify_border(&decl.value, interner) else {
         return unsupported();
@@ -534,11 +557,9 @@ fn expand_outline(
     interner: &mut CssSymbolInterner,
 ) -> Vec<CompiledDeclaration> {
     let unsupported = || {
-        vec![CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
-            value_unsupported_kind(&decl.value),
-            &*decl.name,
-            decl.span,
-        ))]
+        vec![CompiledDeclaration::Unsupported(
+            UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
+        )]
     };
     let Some(components) = classify_border(&decl.value, interner) else {
         return unsupported();
@@ -599,7 +620,15 @@ fn expand_border_color(
             None => return border_side_unsupported(decl),
         }
     }
-    emit_four(decl, ids, &components, specificity, origin, source_order, selector)
+    emit_four(
+        decl,
+        ids,
+        &components,
+        specificity,
+        origin,
+        source_order,
+        selector,
+    )
 }
 
 /// Expands a `border-style` shorthand into the four `border-*-style` longhands,
@@ -635,17 +664,23 @@ fn expand_border_style(
             _ => return border_side_unsupported(decl),
         }
     }
-    emit_four(decl, ids, &components, specificity, origin, source_order, selector)
+    emit_four(
+        decl,
+        ids,
+        &components,
+        specificity,
+        origin,
+        source_order,
+        selector,
+    )
 }
 
 /// The single unsupported-feature fallback for a malformed `border-color` /
 /// `border-style` value.
 fn border_side_unsupported(decl: &ParsedDeclaration) -> Vec<CompiledDeclaration> {
-    vec![CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
-        value_unsupported_kind(&decl.value),
-        &*decl.name,
-        decl.span,
-    ))]
+    vec![CompiledDeclaration::Unsupported(
+        UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
+    )]
 }
 
 /// Fans 1-4 pre-lowered `components` out to the four `ids` (top/right/bottom/left)
@@ -769,11 +804,9 @@ fn expand_pair_shorthand(
     interner: &mut CssSymbolInterner,
 ) -> Vec<CompiledDeclaration> {
     let unsupported = || {
-        vec![CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
-            value_unsupported_kind(&decl.value),
-            &*decl.name,
-            decl.span,
-        ))]
+        vec![CompiledDeclaration::Unsupported(
+            UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
+        )]
     };
     // The two sides' single-component value slices (align first, then justify).
     let (align_values, justify_values): (&[ParsedValue], &[ParsedValue]) = match &*decl.value {
@@ -841,15 +874,15 @@ fn expand_grid_line_shorthand(
     selector: Option<SelectorId>,
 ) -> Vec<CompiledDeclaration> {
     let unsupported = || {
-        vec![CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
-            value_unsupported_kind(&decl.value),
-            &*decl.name,
-            decl.span,
-        ))]
+        vec![CompiledDeclaration::Unsupported(
+            UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
+        )]
     };
     // A `/` separates the start edge from the end edge; more than one `/` is not a
     // valid two-value placement.
-    let mut sides = decl.value.split(|v| matches!(v, ParsedValue::Delimiter('/')));
+    let mut sides = decl
+        .value
+        .split(|v| matches!(v, ParsedValue::Delimiter('/')));
     let Some(start_group) = sides.next() else {
         return unsupported();
     };
@@ -916,11 +949,9 @@ fn expand_grid_area_shorthand(
     selector: Option<SelectorId>,
 ) -> Vec<CompiledDeclaration> {
     let unsupported = || {
-        vec![CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
-            value_unsupported_kind(&decl.value),
-            &*decl.name,
-            decl.span,
-        ))]
+        vec![CompiledDeclaration::Unsupported(
+            UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
+        )]
     };
     let important = if decl.important {
         ImportantFlag::Important
@@ -948,7 +979,10 @@ fn expand_grid_area_shorthand(
         ))];
     }
     let mut edges = Vec::new();
-    for group in decl.value.split(|v| matches!(v, ParsedValue::Delimiter('/'))) {
+    for group in decl
+        .value
+        .split(|v| matches!(v, ParsedValue::Delimiter('/')))
+    {
         match grid_line_edge(group) {
             Some(edge) => edges.push(edge),
             None => return unsupported(),
@@ -959,7 +993,12 @@ fn expand_grid_area_shorthand(
     // clone the reused edges.
     let [row_start, column_start, row_end, column_end] = match edges.as_slice() {
         [a] => [a.clone(), a.clone(), a.clone(), a.clone()],
-        [a, b] => [a.clone(), b.clone(), GridLineValue::Auto, GridLineValue::Auto],
+        [a, b] => [
+            a.clone(),
+            b.clone(),
+            GridLineValue::Auto,
+            GridLineValue::Auto,
+        ],
         [a, b, c] => [a.clone(), b.clone(), c.clone(), GridLineValue::Auto],
         [a, b, c, d] => [a.clone(), b.clone(), c.clone(), d.clone()],
         _ => return unsupported(),
@@ -998,8 +1037,7 @@ fn grid_line_edge(group: &[ParsedValue]) -> Option<GridLineValue> {
         // line, resolved against the container's named lines in the runtime. `span`
         // alone is not a valid edge, so exclude it (a bare `span` is not a line).
         [ParsedValue::Keyword(keyword)]
-            if css_wide_keyword(keyword).is_none()
-                && !keyword.eq_ignore_ascii_case("span") =>
+            if css_wide_keyword(keyword).is_none() && !keyword.eq_ignore_ascii_case("span") =>
         {
             Some(GridLineValue::Named((**keyword).into()))
         }
@@ -1728,7 +1766,10 @@ fn lower_grid_auto_tracks(values: &[ParsedValue]) -> Option<PropertyValue> {
         return None;
     }
     // `auto-fill` / `auto-fit` is only valid on `grid-template-*`; reject it here.
-    if tracks.iter().any(|t| matches!(t, GridTrack::AutoRepeat { .. })) {
+    if tracks
+        .iter()
+        .any(|t| matches!(t, GridTrack::AutoRepeat { .. }))
+    {
         return None;
     }
     Some(PropertyValue::grid_tracks(tracks))
@@ -2440,11 +2481,9 @@ fn expand_background(
     {
         return standard(PropertyId::BackgroundColor, PropertyValue::Color(color));
     }
-    vec![CompiledDeclaration::Unsupported(UnsupportedCssFeature::new(
-        value_unsupported_kind(&decl.value),
-        &*decl.name,
-        decl.span,
-    ))]
+    vec![CompiledDeclaration::Unsupported(
+        UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
+    )]
 }
 
 /// Lowers a `box-shadow` value into a [`PropertyValue::BoxShadow`] list (spec
@@ -2526,7 +2565,9 @@ fn lower_one_shadow(layer: &[ParsedValue]) -> Option<BoxShadow> {
         [x, y, b, s] => (*x, *y, *b, *s),
         _ => return None,
     };
-    Some(BoxShadow::new(offset_x, offset_y, blur, spread, color, inset))
+    Some(BoxShadow::new(
+        offset_x, offset_y, blur, spread, color, inset,
+    ))
 }
 
 /// Lowers one `box-shadow` length component: a `<length>` (`px`, `em` / `rem`,
@@ -2857,18 +2898,26 @@ fn lower_transform(values: &[ParsedValue]) -> Option<PropertyValue> {
 #[allow(clippy::many_single_char_names)]
 fn lower_transform_function(name: &str, args: &[ParsedValue]) -> Option<AffineTransform> {
     // The comma-separated argument groups, each expected to be one component.
-    let groups: Vec<&[ParsedValue]> =
-        args.split(|v| matches!(v, ParsedValue::Comma)).collect();
+    let groups: Vec<&[ParsedValue]> = args.split(|v| matches!(v, ParsedValue::Comma)).collect();
     if name.eq_ignore_ascii_case("translate") {
         match groups.as_slice() {
             [[x]] => Some(AffineTransform::translate(translate_px(x)?, 0.0)),
-            [[x], [y]] => Some(AffineTransform::translate(translate_px(x)?, translate_px(y)?)),
+            [[x], [y]] => Some(AffineTransform::translate(
+                translate_px(x)?,
+                translate_px(y)?,
+            )),
             _ => None,
         }
     } else if name.eq_ignore_ascii_case("translatex") {
-        Some(AffineTransform::translate(translate_px(single_arg(&groups)?)?, 0.0))
+        Some(AffineTransform::translate(
+            translate_px(single_arg(&groups)?)?,
+            0.0,
+        ))
     } else if name.eq_ignore_ascii_case("translatey") {
-        Some(AffineTransform::translate(0.0, translate_px(single_arg(&groups)?)?))
+        Some(AffineTransform::translate(
+            0.0,
+            translate_px(single_arg(&groups)?)?,
+        ))
     } else if name.eq_ignore_ascii_case("scale") {
         match groups.as_slice() {
             [[s]] => {
@@ -2879,21 +2928,38 @@ fn lower_transform_function(name: &str, args: &[ParsedValue]) -> Option<AffineTr
             _ => None,
         }
     } else if name.eq_ignore_ascii_case("scalex") {
-        Some(AffineTransform::scale(arg_number(single_arg(&groups)?)?, 1.0))
+        Some(AffineTransform::scale(
+            arg_number(single_arg(&groups)?)?,
+            1.0,
+        ))
     } else if name.eq_ignore_ascii_case("scaley") {
-        Some(AffineTransform::scale(1.0, arg_number(single_arg(&groups)?)?))
+        Some(AffineTransform::scale(
+            1.0,
+            arg_number(single_arg(&groups)?)?,
+        ))
     } else if name.eq_ignore_ascii_case("rotate") {
-        Some(AffineTransform::rotate(arg_angle_rad(single_arg(&groups)?)?))
+        Some(AffineTransform::rotate(arg_angle_rad(single_arg(
+            &groups,
+        )?)?))
     } else if name.eq_ignore_ascii_case("skew") {
         match groups.as_slice() {
             [[ax]] => Some(AffineTransform::skew(arg_angle_rad(ax)?, 0.0)),
-            [[ax], [ay]] => Some(AffineTransform::skew(arg_angle_rad(ax)?, arg_angle_rad(ay)?)),
+            [[ax], [ay]] => Some(AffineTransform::skew(
+                arg_angle_rad(ax)?,
+                arg_angle_rad(ay)?,
+            )),
             _ => None,
         }
     } else if name.eq_ignore_ascii_case("skewx") {
-        Some(AffineTransform::skew(arg_angle_rad(single_arg(&groups)?)?, 0.0))
+        Some(AffineTransform::skew(
+            arg_angle_rad(single_arg(&groups)?)?,
+            0.0,
+        ))
     } else if name.eq_ignore_ascii_case("skewy") {
-        Some(AffineTransform::skew(0.0, arg_angle_rad(single_arg(&groups)?)?))
+        Some(AffineTransform::skew(
+            0.0,
+            arg_angle_rad(single_arg(&groups)?)?,
+        ))
     } else if name.eq_ignore_ascii_case("matrix") {
         match groups.as_slice() {
             [[a], [b], [c], [d], [e], [f]] => Some(AffineTransform::from_matrix(
@@ -2949,7 +3015,9 @@ fn arg_number(value: &ParsedValue) -> Option<f32> {
 fn arg_angle_rad(value: &ParsedValue) -> Option<f32> {
     match value {
         ParsedValue::Number(n) if *n == 0.0 => Some(0.0),
-        ParsedValue::Dimension { value, unit } => angle_to_degrees(*value, unit).map(f32::to_radians),
+        ParsedValue::Dimension { value, unit } => {
+            angle_to_degrees(*value, unit).map(f32::to_radians)
+        }
         _ => None,
     }
 }
@@ -3190,7 +3258,9 @@ fn position_component(value: &ParsedValue) -> Option<PositionComponent> {
                 None
             }
         }
-        ParsedValue::Percentage(p) => Some(PositionComponent::Length(Length::Percent(narrow_f32(*p)))),
+        ParsedValue::Percentage(p) => {
+            Some(PositionComponent::Length(Length::Percent(narrow_f32(*p))))
+        }
         ParsedValue::Dimension { value, unit } => {
             dimension_length(*value, unit).map(PositionComponent::Length)
         }
@@ -3289,7 +3359,12 @@ fn lower_background_image(values: &[ParsedValue]) -> Option<PropertyValue> {
     match layers.len() {
         0 => None,
         // One layer keeps today's exact flat single-value result.
-        1 => Some(layers.pop().expect("one layer present").into_property_value()),
+        1 => Some(
+            layers
+                .pop()
+                .expect("one layer present")
+                .into_property_value(),
+        ),
         _ => Some(PropertyValue::BackgroundLayers(layers.into_boxed_slice())),
     }
 }
@@ -3498,8 +3573,7 @@ fn lower_repeating_linear_gradient(args: &[ParsedValue]) -> Option<LinearGradien
     } else {
         Length::Percent(period)
     };
-    let gradient =
-        LinearGradient::new_repeating(direction.nominal_angle(), stops, period_len);
+    let gradient = LinearGradient::new_repeating(direction.nominal_angle(), stops, period_len);
     Some(match direction {
         GradientDirection::Corner(corner, _) => gradient.with_corner(corner),
         GradientDirection::Angle(_) => gradient,
@@ -3550,7 +3624,10 @@ fn repeat_stop_position(value: &ParsedValue) -> Option<RepeatPos> {
 /// gradient needs it to define the period).
 fn resolve_repeating_positions(colored: &[(StyleColor, Option<RepeatPos>)]) -> Option<Vec<f32>> {
     let n = colored.len();
-    let mut mags: Vec<Option<f32>> = colored.iter().map(|(_, p)| p.map(RepeatPos::value)).collect();
+    let mut mags: Vec<Option<f32>> = colored
+        .iter()
+        .map(|(_, p)| p.map(RepeatPos::value))
+        .collect();
     if mags[0].is_none() {
         mags[0] = Some(0.0);
     }
@@ -3635,9 +3712,9 @@ fn lower_radial_gradient(args: &[ParsedValue]) -> Option<RadialGradient> {
 /// malformed prelude, which drops the whole gradient once stop parsing then also
 /// fails).
 fn parse_radial_prelude(part: &[ParsedValue]) -> Option<(RadialShape, RadialSize, Length, Length)> {
-    let at_index = part.iter().position(
-        |v| matches!(v, ParsedValue::Keyword(k) if k.eq_ignore_ascii_case("at")),
-    );
+    let at_index = part
+        .iter()
+        .position(|v| matches!(v, ParsedValue::Keyword(k) if k.eq_ignore_ascii_case("at")));
     let (dims, position): (&[ParsedValue], Option<&[ParsedValue]>) = match at_index {
         Some(i) => (&part[..i], Some(&part[i + 1..])),
         None => (part, None),
@@ -4215,32 +4292,75 @@ mod tests {
     fn filter_color_functions_lower_to_color_ops() {
         // Numbers and percentages both parse (100% == 1); a missing amount is the
         // per-function default (1 for these, 0deg for hue-rotate).
-        assert_eq!(filter_ops_of("filter: brightness(1.5)")[0], FilterOp::Brightness(1.5));
-        assert_eq!(filter_ops_of("filter: brightness(150%)")[0], FilterOp::Brightness(1.5));
-        assert_eq!(filter_ops_of("filter: brightness()")[0], FilterOp::Brightness(1.0));
-        assert_eq!(filter_ops_of("filter: contrast(0.5)")[0], FilterOp::Contrast(0.5));
-        assert_eq!(filter_ops_of("filter: saturate(2)")[0], FilterOp::Saturate(2.0));
-        assert_eq!(filter_ops_of("filter: grayscale(50%)")[0], FilterOp::Grayscale(0.5));
-        assert_eq!(filter_ops_of("filter: grayscale()")[0], FilterOp::Grayscale(1.0));
+        assert_eq!(
+            filter_ops_of("filter: brightness(1.5)")[0],
+            FilterOp::Brightness(1.5)
+        );
+        assert_eq!(
+            filter_ops_of("filter: brightness(150%)")[0],
+            FilterOp::Brightness(1.5)
+        );
+        assert_eq!(
+            filter_ops_of("filter: brightness()")[0],
+            FilterOp::Brightness(1.0)
+        );
+        assert_eq!(
+            filter_ops_of("filter: contrast(0.5)")[0],
+            FilterOp::Contrast(0.5)
+        );
+        assert_eq!(
+            filter_ops_of("filter: saturate(2)")[0],
+            FilterOp::Saturate(2.0)
+        );
+        assert_eq!(
+            filter_ops_of("filter: grayscale(50%)")[0],
+            FilterOp::Grayscale(0.5)
+        );
+        assert_eq!(
+            filter_ops_of("filter: grayscale()")[0],
+            FilterOp::Grayscale(1.0)
+        );
         assert_eq!(filter_ops_of("filter: sepia(1)")[0], FilterOp::Sepia(1.0));
-        assert_eq!(filter_ops_of("filter: invert(100%)")[0], FilterOp::Invert(1.0));
-        assert_eq!(filter_ops_of("filter: opacity(0.25)")[0], FilterOp::Opacity(0.25));
+        assert_eq!(
+            filter_ops_of("filter: invert(100%)")[0],
+            FilterOp::Invert(1.0)
+        );
+        assert_eq!(
+            filter_ops_of("filter: opacity(0.25)")[0],
+            FilterOp::Opacity(0.25)
+        );
         // Amounts clamp to their spec ranges.
-        assert_eq!(filter_ops_of("filter: grayscale(200%)")[0], FilterOp::Grayscale(1.0));
-        assert_eq!(filter_ops_of("filter: brightness(-1)")[0], FilterOp::Brightness(0.0));
+        assert_eq!(
+            filter_ops_of("filter: grayscale(200%)")[0],
+            FilterOp::Grayscale(1.0)
+        );
+        assert_eq!(
+            filter_ops_of("filter: brightness(-1)")[0],
+            FilterOp::Brightness(0.0)
+        );
     }
 
     #[test]
     fn filter_hue_rotate_lowers_to_radians() {
         // `hue-rotate` stores radians; deg/grad/rad/turn and a bare 0 all parse.
         let deg = filter_ops_of("filter: hue-rotate(90deg)");
-        let FilterOp::HueRotate(r) = deg[0] else { panic!("hue-rotate") };
+        let FilterOp::HueRotate(r) = deg[0] else {
+            panic!("hue-rotate")
+        };
         assert!((r - core::f32::consts::FRAC_PI_2).abs() < 1e-5);
         let turn = filter_ops_of("filter: hue-rotate(0.5turn)");
-        let FilterOp::HueRotate(r) = turn[0] else { panic!("hue-rotate") };
+        let FilterOp::HueRotate(r) = turn[0] else {
+            panic!("hue-rotate")
+        };
         assert!((r - core::f32::consts::PI).abs() < 1e-5);
-        assert_eq!(filter_ops_of("filter: hue-rotate()")[0], FilterOp::HueRotate(0.0));
-        assert_eq!(filter_ops_of("filter: hue-rotate(0)")[0], FilterOp::HueRotate(0.0));
+        assert_eq!(
+            filter_ops_of("filter: hue-rotate()")[0],
+            FilterOp::HueRotate(0.0)
+        );
+        assert_eq!(
+            filter_ops_of("filter: hue-rotate(0)")[0],
+            FilterOp::HueRotate(0.0)
+        );
     }
 
     #[test]
@@ -4326,7 +4446,10 @@ mod tests {
 
     #[test]
     fn transform_scale_sets_a_and_d() {
-        matrix_near(transform_of("transform: scale(2)"), [2.0, 0.0, 0.0, 2.0, 0.0, 0.0]);
+        matrix_near(
+            transform_of("transform: scale(2)"),
+            [2.0, 0.0, 0.0, 2.0, 0.0, 0.0],
+        );
         matrix_near(
             transform_of("transform: scale(2, 3)"),
             [2.0, 0.0, 0.0, 3.0, 0.0, 0.0],
@@ -4368,7 +4491,10 @@ mod tests {
 
     #[test]
     fn transform_none_is_identity() {
-        matrix_near(transform_of("transform: none"), [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]);
+        matrix_near(
+            transform_of("transform: none"),
+            [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        );
     }
 
     #[test]
@@ -4452,8 +4578,7 @@ mod tests {
     fn repeating_linear_gradient_percent_period() {
         // A `%` period: `red 0%, blue 25%` → 25%-of-line period, stops normalized
         // to red@0, blue@1.
-        let g =
-            gradient_of("background-image: repeating-linear-gradient(0deg, red 0%, blue 25%)");
+        let g = gradient_of("background-image: repeating-linear-gradient(0deg, red 0%, blue 25%)");
         assert!(g.repeating());
         assert_eq!(g.period(), Some(Length::Percent(25.0)));
         assert_eq!(g.stops().len(), 2);
@@ -4464,7 +4589,8 @@ mod tests {
     #[test]
     fn repeating_linear_gradient_default_direction() {
         // No leading direction → defaults to `to bottom` (180°), still repeating.
-        let g = gradient_of("background-image: repeating-linear-gradient(#000 0 6px, #fff 6px 12px)");
+        let g =
+            gradient_of("background-image: repeating-linear-gradient(#000 0 6px, #fff 6px 12px)");
         assert_eq!(g.angle_deg(), 180.0);
         assert!(g.repeating());
         assert_eq!(g.period(), Some(Length::px(12.0)));
@@ -4481,7 +4607,9 @@ mod tests {
             ("to top left", Corner::TopLeft),
             ("to right top", Corner::TopRight),
         ] {
-            let g = gradient_of(&format!("background-image: linear-gradient({css}, #000, #fff)"));
+            let g = gradient_of(&format!(
+                "background-image: linear-gradient({css}, #000, #fff)"
+            ));
             assert_eq!(g.corner(), Some(corner), "corner for `{css}`");
         }
         // A plain side (or angle) carries no corner.
@@ -4561,7 +4689,8 @@ mod tests {
     #[test]
     fn two_layers_gradient_then_url_lower_to_a_layer_list_in_order() {
         // `gradient, url` → two layers, in author order (gradient first = top).
-        let value = value_of(r#"background-image: linear-gradient(90deg, red, blue), url("x.png")"#);
+        let value =
+            value_of(r#"background-image: linear-gradient(90deg, red, blue), url("x.png")"#);
         let layers = value
             .as_background_layers()
             .expect("two layers lower to a BackgroundLayers list");
@@ -4578,8 +4707,7 @@ mod tests {
         // The comma inside `rgb(0, 128, 255)` is a FUNCTION-argument comma, not a
         // layer separator: this must stay ONE gradient layer with the rgb color,
         // never two layers.
-        let value =
-            value_of("background-image: linear-gradient(rgb(0, 128, 255), rgb(255, 0, 0))");
+        let value = value_of("background-image: linear-gradient(rgb(0, 128, 255), rgb(255, 0, 0))");
         match value {
             PropertyValue::LinearGradient(g) => {
                 assert_eq!(g.stops().len(), 2);
@@ -4793,9 +4921,8 @@ mod tests {
 
     #[test]
     fn radial_gradient_circle_at_position_with_explicit_stops() {
-        let g = radial_of(
-            "background-image: radial-gradient(circle at 30% 40%, red 0%, blue 100%)",
-        );
+        let g =
+            radial_of("background-image: radial-gradient(circle at 30% 40%, red 0%, blue 100%)");
         assert_eq!(g.shape(), RadialShape::Circle);
         assert_eq!(g.center_x(), Length::Percent(30.0));
         assert_eq!(g.center_y(), Length::Percent(40.0));
@@ -4951,7 +5078,10 @@ mod tests {
     fn border_shorthand_accepts_components_in_any_order() {
         // `red solid 2px` classifies identically to `2px solid red`.
         let got = pairs(&compile_all("border: red solid 2px"));
-        assert!(got.contains(&(PropertyId::BorderTopWidth, PropertyValue::Length(Length::px(2.0)))));
+        assert!(got.contains(&(
+            PropertyId::BorderTopWidth,
+            PropertyValue::Length(Length::px(2.0))
+        )));
         assert!(got.contains(&(
             PropertyId::BorderTopStyle,
             PropertyValue::Keyword(layout_keyword::BORDER_STYLE_SOLID)
@@ -4968,7 +5098,10 @@ mod tests {
         assert_eq!(
             got,
             vec![
-                (PropertyId::BorderTopWidth, PropertyValue::Length(Length::px(1.0))),
+                (
+                    PropertyId::BorderTopWidth,
+                    PropertyValue::Length(Length::px(1.0))
+                ),
                 (
                     PropertyId::BorderTopStyle,
                     PropertyValue::Keyword(layout_keyword::BORDER_STYLE_SOLID)
@@ -5018,7 +5151,10 @@ mod tests {
         assert_eq!(
             got,
             vec![
-                (PropertyId::OutlineWidth, PropertyValue::Length(Length::px(2.0))),
+                (
+                    PropertyId::OutlineWidth,
+                    PropertyValue::Length(Length::px(2.0))
+                ),
                 (
                     PropertyId::OutlineStyle,
                     PropertyValue::Keyword(layout_keyword::BORDER_STYLE_DASHED)
@@ -5035,7 +5171,10 @@ mod tests {
     fn outline_shorthand_accepts_components_in_any_order() {
         // `#333 solid 2px` classifies identically to `2px solid #333`.
         let got = pairs(&compile_all("outline: #333333 solid 2px"));
-        assert!(got.contains(&(PropertyId::OutlineWidth, PropertyValue::Length(Length::px(2.0)))));
+        assert!(got.contains(&(
+            PropertyId::OutlineWidth,
+            PropertyValue::Length(Length::px(2.0))
+        )));
         assert!(got.contains(&(
             PropertyId::OutlineStyle,
             PropertyValue::Keyword(layout_keyword::BORDER_STYLE_SOLID)
@@ -5050,7 +5189,10 @@ mod tests {
     fn outline_offset_lowers_to_a_length() {
         assert_eq!(
             pairs(&compile_all("outline-offset: 3px")),
-            vec![(PropertyId::OutlineOffset, PropertyValue::Length(Length::px(3.0)))]
+            vec![(
+                PropertyId::OutlineOffset,
+                PropertyValue::Length(Length::px(3.0))
+            )]
         );
     }
 
@@ -5099,10 +5241,22 @@ mod tests {
         assert_eq!(
             got,
             vec![
-                (PropertyId::BorderTopLeftRadius, PropertyValue::Length(Length::px(1.0))),
-                (PropertyId::BorderTopRightRadius, PropertyValue::Length(Length::px(2.0))),
-                (PropertyId::BorderBottomRightRadius, PropertyValue::Length(Length::px(3.0))),
-                (PropertyId::BorderBottomLeftRadius, PropertyValue::Length(Length::px(4.0))),
+                (
+                    PropertyId::BorderTopLeftRadius,
+                    PropertyValue::Length(Length::px(1.0))
+                ),
+                (
+                    PropertyId::BorderTopRightRadius,
+                    PropertyValue::Length(Length::px(2.0))
+                ),
+                (
+                    PropertyId::BorderBottomRightRadius,
+                    PropertyValue::Length(Length::px(3.0))
+                ),
+                (
+                    PropertyId::BorderBottomLeftRadius,
+                    PropertyValue::Length(Length::px(4.0))
+                ),
             ]
         );
     }
@@ -5129,10 +5283,22 @@ mod tests {
         assert_eq!(
             pairs(&compile_all("border-width: 3px")),
             vec![
-                (PropertyId::BorderTopWidth, PropertyValue::Length(Length::px(3.0))),
-                (PropertyId::BorderRightWidth, PropertyValue::Length(Length::px(3.0))),
-                (PropertyId::BorderBottomWidth, PropertyValue::Length(Length::px(3.0))),
-                (PropertyId::BorderLeftWidth, PropertyValue::Length(Length::px(3.0))),
+                (
+                    PropertyId::BorderTopWidth,
+                    PropertyValue::Length(Length::px(3.0))
+                ),
+                (
+                    PropertyId::BorderRightWidth,
+                    PropertyValue::Length(Length::px(3.0))
+                ),
+                (
+                    PropertyId::BorderBottomWidth,
+                    PropertyValue::Length(Length::px(3.0))
+                ),
+                (
+                    PropertyId::BorderLeftWidth,
+                    PropertyValue::Length(Length::px(3.0))
+                ),
             ]
         );
         let solid = PropertyValue::Keyword(layout_keyword::BORDER_STYLE_SOLID);
@@ -5554,13 +5720,19 @@ mod tests {
             property_id_from_name("padding-inline-end"),
             Some(PropertyId::PaddingInlineEnd)
         );
-        assert_eq!(property_id_from_name("min-width"), Some(PropertyId::MinWidth));
+        assert_eq!(
+            property_id_from_name("min-width"),
+            Some(PropertyId::MinWidth)
+        );
         assert_eq!(property_id_from_name("gap"), Some(PropertyId::Gap));
         assert_eq!(
             property_id_from_name("flex-basis"),
             Some(PropertyId::FlexBasis)
         );
-        assert_eq!(property_id_from_name("font-size"), Some(PropertyId::FontSize));
+        assert_eq!(
+            property_id_from_name("font-size"),
+            Some(PropertyId::FontSize)
+        );
         // Case-insensitive, matching the existing seven.
         assert_eq!(
             property_id_from_name("FLEX-DIRECTION"),
@@ -5585,7 +5757,10 @@ mod tests {
             value_of("min-width: 100px"),
             PropertyValue::Length(Length::px(100.0))
         );
-        assert_eq!(value_of("gap: 12px"), PropertyValue::Length(Length::px(12.0)));
+        assert_eq!(
+            value_of("gap: 12px"),
+            PropertyValue::Length(Length::px(12.0))
+        );
         assert_eq!(
             value_of("font-size: 14px"),
             PropertyValue::Length(Length::px(14.0))
@@ -5598,7 +5773,10 @@ mod tests {
             standard("margin-top: 8px").0.property(),
             PropertyId::MarginTop
         );
-        assert_eq!(standard("font-size: 14px").0.property(), PropertyId::FontSize);
+        assert_eq!(
+            standard("font-size: 14px").0.property(),
+            PropertyId::FontSize
+        );
     }
 
     #[test]
@@ -5746,8 +5924,14 @@ mod tests {
         assert_eq!(
             pairs_of("margin-inline: 2em 0"),
             vec![
-                (PropertyId::MarginInlineStart, PropertyValue::Length(Length::Em(2.0))),
-                (PropertyId::MarginInlineEnd, PropertyValue::Length(Length::px(0.0))),
+                (
+                    PropertyId::MarginInlineStart,
+                    PropertyValue::Length(Length::Em(2.0))
+                ),
+                (
+                    PropertyId::MarginInlineEnd,
+                    PropertyValue::Length(Length::px(0.0))
+                ),
             ]
         );
     }
@@ -5991,7 +6175,10 @@ mod tests {
 
     #[test]
     fn inset_longhands_lower_to_lengths() {
-        assert_eq!(value_of("top: 10px"), PropertyValue::Length(Length::px(10.0)));
+        assert_eq!(
+            value_of("top: 10px"),
+            PropertyValue::Length(Length::px(10.0))
+        );
         assert_eq!(
             value_of("left: 5px"),
             PropertyValue::Length(Length::px(5.0))
@@ -6000,7 +6187,10 @@ mod tests {
             value_of("right: 50%"),
             PropertyValue::Length(Length::Percent(50.0))
         );
-        assert_eq!(value_of("bottom: auto"), PropertyValue::Length(Length::Auto));
+        assert_eq!(
+            value_of("bottom: auto"),
+            PropertyValue::Length(Length::Auto)
+        );
     }
 
     #[test]
@@ -6102,9 +6292,7 @@ mod tests {
     /// Extracts the ordered family names from a lowered `font-family` value.
     fn families(text: &str) -> Vec<String> {
         match value_of(text) {
-            PropertyValue::FontFamilies(names) => {
-                names.iter().map(|n| n.to_string()).collect()
-            }
+            PropertyValue::FontFamilies(names) => names.iter().map(|n| n.to_string()).collect(),
             other => panic!("expected font families, got {other:?}"),
         }
     }
@@ -6149,12 +6337,18 @@ mod tests {
 
     #[test]
     fn resolves_direction_weight_style_names() {
-        assert_eq!(property_id_from_name("direction"), Some(PropertyId::Direction));
+        assert_eq!(
+            property_id_from_name("direction"),
+            Some(PropertyId::Direction)
+        );
         assert_eq!(
             property_id_from_name("FONT-WEIGHT"),
             Some(PropertyId::FontWeight)
         );
-        assert_eq!(property_id_from_name("font-style"), Some(PropertyId::FontStyle));
+        assert_eq!(
+            property_id_from_name("font-style"),
+            Some(PropertyId::FontStyle)
+        );
     }
 
     #[test]
@@ -6167,7 +6361,10 @@ mod tests {
             value_of("direction: ltr"),
             PropertyValue::Keyword(layout_keyword::DIRECTION_LTR)
         );
-        assert_eq!(standard("direction: rtl").0.property(), PropertyId::Direction);
+        assert_eq!(
+            standard("direction: rtl").0.property(),
+            PropertyId::Direction
+        );
     }
 
     #[test]
@@ -6258,7 +6455,10 @@ mod tests {
             value_of("text-align: end"),
             PropertyValue::Keyword(layout_keyword::TEXT_ALIGN_END)
         );
-        assert_eq!(standard("text-align: justify").0.property(), PropertyId::TextAlign);
+        assert_eq!(
+            standard("text-align: justify").0.property(),
+            PropertyId::TextAlign
+        );
     }
 
     #[test]
@@ -6385,7 +6585,11 @@ mod tests {
             PropertyValue::Keyword(layout_keyword::OVERFLOW_WRAP_BREAK_WORD)
         );
         // Both inherit by default (CSS Text 3 §5.2).
-        assert!(PropertyId::OverflowWrap.default_inheritance().is_inherited());
+        assert!(
+            PropertyId::OverflowWrap
+                .default_inheritance()
+                .is_inherited()
+        );
     }
 
     #[test]
@@ -6439,8 +6643,14 @@ mod tests {
 
     #[test]
     fn resolves_overflow_name() {
-        assert_eq!(property_id_from_name("overflow"), Some(PropertyId::Overflow));
-        assert_eq!(property_id_from_name("OVERFLOW"), Some(PropertyId::Overflow));
+        assert_eq!(
+            property_id_from_name("overflow"),
+            Some(PropertyId::Overflow)
+        );
+        assert_eq!(
+            property_id_from_name("OVERFLOW"),
+            Some(PropertyId::Overflow)
+        );
     }
 
     #[test]
@@ -6465,7 +6675,10 @@ mod tests {
             value_of("overflow: auto"),
             PropertyValue::Keyword(layout_keyword::OVERFLOW_AUTO)
         );
-        assert_eq!(standard("overflow: hidden").0.property(), PropertyId::Overflow);
+        assert_eq!(
+            standard("overflow: hidden").0.property(),
+            PropertyId::Overflow
+        );
         // CSS-wide keywords still take priority.
         assert_eq!(value_of("overflow: inherit"), PropertyValue::Inherit);
     }
@@ -6475,8 +6688,14 @@ mod tests {
         assert_eq!(value_of("font-weight: 300"), PropertyValue::Number(300.0));
         assert_eq!(value_of("font-weight: 600"), PropertyValue::Number(600.0));
         assert_eq!(value_of("font-weight: bold"), PropertyValue::Number(700.0));
-        assert_eq!(value_of("font-weight: normal"), PropertyValue::Number(400.0));
-        assert_eq!(standard("font-weight: 500").0.property(), PropertyId::FontWeight);
+        assert_eq!(
+            value_of("font-weight: normal"),
+            PropertyValue::Number(400.0)
+        );
+        assert_eq!(
+            standard("font-weight: 500").0.property(),
+            PropertyId::FontWeight
+        );
     }
 
     #[test]
@@ -6553,10 +6772,7 @@ mod tests {
 
     #[test]
     fn lowers_auto_and_percent_and_em_tracks() {
-        assert_eq!(
-            tracks("grid-template-columns: auto"),
-            vec![GridTrack::Auto]
-        );
+        assert_eq!(tracks("grid-template-columns: auto"), vec![GridTrack::Auto]);
         assert_eq!(
             tracks("grid-template-columns: 50% 2em"),
             vec![
@@ -6774,7 +6990,10 @@ mod tests {
         // Cycled multi-track and minmax reuse the same track grammar.
         assert_eq!(
             tracks("grid-auto-columns: 30px 50px"),
-            vec![GridTrack::Fixed(Length::px(30.0)), GridTrack::Fixed(Length::px(50.0))]
+            vec![
+                GridTrack::Fixed(Length::px(30.0)),
+                GridTrack::Fixed(Length::px(50.0))
+            ]
         );
         assert_eq!(
             tracks("grid-auto-columns: minmax(50px, 1fr)"),
@@ -6788,7 +7007,10 @@ mod tests {
     #[test]
     fn grid_auto_tracks_honour_css_wide_keywords() {
         assert_eq!(value_of("grid-auto-rows: inherit"), PropertyValue::Inherit);
-        assert_eq!(value_of("grid-auto-columns: initial"), PropertyValue::Initial);
+        assert_eq!(
+            value_of("grid-auto-columns: initial"),
+            PropertyValue::Initial
+        );
     }
 
     #[test]
@@ -6933,7 +7155,10 @@ mod tests {
 
     #[test]
     fn grid_line_longhand_honours_css_wide_keywords() {
-        assert_eq!(value_of("grid-column-start: inherit"), PropertyValue::Inherit);
+        assert_eq!(
+            value_of("grid-column-start: inherit"),
+            PropertyValue::Inherit
+        );
         assert_eq!(value_of("grid-row-end: initial"), PropertyValue::Initial);
     }
 
@@ -7060,16 +7285,21 @@ mod tests {
         assert_eq!(template.columns(), 2);
         // `h` spans row 1, columns 1-2 → line rect (1..2, 1..3).
         let h = template.area("h").expect("h");
-        assert_eq!((h.row_start, h.row_end, h.column_start, h.column_end), (1, 2, 1, 3));
+        assert_eq!(
+            (h.row_start, h.row_end, h.column_start, h.column_end),
+            (1, 2, 1, 3)
+        );
         // `s` is the single cell at row 2, column 1.
         let s = template.area("s").expect("s");
-        assert_eq!((s.row_start, s.row_end, s.column_start, s.column_end), (2, 3, 1, 2));
+        assert_eq!(
+            (s.row_start, s.row_end, s.column_start, s.column_end),
+            (2, 3, 1, 2)
+        );
     }
 
     #[test]
     fn grid_template_areas_null_cell_is_empty() {
-        let PropertyValue::GridAreas(template) =
-            value_of("grid-template-areas: \"a .\" \". b\"")
+        let PropertyValue::GridAreas(template) = value_of("grid-template-areas: \"a .\" \". b\"")
         else {
             panic!("expected a grid-areas value");
         };
@@ -7090,7 +7320,13 @@ mod tests {
 
     #[test]
     fn grid_template_areas_honours_css_wide_keywords() {
-        assert_eq!(value_of("grid-template-areas: inherit"), PropertyValue::Inherit);
-        assert_eq!(value_of("grid-template-areas: initial"), PropertyValue::Initial);
+        assert_eq!(
+            value_of("grid-template-areas: inherit"),
+            PropertyValue::Inherit
+        );
+        assert_eq!(
+            value_of("grid-template-areas: initial"),
+            PropertyValue::Initial
+        );
     }
 }

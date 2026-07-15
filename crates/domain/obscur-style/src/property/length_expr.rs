@@ -132,11 +132,13 @@ mod tests {
             Box::new(LengthExpr::leaf(Length::Percent(50.0))),
         );
         assert!(deep.uses_ch());
-        assert!(LengthExpr::Min(vec![
-            LengthExpr::leaf(Length::px(1.0)),
-            LengthExpr::leaf(Length::Ch(1.0)),
-        ])
-        .uses_ch());
+        assert!(
+            LengthExpr::Min(vec![
+                LengthExpr::leaf(Length::px(1.0)),
+                LengthExpr::leaf(Length::Ch(1.0)),
+            ])
+            .uses_ch()
+        );
     }
 
     #[test]

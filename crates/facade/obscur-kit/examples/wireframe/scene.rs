@@ -82,8 +82,10 @@ pub fn view() -> View {
             footer(),
         ],
     );
-    let root = el("wf-root", vec![page])
-        .with_prop(ViewProperty::new(obscur_kit::view::view::ID, ViewValue::Text("app".into())));
+    let root = el("wf-root", vec![page]).with_prop(ViewProperty::new(
+        obscur_kit::view::view::ID,
+        ViewValue::Text("app".into()),
+    ));
     View::single(root)
 }
 
@@ -118,12 +120,24 @@ fn footer() -> ViewNode {
 fn group_button() -> ViewNode {
     let btns = row(vec![
         col("DEFAULT", el("wf-btn", vec![text("wf-btn-t", "Button")])),
-        col("HOVER", el("wf-btn hover", vec![text("wf-btn-t", "Button")])),
+        col(
+            "HOVER",
+            el("wf-btn hover", vec![text("wf-btn-t", "Button")]),
+        ),
         // REAL (outline): focus ring is a `.wf-focus` wrapper with a real dashed outline.
-        col("FOCUS", focus(el("wf-btn", vec![text("wf-btn-t", "Button")]))),
-        col("ACTIVE / PRESSED", el("wf-btn active", vec![text("wf-btn-t", "Button")])),
+        col(
+            "FOCUS",
+            focus(el("wf-btn", vec![text("wf-btn-t", "Button")])),
+        ),
+        col(
+            "ACTIVE / PRESSED",
+            el("wf-btn active", vec![text("wf-btn-t", "Button")]),
+        ),
         // REAL (dashed): the disabled border renders as actual dashes.
-        col("DISABLED", el("wf-btn disabled", vec![text("wf-btn-t", "Button")])),
+        col(
+            "DISABLED",
+            el("wf-btn disabled", vec![text("wf-btn-t", "Button")]),
+        ),
     ]);
     card("01", "Button", "<button>", vec![btns])
 }
@@ -134,10 +148,22 @@ fn group_button() -> ViewNode {
 
 fn group_button_primary() -> ViewNode {
     let btns = row(vec![
-        col("DEFAULT", el("wf-btn primary", vec![text("wf-btn-t", "Submit")])),
-        col("HOVER", el("wf-btn primary hover", vec![text("wf-btn-t", "Submit")])),
-        col("ACTIVE / PRESSED", el("wf-btn primary active", vec![text("wf-btn-t", "Submit")])),
-        col("DISABLED", el("wf-btn primary disabled", vec![text("wf-btn-t", "Submit")])),
+        col(
+            "DEFAULT",
+            el("wf-btn primary", vec![text("wf-btn-t", "Submit")]),
+        ),
+        col(
+            "HOVER",
+            el("wf-btn primary hover", vec![text("wf-btn-t", "Submit")]),
+        ),
+        col(
+            "ACTIVE / PRESSED",
+            el("wf-btn primary active", vec![text("wf-btn-t", "Submit")]),
+        ),
+        col(
+            "DISABLED",
+            el("wf-btn primary disabled", vec![text("wf-btn-t", "Submit")]),
+        ),
     ]);
     card("02", "Button — Primary", "<button type=submit>", vec![btns])
 }
@@ -148,25 +174,38 @@ fn group_button_primary() -> ViewNode {
 
 fn field_text(class: &str, value: &str, placeholder: bool, caret: bool) -> ViewNode {
     let mut inner = vec![text(
-        if placeholder { "wf-field-ph" } else { "wf-field-val" },
+        if placeholder {
+            "wf-field-ph"
+        } else {
+            "wf-field-val"
+        },
         value,
     )];
     if caret {
         // SUBSTITUTE (caret): a static 2px×15 bar; no real blinking caret.
         inner.push(el("wf-caret", vec![]));
     }
-    el(&format!("wf-field {class}"), vec![el("wf-field-line", inner)])
+    el(
+        &format!("wf-field {class}"),
+        vec![el("wf-field-line", inner)],
+    )
 }
 
 fn group_text_field() -> ViewNode {
     let r1 = row(vec![
-        col("DEFAULT / EMPTY", field_text("", "Placeholder", true, false)),
+        col(
+            "DEFAULT / EMPTY",
+            field_text("", "Placeholder", true, false),
+        ),
         col("HOVER", field_text("hover", "Placeholder", true, false)),
         col("FOCUS", focus(field_text("focus", "Text", false, true))),
         col("FILLED", field_text("", "Filled value", false, false)),
     ]);
     let r2 = row(vec![
-        col("READ-ONLY", field_text("readonly", "Read-only value", false, false)),
+        col(
+            "READ-ONLY",
+            field_text("readonly", "Read-only value", false, false),
+        ),
         col("DISABLED", field_text("disabled", "Disabled", true, false)),
         // REAL (inset box-shadow error ring): `box-shadow: 0 0 0 1.5px #2b2a27 inset`.
         col(
@@ -178,7 +217,12 @@ fn group_text_field() -> ViewNode {
         ),
     ]);
     let err_caption = text("wf-inline-err", "△ This field is required.");
-    card("03", "Text Field", "<input type=text>", vec![r1, r2, err_caption])
+    card(
+        "03",
+        "Text Field",
+        "<input type=text>",
+        vec![r1, r2, err_caption],
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -232,10 +276,21 @@ fn select_closed(class: &str, label: &str, up: bool, placeholder: bool) -> ViewN
     el(
         &format!("wf-select {class}"),
         vec![
-            text(if placeholder { "wf-field-ph" } else { "wf-field-val" }, label),
+            text(
+                if placeholder {
+                    "wf-field-ph"
+                } else {
+                    "wf-field-val"
+                },
+                label,
+            ),
             // REAL (CSS border-triangle): a 0×0 box with three transparent sides and
             // one inked side paints a true ▼ (closed) / ▲ (open) triangle.
-            tri(if up { "wf-tri wf-tri-up" } else { "wf-tri wf-tri-down" }),
+            tri(if up {
+                "wf-tri wf-tri-up"
+            } else {
+                "wf-tri wf-tri-down"
+            }),
         ],
     )
 }
@@ -260,7 +315,10 @@ fn group_select() -> ViewNode {
         col("CLOSED", select_closed("", "Choose one", false, true)),
         col("HOVER", select_closed("hover", "Choose one", false, true)),
         col("OPEN", open),
-        col("DISABLED", select_closed("disabled", "Choose one", false, true)),
+        col(
+            "DISABLED",
+            select_closed("disabled", "Choose one", false, true),
+        ),
     ]);
     card("05", "Select", "<select>", vec![r])
 }
@@ -279,13 +337,22 @@ fn group_checkbox() -> ViewNode {
         col("HOVER", checkbox("hover", vec![])),
         col("FOCUS", focus(checkbox("", vec![]))),
         // SUBSTITUTE (CSS check): a host-font ✓ glyph.
-        col("CHECKED", checkbox("checked", vec![text("wf-check-mark", "✓")])),
+        col(
+            "CHECKED",
+            checkbox("checked", vec![text("wf-check-mark", "✓")]),
+        ),
         // SUBSTITUTE (indeterminate dash): a 10×2 filled bar box.
-        col("INDETERMINATE", checkbox("checked", vec![el("wf-check-dash", vec![])])),
+        col(
+            "INDETERMINATE",
+            checkbox("checked", vec![el("wf-check-dash", vec![])]),
+        ),
     ]);
     let r2 = row(vec![
         col("DISABLED", checkbox("disabled", vec![])),
-        col("DISABLED · CHECKED", checkbox("disabled checked", vec![text("wf-check-mark faint", "✓")])),
+        col(
+            "DISABLED · CHECKED",
+            checkbox("disabled checked", vec![text("wf-check-mark faint", "✓")]),
+        ),
     ]);
     let label_row = el(
         "wf-check-labelrow",
@@ -294,7 +361,12 @@ fn group_checkbox() -> ViewNode {
             text("wf-check-label", "Checkbox with adjacent label"),
         ],
     );
-    card("06", "Checkbox", "<input type=checkbox>", vec![r1, r2, label_row])
+    card(
+        "06",
+        "Checkbox",
+        "<input type=checkbox>",
+        vec![r1, r2, label_row],
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -303,7 +375,11 @@ fn group_checkbox() -> ViewNode {
 
 fn radio(class: &str, dot: bool) -> ViewNode {
     // SUBSTITUTE (border-radius:50%): explicit half-px radii for the circle + dot.
-    let inner = if dot { vec![el("wf-radio-dot", vec![])] } else { vec![] };
+    let inner = if dot {
+        vec![el("wf-radio-dot", vec![])]
+    } else {
+        vec![]
+    };
     el(&format!("wf-radio {class}"), inner)
 }
 
@@ -408,7 +484,12 @@ fn group_number_search() -> ViewNode {
         col("SEARCH · EMPTY", search_empty),
         col("SEARCH · TYPED + CLEAR", search_typed),
     ]);
-    card("10", "Number & Search", "<input type=number|search>", vec![r])
+    card(
+        "10",
+        "Number & Search",
+        "<input type=number|search>",
+        vec![r],
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -432,7 +513,10 @@ fn group_file_color() -> ViewNode {
     let r = row(vec![
         col("FILE · EMPTY", file_input("", "No file selected", true)),
         col("FILE · SELECTED", file_input("", "report-q3.pdf", false)),
-        col("FILE · DISABLED", file_input("disabled", "No file selected", true)),
+        col(
+            "FILE · DISABLED",
+            file_input("disabled", "No file selected", true),
+        ),
         col("COLOR", color),
     ]);
     card("11", "File & Color", "<input type=file|color>", vec![r])
@@ -524,10 +608,7 @@ fn group_disclosure() -> ViewNode {
             ),
         ],
     );
-    let r = row(vec![
-        col("COLLAPSED", collapsed),
-        col("EXPANDED", expanded),
-    ]);
+    let r = row(vec![col("COLLAPSED", collapsed), col("EXPANDED", expanded)]);
     card("14", "Disclosure", "<details> <summary>", vec![r])
 }
 
@@ -536,10 +617,7 @@ fn group_disclosure() -> ViewNode {
 // ---------------------------------------------------------------------------
 
 fn group_scrollbar_table() -> ViewNode {
-    let scrollbar = el(
-        "wf-scrollbar",
-        vec![el("wf-scroll-thumb", vec![])],
-    );
+    let scrollbar = el("wf-scrollbar", vec![el("wf-scroll-thumb", vec![])]);
     let table = el(
         "wf-table",
         vec![
@@ -556,10 +634,7 @@ fn group_scrollbar_table() -> ViewNode {
             trow("", "Cobalt Co.", "Viewer", "Draft"),
         ],
     );
-    let r = row(vec![
-        col("SCROLLBAR", scrollbar),
-        col("TABLE", table),
-    ]);
+    let r = row(vec![col("SCROLLBAR", scrollbar), col("TABLE", table)]);
     card("15", "Scrollbar & Table", "<table>", vec![r])
 }
 
@@ -602,7 +677,10 @@ fn row(cols: Vec<ViewNode>) -> ViewNode {
 
 /// One state column: the control above a mono caption.
 fn col(caption: &str, control: ViewNode) -> ViewNode {
-    el("wf-col", vec![el("wf-col-slot", vec![control]), text("wf-cap", caption)])
+    el(
+        "wf-col",
+        vec![el("wf-col-slot", vec![control]), text("wf-cap", caption)],
+    )
 }
 
 /// REAL (outline + outline-offset): wraps a control in a `.wf-focus` box carrying a

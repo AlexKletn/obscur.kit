@@ -107,7 +107,11 @@ impl TrackList {
     /// caller can collapse the empty ones after placement; it is [`None`] for
     /// `auto-fill` (whose empty tracks are kept).
     #[must_use]
-    pub fn expand(&self, content_extent: f32, gap: f32) -> (Vec<TrackSize>, Option<(usize, usize)>) {
+    pub fn expand(
+        &self,
+        content_extent: f32,
+        gap: f32,
+    ) -> (Vec<TrackSize>, Option<(usize, usize)>) {
         let Some(repeat) = self.auto_repeat.as_ref() else {
             let mut out = Vec::with_capacity(self.leading.len() + self.trailing.len());
             out.extend(self.leading.iter().cloned());
@@ -155,8 +159,12 @@ fn repetition_count(
     content_extent: f32,
     gap: f32,
 ) -> usize {
-    let definite_sum =
-        |tracks: &[TrackSize]| -> f32 { tracks.iter().map(|t| definite_extent(t, content_extent)).sum() };
+    let definite_sum = |tracks: &[TrackSize]| -> f32 {
+        tracks
+            .iter()
+            .map(|t| definite_extent(t, content_extent))
+            .sum()
+    };
     let pattern_size = definite_sum(pattern);
     // `pattern_extent + gap`: one whole pattern plus the gap that precedes each copy.
     let per = pattern_size + pattern.len() as f32 * gap;
@@ -178,8 +186,8 @@ fn repetition_count(
 #[cfg(test)]
 mod tests {
     use super::TrackList;
-    use crate::algorithm::grid::{AutoRepeat, AutoRepeatMode};
     use crate::algorithm::TrackSize;
+    use crate::algorithm::grid::{AutoRepeat, AutoRepeatMode};
 
     fn fill(pattern: Vec<TrackSize>) -> TrackList {
         TrackList::new(
@@ -202,7 +210,10 @@ mod tests {
         // 100px pattern on a 350px axis: 3 fit (3*100=300 <= 350; a 4th overflows).
         let (tracks, auto_fit) = fill(vec![TrackSize::Fixed(100.0)]).expand(350.0, 0.0);
         assert_eq!(tracks.len(), 3);
-        assert!(auto_fit.is_none(), "auto-fill keeps empty tracks (no collapse range)");
+        assert!(
+            auto_fit.is_none(),
+            "auto-fill keeps empty tracks (no collapse range)"
+        );
     }
 
     #[test]
@@ -217,7 +228,10 @@ mod tests {
         // A leading 50px track leaves 300px: 3 more 100px tracks fit (50 + 300 = 350).
         let list = TrackList::new(
             vec![TrackSize::Fixed(50.0)],
-            Some(AutoRepeat::new(AutoRepeatMode::AutoFill, vec![TrackSize::Fixed(100.0)])),
+            Some(AutoRepeat::new(
+                AutoRepeatMode::AutoFill,
+                vec![TrackSize::Fixed(100.0)],
+            )),
             Vec::new(),
         );
         let (tracks, _) = list.expand(350.0, 0.0);
@@ -229,7 +243,10 @@ mod tests {
     fn auto_fit_reports_collapse_range() {
         let list = TrackList::new(
             Vec::new(),
-            Some(AutoRepeat::new(AutoRepeatMode::AutoFit, vec![TrackSize::Fixed(100.0)])),
+            Some(AutoRepeat::new(
+                AutoRepeatMode::AutoFit,
+                vec![TrackSize::Fixed(100.0)],
+            )),
             Vec::new(),
         );
         let (tracks, auto_fit) = list.expand(350.0, 0.0);

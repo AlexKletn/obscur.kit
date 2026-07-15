@@ -34,8 +34,8 @@ use obscur_kit::css::source::CssSource;
 use obscur_kit::geometry::Size;
 use obscur_kit::identity::RuntimeId;
 use obscur_kit::render::frame::{FrameSubmission, RenderFrame};
-use obscur_kit::render::{Renderer, RendererId};
 use obscur_kit::render::target::{BitmapTarget, RenderTarget};
+use obscur_kit::render::{Renderer, RendererId};
 use obscur_kit::render_cpu::renderer::CpuRenderer;
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
@@ -75,7 +75,10 @@ fn main() {
     if hidpi {
         println!(
             "[hidpi] device_scale={device_scale} · logical {}×{} → physical {}×{}\n",
-            logical_viewport.width, logical_viewport.height, physical_size.width, physical_size.height,
+            logical_viewport.width,
+            logical_viewport.height,
+            physical_size.width,
+            physical_size.height,
         );
     }
 
@@ -158,8 +161,11 @@ fn compile(css: &str) -> Stylesheet {
 fn stage_image_asset() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("obscur-kit-showcase-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create asset dir");
-    std::fs::write(dir.join(showcase::IMAGE_ASSET_NAME), showcase::image_asset_bytes())
-        .expect("write image asset");
+    std::fs::write(
+        dir.join(showcase::IMAGE_ASSET_NAME),
+        showcase::image_asset_bytes(),
+    )
+    .expect("write image asset");
     dir
 }
 

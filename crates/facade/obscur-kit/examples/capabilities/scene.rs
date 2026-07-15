@@ -339,7 +339,11 @@ fn grid_card() -> ViewNode {
             "stage",
             vec![el(
                 "grid-demo",
-                vec![el("gc gc-1", vec![]), el("gc gc-2", vec![]), el("gc gc-3", vec![])],
+                vec![
+                    el("gc gc-1", vec![]),
+                    el("gc gc-2", vec![]),
+                    el("gc gc-3", vec![]),
+                ],
             )],
         )],
     )
@@ -350,7 +354,10 @@ fn margin_card() -> ViewNode {
     card(
         "Margin collapsing",
         "20 + 30 collapse to 30, not 50",
-        vec![el("collapse-stage", vec![el("mc-a", vec![]), el("mc-b", vec![])])],
+        vec![el(
+            "collapse-stage",
+            vec![el("mc-a", vec![]), el("mc-b", vec![])],
+        )],
     )
 }
 

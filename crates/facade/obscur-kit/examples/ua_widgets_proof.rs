@@ -100,7 +100,9 @@ fn render(ua: &Stylesheet) -> tiny_skia::Pixmap {
     let frame = RenderFrame::new(snapshot, VIEWPORT);
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
@@ -109,9 +111,18 @@ fn render(ua: &Stylesheet) -> tiny_skia::Pixmap {
 fn controls_view() -> View {
     let kids = vec![
         widget_root(Checkbox::new("Checkbox — unchecked", CMD).view()),
-        widget_root(Checkbox::new("Checkbox — checked", CMD).checked(true).view()),
+        widget_root(
+            Checkbox::new("Checkbox — checked", CMD)
+                .checked(true)
+                .view(),
+        ),
         widget_root(Checkbox::indeterminate("Checkbox — mixed", CMD).view()),
-        widget_root(Checkbox::new("Checkbox — disabled", CMD).checked(true).disabled(true).view()),
+        widget_root(
+            Checkbox::new("Checkbox — disabled", CMD)
+                .checked(true)
+                .disabled(true)
+                .view(),
+        ),
         widget_root(Radio::new("Radio — unselected", CMD).view()),
         widget_root(Radio::new("Radio — selected", CMD).selected(true).view()),
         widget_root(Radio::new("Radio — disabled", CMD).disabled(true).view()),

@@ -104,10 +104,7 @@ impl SceneVector {
         let mut out = Vec::with_capacity(self.shapes.len());
         for shape in &self.shapes {
             if let Some(fill) = shape.fill {
-                out.push((
-                    shape.path.clone(),
-                    Paint::solid_fill(fill.resolve(current)),
-                ));
+                out.push((shape.path.clone(), Paint::solid_fill(fill.resolve(current))));
             }
             if let Some((paint, width)) = shape.stroke {
                 out.push((

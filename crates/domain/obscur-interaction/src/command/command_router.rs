@@ -162,7 +162,11 @@ mod tests {
         assert!(saves.contains(&ctrl('s')));
         assert!(saves.contains(&Shortcut::new(LogicalKey::character('w'))));
         assert!(router.bindings_for(CMD_OPEN).len() == 1);
-        assert!(router.bindings_for(InternedSymbol::from_raw(0xDEAD)).is_empty());
+        assert!(
+            router
+                .bindings_for(InternedSymbol::from_raw(0xDEAD))
+                .is_empty()
+        );
     }
 
     #[test]

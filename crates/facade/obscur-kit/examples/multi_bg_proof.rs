@@ -39,7 +39,7 @@ use obscur_kit::render::renderer::RendererId;
 use obscur_kit::render_vello::renderer::{VelloDevice, VelloRenderer};
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
-use obscur_kit::view::view::{View, ViewProperty, ViewValue, CLASS};
+use obscur_kit::view::view::{CLASS, View, ViewProperty, ViewValue};
 
 /// The output image extent (and the box fills it).
 const VIEWPORT: Size = Size::new(360.0, 360.0);

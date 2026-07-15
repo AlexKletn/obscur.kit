@@ -20,7 +20,10 @@ fn is_proc_macro_crate_root(file: &Path) -> bool {
         return false;
     }
     // `<crate>/src/lib.rs` → `<crate>/Cargo.toml`.
-    let Some(manifest) = file.parent().and_then(Path::parent).map(|dir| dir.join("Cargo.toml"))
+    let Some(manifest) = file
+        .parent()
+        .and_then(Path::parent)
+        .map(|dir| dir.join("Cargo.toml"))
     else {
         return false;
     };

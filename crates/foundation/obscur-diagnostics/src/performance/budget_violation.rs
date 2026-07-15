@@ -2,9 +2,7 @@
 
 use std::time::Duration;
 
-use crate::diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem,
-};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem};
 
 /// The stable diagnostic code carried by a budget violation.
 const BUDGET_VIOLATION_CODE: DiagnosticCode = DiagnosticCode::new("perf.budget_exceeded");

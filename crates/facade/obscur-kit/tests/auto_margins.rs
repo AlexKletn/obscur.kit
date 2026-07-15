@@ -60,7 +60,10 @@ fn item_box(item_css: &str) -> (f32, f32) {
 fn margin_zero_auto_centres_a_definite_width_box() {
     // THE idiom.
     let (x, width) = item_box("width: 100px; height: 10px; margin: 0 auto");
-    assert!((width - BOX).abs() < 1e-3, "the box keeps its width, got {width}");
+    assert!(
+        (width - BOX).abs() < 1e-3,
+        "the box keeps its width, got {width}"
+    );
     assert!(
         (x - CENTRED).abs() < 1e-3,
         "a 100px box in a 300px container centres at {CENTRED}, got {x}"
@@ -72,10 +75,12 @@ fn the_longhand_form_centres_identically() {
     // `margin: 0 auto` is a shorthand; the longhands must agree with it, or the
     // shorthand expansion is where the bug is.
     let (shorthand, _) = item_box("width: 100px; height: 10px; margin: 0 auto");
-    let (longhand, _) = item_box(
-        "width: 100px; height: 10px; margin-left: auto; margin-right: auto",
+    let (longhand, _) =
+        item_box("width: 100px; height: 10px; margin-left: auto; margin-right: auto");
+    assert!(
+        (shorthand - longhand).abs() < 1e-3,
+        "{shorthand} vs {longhand}"
     );
-    assert!((shorthand - longhand).abs() < 1e-3, "{shorthand} vs {longhand}");
     assert!((longhand - CENTRED).abs() < 1e-3);
 }
 
@@ -104,7 +109,10 @@ fn an_auto_margin_on_an_auto_width_box_resolves_to_zero() {
     // is no leftover and its `auto` margins are zero. It fills, it does not centre
     // — a centring implementation that forgot this would halve the box's position.
     let (x, width) = item_box("height: 10px; margin: 0 auto");
-    assert!((width - PAGE).abs() < 1e-3, "it still fills the container, got {width}");
+    assert!(
+        (width - PAGE).abs() < 1e-3,
+        "it still fills the container, got {width}"
+    );
     assert!(x.abs() < 1e-3, "and starts at the left edge, got {x}");
 }
 
@@ -148,7 +156,10 @@ fn margin_inline_auto_centres_through_the_logical_shorthand() {
 fn the_logical_axis_shorthands_reach_layout_with_two_values() {
     // `margin-inline: <start> <end>` — under ltr, start is the left edge.
     let (x, _) = item_box("width: 100px; height: 10px; margin-inline: 30px 5px");
-    assert!((x - 30.0).abs() < 1e-3, "start is the left edge under ltr, got {x}");
+    assert!(
+        (x - 30.0).abs() < 1e-3,
+        "start is the left edge under ltr, got {x}"
+    );
 }
 
 #[test]
@@ -172,7 +183,11 @@ fn padding_block_shorthand_insets_both_block_edges() {
     let root = runtime.tree().root().expect("a root");
     let page_id = runtime.tree().get(root).expect("live").children()[0];
     let item_id: NodeId = runtime.tree().get(page_id).expect("live").children()[0];
-    let origin = runtime.layout_boxes().get(&item_id).expect("laid out").origin();
+    let origin = runtime
+        .layout_boxes()
+        .get(&item_id)
+        .expect("laid out")
+        .origin();
 
     assert!(
         (origin.y - 25.0).abs() < 1e-3,
@@ -214,7 +229,10 @@ fn fit_content_with_auto_margins_centres_a_shrink_wrapped_box() {
     let (x, width) = (layout.origin().x, layout.size().width);
 
     // "hi" is 2 glyphs at 0.6 x 16px.
-    assert!((width - 19.2).abs() < 1e-3, "shrink-wrapped to its text, got {width}");
+    assert!(
+        (width - 19.2).abs() < 1e-3,
+        "shrink-wrapped to its text, got {width}"
+    );
     assert!(
         (x - (PAGE - width) / 2.0).abs() < 1e-3,
         "centred on its shrink-wrapped width: want {}, got {x}",

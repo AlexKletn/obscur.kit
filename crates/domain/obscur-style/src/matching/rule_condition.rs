@@ -250,9 +250,10 @@ mod tests {
         // A known viewport does not make the container axis known.
         assert!(!container_min.holds(&MediaEnvironment::viewport(1000.0, 1000.0)));
         // Supplying the container size is what turns the query back on.
-        assert!(container_min.holds(
-            &MediaEnvironment::viewport(1000.0, 1000.0).with_container(400.0, 100.0)
-        ));
+        assert!(
+            container_min
+                .holds(&MediaEnvironment::viewport(1000.0, 1000.0).with_container(400.0, 100.0))
+        );
     }
 
     #[test]

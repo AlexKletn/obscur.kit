@@ -81,7 +81,10 @@ fn drive(css: &str, n: usize, width: f32, height: f32) -> (UiRuntime, Vec<NodeId
     let sheet = compile(css);
     let view = grid_view(n);
     let result = rt.render_now(&view, std::slice::from_ref(&sheet));
-    assert!(result.restyled(), "authored grid CSS resolved computed styles");
+    assert!(
+        result.restyled(),
+        "authored grid CSS resolved computed styles"
+    );
     assert!(result.relaid_out(), "the styled tree arranged layout boxes");
     let root = rt.tree().root().expect("root after a frame");
     let container = rt.tree().get(root).unwrap().children().to_vec()[0];
@@ -91,7 +94,11 @@ fn drive(css: &str, n: usize, width: f32, height: f32) -> (UiRuntime, Vec<NodeId
 
 /// The absolute origin `(x, y)` and size `(w, h)` of a node's layout box.
 fn geom(rt: &UiRuntime, node: NodeId) -> (f32, f32, f32, f32) {
-    let b = rt.layout_boxes().get(&node).copied().expect("node has a box");
+    let b = rt
+        .layout_boxes()
+        .get(&node)
+        .copied()
+        .expect("node has a box");
     (b.origin().x, b.origin().y, b.size().width, b.size().height)
 }
 
@@ -104,8 +111,7 @@ fn approx(actual: f32, expected: f32, what: &str) {
 
 /// The shared three-fixed-column container prefix (`width:300px`, `100px 100px
 /// 100px`). Callers append the per-child rules.
-const THREE_COL: &str =
-    ".grid{display:grid;width:300px;grid-template-columns:100px 100px 100px}";
+const THREE_COL: &str = ".grid{display:grid;width:300px;grid-template-columns:100px 100px 100px}";
 
 // 1. column span via lines: `.a{grid-column: 1 / 3}` spans columns 0-1 (x=0,
 //    width 200); a following auto `.b` first-fits into the next free cell (col 2).
@@ -234,7 +240,11 @@ fn negative_end_line_spans_all_columns() {
     let (ax, ay, aw, _) = geom(&rt, k[0]);
     approx(ax, 0.0, "a.x (line 1 → col 0)");
     approx(ay, 0.0, "a.y (row 0)");
-    approx(aw, 300.0, "a.width (line 1 → -1 spans all three 100px columns)");
+    approx(
+        aw,
+        300.0,
+        "a.width (line 1 → -1 spans all three 100px columns)",
+    );
 }
 
 // 8. negative single line: `.a{grid-column: -1}` lands on the LAST column (x=200).
@@ -417,7 +427,11 @@ fn container_justify_items_default_centers_auto_item() {
     approx(ax, 30.0, "a.x (container justify-items:center)");
     approx(ay, 0.0, "a.y (align-items default stretch → cell top)");
     approx(aw, 40.0, "a.width (natural, inline axis centered)");
-    approx(ah, 100.0, "a.height (block axis stretches to fill the cell)");
+    approx(
+        ah,
+        100.0,
+        "a.height (block axis stretches to fill the cell)",
+    );
 }
 
 // Regression: with no alignment authored, an item fills its whole cell exactly

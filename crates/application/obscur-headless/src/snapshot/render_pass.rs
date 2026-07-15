@@ -69,7 +69,13 @@ mod tests {
 
     #[test]
     fn equal_passes_compare_equal() {
-        assert_eq!(RenderPass::new("scene", 1, 2), RenderPass::new("scene", 1, 2));
-        assert_ne!(RenderPass::new("scene", 1, 2), RenderPass::new("scene", 1, 3));
+        assert_eq!(
+            RenderPass::new("scene", 1, 2),
+            RenderPass::new("scene", 1, 2)
+        );
+        assert_ne!(
+            RenderPass::new("scene", 1, 2),
+            RenderPass::new("scene", 1, 3)
+        );
     }
 }

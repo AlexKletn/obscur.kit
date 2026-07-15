@@ -93,7 +93,11 @@ fn main() {
     // Machine checks on the dashed box.
     verify_ring_outside_with_gap(&pixmap, dashed_box);
     // The top ring edge centerline sits at box.top - (offset + width/2) = -4px.
-    verify_dashes(&pixmap, (dashed_box.origin.y - OFFSET - OUTLINE / 2.0) as u32, dashed_box);
+    verify_dashes(
+        &pixmap,
+        (dashed_box.origin.y - OFFSET - OUTLINE / 2.0) as u32,
+        dashed_box,
+    );
 
     let png = pixmap.encode_png().expect("encode png");
     let out = output_path("outline_proof.png");
@@ -154,13 +158,17 @@ fn render(list: DisplayList) -> tiny_skia::Pixmap {
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
     let mut renderer = CpuRenderer::new(RendererId::from_raw(1));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
 /// Whether a pixel reads as ring ink (dark and opaque).
 fn is_ink(pixmap: &tiny_skia::Pixmap, x: u32, y: u32) -> bool {
-    pixmap.pixel(x, y).is_some_and(|p| p.alpha() > 40 && p.red() < 120)
+    pixmap
+        .pixel(x, y)
+        .is_some_and(|p| p.alpha() > 40 && p.red() < 120)
 }
 
 /// Asserts the ring is painted OUTSIDE the box's left edge with a visible offset
@@ -181,7 +189,10 @@ fn verify_ring_outside_with_gap(pixmap: &tiny_skia::Pixmap, box_rect: Rect) {
             }
         }
     }
-    assert!(ink_outside > 0, "no ring ink found outside the box's left edge");
+    assert!(
+        ink_outside > 0,
+        "no ring ink found outside the box's left edge"
+    );
 
     // (2) Offset gap: the column one pixel left of the box is background (white),
     // not ink and not fill — the `outline-offset` gap between the box and the ring.

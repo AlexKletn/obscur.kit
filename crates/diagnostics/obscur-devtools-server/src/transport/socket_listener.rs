@@ -46,7 +46,9 @@ impl SocketListener {
     /// Returns an [`io::Error`] if the loopback bind fails.
     pub fn bind_loopback() -> io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
-        Ok(Self { inner: Inner::Tcp(listener) })
+        Ok(Self {
+            inner: Inner::Tcp(listener),
+        })
     }
 
     /// Binds a Unix domain listener to `path`.
@@ -60,7 +62,9 @@ impl SocketListener {
     #[cfg(unix)]
     pub fn bind_unix(path: impl AsRef<Path>) -> io::Result<Self> {
         let listener = UnixListener::bind(path)?;
-        Ok(Self { inner: Inner::Unix(listener) })
+        Ok(Self {
+            inner: Inner::Unix(listener),
+        })
     }
 
     /// Returns the bound loopback address, if this is a TCP listener.

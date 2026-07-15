@@ -175,9 +175,16 @@ mod tests {
             "Button", "Input", "Checkbox", "Radio", "Select", "Dialog", "List", "Menu", "Tabs",
             "Tree", "Table", "Docking",
         ] {
-            assert!(names.contains(&expected), "missing widget contract for {expected}");
+            assert!(
+                names.contains(&expected),
+                "missing widget contract for {expected}"
+            );
         }
-        assert_eq!(names.len(), 12, "exactly the shipped widgets, no invented tags");
+        assert_eq!(
+            names.len(),
+            12,
+            "exactly the shipped widgets, no invented tags"
+        );
     }
 
     #[test]
@@ -228,7 +235,10 @@ mod tests {
         // instead of asserting a vocabulary that does not exist.
         for tag in ["Menu", "Tabs", "Tree", "Table", "Docking"] {
             let contract = widget(tag);
-            assert!(contract.required_props().is_empty(), "{tag} requires a prop");
+            assert!(
+                contract.required_props().is_empty(),
+                "{tag} requires a prop"
+            );
             assert!(contract.allowed_props().is_empty(), "{tag} declares a prop");
         }
     }
@@ -238,7 +248,10 @@ mod tests {
         // Both sets are registered into one tag-keyed registry, so an overlap
         // would silently shadow one of them.
         let primitives = builtin_contracts();
-        let names: Vec<&str> = primitives.iter().map(ComponentContract::component).collect();
+        let names: Vec<&str> = primitives
+            .iter()
+            .map(ComponentContract::component)
+            .collect();
         for contract in widget_contracts() {
             assert!(
                 !names.contains(&contract.component()),

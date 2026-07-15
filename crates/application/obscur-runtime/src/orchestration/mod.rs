@@ -14,9 +14,9 @@ pub use grid_areas::resolve_named_grid_areas;
 mod grid_lines;
 pub use grid_lines::resolve_named_grid_lines;
 mod grid_templates;
-pub use grid_templates::{grid_template_for, grid_templates_from, GridTemplates};
+pub use grid_templates::{GridTemplates, grid_template_for, grid_templates_from};
 mod inspect;
-pub use inspect::{overlay_commands, InspectInfo, NodeInspection, TreeInspection};
+pub use inspect::{InspectInfo, NodeInspection, TreeInspection, overlay_commands};
 mod layout_coordinator;
 pub use layout_coordinator::{LayoutBoxes, LayoutCoordinator, LayoutStyles, root_font_size};
 mod motion_coordinator;
@@ -26,9 +26,9 @@ pub use pseudo_states::PseudoStates;
 mod render_coordinator;
 pub use render_coordinator::RenderCoordinator;
 mod scene_coordinator;
-pub use scene_coordinator::{ScrollPaint, SceneCoordinator};
+pub use scene_coordinator::{SceneCoordinator, ScrollPaint};
 mod scroll;
-pub(crate) use scroll::{overflow_scrolls, scroll_containers, ScrollContainer};
+pub(crate) use scroll::{ScrollContainer, overflow_scrolls, scroll_containers};
 mod stacking;
 mod style_coordinator;
 pub use style_coordinator::{ComputedStyles, StyleCoordinator};
@@ -38,9 +38,9 @@ mod style_matching_coordinator;
 pub use style_matching_coordinator::StyleMatchingCoordinator;
 mod text_attributes;
 pub(crate) use text_attributes::{
-    alignment_for, attributes_for, direction_for, display_text, letter_spacing_for, line_height_for,
-    overflow_for, overflow_wrap_for, tab_size_for, text_transform_for, white_space_for,
-    word_break_for, word_spacing_for, TabSize,
+    TabSize, alignment_for, attributes_for, direction_for, display_text, letter_spacing_for,
+    line_height_for, overflow_for, overflow_wrap_for, tab_size_for, text_transform_for,
+    white_space_for, word_break_for, word_spacing_for,
 };
 mod text_coordinator;
 pub use text_coordinator::TextCoordinator;

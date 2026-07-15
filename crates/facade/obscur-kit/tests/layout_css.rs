@@ -82,7 +82,11 @@ fn children(rt: &UiRuntime) -> (NodeId, NodeId) {
 
 /// The absolute origin `(x, y)` and size `(w, h)` of a node's layout box.
 fn geom(rt: &UiRuntime, node: NodeId) -> (f32, f32, f32, f32) {
-    let b = rt.layout_boxes().get(&node).copied().expect("node has a box");
+    let b = rt
+        .layout_boxes()
+        .get(&node)
+        .copied()
+        .expect("node has a box");
     (b.origin().x, b.origin().y, b.size().width, b.size().height)
 }
 
@@ -190,7 +194,11 @@ fn justify_content_shifts_children_block_within_explicit_width() {
          .a{width:20px;height:8px} .b{width:30px;height:8px}",
         &two_child_view(),
     );
-    approx(geom(&end, container_node(&end)).2, 200.0, "container is 200px wide");
+    approx(
+        geom(&end, container_node(&end)).2,
+        200.0,
+        "container is 200px wide",
+    );
     let (a, b) = children(&end);
     approx(geom(&end, a).0, 150.0, "flex-end a.x = 200 - 50");
     approx(geom(&end, b).0, 170.0, "flex-end b.x = 150 + 20");

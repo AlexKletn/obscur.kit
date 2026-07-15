@@ -16,7 +16,11 @@
 //! This closes the audit's §5 finding that SVG was decoded and validated but never
 //! painted by anything.
 #![forbid(unsafe_code)]
-#![cfg(all(feature = "resource-fs", feature = "resource-decode", feature = "render-cpu"))]
+#![cfg(all(
+    feature = "resource-fs",
+    feature = "resource-decode",
+    feature = "render-cpu"
+))]
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -44,7 +48,8 @@ const VIEWPORT: f32 = 64.0;
 
 /// A real SVG: one 10×10 square filled with `currentColor`. Nothing in the file
 /// names a colour, so what it paints is entirely the host's computed `color`.
-const ICON_SVG: &[u8] = br##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10">
+const ICON_SVG: &[u8] =
+    br##"<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 10 10">
   <rect width="10" height="10" fill="currentColor"/>
 </svg>"##;
 
@@ -123,7 +128,10 @@ fn an_svg_src_paints_as_vector_paths_and_never_as_an_image() {
         "§5.17: a vector source must never be rasterized into an image"
     );
     // The `currentColor` fill took the element's computed `color`.
-    assert_eq!(painted_fills(&result), vec![Color::rgba(1.0, 0.0, 0.0, 1.0)]);
+    assert_eq!(
+        painted_fills(&result),
+        vec![Color::rgba(1.0, 0.0, 0.0, 1.0)]
+    );
 }
 
 #[test]

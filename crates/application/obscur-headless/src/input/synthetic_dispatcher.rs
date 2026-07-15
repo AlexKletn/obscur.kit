@@ -144,8 +144,8 @@ mod tests {
     use obscur_runtime::UiRuntime;
     use obscur_style::cascade::CascadeOrigin;
     use obscur_style::matching::{BlockDeclaration, StyleRule, Stylesheet};
-    use obscur_style::selector::{ComplexSelector, CompoundSelector, SelectorList, SimpleSelector};
     use obscur_style::property::{Length, PropertyId, PropertyValue};
+    use obscur_style::selector::{ComplexSelector, CompoundSelector, SelectorList, SimpleSelector};
     use obscur_view::view::{
         CLASS, EVENT_CLICK, TEST_ID, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
         ViewValue,
@@ -179,8 +179,14 @@ mod tests {
                     Vec::new(),
                 )]),
                 vec![
-                    BlockDeclaration::normal(PropertyId::Width, PropertyValue::Length(Length::px(100.0))),
-                    BlockDeclaration::normal(PropertyId::Height, PropertyValue::Length(Length::px(50.0))),
+                    BlockDeclaration::normal(
+                        PropertyId::Width,
+                        PropertyValue::Length(Length::px(100.0)),
+                    ),
+                    BlockDeclaration::normal(
+                        PropertyId::Height,
+                        PropertyValue::Length(Length::px(50.0)),
+                    ),
                 ],
             )],
         )
@@ -207,8 +213,14 @@ mod tests {
         let outcomes = SyntheticDispatcher::new().dispatch_all(
             &mut runtime,
             &[
-                SyntheticInput::pointer_down(SelectorTarget::test_id("submit"), PointerButton::Primary),
-                SyntheticInput::pointer_up(SelectorTarget::test_id("submit"), PointerButton::Primary),
+                SyntheticInput::pointer_down(
+                    SelectorTarget::test_id("submit"),
+                    PointerButton::Primary,
+                ),
+                SyntheticInput::pointer_up(
+                    SelectorTarget::test_id("submit"),
+                    PointerButton::Primary,
+                ),
             ],
         );
 
@@ -238,11 +250,21 @@ mod tests {
         let outcomes = SyntheticDispatcher::new().dispatch_all(
             &mut runtime,
             &[
-                SyntheticInput::pointer_down(SelectorTarget::coordinate(point), PointerButton::Primary),
-                SyntheticInput::pointer_up(SelectorTarget::coordinate(point), PointerButton::Primary),
+                SyntheticInput::pointer_down(
+                    SelectorTarget::coordinate(point),
+                    PointerButton::Primary,
+                ),
+                SyntheticInput::pointer_up(
+                    SelectorTarget::coordinate(point),
+                    PointerButton::Primary,
+                ),
             ],
         );
-        assert_eq!(outcomes[0].target, Some(by_id), "same node by either selector");
+        assert_eq!(
+            outcomes[0].target,
+            Some(by_id),
+            "same node by either selector"
+        );
         assert_eq!(clicks.get(), 1);
     }
 
@@ -256,8 +278,16 @@ mod tests {
         let root = runtime.tree().root().expect("a root");
         let target = outcome.target.expect("resolved");
 
-        assert_eq!(outcome.propagation_path.first(), Some(&target), "starts at the target");
-        assert_eq!(outcome.propagation_path.last(), Some(&root), "ends at the root");
+        assert_eq!(
+            outcome.propagation_path.first(),
+            Some(&target),
+            "starts at the target"
+        );
+        assert_eq!(
+            outcome.propagation_path.last(),
+            Some(&root),
+            "ends at the root"
+        );
         assert!(outcome.propagates_through(root));
     }
 

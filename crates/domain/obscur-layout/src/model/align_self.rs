@@ -52,7 +52,10 @@ mod tests {
 
     #[test]
     fn auto_inherits_container_default() {
-        assert_eq!(AlignSelf::Auto.resolve(AlignItems::Center), AlignItems::Center);
+        assert_eq!(
+            AlignSelf::Auto.resolve(AlignItems::Center),
+            AlignItems::Center
+        );
         assert_eq!(
             AlignSelf::Auto.resolve(AlignItems::Stretch),
             AlignItems::Stretch
@@ -61,7 +64,10 @@ mod tests {
 
     #[test]
     fn concrete_values_override_container() {
-        assert_eq!(AlignSelf::Start.resolve(AlignItems::Stretch), AlignItems::Start);
+        assert_eq!(
+            AlignSelf::Start.resolve(AlignItems::Stretch),
+            AlignItems::Start
+        );
         assert_eq!(AlignSelf::End.resolve(AlignItems::Center), AlignItems::End);
         assert_eq!(
             AlignSelf::Stretch.resolve(AlignItems::Start),

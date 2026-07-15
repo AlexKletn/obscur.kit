@@ -152,7 +152,12 @@ mod tests {
         let mut scope = SubscriptionScope::new();
         let mut needs_update = false;
         let signals = SignalGenerations::new();
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut needs_update, &signals);
+        let mut ctx = ComponentContext::new(
+            &mut scope,
+            LifecycleState::Mounted,
+            &mut needs_update,
+            &signals,
+        );
         let view = component
             .render_erased(&mut ctx, props)
             .expect("the props decode");
@@ -189,9 +194,17 @@ mod tests {
         let mut scope = SubscriptionScope::new();
         let mut needs_update = false;
         let signals = SignalGenerations::new();
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut needs_update, &signals);
+        let mut ctx = ComponentContext::new(
+            &mut scope,
+            LifecycleState::Mounted,
+            &mut needs_update,
+            &signals,
+        );
 
-        let bad = vec![ViewProperty::new(step_symbol(), ViewValue::Text("2".into()))];
+        let bad = vec![ViewProperty::new(
+            step_symbol(),
+            ViewValue::Text("2".into()),
+        )];
         assert_eq!(
             erased.render_erased(&mut ctx, &bad),
             Err(PropsError::Type {
@@ -214,7 +227,12 @@ mod tests {
         let mut scope = SubscriptionScope::new();
         let mut needs_update = false;
         let signals = SignalGenerations::new();
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Created, &mut needs_update, &signals);
+        let mut ctx = ComponentContext::new(
+            &mut scope,
+            LifecycleState::Created,
+            &mut needs_update,
+            &signals,
+        );
         let mut mount = MountContext::new(&mut ctx);
         erased.on_mount_erased(&mut mount);
         // The default `error_boundary` still answers through the erasure.

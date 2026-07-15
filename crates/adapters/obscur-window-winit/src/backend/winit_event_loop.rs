@@ -318,7 +318,10 @@ mod tests {
     #[test]
     fn constraints_reach_the_winit_attributes() {
         let request = CreateWindow::new(WindowProperties::default()).with_constraints(
-            WindowConstraints::new(Some(Size::new(320.0, 240.0)), Some(Size::new(1280.0, 800.0))),
+            WindowConstraints::new(
+                Some(Size::new(320.0, 240.0)),
+                Some(Size::new(1280.0, 800.0)),
+            ),
         );
 
         let attributes = window_attributes(&request);

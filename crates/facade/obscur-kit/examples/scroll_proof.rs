@@ -42,7 +42,7 @@ use obscur_kit::render::{Renderer, RendererId};
 use obscur_kit::render_cpu::renderer::CpuRenderer;
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
-use obscur_kit::view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue, CLASS};
+use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
 /// The logical extent each panel is laid out and rasterized under.
 const VIEWPORT: Size = Size::new(220.0, 150.0);
@@ -86,13 +86,21 @@ fn main() {
         .iter()
         .filter(|c| matches!(c, obscur_kit::scene::command::PaintCommand::PushClip(_)))
         .count();
-    assert!(clips >= 1, "the scroller brackets its subtree with an overflow clip");
-    println!("[scene] idle: {} commands, {clips} PushClip", idle_list.commands().len());
+    assert!(
+        clips >= 1,
+        "the scroller brackets its subtree with an overflow clip"
+    );
+    println!(
+        "[scene] idle: {} commands, {clips} PushClip",
+        idle_list.commands().len()
+    );
 
     let idle = capture(&mut runtime, &mut renderer);
 
     // (d) idle hit-test: a pointer at the top of the scrollport lands on row 0.
-    let idle_hit = runtime.handle_pointer(mouse(PointerEventKind::Move, 100.0, 20.0)).target();
+    let idle_hit = runtime
+        .handle_pointer(mouse(PointerEventKind::Move, 100.0, 20.0))
+        .target();
     assert_eq!(idle_hit, Some(rows[0]), "idle: (100,20) hit-tests row 0");
 
     // --- Panel 2: scrolled by one step (two rows) --------------------------
@@ -116,14 +124,23 @@ fn main() {
                 if (t.coeffs[5] + STEP).abs() < 0.01
         )
     });
-    assert!(has_scroll_tf, "a PushTransform(translate(0,-80)) scrolls the content");
+    assert!(
+        has_scroll_tf,
+        "a PushTransform(translate(0,-80)) scrolls the content"
+    );
     println!("[scene] scrolled: PushTransform(translate(0,-{STEP})) present");
 
     let scrolled = capture(&mut runtime, &mut renderer);
 
     // (d) scrolled hit-test: the SAME screen point now lands on row 2.
-    let scrolled_hit = runtime.handle_pointer(mouse(PointerEventKind::Move, 100.0, 20.0)).target();
-    assert_eq!(scrolled_hit, Some(rows[2]), "scrolled: (100,20) hit-tests row 2");
+    let scrolled_hit = runtime
+        .handle_pointer(mouse(PointerEventKind::Move, 100.0, 20.0))
+        .target();
+    assert_eq!(
+        scrolled_hit,
+        Some(rows[2]),
+        "scrolled: (100,20) hit-tests row 2"
+    );
 
     // --- Machine-check the pixels -----------------------------------------
     verify(&idle, &scrolled);
@@ -148,8 +165,10 @@ fn main() {
 /// The view: a `.page` holding a `.scroller` that holds six `.row`s.
 fn scroller_view() -> View {
     let row = |n: u64, idx: usize| {
-        ViewNode::element(ComponentId::from_raw(n))
-            .with_prop(ViewProperty::new(CLASS, ViewValue::Text(format!("row r{idx}").into())))
+        ViewNode::element(ComponentId::from_raw(n)).with_prop(ViewProperty::new(
+            CLASS,
+            ViewValue::Text(format!("row r{idx}").into()),
+        ))
     };
     let rows: Vec<ViewNode> = (0..6).map(|i| row(200 + i as u64, i)).collect();
     let scroller = ViewNode::element(ComponentId::from_raw(100))
@@ -171,7 +190,12 @@ fn scroll_nodes(runtime: &UiRuntime) -> (NodeId, Vec<NodeId>) {
 }
 
 fn mouse(kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
-    PointerEvent::new(PointerId::MOUSE, PointerDevice::Mouse, kind, Point::new(x, y))
+    PointerEvent::new(
+        PointerId::MOUSE,
+        PointerDevice::Mouse,
+        kind,
+        Point::new(x, y),
+    )
 }
 
 /// Rasterizes the runtime's current committed scene into a fresh pixmap.
@@ -180,7 +204,9 @@ fn capture(runtime: &mut UiRuntime, renderer: &mut CpuRenderer) -> tiny_skia::Pi
     let frame = RenderFrame::new(snapshot, VIEWPORT);
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
@@ -202,24 +228,48 @@ fn verify(idle: &tiny_skia::Pixmap, scrolled: &tiny_skia::Pixmap) {
         "clip failed — row 3 painted below the scrollport at (10,130)"
     );
     // The page grey shows there instead.
-    assert!(near(idle.pixel(10, 130), 0xdd, 0xdd, 0xdd), "page grey below the clipped scroller");
+    assert!(
+        near(idle.pixel(10, 130), 0xdd, 0xdd, 0xdd),
+        "page grey below the clipped scroller"
+    );
 
     // (b) Scroll offset: the top of the scrollport is row 0 (red) idle, row 2
     //     (blue) after scrolling up two rows.
-    assert!(near(idle.pixel(10, 20), 0xd9, 0x33, 0x33), "idle: row 0 (red) at scrollport top");
-    assert!(near(scrolled.pixel(10, 20), 0x33, 0x66, 0xd9), "scrolled: row 2 (blue) at scrollport top");
+    assert!(
+        near(idle.pixel(10, 20), 0xd9, 0x33, 0x33),
+        "idle: row 0 (red) at scrollport top"
+    );
+    assert!(
+        near(scrolled.pixel(10, 20), 0x33, 0x66, 0xd9),
+        "scrolled: row 2 (blue) at scrollport top"
+    );
     // A mid-scrollport pixel: row 1 (green) idle → row 3 (orange) scrolled.
-    assert!(near(idle.pixel(10, 60), 0x33, 0xb3, 0x59), "idle: row 1 (green) mid-scrollport");
-    assert!(near(scrolled.pixel(10, 60), 0xe6, 0x8c, 0x26), "scrolled: row 3 (orange) mid-scrollport");
+    assert!(
+        near(idle.pixel(10, 60), 0x33, 0xb3, 0x59),
+        "idle: row 1 (green) mid-scrollport"
+    );
+    assert!(
+        near(scrolled.pixel(10, 60), 0xe6, 0x8c, 0x26),
+        "scrolled: row 3 (orange) mid-scrollport"
+    );
 
     // (c) Scrollbar: the right gutter (x≈196) carries a ~35%-black thumb over a
     //     faint track. The thumb DARKENS its row noticeably vs the same row left of
     //     the gutter; the track barely tints it. Detect the thumb by that contrast,
     //     so it is unambiguous over the colored rows. The thumb is at the top idle
     //     and has moved down when scrolled.
-    assert!(thumb_at(idle, 8), "idle: scrollbar thumb sits at the top of the gutter");
-    assert!(!thumb_at(scrolled, 8), "scrolled: the thumb has left the top of the gutter");
-    assert!(thumb_at(scrolled, 70), "scrolled: the thumb moved down the gutter");
+    assert!(
+        thumb_at(idle, 8),
+        "idle: scrollbar thumb sits at the top of the gutter"
+    );
+    assert!(
+        !thumb_at(scrolled, 8),
+        "scrolled: the thumb has left the top of the gutter"
+    );
+    assert!(
+        thumb_at(scrolled, 70),
+        "scrolled: the thumb moved down the gutter"
+    );
     println!("[verify] clip bites row 3; content scrolled row0→row2; thumb moved top→down");
 }
 
@@ -229,9 +279,9 @@ fn verify(idle: &tiny_skia::Pixmap, scrolled: &tiny_skia::Pixmap) {
 /// changes it, so a 40-unit margin cleanly tells thumb from track.
 fn thumb_at(pixmap: &tiny_skia::Pixmap, y: u32) -> bool {
     let sum = |x: u32| {
-        pixmap
-            .pixel(x, y)
-            .map_or(0i32, |p| i32::from(p.red()) + i32::from(p.green()) + i32::from(p.blue()))
+        pixmap.pixel(x, y).map_or(0i32, |p| {
+            i32::from(p.red()) + i32::from(p.green()) + i32::from(p.blue())
+        })
     };
     sum(196) + 40 < sum(100)
 }
@@ -247,7 +297,14 @@ fn stitch(panels: &[&tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     let paint = tiny_skia::PixmapPaint::default();
     let mut x = 0i32;
     for panel in panels {
-        out.draw_pixmap(x, 0, panel.as_ref(), &paint, tiny_skia::Transform::identity(), None);
+        out.draw_pixmap(
+            x,
+            0,
+            panel.as_ref(),
+            &paint,
+            tiny_skia::Transform::identity(),
+            None,
+        );
         x += panel.width() as i32 + gap as i32;
     }
     out

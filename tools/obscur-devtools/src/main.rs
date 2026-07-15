@@ -105,7 +105,12 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
         }
         index += 1;
     }
-    Ok(Options { endpoint, token, scopes, positionals })
+    Ok(Options {
+        endpoint,
+        token,
+        scopes,
+        positionals,
+    })
 }
 
 /// Parses a comma-separated scope list (`read,subscribe`, `all`, `observer`).
@@ -133,10 +138,14 @@ fn parse_scopes(spec: &str) -> Result<ScopeSet, String> {
 fn connect(endpoint: &Endpoint) -> Result<SocketClient, String> {
     match endpoint {
         Endpoint::Tcp(Some(addr)) => {
-            let parsed = addr.parse().map_err(|_| format!("invalid address '{addr}'"))?;
+            let parsed = addr
+                .parse()
+                .map_err(|_| format!("invalid address '{addr}'"))?;
             SocketClient::connect_loopback(parsed).map_err(|e| format!("connect failed: {e}"))
         }
-        Endpoint::Tcp(None) => Err("a client command needs --tcp <addr> or --unix <path>".to_owned()),
+        Endpoint::Tcp(None) => {
+            Err("a client command needs --tcp <addr> or --unix <path>".to_owned())
+        }
         #[cfg(unix)]
         Endpoint::Unix(path) => {
             SocketClient::connect_unix(path).map_err(|e| format!("connect failed: {e}"))
@@ -154,9 +163,7 @@ fn connect_and_handshake(options: &Options) -> Result<SocketClient, String> {
     println!("{}", cli::format_handshake(&response));
     match response {
         HandshakeResponse::Accepted { .. } => Ok(client),
-        HandshakeResponse::Rejected { reason } => {
-            Err(format!("handshake rejected: {reason:?}"))
-        }
+        HandshakeResponse::Rejected { reason } => Err(format!("handshake rejected: {reason:?}")),
     }
 }
 
@@ -171,8 +178,10 @@ fn run_inspect(args: &[String]) -> Result<(), String> {
     let targets = if target_arg == "all" {
         cli::all_targets()
     } else {
-        vec![cli::parse_target(target_arg)
-            .ok_or_else(|| format!("unknown target '{target_arg}'"))?]
+        vec![
+            cli::parse_target(target_arg)
+                .ok_or_else(|| format!("unknown target '{target_arg}'"))?,
+        ]
     };
 
     let mut client = connect_and_handshake(&options)?;
@@ -192,7 +201,8 @@ fn run_subscribe(args: &[String]) -> Result<(), String> {
         .first()
         .map(String::as_str)
         .ok_or("subscribe needs a topic")?;
-    let topic = cli::parse_topic(topic_arg).ok_or_else(|| format!("unknown topic '{topic_arg}'"))?;
+    let topic =
+        cli::parse_topic(topic_arg).ok_or_else(|| format!("unknown topic '{topic_arg}'"))?;
 
     let mut client = connect_and_handshake(&options)?;
     let reply = cli::subscribe(&mut client, 1, topic).map_err(|e| e.to_string())?;
@@ -227,7 +237,10 @@ fn run_inject(args: &[String]) -> Result<(), String> {
         "down" => vec![InjectedEvent::PointerDown { x, y }],
         "up" => vec![InjectedEvent::PointerUp { x, y }],
         "click" => {
-            vec![InjectedEvent::PointerDown { x, y }, InjectedEvent::PointerUp { x, y }]
+            vec![
+                InjectedEvent::PointerDown { x, y },
+                InjectedEvent::PointerUp { x, y },
+            ]
         }
         other => return Err(format!("unknown inject kind '{other}' (down|up|click)")),
     };
@@ -259,7 +272,9 @@ fn run_serve(args: &[String]) -> Result<(), String> {
             SocketListener::bind_unix(path).map_err(|e| format!("bind failed: {e}"))?
         }
         #[cfg(not(unix))]
-        Endpoint::Unix(_) => return Err("Unix sockets are not available on this platform".to_owned()),
+        Endpoint::Unix(_) => {
+            return Err("Unix sockets are not available on this platform".to_owned());
+        }
     };
     match listener.local_addr().ok().flatten() {
         Some(addr) => println!(
@@ -269,7 +284,11 @@ fn run_serve(args: &[String]) -> Result<(), String> {
         ),
         None => println!("obscur-devtools demo host listening on a Unix socket"),
     }
-    println!("token '{}' granted: {}", options.token, cli::format_scopes(options.scopes));
+    println!(
+        "token '{}' granted: {}",
+        options.token,
+        cli::format_scopes(options.scopes)
+    );
     host::serve_forever(&listener, &options.token, options.scopes).map_err(|e| e.to_string())
 }
 

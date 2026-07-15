@@ -84,8 +84,7 @@ fn respace_run(run: &ShapedRun, text: &str, letter_spacing: f32, word_spacing: f
             // letter-spacing: one add at each cluster *end* — the last glyph whose
             // cluster equals this one (or the final glyph of the run). This adds
             // the tracking once per typographic character unit.
-            let cluster_end =
-                i + 1 == glyphs.len() || glyphs[i + 1].cluster() != glyph.cluster();
+            let cluster_end = i + 1 == glyphs.len() || glyphs[i + 1].cluster() != glyph.cluster();
             if cluster_end {
                 advance += letter_spacing;
             }
@@ -100,8 +99,12 @@ fn respace_run(run: &ShapedRun, text: &str, letter_spacing: f32, word_spacing: f
                 .with_offset(glyph.x_offset(), glyph.y_offset())
         })
         .collect();
-    let respaced_run =
-        GlyphRun::new(respaced, source.direction(), source.font_size(), source.source());
+    let respaced_run = GlyphRun::new(
+        respaced,
+        source.direction(),
+        source.font_size(),
+        source.source(),
+    );
     ShapedRun::new(run.font(), respaced_run)
         .with_level(run.level())
         .with_synthesis(run.synth_oblique(), run.synth_bold())

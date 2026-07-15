@@ -2,9 +2,8 @@
 
 use crate::algorithm::{GridAutoFlow, GridPlacement};
 use crate::model::{
-    MarginEdges,
     AlignItems, AlignSelf, BoxSizing, Dimension, FlexDirection, FlexWrap, Inset, JustifyContent,
-    LayoutDisplay, Position,
+    LayoutDisplay, MarginEdges, Position,
 };
 use obscur_geometry::Insets;
 

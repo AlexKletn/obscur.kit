@@ -119,18 +119,19 @@ impl<'a> ComponentContext<'a> {
 
 #[cfg(test)]
 mod tests {
-    use obscur_identity::SignalId;
-    use crate::state::SignalGenerations;
     use super::ComponentContext;
     use crate::lifecycle::LifecycleState;
+    use crate::state::SignalGenerations;
     use crate::state::{StateGeneration, SubscriptionScope};
+    use obscur_identity::SignalId;
 
     #[test]
     fn exposes_phase_and_scope() {
         let mut scope = SubscriptionScope::new();
         let mut flag = false;
         let signals = SignalGenerations::new();
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut flag, &signals);
+        let mut ctx =
+            ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut flag, &signals);
         assert_eq!(ctx.phase(), LifecycleState::Mounted);
         assert!(ctx.subscriptions().is_empty());
         ctx.subscriptions_mut()
@@ -143,7 +144,8 @@ mod tests {
         let mut scope = SubscriptionScope::new();
         let mut flag = false;
         let signals = SignalGenerations::new();
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Updating, &mut flag, &signals);
+        let mut ctx =
+            ComponentContext::new(&mut scope, LifecycleState::Updating, &mut flag, &signals);
         assert!(!ctx.needs_update());
         ctx.request_update();
         assert!(ctx.needs_update());

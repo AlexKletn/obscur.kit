@@ -21,8 +21,8 @@ use obscur_kit::css::source::CssSource;
 use obscur_kit::geometry::{Point, Size};
 use obscur_kit::identity::{ComponentId, NodeId, RuntimeId};
 use obscur_kit::interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind, PointerId};
-use obscur_kit::runtime::{InputDispatch, InputEvent, UiRuntime};
 use obscur_kit::runtime::scheduler::BackpressureDecision;
+use obscur_kit::runtime::{InputDispatch, InputEvent, UiRuntime};
 use obscur_kit::style::matching::Stylesheet;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
@@ -147,7 +147,9 @@ fn what_dispatch_invalidates_is_served_by_the_frame_that_dispatched_it() {
     assert!(!runtime.has_pending_frame());
 
     runtime.queue_input(moved_to(OVER_TOP));
-    let frame = runtime.run_due_frame(&view(), sheets).expect("a frame is due");
+    let frame = runtime
+        .run_due_frame(&view(), sheets)
+        .expect("a frame is due");
     assert!(
         frame.restyled(),
         "the hover the dispatch phase produced is restyled by THIS frame"
@@ -223,7 +225,9 @@ fn queued_and_immediate_dispatch_agree() {
 
     let (mut queued, _t, _b) = rendered();
     queued.queue_input(moved_to(OVER_BOTTOM));
-    queued.run_due_frame(&view(), sheets).expect("a frame is due");
+    queued
+        .run_due_frame(&view(), sheets)
+        .expect("a frame is due");
     let dispatches = queued.take_input_dispatches();
     let InputDispatch::Pointer(through_queue) = &dispatches[0] else {
         panic!("expected a pointer dispatch");

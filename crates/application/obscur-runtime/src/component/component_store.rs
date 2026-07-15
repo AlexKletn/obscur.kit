@@ -4,9 +4,7 @@ use obscur_identity::{ComponentId, NodeId, SignalId};
 use obscur_tree::node::{NodeFlags, NodeKind};
 use obscur_tree::reconciliation::ReconciliationPlan;
 use obscur_tree::tree::{RetainedTree, SecondaryMap};
-use obscur_view::component::{
-    ComponentRegistration, ComponentRegistry, InstanceId, RegistryError,
-};
+use obscur_view::component::{ComponentRegistration, ComponentRegistry, InstanceId, RegistryError};
 use obscur_view::state::SignalGenerations;
 
 use crate::component::MountedComponent;
@@ -345,7 +343,11 @@ mod tests {
             .instance_id();
         reconcile(&mut store, &mut tree, &view_of(&[KIND]));
         assert_eq!(store.len(), 1);
-        assert_eq!(&*log.borrow(), &["mount"], "no remount on an unchanged view");
+        assert_eq!(
+            &*log.borrow(),
+            &["mount"],
+            "no remount on an unchanged view"
+        );
         assert_eq!(
             store
                 .get(store.nodes().next().expect("a mounted node"))

@@ -5,7 +5,7 @@ use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 use crate::model::{AlignItems, JustifyContent, LayoutBox, LayoutStyle};
 
 use super::grid::{GridTemplate, TrackSize};
-use super::{clamp_content, ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
+use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput, clamp_content};
 
 /// CSS-grid layout with real per-track sizing (spec §4.1, §4.2).
 ///
@@ -346,25 +346,35 @@ fn distribute_to_base(tracks: &mut [Track], start: usize, span: usize, contribut
         return;
     }
     let affected = |t: &Track| matches!(t.min_fn, MinFn::Intrinsic);
-    let leftover = distribute_up_to_limits(
-        tracks,
-        start,
-        hi,
-        extra,
-        affected,
-        |t| t.base,
-        |t| t.limit,
-    );
+    let leftover =
+        distribute_up_to_limits(tracks, start, hi, extra, affected, |t| t.base, |t| t.limit);
     // §11.5.1 "distribute space beyond limits": if affected tracks are frozen,
     // give the remainder to those with an intrinsic max (or, failing that, to
     // all affected tracks) growing without limit.
     if leftover > DISTRIBUTE_THRESHOLD {
-        let beyond =
-            |t: &Track| matches!(t.min_fn, MinFn::Intrinsic) && matches!(t.max_fn, MaxFn::Intrinsic);
+        let beyond = |t: &Track| {
+            matches!(t.min_fn, MinFn::Intrinsic) && matches!(t.max_fn, MaxFn::Intrinsic)
+        };
         if tracks[start..hi].iter().any(beyond) {
-            distribute_up_to_limits(tracks, start, hi, leftover, beyond, |t| t.base, |_| f32::INFINITY);
+            distribute_up_to_limits(
+                tracks,
+                start,
+                hi,
+                leftover,
+                beyond,
+                |t| t.base,
+                |_| f32::INFINITY,
+            );
         } else {
-            distribute_up_to_limits(tracks, start, hi, leftover, affected, |t| t.base, |_| f32::INFINITY);
+            distribute_up_to_limits(
+                tracks,
+                start,
+                hi,
+                leftover,
+                affected,
+                |t| t.base,
+                |_| f32::INFINITY,
+            );
         }
     }
     for t in &mut tracks[start..hi] {
@@ -388,14 +398,22 @@ fn distribute_to_limit(tracks: &mut [Track], start: usize, span: usize, contribu
     }
     let sum: f32 = tracks[start..hi]
         .iter()
-        .map(|t| if t.limit.is_infinite() { t.base } else { t.limit })
+        .map(|t| {
+            if t.limit.is_infinite() {
+                t.base
+            } else {
+                t.limit
+            }
+        })
         .sum();
     let extra = (contribution - sum).max(0.0);
     if extra <= 0.0 {
         return;
     }
     let growable: Vec<usize> = (start..hi)
-        .filter(|&i| affected(&tracks[i]) && (tracks[i].infinitely_growable || tracks[i].limit.is_infinite()))
+        .filter(|&i| {
+            affected(&tracks[i]) && (tracks[i].infinitely_growable || tracks[i].limit.is_infinite())
+        })
         .collect();
     if growable.is_empty() {
         distribute_up_to_limits(
@@ -404,7 +422,13 @@ fn distribute_to_limit(tracks: &mut [Track], start: usize, span: usize, contribu
             hi,
             extra,
             affected,
-            |t| if t.limit.is_infinite() { t.base } else { t.limit },
+            |t| {
+                if t.limit.is_infinite() {
+                    t.base
+                } else {
+                    t.limit
+                }
+            },
             |_| f32::INFINITY,
         );
     } else {
@@ -507,7 +531,15 @@ fn maximise(tracks: &mut [Track], avail: f32) {
     for t in tracks.iter_mut() {
         t.increase = 0.0;
     }
-    distribute_up_to_limits(tracks, 0, tracks.len(), free, |_| true, |t| t.base, |t| t.limit);
+    distribute_up_to_limits(
+        tracks,
+        0,
+        tracks.len(),
+        free,
+        |_| true,
+        |t| t.base,
+        |t| t.limit,
+    );
     for t in tracks.iter_mut() {
         t.base += t.increase;
         t.increase = 0.0;
@@ -567,7 +599,10 @@ fn expand_flexible(tracks: &mut [Track], avail: f32) {
 /// invokes this when the container axis is definite and its content alignment is
 /// `stretch`/`normal` (the default), matching the spec's preconditions.
 fn stretch_auto(tracks: &mut [Track], avail: f32) {
-    let count = tracks.iter().filter(|t| matches!(t.max_fn, MaxFn::Intrinsic)).count();
+    let count = tracks
+        .iter()
+        .filter(|t| matches!(t.max_fn, MaxFn::Intrinsic))
+        .count();
     if count == 0 {
         return;
     }
@@ -791,7 +826,12 @@ fn collapsed_tracks(
             *slot = true;
         }
     }
-    for (track, slot) in collapsed.iter_mut().enumerate().take(end.min(len)).skip(start) {
+    for (track, slot) in collapsed
+        .iter_mut()
+        .enumerate()
+        .take(end.min(len))
+        .skip(start)
+    {
         if !used[track] {
             *slot = true;
         }
@@ -820,7 +860,9 @@ fn implicit_track(auto: &[TrackSize], idx: usize) -> TrackSize {
 /// sizes plus the `span - 1` interior gaps between them.
 fn span_extent(sizes: &[f32], start: usize, span: usize, gap: f32) -> f32 {
     let end = (start + span).min(sizes.len());
-    let base: f32 = sizes.get(start..end).map_or(0.0, |s| s.iter().copied().sum());
+    let base: f32 = sizes
+        .get(start..end)
+        .map_or(0.0, |s| s.iter().copied().sum());
     base + gap * (span.saturating_sub(1) as f32)
 }
 
@@ -1081,8 +1123,10 @@ impl LayoutAlgorithm for GridLayout {
         // vector, so every non-auto-repeat template lays out exactly as before.
         // `col_autofit` / `row_autofit` carry the generated `auto-fit` track range
         // (if any) so empty ones collapse after placement.
-        let (columns_expanded, col_autofit) =
-            self.template.columns().expand(content_width, self.column_gap);
+        let (columns_expanded, col_autofit) = self
+            .template
+            .columns()
+            .expand(content_width, self.column_gap);
         let (rows_expanded, row_autofit) =
             self.template.rows().expand(content_height, self.row_gap);
 
@@ -1192,11 +1236,7 @@ impl LayoutAlgorithm for GridLayout {
             place_col[i] = c0;
             place_row[i] = r0;
             if !flow.is_dense() {
-                (cur_major, cur_minor) = if flow.is_column() {
-                    (c0, r0)
-                } else {
-                    (r0, c0)
-                };
+                (cur_major, cur_minor) = if flow.is_column() { (c0, r0) } else { (r0, c0) };
             }
         }
         // Column-flow items may land past the explicit column count (implicit
@@ -1384,8 +1424,16 @@ impl LayoutAlgorithm for GridLayout {
                     i,
                     BoxConstraints {
                         min: Size::new(
-                            if inline == CellAlign::Stretch { cell_w } else { 0.0 },
-                            if block == CellAlign::Stretch { cell_h } else { 0.0 },
+                            if inline == CellAlign::Stretch {
+                                cell_w
+                            } else {
+                                0.0
+                            },
+                            if block == CellAlign::Stretch {
+                                cell_h
+                            } else {
+                                0.0
+                            },
                         ),
                         max: Size::new(cell_w, cell_h),
                     },
@@ -1483,7 +1531,12 @@ mod tests {
         )
     }
 
-    fn grid(columns: Vec<TrackSize>, rows: Vec<TrackSize>, col_gap: f32, row_gap: f32) -> GridLayout {
+    fn grid(
+        columns: Vec<TrackSize>,
+        rows: Vec<TrackSize>,
+        col_gap: f32,
+        row_gap: f32,
+    ) -> GridLayout {
         GridLayout::with_template(GridTemplate::new(columns, rows), col_gap, row_gap)
     }
 
@@ -1515,13 +1568,18 @@ mod tests {
             ..LayoutStyle::default()
         };
         let mut measurer = FixedChildMeasurer::new(vec![Size::new(10.0, 300.0)]);
-        let out = grid(vec![TrackSize::Fixed(100.0)], vec![TrackSize::Fixed(300.0)], 0.0, 0.0)
-            .layout(
-                &style,
-                &[child(1)],
-                BoxConstraints::loose(Size::new(400.0, 1000.0)),
-                &mut measurer,
-            );
+        let out = grid(
+            vec![TrackSize::Fixed(100.0)],
+            vec![TrackSize::Fixed(300.0)],
+            0.0,
+            0.0,
+        )
+        .layout(
+            &style,
+            &[child(1)],
+            BoxConstraints::loose(Size::new(400.0, 1000.0)),
+            &mut measurer,
+        );
         assert_eq!(out.size().height, 50.0);
     }
 
@@ -1593,7 +1651,11 @@ mod tests {
             Size::new(10.0, 20.0),
         ]);
         let g = grid(
-            vec![TrackSize::Fixed(100.0), TrackSize::Fr(1.0), TrackSize::Fr(2.0)],
+            vec![
+                TrackSize::Fixed(100.0),
+                TrackSize::Fr(1.0),
+                TrackSize::Fr(2.0),
+            ],
             vec![],
             0.0,
             0.0,
@@ -1622,7 +1684,12 @@ mod tests {
         let children = [child(1), child(2)];
         let mut measurer =
             FixedChildMeasurer::new(vec![Size::new(0.0, 10.0), Size::new(0.0, 10.0)]);
-        let g = grid(vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)], vec![], 0.0, 0.0);
+        let g = grid(
+            vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)],
+            vec![],
+            0.0,
+            0.0,
+        );
         let out = g.layout(
             &style,
             &children,
@@ -1668,7 +1735,12 @@ mod tests {
         let style = LayoutStyle::default();
         let children = [child(1), child(2), child(3), child(4), child(5)];
         let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 10.0); 5]);
-        let g = grid(vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)], vec![], 0.0, 0.0);
+        let g = grid(
+            vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)],
+            vec![],
+            0.0,
+            0.0,
+        );
         let out = g.layout(
             &style,
             &children,
@@ -1693,7 +1765,12 @@ mod tests {
             Size::new(0.0, 15.0),
             Size::new(0.0, 5.0),
         ]);
-        let g = grid(vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)], vec![], 0.0, 0.0);
+        let g = grid(
+            vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)],
+            vec![],
+            0.0,
+            0.0,
+        );
         let out = g.layout(
             &style,
             &children,
@@ -2103,7 +2180,12 @@ mod tests {
         let children = [child(1), child(2)];
         let mut measurer =
             FixedChildMeasurer::new(vec![Size::new(0.0, 10.0), Size::new(0.0, 10.0)]);
-        let g = grid(vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)], vec![], 0.0, 0.0);
+        let g = grid(
+            vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)],
+            vec![],
+            0.0,
+            0.0,
+        );
         let out = g.layout(
             &style,
             &children,
@@ -2155,7 +2237,12 @@ mod tests {
         let children = [child(1), child(2)];
         let mut measurer =
             FixedChildMeasurer::new(vec![Size::new(0.0, 10.0), Size::new(0.0, 10.0)]);
-        let g = grid(vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)], vec![], 0.0, 0.0);
+        let g = grid(
+            vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)],
+            vec![],
+            0.0,
+            0.0,
+        );
         let out = g.layout(
             &style,
             &children,
@@ -2310,7 +2397,12 @@ mod tests {
         let style = LayoutStyle::default();
         let children = [child(1), child(2), child(3), child(4), child(5)];
         let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 10.0); 5]);
-        let g = grid(vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)], vec![], 0.0, 0.0);
+        let g = grid(
+            vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)],
+            vec![],
+            0.0,
+            0.0,
+        );
         let out = g.layout(
             &style,
             &children,
@@ -2467,7 +2559,11 @@ mod tests {
         let style = width_style(350.0);
         let children = [child(1), child(2), child(3)];
         let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 10.0); 3]);
-        let g = auto_repeat_grid(AutoRepeatMode::AutoFill, vec![TrackSize::Fixed(100.0)], 10.0);
+        let g = auto_repeat_grid(
+            AutoRepeatMode::AutoFill,
+            vec![TrackSize::Fixed(100.0)],
+            10.0,
+        );
         let out = g.layout(
             &style,
             &children,
@@ -2539,7 +2635,10 @@ mod tests {
         let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 10.0); 4]);
         let columns = TrackList::new(
             vec![TrackSize::Fixed(50.0)],
-            Some(AutoRepeat::new(AutoRepeatMode::AutoFill, vec![TrackSize::Fixed(100.0)])),
+            Some(AutoRepeat::new(
+                AutoRepeatMode::AutoFill,
+                vec![TrackSize::Fixed(100.0)],
+            )),
             Vec::new(),
         );
         let g = GridLayout::with_template(
@@ -2669,7 +2768,12 @@ mod tests {
         assert_eq!(style.grid_auto_flow(), GridAutoFlow::Row);
         let children = [child(1), child(2), child(3), child(4), child(5)];
         let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 10.0); 5]);
-        let g = grid(vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)], vec![], 0.0, 0.0);
+        let g = grid(
+            vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)],
+            vec![],
+            0.0,
+            0.0,
+        );
         let out = g.layout(
             &style,
             &children,
@@ -2890,7 +2994,10 @@ mod tests {
         // leftover/(n+1) = 100/3 ≈ 33.33 at each of the three gaps.
         let (x0, x1) = distribute_cols(JustifyContent::SpaceEvenly);
         assert!((x0 - 100.0 / 3.0).abs() < 1e-3, "x0 = {x0}");
-        assert!((x1 - (100.0 / 3.0 + 50.0 + 100.0 / 3.0)).abs() < 1e-3, "x1 = {x1}");
+        assert!(
+            (x1 - (100.0 / 3.0 + 50.0 + 100.0 / 3.0)).abs() < 1e-3,
+            "x1 = {x1}"
+        );
     }
 
     #[test]
@@ -2903,7 +3010,10 @@ mod tests {
         assert_eq!(distribute_rows(JustifyContent::SpaceAround), (25.0, 125.0));
         let (y0, y1) = distribute_rows(JustifyContent::SpaceEvenly);
         assert!((y0 - 100.0 / 3.0).abs() < 1e-3, "y0 = {y0}");
-        assert!((y1 - (100.0 / 3.0 + 50.0 + 100.0 / 3.0)).abs() < 1e-3, "y1 = {y1}");
+        assert!(
+            (y1 - (100.0 / 3.0 + 50.0 + 100.0 / 3.0)).abs() < 1e-3,
+            "y1 = {y1}"
+        );
     }
 
     #[test]
@@ -3017,7 +3127,10 @@ mod tests {
         let children = [child(1)];
         let mut measurer = FixedChildMeasurer::new(vec![Size::new(50.0, 20.0)]);
         let g = grid(
-            vec![TrackSize::minmax(TrackSize::Fixed(100.0), TrackSize::Fixed(300.0))],
+            vec![TrackSize::minmax(
+                TrackSize::Fixed(100.0),
+                TrackSize::Fixed(300.0),
+            )],
             vec![],
             0.0,
             0.0,
@@ -3067,7 +3180,12 @@ mod tests {
         let children = [child(1), child(2)];
         let mut measurer =
             FixedChildMeasurer::new(vec![Size::new(0.0, 10.0), Size::new(0.0, 10.0)]);
-        let g = grid(vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)], vec![], 0.0, 0.0);
+        let g = grid(
+            vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)],
+            vec![],
+            0.0,
+            0.0,
+        );
         let out = g.layout(
             &style,
             &children,

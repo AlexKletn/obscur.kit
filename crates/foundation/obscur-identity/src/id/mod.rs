@@ -1,7 +1,7 @@
 //! Id module.
 mod component_id;
-mod frame_id;
 mod correlation_id;
+mod frame_id;
 mod namespace_id;
 mod node_id;
 mod operation_id;
@@ -11,8 +11,8 @@ mod signal_id;
 mod window_id;
 
 pub use component_id::ComponentId;
-pub use frame_id::FrameId;
 pub use correlation_id::CorrelationId;
+pub use frame_id::FrameId;
 pub use namespace_id::NamespaceId;
 pub use node_id::NodeId;
 pub use operation_id::OperationId;

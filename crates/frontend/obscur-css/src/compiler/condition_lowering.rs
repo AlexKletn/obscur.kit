@@ -287,7 +287,10 @@ mod tests {
         assert!(!container_condition("(max-inline-size: 40em)").holds(&env));
         // Even with a container supplied, an untestable feature cannot be said
         // to hold.
-        assert!(!container_condition("(orientation: portrait)").holds(&env.with_container(500.0, 500.0)));
+        assert!(
+            !container_condition("(orientation: portrait)")
+                .holds(&env.with_container(500.0, 500.0))
+        );
     }
 
     #[test]

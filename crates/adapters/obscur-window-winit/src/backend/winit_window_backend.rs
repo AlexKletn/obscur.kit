@@ -293,10 +293,7 @@ impl WindowBackend for WinitWindowBackend {
             return outcome;
         }
 
-        let record = self
-            .records
-            .get_mut(&id)
-            .expect("membership checked above");
+        let record = self.records.get_mut(&id).expect("membership checked above");
         record.properties_mut().state = if mode.fullscreen.is_fullscreen() {
             WindowState::Fullscreen
         } else {
@@ -466,10 +463,11 @@ mod tests {
         let owned_error = backend.create_window(owned).expect_err("owner is refused");
         assert!(matches!(owned_error, WindowError::InvalidRequest(_)));
 
-        let modal = CreateWindow::new(WindowProperties::default()).with_relation(
-            WindowRelation::top_level().with_modality(Modality::ApplicationModal),
-        );
-        let modal_error = backend.create_window(modal).expect_err("modality is refused");
+        let modal = CreateWindow::new(WindowProperties::default())
+            .with_relation(WindowRelation::top_level().with_modality(Modality::ApplicationModal));
+        let modal_error = backend
+            .create_window(modal)
+            .expect_err("modality is refused");
         assert!(matches!(modal_error, WindowError::InvalidRequest(_)));
 
         // Nothing was minted or queued for either refusal.

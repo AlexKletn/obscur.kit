@@ -456,7 +456,11 @@ mod tests {
         let chain = alpha_beta_chain();
         let attributes = FontAttributes::default();
         // 'Ω' (U+03A9) is covered by neither font.
-        assert!(registry.resolve(&request(&chain, &attributes, "Ω")).is_none());
+        assert!(
+            registry
+                .resolve(&request(&chain, &attributes, "Ω"))
+                .is_none()
+        );
     }
 
     #[test]
@@ -498,7 +502,11 @@ mod tests {
         let registry = FontRegistry::new();
         let chain = alpha_beta_chain();
         let attributes = FontAttributes::default();
-        assert!(registry.resolve(&request(&chain, &attributes, "A")).is_none());
+        assert!(
+            registry
+                .resolve(&request(&chain, &attributes, "A"))
+                .is_none()
+        );
     }
 
     #[test]
@@ -507,7 +515,11 @@ mod tests {
         // A chain naming only "Alpha" cannot reach Beta even for 'Я'.
         let chain = FontFallback::new(FontFamily::named("Alpha"));
         let attributes = FontAttributes::default();
-        assert!(registry.resolve(&request(&chain, &attributes, "Я")).is_none());
+        assert!(
+            registry
+                .resolve(&request(&chain, &attributes, "Я"))
+                .is_none()
+        );
     }
 
     #[test]
@@ -637,7 +649,10 @@ mod tests {
             .resolve(&request(&chain, &bold, "A"))
             .expect("Alpha covers 'A'");
         assert_eq!(resolved.font(), FontId::new(1));
-        assert!(!resolved.synth_bold(), "a real bold face must not be faux-bolded");
+        assert!(
+            !resolved.synth_bold(),
+            "a real bold face must not be faux-bolded"
+        );
     }
 
     #[test]
@@ -676,6 +691,10 @@ mod tests {
         let resolver: Box<dyn FontResolver> = Box::new(registry());
         let chain = alpha_beta_chain();
         let attributes = FontAttributes::default();
-        assert!(resolver.resolve(&request(&chain, &attributes, "A")).is_some());
+        assert!(
+            resolver
+                .resolve(&request(&chain, &attributes, "A"))
+                .is_some()
+        );
     }
 }

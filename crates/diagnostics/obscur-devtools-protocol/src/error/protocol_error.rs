@@ -62,7 +62,9 @@ mod tests {
     fn display_is_non_empty() {
         let errs = [
             ProtocolError::VersionUnsupported,
-            ProtocolError::Unauthorized { required: PermissionScope::Control },
+            ProtocolError::Unauthorized {
+                required: PermissionScope::Control,
+            },
             ProtocolError::LimitExceeded { limit: 64 },
             ProtocolError::UnknownCommand,
             ProtocolError::MalformedMessage,
@@ -81,7 +83,9 @@ mod tests {
 
     #[test]
     fn unauthorized_carries_required_scope() {
-        let e = ProtocolError::Unauthorized { required: PermissionScope::Inject };
+        let e = ProtocolError::Unauthorized {
+            required: PermissionScope::Inject,
+        };
         assert!(format!("{e}").contains("Inject"));
     }
 }

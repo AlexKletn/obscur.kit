@@ -1,8 +1,8 @@
 //! The cache key for a whole-paragraph shaping result (spec §5.10).
 
 use crate::font::{FontAttributes, FontFace, FontFallback, FontFamily};
-use crate::shaping::face_source_key::FaceSourceKey;
 use crate::shaping::TextDirection;
+use crate::shaping::face_source_key::FaceSourceKey;
 
 /// The full cache key for [`ParagraphShaper::shape_paragraph`]: everything that
 /// can change the itemize → resolve → shape output.

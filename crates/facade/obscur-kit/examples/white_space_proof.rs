@@ -78,11 +78,23 @@ fn main() {
     // and the initial `text-overflow: clip` trims the painted glyphs to the box) —
     // whereas the SAME phrase under `normal` in the SAME box WRAPS to many lines.
     const PHRASE: &str = "keep this whole phrase on one single line";
-    let (c_px, c_lines) = render_block(&css(base, "nowrap", "white-space: nowrap; width: 40px;"), PHRASE);
-    let (_, c_normal) = render_block(&css(base, "normal_wrap", "white-space: normal; width: 40px;"), PHRASE);
+    let (c_px, c_lines) = render_block(
+        &css(base, "nowrap", "white-space: nowrap; width: 40px;"),
+        PHRASE,
+    );
+    let (_, c_normal) = render_block(
+        &css(base, "normal_wrap", "white-space: normal; width: 40px;"),
+        PHRASE,
+    );
     // D: `pre` + tab-size, three renders to prove the tab lands on the stop.
-    let (d_px, d_lines) = render_block(&css(base, "pre_tab4", "white-space: pre; tab-size: 4;"), "a\tb");
-    let (_, d_tab8) = render_block(&css(base, "pre_tab8", "white-space: pre; tab-size: 8;"), "a\tb");
+    let (d_px, d_lines) = render_block(
+        &css(base, "pre_tab4", "white-space: pre; tab-size: 4;"),
+        "a\tb",
+    );
+    let (_, d_tab8) = render_block(
+        &css(base, "pre_tab8", "white-space: pre; tab-size: 8;"),
+        "a\tb",
+    );
     let (_, d_space) = render_block(&css(base, "pre_space", "white-space: pre;"), "a b");
     // The advance of one space (its own line under `pre`): the tab-stop unit.
     let (_, sp_line) = render_block(&css(base, "space", "white-space: pre;"), " ");
@@ -124,8 +136,18 @@ fn verify(
 ) {
     // A `normal`: one line (the space run AND the `\n` collapsed to spaces).
     // B `pre`: two lines (the `\n` preserved as a forced break).
-    assert_eq!(a.len(), 1, "A(normal): `\\n` + space run collapse to one line, got {}", a.len());
-    assert_eq!(b.len(), 2, "B(pre): the `\\n` forces two lines, got {}", b.len());
+    assert_eq!(
+        a.len(),
+        1,
+        "A(normal): `\\n` + space run collapse to one line, got {}",
+        a.len()
+    );
+    assert_eq!(
+        b.len(),
+        2,
+        "B(pre): the `\\n` forces two lines, got {}",
+        b.len()
+    );
     // Clean width comparison on `"a    b"`: collapsed (one space) < preserved (four
     // spaces) by ~3 space advances.
     let w_normal = aw[0].width;
@@ -138,7 +160,12 @@ fn verify(
     // C `nowrap`: exactly ONE line in the narrow box, whereas the SAME phrase under
     // `normal` in the SAME box WRAPS to several lines — proving nowrap disables the
     // soft wrap.
-    assert_eq!(c.len(), 1, "C(nowrap): the long phrase stays on ONE line, got {}", c.len());
+    assert_eq!(
+        c.len(),
+        1,
+        "C(nowrap): the long phrase stays on ONE line, got {}",
+        c.len()
+    );
     assert!(
         c_normal.len() >= 2,
         "C(control): `normal` must WRAP the same phrase to ≥2 lines, got {}",
@@ -147,7 +174,10 @@ fn verify(
 
     // D `pre` + tab: the glyph stream is `a`, `\t`, `b`; the pen just after the tab
     // (advance of `a` + advance of the tab) must land on the tab stop = 4·space.
-    assert!(d_tab4[0].advances.len() >= 2, "D: expected a, tab, b glyphs");
+    assert!(
+        d_tab4[0].advances.len() >= 2,
+        "D: expected a, tab, b glyphs"
+    );
     let pen_after_tab_4 = d_tab4[0].advances[0] + d_tab4[0].advances[1];
     let stop_4 = 4.0 * space_adv;
     assert!(
@@ -176,7 +206,9 @@ fn verify(
          tab-size:8 pen→{pen_after_tab_8:.1}=8·{space_adv:.1}",
         c_normal.len(),
     );
-    println!("[verify] OK — collapse < preserve, `\\n` forced under pre, nowrap stays one line, tab lands on the stop");
+    println!(
+        "[verify] OK — collapse < preserve, `\\n` forced under pre, nowrap stays one line, tab lands on the stop"
+    );
 }
 
 /// Builds one block's CSS: the shared `base` plus a per-block `.block` rule (given
@@ -209,7 +241,11 @@ fn render_block(css: &str, content: &str) -> (tiny_skia::Pixmap, Vec<Line>) {
             if let Some(line) = lines.iter_mut().find(|l| (l.y - origin.y).abs() < 0.1) {
                 line.width += width;
             } else {
-                lines.push(Line { y: origin.y, width, advances });
+                lines.push(Line {
+                    y: origin.y,
+                    width,
+                    advances,
+                });
             }
         }
     }
@@ -217,14 +253,22 @@ fn render_block(css: &str, content: &str) -> (tiny_skia::Pixmap, Vec<Line>) {
     println!(
         "[block] {} line(s): {:?}",
         lines.len(),
-        lines.iter().map(|l| (l.width * 10.0).round() / 10.0).collect::<Vec<_>>()
+        lines
+            .iter()
+            .map(|l| (l.width * 10.0).round() / 10.0)
+            .collect::<Vec<_>>()
     );
 
     let frame = RenderFrame::new(snapshot, VIEWPORT);
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
-    (renderer.pixmap().expect("a rasterized frame").clone(), lines)
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
+    (
+        renderer.pixmap().expect("a rasterized frame").clone(),
+        lines,
+    )
 }
 
 /// The view: a single `.block` element wrapping one text node.
@@ -241,14 +285,29 @@ fn block_view(content: &str) -> View {
 /// Vertically stacks `pixmaps` into one image with thin gray dividers.
 fn stack(pixmaps: &[tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     let gap = 2u32;
-    let width = pixmaps.iter().map(tiny_skia::Pixmap::width).max().unwrap_or(1);
-    let height: u32 = pixmaps.iter().map(|p| p.height() + gap).sum::<u32>().saturating_sub(gap);
+    let width = pixmaps
+        .iter()
+        .map(tiny_skia::Pixmap::width)
+        .max()
+        .unwrap_or(1);
+    let height: u32 = pixmaps
+        .iter()
+        .map(|p| p.height() + gap)
+        .sum::<u32>()
+        .saturating_sub(gap);
     let mut out = tiny_skia::Pixmap::new(width, height.max(1)).expect("combined pixmap");
     out.fill(tiny_skia::Color::from_rgba8(0xd0, 0xcd, 0xc7, 0xff));
     let paint = tiny_skia::PixmapPaint::default();
     let mut y = 0i32;
     for px in pixmaps {
-        out.draw_pixmap(0, y, px.as_ref(), &paint, tiny_skia::Transform::identity(), None);
+        out.draw_pixmap(
+            0,
+            y,
+            px.as_ref(),
+            &paint,
+            tiny_skia::Transform::identity(),
+            None,
+        );
         y += (px.height() + gap) as i32;
     }
     out

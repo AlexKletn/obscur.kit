@@ -13,7 +13,9 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use obscur_devtools_protocol::message::{ControlAction, InjectedEvent, Inspectable, SnapshotPayload};
+use obscur_devtools_protocol::message::{
+    ControlAction, InjectedEvent, Inspectable, SnapshotPayload,
+};
 use obscur_devtools_server::bridge::{InspectSource, SnapshotInspectSource};
 
 use crate::geometry::Point;
@@ -66,8 +68,11 @@ pub fn inspect_source_from(runtime: &UiRuntime) -> SnapshotInspectSource {
         .iter()
         .filter(|node| !node.styles.is_empty())
         .map(|node| {
-            let pairs: Vec<String> =
-                node.styles.iter().map(|(name, value)| format!("{name}={value}")).collect();
+            let pairs: Vec<String> = node
+                .styles
+                .iter()
+                .map(|(name, value)| format!("{name}={value}"))
+                .collect();
             format!("#{} {}", node.node.raw(), pairs.join(" "))
         })
         .collect();
@@ -144,9 +149,7 @@ pub fn inspect_source_from(runtime: &UiRuntime) -> SnapshotInspectSource {
         (images + vectors) as u64,
         Vec::new(),
     )
-    .with_detail(format!(
-        "image_cache: {images}\nvector_cache: {vectors}"
-    ));
+    .with_detail(format!("image_cache: {images}\nvector_cache: {vectors}"));
 
     // EventFlow and PluginState are deliberately left to their typed defaults:
     // the runtime keeps no dispatch log to report a flow from, and the plugin tier
@@ -291,7 +294,10 @@ impl SharedInspectSource {
     /// A poisoned lock (a serving thread panicked mid-read) is recovered rather
     /// than propagated, so a DevTools client fault never takes down the host.
     pub fn set(&self, source: SnapshotInspectSource) {
-        let mut guard = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut guard = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *guard = source;
     }
 
@@ -312,7 +318,9 @@ impl SharedInspectSource {
         // Saturating: an unmatched disconnect must never wrap to "many clients".
         let _ = self
             .clients
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| Some(n.saturating_sub(1)));
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+                Some(n.saturating_sub(1))
+            });
     }
 }
 
@@ -337,7 +345,11 @@ mod tests {
         stats.record(Duration::from_millis(4), Duration::from_millis(4));
         stats.record(Duration::from_millis(4), Duration::from_millis(4));
         let payload = perf_payload(&stats);
-        assert!(payload.description.contains("125 fps"), "{}", payload.description);
+        assert!(
+            payload.description.contains("125 fps"),
+            "{}",
+            payload.description
+        );
         assert!(payload.detail.contains("gpu 4.00ms"), "{}", payload.detail);
         assert!(payload.detail.contains("cpu 4.00ms"), "{}", payload.detail);
         assert_eq!(payload.entity_count, 125);
@@ -357,7 +369,12 @@ mod tests {
         );
         // A clone (as handed to a serving thread) sees the update through the Arc.
         let served = shared.clone();
-        assert!(served.snapshot(Inspectable::Rendering).description.contains("fps"));
+        assert!(
+            served
+                .snapshot(Inspectable::Rendering)
+                .description
+                .contains("fps")
+        );
         assert_eq!(served.snapshot(Inspectable::Rendering).entity_count, 100);
     }
 }

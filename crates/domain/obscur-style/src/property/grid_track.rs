@@ -91,7 +91,9 @@ mod tests {
     #[test]
     fn uses_ch_recurses_through_minmax_and_auto_repeat() {
         assert!(GridTrack::Fixed(Length::Ch(20.0)).uses_ch());
-        assert!(GridTrack::minmax(GridTrack::Fixed(Length::Ch(20.0)), GridTrack::Fr(1.0)).uses_ch());
+        assert!(
+            GridTrack::minmax(GridTrack::Fixed(Length::Ch(20.0)), GridTrack::Fr(1.0)).uses_ch()
+        );
         assert!(GridTrack::minmax(GridTrack::Auto, GridTrack::Fixed(Length::Ch(4.0))).uses_ch());
         // `repeat(auto-fill, 20ch)`: the pattern is where the `ch` hides.
         assert!(
@@ -108,7 +110,10 @@ mod tests {
         assert!(!GridTrack::Auto.uses_ch());
         assert!(!GridTrack::Fr(1.0).uses_ch());
         assert!(!GridTrack::Fixed(Length::px(100.0)).uses_ch());
-        assert!(!GridTrack::Fixed(Length::Em(2.0)).uses_ch(), "`em` is not `ch`");
+        assert!(
+            !GridTrack::Fixed(Length::Em(2.0)).uses_ch(),
+            "`em` is not `ch`"
+        );
         assert!(!GridTrack::minmax(GridTrack::Auto, GridTrack::Fr(1.0)).uses_ch());
         assert!(
             !GridTrack::AutoRepeat {

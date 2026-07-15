@@ -47,11 +47,22 @@ fn main() {
 
     let mut builder = DisplayListBuilder::new();
     // Page background so any bleed outside a box would be visible.
-    builder.fill_rect(Rect::new(Point::new(0.0, 0.0), VIEWPORT), Brush::solid(page));
+    builder.fill_rect(
+        Rect::new(Point::new(0.0, 0.0), VIEWPORT),
+        Brush::solid(page),
+    );
 
     // Left box: background fill, then a crisp inner RING (spread 3, no blur).
     builder.fill_rect(ring_box, Brush::solid(card));
-    builder.draw_shadow(ring_box, CornerRadii::default(), ink, 0.0, 3.0, (0.0, 0.0), true);
+    builder.draw_shadow(
+        ring_box,
+        CornerRadii::default(),
+        ink,
+        0.0,
+        3.0,
+        (0.0, 0.0),
+        true,
+    );
 
     // Right box (rounded): background fill, then a soft inner shadow along the TOP.
     let radii = CornerRadii::uniform(16.0);
@@ -100,7 +111,9 @@ fn render(list: DisplayList) -> tiny_skia::Pixmap {
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
     let mut renderer = CpuRenderer::new(RendererId::from_raw(1));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
@@ -133,7 +146,10 @@ fn verify_ring(pixmap: &tiny_skia::Pixmap, box_rect: Rect) {
         "[verify] ring box: edge inked={edge}, center clear={center}, outside untouched={outside}"
     );
     assert!(edge, "the box edge must show the inset ring");
-    assert!(center, "the box center must stay clear (a ring, not a filled blob)");
+    assert!(
+        center,
+        "the box center must stay clear (a ring, not a filled blob)"
+    );
     assert!(outside, "the inset shadow must not bleed outside the box");
     let _ = top;
     println!("[verify] OK — the inset shadow is a ring INSIDE the box, no bleed");

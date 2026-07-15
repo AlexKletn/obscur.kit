@@ -348,7 +348,10 @@ fn emit_node(node: &UiIrNode, out: &mut String, indent: usize, key: Option<&UiIr
         UiIrNodeKind::Text => {
             let pad = indentation(indent);
             let content = string_literal(node.content());
-            let _ = write!(out, "{pad}__nodes.push(::obscur_view::view::ViewNode::text({content})");
+            let _ = write!(
+                out,
+                "{pad}__nodes.push(::obscur_view::view::ViewNode::text({content})"
+            );
             emit_key(node, out, key);
             out.push_str(");\n");
         }
@@ -412,10 +415,16 @@ fn emit_key(node: &UiIrNode, out: &mut String, inherited: Option<&UiIrExpression
     };
     let key_expr = match key {
         UiIrExpression::Literal(UiIrValue::Int(number)) => {
-            format!("::obscur_view::view::ViewKey::from({}u64)", number.cast_unsigned())
+            format!(
+                "::obscur_view::view::ViewKey::from({}u64)",
+                number.cast_unsigned()
+            )
         }
         UiIrExpression::Literal(UiIrValue::Text(text)) => {
-            format!("::obscur_view::view::ViewKey::from({})", string_literal(text))
+            format!(
+                "::obscur_view::view::ViewKey::from({})",
+                string_literal(text)
+            )
         }
         // The key's Rust path, exactly like any other binding: `key={item.id}` is
         // `ViewKey::from(item.id.clone())`. It used to emit the path's spelling,
@@ -430,13 +439,19 @@ fn emit_key(node: &UiIrNode, out: &mut String, inherited: Option<&UiIrExpression
             if *flag { "true" } else { "false" }
         ),
         UiIrExpression::Literal(UiIrValue::Float(number)) => {
-            format!("::obscur_view::view::ViewKey::from({})", string_literal(&number.to_string()))
+            format!(
+                "::obscur_view::view::ViewKey::from({})",
+                string_literal(&number.to_string())
+            )
         }
         UiIrExpression::Literal(UiIrValue::Null) => {
             "::obscur_view::view::ViewKey::from(\"null\")".to_owned()
         }
         UiIrExpression::Call { name, .. } => {
-            format!("::obscur_view::view::ViewKey::from({})", string_literal(name))
+            format!(
+                "::obscur_view::view::ViewKey::from({})",
+                string_literal(name)
+            )
         }
     };
     let _ = write!(out, ".with_key({key_expr})");
@@ -480,7 +495,10 @@ fn emit_literal(value: &UiIrValue) -> String {
         UiIrValue::Int(number) => format!("::obscur_view::view::ViewValue::Int({number})"),
         UiIrValue::Float(number) => format!("::obscur_view::view::ViewValue::Float({number:?})"),
         UiIrValue::Text(text) => {
-            format!("::obscur_view::view::ViewValue::Text({}.into())", string_literal(text))
+            format!(
+                "::obscur_view::view::ViewValue::Text({}.into())",
+                string_literal(text)
+            )
         }
     }
 }
@@ -521,20 +539,21 @@ mod tests {
 
     #[test]
     fn img_src_emits_the_reserved_src_symbol() {
-        let out = expr(
-            UiIrNode::element(0, "img").with_property(UiIrProperty::text("src", "logo.png")),
-        );
+        let out =
+            expr(UiIrNode::element(0, "img").with_property(UiIrProperty::text("src", "logo.png")));
         // Image::COMPONENT_ID == 0x00C0_0003; SRC symbol == 0x4.
         assert!(out.contains("ComponentId::from_raw(0xc00003)"), "{out}");
         assert!(out.contains("InternedSymbol::from_raw(0x4)"), "{out}");
-        assert!(out.contains(r#"ViewValue::Text("logo.png".into())"#), "{out}");
+        assert!(
+            out.contains(r#"ViewValue::Text("logo.png".into())"#),
+            "{out}"
+        );
     }
 
     #[test]
     fn click_event_emits_the_reserved_event_symbol() {
-        let out = expr(
-            UiIrNode::component(0, "Button").with_event(UiIrEvent::new("click", "submit")),
-        );
+        let out =
+            expr(UiIrNode::component(0, "Button").with_event(UiIrEvent::new("click", "submit")));
         // EVENT_CLICK symbol == 0x101.
         assert!(out.contains("with_event"), "{out}");
         assert!(out.contains("InternedSymbol::from_raw(0x101)"), "{out}");
@@ -599,8 +618,14 @@ mod tests {
 
     #[test]
     fn fn_wrapper_wraps_the_expression() {
-        let src = ViewCodegen::document_to_view_fn(&UiIrDocument::new(UiIrNode::element(0, "div")), "app_view");
-        assert!(src.contains("pub fn app_view() -> ::obscur_view::view::View {"), "{src}");
+        let src = ViewCodegen::document_to_view_fn(
+            &UiIrDocument::new(UiIrNode::element(0, "div")),
+            "app_view",
+        );
+        assert!(
+            src.contains("pub fn app_view() -> ::obscur_view::view::View {"),
+            "{src}"
+        );
         assert!(src.trim_end().ends_with('}'), "{src}");
     }
 }

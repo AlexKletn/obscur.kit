@@ -12,16 +12,17 @@ use obscur_scene::command::{DisplayList, DisplayListBuilder, PaintCommand};
 use obscur_scene::layer::{LayerEffect, SceneLayer};
 use obscur_scene::paint::{
     Brush, ConicGradient as SceneConicGradient, ExtendMode, GradientStop as SceneGradientStop,
-    LinearGradient as SceneLinearGradient, Paint, RadialGradient as SceneRadialGradient, SceneImage,
-    SceneVector, Stroke,
+    LinearGradient as SceneLinearGradient, Paint, RadialGradient as SceneRadialGradient,
+    SceneImage, SceneVector, Stroke,
 };
 use obscur_scene::path::Path;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{
-    layout_keyword, BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize,
-    BoxShadow, ConicGradient, Corner, FilterOp, Length, LinearGradient, ObjectFit, PropertyId,
-    PropertyValue, RadialGradient, RadialShape, RadialSize, StyleColor, Transform, TransformOrigin,
+    BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow,
+    ConicGradient, Corner, FilterOp, Length, LinearGradient, ObjectFit, PropertyId, PropertyValue,
+    RadialGradient, RadialShape, RadialSize, StyleColor, Transform, TransformOrigin,
+    layout_keyword,
 };
 use obscur_text::font::{
     FontAttributes, FontFace, FontFallback, FontFamily, FontId, FontMetrics, FontResolver,
@@ -32,19 +33,19 @@ use obscur_text::layout::{
     ParagraphLine, TextAlignment, TextOverflow, WhiteSpace, WordBreak,
 };
 use obscur_text::selection::TextSelection;
-use obscur_text::shaping::{
-    apply_spacing, apply_tab_stops, CachingShaper, MockTextShaper, ParagraphShaper, ShapedGlyph,
-    ShapedRun, SingleRunItemizer, TextDirection, TextItemizer, TextShaper,
-};
 use obscur_text::selection::{CaretAffinity, SelectionGeometry};
+use obscur_text::shaping::{
+    CachingShaper, MockTextShaper, ParagraphShaper, ShapedGlyph, ShapedRun, SingleRunItemizer,
+    TextDirection, TextItemizer, TextShaper, apply_spacing, apply_tab_stops,
+};
 use obscur_tree::tree::RetainedTree;
 
-use super::stacking::{effective_paint_layer, effective_stacking_z, PaintLayer, PaintUnit};
+use super::stacking::{PaintLayer, PaintUnit, effective_paint_layer, effective_stacking_z};
 use super::{
-    alignment_for, attributes_for, direction_for, display_text, families_for, letter_spacing_for,
-    line_height_for, overflow_for, overflow_wrap_for, root_font_size, tab_size_for,
-    text_transform_for, white_space_for, word_break_for, word_spacing_for, ComputedStyles,
-    EditingView, LayoutBoxes, TabSize,
+    ComputedStyles, EditingView, LayoutBoxes, TabSize, alignment_for, attributes_for,
+    direction_for, display_text, families_for, letter_spacing_for, line_height_for, overflow_for,
+    overflow_wrap_for, root_font_size, tab_size_for, text_transform_for, white_space_for,
+    word_break_for, word_spacing_for,
 };
 
 /// The width, in logical pixels, of the caret rectangle painted at the collapsed
@@ -372,8 +373,9 @@ impl SceneCoordinator {
         // `tab_width` is threaded into `wrap` so a tab on a soft-wrapped line is
         // re-measured from THAT line's start (this pre-wrap pass has no line-break
         // info and can only reset its pen at a hard `\n`).
-        let tab_width =
-            self.tab_stop_width(tab_size, fallback, attributes, direction, font_size, content);
+        let tab_width = self.tab_stop_width(
+            tab_size, fallback, attributes, direction, font_size, content,
+        );
         let runs = apply_tab_stops(runs, content, tab_width);
         let metrics = self.paragraph.line_metrics(font_size);
         // The line box height: the authored `line-height` when present, else the
@@ -496,7 +498,14 @@ impl SceneCoordinator {
         font_size: f32,
     ) -> Option<ShapedGlyph> {
         self.paragraph
-            .shape_paragraph("…", fallback, attributes, &self.default_face, font_size, direction)
+            .shape_paragraph(
+                "…",
+                fallback,
+                attributes,
+                &self.default_face,
+                font_size,
+                direction,
+            )
             .iter()
             .flat_map(|run| run.run().glyphs().iter().copied())
             .next()
@@ -520,7 +529,14 @@ impl SceneCoordinator {
         font_size: f32,
     ) -> Option<ShapedGlyph> {
         self.paragraph
-            .shape_paragraph("-", fallback, attributes, &self.default_face, font_size, direction)
+            .shape_paragraph(
+                "-",
+                fallback,
+                attributes,
+                &self.default_face,
+                font_size,
+                direction,
+            )
             .iter()
             .flat_map(|run| run.run().glyphs().iter().copied())
             .next()
@@ -551,7 +567,14 @@ impl SceneCoordinator {
             TabSize::Length(_) => 0.0,
             TabSize::Factor(_) => self
                 .paragraph
-                .shape_paragraph(" ", fallback, attributes, &self.default_face, font_size, direction)
+                .shape_paragraph(
+                    " ",
+                    fallback,
+                    attributes,
+                    &self.default_face,
+                    font_size,
+                    direction,
+                )
                 .iter()
                 .flat_map(|run| run.run().glyphs().iter())
                 .map(ShapedGlyph::x_advance)
@@ -585,7 +608,14 @@ impl SceneCoordinator {
         index: usize,
     ) -> f32 {
         self.paragraph
-            .shape_paragraph(content, fallback, attributes, &self.default_face, font_size, direction)
+            .shape_paragraph(
+                content,
+                fallback,
+                attributes,
+                &self.default_face,
+                font_size,
+                direction,
+            )
             .iter()
             .flat_map(|run| run.run().glyphs().iter().copied())
             .filter(|glyph| glyph.cluster() < index)
@@ -626,7 +656,14 @@ impl SceneCoordinator {
         let mut pen = 0.0_f32;
         for glyph in self
             .paragraph
-            .shape_paragraph(content, &fallback, &attributes, &self.default_face, font_size, direction)
+            .shape_paragraph(
+                content,
+                &fallback,
+                &attributes,
+                &self.default_face,
+                font_size,
+                direction,
+            )
             .iter()
             .flat_map(|run| run.run().glyphs().iter().copied())
         {
@@ -773,9 +810,19 @@ impl SceneCoordinator {
     ) -> (f32, f32, f32, f32) {
         let li = Self::line_of_byte(layout, index);
         let Some(line) = layout.lines().get(li) else {
-            return (0.0, self.paragraph.line_metrics(font_size).line_height(), 0.0, 0.0);
+            return (
+                0.0,
+                self.paragraph.line_metrics(font_size).line_height(),
+                0.0,
+                0.0,
+            );
         };
-        (line.top(), line.height(), line.x_offset(), Self::line_caret_x(line, index))
+        (
+            line.top(),
+            line.height(),
+            line.x_offset(),
+            Self::line_caret_x(line, index),
+        )
     }
 
     /// Resolves a caret byte `index` to its painted geometry like
@@ -810,7 +857,12 @@ impl SceneCoordinator {
             && !boundary_after_forced_break(content, index)
         {
             let line = &lines[downstream - 1];
-            return (line.top(), line.height(), line.x_offset(), Self::line_caret_x(line, index));
+            return (
+                line.top(),
+                line.height(),
+                line.x_offset(),
+                Self::line_caret_x(line, index),
+            );
         }
         self.caret_line_geometry(layout, font_size, index)
     }
@@ -917,12 +969,14 @@ impl SceneCoordinator {
         let line_start = Self::line_start_byte(layout, li);
         // Undo the line's alignment offset, then resolve against this line's own
         // spaced/tabbed advances (the exact inverse of the painted caret x).
-        let byte =
-            Self::byte_at_line_local_x(line, line.range().end, target_x - line.x_offset());
+        let byte = Self::byte_at_line_local_x(line, line.range().end, target_x - line.x_offset());
         // The maximum caret byte that stays on this line: the line's end, minus a
         // trailing `\n` (whose caret belongs before it, on this line).
         let end = line.range().end.max(line_start).min(content.len());
-        let line_max = if content.get(line_start..end).is_some_and(|s| s.ends_with('\n')) {
+        let line_max = if content
+            .get(line_start..end)
+            .is_some_and(|s| s.ends_with('\n'))
+        {
             end - 1
         } else {
             end
@@ -961,8 +1015,10 @@ impl SceneCoordinator {
         // spaced/tabbed advances), re-expressed from the text box origin by adding
         // the TARGET line's alignment offset so `byte_at_line_x` maps it back
         // consistently (it undoes that same offset).
-        let within_line =
-            layout.lines().get(cur).map_or(0.0, |line| Self::line_caret_x(line, index));
+        let within_line = layout
+            .lines()
+            .get(cur)
+            .map_or(0.0, |line| Self::line_caret_x(line, index));
         let target_x = layout.lines()[target].x_offset() + within_line;
         Some(self.byte_at_line_x(&layout, target, content, style, target_x))
     }
@@ -1147,8 +1203,7 @@ impl SceneCoordinator {
             std::collections::HashMap::new();
         let mut parent_of: std::collections::HashMap<NodeId, Option<NodeId>> =
             std::collections::HashMap::new();
-        let mut depth_of: std::collections::HashMap<NodeId, u32> =
-            std::collections::HashMap::new();
+        let mut depth_of: std::collections::HashMap<NodeId, u32> = std::collections::HashMap::new();
         let mut preorder: Vec<NodeId> = Vec::new();
         let mut clip_brackets: Vec<(NodeId, Clip)> = Vec::new();
         // A CSS 2D `transform` brackets a node's WHOLE subtree paint with a
@@ -1234,7 +1289,9 @@ impl SceneCoordinator {
             // that rounds its corners OR clips overflow emits exactly ONE clip: the
             // ROUNDED border box when it has a radius (which also clips overflow),
             // else a plain rect clip to the border box.
-            if (has_radius || clips_overflow) && let Some(layout_box) = boxes.get(&node) {
+            if (has_radius || clips_overflow)
+                && let Some(layout_box) = boxes.get(&node)
+            {
                 let clip = if has_radius {
                     Clip::rounded_rect(layout_box.bounds, radii)
                 } else {
@@ -1304,7 +1361,8 @@ impl SceneCoordinator {
             // `outline-offset + width/2`). It needs the arranged box; no outline
             // (or no box) records nothing (byte-for-byte identical to before).
             if let Some(layout_box) = boxes.get(&node)
-                && let Some(command) = outline_paint(computed, node, layout_box.bounds, radii, has_radius)
+                && let Some(command) =
+                    outline_paint(computed, node, layout_box.bounds, radii, has_radius)
             {
                 outline_brackets.push((node, command));
             }
@@ -1400,8 +1458,8 @@ impl SceneCoordinator {
                 // color background shows through — the regression-safe path
                 // (byte-identical when `images` is empty). This is the SINGLE-layer
                 // path; the multi-layer list is handled just below.
-                if let Some(image) = background_image_url_of(computed, node)
-                    .and_then(|url| images.get(url))
+                if let Some(image) =
+                    background_image_url_of(computed, node).and_then(|url| images.get(url))
                 {
                     let (tile, repeat_x, repeat_y) =
                         background_image_geometry(computed, node, image, layout_box.bounds);
@@ -1472,8 +1530,7 @@ impl SceneCoordinator {
             //   (documented). A transparent or zero-width side, or an unauthored
             //   border, emits nothing.
             if let Some(layout_box) = boxes.get(&node) {
-                if let Some((width, color)) =
-                    uniform_border(computed, node).filter(|_| has_radius)
+                if let Some((width, color)) = uniform_border(computed, node).filter(|_| has_radius)
                 {
                     let ring = uniform_border_ring(layout_box.bounds, radii, width);
                     node_paint.fill(ring, Brush::solid(scene_color_from(color)));
@@ -1551,8 +1608,9 @@ impl SceneCoordinator {
                     // text (`:placeholder-shown` is false once the effective text is
                     // non-empty), and then paints in the FIELD's ink, not the muted
                     // hint color.
-                    let role = editing
-                        .map_or(EditingRole::None, |view| editing_role(tree, node, view.node));
+                    let role = editing.map_or(EditingRole::None, |view| {
+                        editing_role(tree, node, view.node)
+                    });
                     let active = editing.filter(|view| role.overrides(view));
                     // The displayed text, computed through the SAME `display_text`
                     // seam the layout (measure/arrange) pass uses, so this frame's
@@ -1711,8 +1769,7 @@ impl SceneCoordinator {
                             // empty run at the line origin so the painted line count
                             // matches the box height (one line per wrapped line).
                             let range = line.range();
-                            let line_text =
-                                content.get(range.start..range.end).unwrap_or_default();
+                            let line_text = content.get(range.start..range.end).unwrap_or_default();
                             let run = GlyphRun::new(Vec::new(), font_size, line_text);
                             node_paint.draw_text(
                                 Point::new(line_left, line_top),
@@ -1728,8 +1785,7 @@ impl SceneCoordinator {
                         let mut seg_x = 0.0_f32;
                         for segment in line.segments() {
                             let range = segment.run().source();
-                            let seg_text =
-                                content.get(range.start..range.end).unwrap_or_default();
+                            let seg_text = content.get(range.start..range.end).unwrap_or_default();
                             let run =
                                 positioned_run(segment, baseline, font_size, seg_text, content);
                             let seg_origin = Point::new(line_left + seg_x, line_top);
@@ -1753,8 +1809,8 @@ impl SceneCoordinator {
                         let line_height = self.paragraph.line_metrics(font_size).line_height();
                         let (top0, _h0, xoff0, x0) =
                             self.caret_line_geometry(&layout, font_size, at);
-                        let (_, _, _, x1) = self
-                            .caret_line_geometry(&layout, font_size, at + preedit.text.len());
+                        let (_, _, _, x1) =
+                            self.caret_line_geometry(&layout, font_size, at + preedit.text.len());
                         node_paint.fill_rect(
                             Rect::new(
                                 Point::new(
@@ -1795,7 +1851,10 @@ impl SceneCoordinator {
                         );
                         node_paint.fill_rect(
                             Rect::new(
-                                Point::new(origin.x + x_offset + caret_x - scroll_left, origin.y + top),
+                                Point::new(
+                                    origin.x + x_offset + caret_x - scroll_left,
+                                    origin.y + top,
+                                ),
                                 Size::new(CARET_WIDTH, height),
                             ),
                             Brush::solid(text_color),
@@ -1815,7 +1874,10 @@ impl SceneCoordinator {
             let commands = node_paint.build().commands().to_vec();
             if !commands.is_empty() {
                 let z = zmap.get(&node).copied().unwrap_or(0);
-                let layer = layermap.get(&node).copied().unwrap_or(PaintLayer::NonPositioned);
+                let layer = layermap
+                    .get(&node)
+                    .copied()
+                    .unwrap_or(PaintLayer::NonPositioned);
                 units.push(PaintUnit {
                     z,
                     layer,
@@ -1863,7 +1925,10 @@ impl SceneCoordinator {
             // scrollport (CSS Overflow 3 §scrollport).
             for (node, scroll_top) in scroll_brackets {
                 let z = zmap.get(&node).copied().unwrap_or(0);
-                let layer = layermap.get(&node).copied().unwrap_or(PaintLayer::NonPositioned);
+                let layer = layermap
+                    .get(&node)
+                    .copied()
+                    .unwrap_or(PaintLayer::NonPositioned);
                 let enter = enter_index.get(&node).copied().unwrap_or(0);
                 let exit = exit_index.get(&node).copied().unwrap_or(enter);
                 let depth = depth_of.get(&node).copied().unwrap_or(0);
@@ -1885,7 +1950,10 @@ impl SceneCoordinator {
             }
             for (node, clip) in clip_brackets {
                 let z = zmap.get(&node).copied().unwrap_or(0);
-                let layer = layermap.get(&node).copied().unwrap_or(PaintLayer::NonPositioned);
+                let layer = layermap
+                    .get(&node)
+                    .copied()
+                    .unwrap_or(PaintLayer::NonPositioned);
                 let enter = enter_index.get(&node).copied().unwrap_or(0);
                 let exit = exit_index.get(&node).copied().unwrap_or(enter);
                 let depth = depth_of.get(&node).copied().unwrap_or(0);
@@ -1915,7 +1983,10 @@ impl SceneCoordinator {
             // first (innermost), then the layer, then the transform (outermost).
             for (node, alpha) in opacity_brackets {
                 let z = zmap.get(&node).copied().unwrap_or(0);
-                let layer = layermap.get(&node).copied().unwrap_or(PaintLayer::NonPositioned);
+                let layer = layermap
+                    .get(&node)
+                    .copied()
+                    .unwrap_or(PaintLayer::NonPositioned);
                 let enter = enter_index.get(&node).copied().unwrap_or(0);
                 let exit = exit_index.get(&node).copied().unwrap_or(enter);
                 let depth = depth_of.get(&node).copied().unwrap_or(0);
@@ -1945,7 +2016,10 @@ impl SceneCoordinator {
             // outermost wrapper of the subtree.
             for (node, affine) in transform_brackets {
                 let z = zmap.get(&node).copied().unwrap_or(0);
-                let layer = layermap.get(&node).copied().unwrap_or(PaintLayer::NonPositioned);
+                let layer = layermap
+                    .get(&node)
+                    .copied()
+                    .unwrap_or(PaintLayer::NonPositioned);
                 let enter = enter_index.get(&node).copied().unwrap_or(0);
                 let exit = exit_index.get(&node).copied().unwrap_or(enter);
                 let depth = depth_of.get(&node).copied().unwrap_or(0);
@@ -1972,7 +2046,10 @@ impl SceneCoordinator {
             // renderer's owned gaussian pass operates over.
             for (node, bounds, radius, color_matrix) in blur_brackets {
                 let z = zmap.get(&node).copied().unwrap_or(0);
-                let paint_layer = layermap.get(&node).copied().unwrap_or(PaintLayer::NonPositioned);
+                let paint_layer = layermap
+                    .get(&node)
+                    .copied()
+                    .unwrap_or(PaintLayer::NonPositioned);
                 let enter = enter_index.get(&node).copied().unwrap_or(0);
                 let exit = exit_index.get(&node).copied().unwrap_or(enter);
                 let depth = depth_of.get(&node).copied().unwrap_or(0);
@@ -2009,7 +2086,10 @@ impl SceneCoordinator {
             // paints after the clip closes, unclipped).
             for (node, command) in outline_brackets {
                 let z = zmap.get(&node).copied().unwrap_or(0);
-                let layer = layermap.get(&node).copied().unwrap_or(PaintLayer::NonPositioned);
+                let layer = layermap
+                    .get(&node)
+                    .copied()
+                    .unwrap_or(PaintLayer::NonPositioned);
                 let enter = enter_index.get(&node).copied().unwrap_or(0);
                 let exit = exit_index.get(&node).copied().unwrap_or(enter);
                 units.push(PaintUnit {
@@ -2033,7 +2113,10 @@ impl SceneCoordinator {
                     continue;
                 }
                 let z = zmap.get(&node).copied().unwrap_or(0);
-                let layer = layermap.get(&node).copied().unwrap_or(PaintLayer::NonPositioned);
+                let layer = layermap
+                    .get(&node)
+                    .copied()
+                    .unwrap_or(PaintLayer::NonPositioned);
                 let exit = exit_index
                     .get(&node)
                     .copied()
@@ -2703,9 +2786,21 @@ fn color_op_matrix(op: &FilterOp) -> Option<([[f32; 4]; 4], [f32; 4])> {
         FilterOp::Grayscale(a) => {
             let t = 1.0 - a;
             rgb_3x3(
-                [0.2126 + 0.7874 * t, 0.7152 - 0.7152 * t, 0.0722 - 0.0722 * t],
-                [0.2126 - 0.2126 * t, 0.7152 + 0.2848 * t, 0.0722 - 0.0722 * t],
-                [0.2126 - 0.2126 * t, 0.7152 - 0.7152 * t, 0.0722 + 0.9278 * t],
+                [
+                    0.2126 + 0.7874 * t,
+                    0.7152 - 0.7152 * t,
+                    0.0722 - 0.0722 * t,
+                ],
+                [
+                    0.2126 - 0.2126 * t,
+                    0.7152 + 0.2848 * t,
+                    0.0722 - 0.0722 * t,
+                ],
+                [
+                    0.2126 - 0.2126 * t,
+                    0.7152 - 0.7152 * t,
+                    0.0722 + 0.9278 * t,
+                ],
             )
         }
         // Sepia: the spec sepia matrix interpolated with t = 1 − amount.
@@ -3105,8 +3200,12 @@ fn resolve_radii(
     bounds: Rect,
 ) -> (f32, f32) {
     const SQRT2: f32 = std::f32::consts::SQRT_2;
-    let (left, top, right, bottom) =
-        (bounds.origin.x, bounds.origin.y, bounds.right(), bounds.bottom());
+    let (left, top, right, bottom) = (
+        bounds.origin.x,
+        bounds.origin.y,
+        bounds.right(),
+        bounds.bottom(),
+    );
     let dx_near = (cx - left).abs().min((right - cx).abs());
     let dx_far = (cx - left).abs().max((right - cx).abs());
     let dy_near = (cy - top).abs().min((bottom - cy).abs());
@@ -3130,9 +3229,7 @@ fn resolve_radii(
             RadialSize::FarthestSide => (dx_far, dy_far),
             RadialSize::ClosestCorner => (dx_near * SQRT2, dy_near * SQRT2),
             RadialSize::FarthestCorner => (dx_far * SQRT2, dy_far * SQRT2),
-            RadialSize::Length(len) => {
-                (resolve_axis_radius(len, w), resolve_axis_radius(len, h))
-            }
+            RadialSize::Length(len) => (resolve_axis_radius(len, w), resolve_axis_radius(len, h)),
         },
     }
 }
@@ -3206,18 +3303,16 @@ fn border_fills(computed: &ComputedStyles, node: NodeId, bounds: Rect) -> Vec<(P
     let mut out = Vec::new();
     // Each side: outer full edge, then the two inner corners (inset by adjacent
     // widths). Emitted only when solid, positive-width, and non-transparent.
-    let mut push_side = |width: f32,
-                         style_id: PropertyId,
-                         color_id: PropertyId,
-                         corners: [Point; 4]| {
-        if width > 0.0 && border_is_solid(computed, node, style_id) {
-            let color = border_color_of(computed, node, color_id, current);
-            // A fully transparent side paints nothing (the border-triangle trick).
-            if color.a > 0.0 {
-                out.push((quad(corners[0], corners[1], corners[2], corners[3]), color));
+    let mut push_side =
+        |width: f32, style_id: PropertyId, color_id: PropertyId, corners: [Point; 4]| {
+            if width > 0.0 && border_is_solid(computed, node, style_id) {
+                let color = border_color_of(computed, node, color_id, current);
+                // A fully transparent side paints nothing (the border-triangle trick).
+                if color.a > 0.0 {
+                    out.push((quad(corners[0], corners[1], corners[2], corners[3]), color));
+                }
             }
-        }
-    };
+        };
     push_side(
         top,
         PropertyId::BorderTopStyle,
@@ -3392,7 +3487,8 @@ fn scrollbar_commands(scrollport: Rect, scroll_top: f32, content_height: f32) ->
 
     // Thumb length = the visible fraction of the content, floored to a grabbable
     // minimum but never taller than the track.
-    let thumb_h = (track_h * track_h / content_height).clamp(SCROLLBAR_MIN_THUMB.min(track_h), track_h);
+    let thumb_h =
+        (track_h * track_h / content_height).clamp(SCROLLBAR_MIN_THUMB.min(track_h), track_h);
     let free = (track_h - thumb_h).max(0.0);
     let thumb_y = track_y + free * (scroll_top / scroll_range).clamp(0.0, 1.0);
     let thumb = Rect::new(Point::new(track_x, thumb_y), Size::new(track_w, thumb_h));
@@ -3878,7 +3974,11 @@ mod tests {
         };
         // 90deg (to right): the line runs left→right through the box center.
         let near = |a: Point, b: Point| (a.x - b.x).abs() < 1e-3 && (a.y - b.y).abs() < 1e-3;
-        assert!(near(g.start(), Point::new(0.0, 25.0)), "start {:?}", g.start());
+        assert!(
+            near(g.start(), Point::new(0.0, 25.0)),
+            "start {:?}",
+            g.start()
+        );
         assert!(near(g.end(), Point::new(100.0, 25.0)), "end {:?}", g.end());
         // The authored stops, in order, with their colors and offsets.
         assert_eq!(g.stops().len(), 2);
@@ -3929,7 +4029,11 @@ mod tests {
         // pattern tiles via Repeat.
         assert_eq!(g.extend(), ExtendMode::Repeat);
         let near = |a: Point, b: Point| (a.x - b.x).abs() < 1e-3 && (a.y - b.y).abs() < 1e-3;
-        assert!(near(g.start(), Point::new(0.0, 25.0)), "start {:?}", g.start());
+        assert!(
+            near(g.start(), Point::new(0.0, 25.0)),
+            "start {:?}",
+            g.start()
+        );
         assert!(near(g.end(), Point::new(8.0, 25.0)), "end {:?}", g.end());
         assert_eq!(g.stops().len(), 4);
         assert_eq!(g.stops()[1].offset(), 0.5);
@@ -3969,8 +4073,7 @@ mod tests {
         position: BackgroundPosition,
         repeat: BackgroundRepeat,
     ) -> ComputedStyle {
-        let mut style =
-            with_background_image(PropertyValue::BackgroundImageUrl(url.into()));
+        let mut style = with_background_image(PropertyValue::BackgroundImageUrl(url.into()));
         style.set(
             PropertyId::BackgroundSize,
             ComputedValue::from_concrete(PropertyValue::BackgroundSize(size)).expect("concrete"),
@@ -3982,7 +4085,8 @@ mod tests {
         );
         style.set(
             PropertyId::BackgroundRepeat,
-            ComputedValue::from_concrete(PropertyValue::BackgroundRepeat(repeat)).expect("concrete"),
+            ComputedValue::from_concrete(PropertyValue::BackgroundRepeat(repeat))
+                .expect("concrete"),
         );
         style
     }
@@ -4007,8 +4111,12 @@ mod tests {
 
         // Without the URL in the map: no DrawImage (regression-safe).
         let empty = HashMap::new();
-        let bare = SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &empty);
-        assert!(image_draws(&bare).is_empty(), "no image resolved → no DrawImage");
+        let bare =
+            SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &empty);
+        assert!(
+            image_draws(&bare).is_empty(),
+            "no image resolved → no DrawImage"
+        );
         assert!(bare.is_balanced());
 
         // With the URL resolved: one DrawImage. With NO authored size/position/
@@ -4027,7 +4135,10 @@ mod tests {
         assert_eq!(tile.origin, node_box.bounds.origin);
         assert!((tile.size.width - 2.0).abs() < 1e-3);
         assert!((tile.size.height - 2.0).abs() < 1e-3);
-        assert!(rx && ry, "CSS initial background-repeat is repeat on both axes");
+        assert!(
+            rx && ry,
+            "CSS initial background-repeat is repeat on both axes"
+        );
         assert!(list.is_balanced());
     }
 
@@ -4060,7 +4171,10 @@ mod tests {
         assert_eq!(draws.len(), 1);
         let (tile, _region, rx, ry) = draws[0];
         // `contain` of a 2×2 image into a 10×10 box scales to 10×10 (aspect kept).
-        assert!((tile.size.width - 10.0).abs() < 1e-3, "contain width, got {tile:?}");
+        assert!(
+            (tile.size.width - 10.0).abs() < 1e-3,
+            "contain width, got {tile:?}"
+        );
         assert!((tile.size.height - 10.0).abs() < 1e-3, "contain height");
         assert_eq!(tile.origin, Point::new(0.0, 0.0), "top-left position");
         assert!(!rx && !ry, "no-repeat clears both axis flags");
@@ -4094,14 +4208,17 @@ mod tests {
         let (tile, _region, _rx, _ry) = image_draws(&list)[0];
         // `cover` scales to at least the box on both axes (≥ 10×10). The region
         // clips any overflow at paint time.
-        assert!(tile.size.width >= 10.0 - 1e-3, "cover width ≥ box, got {tile:?}");
+        assert!(
+            tile.size.width >= 10.0 - 1e-3,
+            "cover width ≥ box, got {tile:?}"
+        );
         assert!(tile.size.height >= 10.0 - 1e-3, "cover height ≥ box");
     }
 
     /// Sets an element node's own image `src` on its retained attributes, the way
     /// the reconciler would from an `Image` primitive's `SRC` prop.
     fn set_image_src(tree: &mut RetainedTree, node: NodeId, src: &str) {
-        use obscur_view::view::{StyleAttributes, ViewProperty, ViewValue, SRC};
+        use obscur_view::view::{SRC, StyleAttributes, ViewProperty, ViewValue};
         let attrs =
             StyleAttributes::extract(&[ViewProperty::new(SRC, ViewValue::Text(src.into()))]);
         if let Some(n) = tree.get_mut(node) {
@@ -4140,7 +4257,10 @@ mod tests {
         let empty = HashMap::new();
         let bare =
             SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &empty);
-        assert!(image_draws(&bare).is_empty(), "no resolved image → no DrawImage");
+        assert!(
+            image_draws(&bare).is_empty(),
+            "no resolved image → no DrawImage"
+        );
         assert!(bare.is_balanced());
 
         // Resolved: one DrawImage over the box; default `fill` stretches to the box.
@@ -4152,7 +4272,10 @@ mod tests {
         assert_eq!(draws.len(), 1, "the element image paints one DrawImage");
         let (tile, region, rx, ry) = draws[0];
         assert_eq!(region, node_box.bounds, "region is the element box");
-        assert_eq!(tile, node_box.bounds, "object-fit fill stretches to the box");
+        assert_eq!(
+            tile, node_box.bounds,
+            "object-fit fill stretches to the box"
+        );
         assert!(!rx && !ry, "an element image never tiles");
         assert!(list.is_balanced());
     }
@@ -4180,7 +4303,11 @@ mod tests {
         // `none`: the intrinsic 2×2 tile, centered in the 10×10 box at (4, 4).
         assert!((tile.size.width - 2.0).abs() < 1e-3 && (tile.size.height - 2.0).abs() < 1e-3);
         assert!((tile.origin.x - 4.0).abs() < 1e-3 && (tile.origin.y - 4.0).abs() < 1e-3);
-        assert_eq!(region.size, Size::new(10.0, 10.0), "region clips overflow to the box");
+        assert_eq!(
+            region.size,
+            Size::new(10.0, 10.0),
+            "region clips overflow to the box"
+        );
     }
 
     #[test]
@@ -4216,7 +4343,11 @@ mod tests {
             SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
         let (tile, region, _rx, _ry) = image_draws(&list)[0];
         assert!(tile.size.width >= 20.0 - 1e-3 && tile.size.height >= 10.0 - 1e-3);
-        assert_eq!(region.size, Size::new(20.0, 10.0), "cover overflow clips to the box");
+        assert_eq!(
+            region.size,
+            Size::new(20.0, 10.0),
+            "cover overflow clips to the box"
+        );
     }
 
     #[test]
@@ -4247,7 +4378,10 @@ mod tests {
             SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
         let (tile, _region, _rx, _ry) = image_draws(&list)[0];
         // Intrinsic 2×2 tile positioned bottom-right: origin = box − tile = (8, 8).
-        assert!((tile.origin.x - 8.0).abs() < 1e-3, "x at box right − tile, got {tile:?}");
+        assert!(
+            (tile.origin.x - 8.0).abs() < 1e-3,
+            "x at box right − tile, got {tile:?}"
+        );
         assert!((tile.origin.y - 8.0).abs() < 1e-3, "y at box bottom − tile");
         assert!((tile.size.width - 2.0).abs() < 1e-3);
         assert!((tile.size.height - 2.0).abs() < 1e-3);
@@ -4318,7 +4452,11 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(kinds, vec!["fill", "image"], "color fills, image paints over it");
+        assert_eq!(
+            kinds,
+            vec!["fill", "image"],
+            "color fills, image paints over it"
+        );
     }
 
     #[test]
@@ -4382,12 +4520,19 @@ mod tests {
         // The two fills are the solid background-color (bottom) and the gradient
         // (top); the image draw is the middle (bottom) layer.
         let brushes = fill_brushes(&list);
-        assert!(matches!(brushes[0], Brush::Solid(_)), "bg-color fills first");
+        assert!(
+            matches!(brushes[0], Brush::Solid(_)),
+            "bg-color fills first"
+        );
         assert!(
             matches!(brushes[1], Brush::Linear(_)),
             "the top gradient layer fills last"
         );
-        assert_eq!(image_draws(&list).len(), 1, "the bottom url layer draws one image");
+        assert_eq!(
+            image_draws(&list).len(),
+            1,
+            "the bottom url layer draws one image"
+        );
     }
 
     /// A `ComputedStyle` carrying a single `background-image` computed value.
@@ -4442,7 +4587,11 @@ mod tests {
         let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
         assert!(near(g.center().x, 50.0), "center x {:?}", g.center());
         assert!(near(g.center().y, 25.0), "center y {:?}", g.center());
-        assert!(near(g.radius(), 50.0_f32.hypot(25.0)), "radius {}", g.radius());
+        assert!(
+            near(g.radius(), 50.0_f32.hypot(25.0)),
+            "radius {}",
+            g.radius()
+        );
         assert_eq!(g.stops().len(), 2);
         assert_eq!(g.stops()[0].color(), Color::rgba(1.0, 0.0, 0.0, 1.0));
         assert_eq!(g.stops()[1].offset(), 1.0);
@@ -4488,7 +4637,11 @@ mod tests {
         assert!(near(g.center().x, 50.0), "center x {:?}", g.center());
         assert!(near(g.center().y, 25.0), "center y {:?}", g.center());
         // from 90deg → start_angle = (90 − 90)° = 0 rad (scene +x reference).
-        assert!(near(g.start_angle(), 0.0), "start_angle {}", g.start_angle());
+        assert!(
+            near(g.start_angle(), 0.0),
+            "start_angle {}",
+            g.start_angle()
+        );
         assert_eq!(g.stops().len(), 2);
         assert_eq!(g.stops()[0].color(), Color::rgba(1.0, 0.0, 0.0, 1.0));
         assert!(list.is_balanced());
@@ -4516,7 +4669,10 @@ mod tests {
         assert!((ux - 50.0 / expected).abs() < 1e-3, "dir.x {ux}");
         assert!((uy - (-200.0 / expected)).abs() < 1e-3, "dir.y {uy}");
         // Emphatically not 45° (sin45 ≈ 0.707).
-        assert!((ux - std::f32::consts::FRAC_1_SQRT_2).abs() > 0.4, "not 45°");
+        assert!(
+            (ux - std::f32::consts::FRAC_1_SQRT_2).abs() > 0.4,
+            "not 45°"
+        );
         // Endpoints are symmetric about the box center (100, 25).
         let midx = (g.start().x + g.end().x) / 2.0;
         let midy = (g.start().y + g.end().y) / 2.0;
@@ -4538,7 +4694,10 @@ mod tests {
         let line_len = (g.end().x - g.start().x).hypot(g.end().y - g.start().y);
         let s = std::f32::consts::FRAC_1_SQRT_2;
         let expected = (200.0 * s).abs() + (50.0 * s).abs();
-        assert!((line_len - expected).abs() < 1e-3, "line {line_len} vs {expected}");
+        assert!(
+            (line_len - expected).abs() < 1e-3,
+            "line {line_len} vs {expected}"
+        );
     }
 
     #[test]
@@ -4546,13 +4705,30 @@ mod tests {
         // Centered in a 100×50 box: center (50, 25).
         let bounds = Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 50.0));
         // closest-side circle = min distance to a side = 25 (half height).
-        let (rx, ry) = resolve_radii(RadialShape::Circle, RadialSize::ClosestSide, 50.0, 25.0, bounds);
-        assert!((rx - 25.0).abs() < 1e-3 && (ry - 25.0).abs() < 1e-3, "closest-side {rx},{ry}");
+        let (rx, ry) = resolve_radii(
+            RadialShape::Circle,
+            RadialSize::ClosestSide,
+            50.0,
+            25.0,
+            bounds,
+        );
+        assert!(
+            (rx - 25.0).abs() < 1e-3 && (ry - 25.0).abs() < 1e-3,
+            "closest-side {rx},{ry}"
+        );
         // farthest-corner circle = hypot(50, 25).
-        let (rx, ry) =
-            resolve_radii(RadialShape::Circle, RadialSize::FarthestCorner, 50.0, 25.0, bounds);
+        let (rx, ry) = resolve_radii(
+            RadialShape::Circle,
+            RadialSize::FarthestCorner,
+            50.0,
+            25.0,
+            bounds,
+        );
         let want = 50.0_f32.hypot(25.0);
-        assert!((rx - want).abs() < 1e-3 && (rx - ry).abs() < 1e-6, "farthest-corner {rx},{ry}");
+        assert!(
+            (rx - want).abs() < 1e-3 && (rx - ry).abs() < 1e-6,
+            "farthest-corner {rx},{ry}"
+        );
     }
 
     #[test]
@@ -4561,16 +4737,32 @@ mod tests {
         let bounds = Rect::new(Point::new(0.0, 0.0), Size::new(480.0, 120.0));
         // farthest-corner ellipse keeps the far-side ratio, scaled by √2:
         // (dx_far, dy_far)·√2 = (240√2, 60√2).
-        let (rx, ry) =
-            resolve_radii(RadialShape::Ellipse, RadialSize::FarthestCorner, 240.0, 60.0, bounds);
+        let (rx, ry) = resolve_radii(
+            RadialShape::Ellipse,
+            RadialSize::FarthestCorner,
+            240.0,
+            60.0,
+            bounds,
+        );
         let s = std::f32::consts::SQRT_2;
         assert!((rx - 240.0 * s).abs() < 1e-2, "rx {rx}");
         assert!((ry - 60.0 * s).abs() < 1e-2, "ry {ry}");
-        assert!(rx > ry, "a non-square ellipse is stretched: rx {rx} > ry {ry}");
+        assert!(
+            rx > ry,
+            "a non-square ellipse is stretched: rx {rx} > ry {ry}"
+        );
         // closest-side ellipse = the per-axis near distances (240, 60), still rx≠ry.
-        let (rx, ry) =
-            resolve_radii(RadialShape::Ellipse, RadialSize::ClosestSide, 240.0, 60.0, bounds);
-        assert!((rx - 240.0).abs() < 1e-3 && (ry - 60.0).abs() < 1e-3, "closest-side {rx},{ry}");
+        let (rx, ry) = resolve_radii(
+            RadialShape::Ellipse,
+            RadialSize::ClosestSide,
+            240.0,
+            60.0,
+            bounds,
+        );
+        assert!(
+            (rx - 240.0).abs() < 1e-3 && (ry - 60.0).abs() < 1e-3,
+            "closest-side {rx},{ry}"
+        );
     }
 
     /// A `ComputedStyle` carrying a `background-color` and a resolved `transform`.
@@ -4613,7 +4805,10 @@ mod tests {
         // The transform opens first (outermost) and closes last, bracketing the
         // node's whole subtree paint.
         let Some(PaintCommand::PushTransform(affine)) = commands.first() else {
-            panic!("expected a leading PushTransform, got {:?}", commands.first());
+            panic!(
+                "expected a leading PushTransform, got {:?}",
+                commands.first()
+            );
         };
         // A pure translation commutes with the origin wrapping, so the affine is
         // exactly translate(10, 0) regardless of the (default center) origin.
@@ -4643,13 +4838,10 @@ mod tests {
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         assert!(
-            !list
-                .commands()
-                .iter()
-                .any(|c| matches!(
-                    c,
-                    PaintCommand::PushTransform(_) | PaintCommand::PopTransform
-                )),
+            !list.commands().iter().any(|c| matches!(
+                c,
+                PaintCommand::PushTransform(_) | PaintCommand::PopTransform
+            )),
             "no transform authored ⇒ no transform bracket"
         );
     }
@@ -4780,7 +4972,10 @@ mod tests {
         else {
             panic!("expected a DrawShadow");
         };
-        assert_eq!(*rect, Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 10.0)));
+        assert_eq!(
+            *rect,
+            Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 10.0))
+        );
         assert_eq!(*color, obscur_scene::color::Color::BLACK);
         assert_eq!(*blur, 8.0);
         assert_eq!(*spread, 0.0);
@@ -4798,7 +4993,10 @@ mod tests {
             .iter()
             .position(|c| matches!(c, PaintCommand::DrawPath { .. }))
             .expect("background present");
-        assert!(shadow_pos < fill_pos, "drop shadow paints behind the background");
+        assert!(
+            shadow_pos < fill_pos,
+            "drop shadow paints behind the background"
+        );
         assert!(list.is_balanced());
     }
 
@@ -4878,7 +5076,10 @@ mod tests {
         else {
             panic!("expected a DrawShadow");
         };
-        assert_eq!(*rect, Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 10.0)));
+        assert_eq!(
+            *rect,
+            Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 10.0))
+        );
         assert_eq!(*color, obscur_scene::color::Color::BLACK);
         assert_eq!(*blur, 8.0);
         assert_eq!(*spread, 0.0);
@@ -4896,7 +5097,10 @@ mod tests {
             .iter()
             .position(|c| matches!(c, PaintCommand::DrawPath { .. }))
             .expect("background present");
-        assert!(shadow_pos < fill_pos, "filter drop-shadow paints behind the background");
+        assert!(
+            shadow_pos < fill_pos,
+            "filter drop-shadow paints behind the background"
+        );
         assert!(list.is_balanced());
     }
 
@@ -4964,7 +5168,11 @@ mod tests {
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
 
         let shadows = shadow_commands(&list);
-        assert_eq!(shadows.len(), 2, "box-shadow and filter drop-shadow both paint");
+        assert_eq!(
+            shadows.len(),
+            2,
+            "box-shadow and filter drop-shadow both paint"
+        );
         // Both shadows paint before the background fill.
         let fill_pos = list
             .commands()
@@ -5024,9 +5232,15 @@ mod tests {
         else {
             panic!("expected a DrawShadow");
         };
-        assert!(*inset, "an `inset` shadow lowers to DrawShadow{{inset:true}}");
+        assert!(
+            *inset,
+            "an `inset` shadow lowers to DrawShadow{{inset:true}}"
+        );
         assert_eq!(*spread, 3.0);
-        assert_eq!(*rect, Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 10.0)));
+        assert_eq!(
+            *rect,
+            Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 10.0))
+        );
 
         // The inset shadow paints AFTER (over) the background fill.
         let shadow_pos = list
@@ -5089,9 +5303,7 @@ mod tests {
             .commands()
             .iter()
             .filter_map(|c| match c {
-                PaintCommand::PushLayer(layer)
-                    if layer.effects().iter().any(|e| e.is_blur()) =>
-                {
+                PaintCommand::PushLayer(layer) if layer.effects().iter().any(|e| e.is_blur()) => {
                     Some(layer)
                 }
                 _ => None,
@@ -5127,7 +5339,10 @@ mod tests {
             .iter()
             .rposition(|c| matches!(c, PaintCommand::PopLayer))
             .expect("pop present");
-        assert!(push < fill && fill < pop, "blur layer wraps the subtree paint");
+        assert!(
+            push < fill && fill < pop,
+            "blur layer wraps the subtree paint"
+        );
     }
 
     #[test]
@@ -5234,7 +5449,10 @@ mod tests {
         // luma row absorbs the ×2 into its own weights, so r0c0 = 0.2126 (not 0.4252).
         let swapped = color_matrix_of_ops(&[FilterOp::Brightness(2.0), FilterOp::Grayscale(1.0)])
             .expect("color op");
-        assert!((swapped[0] - 0.4252).abs() < 1e-5, "brightness∘luma still ×2 in r0c0");
+        assert!(
+            (swapped[0] - 0.4252).abs() < 1e-5,
+            "brightness∘luma still ×2 in r0c0"
+        );
         // The two orders differ overall (bias / alpha aside, the linear parts diverge
         // once a biased op like contrast is involved) — assert order matters via a
         // contrast+brightness pair.
@@ -5432,16 +5650,15 @@ mod tests {
             .commands()
             .iter()
             .filter_map(|c| match c {
-                PaintCommand::BackdropFilter {
-                    bounds,
-                    blur,
-                    ..
-                } => Some((*bounds, *blur)),
+                PaintCommand::BackdropFilter { bounds, blur, .. } => Some((*bounds, *blur)),
                 _ => None,
             })
             .collect();
         assert_eq!(backdrops.len(), 1, "one backdrop-filter command");
-        assert_eq!(backdrops[0].0, bounds.bounds, "frost region is the border box");
+        assert_eq!(
+            backdrops[0].0, bounds.bounds,
+            "frost region is the border box"
+        );
         assert_eq!(backdrops[0].1, 12.0, "carries the authored blur radius");
 
         // The BackdropFilter is emitted BEFORE the node's own background fill.
@@ -5521,9 +5738,15 @@ mod tests {
 
         let mut computed = ComputedStyles::new();
         computed.insert(root, ComputedStyle::new()); // root: no background.
-        computed.insert(a, positioned_bg(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), Some(2.0)));
+        computed.insert(
+            a,
+            positioned_bg(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), Some(2.0)),
+        );
         computed.insert(b, positioned_bg(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), None));
-        computed.insert(c, positioned_bg(StyleColor::rgba(0.0, 0.0, 1.0, 1.0), Some(-1.0)));
+        computed.insert(
+            c,
+            positioned_bg(StyleColor::rgba(0.0, 0.0, 1.0, 1.0), Some(-1.0)),
+        );
 
         let mut boxes = LayoutBoxes::new();
         boxes.insert(a, box_at(0.0, 0.0, 10.0, 10.0));
@@ -5534,9 +5757,18 @@ mod tests {
         let rects = fill_rects(&list);
         assert_eq!(rects.len(), 3);
         // c (z=-1) first, b (z=0) middle, a (z=2) last (topmost).
-        assert_eq!(rects[0], Rect::new(Point::new(2.0, 2.0), Size::new(10.0, 10.0)));
-        assert_eq!(rects[1], Rect::new(Point::new(1.0, 1.0), Size::new(10.0, 10.0)));
-        assert_eq!(rects[2], Rect::new(Point::new(0.0, 0.0), Size::new(10.0, 10.0)));
+        assert_eq!(
+            rects[0],
+            Rect::new(Point::new(2.0, 2.0), Size::new(10.0, 10.0))
+        );
+        assert_eq!(
+            rects[1],
+            Rect::new(Point::new(1.0, 1.0), Size::new(10.0, 10.0))
+        );
+        assert_eq!(
+            rects[2],
+            Rect::new(Point::new(0.0, 0.0), Size::new(10.0, 10.0))
+        );
         assert!(list.is_balanced());
     }
 
@@ -5589,8 +5821,14 @@ mod tests {
 
         let mut computed = ComputedStyles::new();
         computed.insert(root, ComputedStyle::new());
-        computed.insert(sib, positioned_bg(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), None));
-        computed.insert(panel, positioned_bg(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), Some(1.0)));
+        computed.insert(
+            sib,
+            positioned_bg(StyleColor::rgba(0.0, 1.0, 0.0, 1.0), None),
+        );
+        computed.insert(
+            panel,
+            positioned_bg(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), Some(1.0)),
+        );
         computed.insert(text, ComputedStyle::new());
 
         let mut boxes = LayoutBoxes::new();
@@ -5614,8 +5852,14 @@ mod tests {
 
         // The two fills: the z=0 sibling first, the z=1 panel above it.
         let rects = fill_rects(&list);
-        assert_eq!(rects[0], Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 20.0)));
-        assert_eq!(rects[1], Rect::new(Point::new(5.0, 5.0), Size::new(20.0, 20.0)));
+        assert_eq!(
+            rects[0],
+            Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 20.0))
+        );
+        assert_eq!(
+            rects[1],
+            Rect::new(Point::new(5.0, 5.0), Size::new(20.0, 20.0))
+        );
         // The text run sits at its box origin, painted last (on top of everything).
         let runs = text_runs(&list);
         assert_eq!(runs.len(), 1);
@@ -6072,7 +6316,10 @@ mod tests {
             PropertyId::BorderBottomStyle,
             PropertyId::BorderLeftStyle,
         ] {
-            style.set(id, ComputedValue::keyword(layout_keyword::BORDER_STYLE_SOLID));
+            style.set(
+                id,
+                ComputedValue::keyword(layout_keyword::BORDER_STYLE_SOLID),
+            );
         }
         for id in [
             PropertyId::BorderTopColor,
@@ -6168,7 +6415,12 @@ mod tests {
         // right: outer TR,BR then inner BR,TR.
         assert_eq!(
             polys[1].0,
-            vec![p(110.0, 20.0), p(110.0, 70.0), p(108.0, 68.0), p(108.0, 22.0)],
+            vec![
+                p(110.0, 20.0),
+                p(110.0, 70.0),
+                p(108.0, 68.0),
+                p(108.0, 22.0)
+            ],
         );
         // bottom: outer BR,BL then inner BL,BR.
         assert_eq!(
@@ -6184,10 +6436,22 @@ mod tests {
         // union to the full outer ring (top/bottom span the full width, left/right
         // the full height — corners now shared by the miters, not overlapped).
         let fills = path_fills(&list);
-        assert_eq!(fills[0].0, Rect::new(Point::new(10.0, 20.0), Size::new(100.0, 2.0)));
-        assert_eq!(fills[1].0, Rect::new(Point::new(108.0, 20.0), Size::new(2.0, 50.0)));
-        assert_eq!(fills[2].0, Rect::new(Point::new(10.0, 68.0), Size::new(100.0, 2.0)));
-        assert_eq!(fills[3].0, Rect::new(Point::new(10.0, 20.0), Size::new(2.0, 50.0)));
+        assert_eq!(
+            fills[0].0,
+            Rect::new(Point::new(10.0, 20.0), Size::new(100.0, 2.0))
+        );
+        assert_eq!(
+            fills[1].0,
+            Rect::new(Point::new(108.0, 20.0), Size::new(2.0, 50.0))
+        );
+        assert_eq!(
+            fills[2].0,
+            Rect::new(Point::new(10.0, 68.0), Size::new(100.0, 2.0))
+        );
+        assert_eq!(
+            fills[3].0,
+            Rect::new(Point::new(10.0, 20.0), Size::new(2.0, 50.0))
+        );
         assert!(list.is_balanced());
     }
 
@@ -6223,7 +6487,10 @@ mod tests {
             style.set(id, ComputedValue::length(Length::px(w)));
         }
         for id in s_ids {
-            style.set(id, ComputedValue::keyword(layout_keyword::BORDER_STYLE_SOLID));
+            style.set(
+                id,
+                ComputedValue::keyword(layout_keyword::BORDER_STYLE_SOLID),
+            );
         }
         for (id, c) in c_ids.into_iter().zip(colors) {
             style.set(id, ComputedValue::color(c));
@@ -6244,13 +6511,37 @@ mod tests {
         // (widths [t,r,b,l], colored side index, box w, box h, expected 3 vertices).
         let cases: [([f32; 4], usize, f32, f32, [(f32, f32); 3]); 4] = [
             // ▽ down — border-top colored, box 10×6: base at top, apex at bottom.
-            ([6.0, 5.0, 0.0, 5.0], 0, 10.0, 6.0, [(0.0, 0.0), (10.0, 0.0), (5.0, 6.0)]),
+            (
+                [6.0, 5.0, 0.0, 5.0],
+                0,
+                10.0,
+                6.0,
+                [(0.0, 0.0), (10.0, 0.0), (5.0, 6.0)],
+            ),
             // △ up — border-bottom colored, box 10×6: base at bottom, apex at top.
-            ([0.0, 5.0, 6.0, 5.0], 2, 10.0, 6.0, [(0.0, 6.0), (10.0, 6.0), (5.0, 0.0)]),
+            (
+                [0.0, 5.0, 6.0, 5.0],
+                2,
+                10.0,
+                6.0,
+                [(0.0, 6.0), (10.0, 6.0), (5.0, 0.0)],
+            ),
             // ▷ right — border-left colored, box 6×10: base at left, apex at right.
-            ([5.0, 0.0, 5.0, 6.0], 3, 6.0, 10.0, [(0.0, 0.0), (0.0, 10.0), (6.0, 5.0)]),
+            (
+                [5.0, 0.0, 5.0, 6.0],
+                3,
+                6.0,
+                10.0,
+                [(0.0, 0.0), (0.0, 10.0), (6.0, 5.0)],
+            ),
             // ◁ left — border-right colored, box 6×10: base at right, apex at left.
-            ([5.0, 6.0, 5.0, 0.0], 1, 6.0, 10.0, [(6.0, 0.0), (6.0, 10.0), (0.0, 5.0)]),
+            (
+                [5.0, 6.0, 5.0, 0.0],
+                1,
+                6.0,
+                10.0,
+                [(6.0, 0.0), (6.0, 10.0), (0.0, 5.0)],
+            ),
         ];
 
         for (widths, colored_side, bw, bh, expected) in cases {
@@ -6270,7 +6561,11 @@ mod tests {
             // Only the one colored side is emitted; the three transparent sides
             // (and any zero-width side) paint nothing.
             assert_eq!(polys.len(), 1, "one triangle for widths {widths:?}");
-            assert_eq!(polys[0].1, scene_color_from(colored), "the triangle is #333");
+            assert_eq!(
+                polys[0].1,
+                scene_color_from(colored),
+                "the triangle is #333"
+            );
             // Exactly three distinct vertices: the collapsed side's two outer (or
             // two inner) corners coincide at the apex.
             let mut want: Vec<(f32, f32)> = expected.to_vec();
@@ -6305,7 +6600,11 @@ mod tests {
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         let polys = path_polygons(&list);
-        assert_eq!(polys.len(), 3, "transparent top side skipped, three opaque sides");
+        assert_eq!(
+            polys.len(),
+            3,
+            "transparent top side skipped, three opaque sides"
+        );
         for (_, color) in &polys {
             assert_eq!(*color, scene_color_from(opaque));
         }
@@ -6321,7 +6620,10 @@ mod tests {
             PropertyId::BorderBottomStyle,
             PropertyId::BorderLeftStyle,
         ] {
-            style.set(id, ComputedValue::keyword(layout_keyword::BORDER_STYLE_DASHED));
+            style.set(
+                id,
+                ComputedValue::keyword(layout_keyword::BORDER_STYLE_DASHED),
+            );
         }
         style
     }
@@ -6360,7 +6662,15 @@ mod tests {
         let fill_count = list
             .commands()
             .iter()
-            .filter(|c| matches!(c, PaintCommand::DrawPath { paint: Paint::Fill(_), .. }))
+            .filter(|c| {
+                matches!(
+                    c,
+                    PaintCommand::DrawPath {
+                        paint: Paint::Fill(_),
+                        ..
+                    }
+                )
+            })
             .count();
         assert_eq!(fill_count, 0, "dashed border does not fill-rect");
         let strokes = stroke_paths(&list);
@@ -6396,7 +6706,10 @@ mod tests {
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         assert_eq!(path_fills(&list).len(), 4, "four solid side rects");
-        assert!(stroke_paths(&list).is_empty(), "no dashed stroke for a solid border");
+        assert!(
+            stroke_paths(&list).is_empty(),
+            "no dashed stroke for a solid border"
+        );
     }
 
     /// Builds a `ComputedStyle` with an `outline` of `width` px, `offset` px, the
@@ -6408,8 +6721,14 @@ mod tests {
         color: StyleColor,
     ) -> ComputedStyle {
         let mut s = ComputedStyle::new();
-        s.set(PropertyId::OutlineWidth, ComputedValue::length(Length::px(width)));
-        s.set(PropertyId::OutlineOffset, ComputedValue::length(Length::px(offset)));
+        s.set(
+            PropertyId::OutlineWidth,
+            ComputedValue::length(Length::px(width)),
+        );
+        s.set(
+            PropertyId::OutlineOffset,
+            ComputedValue::length(Length::px(offset)),
+        );
         s.set(PropertyId::OutlineStyle, ComputedValue::keyword(style));
         s.set(PropertyId::OutlineColor, ComputedValue::color(color));
         s
@@ -6448,8 +6767,14 @@ mod tests {
         // side: origin (6,16), size (108,58). Its inner edge (7,17) is offset(3) px
         // OUTSIDE the border box (10,20) — a focus ring with a visible gap.
         let bounds = path.bounds().expect("outline path has bounds");
-        assert_eq!(bounds, Rect::new(Point::new(6.0, 16.0), Size::new(108.0, 58.0)));
-        assert!(bounds.origin.x < 10.0 && bounds.origin.y < 20.0, "outside the border box");
+        assert_eq!(
+            bounds,
+            Rect::new(Point::new(6.0, 16.0), Size::new(108.0, 58.0))
+        );
+        assert!(
+            bounds.origin.x < 10.0 && bounds.origin.y < 20.0,
+            "outside the border box"
+        );
         assert!(list.is_balanced());
     }
 
@@ -6482,8 +6807,14 @@ mod tests {
             with_outline(2.0, 0.0, layout_keyword::BORDER_STYLE_NONE, color),
         );
         let list = SceneCoordinator::new().compose(&tree, &none, &boxes, None);
-        assert!(stroke_paths(&list).is_empty(), "outline-style:none emits nothing");
-        assert!(list.commands().is_empty(), "no outline, no other paint → empty list");
+        assert!(
+            stroke_paths(&list).is_empty(),
+            "outline-style:none emits nothing"
+        );
+        assert!(
+            list.commands().is_empty(),
+            "no outline, no other paint → empty list"
+        );
     }
 
     #[test]
@@ -6501,7 +6832,11 @@ mod tests {
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         assert_eq!(fill_count(&list), 1, "only the background");
         assert!(stroke_paths(&list).is_empty(), "no outline stroke");
-        assert_eq!(list.commands().len(), 1, "exactly one command (byte-identical)");
+        assert_eq!(
+            list.commands().len(),
+            1,
+            "exactly one command (byte-identical)"
+        );
     }
 
     #[test]
@@ -6569,7 +6904,10 @@ mod tests {
         let fills = path_fills(&list);
         assert_eq!(fills.len(), 5, "one background + four border edges");
         // The background is emitted first, covering the whole border box.
-        assert_eq!(fills[0].0, Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 20.0)));
+        assert_eq!(
+            fills[0].0,
+            Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 20.0))
+        );
         assert_eq!(fills[0].1, Color::rgba(0.0, 1.0, 0.0, 1.0));
         // The remaining four are the blue border edges.
         for (_, color) in &fills[1..] {
@@ -6620,7 +6958,10 @@ mod tests {
             PropertyId::BorderBottomStyle,
             PropertyId::BorderLeftStyle,
         ] {
-            style.set(id, ComputedValue::keyword(layout_keyword::BORDER_STYLE_SOLID));
+            style.set(
+                id,
+                ComputedValue::keyword(layout_keyword::BORDER_STYLE_SOLID),
+            );
         }
         let mut computed = ComputedStyles::new();
         computed.insert(root, style);
@@ -6632,7 +6973,11 @@ mod tests {
         let fills = path_fills(&list);
         assert_eq!(fills.len(), 4);
         for (_, color) in &fills {
-            assert_eq!(*color, Color::rgba(0.0, 0.0, 1.0, 1.0), "border uses currentColor");
+            assert_eq!(
+                *color,
+                Color::rgba(0.0, 0.0, 1.0, 1.0),
+                "border uses currentColor"
+            );
         }
     }
 
@@ -6645,7 +6990,10 @@ mod tests {
         tree.set_root(root);
 
         let mut style = ComputedStyle::new();
-        style.set(PropertyId::BorderTopWidth, ComputedValue::length(Length::px(4.0)));
+        style.set(
+            PropertyId::BorderTopWidth,
+            ComputedValue::length(Length::px(4.0)),
+        );
         // No border-top-style ⇒ treated as `none`.
         let mut computed = ComputedStyles::new();
         computed.insert(root, style);
@@ -6792,15 +7140,24 @@ mod tests {
         let cmds = list.commands();
         // PushClip, rounded root fill, child fill, PopClip — the clip brackets the
         // whole subtree.
-        assert!(matches!(cmds[0], PaintCommand::PushClip(_)), "clip opens first");
-        assert!(matches!(cmds.last(), Some(PaintCommand::PopClip)), "clip closes last");
+        assert!(
+            matches!(cmds[0], PaintCommand::PushClip(_)),
+            "clip opens first"
+        );
+        assert!(
+            matches!(cmds.last(), Some(PaintCommand::PopClip)),
+            "clip closes last"
+        );
         assert!(list.is_balanced(), "the clip bracket is balanced");
 
         // The rounded root background is a curved path (not a plain rectangle),
         // and its bounds still equal the border box.
         match &cmds[1] {
             PaintCommand::DrawPath { path, .. } => {
-                assert!(path_has_curve(path), "rounded background uses a curved path");
+                assert!(
+                    path_has_curve(path),
+                    "rounded background uses a curved path"
+                );
                 assert_eq!(
                     path.bounds(),
                     Some(Rect::new(Point::new(0.0, 0.0), Size::new(100.0, 100.0)))
@@ -6849,10 +7206,9 @@ mod tests {
             other => panic!("expected a plain fill, got {other:?}"),
         }
         assert!(
-            !cmds.iter().any(|c| matches!(
-                c,
-                PaintCommand::PushClip(_) | PaintCommand::PopClip
-            )),
+            !cmds
+                .iter()
+                .any(|c| matches!(c, PaintCommand::PushClip(_) | PaintCommand::PopClip)),
             "no clip commands with no radius"
         );
     }
@@ -6905,7 +7261,11 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
         );
-        assert_eq!(plain.commands(), empty.commands(), "empty scroll map ⇒ identical list");
+        assert_eq!(
+            plain.commands(),
+            empty.commands(),
+            "empty scroll map ⇒ identical list"
+        );
     }
 
     #[test]
@@ -6915,7 +7275,13 @@ mod tests {
         // (track + thumb) AFTER the clip closes (on top, unscrolled).
         let (tree, computed, boxes, root, _child) = scroll_fixture();
         let mut scroll = HashMap::new();
-        scroll.insert(root, ScrollPaint { scroll_top: 80.0, content_height: 120.0 });
+        scroll.insert(
+            root,
+            ScrollPaint {
+                scroll_top: 80.0,
+                content_height: 120.0,
+            },
+        );
         let list = SceneCoordinator::new().compose_with_images_scrolled(
             &tree,
             &computed,
@@ -6928,7 +7294,10 @@ mod tests {
         let cmds = list.commands();
         assert!(list.is_balanced(), "scroll + clip brackets stay balanced");
 
-        let clip_open = cmds.iter().position(|c| matches!(c, PaintCommand::PushClip(_))).unwrap();
+        let clip_open = cmds
+            .iter()
+            .position(|c| matches!(c, PaintCommand::PushClip(_)))
+            .unwrap();
         let scroll_push = cmds
             .iter()
             .position(|c| matches!(c, PaintCommand::PushTransform(t) if (t.coeffs[5] + 80.0).abs() < 0.01))
@@ -6937,18 +7306,30 @@ mod tests {
             .iter()
             .rposition(|c| matches!(c, PaintCommand::PopTransform))
             .unwrap();
-        let clip_close = cmds.iter().rposition(|c| matches!(c, PaintCommand::PopClip)).unwrap();
+        let clip_close = cmds
+            .iter()
+            .rposition(|c| matches!(c, PaintCommand::PopClip))
+            .unwrap();
         // Clip opens outside the scroll transform; the scroll transform closes
         // inside the clip (scroll_pop before clip_close).
-        assert!(clip_open < scroll_push, "scroll transform nests inside the clip");
-        assert!(scroll_pop < clip_close, "scroll transform closes before the clip");
+        assert!(
+            clip_open < scroll_push,
+            "scroll transform nests inside the clip"
+        );
+        assert!(
+            scroll_pop < clip_close,
+            "scroll transform closes before the clip"
+        );
 
         // The scrollbar: two fills AFTER the clip closes (on top, not scrolled).
         let fills_after_clip = cmds[clip_close + 1..]
             .iter()
             .filter(|c| matches!(c, PaintCommand::DrawPath { .. }))
             .count();
-        assert_eq!(fills_after_clip, 2, "a scrollbar track + thumb paint on top");
+        assert_eq!(
+            fills_after_clip, 2,
+            "a scrollbar track + thumb paint on top"
+        );
     }
 
     #[test]
@@ -6993,7 +7374,10 @@ mod tests {
             }
             other => panic!("expected a PushClip rect, got {other:?}"),
         }
-        assert!(matches!(cmds.last(), Some(PaintCommand::PopClip)), "clip closes last");
+        assert!(
+            matches!(cmds.last(), Some(PaintCommand::PopClip)),
+            "clip closes last"
+        );
         assert!(list.is_balanced(), "the clip bracket is balanced");
     }
 
@@ -7022,10 +7406,10 @@ mod tests {
 
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
         assert!(
-            !list.commands().iter().any(|c| matches!(
-                c,
-                PaintCommand::PushClip(_) | PaintCommand::PopClip
-            )),
+            !list
+                .commands()
+                .iter()
+                .any(|c| matches!(c, PaintCommand::PushClip(_) | PaintCommand::PopClip)),
             "overflow: visible adds no clip"
         );
     }
@@ -7147,13 +7531,16 @@ mod tests {
             let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
             let cmds = list.commands();
             assert!(
-                !cmds.iter().any(|c| matches!(
-                    c,
-                    PaintCommand::PushLayer(_) | PaintCommand::PopLayer
-                )),
+                !cmds
+                    .iter()
+                    .any(|c| matches!(c, PaintCommand::PushLayer(_) | PaintCommand::PopLayer)),
                 "opacity {opacity:?} emits no layer commands"
             );
-            assert_eq!(cmds.len(), 1, "just the one background fill for {opacity:?}");
+            assert_eq!(
+                cmds.len(),
+                1,
+                "just the one background fill for {opacity:?}"
+            );
         }
     }
 
@@ -7276,7 +7663,12 @@ mod tests {
         let mock_runs = text_runs(&coordinator.compose(&tree, &computed, &boxes, None));
         assert_eq!(mock_runs.len(), 1);
         assert_eq!(mock_runs[0].1.font(), 0);
-        let mock_ids: Vec<u32> = mock_runs[0].1.glyphs().iter().map(|g| g.glyph_id()).collect();
+        let mock_ids: Vec<u32> = mock_runs[0]
+            .1
+            .glyphs()
+            .iter()
+            .map(|g| g.glyph_id())
+            .collect();
         assert_eq!(mock_ids, vec![u32::from('a'), u32::from('b')]);
 
         // Install a fixed-id shaper through the runtime seam: the emitted run
@@ -7285,7 +7677,12 @@ mod tests {
         let stub_runs = text_runs(&coordinator.compose(&tree, &computed, &boxes, None));
         assert_eq!(stub_runs.len(), 1);
         assert_eq!(stub_runs[0].1.font(), 0);
-        let stub_ids: Vec<u32> = stub_runs[0].1.glyphs().iter().map(|g| g.glyph_id()).collect();
+        let stub_ids: Vec<u32> = stub_runs[0]
+            .1
+            .glyphs()
+            .iter()
+            .map(|g| g.glyph_id())
+            .collect();
         assert_eq!(stub_ids, vec![42, 42]);
         assert_ne!(mock_ids, stub_ids);
     }
@@ -7303,7 +7700,12 @@ mod tests {
             use obscur_text::shaping::{ScriptTag, TextItem};
             use obscur_text::span::TextRange;
             vec![
-                TextItem::new(TextRange::new(0, 2), ScriptTag::LATIN, TextDirection::LeftToRight, 0),
+                TextItem::new(
+                    TextRange::new(0, 2),
+                    ScriptTag::LATIN,
+                    TextDirection::LeftToRight,
+                    0,
+                ),
                 TextItem::new(
                     TextRange::new(2, 6),
                     ScriptTag::CYRILLIC,
@@ -7356,7 +7758,11 @@ mod tests {
         // Each segment carries its own script's glyphs.
         assert_eq!(runs[0].1.text(), "ab");
         assert_eq!(runs[1].1.text(), "ВГ");
-        assert!(coordinator.compose(&tree, &computed, &boxes, None).is_balanced());
+        assert!(
+            coordinator
+                .compose(&tree, &computed, &boxes, None)
+                .is_balanced()
+        );
     }
 
     /// A stub [`Hyphenator`] that proposes one fixed byte offset in any word long
@@ -7393,7 +7799,10 @@ mod tests {
 
         let mut coordinator = SceneCoordinator::new();
         // Default (no hyphenator): the over-wide word stays on one line.
-        assert_eq!(text_runs(&coordinator.compose(&tree, &computed, &boxes, None)).len(), 1);
+        assert_eq!(
+            text_runs(&coordinator.compose(&tree, &computed, &boxes, None)).len(),
+            1
+        );
 
         coordinator.set_hyphenator(Box::new(StubHyphenator { offset: 5 }));
         let runs = text_runs(&coordinator.compose(&tree, &computed, &boxes, None));
@@ -7401,13 +7810,20 @@ mod tests {
         // The head line ("hyphe" + hyphen) ends with the mock hyphen glyph (id 45)
         // and fits the 60px box.
         let head = &runs[0].1;
-        assert_eq!(head.glyphs().last().map(PositionedGlyph::glyph_id), Some(45));
+        assert_eq!(
+            head.glyphs().last().map(PositionedGlyph::glyph_id),
+            Some(45)
+        );
         let head_width: f32 = head.glyphs().iter().map(PositionedGlyph::advance).sum();
         assert!(head_width <= 60.0, "head width {head_width} must fit 60");
         // The tail line ("nation") starts on the next line, no hyphen.
         assert!(runs[1].0.y > runs[0].0.y);
         assert!(!runs[1].1.glyphs().iter().any(|g| g.glyph_id() == 45));
-        assert!(coordinator.compose(&tree, &computed, &boxes, None).is_balanced());
+        assert!(
+            coordinator
+                .compose(&tree, &computed, &boxes, None)
+                .is_balanced()
+        );
     }
 
     // ---- Text caret + selection highlight (this step) ------------------------
@@ -7488,15 +7904,26 @@ mod tests {
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, Some(view));
 
         let fills = caret_fills(&list);
-        assert_eq!(fills.len(), 1, "a non-empty selection paints one highlight, no caret");
+        assert_eq!(
+            fills.len(),
+            1,
+            "a non-empty selection paints one highlight, no caret"
+        );
         let (rect, brush) = &fills[0];
-        assert!((rect.origin.x - 0.0).abs() < 1e-4, "highlight starts at x(start)=0");
+        assert!(
+            (rect.origin.x - 0.0).abs() < 1e-4,
+            "highlight starts at x(start)=0"
+        );
         assert!(
             (rect.size.width - advance).abs() < 1e-4,
             "highlight spans x(start)..x(end) = one advance"
         );
         assert_eq!(rect.size.height, 16.0, "highlight spans the line height");
-        assert_eq!(*brush, Brush::solid(SELECTION_COLOR), "documented selection color");
+        assert_eq!(
+            *brush,
+            Brush::solid(SELECTION_COLOR),
+            "documented selection color"
+        );
 
         // The highlight paints BEHIND the text: its fill is emitted before the run.
         let fill_idx = list
@@ -7509,7 +7936,10 @@ mod tests {
             .iter()
             .position(|c| matches!(c, PaintCommand::DrawText { .. }))
             .expect("a text run");
-        assert!(fill_idx < text_idx, "the highlight is emitted before the glyphs");
+        assert!(
+            fill_idx < text_idx,
+            "the highlight is emitted before the glyphs"
+        );
     }
 
     /// A text node carrying `content` under the root, box at the origin sized
@@ -7555,8 +7985,14 @@ mod tests {
         assert_eq!(fills.len(), 1, "one line → exactly one highlight rect");
         let (rect, brush) = &fills[0];
         assert_eq!(*brush, Brush::solid(SELECTION_COLOR));
-        assert!((rect.origin.x - adv).abs() < 1e-4, "starts at x(1) = one advance");
-        assert!((rect.size.width - adv * 2.0).abs() < 1e-4, "spans bytes 1..3 = two advances");
+        assert!(
+            (rect.origin.x - adv).abs() < 1e-4,
+            "starts at x(1) = one advance"
+        );
+        assert!(
+            (rect.size.width - adv * 2.0).abs() < 1e-4,
+            "spans bytes 1..3 = two advances"
+        );
         assert_eq!(rect.size.height, 16.0, "spans the line height");
         assert_eq!(rect.origin.y, 0.0, "on the first line");
     }
@@ -7568,8 +8004,7 @@ mod tests {
         // the middle line FULL, the end line's HEAD — each the domain
         // `SelectionGeometry` rect translated by the box origin (0,0, no scroll).
         let coordinator = SceneCoordinator::new();
-        let (tree, computed, boxes, text) =
-            wrapped_editing_fixture("aaaa bbbb cccc", 50.0, 48.0);
+        let (tree, computed, boxes, text) = wrapped_editing_fixture("aaaa bbbb cccc", 50.0, 48.0);
         let view = EditingView::new(text, "aaaa bbbb cccc", TextSelection::new(2, 12));
         let list = coordinator.compose(&tree, &computed, &boxes, Some(view));
 
@@ -7580,26 +8015,38 @@ mod tests {
             .collect();
 
         // The painted rects equal the domain geometry over the same wrapped layout.
-        let layout =
-            coordinator.shape_text_lines(&tree, &computed, text, "aaaa bbbb cccc", 50.0);
+        let layout = coordinator.shape_text_lines(&tree, &computed, text, "aaaa bbbb cccc", 50.0);
         let expected = SelectionGeometry::from_paragraph(&layout, 2, 12);
-        assert_eq!(expected.len(), 3, "the selection covers three wrapped lines");
+        assert_eq!(
+            expected.len(),
+            3,
+            "the selection covers three wrapped lines"
+        );
         assert_eq!(highlights.len(), 3, "one highlight rect per covered line");
         for (got, want) in highlights.iter().zip(expected.rects()) {
-            assert_eq!(got, want, "painted rect == domain geometry (origin 0, no scroll)");
+            assert_eq!(
+                got, want,
+                "painted rect == domain geometry (origin 0, no scroll)"
+            );
         }
 
         // Per-line extents: start TAIL begins mid-line-0 (after 2 glyphs), the
         // interior line is FULL from x 0, the end HEAD begins at x 0 and spans 2
         // glyphs. Lines stack by the 16px line height.
         let adv = 16.0 * MockTextShaper::ADVANCE_RATIO;
-        assert!((highlights[0].origin.x - adv * 2.0).abs() < 1e-3, "start tail after 2 glyphs");
+        assert!(
+            (highlights[0].origin.x - adv * 2.0).abs() < 1e-3,
+            "start tail after 2 glyphs"
+        );
         assert_eq!(highlights[0].origin.y, 0.0, "start line");
         assert_eq!(highlights[1].origin.x, 0.0, "interior full width from x 0");
         assert_eq!(highlights[1].origin.y, 16.0, "middle line");
         assert_eq!(highlights[2].origin.x, 0.0, "end head from x 0");
         assert_eq!(highlights[2].origin.y, 32.0, "end line");
-        assert!((highlights[2].size.width - adv * 2.0).abs() < 1e-3, "end head spans 2 glyphs");
+        assert!(
+            (highlights[2].size.width - adv * 2.0).abs() < 1e-3,
+            "end head spans 2 glyphs"
+        );
         assert!(list.is_balanced(), "the display list stays balanced");
     }
 
@@ -7611,16 +8058,20 @@ mod tests {
         // (line 1, x 0); Upstream at the TRAILING edge of the previous line (line 0,
         // its used pen width).
         let coordinator = SceneCoordinator::new();
-        let (tree, computed, boxes, text) =
-            wrapped_editing_fixture("aaaa bbbb cccc", 50.0, 48.0);
-        let layout =
-            coordinator.shape_text_lines(&tree, &computed, text, "aaaa bbbb cccc", 50.0);
+        let (tree, computed, boxes, text) = wrapped_editing_fixture("aaaa bbbb cccc", 50.0, 48.0);
+        let layout = coordinator.shape_text_lines(&tree, &computed, text, "aaaa bbbb cccc", 50.0);
 
         // Downstream (default affinity) → start of line 1.
         let down = EditingView::new(text, "aaaa bbbb cccc", TextSelection::caret(5));
         let d = caret_bar_origin(&coordinator.compose(&tree, &computed, &boxes, Some(down)));
-        assert_eq!(d.y, 16.0, "downstream → line 1 top (byte-identical to before)");
-        assert!((d.x - 0.0).abs() < 1e-4, "downstream → line 1 leading edge (x 0)");
+        assert_eq!(
+            d.y, 16.0,
+            "downstream → line 1 top (byte-identical to before)"
+        );
+        assert!(
+            (d.x - 0.0).abs() < 1e-4,
+            "downstream → line 1 leading edge (x 0)"
+        );
 
         // Upstream affinity → end of line 0.
         let up = EditingView::new(
@@ -7658,13 +8109,18 @@ mod tests {
             .iter()
             .map(|(_, run, _)| run.text().to_owned())
             .collect();
-        assert_eq!(drawn, "abni", "the preedit is spliced into the display text");
+        assert_eq!(
+            drawn, "abni",
+            "the preedit is spliced into the display text"
+        );
 
         let fills = caret_fills(&list);
         // Exactly two fills: the preedit underline and the caret.
         let underline = fills
             .iter()
-            .find(|(r, _)| (r.size.height - PREEDIT_UNDERLINE_THICKNESS).abs() < 1e-4 && r.size.width > 1.0)
+            .find(|(r, _)| {
+                (r.size.height - PREEDIT_UNDERLINE_THICKNESS).abs() < 1e-4 && r.size.width > 1.0
+            })
             .expect("a thin preedit underline");
         assert!(
             (underline.0.origin.x - advance * 2.0).abs() < 1e-4,
@@ -7784,9 +8240,12 @@ mod tests {
         list.commands()
             .iter()
             .filter_map(|c| match c {
-                PaintCommand::DrawText { run, .. } => {
-                    Some(run.glyphs().iter().map(PositionedGlyph::advance).sum::<f32>())
-                }
+                PaintCommand::DrawText { run, .. } => Some(
+                    run.glyphs()
+                        .iter()
+                        .map(PositionedGlyph::advance)
+                        .sum::<f32>(),
+                ),
                 _ => None,
             })
             .sum()
@@ -7805,7 +8264,10 @@ mod tests {
         let ls = 4.0_f32;
         let coordinator = SceneCoordinator::new();
         let author = |s: &mut ComputedStyle| {
-            s.set(PropertyId::LetterSpacing, ComputedValue::length(Length::px(ls)));
+            s.set(
+                PropertyId::LetterSpacing,
+                ComputedValue::length(Length::px(ls)),
+            );
         };
         let (tree, computed, boxes, text) = styled_editing_fixture("abcd", 200.0, author);
         let view = EditingView::new(text, "abcd", TextSelection::caret(4));
@@ -7833,13 +8295,12 @@ mod tests {
         assert_eq!(byte, 4, "click at the end caret x returns text.len()");
         // A caret at a middle boundary and its click are also exact inverses.
         let (tree2, computed2, boxes2, text2) = styled_editing_fixture("abcd", 200.0, author);
-        let mid = coordinator
-            .compose(
-                &tree2,
-                &computed2,
-                &boxes2,
-                Some(EditingView::new(text2, "abcd", TextSelection::caret(2))),
-            );
+        let mid = coordinator.compose(
+            &tree2,
+            &computed2,
+            &boxes2,
+            Some(EditingView::new(text2, "abcd", TextSelection::caret(2))),
+        );
         let mid_x = caret_paint_x(&mid);
         assert!(
             (mid_x - (advance + ls) * 2.0).abs() < 0.5,
@@ -7957,9 +8418,8 @@ mod tests {
                 "plain field caret at {index} is index·advance {expected}, got {caret_x}",
             );
             assert_eq!(
-                coordinator.caret_offset_at_point(
-                    &tree, &computed, text, "abcd", 200.0, caret_x, 8.0,
-                ),
+                coordinator
+                    .caret_offset_at_point(&tree, &computed, text, "abcd", 200.0, caret_x, 8.0,),
                 index,
                 "plain field click at the byte-{index} caret x returns {index}",
             );
@@ -7978,7 +8438,10 @@ mod tests {
             .iter()
             .map(|(_, run, _)| run.text().to_owned())
             .collect();
-        assert_eq!(drawn, "new", "the scene shows the session text, not the retained content");
+        assert_eq!(
+            drawn, "new",
+            "the scene shows the session text, not the retained content"
+        );
     }
 
     #[test]
@@ -7988,7 +8451,10 @@ mod tests {
         let (tree, computed, boxes, _text) = editing_fixture("old");
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
 
-        assert!(caret_fills(&list).is_empty(), "no caret or highlight without a session");
+        assert!(
+            caret_fills(&list).is_empty(),
+            "no caret or highlight without a session"
+        );
         let drawn: String = text_runs(&list)
             .iter()
             .map(|(_, run, _)| run.text().to_owned())
@@ -8008,7 +8474,10 @@ mod tests {
 
         let mut computed = ComputedStyles::new();
         computed.insert(root, ComputedStyle::new());
-        computed.insert(editing_text, with_color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
+        computed.insert(
+            editing_text,
+            with_color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
+        );
         computed.insert(other_text, with_color(StyleColor::rgba(0.0, 1.0, 0.0, 1.0)));
         let mut boxes = LayoutBoxes::new();
         boxes.insert(editing_text, box_at(0.0, 0.0, 200.0, 16.0));
@@ -8017,14 +8486,18 @@ mod tests {
         let view = EditingView::new(editing_text, "hi", TextSelection::caret(1));
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, Some(view));
         // Exactly one caret, over the editing node only.
-        assert_eq!(caret_fills(&list).len(), 1, "only the editing field gets a caret");
+        assert_eq!(
+            caret_fills(&list).len(),
+            1,
+            "only the editing field gets a caret"
+        );
         assert_eq!(text_runs(&list).len(), 2, "both text nodes still render");
     }
 
     /// Sets the reserved `class` list on a retained element, the way the
     /// reconciler would from a `CLASS` prop.
     fn set_class(tree: &mut RetainedTree, node: NodeId, class: &str) {
-        use obscur_view::view::{StyleAttributes, ViewProperty, ViewValue, CLASS};
+        use obscur_view::view::{CLASS, StyleAttributes, ViewProperty, ViewValue};
         let attrs =
             StyleAttributes::extract(&[ViewProperty::new(CLASS, ViewValue::Text(class.into()))]);
         if let Some(n) = tree.get_mut(node) {
@@ -8076,7 +8549,10 @@ mod tests {
         // is overridden only while the session buffer has typed text.
         let empty = EditingView::new(field, "", TextSelection::caret(0));
         let typed = EditingView::new(field, "abc", TextSelection::caret(3));
-        assert!(EditingRole::Value.overrides(&empty), "value text: session always overrides");
+        assert!(
+            EditingRole::Value.overrides(&empty),
+            "value text: session always overrides"
+        );
         assert!(EditingRole::Value.overrides(&typed));
         assert!(
             !EditingRole::Placeholder.overrides(&empty),
@@ -8138,15 +8614,27 @@ mod tests {
         let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, Some(view));
 
         let runs = text_runs(&list);
-        assert_eq!(runs.len(), 1, "one painted run: the session text over the slot");
-        assert_eq!(runs[0].1.text(), "abc", "the placeholder slot paints the typed session text");
+        assert_eq!(
+            runs.len(),
+            1,
+            "one painted run: the session text over the slot"
+        );
+        assert_eq!(
+            runs[0].1.text(),
+            "abc",
+            "the placeholder slot paints the typed session text"
+        );
         assert_eq!(
             runs[0].2.as_solid().map(|b| b.color()),
             Some(scene_color_from(FIELD_INK)),
             "typed text over the placeholder uses the field's ink, not the muted hint color",
         );
         let carets = caret_fills(&list);
-        assert_eq!(carets.len(), 1, "a caret paints into the overridden placeholder slot");
+        assert_eq!(
+            carets.len(),
+            1,
+            "a caret paints into the overridden placeholder slot"
+        );
         assert_eq!(
             carets[0].1.as_solid().map(|b| b.color()),
             Some(scene_color_from(FIELD_INK)),
@@ -8167,7 +8655,11 @@ mod tests {
 
         let runs = text_runs(&list);
         assert_eq!(runs.len(), 1, "the muted placeholder hint still paints");
-        assert_eq!(runs[0].1.text(), "Type here…", "the hint text, not session text");
+        assert_eq!(
+            runs[0].1.text(),
+            "Type here…",
+            "the hint text, not session text"
+        );
         assert_eq!(
             runs[0].2.as_solid().map(|b| b.color()),
             Some(scene_color_from(PLACEHOLDER_MUTED)),
@@ -8195,7 +8687,11 @@ mod tests {
             &boxes,
             Some(EditingView::new(field, "a", TextSelection::caret(1))),
         );
-        assert_eq!(text_runs(&typed)[0].1.text(), "a", "typed char shows before backspace");
+        assert_eq!(
+            text_runs(&typed)[0].1.text(),
+            "a",
+            "typed char shows before backspace"
+        );
         assert_eq!(caret_fills(&typed).len(), 1);
 
         let emptied = coordinator.compose(
@@ -8213,7 +8709,10 @@ mod tests {
             text_runs(&emptied)[0].2.as_solid().map(|b| b.color()),
             Some(scene_color_from(PLACEHOLDER_MUTED)),
         );
-        assert!(caret_fills(&emptied).is_empty(), "no caret once the placeholder is shown again");
+        assert!(
+            caret_fills(&emptied).is_empty(),
+            "no caret once the placeholder is shown again"
+        );
     }
 
     #[test]
@@ -8407,5 +8906,4 @@ mod tests {
             assert!(drawn_fills(&list).is_empty(), "no document, no paint");
         }
     }
-
 }

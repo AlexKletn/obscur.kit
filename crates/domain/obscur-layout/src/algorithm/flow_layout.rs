@@ -5,7 +5,7 @@ use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 use crate::model::{Dimension, LayoutBox, LayoutStyle};
 
 use super::{
-    clamp_content, intrinsic_inline_size, ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput,
+    ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput, clamp_content, intrinsic_inline_size,
 };
 
 /// Normal-flow / block layout (spec §4.1, §4.2).
@@ -192,18 +192,13 @@ impl LayoutAlgorithm for FlowLayout {
         // padding from an explicit width (the `Auto` branch already does), keeping
         // the two consistent — and does not apply to an intrinsic width, which is
         // already a content width (see `intrinsic_inline_size`).
-        let content_width = intrinsic_inline_size(
-            width,
-            children,
-            stretch,
-            avail_content_height,
-            measurer,
-        )
-        .unwrap_or_else(|| {
-            explicit
-                .map_or(stretch, |w| style.box_sizing.content_extent(w, bp_x))
-                .max(0.0)
-        });
+        let content_width =
+            intrinsic_inline_size(width, children, stretch, avail_content_height, measurer)
+                .unwrap_or_else(|| {
+                    explicit
+                        .map_or(stretch, |w| style.box_sizing.content_extent(w, bp_x))
+                        .max(0.0)
+                });
         // Clamp the content width into the authored min/max-width (spec §4.2).
         let content_width = clamp_content(
             content_width,
@@ -300,10 +295,7 @@ impl LayoutAlgorithm for FlowLayout {
                 // Place the zero-height box at the (current) collapsed boundary;
                 // it does not advance `y` and does not close the set.
                 let top = bp_top + y + gap_acc + pending.solve();
-                child_boxes.push(LayoutBox::new(Rect::new(
-                    Point::new(left, top),
-                    child_size,
-                )));
+                child_boxes.push(LayoutBox::new(Rect::new(Point::new(left, top), child_size)));
                 continue;
             }
 
@@ -316,7 +308,8 @@ impl LayoutAlgorithm for FlowLayout {
                 child_size,
             )));
             y = top + child_size.height;
-            pending = CollapsingMargins::EMPTY.adjoin(child_style.margin.bottom.resolve(content_width));
+            pending =
+                CollapsingMargins::EMPTY.adjoin(child_style.margin.bottom.resolve(content_width));
             gap_acc = 0.0;
         }
 
@@ -763,5 +756,4 @@ mod tests {
         );
         assert_eq!(out.child_boxes()[0].origin(), Point::new(0.0, 0.0));
     }
-
 }

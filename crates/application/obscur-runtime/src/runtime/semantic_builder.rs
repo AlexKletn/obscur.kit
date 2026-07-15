@@ -146,7 +146,15 @@ impl SemanticTreeBuilder {
         if let Some(root) = tree.root() {
             let mut visited = BTreeSet::new();
             let inherited = InheritedState::default();
-            Self::walk(tree, root, None, focused, inherited, &mut visited, &mut semantic);
+            Self::walk(
+                tree,
+                root,
+                None,
+                focused,
+                inherited,
+                &mut visited,
+                &mut semantic,
+            );
             if semantic.contains(root) {
                 semantic.set_root(root);
             }
@@ -351,8 +359,8 @@ mod tests {
     use super::*;
     use obscur_identity::{ComponentId, InternedSymbol};
     use obscur_view::view::{
-        StyleAttributes, ViewEventBinding, ViewProperty, ViewValue, CHECKED, CLASS, DISABLED,
-        READONLY, TYPE,
+        CHECKED, CLASS, DISABLED, READONLY, StyleAttributes, TYPE, ViewEventBinding, ViewProperty,
+        ViewValue,
     };
 
     /// Allocates an element whose local name (CSS type) is `local_name`.
@@ -469,12 +477,17 @@ mod tests {
     #[test]
     fn focus_and_hidden_flags_reflect_the_tree() {
         let (mut tree, _root, _panel, button, _ok, _hello) = sample_tree();
-        tree.get_mut(button).unwrap().insert_flags(NodeFlags::HIDDEN);
+        tree.get_mut(button)
+            .unwrap()
+            .insert_flags(NodeFlags::HIDDEN);
 
         let semantic = SemanticTreeBuilder::build(&tree, Some(button));
         let button_node = semantic.get(button).unwrap();
         assert!(button_node.state().focused, "passed-in focus is reflected");
-        assert!(button_node.state().hidden, "HIDDEN flag maps to state.hidden");
+        assert!(
+            button_node.state().hidden,
+            "HIDDEN flag maps to state.hidden"
+        );
     }
 
     /// The headline §7-A regression: the a11y tree used to announce a disabled
@@ -491,7 +504,10 @@ mod tests {
 
         let semantic = SemanticTreeBuilder::build(&tree, None);
         let node = semantic.get(button).unwrap();
-        assert!(node.state().disabled, "`:disabled` must reach the a11y tree");
+        assert!(
+            node.state().disabled,
+            "`:disabled` must reach the a11y tree"
+        );
         assert!(
             !node.state().is_actionable(),
             "a disabled button must never be announced as actionable"
@@ -658,10 +674,8 @@ mod tests {
             component: ComponentId::from_raw(7),
         });
         // A CLASS-only attribute set carries no local name.
-        let attrs = StyleAttributes::extract(&[ViewProperty::new(
-            CLASS,
-            ViewValue::Text("card".into()),
-        )]);
+        let attrs =
+            StyleAttributes::extract(&[ViewProperty::new(CLASS, ViewValue::Text("card".into()))]);
         tree.get_mut(id).unwrap().set_attributes(attrs);
         tree.get_mut(root).unwrap().push_child(id);
         tree.set_root(root);

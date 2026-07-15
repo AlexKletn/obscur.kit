@@ -289,12 +289,23 @@ mod tests {
         // Unchecked + enabled: neither reserved attribute.
         assert_eq!(attrs(&Checkbox::new("A", cmd()).view()), (false, false));
         // Checked: the CHECKED attribute appears.
-        assert_eq!(attrs(&Checkbox::new("A", cmd()).checked(true).view()), (true, false));
+        assert_eq!(
+            attrs(&Checkbox::new("A", cmd()).checked(true).view()),
+            (true, false)
+        );
         // Indeterminate is NOT :checked.
-        assert_eq!(attrs(&Checkbox::indeterminate("A", cmd()).view()), (false, false));
+        assert_eq!(
+            attrs(&Checkbox::indeterminate("A", cmd()).view()),
+            (false, false)
+        );
         // Checked AND disabled: both appear.
         assert_eq!(
-            attrs(&Checkbox::new("A", cmd()).checked(true).disabled(true).view()),
+            attrs(
+                &Checkbox::new("A", cmd())
+                    .checked(true)
+                    .disabled(true)
+                    .view()
+            ),
             (true, true)
         );
     }
@@ -314,7 +325,9 @@ mod tests {
         let box_of = |view: &View| -> (Vec<String>, usize) {
             match &view.root().nodes()[0] {
                 ViewNode::Element { children, .. } => match &children.nodes()[0] {
-                    ViewNode::Element { props, children, .. } => {
+                    ViewNode::Element {
+                        props, children, ..
+                    } => {
                         let classes = props
                             .iter()
                             .find(|p| p.name() == CLASS)

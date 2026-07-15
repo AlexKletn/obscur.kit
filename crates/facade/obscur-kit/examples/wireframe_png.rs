@@ -92,7 +92,9 @@ fn main() {
     let frame = RenderFrame::new(snapshot, physical);
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(physical));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     let pixmap = renderer.pixmap().expect("a rasterized frame");
 
     // 6. Encode the pixmap to PNG and write the artifact.

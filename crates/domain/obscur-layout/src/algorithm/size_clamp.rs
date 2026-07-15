@@ -42,26 +42,54 @@ mod tests {
 
     #[test]
     fn auto_bounds_leave_the_extent_unchanged() {
-        let v = clamp_content(100.0, Dimension::Auto, Dimension::Auto, 500.0, 0.0, BoxSizing::ContentBox);
+        let v = clamp_content(
+            100.0,
+            Dimension::Auto,
+            Dimension::Auto,
+            500.0,
+            0.0,
+            BoxSizing::ContentBox,
+        );
         assert_eq!(v, 100.0);
     }
 
     #[test]
     fn min_floors_a_short_extent() {
         // min-height 100% of 950 available floors a 680 content extent to 950.
-        let v = clamp_content(680.0, Dimension::Percent(100.0), Dimension::Auto, 950.0, 0.0, BoxSizing::ContentBox);
+        let v = clamp_content(
+            680.0,
+            Dimension::Percent(100.0),
+            Dimension::Auto,
+            950.0,
+            0.0,
+            BoxSizing::ContentBox,
+        );
         assert_eq!(v, 950.0);
     }
 
     #[test]
     fn max_caps_a_tall_extent() {
-        let v = clamp_content(800.0, Dimension::Auto, Dimension::Px(300.0), 950.0, 0.0, BoxSizing::ContentBox);
+        let v = clamp_content(
+            800.0,
+            Dimension::Auto,
+            Dimension::Px(300.0),
+            950.0,
+            0.0,
+            BoxSizing::ContentBox,
+        );
         assert_eq!(v, 300.0);
     }
 
     #[test]
     fn min_wins_over_a_smaller_max() {
-        let v = clamp_content(50.0, Dimension::Px(400.0), Dimension::Px(300.0), 950.0, 0.0, BoxSizing::ContentBox);
+        let v = clamp_content(
+            50.0,
+            Dimension::Px(400.0),
+            Dimension::Px(300.0),
+            950.0,
+            0.0,
+            BoxSizing::ContentBox,
+        );
         assert_eq!(v, 400.0);
     }
 
@@ -69,7 +97,14 @@ mod tests {
     fn border_box_min_subtracts_border_and_padding() {
         // Under border-box, a min of 200 with 40 of border+padding floors the
         // *content* extent to 160.
-        let v = clamp_content(0.0, Dimension::Px(200.0), Dimension::Auto, 950.0, 40.0, BoxSizing::BorderBox);
+        let v = clamp_content(
+            0.0,
+            Dimension::Px(200.0),
+            Dimension::Auto,
+            950.0,
+            40.0,
+            BoxSizing::BorderBox,
+        );
         assert_eq!(v, 160.0);
     }
 }

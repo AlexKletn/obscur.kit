@@ -281,15 +281,20 @@ pub fn view(state: &WireState) -> View {
             section("02", "Text Field", "<input>", field_body(state)),
             section("03", "Textarea", "<textarea>", area_body(state)),
             section("04", "Select", "<select>", select_body(state)),
-            section("05", "Checkbox", "<input type=checkbox>", checkbox_body(state)),
+            section(
+                "05",
+                "Checkbox",
+                "<input type=checkbox>",
+                checkbox_body(state),
+            ),
             section("06", "Radio", "<input type=radio>", radio_body(state)),
             section("07", "Text Link", "<a>", link_body()),
             footer(),
         ],
     );
 
-    let app = el("wf-page", vec![column])
-        .with_prop(ViewProperty::new(ID, ViewValue::Text("app".into())));
+    let app =
+        el("wf-page", vec![column]).with_prop(ViewProperty::new(ID, ViewValue::Text("app".into())));
     View::single(app)
 }
 
@@ -300,7 +305,10 @@ fn masthead(state: &WireState) -> ViewNode {
         "wf-mast-row",
         vec![
             text("wf-mast-title", "Wireframe UI Kit"),
-            text("wf-mast-sub", "standard browser elements · all visual states"),
+            text(
+                "wf-mast-sub",
+                "standard browser elements · all visual states",
+            ),
         ],
     );
     let desc = text(
@@ -353,10 +361,16 @@ fn footer() -> ViewNode {
 /// 01 · Button: a live button beside a disabled one.
 fn button_body() -> ViewNode {
     body(vec![
-        slot("DEFAULT · LIVE", control("btn", Button::new("Button", CMD_BTN).view())),
+        slot(
+            "DEFAULT · LIVE",
+            control("btn", Button::new("Button", CMD_BTN).view()),
+        ),
         slot(
             "DISABLED",
-            control("btn-off", Button::new("Button", CMD_BTN_OFF).disabled(true).view()),
+            control(
+                "btn-off",
+                Button::new("Button", CMD_BTN_OFF).disabled(true).view(),
+            ),
         ),
     ])
 }
@@ -387,7 +401,9 @@ fn field_body(state: &WireState) -> ViewNode {
             control_sized(
                 "field-off",
                 "wf-field",
-                Input::with_value(CMD_FIELD_OFF, "read only").readonly(true).view(),
+                Input::with_value(CMD_FIELD_OFF, "read only")
+                    .readonly(true)
+                    .view(),
             ),
         ),
     ])
@@ -414,13 +430,19 @@ fn area_body(state: &WireState) -> ViewNode {
 /// 04 · Select: a live dropdown beside a disabled one.
 fn select_body(state: &WireState) -> ViewNode {
     body(vec![
-        slot("DEFAULT · LIVE", control_sized("select", "wf-select", select_widget(state))),
+        slot(
+            "DEFAULT · LIVE",
+            control_sized("select", "wf-select", select_widget(state)),
+        ),
         slot(
             "DISABLED",
             control_sized(
                 "select-off",
                 "wf-select",
-                Select::new(CMD_SEL_OFF).with_options([SELECT_PROMPT]).disabled(true).view(),
+                Select::new(CMD_SEL_OFF)
+                    .with_options([SELECT_PROMPT])
+                    .disabled(true)
+                    .view(),
             ),
         ),
     ])
@@ -445,7 +467,10 @@ fn checkbox_body(state: &WireState) -> ViewNode {
             "DISABLED",
             control(
                 "chk-off",
-                Checkbox::new("Disabled", CMD_CHK_OFF).checked(true).disabled(true).view(),
+                Checkbox::new("Disabled", CMD_CHK_OFF)
+                    .checked(true)
+                    .disabled(true)
+                    .view(),
             ),
         ),
     ])
@@ -460,14 +485,19 @@ fn radio_body(state: &WireState) -> ViewNode {
                 if selected { "SELECTED" } else { "OPTION" },
                 control(
                     &format!("radio-{i}"),
-                    Radio::new(RADIO_LABELS[i], radio_command(i)).selected(selected).view(),
+                    Radio::new(RADIO_LABELS[i], radio_command(i))
+                        .selected(selected)
+                        .view(),
                 ),
             )
         })
         .collect();
     slots.push(slot(
         "DISABLED",
-        control("radio-off", Radio::new("Disabled", CMD_RADIO_OFF).disabled(true).view()),
+        control(
+            "radio-off",
+            Radio::new("Disabled", CMD_RADIO_OFF).disabled(true).view(),
+        ),
     ));
     body(slots)
 }

@@ -65,9 +65,17 @@ fn main() {
     let s = 0.5_f32.sqrt();
     let angle_deg = mid[1].atan2(mid[0]).to_degrees();
     let scale_x = mid[0].hypot(mid[1]);
-    println!("[motion] recovered angle = {angle_deg:.3}° · scaleX = {scale_x:.4} (naive lerp ≈ {s:.4})");
-    assert!((angle_deg - 45.0).abs() <= 0.05, "expected rotate(45°), got {angle_deg}°");
-    assert!((scale_x - 1.0).abs() <= 1e-3, "scale must be preserved at 1, got {scale_x}");
+    println!(
+        "[motion] recovered angle = {angle_deg:.3}° · scaleX = {scale_x:.4} (naive lerp ≈ {s:.4})"
+    );
+    assert!(
+        (angle_deg - 45.0).abs() <= 0.05,
+        "expected rotate(45°), got {angle_deg}°"
+    );
+    assert!(
+        (scale_x - 1.0).abs() <= 1e-3,
+        "scale must be preserved at 1, got {scale_x}"
+    );
 
     // Build the scene: white page, a faint reference outline of the un-rotated
     // box, then the filled square under the interpolated transform bracket.
@@ -136,7 +144,9 @@ fn render(list: DisplayList) -> tiny_skia::Pixmap {
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
     let mut renderer = CpuRenderer::new(RendererId::from_raw(1));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 

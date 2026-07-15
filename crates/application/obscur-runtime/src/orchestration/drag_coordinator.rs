@@ -336,7 +336,11 @@ mod tests {
         assert!(!coordinator.is_active());
         // Nothing to apply: `cancel` consumed the staged transaction, so there is
         // no commit for a caller to accidentally use.
-        assert!(coordinator.release(&TransactionValidator::new(), version()).is_none());
+        assert!(
+            coordinator
+                .release(&TransactionValidator::new(), version())
+                .is_none()
+        );
     }
 
     #[test]
@@ -423,6 +427,10 @@ mod tests {
         let mut coordinator = DragCoordinator::new();
         assert!(!coordinator.is_active());
         assert!(!coordinator.cancel());
-        assert!(coordinator.release(&TransactionValidator::new(), version()).is_none());
+        assert!(
+            coordinator
+                .release(&TransactionValidator::new(), version())
+                .is_none()
+        );
     }
 }

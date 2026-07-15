@@ -23,7 +23,10 @@ impl SubscriptionManager {
     /// Creates an empty subscription manager.
     #[must_use]
     pub fn new() -> Self {
-        Self { entries: Vec::new(), next_id: 0 }
+        Self {
+            entries: Vec::new(),
+            next_id: 0,
+        }
     }
 
     /// Registers a new subscription to `topic`, returning its fresh id.
@@ -34,7 +37,9 @@ impl SubscriptionManager {
     /// [`SUBSCRIPTION_LIMIT`] subscriptions (spec §7.7).
     pub fn subscribe(&mut self, topic: Topic) -> Result<SubscriptionId, ProtocolError> {
         if self.entries.len() >= SUBSCRIPTION_LIMIT {
-            return Err(ProtocolError::LimitExceeded { limit: SUBSCRIPTION_LIMIT });
+            return Err(ProtocolError::LimitExceeded {
+                limit: SUBSCRIPTION_LIMIT,
+            });
         }
         self.next_id += 1;
         let id = SubscriptionId::new(self.next_id);
@@ -108,7 +113,9 @@ mod tests {
         assert_eq!(mgr.len(), SUBSCRIPTION_LIMIT);
         assert_eq!(
             mgr.subscribe(Topic::Diagnostics),
-            Err(ProtocolError::LimitExceeded { limit: SUBSCRIPTION_LIMIT })
+            Err(ProtocolError::LimitExceeded {
+                limit: SUBSCRIPTION_LIMIT
+            })
         );
     }
 

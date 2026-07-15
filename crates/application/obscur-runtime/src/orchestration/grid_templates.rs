@@ -29,8 +29,8 @@ use obscur_style::property::{GridTrack, Length, LengthContext, PropertyId, Prope
 
 use obscur_text::shaping::ParagraphShaper;
 
-use super::layout_coordinator::{ch_width_for, length_context};
 use super::ComputedStyles;
+use super::layout_coordinator::{ch_width_for, length_context};
 
 /// The [`GridTemplate`] derived for every grid node that authored one, keyed by
 /// [`NodeId`].
@@ -101,8 +101,7 @@ pub fn grid_template_for(
     // (auto-fill / auto-fit is rejected in the CSS layer), so each `GridTrack` maps
     // straight to a `TrackSize` via the same conversion the template tracks use. An
     // absent list stays empty → the algorithm's default `Auto` implicit tracks.
-    let auto_map =
-        |tracks: Option<&[GridTrack]>| auto_track_sizes(tracks.unwrap_or(&[]), &ctx);
+    let auto_map = |tracks: Option<&[GridTrack]>| auto_track_sizes(tracks.unwrap_or(&[]), &ctx);
     Some(
         GridTemplate::from_track_lists(map(columns), map(rows))
             .with_auto_tracks(auto_map(auto_columns), auto_map(auto_rows)),
@@ -135,7 +134,10 @@ fn track_list_of(tracks: &[GridTrack], ctx: &LengthContext) -> TrackList {
     let mut trailing = Vec::new();
     for track in tracks {
         match track {
-            GridTrack::AutoRepeat { fill, tracks: pattern } if auto_repeat.is_none() => {
+            GridTrack::AutoRepeat {
+                fill,
+                tracks: pattern,
+            } if auto_repeat.is_none() => {
                 let mode = if *fill {
                     AutoRepeatMode::AutoFill
                 } else {
@@ -249,7 +251,10 @@ mod tests {
         let mut computed = ComputedStyle::new();
         // font-size 16 -> 2em = 32px; rows carry a rem track resolved against the
         // document root font size (20).
-        computed.set(PropertyId::FontSize, ComputedValue::length(Length::px(16.0)));
+        computed.set(
+            PropertyId::FontSize,
+            ComputedValue::length(Length::px(16.0)),
+        );
         computed.set(
             PropertyId::GridTemplateColumns,
             ComputedValue::from_concrete(PropertyValue::grid_tracks([GridTrack::Fixed(
@@ -303,7 +308,10 @@ mod tests {
         let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT, None).expect("template");
         assert_eq!(
             template.columns().leading(),
-            &[TrackSize::minmax(TrackSize::Percent(0.30), TrackSize::Fr(1.0))]
+            &[TrackSize::minmax(
+                TrackSize::Percent(0.30),
+                TrackSize::Fr(1.0)
+            )]
         );
     }
 
@@ -321,7 +329,10 @@ mod tests {
         let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT, None).expect("template");
         assert_eq!(
             template.columns().leading(),
-            &[TrackSize::minmax(TrackSize::Fixed(100.0), TrackSize::Fr(1.0))]
+            &[TrackSize::minmax(
+                TrackSize::Fixed(100.0),
+                TrackSize::Fr(1.0)
+            )]
         );
     }
 
@@ -363,7 +374,10 @@ mod tests {
             .expect("concrete"),
         );
         let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT, None).expect("template");
-        let repeat = template.columns().auto_repeat().expect("auto-repeat present");
+        let repeat = template
+            .columns()
+            .auto_repeat()
+            .expect("auto-repeat present");
         assert_eq!(repeat.mode(), AutoRepeatMode::AutoFit);
     }
 

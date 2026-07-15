@@ -88,7 +88,10 @@ mod tests {
 
     #[test]
     fn empty_track_samples_to_none() {
-        assert_eq!(MotionCoordinator::sample_keyframes(&KeyframeTrack::new(), 0.5), None);
+        assert_eq!(
+            MotionCoordinator::sample_keyframes(&KeyframeTrack::new(), 0.5),
+            None
+        );
     }
 
     #[test]

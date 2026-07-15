@@ -11,7 +11,11 @@
 //! - the **codegen** path emits, from the same compiled IR, Rust source carrying
 //!   those same real handles.
 #![forbid(unsafe_code)]
-#![cfg(all(feature = "resource-fs", feature = "resource-decode", feature = "render-cpu"))]
+#![cfg(all(
+    feature = "resource-fs",
+    feature = "resource-decode",
+    feature = "render-cpu"
+))]
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -32,7 +36,7 @@ use obscur_kit::render_cpu::renderer::CpuRenderer;
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::scene::command::PaintCommand;
 use obscur_kit::style::matching::Stylesheet;
-use obscur_kit::view::view::{View, ViewNode, SRC};
+use obscur_kit::view::view::{SRC, View, ViewNode};
 use obscur_kit::widgets::button::Button;
 
 /// A real 2×2 opaque-red PNG (RGB), embedded so the test needs no image-encoding
@@ -88,7 +92,10 @@ fn okui_img_src_reaches_paint_on_both_paths() {
     // 1a. Bridge path — the View element binds to the real Image primitive and
     //     its `src` reached the reserved SRC symbol (the old hash bridge dropped
     //     both, so `<img>` never painted).
-    let ViewNode::Element { component, props, .. } = &view.root().nodes()[0] else {
+    let ViewNode::Element {
+        component, props, ..
+    } = &view.root().nodes()[0]
+    else {
         panic!("expected an element");
     };
     assert_eq!(*component, obscur_kit::primitives::Image::COMPONENT_ID);

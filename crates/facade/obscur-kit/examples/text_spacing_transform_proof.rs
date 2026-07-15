@@ -55,19 +55,26 @@ struct Run {
 }
 
 fn main() {
-    println!("== obscur-kit letter-spacing + word-spacing + text-transform proof (headless CPU) ==\n");
+    println!(
+        "== obscur-kit letter-spacing + word-spacing + text-transform proof (headless CPU) ==\n"
+    );
 
-    let base =
-        "\n.page { display: flex; padding: 8px; background: #ffffff; }\n.block { padding: 2px; color: #12203f; }";
+    let base = "\n.page { display: flex; padding: 8px; background: #ffffff; }\n.block { padding: 2px; color: #12203f; }";
 
     // A: baseline `hello`. B: same with letter-spacing: 6px.
-    let (a_px, a_runs) = render_block(&format!("{base}\n.block {{ font-size: {FONT_SIZE}px; }}"), "hello");
+    let (a_px, a_runs) = render_block(
+        &format!("{base}\n.block {{ font-size: {FONT_SIZE}px; }}"),
+        "hello",
+    );
     let (b_px, b_runs) = render_block(
         &format!("{base}\n.block {{ font-size: {FONT_SIZE}px; letter-spacing: 6px; }}"),
         "hello",
     );
     // C: baseline `ab cd`. D: same with word-spacing: 12px.
-    let (c_px, c_runs) = render_block(&format!("{base}\n.block {{ font-size: {FONT_SIZE}px; }}"), "ab cd");
+    let (c_px, c_runs) = render_block(
+        &format!("{base}\n.block {{ font-size: {FONT_SIZE}px; }}"),
+        "ab cd",
+    );
     let (d_px, d_runs) = render_block(
         &format!("{base}\n.block {{ font-size: {FONT_SIZE}px; word-spacing: 12px; }}"),
         "ab cd",
@@ -113,7 +120,10 @@ fn verify(a: &[Run], b: &[Run], c: &[Run], d: &[Run], e: &[Run]) {
         (w1 - expected_ls).abs() < 0.5,
         "letter-spacing: run width {w1:.2} should be baseline {w0:.2} + 6x5 = {expected_ls:.2}"
     );
-    assert!(w1 > w0 + 1.0, "letter-spacing must make the run visibly wider");
+    assert!(
+        w1 > w0 + 1.0,
+        "letter-spacing must make the run visibly wider"
+    );
 
     let g0 = first_run(c).advance; // baseline "ab cd"
     let g1 = first_run(d).advance; // "ab cd" + word-spacing: 12px
@@ -126,13 +136,18 @@ fn verify(a: &[Run], b: &[Run], c: &[Run], d: &[Run], e: &[Run]) {
 
     // §2.1: the shaped/painted text was uppercased BEFORE shaping.
     let upper = first_run(e);
-    assert_eq!(upper.text, "HELLO", "text-transform: uppercase must shape 'HELLO'");
+    assert_eq!(
+        upper.text, "HELLO",
+        "text-transform: uppercase must shape 'HELLO'"
+    );
 
     println!(
         "[verify] letter-spacing: W0={w0:.2} -> W1={w1:.2} (=W0+30)\n[verify] word-spacing:   G0={g0:.2} -> G1={g1:.2} (=G0+12)\n[verify] text-transform: painted run text = {:?}",
         upper.text
     );
-    println!("[verify] OK - spacing widens measured+painted runs; transform uppercases before shaping");
+    println!(
+        "[verify] OK - spacing widens measured+painted runs; transform uppercases before shaping"
+    );
 }
 
 /// Renders one text `block` through the real runtime and returns its rasterized
@@ -165,13 +180,17 @@ fn render_block(css: &str, content: &str) -> (tiny_skia::Pixmap, Vec<Run>) {
         "[block] {:?} -> {} run(s): {:?}",
         content,
         runs.len(),
-        runs.iter().map(|r| (r.text.clone(), (r.advance * 100.0).round() / 100.0)).collect::<Vec<_>>()
+        runs.iter()
+            .map(|r| (r.text.clone(), (r.advance * 100.0).round() / 100.0))
+            .collect::<Vec<_>>()
     );
 
     let frame = RenderFrame::new(snapshot, VIEWPORT);
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     (renderer.pixmap().expect("a rasterized frame").clone(), runs)
 }
 
@@ -189,14 +208,29 @@ fn block_view(content: &str) -> View {
 /// Vertically stacks `pixmaps` into one image with thin gray dividers.
 fn stack(pixmaps: &[tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     let gap = 2u32;
-    let width = pixmaps.iter().map(tiny_skia::Pixmap::width).max().unwrap_or(1);
-    let height: u32 = pixmaps.iter().map(|p| p.height() + gap).sum::<u32>().saturating_sub(gap);
+    let width = pixmaps
+        .iter()
+        .map(tiny_skia::Pixmap::width)
+        .max()
+        .unwrap_or(1);
+    let height: u32 = pixmaps
+        .iter()
+        .map(|p| p.height() + gap)
+        .sum::<u32>()
+        .saturating_sub(gap);
     let mut out = tiny_skia::Pixmap::new(width, height.max(1)).expect("combined pixmap");
     out.fill(tiny_skia::Color::from_rgba8(0xd0, 0xcd, 0xc7, 0xff));
     let paint = tiny_skia::PixmapPaint::default();
     let mut y = 0i32;
     for px in pixmaps {
-        out.draw_pixmap(0, y, px.as_ref(), &paint, tiny_skia::Transform::identity(), None);
+        out.draw_pixmap(
+            0,
+            y,
+            px.as_ref(),
+            &paint,
+            tiny_skia::Transform::identity(),
+            None,
+        );
         y += (px.height() + gap) as i32;
     }
     out

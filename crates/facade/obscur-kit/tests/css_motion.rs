@@ -123,7 +123,11 @@ fn css_transition_and_keyframes_drive_through_the_scheduler() {
         2,
         "the changed transition registered a running timeline alongside the animation"
     );
-    assert_eq!(box_width(&runtime, node), 100.0, "transition starts from the old width");
+    assert_eq!(
+        box_width(&runtime, node),
+        100.0,
+        "transition starts from the old width"
+    );
 
     // Halfway: the width interpolates linearly toward 200.
     runtime.advance_motion(0.5);
@@ -133,6 +137,10 @@ fn css_transition_and_keyframes_drive_through_the_scheduler() {
     // End: both timelines finish and the width settles at 200.
     runtime.advance_motion(0.5);
     let _ = runtime.render_now(&view, sheets);
-    assert_eq!(runtime.active_animations(), 0, "finished timelines are pruned");
+    assert_eq!(
+        runtime.active_animations(),
+        0,
+        "finished timelines are pruned"
+    );
     assert_eq!(box_width(&runtime, node), 200.0, "settled at the new width");
 }

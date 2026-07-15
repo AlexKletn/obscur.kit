@@ -152,7 +152,10 @@ pub fn view(state: &ShowcaseState) -> View {
         "header",
         vec![
             text("title", "obscur.kit — capability showcase"),
-            text("subtitle", "grid + flex · gradients · shadows · images · text · widgets"),
+            text(
+                "subtitle",
+                "grid + flex · gradients · shadows · images · text · widgets",
+            ),
         ],
     );
 
@@ -216,7 +219,10 @@ fn img_card() -> ViewNode {
     let thumb = Image::new(IMAGE_ASSET_NAME)
         .into_view_node()
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("thumb".into())));
-    el("card imgcard", vec![text("card-label", "<img> object-fit"), thumb])
+    el(
+        "card imgcard",
+        vec![text("card-label", "<img> object-fit"), thumb],
+    )
 }
 
 /// The widgets card: a real [`Button`], [`Checkbox`], and [`Input`] laid out in
@@ -224,15 +230,22 @@ fn img_card() -> ViewNode {
 fn widgets_card(state: &ShowcaseState) -> ViewNode {
     let button = first_node(Button::new("Click me", CMD_BUTTON).view())
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("btn".into())));
-    let check = first_node(Checkbox::new("Enabled", CMD_CHECKBOX).checked(state.checked).view())
-        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("check".into())));
+    let check = first_node(
+        Checkbox::new("Enabled", CMD_CHECKBOX)
+            .checked(state.checked)
+            .view(),
+    )
+    .with_prop(ViewProperty::new(CLASS, ViewValue::Text("check".into())));
     let field = first_node(
         Input::with_value(CMD_INPUT, state.input_text.clone())
             .placeholder("type…")
             .view(),
     )
     .with_prop(ViewProperty::new(CLASS, ViewValue::Text("field".into())));
-    el("card widgets", vec![text("card-label", "Widgets"), button, check, field])
+    el(
+        "card widgets",
+        vec![text("card-label", "Widgets"), button, check, field],
+    )
 }
 
 /// Wraps `children` in a classed [`Container`] element node.

@@ -77,7 +77,11 @@ fn main() {
     // Top: UA base only (harness arranges, no control override).
     let top = render_variant(&ua, HARNESS_CSS, "UA default only");
     // Bottom: UA base + author override of `button`.
-    let bottom = render_variant(&ua, OVERRIDE_CSS, "UA + author `button { background:#c00 }`");
+    let bottom = render_variant(
+        &ua,
+        OVERRIDE_CSS,
+        "UA + author `button { background:#c00 }`",
+    );
 
     // Stitch the two variants into one image (top over bottom, with a divider).
     let combined = stitch(&top, &bottom);
@@ -122,7 +126,9 @@ fn render_variant(ua: &Stylesheet, css: &str, label: &str) -> tiny_skia::Pixmap 
     let frame = RenderFrame::new(snapshot, VIEWPORT);
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
@@ -154,7 +160,14 @@ fn stitch(top: &tiny_skia::Pixmap, bottom: &tiny_skia::Pixmap) -> tiny_skia::Pix
     // Light-gray backdrop so the divider band reads.
     out.fill(tiny_skia::Color::from_rgba8(0xdd, 0xda, 0xd3, 0xff));
     let paint = tiny_skia::PixmapPaint::default();
-    out.draw_pixmap(0, 0, top.as_ref(), &paint, tiny_skia::Transform::identity(), None);
+    out.draw_pixmap(
+        0,
+        0,
+        top.as_ref(),
+        &paint,
+        tiny_skia::Transform::identity(),
+        None,
+    );
     out.draw_pixmap(
         0,
         (top.height() + gap) as i32,

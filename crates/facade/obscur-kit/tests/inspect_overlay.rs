@@ -12,13 +12,13 @@ use obscur_kit::interaction::pointer::{PointerDevice, PointerEvent, PointerEvent
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::scene::command::PaintCommand;
 use obscur_kit::style::matching::Stylesheet;
-use obscur_kit::view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue, CLASS};
+use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
 /// A `#root` container holding one `.box` child.
 fn view() -> View {
     let root = ComponentId::from_raw(0x00C0_0001);
-    let box_child = ViewNode::element(root)
-        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("box".into())));
+    let box_child =
+        ViewNode::element(root).with_prop(ViewProperty::new(CLASS, ViewValue::Text("box".into())));
     let root_node = ViewNode::element(root)
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("root".into())))
         .with_children(ViewFragment::from_nodes(vec![box_child]));
@@ -50,9 +50,8 @@ fn draw_path_count(list: &obscur_kit::scene::command::DisplayList) -> usize {
 
 #[test]
 fn inspect_overlay_adds_a_highlight_over_the_hovered_box() {
-    let sheet = compile(
-        "#root { width: 200px; height: 200px } .box { width: 100px; height: 60px }",
-    );
+    let sheet =
+        compile("#root { width: 200px; height: 200px } .box { width: 100px; height: 60px }");
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 200.0));
 
     // First frame lays the boxes out so the hit-test has geometry.
@@ -81,7 +80,10 @@ fn inspect_overlay_adds_a_highlight_over_the_hovered_box() {
     // Turning it back off returns to the baseline command count.
     runtime.set_inspect_mode(false);
     let off = runtime.render_now(&view(), std::slice::from_ref(&sheet));
-    assert_eq!(draw_path_count(off.snapshot().display_list()), baseline_paths);
+    assert_eq!(
+        draw_path_count(off.snapshot().display_list()),
+        baseline_paths
+    );
 }
 
 #[test]
@@ -107,7 +109,11 @@ fn inspect_snapshot_dumps_the_tree_with_geometry_and_styles() {
     let bounds = box_node.bounds.expect("the box was laid out");
     assert!((bounds.size.width - 100.0).abs() < 1e-3, "{bounds:?}");
     assert!((bounds.size.height - 60.0).abs() < 1e-3, "{bounds:?}");
-    let style_names: Vec<&str> = box_node.styles.iter().map(|(name, _)| name.as_str()).collect();
+    let style_names: Vec<&str> = box_node
+        .styles
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect();
     assert!(
         style_names.contains(&"Width") && style_names.contains(&"BackgroundColor"),
         "expected width + background in the dumped styles, got {:?}",
@@ -122,9 +128,8 @@ fn inspect_snapshot_dumps_the_tree_with_geometry_and_styles() {
 
 #[test]
 fn hovered_inspect_reports_the_box_identity_and_geometry() {
-    let sheet = compile(
-        "#root { width: 200px; height: 200px } .box { width: 100px; height: 60px }",
-    );
+    let sheet =
+        compile("#root { width: 200px; height: 200px } .box { width: 100px; height: 60px }");
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 200.0));
     runtime.render_now(&view(), std::slice::from_ref(&sheet));
 
@@ -136,8 +141,16 @@ fn hovered_inspect_reports_the_box_identity_and_geometry() {
     assert_eq!(info.classes, vec!["box".to_owned()]);
     assert_eq!(info.component, Some(ComponentId::from_raw(0x00C0_0001)));
     // The `.box` is 100×60 at the flow origin.
-    assert!((info.bounds.size.width - 100.0).abs() < 1e-3, "{:?}", info.bounds);
-    assert!((info.bounds.size.height - 60.0).abs() < 1e-3, "{:?}", info.bounds);
+    assert!(
+        (info.bounds.size.width - 100.0).abs() < 1e-3,
+        "{:?}",
+        info.bounds
+    );
+    assert!(
+        (info.bounds.size.height - 60.0).abs() < 1e-3,
+        "{:?}",
+        info.bounds
+    );
 
     // The readout line names the class and geometry.
     let line = info.to_string();

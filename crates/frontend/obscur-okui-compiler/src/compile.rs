@@ -10,9 +10,9 @@ use std::collections::HashMap;
 
 use obscur_capability::CapabilityId;
 use obscur_okui_syntax::ast::{Document, Element};
-use obscur_view::contract::ComponentSurface;
 use obscur_ui_ir::document::UiIrDocument;
 use obscur_ui_ir::source::SourceMap;
+use obscur_view::contract::ComponentSurface;
 
 use crate::lowering::{LoweringError, UiIrLowering};
 use crate::resolution::{NameResolver, ResolutionError};
@@ -414,7 +414,11 @@ mod tests {
         let result = Compiler::new("app.okui")
             .with_registry(button_registry())
             .compile(&doc);
-        assert!(!result.has_errors(), "diagnostics: {:?}", result.diagnostics());
+        assert!(
+            !result.has_errors(),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
         let ir = result.document().expect("a lowered document");
         assert_eq!(ir.root().tag(), "Button");
         assert!(!result.source_map().is_empty());
@@ -430,14 +434,18 @@ mod tests {
         let typo = Compiler::new("app.okui").compile(&document(
             "<Button label=\"Save\" laebl=\"Save\" on:click=submit/>",
         ));
-        assert!(typo.has_errors(), "a typo'd Button attribute must not compile clean");
+        assert!(
+            typo.has_errors(),
+            "a typo'd Button attribute must not compile clean"
+        );
 
         let missing = Compiler::new("app.okui").compile(&document("<Button on:click=submit/>"));
         assert!(missing.has_errors(), "Button requires its `label`");
 
         // And the honest form still compiles.
-        let ok = Compiler::new("app.okui")
-            .compile(&document("<Button label=\"Save\" disabled=\"true\" on:click=submit/>"));
+        let ok = Compiler::new("app.okui").compile(&document(
+            "<Button label=\"Save\" disabled=\"true\" on:click=submit/>",
+        ));
         assert!(!ok.has_errors(), "diagnostics: {:?}", ok.diagnostics());
     }
 
@@ -446,7 +454,11 @@ mod tests {
         // Menu/Tabs/... are registered with no prop surface precisely so they
         // stay unchecked rather than asserting a vocabulary that does not exist.
         let result = Compiler::new("app.okui").compile(&document("<Tabs anything=\"1\"/>"));
-        assert!(!result.has_errors(), "diagnostics: {:?}", result.diagnostics());
+        assert!(
+            !result.has_errors(),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
     }
 
     #[test]
@@ -510,11 +522,13 @@ mod tests {
             .diagnostics()
             .iter()
             .any(|d| matches!(d, CompileDiagnostic::Resolution(_)));
-        let has_unknown_attr = result.diagnostics().iter().any(|d| matches!(
-            d,
-            CompileDiagnostic::Validation(v)
-                if v.message() == "unknown attribute 'bogus' on component 'Button'"
-        ));
+        let has_unknown_attr = result.diagnostics().iter().any(|d| {
+            matches!(
+                d,
+                CompileDiagnostic::Validation(v)
+                    if v.message() == "unknown attribute 'bogus' on component 'Button'"
+            )
+        });
         assert!(has_resolution, "diagnostics: {:?}", result.diagnostics());
         assert!(has_unknown_attr, "diagnostics: {:?}", result.diagnostics());
         assert!(result.diagnostics().len() >= 2);
@@ -522,14 +536,18 @@ mod tests {
 
     #[test]
     fn seeded_symbol_resolves_dynamic_attribute() {
-        let registry = ContractRegistry::new()
-            .with(ComponentContract::new("Text").allowing_prop("value"));
+        let registry =
+            ContractRegistry::new().with(ComponentContract::new("Text").allowing_prop("value"));
         let doc = document("<Text value={count}/>");
         let result = Compiler::new("app.okui")
             .with_registry(registry)
             .defining(Symbol::prop("count"))
             .compile(&doc);
-        assert!(!result.has_errors(), "diagnostics: {:?}", result.diagnostics());
+        assert!(
+            !result.has_errors(),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
         assert!(result.document().is_some());
     }
 
@@ -539,7 +557,11 @@ mod tests {
         let result = Compiler::new("app.okui")
             .granting(CapabilityId::new("camera"))
             .compile(&doc);
-        assert!(!result.has_errors(), "diagnostics: {:?}", result.diagnostics());
+        assert!(
+            !result.has_errors(),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
     }
 
     #[test]
@@ -566,10 +588,10 @@ mod tests {
             .compile(&doc);
         assert!(result.document().is_some());
         assert!(
-            result
-                .diagnostics()
-                .iter()
-                .any(|d| matches!(d, CompileDiagnostic::Lowering(LoweringError::MissingLoopKey(_)))),
+            result.diagnostics().iter().any(|d| matches!(
+                d,
+                CompileDiagnostic::Lowering(LoweringError::MissingLoopKey(_))
+            )),
             "diagnostics: {:?}",
             result.diagnostics()
         );
@@ -725,7 +747,8 @@ mod tests {
 
     #[test]
     fn user_surface_accepts_fully_correct_usage() {
-        let doc = document("<Tabs selected=\"0\" orientation=\"vertical\" on:change=go><Tab/></Tabs>");
+        let doc =
+            document("<Tabs selected=\"0\" orientation=\"vertical\" on:change=go><Tab/></Tabs>");
         let result = Compiler::new("app.okui")
             .with_registry(tabs_registry())
             .defining(Symbol::prop("go"))

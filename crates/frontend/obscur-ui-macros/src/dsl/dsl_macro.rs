@@ -163,7 +163,9 @@ fn build_node(node: &DslNode, counter: &mut u64) -> UiIrNode {
                     // itself (spec §2.11), not as a property — the same split the
                     // `.okui` file lowering makes. Left as a property it reaches
                     // no consumer, and every item in the list renders unkeyed.
-                    DslAttr::Prop { name, value } if name == "key" && is_loop_tag(element.tag.as_str()) => {
+                    DslAttr::Prop { name, value }
+                        if name == "key" && is_loop_tag(element.tag.as_str()) =>
+                    {
                         ir.with_key(build_expression(value))
                     }
                     DslAttr::Prop { name, value } => ir.with_property(build_property(name, value)),
@@ -488,9 +490,15 @@ mod tests {
 
     #[test]
     fn uppercase_tag_is_a_component_and_lowercase_is_an_element() {
-        assert_eq!(doc(quote! { <Button/> }).root().kind(), UiIrNodeKind::Component);
+        assert_eq!(
+            doc(quote! { <Button/> }).root().kind(),
+            UiIrNodeKind::Component
+        );
         assert_eq!(doc(quote! { <Button/> }).root().tag(), "Button");
-        assert_eq!(doc(quote! { <container/> }).root().kind(), UiIrNodeKind::Element);
+        assert_eq!(
+            doc(quote! { <container/> }).root().kind(),
+            UiIrNodeKind::Element
+        );
     }
 
     #[test]
@@ -506,9 +514,18 @@ mod tests {
     fn literal_properties_keep_their_types() {
         let document = doc(quote! { <div enabled={true} count={5} ratio={1.5}/> });
         let root = document.root();
-        assert_eq!(prop(root, "enabled"), &UiIrExpression::Literal(UiIrValue::Bool(true)));
-        assert_eq!(prop(root, "count"), &UiIrExpression::Literal(UiIrValue::Int(5)));
-        assert_eq!(prop(root, "ratio"), &UiIrExpression::Literal(UiIrValue::Float(1.5)));
+        assert_eq!(
+            prop(root, "enabled"),
+            &UiIrExpression::Literal(UiIrValue::Bool(true))
+        );
+        assert_eq!(
+            prop(root, "count"),
+            &UiIrExpression::Literal(UiIrValue::Int(5))
+        );
+        assert_eq!(
+            prop(root, "ratio"),
+            &UiIrExpression::Literal(UiIrValue::Float(1.5))
+        );
     }
 
     #[test]
@@ -525,8 +542,14 @@ mod tests {
         // `{user.name}` must normalise to "user.name", not the spaced token form.
         let document = doc(quote! { <div title={user.name} value={count}/> });
         let root = document.root();
-        assert_eq!(prop(root, "title"), &UiIrExpression::Binding("user.name".into()));
-        assert_eq!(prop(root, "value"), &UiIrExpression::Binding("count".into()));
+        assert_eq!(
+            prop(root, "title"),
+            &UiIrExpression::Binding("user.name".into())
+        );
+        assert_eq!(
+            prop(root, "value"),
+            &UiIrExpression::Binding("count".into())
+        );
     }
 
     #[test]
@@ -563,7 +586,11 @@ mod tests {
         let root = document.root();
         assert_eq!(root.id(), 0);
         let ids: Vec<u64> = root.children().iter().map(UiIrNode::id).collect();
-        assert_eq!(ids, vec![1, 3], "pre-order: each span's text takes the next id");
+        assert_eq!(
+            ids,
+            vec![1, 3],
+            "pre-order: each span's text takes the next id"
+        );
         assert_eq!(root.children()[0].children()[0].id(), 2);
         assert_eq!(root.children()[1].children()[0].id(), 4);
         assert_eq!(document.root().node_count(), 5);
@@ -605,8 +632,14 @@ mod tests {
     #[test]
     fn malformed_input_is_an_error_not_a_panic() {
         assert!(DslMacro::to_document(quote! {}).is_err(), "empty input");
-        assert!(DslMacro::to_document(quote! { <a></b> }).is_err(), "mismatched tag");
-        assert!(DslMacro::to_document(quote! { <div> }).is_err(), "missing closing tag");
+        assert!(
+            DslMacro::to_document(quote! { <a></b> }).is_err(),
+            "mismatched tag"
+        );
+        assert!(
+            DslMacro::to_document(quote! { <div> }).is_err(),
+            "missing closing tag"
+        );
     }
 
     /// Whether `source` parses as an expression §2.10 admits.
@@ -620,18 +653,18 @@ mod tests {
         // §2.10: props, read-only state, loop/template locals, field access,
         // comparisons, logical operators, Option/null checks.
         for source in [
-            "open",                  // a prop / state / loop local
-            "user.name",             // field access
-            "user.profile.city",     // nested field access
-            "42",                    // a literal
-            "count > 0",             // a comparison
-            "a == b",                // another
-            "open && !closed",       // logical operators
-            "(a || b) && c",         // grouping
-            "items[0]",              // indexing
-            "maybe.is_some()",       // an Option check — a method call in Rust
-            "count + 1",             // arithmetic: pure, and named by neither side
-            "&user.name",            // a borrow of a read is a read
+            "open",              // a prop / state / loop local
+            "user.name",         // field access
+            "user.profile.city", // nested field access
+            "42",                // a literal
+            "count > 0",         // a comparison
+            "a == b",            // another
+            "open && !closed",   // logical operators
+            "(a || b) && c",     // grouping
+            "items[0]",          // indexing
+            "maybe.is_some()",   // an Option check — a method call in Rust
+            "count + 1",         // arithmetic: pure, and named by neither side
+            "&user.name",        // a borrow of a read is a read
         ] {
             assert!(admits(source), "§2.10 allows `{source}`");
         }
@@ -643,16 +676,16 @@ mod tests {
         // unconstrained arbitrary function calls, direct service access. Each is
         // refused by refusing its *shape* — there is no way to spell the effect.
         for source in [
-            "count = 1",             // assignment
-            "count += 1",            // compound assignment
-            "fetch().await",         // async work
-            "load_config()",         // an unconstrained free call
-            "std::fs::read(path)",   // I/O, which is a free call
-            "|x| x + 1",             // a closure
-            "vec![1, 2]",            // a macro
-            "unsafe { ptr() }",      // unsafe
-            "maybe?",                // `?`
-            "loop { }",              // not an expression anyone reads
+            "count = 1",           // assignment
+            "count += 1",          // compound assignment
+            "fetch().await",       // async work
+            "load_config()",       // an unconstrained free call
+            "std::fs::read(path)", // I/O, which is a free call
+            "|x| x + 1",           // a closure
+            "vec![1, 2]",          // a macro
+            "unsafe { ptr() }",    // unsafe
+            "maybe?",              // `?`
+            "loop { }",            // not an expression anyone reads
         ] {
             assert!(!admits(source), "§2.10 forbids `{source}`");
         }

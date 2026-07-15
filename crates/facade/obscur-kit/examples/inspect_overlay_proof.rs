@@ -23,7 +23,7 @@ use obscur_kit::render::{Renderer, RendererId};
 use obscur_kit::render_cpu::renderer::CpuRenderer;
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
-use obscur_kit::view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue, CLASS};
+use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
 const VIEWPORT: Size = Size::new(520.0, 200.0);
 
@@ -79,12 +79,18 @@ fn main() {
 fn view() -> View {
     let container = ComponentId::from_raw(0x00C0_0001);
     let card = |class: &str| {
-        ViewNode::element(container)
-            .with_prop(ViewProperty::new(CLASS, ViewValue::Text(format!("card {class}").into())))
+        ViewNode::element(container).with_prop(ViewProperty::new(
+            CLASS,
+            ViewValue::Text(format!("card {class}").into()),
+        ))
     };
     let row = ViewNode::element(container)
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("row".into())))
-        .with_children(ViewFragment::from_nodes(vec![card("a"), card("b"), card("c")]));
+        .with_children(ViewFragment::from_nodes(vec![
+            card("a"),
+            card("b"),
+            card("c"),
+        ]));
     View::from_fragment(ViewFragment::from_nodes(vec![row]))
 }
 

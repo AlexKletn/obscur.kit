@@ -79,7 +79,8 @@ impl SocketTransport {
             Ok(message) => answer(endpoint, message),
             Err(error) => ClientBound::Error(error.into()),
         };
-        self.stream.write_frame(&WireCodec::encode_client_bound(&reply))?;
+        self.stream
+            .write_frame(&WireCodec::encode_client_bound(&reply))?;
         Ok(true)
     }
 
@@ -170,9 +171,7 @@ fn answer<S: InspectSource>(
         ServerBound::Handshake(request) => ClientBound::Handshake(endpoint.handshake(&request)),
         ServerBound::Command(command) => match endpoint.dispatch(&command) {
             Ok(CommandOutcome::Snapshot(snapshot)) => ClientBound::Snapshot(snapshot),
-            Ok(CommandOutcome::Subscribed(subscription)) => {
-                ClientBound::Subscription(subscription)
-            }
+            Ok(CommandOutcome::Subscribed(subscription)) => ClientBound::Subscription(subscription),
             Ok(CommandOutcome::Unsubscribed(_) | CommandOutcome::Acknowledged(_)) => {
                 ClientBound::Acknowledged(command.id)
             }
@@ -225,8 +224,10 @@ mod tests {
 
     #[test]
     fn real_socket_round_trips_handshake_and_inspect() {
-        let source = SnapshotInspectSource::new()
-            .with_snapshot(Inspectable::Tree, SnapshotPayload::new("live-tree", 2, vec![7, 8]));
+        let source = SnapshotInspectSource::new().with_snapshot(
+            Inspectable::Tree,
+            SnapshotPayload::new("live-tree", 2, vec![7, 8]),
+        );
         with_served_endpoint(ScopeSet::all_read(), source, |client| {
             let response = client.handshake(&handshake("dev")).expect("handshake io");
             assert!(response.is_accepted());
@@ -252,21 +253,30 @@ mod tests {
     fn real_socket_rejects_control_without_scope() {
         // Read-only session: a control command must be refused over the socket
         // exactly as the in-process endpoint refuses it.
-        with_served_endpoint(ScopeSet::all_read(), SnapshotInspectSource::new(), |client| {
-            assert!(client.handshake(&handshake("dev")).expect("handshake io").is_accepted());
-            let reply = client
-                .command(&CommandMessage::new(
-                    CommandId::new(2),
-                    CommandKind::Control(ControlAction::Pause),
-                ))
-                .expect("control io");
-            assert_eq!(
-                reply,
-                ClientBound::Error(ProtocolError::Unauthorized {
-                    required: PermissionScope::Control,
-                })
-            );
-        });
+        with_served_endpoint(
+            ScopeSet::all_read(),
+            SnapshotInspectSource::new(),
+            |client| {
+                assert!(
+                    client
+                        .handshake(&handshake("dev"))
+                        .expect("handshake io")
+                        .is_accepted()
+                );
+                let reply = client
+                    .command(&CommandMessage::new(
+                        CommandId::new(2),
+                        CommandKind::Control(ControlAction::Pause),
+                    ))
+                    .expect("control io");
+                assert_eq!(
+                    reply,
+                    ClientBound::Error(ProtocolError::Unauthorized {
+                        required: PermissionScope::Control,
+                    })
+                );
+            },
+        );
     }
 
     #[test]
@@ -315,7 +325,12 @@ mod tests {
         });
 
         let mut client = SocketClient::connect_loopback(addr).expect("connect");
-        assert!(client.handshake(&handshake("dev")).expect("io").is_accepted());
+        assert!(
+            client
+                .handshake(&handshake("dev"))
+                .expect("io")
+                .is_accepted()
+        );
         // Subscribe, so the endpoint knows this client wants frame events.
         let reply = client
             .command(&CommandMessage::new(
@@ -372,7 +387,12 @@ mod tests {
         });
 
         let mut client = SocketClient::connect_loopback(addr).expect("connect");
-        assert!(client.handshake(&handshake("dev")).expect("io").is_accepted());
+        assert!(
+            client
+                .handshake(&handshake("dev"))
+                .expect("io")
+                .is_accepted()
+        );
         // Subscribed to Frames only.
         let _ = client
             .command(&CommandMessage::new(
@@ -397,5 +417,4 @@ mod tests {
         drop(client);
         handle.join().expect("join");
     }
-
 }

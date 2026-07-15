@@ -32,7 +32,7 @@ use obscur_kit::runtime::orchestration::{ComputedStyles, LayoutBoxes, SceneCoord
 use obscur_kit::scene::command::DisplayList;
 use obscur_kit::scene::scene::{SceneGeneration, SceneSnapshot};
 use obscur_kit::style::computed::{ComputedStyle, ComputedValue};
-use obscur_kit::style::property::{layout_keyword, PropertyId, StyleColor};
+use obscur_kit::style::property::{PropertyId, StyleColor, layout_keyword};
 use obscur_kit::tree::node::{LogicalParent, NodeKind};
 use obscur_kit::tree::tree::RetainedTree;
 
@@ -63,7 +63,10 @@ fn main() {
 
     let mut computed: ComputedStyles = HashMap::new();
     computed.insert(root, background(white));
-    computed.insert(hidden, background_overflow(blue, layout_keyword::OVERFLOW_HIDDEN));
+    computed.insert(
+        hidden,
+        background_overflow(blue, layout_keyword::OVERFLOW_HIDDEN),
+    );
     computed.insert(hidden_child, background(green));
     computed.insert(
         visible,
@@ -72,7 +75,10 @@ fn main() {
     computed.insert(visible_child, background(green));
 
     let mut boxes: LayoutBoxes = HashMap::new();
-    boxes.insert(root, LayoutBox::new(Rect::new(Point::new(0.0, 0.0), VIEWPORT)));
+    boxes.insert(
+        root,
+        LayoutBox::new(Rect::new(Point::new(0.0, 0.0), VIEWPORT)),
+    );
     boxes.insert(hidden, LayoutBox::new(box_hidden));
     boxes.insert(hidden_child, LayoutBox::new(child_hidden));
     boxes.insert(visible, LayoutBox::new(box_visible));
@@ -83,12 +89,7 @@ fn main() {
     let clips = list
         .commands()
         .iter()
-        .filter(|c| {
-            matches!(
-                c,
-                obscur_kit::scene::command::PaintCommand::PushClip(_)
-            )
-        })
+        .filter(|c| matches!(c, obscur_kit::scene::command::PaintCommand::PushClip(_)))
         .count();
     println!(
         "[scene] {} paint command(s) · {clips} PushClip (exactly one — the hidden box)",
@@ -123,7 +124,11 @@ fn main() {
 
 /// Allocates an element node under `parent`, wiring the child + logical-parent
 /// links, and returns its id (mirrors the coordinator's own test helper).
-fn element(tree: &mut RetainedTree, parent: obscur_kit::identity::NodeId, raw: u64) -> obscur_kit::identity::NodeId {
+fn element(
+    tree: &mut RetainedTree,
+    parent: obscur_kit::identity::NodeId,
+    raw: u64,
+) -> obscur_kit::identity::NodeId {
     let id = tree.alloc(NodeKind::Element {
         component: ComponentId::from_raw(raw),
     });
@@ -160,7 +165,9 @@ fn render(list: DisplayList) -> tiny_skia::Pixmap {
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
     let mut renderer = CpuRenderer::new(RendererId::from_raw(1));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
@@ -188,7 +195,8 @@ fn verify_clipped(
     // (1) The hidden box's overflow region is the WHITE background — the child was
     // clipped away and does not spill past the box.
     assert!(
-        is_white(pixmap, hidden_spill.0, hidden_spill.1) && !is_green(pixmap, hidden_spill.0, hidden_spill.1),
+        is_white(pixmap, hidden_spill.0, hidden_spill.1)
+            && !is_green(pixmap, hidden_spill.0, hidden_spill.1),
         "overflow:hidden did NOT clip — expected white at {hidden_spill:?}, found child ink"
     );
     // (2) The visible box's mirror region IS green — the child overflows.

@@ -277,7 +277,10 @@ mod tests {
     use obscur_identity::NodeId;
 
     fn some_input() -> SyntheticInput {
-        SyntheticInput::pointer_down(SelectorTarget::node(NodeId::from_raw(1)), PointerButton::Primary)
+        SyntheticInput::pointer_down(
+            SelectorTarget::node(NodeId::from_raw(1)),
+            PointerButton::Primary,
+        )
     }
 
     #[test]

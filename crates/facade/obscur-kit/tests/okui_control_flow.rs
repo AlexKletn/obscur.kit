@@ -69,7 +69,11 @@ fn a_true_condition_renders_its_body() {
     let ViewNode::Element { children, .. } = &roots(&view)[0] else {
         panic!("expected an element root");
     };
-    assert_eq!(children.nodes().len(), 1, "a true condition renders its body");
+    assert_eq!(
+        children.nodes().len(),
+        1,
+        "a true condition renders its body"
+    );
 }
 
 #[test]
@@ -183,11 +187,7 @@ fn a_for_renders_one_node_per_item() {
     let ViewNode::Element { children, .. } = &roots(&view)[0] else {
         panic!("expected an element root");
     };
-    let classes: Vec<_> = children
-        .nodes()
-        .iter()
-        .map(|n| prop(n, "class"))
-        .collect();
+    let classes: Vec<_> = children.nodes().iter().map(|n| prop(n, "class")).collect();
     assert_eq!(
         classes,
         vec![
@@ -333,7 +333,10 @@ fn a_conditional_inside_a_loop_still_keys_its_item() {
         let ViewNode::Element { key, .. } = node else {
             panic!("expected elements");
         };
-        assert!(key.is_some(), "a branch's node still carries the item's key");
+        assert!(
+            key.is_some(),
+            "a branch's node still carries the item's key"
+        );
     }
 }
 

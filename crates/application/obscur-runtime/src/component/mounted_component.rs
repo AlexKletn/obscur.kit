@@ -2,10 +2,10 @@
 
 use core::fmt;
 
+use obscur_identity::SignalId;
 use obscur_view::component::{
     ComponentContext, ComponentInstance, ErasedComponent, InstanceId, PropsError,
 };
-use obscur_identity::SignalId;
 use obscur_view::lifecycle::{MountContext, UnmountContext};
 use obscur_view::state::{SignalGenerations, StateGeneration};
 use obscur_view::view::{View, ViewProperty};
@@ -253,7 +253,9 @@ mod tests {
     }
 
     fn rendered_text(component: &mut MountedComponent, by: i64) -> String {
-        let view = component.render(&props(by), &SignalGenerations::new()).expect("props decode");
+        let view = component
+            .render(&props(by), &SignalGenerations::new())
+            .expect("props decode");
         let ViewNode::Text { content, .. } = &view.root().nodes()[0] else {
             panic!("counter renders text");
         };

@@ -101,10 +101,7 @@ mod tests {
         assert_eq!(edges.right, Margin::Px(2.0));
         assert_eq!(edges.bottom, Margin::Px(3.0));
         assert_eq!(edges.left, Margin::Px(4.0));
-        assert_eq!(
-            MarginEdges::uniform(5.0).resolve(0.0),
-            Insets::uniform(5.0)
-        );
+        assert_eq!(MarginEdges::uniform(5.0).resolve(0.0), Insets::uniform(5.0));
     }
 
     #[test]

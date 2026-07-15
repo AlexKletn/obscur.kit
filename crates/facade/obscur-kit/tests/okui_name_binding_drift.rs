@@ -72,9 +72,15 @@ fn widget_component_ids_match_their_source() {
 #[test]
 fn resolved_tags_bind_to_the_real_component_ids() {
     // The registry's resolver, not just its constants, lands on the real ids.
-    assert_eq!(name_binding::component_id_for("Button"), Button::COMPONENT_ID);
+    assert_eq!(
+        name_binding::component_id_for("Button"),
+        Button::COMPONENT_ID
+    );
     assert_eq!(name_binding::component_id_for("img"), Image::COMPONENT_ID);
-    assert_eq!(name_binding::component_id_for("div"), Container::COMPONENT_ID);
+    assert_eq!(
+        name_binding::component_id_for("div"),
+        Container::COMPONENT_ID
+    );
     assert_eq!(name_binding::attr_symbol("src"), view::SRC);
     assert_eq!(name_binding::event_symbol("click"), view::EVENT_CLICK);
 }
@@ -124,10 +130,13 @@ fn every_shipped_widget_has_a_contract() {
         .map(obscur_kit::okui_compiler::validation::ComponentContract::component)
         .collect();
     for expected in [
-        "Button", "Input", "Checkbox", "Select", "Menu", "Dialog", "Tabs", "List", "Tree",
-        "Table", "Docking", "Radio",
+        "Button", "Input", "Checkbox", "Select", "Menu", "Dialog", "Tabs", "List", "Tree", "Table",
+        "Docking", "Radio",
     ] {
-        assert!(tags.contains(&expected), "shipped widget {expected} has no contract");
+        assert!(
+            tags.contains(&expected),
+            "shipped widget {expected} has no contract"
+        );
     }
 }
 
@@ -173,7 +182,10 @@ fn derived_prop_symbols_match_the_view_tree_symbols() {
     let symbols: Vec<_> = contract.props.iter().map(|p| p.name).collect();
 
     // The reserved name resolves to the shared constant, not to any hash.
-    assert!(symbols.contains(&view::DISABLED), "derived `disabled` must be view::DISABLED");
+    assert!(
+        symbols.contains(&view::DISABLED),
+        "derived `disabled` must be view::DISABLED"
+    );
     // The non-reserved names resolve through the same registry the view uses.
     assert!(symbols.contains(&name_binding::attr_symbol("placeholder")));
     assert!(symbols.contains(&name_binding::attr_symbol("label")));
@@ -262,7 +274,12 @@ fn an_absent_optional_prop_is_none_and_an_absent_required_one_errors() {
         ViewValue::Text("x".into()),
     )])
     .expect_err("a missing required prop is an error");
-    assert_eq!(error, PropsError::Missing { name: view::DISABLED });
+    assert_eq!(
+        error,
+        PropsError::Missing {
+            name: view::DISABLED
+        }
+    );
 }
 
 #[test]

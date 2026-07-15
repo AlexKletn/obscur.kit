@@ -237,11 +237,8 @@ mod tests {
 
         // With no interaction state the hover-gated rule does NOT contribute.
         let empty = PseudoStates::new();
-        let cold = coordinator.build_inputs_with_pseudo(
-            &tree,
-            std::slice::from_ref(&sheet),
-            &empty,
-        );
+        let cold =
+            coordinator.build_inputs_with_pseudo(&tree, std::slice::from_ref(&sheet), &empty);
         assert!(
             cold.cascaded_for(child).is_empty(),
             ":hover must not match without recorded hover state"
@@ -257,11 +254,8 @@ mod tests {
         // Recording HOVER for the node makes the rule match and cascade.
         let mut hot_states = PseudoStates::new();
         hot_states.set(child, PseudoState::HOVER);
-        let hot = coordinator.build_inputs_with_pseudo(
-            &tree,
-            std::slice::from_ref(&sheet),
-            &hot_states,
-        );
+        let hot =
+            coordinator.build_inputs_with_pseudo(&tree, std::slice::from_ref(&sheet), &hot_states);
         assert_eq!(
             hot.cascaded_for(child).get(PropertyId::BackgroundColor),
             Some(&red()),

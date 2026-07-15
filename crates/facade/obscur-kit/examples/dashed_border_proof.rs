@@ -122,7 +122,9 @@ fn render(list: DisplayList) -> tiny_skia::Pixmap {
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
     let mut renderer = CpuRenderer::new(RendererId::from_raw(1));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
@@ -144,9 +146,7 @@ fn verify_dashes(pixmap: &tiny_skia::Pixmap, y: u32, box_rect: Rect) {
     }
     let dashes = runs.iter().filter(|(ink, _)| *ink).count();
     let gaps = runs.iter().filter(|(ink, _)| !*ink).count();
-    println!(
-        "[verify] top border scanline y={y}: {dashes} painted dash run(s), {gaps} gap(s)"
-    );
+    println!("[verify] top border scanline y={y}: {dashes} painted dash run(s), {gaps} gap(s)");
     assert!(
         dashes >= 2 && gaps >= 1,
         "expected an alternating dash/gap pattern, got runs={runs:?} (border rendered solid?)",

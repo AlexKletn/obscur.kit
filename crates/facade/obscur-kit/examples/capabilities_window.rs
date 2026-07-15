@@ -149,7 +149,11 @@ impl CapabilitiesWindow {
     /// [`CYCLE_SECS`] so the rotation sweeps `0° → 90° → 0°` and repeats.
     fn blend_t(&self) -> f32 {
         let phase = (self.start.elapsed().as_secs_f32() / CYCLE_SECS).fract();
-        if phase < 0.5 { phase * 2.0 } else { 2.0 - phase * 2.0 }
+        if phase < 0.5 {
+            phase * 2.0
+        } else {
+            2.0 - phase * 2.0
+        }
     }
 
     /// Blends `rotate(0°) → rotate(90°)` through the motion engine at the current
@@ -192,8 +196,10 @@ impl CapabilitiesWindow {
         else {
             return;
         };
-        let physical_size =
-            Size::new(surface.config().width as f32, surface.config().height as f32);
+        let physical_size = Size::new(
+            surface.config().width as f32,
+            surface.config().height as f32,
+        );
         let render_frame = RenderFrame::new(snapshot, physical_size);
         let submission = FrameSubmission::new(render_frame);
         match renderer.present_to_surface(&submission, surface) {

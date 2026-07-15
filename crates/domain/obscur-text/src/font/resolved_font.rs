@@ -124,14 +124,16 @@ mod tests {
         assert!(!plain.synth_oblique());
         assert!(!plain.synth_bold());
 
-        let synthesized = ResolvedFont::new(FontId::new(1), face("Inter")).with_synthesis(true, true);
+        let synthesized =
+            ResolvedFont::new(FontId::new(1), face("Inter")).with_synthesis(true, true);
         assert!(synthesized.synth_oblique());
         assert!(synthesized.synth_bold());
         // The flags participate in equality (additive fields on the derive).
         assert_ne!(plain, synthesized);
 
         // Each flag is independent.
-        let oblique_only = ResolvedFont::new(FontId::new(1), face("Inter")).with_synthesis(true, false);
+        let oblique_only =
+            ResolvedFont::new(FontId::new(1), face("Inter")).with_synthesis(true, false);
         assert!(oblique_only.synth_oblique());
         assert!(!oblique_only.synth_bold());
     }

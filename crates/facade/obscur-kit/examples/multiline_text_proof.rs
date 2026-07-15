@@ -64,7 +64,9 @@ fn main() {
     // Block A: a ~200px box; the long paragraph wraps at the content width and its
     // lines stack by the font's natural (metric) line height.
     let (a_px, a_ys) = render_block(
-        &format!("{base}\n.block {{ width: 200px; padding: 6px; background: #eef2ff; color: #12203f; font-size: {FONT_SIZE}px; }}"),
+        &format!(
+            "{base}\n.block {{ width: 200px; padding: 6px; background: #eef2ff; color: #12203f; font-size: {FONT_SIZE}px; }}"
+        ),
         PARAGRAPH,
     );
     // Block B: a wide box; the `\n` forces two lines with no wrapping. Under the
@@ -72,13 +74,17 @@ fn main() {
     // 3 §4.1.1), so this fixture opts into `pre-line` to PRESERVE the newline as a
     // forced break — the behaviour this block proves.
     let (b_px, b_ys) = render_block(
-        &format!("{base}\n.block {{ width: 300px; padding: 6px; background: #fff3e6; color: #3f2410; font-size: {FONT_SIZE}px; white-space: pre-line; }}"),
+        &format!(
+            "{base}\n.block {{ width: 300px; padding: 6px; background: #fff3e6; color: #3f2410; font-size: {FONT_SIZE}px; white-space: pre-line; }}"
+        ),
         "First line before the newline\nSecond line after the newline",
     );
     // Block C: the same ~200px box, but `line-height: 2` (inherited to the text)
     // spaces the wrapped lines twice as far apart.
     let (c_px, c_ys) = render_block(
-        &format!("{base}\n.block {{ width: 200px; padding: 6px; background: #e9f7ee; color: #103018; font-size: {FONT_SIZE}px; line-height: 2; }}"),
+        &format!(
+            "{base}\n.block {{ width: 200px; padding: 6px; background: #e9f7ee; color: #103018; font-size: {FONT_SIZE}px; line-height: 2; }}"
+        ),
         PARAGRAPH,
     );
 
@@ -132,31 +138,57 @@ fn render_block(css: &str, content: &str) -> (tiny_skia::Pixmap, Vec<f32>) {
     println!(
         "[block] {} DrawText line(s) at y = {:?}",
         ys.len(),
-        ys.iter().map(|y| (y * 10.0).round() / 10.0).collect::<Vec<_>>()
+        ys.iter()
+            .map(|y| (y * 10.0).round() / 10.0)
+            .collect::<Vec<_>>()
     );
 
     let frame = RenderFrame::new(snapshot, VIEWPORT);
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     (renderer.pixmap().expect("a rasterized frame").clone(), ys)
 }
 
 /// Machine-checks the three blocks' per-line y-origins.
 fn verify(a: &[f32], b: &[f32], c: &[f32]) {
     // Block A: the long paragraph WRAPPED into ≥ 2 visual lines, strictly stacked.
-    assert!(a.len() >= 2, "block A must wrap into ≥ 2 lines, got {}", a.len());
-    assert!(strictly_increasing(a), "block A lines must not overlap: {a:?}");
+    assert!(
+        a.len() >= 2,
+        "block A must wrap into ≥ 2 lines, got {}",
+        a.len()
+    );
+    assert!(
+        strictly_increasing(a),
+        "block A lines must not overlap: {a:?}"
+    );
     let a_gap = a[1] - a[0];
     assert!(a_gap > 0.0, "block A line spacing must be positive");
 
     // Block B: exactly two lines from the explicit `\n`.
-    assert_eq!(b.len(), 2, "block B (`\\n`) must be two lines, got {}", b.len());
-    assert!(b[1] > b[0], "block B's second line must sit below the first");
+    assert_eq!(
+        b.len(),
+        2,
+        "block B (`\\n`) must be two lines, got {}",
+        b.len()
+    );
+    assert!(
+        b[1] > b[0],
+        "block B's second line must sit below the first"
+    );
 
     // Block C: the SAME paragraph wrapped, but spaced by line-height:2 = 2·15 = 30px.
-    assert!(c.len() >= 2, "block C must wrap into ≥ 2 lines, got {}", c.len());
-    assert!(strictly_increasing(c), "block C lines must not overlap: {c:?}");
+    assert!(
+        c.len() >= 2,
+        "block C must wrap into ≥ 2 lines, got {}",
+        c.len()
+    );
+    assert!(
+        strictly_increasing(c),
+        "block C lines must not overlap: {c:?}"
+    );
     let c_gap = c[1] - c[0];
     let expected = 2.0 * FONT_SIZE;
     assert!(
@@ -177,7 +209,9 @@ fn verify(a: &[f32], b: &[f32], c: &[f32]) {
         c.len(),
         c_gap,
     );
-    println!("[verify] OK — text wraps at the box width, stacks without overlap, and line-height widens the spacing");
+    println!(
+        "[verify] OK — text wraps at the box width, stacks without overlap, and line-height widens the spacing"
+    );
 }
 
 /// Whether `ys` is strictly increasing (each line strictly below the previous).
@@ -199,14 +233,29 @@ fn block_view(content: &str) -> View {
 /// Vertically stacks `pixmaps` into one image with thin gray dividers.
 fn stack(pixmaps: &[tiny_skia::Pixmap]) -> tiny_skia::Pixmap {
     let gap = 2u32;
-    let width = pixmaps.iter().map(tiny_skia::Pixmap::width).max().unwrap_or(1);
-    let height: u32 = pixmaps.iter().map(|p| p.height() + gap).sum::<u32>().saturating_sub(gap);
+    let width = pixmaps
+        .iter()
+        .map(tiny_skia::Pixmap::width)
+        .max()
+        .unwrap_or(1);
+    let height: u32 = pixmaps
+        .iter()
+        .map(|p| p.height() + gap)
+        .sum::<u32>()
+        .saturating_sub(gap);
     let mut out = tiny_skia::Pixmap::new(width, height.max(1)).expect("combined pixmap");
     out.fill(tiny_skia::Color::from_rgba8(0xd0, 0xcd, 0xc7, 0xff));
     let paint = tiny_skia::PixmapPaint::default();
     let mut y = 0i32;
     for px in pixmaps {
-        out.draw_pixmap(0, y, px.as_ref(), &paint, tiny_skia::Transform::identity(), None);
+        out.draw_pixmap(
+            0,
+            y,
+            px.as_ref(),
+            &paint,
+            tiny_skia::Transform::identity(),
+            None,
+        );
         y += (px.height() + gap) as i32;
     }
     out

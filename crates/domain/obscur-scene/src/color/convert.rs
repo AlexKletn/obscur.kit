@@ -317,6 +317,10 @@ mod tests {
     #[test]
     fn lch_matches_lab() {
         // lch(50 50 0) has a = 50, b = 0, i.e. lab(50 50 0).
-        close(lch_to_srgb(50.0, 50.0, 0.0), lab_to_srgb(50.0, 50.0, 0.0), 1e-9);
+        close(
+            lch_to_srgb(50.0, 50.0, 0.0),
+            lab_to_srgb(50.0, 50.0, 0.0),
+            1e-9,
+        );
     }
 }

@@ -216,8 +216,8 @@ mod tests {
         // logical-last scalar ('c') is first. Clusters are the SOURCE byte
         // offsets, preserved but reversed; advances stay uniform.
         let shaper = MockTextShaper::new();
-        let request =
-            ShapingRequest::new("abc", mono_face(), 10.0).with_direction(TextDirection::RightToLeft);
+        let request = ShapingRequest::new("abc", mono_face(), 10.0)
+            .with_direction(TextDirection::RightToLeft);
         let run = shaper.shape(&request);
         let ids: Vec<u32> = run.glyphs().iter().map(ShapedGlyph::glyph_id).collect();
         let clusters: Vec<usize> = run.glyphs().iter().map(ShapedGlyph::cluster).collect();
@@ -232,8 +232,8 @@ mod tests {
     #[test]
     fn rtl_shaping_is_deterministic() {
         let shaper = MockTextShaper::new();
-        let request =
-            ShapingRequest::new("abc", mono_face(), 10.0).with_direction(TextDirection::RightToLeft);
+        let request = ShapingRequest::new("abc", mono_face(), 10.0)
+            .with_direction(TextDirection::RightToLeft);
         assert_eq!(shaper.shape(&request), shaper.shape(&request));
     }
 

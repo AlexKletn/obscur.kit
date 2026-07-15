@@ -19,8 +19,14 @@ use obscur_kit::runtime::UiRuntime;
 mod showcase;
 
 fn main() {
-    let width: f32 = std::env::var("INSPECT_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1478.0);
-    let height: f32 = std::env::var("INSPECT_H").ok().and_then(|v| v.parse().ok()).unwrap_or(950.0);
+    let width: f32 = std::env::var("INSPECT_W")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1478.0);
+    let height: f32 = std::env::var("INSPECT_H")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(950.0);
 
     let src = CssSource::anonymous(showcase::stylesheet());
     let parsed = StylesheetParser::new(&src).parse();

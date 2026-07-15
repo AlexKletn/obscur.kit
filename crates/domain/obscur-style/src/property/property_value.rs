@@ -658,7 +658,10 @@ mod tests {
         assert_eq!(pos.as_background_size(), None);
 
         let repeat = PropertyValue::BackgroundRepeat(BackgroundRepeat::NoRepeat);
-        assert_eq!(repeat.as_background_repeat(), Some(BackgroundRepeat::NoRepeat));
+        assert_eq!(
+            repeat.as_background_repeat(),
+            Some(BackgroundRepeat::NoRepeat)
+        );
         assert_eq!(PropertyValue::Number(1.0).as_background_repeat(), None);
     }
 
@@ -772,7 +775,10 @@ mod tests {
         assert_eq!(value.as_grid_line(), Some(&GridLineValue::Line(3)));
         assert_eq!(PropertyValue::Number(1.0).as_grid_line(), None);
         let named = PropertyValue::GridLine(GridLineValue::Named("main".into()));
-        assert_eq!(named.as_grid_line(), Some(&GridLineValue::Named("main".into())));
+        assert_eq!(
+            named.as_grid_line(),
+            Some(&GridLineValue::Named("main".into()))
+        );
     }
 
     #[test]

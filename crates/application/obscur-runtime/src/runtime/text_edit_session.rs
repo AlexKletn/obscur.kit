@@ -257,7 +257,9 @@ impl TextEditSession {
 
     /// Returns whether an IME composition is currently live (composing).
     pub(crate) fn is_composing(&self) -> bool {
-        self.composition.as_ref().is_some_and(Composition::is_active)
+        self.composition
+            .as_ref()
+            .is_some_and(Composition::is_active)
     }
 
     /// Returns the active composition, if any — the source of the preedit the

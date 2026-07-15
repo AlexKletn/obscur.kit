@@ -131,7 +131,9 @@ impl GridAreaTemplate {
 /// Narrows a 0-based `usize` index into the 1-based `u32` line number `index + 1`,
 /// saturating so a pathologically large grid cannot overflow.
 fn to_line(index: usize) -> u32 {
-    u32::try_from(index).unwrap_or(u32::MAX - 1).saturating_add(1)
+    u32::try_from(index)
+        .unwrap_or(u32::MAX - 1)
+        .saturating_add(1)
 }
 
 #[cfg(test)]
@@ -143,13 +145,7 @@ mod tests {
         spec.iter()
             .map(|row| {
                 row.iter()
-                    .map(|&cell| {
-                        if cell == "." {
-                            None
-                        } else {
-                            Some(cell.into())
-                        }
-                    })
+                    .map(|&cell| if cell == "." { None } else { Some(cell.into()) })
                     .collect()
             })
             .collect()
@@ -172,13 +168,18 @@ mod tests {
     #[test]
     fn multi_row_column_area_spans_both_rows() {
         // "h h" / "s m" / "f f": `s` is (row 2, col 1); `h`/`f` each span the row.
-        let template =
-            GridAreaTemplate::from_rows(&rows(&[&["h", "h"], &["s", "m"], &["f", "f"]]))
-                .expect("template");
+        let template = GridAreaTemplate::from_rows(&rows(&[&["h", "h"], &["s", "m"], &["f", "f"]]))
+            .expect("template");
         let s = template.area("s").expect("s");
-        assert_eq!((s.row_start, s.row_end, s.column_start, s.column_end), (2, 3, 1, 2));
+        assert_eq!(
+            (s.row_start, s.row_end, s.column_start, s.column_end),
+            (2, 3, 1, 2)
+        );
         let f = template.area("f").expect("f");
-        assert_eq!((f.row_start, f.row_end, f.column_start, f.column_end), (3, 4, 1, 3));
+        assert_eq!(
+            (f.row_start, f.row_end, f.column_start, f.column_end),
+            (3, 4, 1, 3)
+        );
         assert_eq!(template.rows(), 3);
         assert_eq!(template.columns(), 2);
     }
@@ -189,7 +190,10 @@ mod tests {
         let template =
             GridAreaTemplate::from_rows(&rows(&[&["a", "b"], &["a", "c"]])).expect("template");
         let a = template.area("a").expect("a");
-        assert_eq!((a.row_start, a.row_end, a.column_start, a.column_end), (1, 3, 1, 2));
+        assert_eq!(
+            (a.row_start, a.row_end, a.column_start, a.column_end),
+            (1, 3, 1, 2)
+        );
     }
 
     #[test]

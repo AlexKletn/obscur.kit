@@ -36,7 +36,9 @@ impl SocketClient {
     /// Returns an [`io::Error`] if the connection cannot be established.
     pub fn connect_loopback(addr: SocketAddr) -> io::Result<Self> {
         let stream = TcpStream::connect(addr)?;
-        Ok(Self { stream: SocketStream::from_tcp(stream) })
+        Ok(Self {
+            stream: SocketStream::from_tcp(stream),
+        })
     }
 
     /// Connects to a Unix domain socket path.
@@ -47,7 +49,9 @@ impl SocketClient {
     #[cfg(unix)]
     pub fn connect_unix(path: impl AsRef<Path>) -> io::Result<Self> {
         let stream = UnixStream::connect(path)?;
-        Ok(Self { stream: SocketStream::from_unix(stream) })
+        Ok(Self {
+            stream: SocketStream::from_unix(stream),
+        })
     }
 
     /// Performs the connection handshake and returns the server's response.
@@ -59,7 +63,9 @@ impl SocketClient {
     pub fn handshake(&mut self, request: &HandshakeRequest) -> io::Result<HandshakeResponse> {
         match self.exchange(&ServerBound::Handshake(request.clone()))? {
             ClientBound::Handshake(response) => Ok(response),
-            other => Err(unexpected(&format!("expected handshake response, got {other:?}"))),
+            other => Err(unexpected(&format!(
+                "expected handshake response, got {other:?}"
+            ))),
         }
     }
 
@@ -103,7 +109,8 @@ impl SocketClient {
 
     /// Writes one server-bound message and reads exactly one reply.
     fn exchange(&mut self, message: &ServerBound) -> io::Result<ClientBound> {
-        self.stream.write_frame(&WireCodec::encode_server_bound(message))?;
+        self.stream
+            .write_frame(&WireCodec::encode_server_bound(message))?;
         let frame = self
             .stream
             .read_frame()?
@@ -138,7 +145,9 @@ mod tests {
             let mut endpoint = DevToolsEndpoint::new(auth, RuntimeBridge::new(NullInspectSource));
             // NOTE: deliberately not enabled.
             let stream = listener.accept().expect("accept");
-            SocketTransport::new(stream).serve(&mut endpoint).expect("serve");
+            SocketTransport::new(stream)
+                .serve(&mut endpoint)
+                .expect("serve");
         });
 
         let mut client = SocketClient::connect_loopback(addr).expect("connect");

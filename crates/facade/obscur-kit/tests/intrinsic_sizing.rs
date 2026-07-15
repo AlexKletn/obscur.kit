@@ -82,7 +82,9 @@ fn item_size(css: &str) -> (f32, f32) {
 
 /// A 400x400 page. `width` is what the `.item` authors.
 fn page_with(width: &str) -> String {
-    format!(".page {{ width: 400px; height: 400px; font-size: {FONT}px }} .item {{ width: {width} }}")
+    format!(
+        ".page {{ width: 400px; height: 400px; font-size: {FONT}px }} .item {{ width: {width} }}"
+    )
 }
 
 #[test]
@@ -97,7 +99,10 @@ fn max_content_puts_everything_on_one_line() {
         "one line tall, got {height} (it wrapped, so it was not offered unbounded space)"
     );
     // The assertion that gives it teeth: it did NOT just take the container.
-    assert!(width < 400.0, "`max-content` must shrink to the content, not stretch");
+    assert!(
+        width < 400.0,
+        "`max-content` must shrink to the content, not stretch"
+    );
 }
 
 #[test]
@@ -123,7 +128,10 @@ fn min_content_and_max_content_disagree_on_wrappable_text() {
     // If these ever agree for a multi-word string, the two probes are not probing.
     let (min, _) = item_size(&page_with("min-content"));
     let (max, _) = item_size(&page_with("max-content"));
-    assert!(min < max, "min-content {min} must be narrower than max-content {max}");
+    assert!(
+        min < max,
+        "min-content {min} must be narrower than max-content {max}"
+    );
 }
 
 #[test]
@@ -131,8 +139,14 @@ fn auto_still_stretches_to_the_container() {
     // The regression guard: `auto` is the overwhelmingly common case and must be
     // untouched by any of this.
     let (width, height) = item_size(&page_with("auto"));
-    assert!((width - 400.0).abs() < 1e-3, "`auto` fills its container, got {width}");
-    assert!((height - FONT).abs() < 1e-3, "and the text fits on one line, got {height}");
+    assert!(
+        (width - 400.0).abs() < 1e-3,
+        "`auto` fills its container, got {width}"
+    );
+    assert!(
+        (height - FONT).abs() < 1e-3,
+        "and the text fits on one line, got {height}"
+    );
 }
 
 #[test]
@@ -235,8 +249,5 @@ fn a_percentage_child_does_not_poison_a_max_content_box() {
         width.is_finite(),
         "a `%` child resolved against unbounded space and made the box infinite"
     );
-    assert!(
-        width <= 400.0,
-        "the box escaped its container: {width}"
-    );
+    assert!(width <= 400.0, "the box escaped its container: {width}");
 }

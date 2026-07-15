@@ -129,7 +129,10 @@ mod tests {
             SnapshotStage::Accessibility,
             SnapshotStage::RenderGraph,
         ] {
-            assert!(!stage.is_backend_dependent(), "{stage:?} is backend-neutral");
+            assert!(
+                !stage.is_backend_dependent(),
+                "{stage:?} is backend-neutral"
+            );
         }
     }
 

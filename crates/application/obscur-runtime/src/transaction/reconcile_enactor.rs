@@ -2,7 +2,7 @@
 //! transaction commit boundary (spec §3.2, §3.4 phase 4).
 
 use obscur_identity::{NodeId, VersionStamp};
-use obscur_tree::reconciliation::{ReconciliationPlan, Reconciler};
+use obscur_tree::reconciliation::{Reconciler, ReconciliationPlan};
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::{View, ViewFragment};
 
@@ -220,7 +220,9 @@ mod tests {
 
         // The reconcile mutated the tree exactly as `reconcile_root` would: the
         // synthetic root gained the two element children.
-        let root = tree.root().expect("root exists after the committed reconcile");
+        let root = tree
+            .root()
+            .expect("root exists after the committed reconcile");
         assert_eq!(tree.get(root).unwrap().children().len(), 2);
     }
 

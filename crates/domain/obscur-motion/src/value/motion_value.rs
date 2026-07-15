@@ -2,8 +2,8 @@
 
 use obscur_geometry::{Point, Rect, Size};
 
-use super::transform_interp::{self, Matrix2D};
 use super::Interpolatable;
+use super::transform_interp::{self, Matrix2D};
 
 /// A concrete presentation value the motion engine can animate (spec §4.17).
 ///
@@ -152,9 +152,9 @@ impl MotionValue {
             // Transforms do NOT blend component-wise: they interpolate by matrix
             // decomposition (CSS Transforms §14) so rotation/scale/skew stay
             // physical instead of shearing (see `transform_interp`).
-            (Self::Transform(a), Self::Transform(b)) => {
-                Some(Self::Transform(transform_interp::interpolate_matrix(*a, *b, t)))
-            }
+            (Self::Transform(a), Self::Transform(b)) => Some(Self::Transform(
+                transform_interp::interpolate_matrix(*a, *b, t),
+            )),
             _ => None,
         }
     }

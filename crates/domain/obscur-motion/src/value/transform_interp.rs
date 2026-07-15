@@ -265,16 +265,25 @@ mod tests {
         // Scale is preserved at 1 (a proper rotation), unlike the naive lerp
         // whose column length would be hypot(0.5, 0.5) ≈ 0.707 (a 30% shrink).
         let scale_x = mid[0].hypot(mid[1]);
-        assert!((scale_x - 1.0).abs() <= EPS, "scaleX must stay 1, got {scale_x}");
+        assert!(
+            (scale_x - 1.0).abs() <= EPS,
+            "scaleX must stay 1, got {scale_x}"
+        );
 
         // And the recovered angle is exactly 45°.
         let angle = mid[1].atan2(mid[0]);
-        assert!((angle - PI / 4.0).abs() <= EPS, "angle must be 45°, got {angle} rad");
+        assert!(
+            (angle - PI / 4.0).abs() <= EPS,
+            "angle must be 45°, got {angle} rad"
+        );
 
         // Contrast: the naive component-wise lerp shrinks the box.
         let naive: Matrix2D = [0.5, 0.5, -0.5, 0.5, 0.0, 0.0];
         let naive_scale = naive[0].hypot(naive[1]);
-        assert!((naive_scale - s).abs() <= EPS, "naive lerp shrinks to ~0.707");
+        assert!(
+            (naive_scale - s).abs() <= EPS,
+            "naive lerp shrinks to ~0.707"
+        );
     }
 
     #[test]
@@ -290,7 +299,10 @@ mod tests {
 
     #[test]
     fn identity_stays_identity() {
-        assert!(approx(interpolate_matrix(IDENTITY, IDENTITY, 0.5), IDENTITY));
+        assert!(approx(
+            interpolate_matrix(IDENTITY, IDENTITY, 0.5),
+            IDENTITY
+        ));
     }
 
     #[test]
@@ -365,7 +377,10 @@ mod tests {
             angle: 0.7,
         };
         let round = decompose(recompose(&d));
-        assert!(approx_dec(&round, &d), "decompose(recompose(d)) = {round:?}");
+        assert!(
+            approx_dec(&round, &d),
+            "decompose(recompose(d)) = {round:?}"
+        );
     }
 
     #[test]
@@ -373,7 +388,11 @@ mod tests {
         // A reflection (negative determinant): scale(-1, 1) = flip X.
         let m = [-1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
         let d = decompose(m);
-        assert!(d.scale.0 < 0.0, "flip must land on scaleX, got {:?}", d.scale);
+        assert!(
+            d.scale.0 < 0.0,
+            "flip must land on scaleX, got {:?}",
+            d.scale
+        );
         // Round-trips despite the flip.
         assert!(approx(recompose(&d), m));
     }
@@ -390,6 +409,9 @@ mod tests {
     fn degenerate_zero_scale_stays_finite() {
         let m = [0.0, 0.0, 0.0, 0.0, 5.0, 6.0]; // fully collapsed linear part
         let out = interpolate_matrix(m, IDENTITY, 0.5);
-        assert!(out.iter().all(|v| v.is_finite()), "degenerate blend must be finite: {out:?}");
+        assert!(
+            out.iter().all(|v| v.is_finite()),
+            "degenerate blend must be finite: {out:?}"
+        );
     }
 }

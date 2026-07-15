@@ -77,11 +77,7 @@ mod tests {
 
     #[test]
     fn new_records_all_three_parts() {
-        let event = KeyEvent::new(
-            PhysicalKey::KeyA,
-            Some(LogicalKey::character('a')),
-            true,
-        );
+        let event = KeyEvent::new(PhysicalKey::KeyA, Some(LogicalKey::character('a')), true);
         assert_eq!(event.physical(), PhysicalKey::KeyA);
         assert_eq!(event.logical(), Some(LogicalKey::character('a')));
         assert!(event.pressed());

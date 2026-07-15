@@ -114,7 +114,11 @@ mod tests {
     #[test]
     fn blend_starts_from_the_current_value_not_a_snap() {
         let resolved = TransitionInterruption::Blend
-            .resolve_track(&target(), MotionValue::scalar(30.0), MotionValue::scalar(0.0))
+            .resolve_track(
+                &target(),
+                MotionValue::scalar(30.0),
+                MotionValue::scalar(0.0),
+            )
             .expect("Blend resolves a track");
         // Seamless: the new track begins at the current value (30), not 0.
         assert_eq!(resolved.sample(0.0), MotionValue::scalar(30.0));
@@ -124,7 +128,11 @@ mod tests {
     #[test]
     fn restart_uses_the_incoming_track_verbatim() {
         let resolved = TransitionInterruption::Restart
-            .resolve_track(&target(), MotionValue::scalar(30.0), MotionValue::scalar(0.0))
+            .resolve_track(
+                &target(),
+                MotionValue::scalar(30.0),
+                MotionValue::scalar(0.0),
+            )
             .expect("Restart resolves a track");
         assert_eq!(resolved, target());
         assert_eq!(resolved.sample(0.0), MotionValue::scalar(0.0));
@@ -133,7 +141,11 @@ mod tests {
     #[test]
     fn reverse_plays_from_current_back_to_origin() {
         let resolved = TransitionInterruption::Reverse
-            .resolve_track(&target(), MotionValue::scalar(30.0), MotionValue::scalar(0.0))
+            .resolve_track(
+                &target(),
+                MotionValue::scalar(30.0),
+                MotionValue::scalar(0.0),
+            )
             .expect("Reverse resolves a track");
         assert_eq!(resolved.sample(0.0), MotionValue::scalar(30.0));
         assert_eq!(resolved.sample(1.0), MotionValue::scalar(0.0));

@@ -122,9 +122,9 @@ impl crate::port::DiagnosticSink for ChannelSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::OverflowStrategy;
     use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem};
     use crate::port::DiagnosticSink;
-    use crate::OverflowStrategy;
 
     fn diag(severity: DiagnosticSeverity, code: &'static str) -> Diagnostic {
         Diagnostic::new(

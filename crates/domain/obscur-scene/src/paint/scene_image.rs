@@ -146,8 +146,8 @@ mod tests {
 
     #[test]
     fn clone_is_equal_and_shares_pixels() {
-        let img = SceneImage::new(2, 2, Arc::from(rgba_2x2()), AlphaMode::Straight)
-            .expect("valid image");
+        let img =
+            SceneImage::new(2, 2, Arc::from(rgba_2x2()), AlphaMode::Straight).expect("valid image");
         let clone = img.clone();
         assert_eq!(img, clone);
         // Cloning shares the pixel allocation (cheap clone).

@@ -126,9 +126,17 @@ impl SelectionGeometry {
         let mut rects = Vec::with_capacity(end_line.saturating_sub(start_line) + 1);
         for (li, line) in lines.iter().enumerate().take(end_line + 1).skip(start_line) {
             // Leading line: from the start pen x; interior/trailing: from x = 0.
-            let x_from = if li == start_line { Self::line_pen_x(line, lo) } else { 0.0 };
+            let x_from = if li == start_line {
+                Self::line_pen_x(line, lo)
+            } else {
+                0.0
+            };
             // Trailing line: to the end pen x; leading/interior: to the line width.
-            let x_to = if li == end_line { Self::line_pen_x(line, hi) } else { line.width() };
+            let x_to = if li == end_line {
+                Self::line_pen_x(line, hi)
+            } else {
+                line.width()
+            };
             let width = x_to - x_from;
             // Drop a zero/negative-width extent (a boundary sliver or empty line):
             // it paints nothing, keeping a one-line span byte-identical.
@@ -180,12 +188,7 @@ mod tests {
 
     /// A one-segment line whose glyphs carry the given `(cluster, advance)` pairs,
     /// covering byte `range`, boxed at `top` with a 12px height, offset by `xoff`.
-    fn line(
-        clusters: &[(usize, f32)],
-        range: TextRange,
-        top: f32,
-        xoff: f32,
-    ) -> ParagraphLine {
+    fn line(clusters: &[(usize, f32)], range: TextRange, top: f32, xoff: f32) -> ParagraphLine {
         let glyphs = clusters
             .iter()
             .map(|&(cluster, adv)| ShapedGlyph::new(1, cluster, adv))
@@ -201,9 +204,24 @@ mod tests {
     /// stacked by 12px, covering bytes 0..4 / 4..8 / 8..12.
     fn three_line_layout(xoffsets: [f32; 3]) -> ParagraphLayout {
         let lines = vec![
-            line(&[(0, 10.0), (1, 10.0), (2, 10.0), (3, 10.0)], TextRange::new(0, 4), 0.0, xoffsets[0]),
-            line(&[(4, 10.0), (5, 10.0), (6, 10.0), (7, 10.0)], TextRange::new(4, 8), 12.0, xoffsets[1]),
-            line(&[(8, 10.0), (9, 10.0), (10, 10.0), (11, 10.0)], TextRange::new(8, 12), 24.0, xoffsets[2]),
+            line(
+                &[(0, 10.0), (1, 10.0), (2, 10.0), (3, 10.0)],
+                TextRange::new(0, 4),
+                0.0,
+                xoffsets[0],
+            ),
+            line(
+                &[(4, 10.0), (5, 10.0), (6, 10.0), (7, 10.0)],
+                TextRange::new(4, 8),
+                12.0,
+                xoffsets[1],
+            ),
+            line(
+                &[(8, 10.0), (9, 10.0), (10, 10.0), (11, 10.0)],
+                TextRange::new(8, 12),
+                24.0,
+                xoffsets[2],
+            ),
         ];
         ParagraphLayout::new(lines, TextAlignment::Start, TextOverflow::Clip)
     }
@@ -231,9 +249,21 @@ mod tests {
         let layout = three_line_layout([0.0; 3]);
         let geo = SelectionGeometry::from_paragraph(&layout, 2, 10);
         assert_eq!(geo.len(), 3, "one rect per covered line");
-        assert_eq!(geo.rects()[0], rect(20.0, 0.0, 20.0, 12.0), "start line: tail");
-        assert_eq!(geo.rects()[1], rect(0.0, 12.0, 40.0, 12.0), "interior: full width");
-        assert_eq!(geo.rects()[2], rect(0.0, 24.0, 20.0, 12.0), "end line: head");
+        assert_eq!(
+            geo.rects()[0],
+            rect(20.0, 0.0, 20.0, 12.0),
+            "start line: tail"
+        );
+        assert_eq!(
+            geo.rects()[1],
+            rect(0.0, 12.0, 40.0, 12.0),
+            "interior: full width"
+        );
+        assert_eq!(
+            geo.rects()[2],
+            rect(0.0, 24.0, 20.0, 12.0),
+            "end line: head"
+        );
     }
 
     #[test]

@@ -78,13 +78,13 @@ impl RenderGraphSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use obscur_geometry::Rect;
     use obscur_scene::clip::Clip;
     use obscur_scene::color::Color;
     use obscur_scene::command::{DisplayList, PaintCommand};
     use obscur_scene::paint::Paint;
     use obscur_scene::path::Path;
     use obscur_scene::scene::SceneGeneration;
-    use obscur_geometry::Rect;
 
     fn draw() -> PaintCommand {
         PaintCommand::DrawPath {

@@ -127,7 +127,8 @@ mod tests {
         let mut scope = SubscriptionScope::new();
         let mut flag = false;
         let signals = SignalGenerations::new();
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut flag, &signals);
+        let mut ctx =
+            ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut flag, &signals);
 
         let view = component.render(&mut ctx, &CounterProps { step: 2 });
         assert!(view.root().is_empty());

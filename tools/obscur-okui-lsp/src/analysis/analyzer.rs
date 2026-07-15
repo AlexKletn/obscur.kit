@@ -285,9 +285,7 @@ mod tests {
     fn resolution_error_is_reported_as_error() {
         // `{missing}` is an unknown reference — a resolution error.
         let mut analyzer = Analyzer::new();
-        analyzer
-            .store_mut()
-            .open(URI, 1, "<Text value={missing}/>");
+        analyzer.store_mut().open(URI, 1, "<Text value={missing}/>");
         let diagnostics = analyzer.analyze(URI);
         assert!(
             diagnostics
@@ -333,7 +331,11 @@ mod tests {
         let hover = analyzer
             .hover(URI, Position::new(0, 6))
             .expect("a hover result");
-        assert!(hover.contents.contains("Row"), "contents: {}", hover.contents);
+        assert!(
+            hover.contents.contains("Row"),
+            "contents: {}",
+            hover.contents
+        );
     }
 
     #[test]

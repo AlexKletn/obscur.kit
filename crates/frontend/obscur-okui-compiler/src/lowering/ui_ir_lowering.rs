@@ -461,7 +461,10 @@ mod tests {
         assert_eq!(root.key(), Some(&UiIrExpression::binding("row.id")));
         assert!(root.property("key").is_none());
         // The iterated collection flows through as a property.
-        assert_eq!(root.property("each"), Some(&UiIrExpression::binding("items")));
+        assert_eq!(
+            root.property("each"),
+            Some(&UiIrExpression::binding("items"))
+        );
         // The body is a child.
         assert_eq!(root.children().len(), 1);
         assert_eq!(root.children()[0].tag(), "Row");
@@ -487,7 +490,10 @@ mod tests {
         let root = doc.root();
         assert_eq!(root.kind(), UiIrNodeKind::Conditional);
         assert_eq!(root.tag(), "If");
-        assert_eq!(root.property("cond"), Some(&UiIrExpression::binding("open")));
+        assert_eq!(
+            root.property("cond"),
+            Some(&UiIrExpression::binding("open"))
+        );
         assert_eq!(root.children().len(), 1);
     }
 

@@ -46,7 +46,11 @@ fn compiled_okui_with_a_for_loop_reconciles_into_a_retained_tree() {
     let ul = top[0];
     assert!(tree.get(ul).expect("live").kind().is_element());
     let ul_children = child_ids(&tree, ul);
-    assert_eq!(ul_children.len(), 1, "the <For> materialized its <li> template");
+    assert_eq!(
+        ul_children.len(),
+        1,
+        "the <For> materialized its <li> template"
+    );
     assert!(tree.get(ul_children[0]).expect("live").kind().is_element());
 }
 
@@ -54,9 +58,7 @@ fn compiled_okui_with_a_for_loop_reconciles_into_a_retained_tree() {
 fn hand_built_ir_document_reconciles_with_keys_and_text() {
     // <section><A key="alpha"/>hello</section>
     let root = UiIrNode::element(1, "section")
-        .with_child(
-            UiIrNode::component(2, "A").with_key(UiIrExpression::text("alpha")),
-        )
+        .with_child(UiIrNode::component(2, "A").with_key(UiIrExpression::text("alpha")))
         .with_child(UiIrNode::text(3, "hello"));
     let document = UiIrDocument::new(root);
 

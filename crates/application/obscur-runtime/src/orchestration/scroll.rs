@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use obscur_geometry::Rect;
 use obscur_identity::NodeId;
 use obscur_style::computed::ComputedValue;
-use obscur_style::property::{layout_keyword, PropertyId, PropertyValue};
+use obscur_style::property::{PropertyId, PropertyValue, layout_keyword};
 use obscur_tree::tree::RetainedTree;
 
 use super::{ComputedStyles, LayoutBoxes};
@@ -86,7 +86,9 @@ fn scrollable_content_height(
 ) -> f32 {
     let top = scrollport.origin.y;
     let mut max_bottom = scrollport.bottom();
-    let mut stack: Vec<NodeId> = tree.get(node).map_or_else(Vec::new, |n| n.children().to_vec());
+    let mut stack: Vec<NodeId> = tree
+        .get(node)
+        .map_or_else(Vec::new, |n| n.children().to_vec());
     let mut visited: HashSet<NodeId> = HashSet::new();
     while let Some(child) = stack.pop() {
         if !visited.insert(child) {
@@ -132,10 +134,14 @@ pub(crate) fn scroll_containers(
             && let Some(b) = boxes.get(&node)
         {
             let scrollport = b.bounds;
-            let content_height =
-                scrollable_content_height(tree, computed, boxes, node, scrollport);
+            let content_height = scrollable_content_height(tree, computed, boxes, node, scrollport);
             if content_height > scrollport.size.height {
-                out.push(ScrollContainer { node, scrollport, content_height, depth });
+                out.push(ScrollContainer {
+                    node,
+                    scrollport,
+                    content_height,
+                    depth,
+                });
             }
         }
         if let Some(n) = tree.get(node) {

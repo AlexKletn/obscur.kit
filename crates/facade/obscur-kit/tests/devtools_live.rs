@@ -26,7 +26,7 @@ use obscur_kit::geometry::Size;
 use obscur_kit::identity::{ComponentId, RuntimeId};
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
-use obscur_kit::view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue, CLASS};
+use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
 fn compile(css: &str) -> Stylesheet {
     let src = CssSource::anonymous(css);
@@ -38,12 +38,18 @@ fn compile(css: &str) -> Stylesheet {
 fn view() -> View {
     let container = ComponentId::from_raw(0x00C0_0001);
     let card = |class: &str| {
-        ViewNode::element(container)
-            .with_prop(ViewProperty::new(CLASS, ViewValue::Text(format!("card {class}").into())))
+        ViewNode::element(container).with_prop(ViewProperty::new(
+            CLASS,
+            ViewValue::Text(format!("card {class}").into()),
+        ))
     };
     let row = ViewNode::element(container)
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("row".into())))
-        .with_children(ViewFragment::from_nodes(vec![card("a"), card("b"), card("c")]));
+        .with_children(ViewFragment::from_nodes(vec![
+            card("a"),
+            card("b"),
+            card("c"),
+        ]));
     View::from_fragment(ViewFragment::from_nodes(vec![row]))
 }
 
@@ -68,7 +74,9 @@ fn external_client_inspects_the_live_tree_over_the_socket() {
         let mut endpoint = DevToolsEndpoint::new(auth, RuntimeBridge::new(source));
         endpoint.enable();
         let stream = listener.accept().expect("accept");
-        SocketTransport::new(stream).serve(&mut endpoint).expect("serve");
+        SocketTransport::new(stream)
+            .serve(&mut endpoint)
+            .expect("serve");
     });
 
     // 3. External client: handshake, then inspect the tree.
@@ -77,7 +85,10 @@ fn external_client_inspects_the_live_tree_over_the_socket() {
     assert!(client.handshake(&request).expect("handshake").is_accepted());
 
     let reply = client
-        .command(&CommandMessage::new(CommandId::new(1), CommandKind::Inspect(Inspectable::Tree)))
+        .command(&CommandMessage::new(
+            CommandId::new(1),
+            CommandKind::Inspect(Inspectable::Tree),
+        ))
         .expect("inspect io");
     let ClientBound::Snapshot(snapshot) = reply else {
         panic!("expected a tree snapshot, got {reply:?}");
@@ -86,17 +97,32 @@ fn external_client_inspects_the_live_tree_over_the_socket() {
     // The payload carries the REAL live tree: node count > 0 and the detail
     // names the middle card at its resolved absolute geometry.
     assert!(snapshot.payload.entity_count >= 4, "root + 3 cards");
-    assert!(snapshot.payload.detail.contains(".card.b"), "{}", snapshot.payload.detail);
-    assert!(snapshot.payload.detail.contains("180,20"), "{}", snapshot.payload.detail);
+    assert!(
+        snapshot.payload.detail.contains(".card.b"),
+        "{}",
+        snapshot.payload.detail
+    );
+    assert!(
+        snapshot.payload.detail.contains("180,20"),
+        "{}",
+        snapshot.payload.detail
+    );
 
     // Layout target carries just the geometry lines.
     let layout = client
-        .command(&CommandMessage::new(CommandId::new(2), CommandKind::Inspect(Inspectable::Layout)))
+        .command(&CommandMessage::new(
+            CommandId::new(2),
+            CommandKind::Inspect(Inspectable::Layout),
+        ))
         .expect("inspect io");
     let ClientBound::Snapshot(layout) = layout else {
         panic!("expected a layout snapshot");
     };
-    assert!(layout.payload.detail.contains("140×160"), "{}", layout.payload.detail);
+    assert!(
+        layout.payload.detail.contains("140×160"),
+        "{}",
+        layout.payload.detail
+    );
 
     drop(client);
     handle.join().expect("join");
@@ -111,7 +137,7 @@ fn external_client_injects_a_click_that_drives_the_runtime() {
     use obscur_kit::devtools_protocol::message::InjectedEvent;
     use obscur_kit::devtools_server::bridge::NullInspectSource;
     use obscur_kit::identity::InternedSymbol;
-    use obscur_kit::view::view::{ViewEventBinding, EVENT_CLICK};
+    use obscur_kit::view::view::{EVENT_CLICK, ViewEventBinding};
 
     const CMD: InternedSymbol = InternedSymbol::from_raw(0x0ABC);
 
@@ -139,7 +165,9 @@ fn external_client_injects_a_click_that_drives_the_runtime() {
         let mut endpoint = DevToolsEndpoint::new(auth, RuntimeBridge::new(NullInspectSource));
         endpoint.enable();
         let stream = listener.accept().expect("accept");
-        SocketTransport::new(stream).serve(&mut endpoint).expect("serve");
+        SocketTransport::new(stream)
+            .serve(&mut endpoint)
+            .expect("serve");
         endpoint
     });
 
@@ -155,7 +183,10 @@ fn external_client_injects_a_click_that_drives_the_runtime() {
     .enumerate()
     {
         client
-            .command(&CommandMessage::new(CommandId::new(id as u64 + 1), CommandKind::Inject(event)))
+            .command(&CommandMessage::new(
+                CommandId::new(id as u64 + 1),
+                CommandKind::Inject(event),
+            ))
             .expect("inject io");
     }
     drop(client);
@@ -163,12 +194,19 @@ fn external_client_injects_a_click_that_drives_the_runtime() {
     // Host drains the queued injections and applies them to the runtime.
     let mut endpoint = handle.join().expect("join");
     let injected = endpoint.drain_injections();
-    assert_eq!(injected.len(), 2, "both injected events reached the endpoint queue");
+    assert_eq!(
+        injected.len(),
+        2,
+        "both injected events reached the endpoint queue"
+    );
     for event in injected {
         apply_injected(&mut runtime, event);
     }
 
-    assert!(clicked.get(), "the externally injected click dispatched the button command");
+    assert!(
+        clicked.get(),
+        "the externally injected click dispatched the button command"
+    );
 }
 
 /// Every §7.6 inspect target the runtime can genuinely answer, from a live tree.
@@ -193,18 +231,36 @@ fn every_target_the_runtime_knows_reports_real_state_not_a_default() {
 
     // Accessibility: the semantic tree the runtime derives — the same one a
     // platform AX bridge consumes, so an inspector and a screen reader agree.
-    assert!(count(Inspectable::Accessibility) > 0, "the semantic tree is real");
+    assert!(
+        count(Inspectable::Accessibility) > 0,
+        "the semantic tree is real"
+    );
     // Scene: the display list this frame paints.
-    assert!(count(Inspectable::Scene) > 0, "the composed paint commands are real");
+    assert!(
+        count(Inspectable::Scene) > 0,
+        "the composed paint commands are real"
+    );
     // Caches / Resources / Animations are legitimately zero here — nothing was
     // loaded and nothing animates — so assert the payload DESCRIBES rather than
     // that it counts, which is what a default could never do.
     let described = |target| {
         obscur_kit::devtools_server::bridge::InspectSource::snapshot(&source, target).description
     };
-    assert!(described(Inspectable::Resources).contains("requested"), "{:?}", described(Inspectable::Resources));
-    assert!(described(Inspectable::Caches).contains("image"), "{:?}", described(Inspectable::Caches));
-    assert!(described(Inspectable::Animations).contains("timeline"), "{:?}", described(Inspectable::Animations));
+    assert!(
+        described(Inspectable::Resources).contains("requested"),
+        "{:?}",
+        described(Inspectable::Resources)
+    );
+    assert!(
+        described(Inspectable::Caches).contains("image"),
+        "{:?}",
+        described(Inspectable::Caches)
+    );
+    assert!(
+        described(Inspectable::Animations).contains("timeline"),
+        "{:?}",
+        described(Inspectable::Animations)
+    );
 }
 
 #[test]
@@ -219,8 +275,7 @@ fn event_flow_and_plugin_state_stay_honest_defaults() {
 
     let source = inspect_source_from(&runtime);
     for target in [Inspectable::EventFlow, Inspectable::PluginState] {
-        let payload =
-            obscur_kit::devtools_server::bridge::InspectSource::snapshot(&source, target);
+        let payload = obscur_kit::devtools_server::bridge::InspectSource::snapshot(&source, target);
         assert_eq!(payload.entity_count, 0, "{target:?} claims nothing");
     }
 }

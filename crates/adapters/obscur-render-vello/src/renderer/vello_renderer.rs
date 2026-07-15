@@ -7,9 +7,9 @@ use obscur_render::target::RenderTarget;
 
 use obscur_scene::command::{DisplayList, PaintCommand};
 
+use vello::Scene;
 use vello::kurbo::Affine;
 use vello::peniko::{Blob, FontData};
-use vello::Scene;
 
 use crate::conversion::{BlurLayer, SceneConverter, SceneSegment};
 use crate::effects::{ColorMatrix, GaussianBlur};
@@ -256,8 +256,10 @@ impl VelloRenderer {
                 .get_or_insert_with(|| GaussianBlur::new(&gpu_device));
             // Disjoint field borrow: the color-matrix pipeline is built only when a
             // color op is present (byte-identical no-color path otherwise).
-            let color_matrix = needs_color
-                .then(|| self.color_matrix.get_or_insert_with(|| ColorMatrix::new(&gpu_device)));
+            let color_matrix = needs_color.then(|| {
+                self.color_matrix
+                    .get_or_insert_with(|| ColorMatrix::new(&gpu_device))
+            });
             let mut encoder = gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("obscur-vello-filter"),
             });
@@ -306,7 +308,11 @@ impl VelloRenderer {
     ///
     /// [`RendererError::DeviceLost`] when no device is attached, or
     /// [`RendererError::Backend`] on a Vello rasterization failure.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::cast_precision_loss)]
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
     fn render_segmented(
         &mut self,
         display_list: &DisplayList,
@@ -395,7 +401,8 @@ impl VelloRenderer {
                         Vec::with_capacity(blurs.len());
                     for blur in blurs {
                         let margin = (blur.radius * 3.0).ceil().max(1.0);
-                        let s_width = (blur.bounds.size.width + 2.0 * margin).ceil().max(1.0) as u32;
+                        let s_width =
+                            (blur.bounds.size.width + 2.0 * margin).ceil().max(1.0) as u32;
                         let s_height =
                             (blur.bounds.size.height + 2.0 * margin).ceil().max(1.0) as u32;
                         let s_frame = VelloFrame::new_offscreen(&gpu_device, s_width, s_height);
@@ -431,15 +438,13 @@ impl VelloRenderer {
                                         .into_renderer_error()
                                 })?;
                         }
-                        let origin =
-                            (blur.bounds.origin.x - margin, blur.bounds.origin.y - margin);
+                        let origin = (blur.bounds.origin.x - margin, blur.bounds.origin.y - margin);
                         prepared.push((s_frame, origin, blur));
                     }
 
                     // Composite the segment (whole-frame) onto `T`, then its filter
                     // layers on top, in one encoder submitted after the Vello renders.
-                    let needs_color =
-                        prepared.iter().any(|(_, _, b)| b.color_matrix.is_some());
+                    let needs_color = prepared.iter().any(|(_, _, b)| b.color_matrix.is_some());
                     let gaussian = self.blur.as_ref().expect("blur pipelines built above");
                     // Build/reuse the color-matrix pipeline only when a color op is
                     // present (byte-identical no-color path otherwise).
@@ -702,12 +707,14 @@ impl VelloRenderer {
         match receiver.recv() {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
-                return Err(VelloRenderError::RenderFailed(error.to_string().into())
-                    .into_renderer_error());
+                return Err(
+                    VelloRenderError::RenderFailed(error.to_string().into()).into_renderer_error()
+                );
             }
             Err(error) => {
-                return Err(VelloRenderError::RenderFailed(error.to_string().into())
-                    .into_renderer_error());
+                return Err(
+                    VelloRenderError::RenderFailed(error.to_string().into()).into_renderer_error()
+                );
             }
         }
 
@@ -773,7 +780,10 @@ fn apply_filter_layer(
     // scratch may be translucent (e.g. `opacity()`), so it composites premultiplied;
     // the raw blur path stays `false` (byte-identical to the shipped opaque path).
     let (source_view, premultiply) = match &scratch {
-        Some(tex) => (tex.create_view(&wgpu::TextureViewDescriptor::default()), true),
+        Some(tex) => (
+            tex.create_view(&wgpu::TextureViewDescriptor::default()),
+            true,
+        ),
         None => (
             s_frame
                 .texture()
@@ -866,8 +876,9 @@ impl Renderer for VelloRenderer {
             // saturate/sepia/invert/hue-rotate/opacity) run through our owned wgpu
             // color-matrix pass — a real per-pixel affine, emulated (Vello 0.9 has
             // no native color filter).
-            "blur" | "shadow" | "drop-shadow" | "backdrop-filter" | "color-matrix"
-            | "filter" => SupportLevel::Emulated,
+            "blur" | "shadow" | "drop-shadow" | "backdrop-filter" | "color-matrix" | "filter" => {
+                SupportLevel::Emulated
+            }
             // Anything else has no primitive on Vello 0.9, so it is honestly
             // unavailable rather than a silent no-op (spec §5.2 explicit diagnostics).
             _ => SupportLevel::Unavailable,

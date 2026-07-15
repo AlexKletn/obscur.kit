@@ -348,14 +348,8 @@ mod tests {
         // Its segments are exactly the outer rounded rect's followed by the inner's.
         let outer_only = Path::rounded_rect(outer, CornerRadii::uniform(14.0));
         let inner_only = Path::rounded_rect(inner, CornerRadii::uniform(9.0));
-        assert_eq!(
-            &ring.segments()[..outer_only.len()],
-            outer_only.segments()
-        );
-        assert_eq!(
-            &ring.segments()[outer_only.len()..],
-            inner_only.segments()
-        );
+        assert_eq!(&ring.segments()[..outer_only.len()], outer_only.segments());
+        assert_eq!(&ring.segments()[outer_only.len()..], inner_only.segments());
     }
 
     #[test]

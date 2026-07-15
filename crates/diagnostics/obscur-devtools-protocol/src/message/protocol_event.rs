@@ -55,7 +55,11 @@ impl ProtocolEvent {
     /// Creates a protocol event.
     #[must_use]
     pub fn new(subscription: SubscriptionId, topic: Topic, kind: EventKind) -> Self {
-        Self { subscription, topic, kind }
+        Self {
+            subscription,
+            topic,
+            kind,
+        }
     }
 }
 

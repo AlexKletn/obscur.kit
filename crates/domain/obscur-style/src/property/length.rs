@@ -179,8 +179,14 @@ mod tests {
         // em apart, `ch` follows the FACE while `em` follows the size.
         let narrow = ctx().with_ch_width(8.0);
         let wide = ctx().with_ch_width(16.0);
-        assert_eq!(Length::Em(1.0).resolve_px(&narrow), Length::Em(1.0).resolve_px(&wide));
-        assert_ne!(Length::Ch(1.0).resolve_px(&narrow), Length::Ch(1.0).resolve_px(&wide));
+        assert_eq!(
+            Length::Em(1.0).resolve_px(&narrow),
+            Length::Em(1.0).resolve_px(&wide)
+        );
+        assert_ne!(
+            Length::Ch(1.0).resolve_px(&narrow),
+            Length::Ch(1.0).resolve_px(&wide)
+        );
     }
 
     #[test]

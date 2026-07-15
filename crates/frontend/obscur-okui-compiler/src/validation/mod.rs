@@ -19,6 +19,6 @@ mod contract_validator;
 pub use contract_validator::{ComponentContract, ContractValidator};
 mod expression_validator;
 pub use expression_validator::{
-    check_expression, ExpressionValidator, ValidationDiagnostic, FORBIDDEN_MESSAGE,
+    ExpressionValidator, FORBIDDEN_MESSAGE, ValidationDiagnostic, check_expression,
 };
 mod surface_bridge;

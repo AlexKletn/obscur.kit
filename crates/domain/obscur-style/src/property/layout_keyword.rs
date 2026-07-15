@@ -996,7 +996,10 @@ mod tests {
             text_overflow_from_name("ellipsis"),
             Some(TEXT_OVERFLOW_ELLIPSIS)
         );
-        assert_eq!(text_overflow_from_name("ELLIPSIS"), Some(TEXT_OVERFLOW_ELLIPSIS));
+        assert_eq!(
+            text_overflow_from_name("ELLIPSIS"),
+            Some(TEXT_OVERFLOW_ELLIPSIS)
+        );
         assert_eq!(text_overflow_from_name("fade"), None);
         // Round-trips through `name_of`.
         assert_eq!(name_of(TEXT_OVERFLOW_CLIP), Some("clip"));

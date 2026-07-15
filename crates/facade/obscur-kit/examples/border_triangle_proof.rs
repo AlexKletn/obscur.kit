@@ -54,16 +54,36 @@ fn main() {
     // the other three transparent → a triangle. Widths are [top, right, bottom, left].
     // ▽ down — border-top inked (box 60×40).
     let down = Rect::new(Point::new(40.0, 40.0), Size::new(60.0, 40.0));
-    emit_border(&mut builder, down, [40.0, 30.0, 0.0, 30.0], [ink, clear, clear, clear]);
+    emit_border(
+        &mut builder,
+        down,
+        [40.0, 30.0, 0.0, 30.0],
+        [ink, clear, clear, clear],
+    );
     // ▲ up — border-bottom inked (box 60×40).
     let up = Rect::new(Point::new(140.0, 40.0), Size::new(60.0, 40.0));
-    emit_border(&mut builder, up, [0.0, 30.0, 40.0, 30.0], [clear, clear, ink, clear]);
+    emit_border(
+        &mut builder,
+        up,
+        [0.0, 30.0, 40.0, 30.0],
+        [clear, clear, ink, clear],
+    );
     // ▷ right — border-left inked (box 40×60).
     let right = Rect::new(Point::new(250.0, 30.0), Size::new(40.0, 60.0));
-    emit_border(&mut builder, right, [30.0, 0.0, 30.0, 40.0], [clear, clear, clear, ink]);
+    emit_border(
+        &mut builder,
+        right,
+        [30.0, 0.0, 30.0, 40.0],
+        [clear, clear, clear, ink],
+    );
     // ◁ left — border-right inked (box 40×60).
     let left = Rect::new(Point::new(340.0, 30.0), Size::new(40.0, 60.0));
-    emit_border(&mut builder, left, [30.0, 40.0, 30.0, 0.0], [clear, ink, clear, clear]);
+    emit_border(
+        &mut builder,
+        left,
+        [30.0, 40.0, 30.0, 0.0],
+        [clear, ink, clear, clear],
+    );
 
     // A normal 4-colour bordered box: an 8px border with a distinct colour per
     // side, so the 45° mitered corners are visible. Light fill behind it.
@@ -73,7 +93,12 @@ fn main() {
     let green = Some(Color::rgba(0.20, 0.60, 0.25, 1.0));
     let blue = Some(Color::rgba(0.20, 0.40, 0.80, 1.0));
     let orange = Some(Color::rgba(0.90, 0.55, 0.10, 1.0));
-    emit_border(&mut builder, box_rect, [8.0, 8.0, 8.0, 8.0], [red, green, blue, orange]);
+    emit_border(
+        &mut builder,
+        box_rect,
+        [8.0, 8.0, 8.0, 8.0],
+        [red, green, blue, orange],
+    );
 
     let list = builder.build();
     println!(
@@ -153,13 +178,20 @@ fn render(list: DisplayList) -> tiny_skia::Pixmap {
     let submission = FrameSubmission::new(frame);
     let target = RenderTarget::bitmap(BitmapTarget::new(VIEWPORT));
     let mut renderer = CpuRenderer::new(RendererId::from_raw(1));
-    renderer.render(&submission, &target).expect("cpu render succeeds");
+    renderer
+        .render(&submission, &target)
+        .expect("cpu render succeeds");
     renderer.pixmap().expect("a rasterized frame").clone()
 }
 
 /// Asserts the arrow is INKED at `inside` (its centroid) yet EMPTY (white) at
 /// `outside` (a corner of its bounding box the triangle does not cover).
-fn verify_triangle(pixmap: &tiny_skia::Pixmap, name: &str, inside: (u32, u32), outside: (u32, u32)) {
+fn verify_triangle(
+    pixmap: &tiny_skia::Pixmap,
+    name: &str,
+    inside: (u32, u32),
+    outside: (u32, u32),
+) {
     let inked = |(x, y): (u32, u32)| {
         pixmap
             .pixel(x, y)
@@ -170,7 +202,10 @@ fn verify_triangle(pixmap: &tiny_skia::Pixmap, name: &str, inside: (u32, u32), o
     println!(
         "[verify] {name}: centroid {inside:?} inked={inside_inked}, corner {outside:?} inked={outside_inked}"
     );
-    assert!(inside_inked, "{name}: expected the triangle centroid to be filled");
+    assert!(
+        inside_inked,
+        "{name}: expected the triangle centroid to be filled"
+    );
     assert!(
         !outside_inked,
         "{name}: expected the outside corner to be empty (a triangle, not a rect)"

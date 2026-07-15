@@ -642,7 +642,10 @@ mod tests {
         // `disabled` is reserved: a low fixed constant, not a hash at all.
         let disabled = name_symbol("disabled");
         assert_eq!(disabled, 0x0000_0005, "reserved DISABLED symbol");
-        assert!(generated.contains(&format!("from_raw ({disabled})")), "{generated}");
+        assert!(
+            generated.contains(&format!("from_raw ({disabled})")),
+            "{generated}"
+        );
         assert!(
             !generated.contains(&format!("from_raw ({})", fnv32("disabled"))),
             "the bare hash must not appear: {generated}"
@@ -653,7 +656,10 @@ mod tests {
         let placeholder = name_symbol("placeholder");
         assert_eq!(placeholder, fnv32("placeholder") | 0x8000_0000);
         assert_ne!(placeholder, fnv32("placeholder"));
-        assert!(generated.contains(&format!("from_raw ({placeholder})")), "{generated}");
+        assert!(
+            generated.contains(&format!("from_raw ({placeholder})")),
+            "{generated}"
+        );
     }
 
     #[test]
@@ -666,7 +672,10 @@ mod tests {
         });
         // `click` is a reserved event symbol, not a hash.
         let click = event_name_symbol("click");
-        assert!(generated.contains(&format!("from_raw ({click})")), "{generated}");
+        assert!(
+            generated.contains(&format!("from_raw ({click})")),
+            "{generated}"
+        );
     }
 
     #[test]

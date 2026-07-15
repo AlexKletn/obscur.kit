@@ -12,7 +12,11 @@
 //! [`PaintCommand::DrawImage`] and that the CPU (tiny-skia) backend paints the
 //! image's pixels inside the element box (not the transparent background).
 #![forbid(unsafe_code)]
-#![cfg(all(feature = "resource-fs", feature = "resource-decode", feature = "render-cpu"))]
+#![cfg(all(
+    feature = "resource-fs",
+    feature = "resource-decode",
+    feature = "render-cpu"
+))]
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -30,7 +34,7 @@ use obscur_kit::render_cpu::renderer::CpuRenderer;
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::scene::command::PaintCommand;
 use obscur_kit::style::matching::Stylesheet;
-use obscur_kit::view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue, CLASS};
+use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
 /// The fixed viewport every test renders under, so geometry is deterministic.
 const VIEWPORT: f32 = 64.0;
@@ -97,7 +101,11 @@ fn url_background_image_reaches_paint_and_the_cpu_backend() {
         .iter()
         .filter(|c| matches!(c, PaintCommand::DrawImage { .. }))
         .collect();
-    assert_eq!(draw_images.len(), 1, "the loaded+decoded image paints one DrawImage");
+    assert_eq!(
+        draw_images.len(),
+        1,
+        "the loaded+decoded image paints one DrawImage"
+    );
     let PaintCommand::DrawImage {
         tile,
         region,
@@ -133,9 +141,21 @@ fn url_background_image_reaches_paint_and_the_cpu_backend() {
     // A pixel at the box center is the image's RED, not the blue background — proof
     // the image both loaded and painted over the color.
     let px = pixmap.pixel(20, 15).expect("pixel inside the box");
-    assert!(px.red() > 200, "center pixel is red (image), got r={}", px.red());
-    assert!(px.blue() < 60, "center pixel is not blue (background), got b={}", px.blue());
-    assert!(px.alpha() > 200, "center pixel is opaque, got a={}", px.alpha());
+    assert!(
+        px.red() > 200,
+        "center pixel is red (image), got r={}",
+        px.red()
+    );
+    assert!(
+        px.blue() < 60,
+        "center pixel is not blue (background), got b={}",
+        px.blue()
+    );
+    assert!(
+        px.alpha() > 200,
+        "center pixel is opaque, got a={}",
+        px.alpha()
+    );
 }
 
 #[test]
@@ -166,7 +186,11 @@ fn background_size_position_repeat_flow_through_to_paint() {
         .iter()
         .filter(|c| matches!(c, PaintCommand::DrawImage { .. }))
         .collect();
-    assert_eq!(draw_images.len(), 1, "one DrawImage for the single background layer");
+    assert_eq!(
+        draw_images.len(),
+        1,
+        "one DrawImage for the single background layer"
+    );
     let PaintCommand::DrawImage {
         tile,
         region,
@@ -206,8 +230,16 @@ fn background_size_position_repeat_flow_through_to_paint() {
     let pixmap = renderer.pixmap().expect("a rasterized frame");
     // A pixel inside the centered 30×30 tile is red (image), not blue.
     let px = pixmap.pixel(20, 15).expect("pixel inside the tile");
-    assert!(px.red() > 200, "tile pixel is red (image), got r={}", px.red());
-    assert!(px.blue() < 60, "tile pixel is not blue (background), got b={}", px.blue());
+    assert!(
+        px.red() > 200,
+        "tile pixel is red (image), got r={}",
+        px.red()
+    );
+    assert!(
+        px.blue() < 60,
+        "tile pixel is not blue (background), got b={}",
+        px.blue()
+    );
 }
 
 #[test]
@@ -215,7 +247,8 @@ fn missing_url_asset_paints_no_image_and_does_not_panic() {
     // The sandbox root exists but the referenced file does not: the load fails, the
     // image caches nothing, and the frame paints no DrawImage (honest skip).
     let dir = temp_asset_dir();
-    let sheet = compile(r#".img { background-image: url("absent.png"); width: 40px; height: 30px }"#);
+    let sheet =
+        compile(r#".img { background-image: url("absent.png"); width: 40px; height: 30px }"#);
 
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
     KitBootstrap::new().install_image_resources(&mut runtime, &dir);

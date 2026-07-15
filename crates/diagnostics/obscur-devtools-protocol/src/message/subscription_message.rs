@@ -61,13 +61,21 @@ impl Subscription {
     /// Creates a granted subscription record.
     #[must_use]
     pub const fn granted(id: SubscriptionId, topic: Topic) -> Self {
-        Self { id, topic, granted: true }
+        Self {
+            id,
+            topic,
+            granted: true,
+        }
     }
 
     /// Creates a denied subscription record.
     #[must_use]
     pub const fn denied(id: SubscriptionId, topic: Topic) -> Self {
-        Self { id, topic, granted: false }
+        Self {
+            id,
+            topic,
+            granted: false,
+        }
     }
 }
 
@@ -84,7 +92,10 @@ impl SubscribeResponse {
     /// Creates a subscribe response.
     #[must_use]
     pub const fn new(command: CommandId, subscription: Subscription) -> Self {
-        Self { command, subscription }
+        Self {
+            command,
+            subscription,
+        }
     }
 }
 
