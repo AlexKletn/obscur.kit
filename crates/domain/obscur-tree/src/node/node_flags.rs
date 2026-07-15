@@ -22,6 +22,15 @@ impl NodeFlags {
     pub const LAYER_ROOT: Self = Self(1 << 2);
     /// System-generated node, hidden from the component tree (spec §4.16).
     pub const SYNTHETIC: Self = Self(1 << 3);
+    /// Hosts a mounted component: this node's children are produced by that
+    /// component's `render`, **not** by the desired tree (spec §2.1, §2.2).
+    ///
+    /// Reconciliation therefore does not recurse into this node's children — the
+    /// desired node names the component and carries its props, but says nothing
+    /// about what it renders, so descending would delete the component's output
+    /// on every frame. The runtime sets this when it mounts an instance and
+    /// clears it when it unmounts one.
+    pub const COMPONENT_HOST: Self = Self(1 << 4);
 
     /// Returns an empty flag set.
     #[must_use]

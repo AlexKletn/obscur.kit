@@ -159,9 +159,11 @@ impl FramePipeline {
     /// call; the runtime ([`UiRuntime`](crate::UiRuntime)) owns a
     /// persistent enactor whose version advances across frames.
     fn commit_reconcile(&self, tree: &mut RetainedTree, desired: &View) -> bool {
-        let commit = ReconcileEnactor::new()
+        let (commit, _plan) = ReconcileEnactor::new()
             .commit_root(&self.reconciler, tree, desired)
             .expect("a root reconcile is a single, structurally-valid ReplaceRoot");
+        // This pipeline drives no component instances, so the structural deltas
+        // are not needed here — only whether anything changed.
         !commit.is_empty()
     }
 

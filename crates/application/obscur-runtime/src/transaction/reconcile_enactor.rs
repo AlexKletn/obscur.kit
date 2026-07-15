@@ -2,7 +2,7 @@
 //! transaction commit boundary (spec §3.2, §3.4 phase 4).
 
 use obscur_identity::VersionStamp;
-use obscur_tree::reconciliation::Reconciler;
+use obscur_tree::reconciliation::{ReconciliationPlan, Reconciler};
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
 
@@ -80,6 +80,13 @@ impl ReconcileEnactor {
     /// frame's `reconciled` flag from [`TransactionCommit::is_empty`], matching
     /// the previous `!plan.is_empty()` semantics precisely.
     ///
+    /// The underlying [`ReconciliationPlan`] is returned alongside it, because the
+    /// commit records the *transaction* (one normalized `ReplaceRoot`) while the
+    /// plan records the *structural deltas* — which nodes were inserted, updated,
+    /// moved or removed. A caller that maintains per-node state (component
+    /// instances) needs those deltas; a tree walk would have to rediscover what
+    /// the plan already states.
+    ///
     /// # Errors
     ///
     /// Returns the [`TransactionError`] from validation if the staged batch is
@@ -92,7 +99,7 @@ impl ReconcileEnactor {
         reconciler: &Reconciler,
         tree: &mut RetainedTree,
         desired: &View,
-    ) -> Result<TransactionCommit, TransactionError> {
+    ) -> Result<(TransactionCommit, ReconciliationPlan), TransactionError> {
         // 1. Stage the normalized intent: a whole-tree root reconcile.
         let mut staged = UiTransaction::new();
         staged.push(UiOperation::ReplaceRoot);
@@ -108,12 +115,12 @@ impl ReconcileEnactor {
         //    the version and carries operations; an idempotent pass commits
         //    empty and leaves the stamp untouched.
         if plan.is_empty() {
-            return Ok(TransactionCommit::new(Vec::new(), self.version));
+            return Ok((TransactionCommit::new(Vec::new(), self.version), plan));
         }
         self.version = self.version.bump();
-        Ok(TransactionCommit::new(
-            staged.into_operations(),
-            self.version,
+        Ok((
+            TransactionCommit::new(staged.into_operations(), self.version),
+            plan,
         ))
     }
 }
@@ -142,7 +149,7 @@ mod tests {
 
         // The first frame populates the tree: a non-empty commit is produced and
         // the version stamp advances — the mutation flowed through the commit.
-        let commit = enactor
+        let (commit, _plan) = enactor
             .commit_root(&reconciler, &mut tree, &view)
             .expect("a single ReplaceRoot is structurally valid");
         assert!(!commit.is_empty(), "a tree change produced a real commit");
@@ -168,7 +175,7 @@ mod tests {
 
         // Re-committing the same view is a no-op reconcile: an empty commit, and
         // the version stamp does not advance.
-        let second = enactor
+        let (second, _plan) = enactor
             .commit_root(&reconciler, &mut tree, &view)
             .expect("still structurally valid");
         assert!(second.is_empty(), "an idempotent reconcile commits empty");
@@ -188,7 +195,7 @@ mod tests {
         let direct_plan = reconciler.reconcile_root(&mut direct, &view);
 
         let mut enacted = RetainedTree::new();
-        let commit = ReconcileEnactor::new()
+        let (commit, _plan) = ReconcileEnactor::new()
             .commit_root(&reconciler, &mut enacted, &view)
             .unwrap();
 

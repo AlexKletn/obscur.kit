@@ -45,6 +45,7 @@ use obscur_text::selection::TextSelection;
 use obscur_text::shaping::{TextDirection, TextItemizer, TextShaper};
 use obscur_tree::node::NodeKind;
 use obscur_tree::reconciliation::Reconciler;
+use obscur_view::component::{ComponentRegistration, RegistryError};
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::{View, EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT};
 
@@ -61,6 +62,17 @@ use crate::orchestration::{
 };
 use crate::orchestration::{alignment_for, direction_for, white_space_for};
 use crate::scheduler::{BackpressureDecision, FrameScheduler};
+use crate::component::ComponentStore;
+
+/// How many times [`UiRuntime::render_components`] re-renders newly appeared
+/// components within one frame before giving up.
+///
+/// A component's output can contain further component elements, so rendering is a
+/// fixpoint. This bound is not a design limit on nesting depth — real trees nest
+/// far shallower — but a backstop: a component that renders itself, directly or
+/// mutually, would otherwise spin the frame forever. Exceeding it truncates that
+/// frame's tree instead of hanging, and the `component.rendered` counter shows it.
+const MAX_COMPONENT_RENDER_PASSES: usize = 32;
 use crate::transaction::ReconcileEnactor;
 
 /// The maximum gap, in microseconds, between two presses for them to count as a
@@ -400,6 +412,14 @@ pub struct UiRuntime {
     /// [`run_frame`](Self::run_frame)/[`run_due_frame`](Self::run_due_frame)
     /// callers that pass a `&View` directly are entirely unaffected.
     root_view: Option<Box<dyn FnMut() -> View>>,
+    /// The registered component kinds and one live instance per component-backed
+    /// node (spec §2.1, §2.14).
+    ///
+    /// Empty and inert until a host calls
+    /// [`register_component`](Self::register_component): with no registrations
+    /// nothing mounts, so a host that drives the tree purely from its root view
+    /// builder pays nothing for this.
+    components: ComponentStore,
     /// The stylesheets the reactive frame path matches against the rebuilt view
     /// (installed via [`set_stylesheets`](Self::set_stylesheets)), parallel to the
     /// held [`root_view`](Self::root_view). Empty by default; the explicit
@@ -498,6 +518,7 @@ impl UiRuntime {
             background_work: 0,
             serviced_background: 0,
             root_view: None,
+            components: ComponentStore::new(),
             stylesheets: Vec::new(),
             default_stylesheet: None,
             resource_loader: None,
@@ -899,6 +920,116 @@ impl UiRuntime {
         Some(self.run_frame(ctx, desired, sheets))
     }
 
+    /// Renders every mounted component and reconciles its output into that
+    /// node's children, returning whether any of those sub-reconciles changed the
+    /// tree.
+    ///
+    /// A component's props are decoded from the node's **retained** properties —
+    /// the desired tree is already consumed by the time this runs, which is why
+    /// the reconciler retains them.
+    ///
+    /// # Why a fixpoint loop
+    ///
+    /// A component's output may itself contain component-backed elements, which
+    /// only exist (and so only mount) once that output is reconciled. Each pass
+    /// therefore renders the components that appeared in the previous one, until a
+    /// pass produces no new instances. [`MAX_COMPONENT_RENDER_PASSES`] bounds it,
+    /// so a component that (directly or mutually) renders itself forever degrades
+    /// into a truncated tree plus a counter, rather than hanging the frame.
+    ///
+    /// # A component whose props do not decode
+    ///
+    /// It is not rendered and its existing children are left alone — an authored
+    /// mistake must not silently delete a subtree. The failure is counted as
+    /// `component.props_errors` rather than swallowed.
+    fn render_components(&mut self) -> bool {
+        // The common case by far: no host registrations, nothing mounted.
+        if self.components.is_empty() {
+            return false;
+        }
+        let mut pending: Vec<NodeId> = self.components.nodes().collect();
+        let mut changed = false;
+        let mut errors: u64 = 0;
+        let mut rendered: u64 = 0;
+
+        for _ in 0..MAX_COMPONENT_RENDER_PASSES {
+            if pending.is_empty() {
+                break;
+            }
+            let mut next = Vec::new();
+            for node in std::mem::take(&mut pending) {
+                // The node may have been removed by an earlier pass in this loop.
+                let Some(props) = self.tree.get(node).map(|n| n.props().to_vec()) else {
+                    continue;
+                };
+                let Some(mounted) = self.components.get_mut(node) else {
+                    continue;
+                };
+                let Ok(view) = mounted.render(&props) else {
+                    errors += 1;
+                    continue;
+                };
+                // The render serviced any request the component made *before* it;
+                // a request raised during this render is honoured by the next
+                // frame, not by looping here.
+                mounted.clear_needs_update();
+                rendered += 1;
+
+                let plan = self.reconciler.reconcile(&mut self.tree, node, view.root());
+                changed |= !plan.is_empty();
+                self.components.sync(&mut self.tree, &plan);
+                // Only newly inserted nodes can have minted new instances.
+                next.extend(
+                    plan.iter()
+                        .filter(|op| op.is_insert())
+                        .map(|op| op.id())
+                        .filter(|id| self.components.get(*id).is_some())
+                        .collect::<Vec<_>>(),
+                );
+            }
+            pending = next;
+        }
+
+        let mut counter = PerformanceCounter::new(DiagnosticSubsystem::Tree, "component.rendered");
+        counter.add(rendered);
+        self.telemetry.record_counter(&counter);
+        if errors > 0 {
+            let mut counter =
+                PerformanceCounter::new(DiagnosticSubsystem::Tree, "component.props_errors");
+            counter.add(errors);
+            self.telemetry.record_counter(&counter);
+        }
+        changed
+    }
+
+    /// Registers a component kind so nodes naming its
+    /// [`ComponentId`](obscur_identity::ComponentId) instantiate it (spec §2.14).
+    ///
+    /// Static registration is the default. Once registered, every reconciled node
+    /// whose element names this kind mounts an instance — which is rendered with
+    /// its typed props decoded from the node's authored properties, and whose
+    /// local state lives for as long as the node does.
+    ///
+    /// Registering nothing keeps the whole component path inert, so a host that
+    /// drives its tree from a root view builder alone is unaffected.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RegistryError`](obscur_view::component::RegistryError) when a
+    /// kind is already registered under the same id.
+    pub fn register_component(
+        &mut self,
+        registration: ComponentRegistration,
+    ) -> Result<(), RegistryError> {
+        self.components.register(registration)
+    }
+
+    /// The number of component instances currently mounted.
+    #[must_use]
+    pub fn mounted_component_count(&self) -> usize {
+        self.components.len()
+    }
+
     /// Installs the runtime-held **view builder** that closes the reactive
     /// re-render loop (spec §3.1), replacing any previously installed builder.
     ///
@@ -1088,11 +1219,20 @@ impl UiRuntime {
         //    whether the commit carried any operation — identical to the previous
         //    `!plan.is_empty()`.
         let reconciled = if plan.reconcile() {
-            let commit = self
+            let (commit, reconcile_plan) = self
                 .enactor
                 .commit_root(&self.reconciler, &mut self.tree, desired)
                 .expect("a root reconcile is a single, structurally-valid ReplaceRoot");
             let changed = !commit.is_empty();
+            // 1b. Mount an instance for every inserted component-backed node and
+            //     unmount every removed one, from the plan's structural deltas.
+            //     A host that registered no component kinds pays nothing here.
+            self.components.sync(&mut self.tree, &reconcile_plan);
+            // 1c. Render every mounted component and reconcile its output into
+            //     its own children, so a component-backed node's subtree exists
+            //     before style/layout read the tree.
+            let rendered = self.render_components();
+            let changed = changed || rendered;
             // Telemetry: mark the reconcile phase and count the resulting nodes,
             // budgeting the retained-tree size (spec §7.9).
             let nodes = self.tree.len() as u64;
@@ -4361,6 +4501,229 @@ mod tests {
     fn counter_child(runtime: &UiRuntime) -> NodeId {
         let root = runtime.tree().root().expect("tree has a root after a frame");
         runtime.tree().get(root).unwrap().children().to_vec()[0]
+    }
+
+    // ---- runtime-driven components (§2.1, §2.14, §3.1) ----------------------
+
+    mod components {
+        use super::{runtime_id, viewport};
+        use crate::runtime::UiRuntime;
+        use obscur_identity::{ComponentId, InternedSymbol, NodeId};
+        use obscur_view::component::{
+            Component, ComponentContext, ComponentContract, ComponentFactory, ComponentInstance,
+            ComponentRegistration, ComponentVersion, ErasedComponent, FromProps, InstanceId,
+            PropsError, decode_required,
+        };
+        use obscur_view::state::LocalState;
+        use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
+
+        const COUNTER: ComponentId = ComponentId::from_raw(0xC0FFEE);
+
+        /// A non-reserved prop symbol, resolved the way the view tree resolves it.
+        fn step() -> InternedSymbol {
+            InternedSymbol::from_raw(0x8000_0021)
+        }
+
+        struct CounterProps {
+            step: u32,
+        }
+
+        impl FromProps for CounterProps {
+            fn from_props(props: &[ViewProperty]) -> Result<Self, PropsError> {
+                Ok(Self {
+                    step: decode_required(props, step())?,
+                })
+            }
+        }
+
+        /// Adds `step` to its own local state on every render and emits the total
+        /// as a text child — so the text reveals both the decoded prop and whether
+        /// the state survived.
+        struct Counter {
+            total: LocalState<u32>,
+        }
+
+        impl Component for Counter {
+            type Props = CounterProps;
+            fn render(&mut self, _: &mut ComponentContext<'_>, props: &Self::Props) -> View {
+                self.total.set(*self.total.get() + props.step);
+                View::from_fragment(ViewFragment::from_nodes(vec![ViewNode::text(
+                    self.total.get().to_string(),
+                )]))
+            }
+        }
+
+        #[derive(Debug)]
+        struct CounterFactory;
+
+        impl ComponentFactory for CounterFactory {
+            fn component_id(&self) -> ComponentId {
+                COUNTER
+            }
+            fn contract(&self) -> ComponentContract {
+                ComponentContract::new(COUNTER)
+            }
+            fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
+                ComponentInstance::new(instance, COUNTER)
+            }
+            fn create_component(&self) -> Box<dyn ErasedComponent> {
+                Box::new(Counter {
+                    total: LocalState::new(0),
+                })
+            }
+        }
+
+        fn runtime_with_counter() -> UiRuntime {
+            let mut runtime = UiRuntime::new(runtime_id(), viewport());
+            runtime
+                .register_component(ComponentRegistration::new(
+                    Box::new(CounterFactory),
+                    ComponentVersion::INITIAL,
+                ))
+                .expect("first registration");
+            runtime
+        }
+
+        /// A view with one `<Counter step=N/>` element.
+        fn counter_view(step_by: i64) -> View {
+            View::from_fragment(ViewFragment::from_nodes(vec![
+                ViewNode::element(COUNTER)
+                    .with_prop(ViewProperty::new(step(), ViewValue::Int(step_by))),
+            ]))
+        }
+
+        /// The text the component rendered underneath its own node.
+        fn rendered_text(runtime: &UiRuntime) -> String {
+            let root = runtime.tree().root().expect("a root");
+            let node = runtime.tree().get(root).expect("live").children()[0];
+            let child = runtime.tree().get(node).expect("live").children()[0];
+            match runtime.tree().get(child).expect("live").kind() {
+                obscur_tree::node::NodeKind::Text { content } => content.to_string(),
+                other => panic!("expected the component's text output, got {other:?}"),
+            }
+        }
+
+        /// The node the component instance is mounted on.
+        fn component_node(runtime: &UiRuntime) -> NodeId {
+            let root = runtime.tree().root().expect("a root");
+            runtime.tree().get(root).expect("live").children()[0]
+        }
+
+        #[test]
+        fn the_runtime_mounts_and_renders_a_registered_component() {
+            // THE vertical slice: a node naming a registered kind mounts an
+            // instance, its typed props are decoded from the node's authored
+            // properties, and its rendered output becomes that node's children.
+            let mut runtime = runtime_with_counter();
+            runtime.render_now(&counter_view(2), &[]);
+
+            assert_eq!(runtime.mounted_component_count(), 1);
+            assert_eq!(rendered_text(&runtime), "2", "the decoded step reached render");
+        }
+
+        #[test]
+        fn local_state_survives_across_frames_on_a_stable_node() {
+            // The node is reused across frames (same kind, same position), so the
+            // instance — and the LocalState it owns — is never re-created.
+            let mut runtime = runtime_with_counter();
+            runtime.render_now(&counter_view(2), &[]);
+            let node = component_node(&runtime);
+            assert_eq!(rendered_text(&runtime), "2");
+
+            runtime.render_now(&counter_view(3), &[]);
+            assert_eq!(component_node(&runtime), node, "the node was reused");
+            assert_eq!(runtime.mounted_component_count(), 1, "no remount");
+            assert_eq!(rendered_text(&runtime), "5", "2 + 3: the state persisted");
+        }
+
+        #[test]
+        fn the_root_reconcile_does_not_destroy_the_components_output() {
+            // The desired node `<Counter step=N/>` has NO children — the component
+            // supplies them. Without COMPONENT_HOST, the root reconcile would
+            // treat the desired (empty) children as authoritative and delete the
+            // component's output every frame, re-creating it afterwards with fresh
+            // NodeIds — which would also unmount and remount any nested component,
+            // losing its local state. Identity of the output node proves it stands.
+            let mut runtime = runtime_with_counter();
+            runtime.render_now(&counter_view(2), &[]);
+
+            let host = component_node(&runtime);
+            assert!(
+                runtime
+                    .tree()
+                    .get(host)
+                    .expect("live")
+                    .flags()
+                    .contains(obscur_tree::node::NodeFlags::COMPONENT_HOST),
+                "mounting flags the node as a component host"
+            );
+            let output = runtime.tree().get(host).expect("live").children()[0];
+
+            runtime.render_now(&counter_view(3), &[]);
+            assert_eq!(
+                runtime.tree().get(host).expect("live").children()[0],
+                output,
+                "the component's output node survived the root reconcile"
+            );
+        }
+
+        #[test]
+        fn unmounting_clears_the_component_host_flag() {
+            // Otherwise a node whose component was unmounted would stay opaque to
+            // reconciliation forever.
+            let mut runtime = runtime_with_counter();
+            runtime.render_now(&counter_view(2), &[]);
+            let host = component_node(&runtime);
+            assert!(runtime.tree().get(host).is_some());
+
+            runtime.render_now(&View::empty(), &[]);
+            // The node is gone with its instance; nothing is left flagged.
+            assert_eq!(runtime.mounted_component_count(), 0);
+            assert!(runtime.tree().get(host).is_none(), "the host node is gone");
+        }
+
+        #[test]
+        fn removing_the_node_unmounts_the_instance() {
+            let mut runtime = runtime_with_counter();
+            runtime.render_now(&counter_view(2), &[]);
+            assert_eq!(runtime.mounted_component_count(), 1);
+
+            runtime.render_now(&View::empty(), &[]);
+            assert_eq!(runtime.mounted_component_count(), 0);
+        }
+
+        #[test]
+        fn a_host_that_registers_nothing_is_unaffected() {
+            // The same view, with no registration: the element is a plain node,
+            // nothing mounts, and it renders no children of its own.
+            let mut runtime = UiRuntime::new(runtime_id(), viewport());
+            runtime.render_now(&counter_view(2), &[]);
+            assert_eq!(runtime.mounted_component_count(), 0);
+            let node = component_node(&runtime);
+            assert!(
+                runtime.tree().get(node).expect("live").children().is_empty(),
+                "an unregistered element gets no component output"
+            );
+        }
+
+        #[test]
+        fn undecodable_props_leave_the_subtree_alone_rather_than_deleting_it() {
+            // First a good frame, so the component has output.
+            let mut runtime = runtime_with_counter();
+            runtime.render_now(&counter_view(2), &[]);
+            assert_eq!(rendered_text(&runtime), "2");
+
+            // Now the author writes `step="2"` — text where a number is wanted.
+            let bad = View::from_fragment(ViewFragment::from_nodes(vec![
+                ViewNode::element(COUNTER)
+                    .with_prop(ViewProperty::new(step(), ViewValue::Text("2".into()))),
+            ]));
+            runtime.render_now(&bad, &[]);
+            // The instance is still mounted and its previous output still stands:
+            // an authored mistake must not silently delete a subtree.
+            assert_eq!(runtime.mounted_component_count(), 1);
+            assert_eq!(rendered_text(&runtime), "2");
+        }
     }
 
     #[test]

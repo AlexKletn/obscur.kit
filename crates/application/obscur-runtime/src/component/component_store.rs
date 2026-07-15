@@ -1,7 +1,7 @@
 //! `ComponentStore`: the runtime's per-node component instances.
 
 use obscur_identity::{ComponentId, NodeId};
-use obscur_tree::node::NodeKind;
+use obscur_tree::node::{NodeFlags, NodeKind};
 use obscur_tree::reconciliation::ReconciliationPlan;
 use obscur_tree::tree::{RetainedTree, SecondaryMap};
 use obscur_view::component::{
@@ -104,12 +104,12 @@ impl ComponentStore {
     /// `Update` and `Move` ops are intentionally ignored: they change a node's
     /// content or position, not its existence, so the instance (and its local
     /// state) rides along untouched. That is the whole point of keyed identity.
-    pub fn sync(&mut self, tree: &RetainedTree, plan: &ReconciliationPlan) {
+    pub fn sync(&mut self, tree: &mut RetainedTree, plan: &ReconciliationPlan) {
         for op in plan {
             if op.is_insert() {
                 self.mount(tree, op.id());
             } else if op.is_remove() {
-                self.unmount(op.id());
+                self.unmount(tree, op.id());
             }
         }
     }
@@ -119,7 +119,7 @@ impl ComponentStore {
     /// A node whose kind is unregistered — a plain container, a widget tag, a
     /// text leaf — simply gets no instance, which is what leaves a
     /// component-free host paying nothing.
-    fn mount(&mut self, tree: &RetainedTree, node: NodeId) {
+    fn mount(&mut self, tree: &mut RetainedTree, node: NodeId) {
         let Some(component) = tree.get(node).and_then(|n| component_id_of(n.kind())) else {
             return;
         };
@@ -134,15 +134,27 @@ impl ComponentStore {
         );
         mounted.mount();
         self.mounted.insert(node, mounted);
+        // Tell reconciliation that this node's children now belong to the
+        // component: without the flag, the next root reconcile would see the
+        // desired node's (empty) children and delete the component's output.
+        if let Some(retained) = tree.get_mut(node) {
+            retained.flags.insert(NodeFlags::COMPONENT_HOST);
+        }
     }
 
     /// Unmounts and drops the instance at `node`, if one is mounted.
     ///
     /// The hook runs while the component's state is still readable; dropping the
     /// value afterwards releases that state and the scoped subscriptions.
-    fn unmount(&mut self, node: NodeId) {
+    fn unmount(&mut self, tree: &mut RetainedTree, node: NodeId) {
         if let Some(mut mounted) = self.mounted.remove(node) {
             mounted.unmount();
+        }
+        // The node is usually already gone (a Remove op means the reconciler
+        // dropped it), but clear the flag defensively for any caller that
+        // unmounts a still-live node.
+        if let Some(retained) = tree.get_mut(node) {
+            retained.flags.remove(NodeFlags::COMPONENT_HOST);
         }
     }
 }

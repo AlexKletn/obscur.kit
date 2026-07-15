@@ -7,7 +7,7 @@ use obscur_view::view::{
     StyleAttributes, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
 };
 
-use crate::node::{LogicalParent, NodeKind, VisualParent};
+use crate::node::{LogicalParent, NodeFlags, NodeKind, VisualParent};
 use crate::tree::{RetainedTree, Subtree};
 
 use super::{ChildMatcher, IdentityMatch, ReconciliationOp, ReconciliationPlan};
@@ -165,7 +165,18 @@ impl Reconciler {
 
             // Recurse into element children (created nodes start empty, so all
             // of their desired children become inserts).
-            if let ViewNode::Element { children, .. } = node {
+            //
+            // A COMPONENT_HOST is the exception: its children belong to the
+            // mounted component's `render`, not to the desired tree. The desired
+            // node names the component and carries its props but says nothing
+            // about its output, so recursing here would delete that output every
+            // frame — and take any nested component instance (and its local
+            // state) with it. Authored children under a component are §2.12 slot
+            // content, which is not lowered yet; they are ignored rather than
+            // mistaken for the component's own output.
+            if let ViewNode::Element { children, .. } = node
+                && !hosts_component(tree, id)
+            {
                 self.reconcile_into(tree, id, children.nodes(), plan);
             }
 
@@ -205,6 +216,13 @@ impl Reconciler {
             }
         }
     }
+}
+
+/// Whether `id` is a live node flagged as hosting a mounted component, whose
+/// children are therefore owned by that component rather than by the desired tree.
+fn hosts_component(tree: &RetainedTree, id: NodeId) -> bool {
+    tree.get(id)
+        .is_some_and(|node| node.flags().contains(NodeFlags::COMPONENT_HOST))
 }
 
 /// Maps a desired node to the retained [`NodeKind`] it materializes as.
