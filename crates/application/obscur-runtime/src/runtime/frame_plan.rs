@@ -11,6 +11,7 @@ use obscur_style::invalidation::StyleInvalidation;
 
 use crate::frame::FrameReason;
 use crate::invalidation::{Invalidation, InvalidationReason, InvalidationRouter};
+use crate::transaction::{TransactionCommit, UiOperation};
 
 /// The pipeline phases a single frame must run, classified from its
 /// [`FrameReason`] via the [`InvalidationRouter`] (spec §3.4 phase 5, §4.3).
@@ -92,6 +93,65 @@ impl FramePlan {
             style: router.needs_style(),
             layout: router.needs_layout(),
             compose: router.needs_scene(),
+        }
+    }
+
+    /// Classifies the phases a **committed transaction** requires, from its
+    /// operations rather than from a frame reason (spec §3.4 phases 4–5).
+    ///
+    /// # Why this is better information than a [`FrameReason`]
+    ///
+    /// [`for_frame`](Self::for_frame) derives the plan from the *category* of a
+    /// frame, which is a proxy: `UiCommit` means "something committed", so it
+    /// conservatively runs everything. A committed transaction does not need the
+    /// proxy — it lists the exact changes, so the plan comes from
+    /// [`UiOperation::invalidation`] and says precisely what has to re-run. A
+    /// transaction of nothing but [`InvalidateStyle`](UiOperation::InvalidateStyle)
+    /// restyles without reconciling, because no operation in it claims the tree
+    /// changed.
+    ///
+    /// An **empty** transaction yields an [idle](Self::is_idle) plan: nothing was
+    /// asked for, so nothing runs. That is what makes a cancelled provisional
+    /// transaction free — it stages operations, commits none, and no phase is
+    /// classified.
+    ///
+    /// Reconcile is flagged by the operations that can change tree structure
+    /// ([`ReplaceRoot`](UiOperation::ReplaceRoot) /
+    /// [`Rerender`](UiOperation::Rerender)); the style/layout/compose flags come
+    /// off the router, exactly as in [`for_frame`].
+    #[must_use]
+    pub(crate) fn for_transaction(commit: &TransactionCommit) -> Self {
+        let mut router = InvalidationRouter::new();
+        let mut style = StyleInvalidation::new();
+        let mut layout = LayoutInvalidation::new();
+        let mut reconcile = false;
+        for &op in commit.operations() {
+            reconcile |= matches!(
+                op,
+                UiOperation::ReplaceRoot | UiOperation::Rerender { .. }
+            );
+            router.route(op.invalidation(), &mut style, &mut layout);
+        }
+        Self {
+            reconcile,
+            style: router.needs_style(),
+            layout: router.needs_layout(),
+            compose: router.needs_scene(),
+        }
+    }
+
+    /// The union of two plans: a phase runs if **either** asked for it.
+    ///
+    /// Union rather than intersection, because a plan is a statement of what must
+    /// run, not what may. Two transactions landing between frames each classified
+    /// their own work; the frame that serves both has to do all of it.
+    #[must_use]
+    pub(crate) const fn merged_with(self, other: Self) -> Self {
+        Self {
+            reconcile: self.reconcile || other.reconcile,
+            style: self.style || other.style,
+            layout: self.layout || other.layout,
+            compose: self.compose || other.compose,
         }
     }
 
@@ -199,6 +259,100 @@ impl FramePlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use obscur_identity::{NodeId, VersionStamp};
+
+    /// A commit of `ops`, as a transaction would produce.
+    fn commit(ops: Vec<UiOperation>) -> TransactionCommit {
+        TransactionCommit::new(ops, VersionStamp::from_raw(1))
+    }
+
+    fn node() -> NodeId {
+        NodeId::from_raw(1)
+    }
+
+    #[test]
+    fn a_style_only_transaction_restyles_without_reconciling() {
+        // THE point of classifying from operations instead of the frame reason: a
+        // `UiCommit` frame is conservatively full, but the operations know the
+        // tree did not change, because none of them said so.
+        let plan = FramePlan::for_transaction(&commit(vec![UiOperation::InvalidateStyle {
+            node: node(),
+        }]));
+        assert!(!plan.reconcile(), "no operation claimed a tree change");
+        assert!(plan.style());
+        assert!(plan.layout(), "a style can feed geometry");
+        assert!(plan.compose());
+        assert_ne!(
+            plan,
+            FramePlan::for_frame(FrameReason::UiCommit, false),
+            "the whole gain is being cheaper than the reason-derived plan"
+        );
+    }
+
+    #[test]
+    fn a_layout_only_transaction_does_not_dirty_the_style_phase() {
+        // The difference between the two invalidate operations, and the reason
+        // they are separate: `InvalidateLayout` claims geometry only.
+        let plan = FramePlan::for_transaction(&commit(vec![UiOperation::InvalidateLayout {
+            node: node(),
+        }]));
+        assert!(!plan.reconcile());
+        assert!(!plan.style(), "geometry went stale, the style did not");
+        assert!(plan.layout());
+        assert!(plan.compose());
+    }
+
+    #[test]
+    fn a_root_replacement_reconciles_everything() {
+        let plan = FramePlan::for_transaction(&commit(vec![UiOperation::ReplaceRoot]));
+        assert_eq!(plan, FramePlan::full());
+    }
+
+    #[test]
+    fn a_subtree_rerender_reconciles_too() {
+        // A component's output can change its subtree's structure.
+        let plan = FramePlan::for_transaction(&commit(vec![UiOperation::Rerender { node: node() }]));
+        assert!(plan.reconcile());
+        assert!(plan.style());
+        assert!(plan.layout());
+        assert!(plan.compose());
+    }
+
+    #[test]
+    fn an_empty_transaction_is_idle() {
+        // What makes a cancelled provisional transaction free: nothing was asked
+        // for, so no phase is classified.
+        assert!(FramePlan::for_transaction(&commit(Vec::new())).is_idle());
+    }
+
+    #[test]
+    fn a_mixed_transaction_takes_the_union_of_its_operations() {
+        // One structural operation is enough to reconcile the frame, however many
+        // cheap ones it travels with.
+        let plan = FramePlan::for_transaction(&commit(vec![
+            UiOperation::InvalidateLayout { node: node() },
+            UiOperation::Rerender { node: node() },
+        ]));
+        assert!(plan.reconcile(), "the `Rerender` decides");
+        assert!(plan.style());
+    }
+
+    #[test]
+    fn merging_takes_every_phase_either_plan_asked_for() {
+        let style_only = FramePlan::for_transaction(&commit(vec![UiOperation::InvalidateStyle {
+            node: node(),
+        }]));
+        assert!(!style_only.reconcile());
+        assert_eq!(
+            style_only.merged_with(FramePlan::for_transaction(&commit(vec![
+                UiOperation::ReplaceRoot
+            ]))),
+            FramePlan::full(),
+            "two commits between frames: the frame owes both"
+        );
+        // Merging with an idle plan changes nothing.
+        assert_eq!(style_only.merged_with(FramePlan::for_transaction(&commit(Vec::new()))), style_only);
+    }
 
     #[test]
     fn first_frame_is_always_full_even_for_input() {

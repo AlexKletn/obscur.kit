@@ -31,7 +31,10 @@ fn style_reason(reason: InvalidationReason) -> Option<StyleInvalidationReason> {
         InvalidationReason::CustomPropertyChanged => {
             Some(StyleInvalidationReason::CustomPropertyChanged)
         }
-        InvalidationReason::TreeChanged
+        // `LayoutChanged` states a geometry-only cause: its kind does not even
+        // `needs_restyle`, so there is no style edit to record for it.
+        InvalidationReason::LayoutChanged
+        | InvalidationReason::TreeChanged
         | InvalidationReason::ContentChanged
         | InvalidationReason::EnvironmentChanged => None,
     }
@@ -45,6 +48,7 @@ fn style_reason(reason: InvalidationReason) -> Option<StyleInvalidationReason> {
 /// | [`InvalidationReason`]  | [`LayoutInvalidationReason`] |
 /// |-------------------------|------------------------------|
 /// | `StyleChanged` / `InlineStyleChanged` / `PseudoStateChanged` / `CustomPropertyChanged` | `StyleChanged` |
+/// | `LayoutChanged`         | `Requested`                 |
 /// | `TreeChanged`           | `TreeChanged`               |
 /// | `ContentChanged`        | `ContentChanged`            |
 /// | `EnvironmentChanged`    | `EnvironmentChanged`        |
@@ -54,6 +58,9 @@ fn layout_reason(reason: InvalidationReason) -> LayoutInvalidationReason {
         | InvalidationReason::InlineStyleChanged
         | InvalidationReason::PseudoStateChanged
         | InvalidationReason::CustomPropertyChanged => LayoutInvalidationReason::StyleChanged,
+        // The runtime-level cause names no finer reason, so neither does this:
+        // see `LayoutInvalidationReason::Requested`.
+        InvalidationReason::LayoutChanged => LayoutInvalidationReason::Requested,
         InvalidationReason::TreeChanged => LayoutInvalidationReason::TreeChanged,
         InvalidationReason::ContentChanged => LayoutInvalidationReason::ContentChanged,
         InvalidationReason::EnvironmentChanged => LayoutInvalidationReason::EnvironmentChanged,

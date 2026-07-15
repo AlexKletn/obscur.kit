@@ -26,6 +26,16 @@ pub enum LayoutInvalidationReason {
     /// The node's intrinsic/text content changed (e.g. a text run relayout),
     /// which can change its measured size without a style or constraint change.
     ContentChanged,
+    /// A caller asked for this node's layout to be recomputed without naming a
+    /// finer cause.
+    ///
+    /// The other variants each state *why* the geometry went stale, which lets a
+    /// future incremental pass decide how far to propagate. This one states only
+    /// that it did. It exists because a caller outside layout genuinely may not
+    /// know more — the runtime's `InvalidateLayout` operation is exactly that
+    /// statement — and mapping such a request onto one of the specific causes
+    /// would put a claim in its mouth that it never made.
+    Requested,
     /// The window environment changed: viewport size, DPI/scale factor, or other
     /// global layout inputs.
     EnvironmentChanged,

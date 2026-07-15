@@ -78,7 +78,7 @@ use crate::component::ComponentStore;
 /// mutually, would otherwise spin the frame forever. Exceeding it truncates that
 /// frame's tree instead of hanging, and the `component.rendered` counter shows it.
 const MAX_COMPONENT_RENDER_PASSES: usize = 32;
-use crate::transaction::ReconcileEnactor;
+use crate::transaction::{ReconcileEnactor, TransactionCommit};
 
 /// The maximum gap, in microseconds, between two presses for them to count as a
 /// multi-click (the platform double-click window; 500 ms is the common default).
@@ -286,6 +286,12 @@ pub struct UiRuntime {
     modifiers: Modifiers,
     /// The id assigned to the next produced frame.
     next_frame: FrameId,
+    /// The phase plan a committed transaction asked for, awaiting the frame that
+    /// will honour it ([`apply_transaction`](Self::apply_transaction)).
+    ///
+    /// [`None`] on every frame nobody committed to, which is the overwhelming
+    /// majority: those classify from their [`FrameReason`] exactly as before.
+    staged_plan: Option<FramePlan>,
     /// The viewport frames are laid out under.
     viewport: Size,
     /// The viewport scroll offset `(x, y)` in logical pixels — the document-
@@ -535,6 +541,7 @@ impl UiRuntime {
             editing: None,
             commands: CommandRouter::new(),
             modifiers: Modifiers::new(),
+            staged_plan: None,
             next_frame: FrameId::FIRST,
             viewport,
             viewport_scroll: (0.0, 0.0),
@@ -1043,6 +1050,43 @@ impl UiRuntime {
         self.scheduler.request_reason(reason)
     }
 
+    /// Applies a committed [`UiTransaction`](crate::transaction::UiTransaction):
+    /// classifies the phases its operations require and requests the frame that
+    /// will run them (spec §3.4 phases 4–5).
+    ///
+    /// This is what a [`UiOperation`](crate::transaction::UiOperation) *does*.
+    /// Without it the vocabulary is a validation gate and a record: operations are
+    /// normalized and checked, and then nothing consults them. Here they decide
+    /// the frame's [`FramePlan`], so a transaction that only invalidated a style
+    /// produces a frame that restyles **without reconciling** — the tree cannot
+    /// have changed, because no operation said it did.
+    ///
+    /// # An empty commit costs nothing
+    ///
+    /// Committing no operations stages an idle plan and requests no frame. That is
+    /// what makes [`ProvisionalTransaction`] genuinely cheap to abandon: cancelling
+    /// never reaches this method, so a drag that goes nowhere costs zero frames
+    /// rather than one that recomputes nothing.
+    ///
+    /// Returns the scheduler's [`BackpressureDecision`], or [`None`] when the
+    /// commit was empty and no frame was requested.
+    ///
+    /// [`ProvisionalTransaction`]: crate::transaction::ProvisionalTransaction
+    pub fn apply_transaction(&mut self, commit: &TransactionCommit) -> Option<BackpressureDecision> {
+        if commit.is_empty() {
+            return None;
+        }
+        let plan = FramePlan::for_transaction(commit);
+        // Merge rather than overwrite: two commits between frames both get the
+        // phases they asked for. Dropping the earlier one would silently lose the
+        // work it classified.
+        self.staged_plan = Some(match self.staged_plan {
+            Some(pending) => pending.merged_with(plan),
+            None => plan,
+        });
+        Some(self.scheduler.request_reason(FrameReason::UiCommit))
+    }
+
     /// The [`FrameReason`] of the most-urgent pending frame request, if any (test
     /// introspection — lets a test assert which frame a keystroke scheduled).
     #[cfg(test)]
@@ -1491,7 +1535,15 @@ impl UiRuntime {
         // frame over an empty tree is always full so every retained output
         // exists before later frames can reuse it.
         let first_frame = self.tree.root().is_none();
-        let plan = FramePlan::for_frame(ctx.reason(), first_frame);
+        // A plan staged by `apply_transaction` wins over the reason-derived one:
+        // it was classified from the committed operations themselves, which is
+        // what actually changed, rather than from the frame's category — see
+        // `FramePlan::for_transaction`. The first-frame guard still overrides
+        // both, because there is nothing retained to reuse.
+        let plan = match self.staged_plan.take() {
+            Some(staged) if !first_frame => staged,
+            _ => FramePlan::for_frame(ctx.reason(), first_frame),
+        };
 
         // Open the frame telemetry span (spec §7.9). A `NullTelemetrySink`
         // (the default) makes this and every per-phase record below a no-op, so
@@ -5538,6 +5590,134 @@ mod tests {
         let first_commands: Vec<_> = first.snapshot().display_list().commands().to_vec();
         let second_commands: Vec<_> = second.snapshot().display_list().commands().to_vec();
         assert_eq!(first_commands, second_commands);
+    }
+
+    #[test]
+    fn a_committed_transaction_decides_the_frames_phases() {
+        use crate::transaction::{TransactionCommit, UiOperation};
+        use obscur_identity::VersionStamp;
+
+        // A SECOND view, structurally different from `counter_view`, so that
+        // "did the reconcile phase run" is observable. Against an identical view a
+        // reconcile commits empty and `reconciled()` is false either way — the
+        // assertion would pass without the plan doing anything at all.
+        fn two_node_view() -> View {
+            View::from_fragment(ViewFragment::from_nodes(vec![
+                ViewNode::element(ComponentId::from_raw(10))
+                    .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into())))
+                    .with_children(ViewFragment::from_nodes(vec![ViewNode::element(
+                        ComponentId::from_raw(11),
+                    )])),
+            ]))
+        }
+
+        let sheet = counter_stylesheet();
+        let sheets = std::slice::from_ref(&sheet);
+
+        // Establish the retained tree: the first frame is unconditionally full.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        assert!(runtime.render_now(&counter_view(), sheets).reconciled());
+        let node = runtime.tree().root().expect("a root");
+        let before = runtime.tree().len();
+
+        // Commit a transaction that invalidates a style and NOTHING else, then run
+        // the frame it scheduled — handing it the BIGGER view.
+        assert!(
+            runtime
+                .apply_transaction(&TransactionCommit::new(
+                    vec![UiOperation::InvalidateStyle { node }],
+                    VersionStamp::from_raw(9),
+                ))
+                .is_some(),
+            "a non-empty commit requests a frame"
+        );
+        let result = runtime
+            .run_due_frame(&two_node_view(), sheets)
+            .expect("the commit scheduled a frame");
+
+        // THE assertion: the operations decided the plan. A `UiCommit` frame
+        // classified from its reason alone runs every phase and would have pulled
+        // the new node in; this one knows the tree cannot have changed, because no
+        // operation said it did — so the extra node is not adopted.
+        assert!(!result.reconciled(), "a style-only transaction does not reconcile");
+        assert_eq!(runtime.tree().len(), before, "the tree really was left alone");
+        assert!(result.restyled(), "but it does restyle");
+        assert!(result.composed());
+
+        // The control: the same view through the ordinary reason-derived path DOES
+        // reconcile — so the difference above is the plan, not the view.
+        runtime.request_frame(FrameReason::UiCommit);
+        let control = runtime
+            .run_due_frame(&two_node_view(), sheets)
+            .expect("a frame is due");
+        assert!(control.reconciled());
+        assert!(runtime.tree().len() > before, "and now the node is adopted");
+    }
+
+    #[test]
+    fn an_empty_commit_schedules_no_frame_at_all() {
+        use crate::transaction::TransactionCommit;
+        use obscur_identity::VersionStamp;
+
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let view = counter_view();
+        let sheet = counter_stylesheet();
+        runtime.render_now(&view, std::slice::from_ref(&sheet));
+
+        let empty = TransactionCommit::new(Vec::new(), VersionStamp::from_raw(9));
+        assert!(
+            runtime.apply_transaction(&empty).is_none(),
+            "nothing was asked for, so no frame is requested"
+        );
+        assert!(
+            !runtime.has_pending_frame(),
+            "an abandoned transaction must cost zero frames, not one that does nothing"
+        );
+    }
+
+    #[test]
+    fn two_commits_between_frames_both_get_their_phases() {
+        use crate::transaction::{TransactionCommit, UiOperation};
+        use obscur_identity::VersionStamp;
+
+        fn two_node_view() -> View {
+            View::from_fragment(ViewFragment::from_nodes(vec![
+                ViewNode::element(ComponentId::from_raw(10))
+                    .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into())))
+                    .with_children(ViewFragment::from_nodes(vec![ViewNode::element(
+                        ComponentId::from_raw(11),
+                    )])),
+            ]))
+        }
+
+        let sheet = counter_stylesheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.render_now(&counter_view(), sheets);
+        let node = runtime.tree().root().expect("a root");
+        let before = runtime.tree().len();
+
+        // A cheap commit, then a structural one, with no frame in between: the
+        // single frame that serves both owes the union, so it must reconcile —
+        // proven by the new node being adopted, which the cheap plan alone would
+        // have skipped (see the test above).
+        runtime.apply_transaction(&TransactionCommit::new(
+            vec![UiOperation::InvalidateStyle { node }],
+            VersionStamp::from_raw(9),
+        ));
+        runtime.apply_transaction(&TransactionCommit::new(
+            vec![UiOperation::Rerender { node }],
+            VersionStamp::from_raw(10),
+        ));
+
+        let result = runtime
+            .run_due_frame(&two_node_view(), sheets)
+            .expect("a frame is due");
+        assert!(
+            result.reconciled(),
+            "the structural commit must not be lost to the cheap one"
+        );
+        assert!(runtime.tree().len() > before);
     }
 
     #[test]
