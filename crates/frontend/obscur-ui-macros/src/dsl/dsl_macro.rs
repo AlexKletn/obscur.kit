@@ -387,110 +387,19 @@ fn parse_attr(input: ParseStream) -> syn::Result<DslAttr> {
     }
 }
 
-/// Rejects an expression outside the pure-read subset §2.10 allows.
+/// Rejects an expression outside the pure-read subset §2.10 allows, as a
+/// `syn::Error` spanned at the offending expression.
 ///
-/// # A positive allow-list, not a deny-list
-///
-/// The match names what an expression **may** be and rejects everything else, so
-/// a shape nobody thought about is refused rather than admitted. That direction
-/// is the whole point: the alternative — listing what is forbidden — is only ever
-/// as good as the imagination of whoever wrote the list, and §2.10's forbidden
-/// side ("I/O", "direct service access") names *effects*, which no syntactic
-/// list can enumerate.
-///
-/// It matters now in a way it did not before. A binding used to be emitted as a
-/// string — `{do_io()}` produced the harmless text `"do_io()"`. It is now emitted
-/// as real Rust, so the same expression would compile and run. The restriction had
-/// no teeth until the language did.
-///
-/// # What is allowed, and why each
-///
-/// * **paths** and **field access** — §2.10's props, read-only state, loop locals
-///   and field access. The whole point of a binding.
-/// * **literals** — a constant is a read of nothing.
-/// * **comparisons and logical operators**, and `!` / `-` — named by §2.10.
-/// * **arithmetic** — not named by either side, and allowed here because every
-///   §2.10 *forbidden* item is an effect, and arithmetic has none. Refusing
-///   `{a + b}` while allowing `{a > b}` would be a rule about spelling rather
-///   than about what an expression does.
-/// * **parentheses** and **indexing** — grouping and a field access by another
-///   name.
-/// * **method calls** — the honest gap, see below.
-/// * **`&`/`*`** — a borrow or deref of a read is still a read.
-///
-/// Everything else is rejected, which by construction covers §2.10's forbidden
-/// list: assignment and compound assignment, `await` and `async` blocks, closures,
-/// `unsafe`, macros, loops, `?`, and **free function calls** — the
-/// "unconstrained arbitrary function calls" §2.10 names, which stay refused until
-/// something declares which functions are its "explicitly exported pure" ones.
-///
-/// # The gap this does not close
-///
-/// A **method call** is allowed. §2.10 permits Option/null checks (`.is_some()`),
-/// formatting and translations, and all three are method calls in Rust — but so
-/// is `.write_to_disk()`, and nothing here can tell them apart. Narrowing this
-/// needs the same registry of exported pure functions that free calls are waiting
-/// on; until it exists, refusing all method calls would forbid `{maybe.is_some()}`,
-/// which §2.10 explicitly allows. Recorded rather than silently decided.
-/// Whether `op` mutates its left operand (`+=`, `-=`, …).
-///
-/// A separate question from "is it a binary operator", because `syn` gives the
-/// compound-assignment operators the same `Expr::Binary` node as `+` and `==`.
-fn is_assigning_op(op: syn::BinOp) -> bool {
-    matches!(
-        op,
-        syn::BinOp::AddAssign(_)
-            | syn::BinOp::SubAssign(_)
-            | syn::BinOp::MulAssign(_)
-            | syn::BinOp::DivAssign(_)
-            | syn::BinOp::RemAssign(_)
-            | syn::BinOp::BitXorAssign(_)
-            | syn::BinOp::BitAndAssign(_)
-            | syn::BinOp::BitOrAssign(_)
-            | syn::BinOp::ShlAssign(_)
-            | syn::BinOp::ShrAssign(_)
-    )
-}
-
+/// The rule itself lives in the compiler
+/// ([`check_expression`](::obscur_okui_compiler::validation::check_expression)) —
+/// the same function a compiled `.okui` file is checked with. Two copies of a
+/// restriction is one too many: they drift, and the looser one is the one that
+/// decides. What this adds is the span, which is the whole reason the macro path
+/// reports better than the file path can: the author's build stops on the
+/// expression they wrote.
 fn check_expression(expr: &Expr) -> syn::Result<()> {
-    match expr {
-        // A read of a name, a field, or a constant.
-        Expr::Path(_) | Expr::Lit(_) => Ok(()),
-        Expr::Field(inner) => check_expression(&inner.base),
-        Expr::Paren(inner) => check_expression(&inner.expr),
-        Expr::Index(inner) => {
-            check_expression(&inner.expr)?;
-            check_expression(&inner.index)
-        }
-        Expr::Reference(inner) => check_expression(&inner.expr),
-        Expr::Unary(inner) => check_expression(&inner.expr),
-        // `syn` files compound assignment (`+=`) under `Binary`, not under
-        // `Assign` — so admitting every binary operator would admit the mutation
-        // §2.10 forbids. The operator is checked, not just the operands.
-        Expr::Binary(inner) => {
-            if is_assigning_op(inner.op) {
-                return Err(syn::Error::new_spanned(
-                    expr,
-                    "assignment is not allowed in a `.okui` expression (spec §2.10)",
-                ));
-            }
-            check_expression(&inner.left)?;
-            check_expression(&inner.right)
-        }
-        Expr::Cast(inner) => check_expression(&inner.expr),
-        // See "the gap this does not close".
-        Expr::MethodCall(inner) => {
-            check_expression(&inner.receiver)?;
-            inner.args.iter().try_for_each(check_expression)
-        }
-        _ => Err(syn::Error::new_spanned(
-            expr,
-            "this expression is outside what `.okui` allows (spec §2.10): an \
-             expression may read props, state and loop locals, access fields, \
-             compare, and combine with logical operators — it may not assign, \
-             mutate, await, or call a function that has not been declared pure",
-        )),
-    }
+    ::obscur_okui_compiler::validation::check_expression(expr)
+        .map_err(|message| syn::Error::new_spanned(expr, message))
 }
 
 /// Classifies a braced attribute expression into a resolved [`PropValue`].
