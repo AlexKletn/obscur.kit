@@ -13,6 +13,8 @@ mod flex_layout;
 pub use flex_layout::FlexLayout;
 mod flow_layout;
 pub use flow_layout::FlowLayout;
+mod intrinsic_inline;
+pub(crate) use intrinsic_inline::intrinsic_inline_size;
 mod grid;
 pub use grid::{
     AutoRepeat, AutoRepeatMode, GridAutoFlow, GridLine, GridPlacement, GridTemplate, TrackList,

@@ -93,11 +93,31 @@ impl TaffyStyleMapper {
     ///
     /// `Auto → Auto`, `Px(v) → Length(v)`, `Percent(p) → Percent(p / 100.0)`
     /// (see the percent convention on [`to_taffy`](Self::to_taffy)).
+    ///
+    /// # The intrinsic keywords degrade to `auto` here
+    ///
+    /// `taffy::Dimension` models exactly `Auto`/`Length`/`Percent` — it has no way
+    /// to *say* `min-content`, `max-content` or `fit-content` on a sizing
+    /// property, so there is nothing faithful to map them to and this returns
+    /// `Auto`. That is a real behaviour difference from the native algorithms,
+    /// which measure them: through this adapter, `width: max-content` sizes as
+    /// `width: auto`.
+    ///
+    /// It is reported rather than papered over: the alternative — silently
+    /// emitting some fixed length — would be a wrong number instead of a wrong
+    /// keyword, and `auto` is at least the value CSS falls back to when a sizing
+    /// keyword is unsupported. A faithful mapping needs taffy's own intrinsic
+    /// sizing seam (its `AvailableSpace` measure), which this style-only mapper
+    /// does not reach.
     fn dimension(&self, dimension: Dimension) -> taffy::Dimension {
         match dimension {
             Dimension::Auto => taffy::Dimension::Auto,
             Dimension::Px(value) => taffy::Dimension::Length(value),
             Dimension::Percent(percent) => taffy::Dimension::Percent(percent / 100.0),
+            // See the note above: unrepresentable in `taffy::Dimension`.
+            Dimension::MinContent | Dimension::MaxContent | Dimension::FitContent => {
+                taffy::Dimension::Auto
+            }
         }
     }
 

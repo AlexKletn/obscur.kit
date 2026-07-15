@@ -178,6 +178,29 @@ pub const WORD_BREAK_BREAK_ALL: InternedSymbol = InternedSymbol::from_raw(0x0000
 /// CJK-context text (suppresses inter-ideograph opportunities).
 pub const WORD_BREAK_KEEP_ALL: InternedSymbol = InternedSymbol::from_raw(0x0000_2303);
 
+// ---- intrinsic sizing keyword values (CSS Sizing 3 §4.1) ----
+//
+// These are values of the *sizing* properties (`width` / `height` / `min-*` /
+// `max-*` / `flex-basis`), and unlike every other keyword family here they are
+// not a closed choice the layout reads off a style: each is a question about the
+// content, answered by measuring it. The style layer's job is only to carry
+// which question was asked; `obscur_layout::model::Dimension` is where they
+// become sizes.
+
+/// The `min-content` keyword: the smallest size the content can take without
+/// overflowing — in the inline axis, the widest run it cannot break.
+pub const SIZING_MIN_CONTENT: InternedSymbol = InternedSymbol::from_raw(0x0000_2401);
+/// The `max-content` keyword: the size the content wants given unbounded space —
+/// in the inline axis, everything on one line.
+pub const SIZING_MAX_CONTENT: InternedSymbol = InternedSymbol::from_raw(0x0000_2402);
+/// The `fit-content` keyword: `min(max-content, max(min-content, stretch))` — the
+/// classic shrink-to-fit (CSS 2.1 §10.3.5).
+///
+/// This is the bare keyword only. The `fit-content(<length-percentage>)`
+/// *function* form is a different value that clamps against an authored limit; it
+/// is not modelled, and lowers to no sizing keyword at all.
+pub const SIZING_FIT_CONTENT: InternedSymbol = InternedSymbol::from_raw(0x0000_2403);
+
 // ---- relative `font-weight` keyword values ----
 
 /// The `font-weight: bolder` keyword. Unlike the absolute weights (which lower
@@ -567,6 +590,22 @@ pub fn word_break_from_name(name: &str) -> Option<InternedSymbol> {
         "normal" => Some(WORD_BREAK_NORMAL),
         "break-all" => Some(WORD_BREAK_BREAK_ALL),
         "keep-all" => Some(WORD_BREAK_KEEP_ALL),
+        _ => None,
+    }
+}
+
+/// Maps an intrinsic sizing keyword string to its reserved [`InternedSymbol`].
+///
+/// `auto` is deliberately **not** here: it is a length keyword
+/// ([`Length::Auto`](crate::property::Length::Auto)), not a sizing question, and
+/// the CSS layer lowers it before reaching this table. Adding it here would
+/// re-route `width: auto` through the keyword path and change its computed value.
+#[must_use]
+pub fn sizing_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "min-content" => Some(SIZING_MIN_CONTENT),
+        "max-content" => Some(SIZING_MAX_CONTENT),
+        "fit-content" => Some(SIZING_FIT_CONTENT),
         _ => None,
     }
 }

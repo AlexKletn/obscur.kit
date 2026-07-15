@@ -2,9 +2,11 @@
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
-use crate::model::{LayoutBox, LayoutStyle};
+use crate::model::{Dimension, LayoutBox, LayoutStyle};
 
-use super::{clamp_content, ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
+use super::{
+    clamp_content, intrinsic_inline_size, ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput,
+};
 
 /// Normal-flow / block layout (spec §4.1, §4.2).
 ///
@@ -16,6 +18,14 @@ use super::{clamp_content, ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOu
 /// * **Content width** — resolves `style.width` against the constraint's max
 ///   width; if `Auto`, uses the available content width (`constraints.max.width`
 ///   minus horizontal border + padding). Clamped to be non-negative.
+/// * **Intrinsic width (CSS Sizing 3 §4.1)** — `min-content` / `max-content` /
+///   `fit-content` are answered by *measuring* the children rather than by
+///   arithmetic: the children are re-measured under a no-space (`min-content`) or
+///   unbounded (`max-content`) inline offer, and the widest wins. See
+///   [`intrinsic_inline_size`], which also explains why these cost an extra
+///   measuring pass. In the **block** axis the two intrinsic sizes coincide with
+///   the content height, so `height: max-content` is `height: auto` for a block
+///   and needs no separate path.
 /// * **Child stacking** — each child is measured with
 ///   [`BoxConstraints::loose`] up to `(content_width − its inline margins,
 ///   remaining_height)`, placed at the content-box left edge **plus its
@@ -141,17 +151,47 @@ impl LayoutAlgorithm for FlowLayout {
         let bp_x = bp_left + border.right + padding.right;
         let bp_y = bp_top + border.bottom + padding.bottom;
 
-        // Content width: explicit width (resolved against the max width) else the
-        // available content width. Never negative. `box-sizing: border-box`
-        // subtracts the horizontal border + padding from an explicit width (the
-        // `Auto` branch already does), keeping the two consistent.
-        let content_width = style
-            .width
-            .resolve(constraints.max.width)
-            .map_or(constraints.max.width - bp_x, |w| {
-                style.box_sizing.content_extent(w, bp_x)
-            })
-            .max(0.0);
+        // Available content height for measuring children under (may be infinite).
+        let avail_content_height = (constraints.max.height - bp_y).max(0.0);
+
+        // The content width a `width: auto` box takes: everything its container
+        // offers. Also the `stretch` term `fit-content` is bounded by. It is
+        // **unbounded** while this box is itself being measured for someone else's
+        // `max-content`.
+        let stretch = (constraints.max.width - bp_x).max(0.0);
+        let explicit = style.width.resolve(constraints.max.width);
+        // `auto` normally stretches to the space offered — but under an unbounded
+        // offer there is no such space, and stretching would make the box
+        // infinitely wide, poisoning every size derived from it. CSS Sizing 3 §5.2:
+        // against an infinite available space, `auto` sizes to `max-content`. The
+        // same applies to a percentage, which §5.1 already turned into `auto` by
+        // refusing to resolve against an indefinite basis (see `Dimension::resolve`)
+        // — so `width: 50%` inside a `max-content` box contributes its content, not
+        // half of infinity.
+        let width = if explicit.is_none() && !style.width.is_intrinsic() && !stretch.is_finite() {
+            Dimension::MaxContent
+        } else {
+            style.width
+        };
+        // Content width: an intrinsic keyword is answered by *measuring* the
+        // children (`min-content` / `max-content` / `fit-content`, spec §4.2); an
+        // explicit width resolves against the max width; `auto` stretches. Never
+        // negative. `box-sizing: border-box` subtracts the horizontal border +
+        // padding from an explicit width (the `Auto` branch already does), keeping
+        // the two consistent — and does not apply to an intrinsic width, which is
+        // already a content width (see `intrinsic_inline_size`).
+        let content_width = intrinsic_inline_size(
+            width,
+            children,
+            stretch,
+            avail_content_height,
+            measurer,
+        )
+        .unwrap_or_else(|| {
+            explicit
+                .map_or(stretch, |w| style.box_sizing.content_extent(w, bp_x))
+                .max(0.0)
+        });
         // Clamp the content width into the authored min/max-width (spec §4.2).
         let content_width = clamp_content(
             content_width,
@@ -161,9 +201,6 @@ impl LayoutAlgorithm for FlowLayout {
             bp_x,
             style.box_sizing,
         );
-
-        // Available content height for measuring children under (may be infinite).
-        let avail_content_height = (constraints.max.height - bp_y).max(0.0);
 
         let mut child_boxes = Vec::with_capacity(children.len());
         // `y` is the collapsed bottom edge of the last placed *real* (non
@@ -267,8 +304,18 @@ impl LayoutAlgorithm for FlowLayout {
             style.box_sizing,
         );
 
+        // The box reports the size it resolved to. A *tight* constraint still
+        // dictates (an absolutely-positioned box with both insets is assigned its
+        // size, not offered it); a *loose* one only offers, so content that does
+        // not fit overflows rather than reporting the space it was given.
+        //
+        // `min-content` and `fit-content` are what make that distinction visible —
+        // both are *defined* to overflow rather than drop below the widest
+        // unbreakable run (CSS 2.1 §10.3.5) — but it was equally true of an
+        // explicit `width: 500px` in a 40px container, which used to report 40.
+        // Anything that fits is unaffected.
         let border_box = Size::new(content_width + bp_x, content_height + bp_y);
-        let size = constraints.constrain(border_box);
+        let size = constraints.constrain_allowing_overflow(border_box);
 
         LayoutOutput::new(size, child_boxes)
     }

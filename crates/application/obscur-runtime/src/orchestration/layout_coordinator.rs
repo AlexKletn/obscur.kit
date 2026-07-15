@@ -540,7 +540,21 @@ fn measure_text_node(
             )
         }
     };
-    constraints.constrain(layout.size())
+    // The paragraph reports the size it actually NEEDS.
+    //
+    // A plain `constrain` here looks defensive and is a lie: content that cannot
+    // fit the offered width does not shrink, it overflows — an unbreakable word is
+    // the standing example — and reporting the offered width instead of the needed
+    // one hides that from every caller, exact-fit and overflow coming back
+    // identical. It also makes `min-content` unanswerable: that probe offers zero
+    // width, so under `constrain` every answer would be zero rather than the widest
+    // unbreakable run, which is the *definition* of the value (CSS Sizing 3 §4.1).
+    //
+    // Wrapping already keeps the width within `max_width` whenever the content
+    // *can* fit, so this differs only in the overflow case — where the old answer
+    // was wrong. A tight constraint still dictates; see
+    // [`BoxConstraints::constrain_allowing_overflow`].
+    constraints.constrain_allowing_overflow(layout.size())
 }
 
 /// Shapes a single hyphen (`-`) through `paragraph` at `font_size` and returns
@@ -991,6 +1005,17 @@ fn dimension_of(computed: &ComputedStyle, property: PropertyId, ctx: &LengthCont
                 .map_or(Dimension::Auto, Dimension::Px),
         },
         Some(PropertyValue::Calc(expr)) => expr.resolve(ctx).map_or(Dimension::Auto, Dimension::Px),
+        // The intrinsic sizing keywords carry no length: they name a question
+        // layout answers by measuring content (CSS Sizing 3 §4.1).
+        Some(&PropertyValue::Keyword(sym)) if sym == layout_keyword::SIZING_MIN_CONTENT => {
+            Dimension::MinContent
+        }
+        Some(&PropertyValue::Keyword(sym)) if sym == layout_keyword::SIZING_MAX_CONTENT => {
+            Dimension::MaxContent
+        }
+        Some(&PropertyValue::Keyword(sym)) if sym == layout_keyword::SIZING_FIT_CONTENT => {
+            Dimension::FitContent
+        }
         _ => Dimension::Auto,
     }
 }
