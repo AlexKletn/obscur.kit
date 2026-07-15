@@ -54,6 +54,14 @@ pub const DISABLED: InternedSymbol = InternedSymbol::from_raw(0x0000_0005);
 /// Reserved `checked` attribute symbol (`obscur_view::view::CHECKED`).
 pub const CHECKED: InternedSymbol = InternedSymbol::from_raw(0x0000_0006);
 
+/// Mirror of `obscur_view::view::TEST_ID` — a node's stable testing identifier
+/// (spec §7.5).
+///
+/// Deliberately NOT a style attribute: it must not affect matching, specificity,
+/// layout or visuals, so it is carried as an ordinary property and read only by a
+/// selector resolver. It sits in its own `0x0000_02xx` namespace.
+pub const TEST_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0201);
+
 // --- Reserved event symbols (mirror `obscur_view::view::event_name`). ---
 
 /// Reserved `click` event symbol (`obscur_view::view::EVENT_CLICK`).
@@ -158,6 +166,8 @@ pub fn attr_symbol(name: &str) -> InternedSymbol {
         "src" => SRC,
         "disabled" => DISABLED,
         "checked" => CHECKED,
+        // A stable testing identifier, not a style attribute (spec §7.5).
+        "test-id" => TEST_ID,
         other => fallback_symbol(other),
     }
 }

@@ -1544,6 +1544,7 @@ dependencies = [
  "obscur-accessibility",
  "obscur-geometry",
  "obscur-identity",
+ "obscur-interaction",
  "obscur-layout",
  "obscur-runtime",
  "obscur-scene",

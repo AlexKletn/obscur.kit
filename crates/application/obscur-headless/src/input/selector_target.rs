@@ -9,12 +9,16 @@ use obscur_identity::NodeId;
 /// a viewport coordinate (spec §7.4). Stable selectors are independent of CSS and
 /// do not affect layout or visuals (spec §7.5).
 ///
-/// Resolution semantics:
-/// - [`SelectorTarget::Node`] is already resolved to a concrete node id.
-/// - [`SelectorTarget::TestId`] and [`SelectorTarget::Coordinate`] are resolved to
-///   a concrete node during dispatch — by matching the `test-id` or by
-///   hit-testing the point — which the interaction subsystem performs in a later
-///   phase (Phase 3). Here they are inert typed data.
+/// Resolution semantics ([`SelectorResolver`](crate::input::SelectorResolver)):
+/// - [`SelectorTarget::Node`] names a node directly; it resolves only while that
+///   node is still live.
+/// - [`SelectorTarget::TestId`] resolves by matching the node's `test-id`
+///   property. It is not a style attribute, so it affects no matching, layout or
+///   visual output (spec §7.5).
+/// - [`SelectorTarget::Coordinate`] is *not* resolved here: it is aimed straight
+///   at [`UiRuntime::handle_pointer`](obscur_runtime::UiRuntime::handle_pointer),
+///   which hit-tests it exactly as it would a real pointer. Re-implementing that
+///   would give a second, divergent answer.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SelectorTarget {
     /// A direct, already-resolved stable node id.

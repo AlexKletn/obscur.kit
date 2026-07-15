@@ -7,10 +7,10 @@ use crate::input::selector_target::SelectorTarget;
 ///
 /// Each variant is inert typed data describing one atomic input. The events are
 /// injected into a headless run and dispatched — hit-tested, routed through
-/// capture → target → bubble, and turned into a typed dispatch result — by the
-/// interaction subsystem in a later phase (Phase 3, `obscur-interaction`). Here
-/// nothing is resolved or dispatched; these descriptors only let tests build the
-/// input they will replay.
+/// capture → target → bubble, and turned into a
+/// [`DispatchOutcome`](crate::input::DispatchOutcome) — by
+/// [`SyntheticDispatcher`](crate::input::SyntheticDispatcher), which replays them
+/// through the runtime's real input path.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SyntheticInput {
     /// A pointer movement over the given target.
