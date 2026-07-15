@@ -51,20 +51,25 @@ impl MarginEdges {
         Self::px(value, value, value, value)
     }
 
-    /// These edges as plain [`Insets`], with every `auto` read as `0`.
+    /// These edges as plain [`Insets`], against a containing-block inline size of
+    /// `basis`.
     ///
-    /// The lossy direction, and deliberately so: it is for the callers that
-    /// consume margins purely as lengths and have no leftover space to hand out.
-    /// A caller that *distributes* leftover space must read the edges directly and
-    /// ask [`Margin::is_auto`] — collapsing to `0` first is exactly how `auto`
-    /// gets lost.
+    /// `basis` resolves percentage edges — all four of them, since CSS 2.1 §8.3
+    /// resolves even `margin-top` against the containing block's *width*. Every
+    /// `auto` reads as `0`.
+    ///
+    /// The lossy direction, and deliberately so: it is for the callers that consume
+    /// margins purely as lengths and have no leftover space to hand out. A caller
+    /// that *distributes* leftover space must read the edges directly and ask
+    /// [`Margin::is_auto`] — collapsing to `0` first is exactly how `auto` gets
+    /// lost. See [`Margin::resolve`] for what a non-finite or zero `basis` means.
     #[must_use]
-    pub fn or_zero(self) -> Insets {
+    pub fn resolve(self, basis: f32) -> Insets {
         Insets {
-            top: self.top.or_zero(),
-            right: self.right.or_zero(),
-            bottom: self.bottom.or_zero(),
-            left: self.left.or_zero(),
+            top: self.top.resolve(basis),
+            right: self.right.resolve(basis),
+            bottom: self.bottom.resolve(basis),
+            left: self.left.resolve(basis),
         }
     }
 
@@ -85,7 +90,7 @@ mod tests {
     #[test]
     fn zero_is_the_default() {
         assert_eq!(MarginEdges::default(), MarginEdges::ZERO);
-        assert_eq!(MarginEdges::ZERO.or_zero(), Insets::uniform(0.0));
+        assert_eq!(MarginEdges::ZERO.resolve(0.0), Insets::uniform(0.0));
         assert!(!MarginEdges::ZERO.has_auto_inline());
     }
 
@@ -97,20 +102,20 @@ mod tests {
         assert_eq!(edges.bottom, Margin::Px(3.0));
         assert_eq!(edges.left, Margin::Px(4.0));
         assert_eq!(
-            MarginEdges::uniform(5.0).or_zero(),
+            MarginEdges::uniform(5.0).resolve(0.0),
             Insets::uniform(5.0)
         );
     }
 
     #[test]
-    fn or_zero_flattens_auto_edges_to_lengths() {
+    fn resolve_flattens_auto_edges_to_lengths() {
         let centred = MarginEdges {
             left: Margin::Auto,
             right: Margin::Auto,
             ..MarginEdges::px(10.0, 0.0, 20.0, 0.0)
         };
         assert_eq!(
-            centred.or_zero(),
+            centred.resolve(0.0),
             Insets {
                 top: 10.0,
                 right: 0.0,

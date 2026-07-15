@@ -67,8 +67,10 @@ impl LayoutAlgorithm for PositionedLayout {
         for (index, child) in children.iter().enumerate() {
             // A positioned child is placed at its offset, not fitted into leftover
             // space, so there is no leftover for an `auto` margin to absorb: CSS
-            // 2.1 §10.3.7 resolves it to zero, which is what `or_zero` reads.
-            let margin = child.style.margin.or_zero();
+            // 2.1 §10.3.7 resolves it to zero, which is what `resolve` reads.
+            // A percentage edge resolves against the containing block's inline
+            // size, which here is the width this container was offered.
+            let margin = child.style.margin.resolve(constraints.max.width);
             let size = measurer.measure_child(index, child_constraints);
             let origin = Point::new(padding.left + margin.left, padding.top + margin.top);
             child_boxes.push(LayoutBox::new(Rect::new(origin, size)));

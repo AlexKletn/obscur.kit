@@ -83,11 +83,14 @@ use super::{
 /// writing-mode-aware block direction are likewise not modelled; block flow is
 /// strictly vertical.
 ///
-/// **Percentage margins** are not resolved: [`Margin`](crate::model::Margin)
-/// models a length or `auto`, and the CSS bridge folds a `%` margin to `0` before
-/// layout sees it. Adding a `Percent` variant is what unblocks them, and every
-/// `match` on `Margin` stops compiling until it says what to do — which is the
-/// reason the type is an enum rather than an `f32` plus a flag.
+/// # Percentage margins resolve against the *width*, on every edge
+///
+/// A `%` margin — including `margin-top` / `margin-bottom` — resolves against this
+/// container's `content_width` (CSS 2.1 §8.3). Reading that as a typo is the
+/// natural reaction; it is deliberate. A block's height usually depends on its
+/// content, so resolving a block-axis percentage against it would be circular. CSS
+/// breaks the cycle by picking one axis, and the inline one is the axis that is
+/// definite by the time children are laid out.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FlowLayout;
 
@@ -229,7 +232,12 @@ impl LayoutAlgorithm for FlowLayout {
             // block-axis `auto` margin is zero in normal flow (CSS 2.1 §10.6.3):
             // there is no leftover block space for it to absorb, because the
             // container's height is what the children add up to.
-            pending = pending.adjoin(child_style.margin.top.or_zero());
+            //
+            // `content_width` is the basis for a percentage margin on EVERY edge,
+            // including this block-axis one: CSS 2.1 §8.3 resolves all four against
+            // the containing block's *width*. `margin-top: 10%` of a 300px-wide
+            // parent is 30px regardless of how tall anything is.
+            pending = pending.adjoin(child_style.margin.top.resolve(content_width));
 
             // Separation before this child: the additive gap plus the collapsed
             // margin. For the first child this is just its (contained) top
@@ -242,7 +250,8 @@ impl LayoutAlgorithm for FlowLayout {
             // `width: auto` child fills what is left rather than the whole box.
             // Only the *fixed* edges take: an `auto` margin reserves nothing, it
             // absorbs what is left after the child has been sized.
-            let fixed_inline = child_style.margin.left.or_zero() + child_style.margin.right.or_zero();
+            let fixed_inline = child_style.margin.left.resolve(content_width)
+                + child_style.margin.right.resolve(content_width);
             let child_width = (content_width - fixed_inline).max(0.0);
             let child_size = measurer.measure_child(
                 index,
@@ -272,7 +281,7 @@ impl LayoutAlgorithm for FlowLayout {
             ) {
                 (true, true) => leftover / 2.0,
                 (true, false) => leftover,
-                (false, _) => child_style.margin.left.or_zero(),
+                (false, _) => child_style.margin.left.resolve(content_width),
             };
             let left = bp_left + left_margin;
 
@@ -287,7 +296,7 @@ impl LayoutAlgorithm for FlowLayout {
                 && child_style.padding.bottom == 0.0;
 
             if collapses_through {
-                pending = pending.adjoin(child_style.margin.bottom.or_zero());
+                pending = pending.adjoin(child_style.margin.bottom.resolve(content_width));
                 // Place the zero-height box at the (current) collapsed boundary;
                 // it does not advance `y` and does not close the set.
                 let top = bp_top + y + gap_acc + pending.solve();
@@ -307,7 +316,7 @@ impl LayoutAlgorithm for FlowLayout {
                 child_size,
             )));
             y = top + child_size.height;
-            pending = CollapsingMargins::EMPTY.adjoin(child_style.margin.bottom.or_zero());
+            pending = CollapsingMargins::EMPTY.adjoin(child_style.margin.bottom.resolve(content_width));
             gap_acc = 0.0;
         }
 

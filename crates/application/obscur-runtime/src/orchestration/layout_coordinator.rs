@@ -1043,13 +1043,20 @@ fn length_px_of(computed: &ComputedStyle, property: PropertyId, ctx: &LengthCont
 /// **unresolved** (CSS 2.1 §10.3.3).
 ///
 /// This is the margin twin of [`insets_of`], and differs in the one way that
-/// matters: `auto` survives as [`Margin::Auto`] instead of being folded to `0`.
-/// It cannot be folded here — `auto` means "take the leftover", and how much is
-/// left depends on the box's used width, which layout has not computed yet. That
-/// premature `0` is exactly what used to make `margin: 0 auto` do nothing.
+/// matters: neither `auto` nor a percentage is folded to a number here, because
+/// neither *has* one yet.
 ///
-/// A percentage margin still resolves to `0`, as it does for every other inset:
-/// [`Margin`] models no `Percent` variant yet.
+/// * `auto` means "take the leftover", and how much is left depends on the box's
+///   used width, which layout has not computed. That premature `0` is exactly what
+///   used to make `margin: 0 auto` do nothing.
+/// * A percentage resolves against the *containing block's* inline size (CSS 2.1
+///   §8.3 — the width, on all four edges), which this node's own
+///   [`LengthContext`] does not know: `ctx.percent_basis` is the node's own
+///   basis, not its parent's content width. Layout resolves it where the
+///   containing block is in hand.
+///
+/// `calc()` mixing a percentage still folds to `0` (the expression cannot be
+/// resolved without a basis), as it does for every other length here.
 fn margin_edges_of(
     computed: &ComputedStyle,
     top: PropertyId,
@@ -1067,11 +1074,12 @@ fn margin_edges_of(
 }
 
 /// Resolves one margin longhand into a [`Margin`]: an authored `auto` stays
-/// [`Margin::Auto`], every other value folds to logical pixels exactly as
-/// [`length_px_of`] does.
+/// [`Margin::Auto`] and an authored `%` stays [`Margin::Percent`], while every
+/// other value folds to logical pixels exactly as [`length_px_of`] does.
 fn margin_of(computed: &ComputedStyle, property: PropertyId, ctx: &LengthContext) -> Margin {
     match computed.get(property).map(ComputedValue::value) {
         Some(&PropertyValue::Length(Length::Auto)) => Margin::Auto,
+        Some(&PropertyValue::Length(Length::Percent(percent))) => Margin::Percent(percent),
         _ => Margin::Px(length_px_of(computed, property, ctx)),
     }
 }

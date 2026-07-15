@@ -2,7 +2,7 @@
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
-use crate::model::{AlignItems, Dimension, JustifyContent, LayoutBox, LayoutStyle};
+use crate::model::{AlignItems, Dimension, JustifyContent, LayoutBox, LayoutStyle, Margin};
 
 use super::{clamp_content, ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 
@@ -181,8 +181,21 @@ fn item_align(item: &LayoutStyle, container: &LayoutStyle) -> AlignItems {
 ///
 /// Per-item **main-axis min/max clamping** (`min-width`/`max-width` in a row,
 /// the height bounds in a column) and **margins** (which consume main-axis space
-/// and offset each item) *are* honoured; cross-axis min/max and margin
-/// interaction with `align-items`/auto margins remain later work.
+/// and offset each item) *are* honoured; cross-axis min/max remains later work.
+///
+/// # `auto` margins take the free space before `justify-content` sees it
+///
+/// CSS Flexbox §8.1: when a line has positive free space and any main-axis margin
+/// on it is `auto`, that space is split equally among the `auto` margins and
+/// `justify-content` gets none. The ordering *is* the feature — it is why
+/// `margin-left: auto` pushes an item to the end of a row no matter what
+/// `justify-content` says, and why `justify-content` appears to stop working the
+/// moment an `auto` margin is added. See [`place_line`].
+///
+/// **Cross-axis `auto` margins are not honoured**: §8.1 gives them the same job in
+/// the cross axis, where they would absorb the line's leftover cross space and
+/// override `align-self`. Only the main axis distributes here, so a cross-axis
+/// `auto` margin reserves nothing and alignment decides alone.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FlexLayout;
 
@@ -265,18 +278,21 @@ impl LayoutAlgorithm for FlexLayout {
         let mut main_trail = Vec::with_capacity(count);
         let mut cross_lead = Vec::with_capacity(count);
         for child in children {
-            // Flex reads margins purely as lengths, so an `auto` edge is taken as
-            // `0` here.
+            // Edges stay [`Margin`] rather than collapsing to lengths here, because
+            // an `auto` edge has two answers downstream: it *reserves* nothing
+            // (§8.1) but it *absorbs* free space (see `place_line`). Flattening it
+            // to `0` now would throw the second one away.
             //
-            // That is a real gap, not a rounding: CSS Flexbox §8.1 gives `auto`
-            // margins a *second* job on a flex item — they absorb the line's free
-            // space before `justify-content` sees it, which is how `margin-left:
-            // auto` pushes an item to the end of a row. Implementing that means
-            // teaching the free-space distribution below about auto edges, not
-            // changing this line. Until then a flex item's `auto` margin behaves as
-            // zero, and `justify-content` decides alone. Block layout does honour
-            // `auto` margins (see `FlowLayout`), so `margin: 0 auto` centres there.
-            let m = child.style.margin.or_zero();
+            // Percentages, on the other hand, resolve right here: CSS 2.1 §8.3
+            // resolves every margin edge against the containing block's INLINE size
+            // — this container's content width — regardless of which way the flex
+            // axis runs. It is known, it cannot change, and resolving it once leaves
+            // only `Px` and `Auto` for the rest of the algorithm to think about.
+            let fix = |edge: Margin| match edge {
+                Margin::Percent(_) => Margin::Px(edge.resolve(content_width)),
+                px_or_auto => px_or_auto,
+            };
+            let m = child.style.margin;
             let (lead, trail) = if is_row {
                 if is_reverse {
                     (m.right, m.left)
@@ -288,9 +304,9 @@ impl LayoutAlgorithm for FlexLayout {
             } else {
                 (m.top, m.bottom)
             };
-            main_lead.push(lead);
-            main_trail.push(trail);
-            cross_lead.push(if is_row { m.top } else { m.left });
+            main_lead.push(fix(lead));
+            main_trail.push(fix(trail));
+            cross_lead.push(fix(if is_row { m.top } else { m.left }));
         }
 
         // Step 2: per item, the **flex base size** (`flex_basis`/`width`/measured,
@@ -423,7 +439,7 @@ impl LayoutAlgorithm for FlexLayout {
             let sum_margin_main: f32 = main_lead
                 .iter()
                 .zip(main_trail.iter())
-                .map(|(l, t)| l + t)
+                .map(|(l, t)| reserved(*l) + reserved(*t))
                 .sum();
             let content_main = sum_base + gap_span + sum_margin_main;
 
@@ -488,7 +504,8 @@ impl LayoutAlgorithm for FlexLayout {
         let mut current: Vec<usize> = Vec::new();
         let mut current_main = 0.0_f32;
         for index in 0..count {
-            let item_main = base_main[index] + main_lead[index] + main_trail[index];
+            let item_main =
+                base_main[index] + reserved(main_lead[index]) + reserved(main_trail[index]);
             let with_item = if current.is_empty() {
                 item_main
             } else {
@@ -580,6 +597,36 @@ impl LayoutAlgorithm for FlexLayout {
     }
 }
 
+/// The main-axis space a margin edge **reserves** — what must be subtracted
+/// before there is any free space to speak of.
+///
+/// `auto` reserves nothing: CSS Flexbox §8.1 gives it the opposite job, absorbing
+/// free space *after* the items are sized. So it is `0` here and re-enters the
+/// arithmetic in [`place_line`], the only place that knows how much there is to
+/// absorb.
+///
+/// The basis is irrelevant: percentages were resolved against the container's
+/// inline size when the edges were extracted, so only `Px` and `Auto` reach here.
+fn reserved(margin: Margin) -> f32 {
+    margin.resolve(0.0)
+}
+
+/// The main-axis space a margin edge finally **occupies**: what it reserved, or
+/// its share of the line's free space when it is `auto` (CSS Flexbox §8.1).
+///
+/// The counterpart to [`reserved`], and the two disagree on exactly one input.
+/// `reserved` answers "what has to come off the top before there is free space",
+/// which for `auto` is nothing; this answers "where does the item actually sit",
+/// which for `auto` is its share of what was left. Calling the wrong one is how
+/// the free space gets counted twice.
+fn used(margin: Margin, auto_share: f32) -> f32 {
+    if margin.is_auto() {
+        auto_share
+    } else {
+        reserved(margin)
+    }
+}
+
 /// Inputs for [`place_line`]: one flex line's items plus the shared container /
 /// style context. Grouped into a struct because the single-line sizing pass
 /// legitimately needs this many parameters and a positional argument list would
@@ -617,10 +664,10 @@ struct LineArgs<'a, 'm> {
     /// Gap between adjacent items on the line.
     gap: f32,
     /// Leading / trailing main-axis margins, indexed by the global item index.
-    main_lead: &'a [f32],
-    main_trail: &'a [f32],
+    main_lead: &'a [Margin],
+    main_trail: &'a [Margin],
     /// Leading cross-axis margin, indexed by the global item index.
-    cross_lead: &'a [f32],
+    cross_lead: &'a [Margin],
     /// When `Some(target)`, `stretch` fills `target` and alignment resolves
     /// against `container_cross` (the single-line / no-wrap semantics). When
     /// `None`, the line's cross size is the max item cross size and `stretch`
@@ -697,7 +744,10 @@ fn place_line(args: LineArgs) -> PlacedLine {
 
     // Margins consume main-axis space alongside the gaps; both are constants that
     // do not flex, so the justification pass below reuses this sum.
-    let sum_margin_main: f32 = line.iter().map(|&i| main_lead[i] + main_trail[i]).sum();
+    let sum_margin_main: f32 = line
+        .iter()
+        .map(|&i| reserved(main_lead[i]) + reserved(main_trail[i]))
+        .sum();
 
     // §4.5 content floors for the DEFERRED items (row main axis / definite basis)
     // are `content.min(fb) <= fb`, so they can only bite when this line's items are
@@ -833,34 +883,58 @@ fn place_line(args: LineArgs) -> PlacedLine {
         None => line_cross,
     };
 
-    // Step 6: justify_content → leading offset and inter-item spacing.
+    // Step 6: distribute the line's free space — to `auto` margins first, and to
+    // `justify_content` only if they leave any (CSS Flexbox §8.1).
     let total_final: f32 = final_main.iter().copied().sum();
     let remaining = line_main - total_final - gap_span - sum_margin_main;
-    let (leading, spacing) = if remaining <= 0.0 || count == 0 {
+
+    // §8.1: "if the remaining free space is positive and at least one main-axis
+    // margin on this line is `auto`, the free space is distributed equally among
+    // those margins" — and, crucially, `justify-content` then has nothing left to
+    // distribute. That ordering is the whole behaviour: `margin-left: auto` on one
+    // item pushes it (and everything after it) to the end of the row *regardless*
+    // of `justify-content`, which is exactly why the idiom is used.
+    let auto_main: usize = line
+        .iter()
+        .map(|&i| usize::from(main_lead[i].is_auto()) + usize::from(main_trail[i].is_auto()))
+        .sum();
+    // Each `auto` edge's share. Zero when there are none, so `absorbed` below is a
+    // no-op and every existing line places byte-identically.
+    let auto_share = if auto_main > 0 && remaining > 0.0 {
+        remaining / auto_main as f32
+    } else {
+        0.0
+    };
+    // What `justify_content` still has to work with: nothing, once any `auto`
+    // margin has claimed it.
+    let free_for_justify = if auto_main > 0 { 0.0 } else { remaining };
+
+    let (leading, spacing) = if free_for_justify <= 0.0 || count == 0 {
         (0.0, 0.0)
     } else {
         let n = count as f32;
         match style.justify_content {
             JustifyContent::FlexStart => (0.0, 0.0),
-            JustifyContent::FlexEnd => (remaining, 0.0),
-            JustifyContent::Center => (remaining / 2.0, 0.0),
+            JustifyContent::FlexEnd => (free_for_justify, 0.0),
+            JustifyContent::Center => (free_for_justify / 2.0, 0.0),
             JustifyContent::SpaceBetween => {
                 if count > 1 {
-                    (0.0, remaining / (n - 1.0))
+                    (0.0, free_for_justify / (n - 1.0))
                 } else {
                     (0.0, 0.0)
                 }
             }
             JustifyContent::SpaceAround => {
-                let s = remaining / n;
+                let s = free_for_justify / n;
                 (s / 2.0, s)
             }
             JustifyContent::SpaceEvenly => {
-                let s = remaining / (n + 1.0);
+                let s = free_for_justify / (n + 1.0);
                 (s, s)
             }
         }
     };
+
 
     // Steps 7 & 8: position each item and map back to (x, y).
     let mut cursor = leading;
@@ -872,12 +946,13 @@ fn place_line(args: LineArgs) -> PlacedLine {
     for &pos in &order {
         let i = line[pos];
         // A leading main-axis margin pushes the item further along the main axis
-        // before it is placed.
-        cursor += main_lead[i];
+        // before it is placed — by its own length, or by its share of the line's
+        // free space when it is `auto`.
+        cursor += used(main_lead[i], auto_share);
         let main = final_main[pos];
         let cross = cross_size[pos];
         let cross_start = cross_offset
-            + cross_lead[i]
+            + reserved(cross_lead[i])
             + match item_align(&children[i].style, style) {
                 AlignItems::FlexStart | AlignItems::Start | AlignItems::Stretch => 0.0,
                 AlignItems::FlexEnd | AlignItems::End => align_ref - cross,
@@ -895,7 +970,7 @@ fn place_line(args: LineArgs) -> PlacedLine {
             )
         };
         child_boxes[i] = LayoutBox::new(Rect::new(origin, size));
-        cursor += main + main_trail[i] + gap + spacing;
+        cursor += main + used(main_trail[i], auto_share) + gap + spacing;
     }
 
     PlacedLine {

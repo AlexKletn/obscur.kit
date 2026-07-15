@@ -16,15 +16,20 @@
 /// `Dimension` carries `MinContent` / `MaxContent` / `FitContent`, and a type that
 /// can express nonsense pushes the job of rejecting it onto every reader. This
 /// enum says exactly what a margin can be, so there is nothing to reject.
-///
-/// `Percent` is absent for the same reason: percentage margins are not resolved by
-/// this engine (they never were — the CSS bridge folded them to `0`). When they
-/// are, they arrive as a variant here and every `match` stops compiling until it
-/// has an answer, which is the point.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Margin {
     /// An absolute margin, in logical pixels. May be negative.
     Px(f32),
+    /// A percentage of the containing block's **inline** size, as a percentage
+    /// value (`50.0` for `50%`).
+    ///
+    /// The inline size for *every* edge, including `margin-top` and
+    /// `margin-bottom` — CSS 2.1 §8.3 resolves all four against the containing
+    /// block's *width*, not each edge's own axis. It reads like a bug and is not:
+    /// a block's height often depends on its content, so resolving a block-axis
+    /// percentage against it would be circular. One axis is chosen to break the
+    /// cycle, and CSS chose the inline one.
+    Percent(f32),
     /// The `auto` keyword: this edge absorbs leftover space in its axis.
     Auto,
 }
@@ -39,18 +44,29 @@ impl Margin {
         matches!(self, Self::Auto)
     }
 
-    /// This edge's contribution as a plain length, treating `auto` as `0`.
+    /// This edge as a plain length, against a containing-block inline size of
+    /// `basis`.
     ///
-    /// `0` is what `auto` *used* value is whenever there is no leftover space to
-    /// absorb — which CSS 2.1 §10.3.3 makes the common case: a `width: auto` block
-    /// already fills its container, so its `auto` margins resolve to zero. Use this
-    /// wherever an edge is being consumed as a length; use
-    /// [`is_auto`](Self::is_auto) where the leftover actually gets distributed.
+    /// * `Px` is already a length.
+    /// * `Percent` is `basis × percent / 100`. An `basis` that is not finite —
+    ///   which is what a `max-content` probe offers — yields `0`: CSS Sizing 3
+    ///   §5.2 treats a percentage margin as zero when computing an intrinsic
+    ///   contribution, for the same reason it does for a percentage size (there is
+    ///   nothing definite to be a percentage *of*). Passing `0.0` as the basis is
+    ///   the honest way for a caller with no containing block to say so.
+    /// * `Auto` is `0` — its used value whenever there is no leftover space to
+    ///   absorb, which CSS 2.1 §10.3.3 makes the common case: a `width: auto` block
+    ///   already fills its container.
+    ///
+    /// Use this wherever an edge is *consumed* as a length; use
+    /// [`is_auto`](Self::is_auto) where the leftover actually gets distributed,
+    /// because this collapses that question to `0`.
     #[must_use]
-    pub const fn or_zero(self) -> f32 {
+    pub fn resolve(self, basis: f32) -> f32 {
         match self {
             Self::Px(value) => value,
-            Self::Auto => 0.0,
+            Self::Percent(percent) if basis.is_finite() => basis * percent / 100.0,
+            Self::Percent(_) | Self::Auto => 0.0,
         }
     }
 }
@@ -75,13 +91,38 @@ mod tests {
     #[test]
     fn auto_reads_as_zero_when_consumed_as_a_length() {
         assert!(Margin::Auto.is_auto());
-        assert_eq!(Margin::Auto.or_zero(), 0.0);
+        assert_eq!(Margin::Auto.resolve(500.0), 0.0);
     }
 
     #[test]
     fn a_length_edge_keeps_its_value_including_a_negative_one() {
-        assert_eq!(Margin::Px(12.5).or_zero(), 12.5);
-        assert_eq!(Margin::Px(-8.0).or_zero(), -8.0, "negative margins are legal CSS");
+        assert_eq!(Margin::Px(12.5).resolve(500.0), 12.5);
+        assert_eq!(
+            Margin::Px(-8.0).resolve(500.0),
+            -8.0,
+            "negative margins are legal CSS"
+        );
         assert!(!Margin::Px(-8.0).is_auto());
+        // The basis is irrelevant to a length — including an indefinite one.
+        assert_eq!(Margin::Px(12.5).resolve(f32::INFINITY), 12.5);
+    }
+
+    #[test]
+    fn a_percentage_resolves_against_the_basis() {
+        assert_eq!(Margin::Percent(10.0).resolve(500.0), 50.0);
+        assert_eq!(Margin::Percent(50.0).resolve(80.0), 40.0);
+        assert!(!Margin::Percent(50.0).is_auto(), "a `%` is not `auto`");
+    }
+
+    #[test]
+    fn a_percentage_against_an_indefinite_basis_is_zero() {
+        // What a `max-content` probe offers. CSS Sizing 3 §5.2: a percentage
+        // margin contributes zero to an intrinsic size, because there is nothing
+        // definite for it to be a percentage of. Resolving it arithmetically would
+        // return infinity and take the whole box with it.
+        assert_eq!(Margin::Percent(50.0).resolve(f32::INFINITY), 0.0);
+        assert_eq!(Margin::Percent(50.0).resolve(f32::NAN), 0.0);
+        // And a caller with no containing block says so by passing a zero basis.
+        assert_eq!(Margin::Percent(50.0).resolve(0.0), 0.0);
     }
 }

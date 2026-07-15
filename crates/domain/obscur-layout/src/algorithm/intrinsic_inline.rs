@@ -35,7 +35,11 @@ fn probe(
 ) -> f32 {
     let mut widest = 0.0_f32;
     for (index, child) in children.iter().enumerate() {
-        let margin = child.style().margin.or_zero();
+        // A zero basis, deliberately: this is an intrinsic contribution, and CSS
+        // Sizing 3 §5.2 treats a percentage margin as zero while computing one —
+        // the containing block's size is what is being computed, so there is
+        // nothing definite for the percentage to be a fraction of.
+        let margin = child.style().margin.resolve(0.0);
         let margins = margin.left + margin.right;
         // `UNBOUNDED - margins` stays unbounded; a zero offer stays zero.
         let available = (offer - margins).max(0.0);

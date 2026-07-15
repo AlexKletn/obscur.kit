@@ -125,13 +125,16 @@ impl TaffyStyleMapper {
     /// Maps obscur [`MarginEdges`] to a `taffy::Rect<LengthPercentageAuto>`.
     ///
     /// Unlike the intrinsic sizing keywords — which `taffy::Dimension` cannot say
-    /// at all, see [`dimension`](Self::dimension) — `auto` margins map exactly:
-    /// `LengthPercentageAuto::Auto` is the same value with the same meaning, and
-    /// taffy distributes leftover space to it. So `margin: 0 auto` centres through
-    /// this adapter as it does natively, and nothing here needs a caveat.
+    /// at all, see [`dimension`](Self::dimension) — every margin maps exactly.
+    /// `LengthPercentageAuto` is the same three-way choice with the same meanings:
+    /// taffy distributes leftover space to `Auto` and resolves `Percent` against
+    /// the containing block, so `margin: 0 auto` centres through this adapter as it
+    /// does natively. Nothing here needs a caveat.
     fn margin_lpa(&self, margin: MarginEdges) -> taffy::Rect<taffy::LengthPercentageAuto> {
         let edge = |m: Margin| match m {
             Margin::Px(value) => taffy::LengthPercentageAuto::Length(value),
+            // Percent convention: obscur is 0..=100, taffy 0..=1 (see `to_taffy`).
+            Margin::Percent(percent) => taffy::LengthPercentageAuto::Percent(percent / 100.0),
             Margin::Auto => taffy::LengthPercentageAuto::Auto,
         };
         taffy::Rect {
