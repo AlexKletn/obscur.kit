@@ -1,6 +1,7 @@
 //! `SvgVectorizer`: SVG source → a [`SceneVector`], keeping `currentColor` deferred.
 
 use obscur_geometry::{Point, Size};
+use obscur_resources::port::VectorDecoder;
 use obscur_resources::state::ResourceError;
 use obscur_scene::color::Color;
 use obscur_scene::paint::{SceneVector, VectorPaint, VectorShape};
@@ -200,6 +201,12 @@ fn convert_path(data: &usvg::tiny_skia_path::Path) -> Path {
         }
     }
     path
+}
+
+impl VectorDecoder for SvgVectorizer {
+    fn decode_vector(&self, bytes: &[u8]) -> Result<SceneVector, ResourceError> {
+        self.vectorize(bytes)
+    }
 }
 
 #[cfg(test)]

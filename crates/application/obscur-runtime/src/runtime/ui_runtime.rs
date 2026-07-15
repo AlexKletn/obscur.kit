@@ -24,12 +24,12 @@ use obscur_motion::transition::TransitionInterruption;
 use obscur_motion::value::MotionValue;
 use obscur_resources::handle::{ResourceHandle, ResourceKind};
 use obscur_resources::hub::{ResourceHub, ResourceRequest};
-use obscur_resources::port::{ResourceDecoder, ResourceLoader};
+use obscur_resources::port::{ResourceDecoder, ResourceLoader, VectorDecoder};
 use obscur_resources::source::ResourceSource;
 use obscur_resources::state::{ResourceError, ResourceMetadata};
 use obscur_scene::color::AlphaMode;
 use obscur_scene::command::{DisplayList, PaintCommand};
-use obscur_scene::paint::SceneImage;
+use obscur_scene::paint::{SceneImage, SceneVector};
 use obscur_scene::scene::{Scene, SceneSnapshot};
 use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_style::computed::{ComputedStyle, ComputedValue};
@@ -458,6 +458,17 @@ pub struct UiRuntime {
     /// A URL is inserted once its bytes load and decode; a failed load caches
     /// nothing (the image simply is not painted).
     image_cache: HashMap<Box<str>, SceneImage>,
+    /// The host-installed port that parses vector sources (spec §5.17). Absent by
+    /// default, in which case an SVG source paints nothing — the same policy an
+    /// absent raster decoder has for a bitmap.
+    vector_decoder: Option<Box<dyn VectorDecoder>>,
+    /// The parsed vector documents resolved from an element `src`, keyed like
+    /// [`image_cache`](Self::image_cache).
+    ///
+    /// A document is parsed **once** and cached colour-independently: its
+    /// `currentColor` paints are still unresolved, so a theme change re-resolves at
+    /// compose time and never re-parses (spec §5.17).
+    vector_cache: HashMap<Box<str>, SceneVector>,
     /// The [`ResourceHandle`] minted for each requested image URL, retained so the
     /// hub lifecycle (begin_load → complete/fail) is driven per resource and a URL
     /// is requested at most once.
@@ -526,6 +537,8 @@ impl UiRuntime {
             resource_decoder: None,
             resource_hub: ResourceHub::new(),
             image_cache: HashMap::new(),
+            vector_decoder: None,
+            vector_cache: HashMap::new(),
             image_handles: HashMap::new(),
         }
     }
@@ -550,6 +563,24 @@ impl UiRuntime {
         self.resource_loader = Some(loader);
         self.resource_decoder = Some(decoder);
         self.image_cache.clear();
+        self.image_handles.clear();
+    }
+
+    /// Installs the port that parses **vector** sources (spec §5.17), replacing
+    /// any previous one and dropping the parsed-document cache.
+    ///
+    /// Separate from [`set_resource_providers`](Self::set_resource_providers)
+    /// because a vector decoder is a genuinely different capability: a raster
+    /// decoder yields pixels, this yields geometry with `currentColor` still
+    /// deferred. A host may install either, both, or neither; with none installed
+    /// an SVG `src` resolves to nothing and paints nothing, exactly as an
+    /// unloadable bitmap does — never a crash, and never a rasterized fallback
+    /// that would silently break §5.17's vector guarantee.
+    ///
+    /// A [`ResourceLoader`] is still required to fetch the bytes.
+    pub fn set_vector_decoder(&mut self, decoder: Box<dyn VectorDecoder>) {
+        self.vector_decoder = Some(decoder);
+        self.vector_cache.clear();
         self.image_handles.clear();
     }
 
@@ -627,6 +658,52 @@ impl UiRuntime {
     /// not retried; a loader/decoder error `fail`s the handle and caches nothing, so
     /// the image is simply not painted — no panic. With no loader/decoder installed
     /// this is a no-op (the honest-capability default).
+    fn resolve_element_vectors(&mut self) {
+        // A loader and a VECTOR decoder are both required; without either, an SVG
+        // source honestly resolves to nothing.
+        let (Some(loader), Some(decoder)) = (
+            self.resource_loader.as_deref(),
+            self.vector_decoder.as_deref(),
+        ) else {
+            return;
+        };
+        let sources: Vec<Box<str>> = self
+            .tree
+            .iter()
+            .filter_map(|(_, node)| node.attributes().image_source().map(Box::<str>::from))
+            .filter(|src| is_vector_source(src))
+            .collect();
+        for key in sources {
+            if self.vector_cache.contains_key(&key) || self.image_handles.contains_key(&key) {
+                // Parsed once. A theme change re-resolves `currentColor` at compose
+                // time and must NOT re-parse (spec §5.17) — so a cached document is
+                // never revisited here.
+                continue;
+            }
+            let source = ResourceSource::file(key.clone());
+            let handle = self
+                .resource_hub
+                .request(ResourceRequest::new(source.clone(), ResourceKind::Svg));
+            self.image_handles.insert(key.clone(), handle);
+            let Some(version) = self.resource_hub.begin_load(handle) else {
+                continue;
+            };
+            match loader
+                .load(&source)
+                .and_then(|loaded| decoder.decode_vector(loaded.bytes()))
+            {
+                Ok(vector) => {
+                    let metadata = ResourceMetadata::new().with_intrinsic_size(vector.size());
+                    self.resource_hub.complete(handle, version, metadata);
+                    self.vector_cache.insert(key, vector);
+                }
+                Err(error) => {
+                    self.resource_hub.fail(handle, version, error);
+                }
+            }
+        }
+    }
+
     fn resolve_element_images(&mut self) {
         // Both a loader and a decoder are required; without either, element images
         // honestly resolve to nothing.
@@ -641,6 +718,10 @@ impl UiRuntime {
             .tree
             .iter()
             .filter_map(|(_, node)| node.attributes().image_source().map(Box::<str>::from))
+            // A vector source is not a bitmap: it goes through
+            // `resolve_element_vectors`, and handing it to the raster decoder
+            // would only produce a decode failure.
+            .filter(|src| !is_vector_source(src))
             .collect();
         for key in sources {
             if self.image_cache.contains_key(&key) || self.image_handles.contains_key(&key) {
@@ -1475,6 +1556,7 @@ impl UiRuntime {
             // content. A no-op when no loader/decoder is installed or no `src` is
             // authored.
             self.resolve_element_images();
+            self.resolve_element_vectors();
             // Thread the runtime-owned editing session into compose so the focused
             // editable paints its live session text plus a caret + selection
             // highlight (spec §5.11) — the SAME [`EditingView`] the measure pass
@@ -1495,6 +1577,7 @@ impl UiRuntime {
                 &self.boxes,
                 editing,
                 &self.image_cache,
+                &self.vector_cache,
                 &scroll,
             );
             // Inspect overlay (spec §7.6): when inspect mode is on, append a
@@ -4246,6 +4329,17 @@ fn is_activation_key(key: Option<LogicalKey>) -> bool {
 /// Propagates any [`ResourceError`] from the loader or decoder, and returns
 /// [`ResourceError::DecodeFailed`] when the decoded buffer's length does not match
 /// its reported intrinsic size (so [`SceneImage::new`]'s byte-length guard fails).
+/// Whether `src` names a vector document (spec §5.17).
+///
+/// Decided by extension rather than by sniffing the bytes: an author writing
+/// `.svg` means one, and trying to parse every bitmap as SVG to find out would
+/// cost a failed parse per image and turn a clear "not an image" into a confusing
+/// "invalid SVG".
+fn is_vector_source(src: &str) -> bool {
+    let lower = src.to_ascii_lowercase();
+    lower.ends_with(".svg") || lower.ends_with(".svgz")
+}
+
 fn load_and_decode_image(
     loader: &dyn ResourceLoader,
     decoder: &dyn ResourceDecoder,

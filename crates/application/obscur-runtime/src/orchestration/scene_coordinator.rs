@@ -13,7 +13,7 @@ use obscur_scene::layer::{LayerEffect, SceneLayer};
 use obscur_scene::paint::{
     Brush, ConicGradient as SceneConicGradient, ExtendMode, GradientStop as SceneGradientStop,
     LinearGradient as SceneLinearGradient, Paint, RadialGradient as SceneRadialGradient, SceneImage,
-    Stroke,
+    SceneVector, Stroke,
 };
 use obscur_scene::path::Path;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
@@ -1061,12 +1061,27 @@ impl SceneCoordinator {
         images: &HashMap<Box<str>, SceneImage>,
     ) -> DisplayList {
         // No scroll containers: byte-identical to before per-element scroll existed.
-        self.compose_with_images_scrolled(tree, computed, boxes, editing, images, &HashMap::new())
+        self.compose_with_images_scrolled(
+            tree,
+            computed,
+            boxes,
+            editing,
+            images,
+            &HashMap::new(),
+            &HashMap::new(),
+        )
     }
 
     /// Composes like [`compose_with_images`](Self::compose_with_images), additionally
     /// applying each scroll container's live scroll offset and painting its
     /// scrollbar (CSS Overflow Module Level 3 §scroll-container, §scrollport).
+    ///
+    /// `vectors` maps an element `src` to its parsed [`SceneVector`] — the
+    /// vector-content counterpart of `images`. A `src` present in `vectors` paints
+    /// as `DrawPath` outlines placed by `object-fit`, with `currentColor` resolved
+    /// against the node's computed `color` (spec §5.17); a `src` absent from it
+    /// paints nothing, exactly like an unloaded image. An empty map reproduces the
+    /// image-only behaviour byte-for-byte.
     ///
     /// `scroll` maps a scroll-container [`NodeId`] to its
     /// [`ScrollPaint`] (current `scroll_top` + scrollable `content_height`). For a
@@ -1088,6 +1103,7 @@ impl SceneCoordinator {
         boxes: &LayoutBoxes,
         editing: Option<EditingView<'_>>,
         images: &HashMap<Box<str>, SceneImage>,
+        vectors: &HashMap<Box<str>, SceneVector>,
         scroll: &HashMap<NodeId, ScrollPaint>,
     ) -> DisplayList {
         let Some(root) = tree.root() else {
@@ -1494,6 +1510,23 @@ impl SceneCoordinator {
             {
                 let tile = object_fit_tile(computed, node, image, layout_box.bounds);
                 node_paint.draw_image(image.clone(), tile, layout_box.bounds, false, false);
+            }
+
+            // An element's own VECTOR content (an `<img src="...svg">`) paints at
+            // exactly the same point in the node's paint unit as a bitmap, placed
+            // by the same `object-fit` rule — it is a replaced element either way.
+            //
+            // It stays vector (spec §5.17): rather than rasterizing, the document's
+            // own coordinate space is mapped onto the placed tile by a transform and
+            // its outlines are emitted as `DrawPath`, so it rasterizes at the
+            // frame's resolution like every other path. `currentColor` is resolved
+            // HERE, against the node's computed `color` — the parsed document is
+            // colour-independent, so a theme change re-resolves without reparsing.
+            if let Some(layout_box) = boxes.get(&node)
+                && let Some(vector) = element_image_of(tree, node).and_then(|src| vectors.get(src))
+                && !vector.is_empty()
+            {
+                emit_vector(&mut node_paint, computed, node, vector, layout_box.bounds);
             }
 
             if let Some(retained) = tree.get(node) {
@@ -2320,6 +2353,49 @@ fn background_image_geometry(
     )
 }
 
+/// Emits `vector` into `paint`, placed within `region` per `object-fit` and drawn
+/// in the node's computed `color` wherever the document says `currentColor`
+/// (spec §5.17).
+///
+/// The document's outlines are left untouched: instead of transforming every
+/// point, the placement is pushed as an [`AffineTransform`] that maps the
+/// document's own space onto the placed tile, and popped afterwards. That keeps
+/// the geometry exactly as parsed — vector through the pipeline — and costs one
+/// command pair however many shapes the document has.
+///
+/// A document with a degenerate intrinsic size cannot be scaled onto a tile, so it
+/// is skipped rather than divided by zero.
+fn emit_vector(
+    paint: &mut DisplayListBuilder,
+    computed: &ComputedStyles,
+    node: NodeId,
+    vector: &SceneVector,
+    region: Rect,
+) {
+    let intrinsic = vector.size();
+    if intrinsic.width <= 0.0 || intrinsic.height <= 0.0 {
+        return;
+    }
+    let tile = object_fit_tile_sized(computed, node, intrinsic, region);
+    let (sx, sy) = (
+        tile.size.width / intrinsic.width,
+        tile.size.height / intrinsic.height,
+    );
+
+    // `currentColor` is the node's computed `color` — the same resolution
+    // `border-*-color` already falls back to.
+    let current = scene_color_from(current_color_of(computed, node));
+
+    paint.push_transform(
+        AffineTransform::translate(tile.origin.x, tile.origin.y)
+            .multiply(AffineTransform::scale(sx, sy)),
+    );
+    for (path, shape_paint) in vector.resolved(current) {
+        paint.draw(path, shape_paint);
+    }
+    paint.pop_transform();
+}
+
 /// Reads a retained element node's own image `src` (an `<img>` / `Image`
 /// primitive's source), if any — the key the runtime resolves against its image
 /// cache.
@@ -2354,8 +2430,21 @@ fn object_fit_tile(
     image: &SceneImage,
     region: Rect,
 ) -> Rect {
+    let intrinsic = Size::new(image.width() as f32, image.height() as f32);
+    object_fit_tile_sized(computed, node, intrinsic, region)
+}
+
+/// [`object_fit_tile`] against a bare intrinsic size, so a replaced element whose
+/// content is not a bitmap — a vector document — places identically to an image
+/// rather than through a parallel rule.
+fn object_fit_tile_sized(
+    computed: &ComputedStyles,
+    node: NodeId,
+    intrinsic: Size,
+    region: Rect,
+) -> Rect {
     let fit = object_fit_of(computed, node);
-    let (iw, ih) = (image.width() as f32, image.height() as f32);
+    let (iw, ih) = (intrinsic.width, intrinsic.height);
     let bw = region.size.width;
     let bh = region.size.height;
     let (tw, th) = resolve_object_fit_size(fit, iw, ih, bw, bh);
@@ -6814,6 +6903,7 @@ mod tests {
             None,
             &HashMap::new(),
             &HashMap::new(),
+            &HashMap::new(),
         );
         assert_eq!(plain.commands(), empty.commands(), "empty scroll map ⇒ identical list");
     }
@@ -6831,6 +6921,7 @@ mod tests {
             &computed,
             &boxes,
             None,
+            &HashMap::new(),
             &HashMap::new(),
             &scroll,
         );
@@ -8148,4 +8239,173 @@ mod tests {
         assert_eq!(carets.len(), 1, "exactly one caret on the value node");
         assert_eq!(carets[0].1.as_solid().map(|b| b.color()), Some(value_color));
     }
+
+    // ---- SVG stays vector, and follows the computed color (§5.17) -----------
+
+    mod vector_content {
+        use super::{add_child, box_at};
+        use crate::orchestration::scene_coordinator::SceneCoordinator;
+        use crate::orchestration::{ComputedStyles, LayoutBoxes};
+        use obscur_geometry::Point;
+        use obscur_geometry::Size;
+        use obscur_identity::NodeId;
+        use obscur_scene::color::Color;
+        use obscur_scene::command::{DisplayList, PaintCommand};
+        use obscur_scene::paint::{Brush, Paint, SceneVector, VectorPaint, VectorShape};
+        use obscur_scene::path::Path;
+        use obscur_style::computed::{ComputedStyle, ComputedValue};
+        use obscur_style::property::{PropertyId, StyleColor};
+        use obscur_tree::node::NodeKind;
+        use obscur_tree::tree::RetainedTree;
+        use obscur_view::view::{SRC, StyleAttributes, ViewProperty, ViewValue};
+        use std::collections::HashMap;
+
+        const SRC_KEY: &str = "icon.svg";
+
+        /// A 10x10 document: one square filled with `currentColor`.
+        fn icon() -> SceneVector {
+            let mut path = Path::new();
+            path.move_to(Point::new(0.0, 0.0));
+            path.line_to(Point::new(10.0, 0.0));
+            path.line_to(Point::new(10.0, 10.0));
+            path.close();
+            SceneVector::new(
+                Size::new(10.0, 10.0),
+                vec![VectorShape {
+                    path,
+                    fill: Some(VectorPaint::CurrentColor),
+                    stroke: None,
+                }],
+            )
+        }
+
+        /// A tree with one element carrying `src="icon.svg"` and a computed `color`.
+        fn fixture(color: StyleColor) -> (RetainedTree, ComputedStyles, LayoutBoxes, NodeId) {
+            let mut tree = RetainedTree::new();
+            let root = tree.alloc(NodeKind::Root);
+            tree.set_root(root);
+            let child = add_child(&mut tree, root, 10);
+            if let Some(node) = tree.get_mut(child) {
+                node.set_attributes(StyleAttributes::extract(&[ViewProperty::new(
+                    SRC,
+                    ViewValue::Text(SRC_KEY.into()),
+                )]));
+            }
+            let mut computed = ComputedStyles::new();
+            let mut style = ComputedStyle::new();
+            style.set(PropertyId::Color, ComputedValue::color(color));
+            computed.insert(child, style);
+            let mut boxes = LayoutBoxes::new();
+            boxes.insert(root, box_at(0.0, 0.0, 40.0, 40.0));
+            boxes.insert(child, box_at(0.0, 0.0, 20.0, 20.0));
+            (tree, computed, boxes, child)
+        }
+
+        fn vectors() -> HashMap<Box<str>, SceneVector> {
+            let mut map = HashMap::new();
+            map.insert(Box::<str>::from(SRC_KEY), icon());
+            map
+        }
+
+        /// The fill colours of every `DrawPath` in the composed list.
+        fn drawn_fills(list: &DisplayList) -> Vec<Color> {
+            list.commands()
+                .iter()
+                .filter_map(|cmd| match cmd {
+                    PaintCommand::DrawPath {
+                        paint: Paint::Fill(Brush::Solid(solid)),
+                        ..
+                    } => Some(solid.color()),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        fn compose(color: StyleColor) -> DisplayList {
+            let (tree, computed, boxes, _) = fixture(color);
+            SceneCoordinator::new().compose_with_images_scrolled(
+                &tree,
+                &computed,
+                &boxes,
+                None,
+                &HashMap::new(),
+                &vectors(),
+                &HashMap::new(),
+            )
+        }
+
+        #[test]
+        fn an_svg_source_paints_as_vector_paths_not_an_image() {
+            // §5.17 "SVG remains vector through the scene pipeline": the icon must
+            // reach the renderers as outlines, never as a rasterized DrawImage.
+            let list = compose(StyleColor::rgba(1.0, 0.0, 0.0, 1.0));
+            assert!(
+                list.commands()
+                    .iter()
+                    .any(|c| matches!(c, PaintCommand::DrawPath { .. })),
+                "the document's outline reached the scene"
+            );
+            assert!(
+                !list
+                    .commands()
+                    .iter()
+                    .any(|c| matches!(c, PaintCommand::DrawImage { .. })),
+                "a vector source must never be rasterized into an image"
+            );
+        }
+
+        #[test]
+        fn current_color_follows_the_computed_color_across_themes() {
+            // THE §5.17 property, end to end: ONE parsed document, composed twice
+            // under different computed `color`, painting different colours. No
+            // reparse is involved — the same `SceneVector` value is reused.
+            let red = compose(StyleColor::rgba(1.0, 0.0, 0.0, 1.0));
+            let blue = compose(StyleColor::rgba(0.0, 0.0, 1.0, 1.0));
+
+            assert_eq!(drawn_fills(&red), vec![Color::rgba(1.0, 0.0, 0.0, 1.0)]);
+            assert_eq!(drawn_fills(&blue), vec![Color::rgba(0.0, 0.0, 1.0, 1.0)]);
+        }
+
+        #[test]
+        fn the_document_is_placed_by_a_transform_that_scales_it_onto_the_box() {
+            // The 10x10 document is placed into a 20x20 box: scaled x2, not
+            // re-pointed. Vector geometry survives untouched.
+            let list = compose(StyleColor::rgba(1.0, 0.0, 0.0, 1.0));
+            let pushed = list
+                .commands()
+                .iter()
+                .find_map(|c| match c {
+                    PaintCommand::PushTransform(t) => Some(*t),
+                    _ => None,
+                })
+                .expect("the placement is a transform");
+            // A unit vector along x maps to 2 units: the scale reached the command.
+            let scaled = pushed.apply(Point::new(1.0, 1.0));
+            let origin = pushed.apply(Point::new(0.0, 0.0));
+            assert!((scaled.x - origin.x - 2.0).abs() < 1e-4, "{pushed:?}");
+            assert!((scaled.y - origin.y - 2.0).abs() < 1e-4, "{pushed:?}");
+            assert!(
+                list.commands()
+                    .iter()
+                    .any(|c| matches!(c, PaintCommand::PopTransform)),
+                "the transform is popped: the stream stays balanced"
+            );
+        }
+
+        #[test]
+        fn an_unresolved_src_paints_nothing() {
+            let (tree, computed, boxes, _) = fixture(StyleColor::rgba(1.0, 0.0, 0.0, 1.0));
+            let list = SceneCoordinator::new().compose_with_images_scrolled(
+                &tree,
+                &computed,
+                &boxes,
+                None,
+                &HashMap::new(),
+                &HashMap::new(),
+                &HashMap::new(),
+            );
+            assert!(drawn_fills(&list).is_empty(), "no document, no paint");
+        }
+    }
+
 }
