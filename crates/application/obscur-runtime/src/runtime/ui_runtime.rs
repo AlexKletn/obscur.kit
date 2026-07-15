@@ -1191,10 +1191,11 @@ impl UiRuntime {
         //    boxes and hit-test index carry over unchanged.
         //
         //    The plan's flag is a conservative upper bound derived from the frame
-        //    REASON; now that the real computed styles exist, refine it with what
-        //    ACTUALLY changed (spec §3.4 phase 5, §4.3) — a hover that only
-        //    shifts a fill reuses every retained box.
-        let layout_needed = self.layout_is_needed(plan, &ctx, first_frame, &computed);
+        //    REASON; now that the reconcile result and the real computed styles
+        //    exist, refine it with what ACTUALLY changed (spec §3.4 phase 5, §4.3)
+        //    — a hover that only shifts a fill reuses every retained box, even on
+        //    the reactive path where every frame is classified structural.
+        let layout_needed = self.layout_is_needed(plan, &ctx, first_frame, reconciled, &computed);
         let relaid_out = if layout_needed {
             let root_font = root_font_size(&computed, self.tree.root());
             let mut layout_styles = self
@@ -3439,27 +3440,51 @@ impl UiRuntime {
     /// Conservative by construction — it only ever *removes* provably redundant
     /// work:
     /// * a plan that already skips layout is left alone;
-    /// * a structural (`reconcile`) or first frame always lays out;
-    /// * any reason other than [`Input`](FrameReason::Input) /
-    ///   [`Animation`](FrameReason::Animation) keeps the plan's answer;
+    /// * a first frame, or a reconcile that ACTUALLY changed the tree, lays out;
+    /// * any reason outside the refined set below keeps the plan's answer;
     /// * a moved viewport / scroll offset, or a changed node count, forces layout;
     /// * an unknown property is layout-affecting by default.
+    ///
+    /// # Why `reconciled` and not `plan.reconcile()`
+    ///
+    /// The reactive path ([`run_due_frame_reactive`](Self::run_due_frame_reactive))
+    /// classifies EVERY frame as a structural [`FrameReason::UiCommit`], because the
+    /// builder may have produced a different tree and that must be reconciled. So a
+    /// windowed host — which drives every hover through the reactive path — would
+    /// hit `plan.reconcile() == true` on every frame and never reach this
+    /// refinement at all. But reconcile itself reports whether it changed anything:
+    /// it diffs text content, attributes and event bindings *by value*, so an empty
+    /// commit proves the tree is byte-identical. Gating on that actual result rather
+    /// than the plan's conservative upper bound is what makes a reactive hover
+    /// layout-free.
+    ///
+    /// # Why the reason allowlist stays
+    ///
+    /// The checks below cover layout's inputs for the listed reasons only. Notably
+    /// [`ResourceCompletion`](FrameReason::ResourceCompletion) is NOT refined: a
+    /// font or image that finished loading changes text metrics / intrinsic sizes,
+    /// and neither is a computed style nor a tracked layout input, so its deltas are
+    /// invisible here and it must keep laying out.
     fn layout_is_needed(
         &self,
         plan: FramePlan,
         ctx: &FrameContext,
         first_frame: bool,
+        reconciled: bool,
         computed: &ComputedStyles,
     ) -> bool {
         if !plan.layout() {
             return false;
         }
-        // Structure changed (or there is nothing retained to reuse).
-        if plan.reconcile() || first_frame {
+        // The tree actually changed, or there is nothing retained to reuse.
+        if reconciled || first_frame {
             return true;
         }
-        // Only the hot, non-structural reasons are refined.
-        if !matches!(ctx.reason(), FrameReason::Input | FrameReason::Animation) {
+        // Only the reasons whose layout inputs are fully covered below are refined.
+        if !matches!(
+            ctx.reason(),
+            FrameReason::Input | FrameReason::Animation | FrameReason::UiCommit
+        ) {
             return true;
         }
         // Layout also reads the viewport, the sticky scroll offset and the live
@@ -5190,6 +5215,82 @@ mod tests {
     }
 
     #[test]
+    fn a_paint_only_hover_is_layout_free_on_the_reactive_path_too() {
+        // The refinement has to bite where hosts actually live. A windowed host
+        // drives every frame through `run_due_frame_reactive`, which classifies
+        // ALL of them as a structural `UiCommit` — so gating on the plan's
+        // `reconcile()` flag would relayout on every hover and the whole
+        // optimization would be dead code in real windows. The gate is the
+        // reconcile's ACTUAL result: an unchanged rebuild commits empty.
+        let sheet = box_paint_only_hover_sheet();
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_root_view(box_view);
+        runtime.set_stylesheets(vec![sheet]);
+        runtime.request_frame(FrameReason::UiCommit);
+        let first = runtime.run_due_frame_reactive().expect("the first frame is due");
+        assert!(first.relaid_out(), "the first frame arranges the boxes");
+
+        let node = counter_child(&runtime);
+        let cold_box = runtime.layout_boxes().get(&node).copied().expect("a laid-out box");
+
+        runtime.set_pseudo_state(node, PseudoState::HOVER);
+        runtime.request_frame(FrameReason::UiCommit);
+        let hot = runtime.run_due_frame_reactive().expect("the hover frame is due");
+
+        assert!(!hot.reconciled(), "the rebuilt view is identical: reconcile commits empty");
+        assert!(
+            !hot.relaid_out(),
+            "a paint-only hover must be layout-free on the reactive path as well"
+        );
+        assert!(hot.restyled(), "it still restyles so the fill reaches paint");
+        assert_eq!(
+            runtime.layout_boxes().get(&node).copied(),
+            Some(cold_box),
+            "the retained box carried over unchanged"
+        );
+    }
+
+    #[test]
+    fn a_reactive_rebuild_that_changes_text_still_relayouts() {
+        // The safety side of the same gate: reconcile diffs text content BY VALUE,
+        // so a builder whose state produced new text commits a real change and the
+        // frame must lay out — text is not a computed style, and skipping here
+        // would strand the old text box (the wireframe's status line does exactly
+        // this on every click).
+        let label = Rc::new(RefCell::new("one".to_owned()));
+        let sheet = box_paint_only_hover_sheet();
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        {
+            let label = label.clone();
+            runtime.set_root_view(move || {
+                View::from_fragment(ViewFragment::from_nodes(vec![
+                    ViewNode::element(ComponentId::from_raw(10))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("box".into())))
+                        .with_children(ViewFragment::from_nodes(vec![ViewNode::text(
+                            label.borrow().as_str(),
+                        )])),
+                ]))
+            });
+        }
+        runtime.set_stylesheets(vec![sheet]);
+        runtime.request_frame(FrameReason::UiCommit);
+        runtime.run_due_frame_reactive().expect("the first frame is due");
+
+        // An identical rebuild: provably layout-free (the control for the assert
+        // below — it proves the next frame's relayout is caused by the TEXT).
+        runtime.request_frame(FrameReason::UiCommit);
+        let same = runtime.run_due_frame_reactive().expect("the repeat frame is due");
+        assert!(!same.relaid_out(), "an identical rebuild is layout-free");
+
+        // Now the state changes the text the builder emits.
+        *label.borrow_mut() = "two".to_owned();
+        runtime.request_frame(FrameReason::UiCommit);
+        let changed = runtime.run_due_frame_reactive().expect("the commit frame is due");
+        assert!(changed.reconciled(), "the new text is a real tree change");
+        assert!(changed.relaid_out(), "changed text must relayout");
+    }
+
+    #[test]
     fn css_transition_registers_and_interpolates_on_change() {
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
         let view = box_view();
@@ -5397,10 +5498,16 @@ mod tests {
         }
 
         let sink = shared.0.borrow();
-        // Three full frames, each opening a "frame" span.
+        // Three frames, each opening a "frame" span.
         let frame_spans = sink.spans.iter().filter(|s| s.name == "frame").count();
         assert_eq!(frame_spans, 3);
-        assert_eq!(sink.spans.len(), 3 * 5, "5 spans per full frame");
+        // Only the FIRST frame lays out. Frames 2-3 re-render an identical view:
+        // reconcile commits empty and no layout-affecting style changed, so
+        // `layout_is_needed` skips the phase and the retained boxes carry over.
+        let layout_spans = sink.spans.iter().filter(|s| s.name == "layout").count();
+        assert_eq!(layout_spans, 1, "an unchanged re-render must not relayout");
+        // 5 spans for the full first frame, 4 for each layout-free repeat.
+        assert_eq!(sink.spans.len(), 5 + 2 * 4);
     }
 
     #[test]
