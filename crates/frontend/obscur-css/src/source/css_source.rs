@@ -1,6 +1,6 @@
 //! An owned CSS source: its id, logical name, and text (spec §2.5 source maps).
 
-use crate::source::{SourceId, SourceSpan};
+use crate::source::{SourceId, SourceSpan, SourceVersion};
 
 /// An owned CSS source together with its identity and text (spec §2.5).
 ///
@@ -12,6 +12,9 @@ use crate::source::{SourceId, SourceSpan};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CssSource {
     id: SourceId,
+    /// Which revision of this source's text `text` is (spec §4.12). Stamped by
+    /// the owner; a cache compares it rather than the text.
+    version: SourceVersion,
     name: Box<str>,
     text: Box<str>,
 }
@@ -22,6 +25,7 @@ impl CssSource {
     pub fn new(id: SourceId, name: impl Into<Box<str>>, text: impl Into<Box<str>>) -> Self {
         Self {
             id,
+            version: SourceVersion::INITIAL,
             name: name.into(),
             text: text.into(),
         }
@@ -32,6 +36,24 @@ impl CssSource {
     #[must_use]
     pub fn anonymous(text: impl Into<Box<str>>) -> Self {
         Self::new(SourceId::ANONYMOUS, "", text)
+    }
+
+    /// Returns this source at revision `version` (fluent).
+    ///
+    /// An owner that re-reads a stylesheet from disk stamps the new text with the
+    /// next revision, which is what invalidates a
+    /// [`StylesheetCache`](crate::cache::StylesheetCache) entry — explicitly, per
+    /// spec §4.12, rather than by the cache re-hashing text behind the owner's back.
+    #[must_use]
+    pub fn at_version(mut self, version: SourceVersion) -> Self {
+        self.version = version;
+        self
+    }
+
+    /// The revision of this source's text.
+    #[must_use]
+    pub const fn version(&self) -> SourceVersion {
+        self.version
     }
 
     /// Returns the id of this source.
