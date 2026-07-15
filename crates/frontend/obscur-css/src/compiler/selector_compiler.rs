@@ -4,8 +4,9 @@
 //! CSS `(a, b, c)` specificity triple the cascade ranks declarations by, plus a
 //! sequential [`SelectorId`] handle that ties a produced [`Declaration`] back to
 //! the rule that authored it. It also surfaces the excluded dynamic-state
-//! pseudo-classes (`:link`, `:visited`, `:target`) as
-//! [`UnsupportedCssFeature`]s (§4.13) rather than silently matching them.
+//! pseudo-classes (`:link`, `:visited`, `:target`) and pseudo-elements
+//! (`::before`, `::after`, …) as [`UnsupportedCssFeature`]s (§4.13) rather than
+//! silently matching them.
 //!
 //! [`Declaration`]: obscur_style::cascade::Declaration
 
@@ -63,7 +64,7 @@ impl SelectorCompiler {
     }
 
     /// Compiles one complex selector, minting its id and reporting any excluded
-    /// pseudo-classes into `unsupported`.
+    /// pseudo-classes and pseudo-elements into `unsupported`.
     #[must_use]
     pub fn compile(
         &mut self,
@@ -71,7 +72,7 @@ impl SelectorCompiler {
         unsupported: &mut Vec<UnsupportedCssFeature>,
     ) -> CompiledSelector {
         let specificity = Self::specificity(selector);
-        collect_excluded(selector, unsupported);
+        collect_unsupported(selector, unsupported);
         let id = SelectorId::from_raw(self.next_id);
         self.next_id += 1;
         CompiledSelector { id, specificity }
@@ -98,7 +99,9 @@ impl SelectorCompiler {
     /// dynamic-state pseudo-classes are *not* filtered here (that diagnostic is
     /// raised by [`compile`](Self::compile)); they lower to
     /// [`style::PseudoClassSelector::Other`], which the matcher treats as
-    /// matching nothing.
+    /// matching nothing. Pseudo-elements lower likewise — preserved as
+    /// [`style::SimpleSelector::PseudoElement`], which the matcher never
+    /// matches because the kit generates no box for one.
     #[must_use]
     pub fn lower_list(list: &ParsedSelectorList) -> style::SelectorList {
         style::SelectorList::new(list.0.iter().map(Self::lower_complex).collect())
@@ -262,23 +265,38 @@ fn compound_specificity(compound: &ParsedCompoundSelector) -> SelectorSpecificit
     SelectorSpecificity::new(a, b, c)
 }
 
-/// Records the excluded dynamic-state pseudo-classes (`:link`, `:visited`,
-/// `:target`) found anywhere in the complex selector (§4.13).
-fn collect_excluded(
+/// Records the constructs the kit recognises but cannot honour, found anywhere
+/// in the complex selector (§4.13): the excluded dynamic-state pseudo-classes
+/// (`:link`, `:visited`, `:target`) and every pseudo-element.
+///
+/// Both lower to something the matcher never matches, so the rule is inert; the
+/// diagnostic is what keeps that from being a silent drop.
+fn collect_unsupported(
     selector: &ParsedComplexSelector,
     unsupported: &mut Vec<UnsupportedCssFeature>,
 ) {
     let compounds = std::iter::once(&selector.head).chain(selector.tail.iter().map(|(_, c)| c));
     for compound in compounds {
         for part in &compound.parts {
-            if let SimpleSelector::PseudoClass { name, .. } = part
-                && is_excluded_pseudo(name)
-            {
-                unsupported.push(UnsupportedCssFeature::new(
-                    UnsupportedFeatureKind::Selector,
-                    format!(":{name}"),
-                    SourceSpan::empty(0),
-                ));
+            match part {
+                SimpleSelector::PseudoClass { name, .. } if is_excluded_pseudo(name) => {
+                    unsupported.push(UnsupportedCssFeature::new(
+                        UnsupportedFeatureKind::Selector,
+                        format!(":{name}"),
+                        SourceSpan::empty(0),
+                    ));
+                }
+                // No `content` property and no generated box: a pseudo-element
+                // rule styles nothing at all rather than leaking onto the
+                // originating element.
+                SimpleSelector::PseudoElement(name) => {
+                    unsupported.push(UnsupportedCssFeature::new(
+                        UnsupportedFeatureKind::PseudoElement,
+                        format!("::{name}"),
+                        SourceSpan::empty(0),
+                    ));
+                }
+                _ => {}
             }
         }
     }
@@ -391,6 +409,27 @@ mod tests {
         assert_eq!(unsupported.len(), 1);
         assert_eq!(unsupported[0].kind(), UnsupportedFeatureKind::Selector);
         assert_eq!(unsupported[0].name(), ":visited");
+    }
+
+    #[test]
+    fn pseudo_element_is_unsupported() {
+        let mut compiler = SelectorCompiler::new();
+        let mut unsupported = Vec::new();
+        let _ = compiler.compile(&selector(".badge::before"), &mut unsupported);
+        let _ = compiler.compile(&selector("li::after"), &mut unsupported);
+        assert_eq!(unsupported.len(), 2);
+        assert_eq!(unsupported[0].kind(), UnsupportedFeatureKind::PseudoElement);
+        assert_eq!(unsupported[0].name(), "::before");
+        assert_eq!(unsupported[1].name(), "::after");
+    }
+
+    #[test]
+    fn pseudo_element_in_a_tail_compound_is_reported() {
+        let mut compiler = SelectorCompiler::new();
+        let mut unsupported = Vec::new();
+        let _ = compiler.compile(&selector("ul > li::before"), &mut unsupported);
+        assert_eq!(unsupported.len(), 1);
+        assert_eq!(unsupported[0].name(), "::before");
     }
 
     #[test]

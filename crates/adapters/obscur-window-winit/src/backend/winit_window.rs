@@ -60,8 +60,13 @@ impl WinitWindow {
     /// (only when an explicit one is requested — a platform-chosen `None`
     /// position is left to the platform), resizability, server-side decorations,
     /// always-on-top window level, and presentation state. Transparency is fixed
-    /// at creation time in winit and cannot be toggled afterwards, so a changed
-    /// `transparent` flag is intentionally ignored here.
+    /// at creation time in winit and cannot be toggled afterwards, which is why
+    /// [`WinitWindowBackend`]'s `update_window` never lets a changed
+    /// `transparent` flag reach this far: it keeps the record on the live value
+    /// and reports the update `conditional()`, rather than accepting a flip that
+    /// would be silently dropped here.
+    ///
+    /// [`WinitWindowBackend`]: super::WinitWindowBackend
     pub fn apply_properties(&self, props: &WindowProperties) {
         self.window.set_title(&props.title);
         let _ = self.window.request_inner_size(LogicalSize::new(

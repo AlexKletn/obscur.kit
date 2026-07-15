@@ -276,6 +276,27 @@ mod tests {
     }
 
     #[test]
+    fn pseudo_element_rule_does_not_style_originating_element() {
+        // The audit case: `.badge::before { color: red }` must leave `.badge`
+        // itself unstyled. The kit generates no `::before` box, so the rule has
+        // nowhere to land; anchoring it on the subject painted the wrong element.
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![rule(
+                vec![
+                    class("badge"),
+                    SimpleSelector::PseudoElement("before".into()),
+                ],
+                vec![BlockDeclaration::normal(PropertyId::Color, color(1.0))],
+            )],
+        );
+        let element = FakeElement::new("span").with_class("badge");
+        let resolved = StyleMatcher::new().match_single(&sheet, &element);
+        assert_eq!(resolved.get(PropertyId::Color), None);
+        assert!(resolved.is_empty());
+    }
+
+    #[test]
     fn higher_specificity_wins() {
         // #id { color: A } beats .cls { color: B }; div { color: C } loses too.
         let sheet = Stylesheet::new(

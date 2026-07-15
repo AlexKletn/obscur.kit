@@ -50,7 +50,7 @@ Three defects the audit found in work from the immediately preceding campaign. A
 | §1 Architecture & boundaries | Static architecture real and machine-enforced; **dynamic architecture (topology, diagnostics, error boundaries) is types with no execution path** | **yes** |
 | §2 Components, tree & DSL | Data model faithful; control flow now real; **§2.12 unimplemented below the type layer; §2.13 unenforced on the primary surface** | **yes** |
 | §3 State, transactions & runtime | Frame skeleton, scheduler, DnD, resource staleness real; **invalidation is boolean-per-phase; §3.7 100% stubs** | **yes** |
-| §4 Layout, CSS & motion | Flow/flex/grid genuinely strong; **relative units die at the layout↔paint seam; `@container` always matches; `::before` leaks** | **yes** |
+| §4 Layout, CSS & motion | Flow/flex/grid genuinely strong; **relative units die at the layout↔paint seam; `::before` leaks**; `@container` now fails closed + diagnoses, but is inert (§4.13 still over-claims it as *Supported*) | **yes** |
 | §5 Rendering, text & resources | SVG/currentColor and resource versioning excellent; **no font subsystem; caches dead; diagnostics decorative** | **yes** |
 | §6 Platform, windows & services | Two live targets (linux, wasm32) with real providers; **the whole window/display/action half is unconsumed and silently lies** | **yes** |
 | §7 A11y, testing & diagnostics | DevTools read-side security genuinely enforced; **a11y tree misreports state; headless determinism is ceremonial** | **yes** |
@@ -95,7 +95,13 @@ Three defects the audit found in work from the immediately preceding campaign. A
 **4-A. `font-size: 2rem` renders at 16px, and poisons every `em` on the node.**
 `ComputedStyle` never absolutizes lengths. Layout resolves via `resolve_px(ctx)`; **paint does not** (`scene_coordinator.rs:2812,3317,3635` use `as_px()`, which honours absolute px only). Consequences: `border-width: .1em` **reserves layout space and paints nothing** — the two phases disagree; `box-shadow`/`border-radius`/`blur` in relative units become 0; `border-radius: 50%` (the circle idiom) is dead. `rem` has no chicken-and-egg excuse. **One absolutization pass at computed-value time retires ~8 silently-wrong rows.**
 
-**4-B. `@container` always matches.** Full parse→lower→evaluate chain exists; `MediaEnvironment::with_container` has **zero callers** and there is no `container-type` property. Unset ⇒ non-restrictive ⇒ holds. §4.13 lists container queries as *Supported*. **Fails open** — the worst mode for a gate.
+**4-B. `@container` always matches.** — **CLOSED (fails closed + diagnostic); still not implemented.** Was: full parse→lower→evaluate chain exists, but `MediaEnvironment::with_container` has **zero callers** and there is no `container-type` property, so unset ⇒ non-restrictive ⇒ holds — failing open, the worst mode for a gate.
+
+Now: an unknown *container* axis evaluates to **false** (`FeatureQuery::holds`), an unrepresentable container feature lowers to `Never` rather than `Always`, a bare `@container name { … }` lowers to `Never`, and the parser records an `UnsupportedCssFeature(AtRule, "@container")` on `CompiledStylesheet::unsupported`. Viewport axes keep their permissive `unbounded()` opt-out — the asymmetry is deliberate and documented (css-contain-3 §3.1).
+
+Two scoping caveats, or this entry becomes the next over-claim: "inert" covers **matchable declarations**; the motion path (`stylesheet_compiler.rs:404-409`) is a separate lowering. And the diagnostic is **recorded, not reported** — `unsupported` has no production reader (every consumer takes `.matchable`), which is the same decorative-diagnostics finding §5-A records.
+
+**Still open:** `@container` rules are *inert*, not *working*. There is no `container-type`/`container-name` property, and `with_container` still has no production caller. Wiring it for real needs a container's resolved size during matching, but `build_inputs_env` matches the whole tree strictly *before* `style.resolve` and layout, and there is no layout-interleaved restyle pass. §4.13 listing container queries as *Supported* remains an over-claim against the implementation.
 
 **4-C. `::before`/`::after` apply their declarations to the originating element.** `selector_matcher.rs:134`: `PseudoElement(_) => true`. `.badge::before { color: red }` paints `.badge` red. No `PropertyId::Content`, no generated box. Omission would fail closed; this does not.
 
@@ -105,7 +111,13 @@ Three defects the audit found in work from the immediately preceding campaign. A
 
 **5-A. §5.2's "explicit diagnostics" requirement is decorative.** `RendererError::UnsupportedEffect` is **never constructed**; `Renderer::supports_effect` has no production consumer. The previous audit converted this into a clean bill of health ("documented policy, correctly reported via `supports_effect`") — nothing reads it, and what it reports is wrong: CPU claims `Emulated` for blur while `DrawShadow` destructures `blur: _` and draws a hard rect. **That is `Unavailable`.**
 
-**5-B. §5.18 has no font subsystem, and the shaper's metrics are fake.** No system font enumeration (zero fontconfig/font-kit/core-text/DirectWrite); **zero font files in the repo**, so the "bundled fallback set for WASM/isolated environments" cannot be met by construction. "Usable rendering out of the box" is false: `SceneCoordinator::new()` installs a **mock** shaper, an empty resolver and a single-run itemizer (⇒ **no bidi by default**). Worse, the only wired real mode, `HarfrustShaper::without_font()`, shapes real glyph *advances* while reporting **idealized 0.8/0.2 line metrics** — `FontRegistry` reads the real `ascent`/`descent` at registration and never plumbs them to `line_metrics_for`. Real text, fake line boxes, in every example.
+**5-B. §5.18 has no font subsystem, and the shaper's metrics are fake.** — **fake metrics CLOSED; the font subsystem is untouched.** No system font enumeration (zero fontconfig/font-kit/core-text/DirectWrite); **zero font files in the repo**, so the "bundled fallback set for WASM/isolated environments" cannot be met by construction. "Usable rendering out of the box" is false: `SceneCoordinator::new()` installs a **mock** shaper, an empty resolver and a single-run itemizer (⇒ **no bidi by default**). All of that stands.
+
+The metrics half was: `HarfrustShaper::without_font()` — the only wired real mode — shaped real glyph *advances* while reporting **idealized 0.8/0.2 line metrics**, because `FontRegistry` read the real `ascent`/`descent` at registration and never plumbed them to `line_metrics_for`. Real text, fake line boxes, in every example.
+
+Now: `FontRegistry::face_metrics()` hands the registry's real per-face `head`/`hhea` metrics to `HarfrustShaper::with_faces()` as a `FaceMetrics` snapshot keyed by `FontId`, so `line_metrics`/`line_metrics_for` scale each face's *own* ascent/descent/line-gap — a taller fallback face grows its line box (CSS 2.1 §10.8.1). All 27 examples wire it; the rendered PNGs change. The idealized ratios remain **only** for a face with no readable metrics, and each such query is counted by `HarfrustShaper::idealized_line_metrics()`.
+
+**Still open:** (a) the font-subsystem half above — enumeration, bundled fallbacks, the mock-by-default stack; (b) `KitBootstrap` still has **no installer** — `text_shaper_without_font` now *takes* `FaceMetrics`, so metrics-blindness is opt-in rather than the default, but `FaceMetrics::empty()` is a documented opt-out that hands out exactly such a shaper (`kit_bootstrap.rs:223-226`); the constructor has zero callers regardless, and all 27 examples still hand-wire the stack identically; (c) `idealized_line_metrics()` is an affordance, not a report — nothing in the runtime reads it, so a host that never asks still gets ratio-sized line boxes silently; (d) only `hhea` is read — the OS/2 `USE_TYPO_METRICS` selection between `sTypoAscender`/`usWinAscent` is not implemented; (e) **a new silent-wrongness, narrower than the one closed**: `face_metrics()` is a *snapshot*, so a face registered after it is absent from the table, `line_metrics_for` misses, and the fall-through hands back the **primary face's** real metrics — that face is measured by the wrong font, and `idealized_line_metrics()` does not count it, because the counter only catches the idealized fallback and never wrong-face substitution. All 27 examples order their calls correctly, so nothing is wrong today; the trap is set for the 28th.
 
 **5-C. §5.19 is a complete, tested, entirely unused subsystem.** ~1,150 lines (`PathCache`/`GlyphCache`/`TextureCache`, `CacheBudget`/`EvictionPolicy`/`CacheStatistics`/`VisibilityPriority`) with zero consumers. The caches that run are unbounded `HashMap`s with no budget, eviction, metrics or test switch.
 
@@ -123,7 +135,11 @@ Three defects the audit found in work from the immediately preceding campaign. A
 
 ### §7 — the a11y tree misreports state
 
-**7-A. A disabled control is announced as enabled and actionable.** `semantic_builder.rs:104-127` never reads `is_disabled()`/`is_checked()`/`is_readonly()` — which exist and which **the CSS matcher already consumes**. `SemanticState::disabled` is always false, so `is_actionable()` returns **true for a disabled button**. The engine knows the truth on the CSS path and publishes the opposite on the a11y path. Compounded by §7.1 L27 being violated (no action path back in): an AT client is told a control is actionable and has no way to act.
+**7-A. A disabled control is announced as enabled and actionable.** — **CLOSED in the builder; the output path is still unwired.** Was: `semantic_builder.rs:104-127` never read `is_disabled()`/`is_checked()`/`is_readonly()` — which exist and which **the CSS matcher already consumes** — so `SemanticState::disabled` was always false and `is_actionable()` returned **true for a disabled button**. The engine knew the truth on the CSS path and published the opposite on the a11y path.
+
+Now the builder derives all three from the same attributes the CSS matcher reads, so the two paths agree, and the accesskit adapter already maps them (`node_converter.rs`: `disabled`→`set_disabled`, `checked`→`set_toggled`, `readonly`→`set_read_only`).
+
+**Still open, and this is the finding that outlives the fix:** a real screen reader still hears nothing. `AccessKitBridge` is **never constructed outside its own crate**, and `push_accessibility`'s only caller is a test (`ui_runtime.rs:6484`). The tree is now correct and no production host publishes it — the same *domain richer than its runtime* pattern this audit opens with, one layer further out. §7.1 L27 (no action path back in) is likewise untouched.
 
 **7-B. The headless runtime's determinism is ceremonial.** `advance_time`/`run_tasks` touch the clock and executor; `render`/`render_styled` touch neither. Two tests (`advance_time_moves_the_clock`, `run_tasks_drains_the_executor`) pass with the entire frame pipeline deleted — the test *itself* spawns the closure the host never spawns. **A chapter about testing has an untested test harness.**
 
@@ -196,7 +212,7 @@ Three defects the audit found in work from the immediately preceding campaign. A
 2. **§4-B, §4-C** — both **fail open**; the two most dangerous entries here.
 3. **§7-A** — the a11y tree has the data and publishes the opposite; small fix, real users.
 4. **§1-A/§1-B** — a component failure should not produce stale UI and total silence.
-5. **§5-B** — plumb `FontRegistry`'s real metrics to `line_metrics_for`, and give `KitBootstrap` an installer.
+5. **§5-B** — ~~plumb `FontRegistry`'s real metrics to `line_metrics_for`~~ (done), and give `KitBootstrap` an installer (still open — 27 examples hand-wire the stack).
 6. **§6-B** — return `emulated()`/`conditional()`/`Unsupported` instead of `native()` for work not done.
 7. **Wire what is already built and tested** — `StylesheetCache`, the CSS→motion bridge, `PipelineSnapshot` into `HeadlessHost`, `serve_with_events`.
 8. **Ban `Plugin → render/scene/tree` in xtask** while it costs one line.

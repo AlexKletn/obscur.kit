@@ -1648,6 +1648,7 @@ dependencies = [
  "obscur-tree",
  "obscur-ui-ir",
  "obscur-view",
+ "syn",
 ]
 
 [[package]]
@@ -1788,6 +1789,7 @@ name = "obscur-runtime"
 version = "0.0.0"
 dependencies = [
  "obscur-accessibility",
+ "obscur-data-transfer",
  "obscur-diagnostics",
  "obscur-geometry",
  "obscur-identity",

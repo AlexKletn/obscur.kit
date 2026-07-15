@@ -21,10 +21,21 @@
 //! `units_per_em` from the loaded face (never from possibly-placeholder
 //! [`FontMetrics`](obscur_text::font::FontMetrics)). Bidi level resolution and
 //! itemization happen upstream; this adapter shapes one already-uniform run.
+//!
+//! **Line metrics are wired separately from shaping.** The port asks a shaper for
+//! a font's vertical metrics by [`FontId`](obscur_text::font::FontId), and only
+//! the [`FontRegistry`] that issued the ids knows the bytes behind each one, so a
+//! [`HarfrustShaper::without_font`] shaper must be handed the registry's
+//! [`FaceMetrics`] snapshot ([`FontRegistry::face_metrics`] →
+//! [`HarfrustShaper::with_faces`]) or it will shape real glyphs into line boxes
+//! sized by the idealized 0.8/0.2 ratios. Those fallbacks are counted by
+//! [`HarfrustShaper::idealized_line_metrics`].
 #![deny(unsafe_op_in_unsafe_fn)]
 
+mod face_metrics;
 mod registry;
 mod shaper;
 
+pub use face_metrics::FaceMetrics;
 pub use registry::FontRegistry;
 pub use shaper::HarfrustShaper;

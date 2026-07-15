@@ -10,6 +10,8 @@ use obscur_text::font::{
 use obscur_text::span::FontSlant;
 use read_fonts::{FontRef as ReadFontRef, TableProvider};
 
+use crate::face_metrics::FaceMetrics;
+
 /// A real [`FontResolver`] backed by a set of registered fonts and their true
 /// `cmap` coverage (spec §5.10 font fallback).
 ///
@@ -17,7 +19,9 @@ use read_fonts::{FontRef as ReadFontRef, TableProvider};
 /// once (via [`read_fonts`]) to read its `units_per_em` and vertical metrics and
 /// hands back a [`FontId`] assigned in registration order (`0, 1, 2, …`). The id
 /// is deterministic and stable, so a later renderer can look the same face back
-/// up by id.
+/// up by id — and so can a shaper, through the
+/// [`face_metrics`](Self::face_metrics) table, which is how a line box gets sized
+/// from the face's own metrics instead of idealized ratios.
 ///
 /// [`resolve`](FontResolver::resolve) walks the request's fallback chain in
 /// order (primary first). For each family it consults every registered font
@@ -36,17 +40,15 @@ pub struct FontRegistry {
 }
 
 /// One registered font: its id, requested family/attributes, raw bytes, and the
-/// vertical metrics read once at registration time.
+/// vertical metrics read once at registration time — `None` when the bytes carry
+/// no readable `head`/`hhea`.
 #[derive(Debug, Clone)]
 struct RegisteredFont {
     id: FontId,
     family: FontFamily,
     attributes: FontAttributes,
     bytes: Arc<[u8]>,
-    units_per_em: u16,
-    ascent: f32,
-    descent: f32,
-    line_gap: f32,
+    metrics: Option<FontMetrics>,
 }
 
 impl FontRegistry {
@@ -64,7 +66,8 @@ impl FontRegistry {
     /// The bytes are parsed once to read the face's `units_per_em` and `hhea`
     /// vertical metrics for the resolved [`FontFace`]. Bytes that do not parse as
     /// a font are still registered (keeping id assignment deterministic) with
-    /// idealized default metrics; such a font simply never covers any run.
+    /// idealized default metrics; such a font simply never covers any run, and
+    /// [`face_metrics`](Self::face_metrics) reports it as having no real metrics.
     pub fn register(
         &mut self,
         family: FontFamily,
@@ -75,18 +78,34 @@ impl FontRegistry {
         // Ids are handed out densely in registration order, so the index is the
         // current length.
         let id = FontId::new(u32::try_from(self.fonts.len()).unwrap_or(u32::MAX));
-        let (units_per_em, ascent, descent, line_gap) = read_metrics(&bytes);
+        let metrics = read_metrics(&bytes);
         self.fonts.push(RegisteredFont {
             id,
             family,
             attributes,
             bytes,
-            units_per_em,
-            ascent,
-            descent,
-            line_gap,
+            metrics,
         });
         id
+    }
+
+    /// Returns a snapshot of every registered face's real design metrics, keyed by
+    /// the [`FontId`] handed out at registration (spec §5.10).
+    ///
+    /// Hand it to
+    /// [`HarfrustShaper::with_faces`](crate::HarfrustShaper::with_faces): a shaper
+    /// is asked for line metrics by id alone, so without this table it cannot tell
+    /// which face an id names and answers every query with the idealized ratios.
+    /// A face registered *after* this call is not in the snapshot — take it once
+    /// the faces are registered.
+    #[must_use]
+    pub fn face_metrics(&self) -> FaceMetrics {
+        FaceMetrics::new(
+            self.fonts
+                .iter()
+                .map(|font| font.metrics)
+                .collect::<Vec<_>>(),
+        )
     }
 
     /// Returns the number of registered fonts.
@@ -122,7 +141,7 @@ impl FontResolver for FontRegistry {
                     font.family.clone(),
                     font.attributes,
                     FontSource::memory(Arc::clone(&font.bytes)),
-                    FontMetrics::new(font.units_per_em, font.ascent, font.descent, font.line_gap),
+                    font.metrics.unwrap_or(IDEALIZED_METRICS),
                 );
                 // Detect synthesis: the request wants a slant/weight the matched
                 // face — chosen as the nearest available cut — does not actually
@@ -155,27 +174,36 @@ impl RegisteredFont {
     }
 }
 
-/// Reads `(units_per_em, ascent, descent, line_gap)` in font design units from
-/// the `head`/`hhea` tables, falling back to idealized defaults (1000 upem,
-/// 800 / −200 / 0) when the bytes are not a loadable font or the tables are
-/// missing. `descent` keeps the font's signed (negative-below-baseline)
+/// The design metrics standing in for a face whose own tables are unreadable:
+/// the idealized 0.8 / 0.2 ratios expressed at 1000 units per em, so a scaled
+/// line height equals the font size exactly. A face resolved with these is
+/// reported as metric-less by [`FontRegistry::face_metrics`], so the shaper's
+/// fallback to the same ratios is observable rather than a silent pretence of
+/// real data.
+const IDEALIZED_METRICS: FontMetrics = FontMetrics::new(1000, 800.0, -200.0, 0.0);
+
+/// Reads a face's design metrics (units-per-em plus `hhea`
+/// ascender / descender / line-gap) in font units, or `None` when the bytes are
+/// not a loadable font, the `head`/`hhea` tables are missing, or `units_per_em`
+/// is zero. `descent` keeps the font's signed (negative-below-baseline)
 /// convention, matching [`FontMetrics`].
-fn read_metrics(bytes: &[u8]) -> (u16, f32, f32, f32) {
-    let read = || -> Option<(u16, f32, f32, f32)> {
-        let font = ReadFontRef::new(bytes).ok()?;
-        let units_per_em = font.head().ok()?.units_per_em();
-        if units_per_em == 0 {
-            return None;
-        }
-        let hhea = font.hhea().ok()?;
-        Some((
-            units_per_em,
-            f32::from(hhea.ascender().to_i16()),
-            f32::from(hhea.descender().to_i16()),
-            f32::from(hhea.line_gap().to_i16()),
-        ))
-    };
-    read().unwrap_or((1000, 800.0, -200.0, 0.0))
+///
+/// Only `hhea` is consulted: the OS/2 `USE_TYPO_METRICS` selection between
+/// `sTypoAscender`/`usWinAscent` is **not** implemented, so a face that asks for
+/// its typo metrics is still measured by its `hhea` ones.
+fn read_metrics(bytes: &[u8]) -> Option<FontMetrics> {
+    let font = ReadFontRef::new(bytes).ok()?;
+    let units_per_em = font.head().ok()?.units_per_em();
+    if units_per_em == 0 {
+        return None;
+    }
+    let hhea = font.hhea().ok()?;
+    Some(FontMetrics::new(
+        units_per_em,
+        f32::from(hhea.ascender().to_i16()),
+        f32::from(hhea.descender().to_i16()),
+        f32::from(hhea.line_gap().to_i16()),
+    ))
 }
 
 /// The weight at and above which a request is treated as "bold-ish": a request
@@ -610,6 +638,37 @@ mod tests {
             .expect("Alpha covers 'A'");
         assert_eq!(resolved.font(), FontId::new(1));
         assert!(!resolved.synth_bold(), "a real bold face must not be faux-bolded");
+    }
+
+    #[test]
+    fn face_metrics_snapshot_is_keyed_by_the_issued_ids() {
+        let registry = registry();
+        let faces = registry.face_metrics();
+        assert_eq!(faces.len(), registry.len());
+        // Both fonts carry the same real head/hhea (1000 upem, 800 / −200 / 0),
+        // read once at registration and reachable by the id `register` returned.
+        for id in [FontId::new(0), FontId::new(1)] {
+            let metrics = faces.get(id).expect("a loadable face has real metrics");
+            assert_eq!(metrics.units_per_em, 1000);
+            assert_eq!(metrics.ascent, 800.0);
+            assert_eq!(metrics.descent, -200.0);
+        }
+        // An id the registry never issued names no face.
+        assert!(faces.get(FontId::new(2)).is_none());
+    }
+
+    #[test]
+    fn an_unloadable_faces_metrics_are_reported_as_absent_not_faked() {
+        let mut registry = FontRegistry::new();
+        let id = registry.register(
+            FontFamily::named("Broken"),
+            FontAttributes::default(),
+            vec![0u8, 1, 2, 3],
+        );
+        // The face still takes its id — but the snapshot says "no metrics" rather
+        // than handing back the idealized stand-in as if it were the font's own.
+        assert_eq!(registry.face_metrics().len(), 1);
+        assert!(registry.face_metrics().get(id).is_none());
     }
 
     #[test]

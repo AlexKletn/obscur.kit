@@ -3,12 +3,19 @@
 //! live environment (§4.13).
 //!
 //! Only length features on the width/height (viewport) or inline-size/block-size
-//! (container) axes with a `px` reference are represented as comparisons; every
+//! (container) axes with a `px` reference are represented as comparisons. Every
 //! other feature (a boolean feature, a non-`px` length, an unknown name) lowers
-//! to [`RuleCondition::Always`] so the rule is gated permissively rather than
-//! silently dropped. `and`/`or` connectors are not distinguished by the parser,
-//! so a query's feature list is treated as a conjunction; a media query list is
-//! a disjunction, and the `not` qualifier negates a query.
+//! to a per-family fallback: [`RuleCondition::Always`] for `@media`, so the rule
+//! is gated permissively rather than silently dropped, but
+//! [`RuleCondition::Never`] for `@container`, which fails closed because nothing
+//! can establish a query container — see
+//! [`MediaEnvironment`](obscur_style::matching::MediaEnvironment).
+//!
+//! `and`/`or` connectors are not distinguished by the parser, so a query's
+//! feature list is treated as a conjunction; a media query list is a
+//! disjunction, and the `not` qualifier negates a query. Container queries have
+//! no `not` qualifier in the parsed grammar, so no negation can flip a
+//! failed-closed container feature back to holding.
 
 use crate::parser::{
     ContainerCondition, MediaComparator, MediaCondition, MediaQualifier, ParsedContainerQuery,
@@ -61,14 +68,22 @@ fn lower_media_query(query: &ParsedMediaQuery) -> RuleCondition {
     }
 }
 
-/// A container query is a conjunction of its features; the container name is not
-/// yet matched against a specific element, so it is ignored here.
+/// A container query is a conjunction of its features.
+///
+/// The container name is ignored: nothing can establish a *named* container any
+/// more than an anonymous one, so matching the name would not change the answer.
+/// A query with no features at all (`@container name { … }`) asks only "does
+/// this container exist", which is [`Never`](RuleCondition::Never) here.
 fn lower_container_query(query: &ParsedContainerQuery) -> RuleCondition {
-    conjoin(
+    if query.conditions.is_empty() {
+        return RuleCondition::Never;
+    }
+    RuleCondition::All(
         query
             .conditions
             .iter()
-            .map(|cond| lower_container_condition(cond)),
+            .map(lower_container_condition)
+            .collect(),
     )
 }
 
@@ -83,6 +98,9 @@ fn conjoin(parts: impl Iterator<Item = RuleCondition>) -> RuleCondition {
 }
 
 /// Lowers a media feature (viewport width/height axes).
+///
+/// An unrepresentable media feature is permissive: the viewport exists, we
+/// simply cannot test this aspect of it, so the rule still applies.
 fn lower_media_condition(condition: &MediaCondition) -> RuleCondition {
     lower_feature(
         &condition.feature,
@@ -90,10 +108,17 @@ fn lower_media_condition(condition: &MediaCondition) -> RuleCondition {
         condition.value.as_deref(),
         ConditionAxis::ViewportWidth,
         ConditionAxis::ViewportHeight,
+        RuleCondition::Always,
     )
 }
 
 /// Lowers a container feature (container inline/block size axes).
+///
+/// An unrepresentable container feature lowers to [`RuleCondition::Never`], not
+/// `Always`: a container query is evaluated against a container that nothing in
+/// this pipeline can establish, so a permissive fallback would resurrect the
+/// always-matches bug through the back door (`@container (orientation: portrait)`
+/// would apply everywhere).
 fn lower_container_condition(condition: &ContainerCondition) -> RuleCondition {
     lower_feature(
         &condition.feature,
@@ -101,17 +126,19 @@ fn lower_container_condition(condition: &ContainerCondition) -> RuleCondition {
         condition.value.as_deref(),
         ConditionAxis::ContainerWidth,
         ConditionAxis::ContainerHeight,
+        RuleCondition::Never,
     )
 }
 
 /// Maps a feature name/comparator/value onto a width- or height-axis comparison,
-/// falling back to [`RuleCondition::Always`] for anything unrepresentable.
+/// falling back to `unrepresentable` for anything it cannot express.
 fn lower_feature(
     feature: &str,
     comparator: Option<MediaComparator>,
     value: Option<&[ParsedValue]>,
     width_axis: ConditionAxis,
     height_axis: ConditionAxis,
+    unrepresentable: RuleCondition,
 ) -> RuleCondition {
     let name = feature.to_ascii_lowercase();
     let (axis, synthesized) = match name.as_str() {
@@ -121,11 +148,11 @@ fn lower_feature(
         "min-height" | "min-block-size" => (height_axis, Some(ConditionComparator::Ge)),
         "max-height" | "max-block-size" => (height_axis, Some(ConditionComparator::Le)),
         "height" | "block-size" => (height_axis, None),
-        // Boolean features, orientation, prefers-*, unknown names: not gated.
-        _ => return RuleCondition::Always,
+        // Boolean features, orientation, prefers-*, unknown names.
+        _ => return unrepresentable,
     };
     let Some(reference_px) = value.and_then(reference_px) else {
-        return RuleCondition::Always;
+        return unrepresentable;
     };
     // `min-`/`max-` forms carry their own comparator; plain `width`/`height` use
     // the range comparator, defaulting a bare `(width: 600px)` colon form to `=`.
@@ -241,12 +268,43 @@ mod tests {
     }
 
     #[test]
+    fn container_query_fails_closed_without_a_container() {
+        // The live runtime supplies a viewport but never a container size, so
+        // this is the environment every `@container` rule is really evaluated
+        // against. It must not hold.
+        let env = MediaEnvironment::viewport(1000.0, 1000.0);
+        assert!(!container_condition("(min-inline-size: 400px)").holds(&env));
+        assert!(!container_condition("(max-width: 400px)").holds(&env));
+        assert!(!container_condition("(width > 100px)").holds(&env));
+    }
+
+    #[test]
+    fn unrepresentable_container_feature_fails_closed() {
+        // The back door: a feature we cannot lower to a length must not fall
+        // back to `Always` inside a container query.
+        let env = MediaEnvironment::viewport(1000.0, 1000.0);
+        assert!(!container_condition("(orientation: portrait)").holds(&env));
+        assert!(!container_condition("(max-inline-size: 40em)").holds(&env));
+        // Even with a container supplied, an untestable feature cannot be said
+        // to hold.
+        assert!(!container_condition("(orientation: portrait)").holds(&env.with_container(500.0, 500.0)));
+    }
+
+    #[test]
+    fn bare_named_container_query_fails_closed() {
+        // `@container sidebar { … }` asks only whether the container exists.
+        let cond = container_condition("sidebar");
+        assert_eq!(cond, RuleCondition::Never);
+        assert!(!cond.holds(&MediaEnvironment::viewport(1000.0, 1000.0)));
+    }
+
+    #[test]
     fn container_inline_size_gates() {
         let cond = container_condition("(min-inline-size: 400px)");
         let env = MediaEnvironment::viewport(1000.0, 1000.0);
         assert!(!cond.holds(&env.with_container(200.0, 200.0)));
         assert!(cond.holds(&env.with_container(500.0, 200.0)));
-        // Unknown container size (viewport-only env) is non-restrictive.
-        assert!(cond.holds(&env));
+        // Unknown container size (viewport-only env) fails closed.
+        assert!(!cond.holds(&env));
     }
 }

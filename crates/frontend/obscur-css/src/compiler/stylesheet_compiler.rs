@@ -474,6 +474,7 @@ fn is_transition_shorthand(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::UnsupportedFeatureKind;
     use crate::source::CssSource;
     use obscur_style::property::{Length, PropertyId, PropertyValue, StyleColor};
     use obscur_style::selector::SelectorSpecificity;
@@ -559,6 +560,21 @@ mod tests {
         let sheet = compile("a { float: left }");
         assert!(sheet.declarations.is_empty());
         assert_eq!(sheet.unsupported.len(), 1);
+    }
+
+    #[test]
+    fn pseudo_element_rule_is_reported_as_unsupported() {
+        // The whole point of the diagnostic: `.badge::before` compiles to a rule
+        // that styles nothing (no generated box exists), so the host is told
+        // rather than left to wonder why the declaration had no effect.
+        let sheet = compile(".badge::before { color: red }");
+        let reported: Vec<&str> = sheet
+            .unsupported
+            .iter()
+            .filter(|f| f.kind() == UnsupportedFeatureKind::PseudoElement)
+            .map(UnsupportedCssFeature::name)
+            .collect();
+        assert_eq!(reported, ["::before"]);
     }
 
     #[test]

@@ -23,6 +23,17 @@ pub enum ConditionAxis {
     ContainerHeight,
 }
 
+impl ConditionAxis {
+    /// Whether this axis measures a query container rather than the viewport.
+    ///
+    /// The two families differ in how an *unknown* value is treated — see
+    /// [`FeatureQuery::holds`].
+    #[must_use]
+    pub const fn is_container(self) -> bool {
+        matches!(self, Self::ContainerWidth | Self::ContainerHeight)
+    }
+}
+
 /// The comparison a [`FeatureQuery`] applies between the environment value and
 /// its reference length.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,9 +52,9 @@ pub enum ConditionComparator {
 
 /// A single feature comparison: `axis comparator reference_px`.
 ///
-/// The reference length is stored resolved to logical pixels. If the queried
-/// axis is unknown in the environment (see [`MediaEnvironment`]) the query is
-/// non-restrictive and [`holds`](Self::holds) returns `true`.
+/// The reference length is stored resolved to logical pixels. An unknown axis
+/// resolves per-family: unknown *viewport* axes are non-restrictive, unknown
+/// *container* axes never hold. See [`holds`](Self::holds).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FeatureQuery {
     axis: ConditionAxis,
@@ -84,8 +95,18 @@ impl FeatureQuery {
         self.reference_px
     }
 
-    /// Evaluates the query against `env`, holding non-restrictively (`true`)
-    /// when the axis value is unknown.
+    /// Evaluates the query against `env`.
+    ///
+    /// An unknown axis resolves by family, and the asymmetry is deliberate:
+    ///
+    /// - An unknown **viewport** axis is non-restrictive (`true`). A live
+    ///   runtime always supplies a viewport, so `None` here only ever means a
+    ///   caller opted out of gating via [`MediaEnvironment::unbounded`].
+    /// - An unknown **container** axis never holds (`false`). `None` means no
+    ///   ancestor established a query container, and css-contain-3 §3.1 makes a
+    ///   container query against a nonexistent container *false*. Holding here
+    ///   would make every `@container` rule apply at every container size —
+    ///   which is exactly the bug this asymmetry exists to prevent.
     #[must_use]
     pub fn holds(&self, env: &MediaEnvironment) -> bool {
         let actual = match self.axis {
@@ -95,7 +116,7 @@ impl FeatureQuery {
             ConditionAxis::ContainerHeight => env.container_height(),
         };
         let Some(actual) = actual else {
-            return true;
+            return !self.axis.is_container();
         };
         match self.comparator {
             ConditionComparator::Lt => actual < self.reference_px,
@@ -110,9 +131,11 @@ impl FeatureQuery {
 /// An evaluable `@media`/`@container` condition tree.
 ///
 /// Built by the CSS frontend from a parsed query and evaluated by the matcher.
-/// The frontend maps a feature it cannot represent (a boolean feature, a
+/// The frontend maps a *media* feature it cannot represent (a boolean feature, a
 /// non-`px` length, an unknown feature name) to [`Always`](Self::Always) so that
-/// such rules are never silently dropped.
+/// such rules are never silently dropped; the same unrepresentable feature in a
+/// *container* query maps to [`Never`](Self::Never) instead, because no element
+/// can currently be a query container (see [`FeatureQuery::holds`]).
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuleCondition {
     /// A single feature comparison.
@@ -212,6 +235,42 @@ mod tests {
         // Empty All holds; empty Any does not.
         assert!(RuleCondition::All(Vec::new()).holds(&env));
         assert!(!RuleCondition::Any(Vec::new()).holds(&env));
+    }
+
+    #[test]
+    fn unknown_container_axis_fails_closed() {
+        // The regression this guards: with no container size supplied, a
+        // `@container (min-width: 300px)` rule used to apply everywhere.
+        let container_min = RuleCondition::Feature(FeatureQuery::new(
+            ConditionAxis::ContainerWidth,
+            ConditionComparator::Ge,
+            300.0,
+        ));
+        assert!(!container_min.holds(&MediaEnvironment::unbounded()));
+        // A known viewport does not make the container axis known.
+        assert!(!container_min.holds(&MediaEnvironment::viewport(1000.0, 1000.0)));
+        // Supplying the container size is what turns the query back on.
+        assert!(container_min.holds(
+            &MediaEnvironment::viewport(1000.0, 1000.0).with_container(400.0, 100.0)
+        ));
+    }
+
+    #[test]
+    fn unknown_container_axis_fails_closed_for_max_queries_too() {
+        // A `max-width` query is the dangerous direction: failing OPEN would let
+        // it hold, and failing closed must not depend on the comparator.
+        let container_max = RuleCondition::Feature(FeatureQuery::new(
+            ConditionAxis::ContainerHeight,
+            ConditionComparator::Le,
+            300.0,
+        ));
+        assert!(!container_max.holds(&MediaEnvironment::unbounded()));
+    }
+
+    #[test]
+    fn unknown_viewport_axis_stays_non_restrictive() {
+        // The asymmetry: viewport axes keep the permissive opt-out.
+        assert!(max_width(1.0).holds(&MediaEnvironment::unbounded()));
     }
 
     #[test]

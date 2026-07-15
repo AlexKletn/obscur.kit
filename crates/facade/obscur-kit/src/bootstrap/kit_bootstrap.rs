@@ -214,10 +214,23 @@ impl KitBootstrap {
     /// [`set_text_itemizer`](crate::runtime::UiRuntime::set_text_itemizer)) to
     /// wire the full multi-font fallback stack: itemize → resolve by coverage →
     /// shape per item.
+    ///
+    /// `faces` is that same registry's
+    /// [`face_metrics`](crate::text_harfrust::FontRegistry::face_metrics), taken
+    /// after every face is registered: a shaper is asked for line metrics by
+    /// [`FontId`](crate::text::font::FontId) alone, so without the table it would
+    /// shape real glyphs into line boxes sized by idealized ratios. Pass
+    /// [`FaceMetrics::empty`](crate::text_harfrust::FaceMetrics::empty) only when
+    /// there is deliberately no registry — line boxes are then ratio-sized, which
+    /// [`HarfrustShaper::idealized_line_metrics`](crate::text_harfrust::HarfrustShaper::idealized_line_metrics)
+    /// reports.
     #[cfg(feature = "text-harfrust")]
     #[must_use]
-    pub fn text_shaper_without_font(&self) -> Box<dyn crate::text::shaping::TextShaper> {
-        Box::new(crate::text_harfrust::HarfrustShaper::without_font())
+    pub fn text_shaper_without_font(
+        &self,
+        faces: crate::text_harfrust::FaceMetrics,
+    ) -> Box<dyn crate::text::shaping::TextShaper> {
+        Box::new(crate::text_harfrust::HarfrustShaper::without_font().with_faces(faces))
     }
 
     /// Builds an empty [`FontRegistry`](crate::text_harfrust::FontRegistry) — the
@@ -229,7 +242,10 @@ impl KitBootstrap {
     /// install it with
     /// [`set_font_resolver`](crate::runtime::UiRuntime::set_font_resolver). Use
     /// the **same** id↔bytes assignment on the renderer's `register_font` so
-    /// scene run handles line up with the renderer's fonts.
+    /// scene run handles line up with the renderer's fonts, and hand its
+    /// [`face_metrics`](crate::text_harfrust::FontRegistry::face_metrics) to
+    /// [`Self::text_shaper_without_font`] so the faces also size their own line
+    /// boxes.
     #[cfg(feature = "text-harfrust")]
     #[must_use]
     pub fn font_registry(&self) -> crate::text_harfrust::FontRegistry {

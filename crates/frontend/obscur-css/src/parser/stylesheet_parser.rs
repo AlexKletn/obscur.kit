@@ -689,7 +689,20 @@ impl Builder<'_> {
 
         match name.as_str() {
             "media" => self.parse_media_rule(),
-            "container" => self.parse_container_rule(),
+            "container" => {
+                // The query parses and lowers, but nothing can establish a query
+                // container — there is no `container-type` property, and a
+                // container's size is a layout output that whole-tree style
+                // matching runs before. The condition therefore fails closed and
+                // the block's rules never apply, so say so (§4.13) instead of
+                // letting the author believe their rules are live.
+                self.unsupported.push(UnsupportedCssFeature::new(
+                    UnsupportedFeatureKind::AtRule,
+                    "@container",
+                    at_span,
+                ));
+                self.parse_container_rule()
+            }
             "keyframes" | "-webkit-keyframes" => self.parse_keyframes_rule(),
             _ => {
                 self.unsupported.push(UnsupportedCssFeature::new(
@@ -1216,6 +1229,33 @@ mod tests {
                 .iter()
                 .any(|r| matches!(r, ParsedRule::Style(_)))
         );
+    }
+
+    #[test]
+    fn container_at_rule_is_reported_unsupported() {
+        let src = CssSource::anonymous("@container (min-width: 400px) { a { color: red } }");
+        let sheet = StylesheetParser::new(&src).parse();
+        assert_eq!(sheet.unsupported.len(), 1);
+        assert_eq!(sheet.unsupported[0].name(), "@container");
+        assert_eq!(
+            sheet.unsupported[0].kind(),
+            UnsupportedFeatureKind::AtRule
+        );
+        // Reported, but still parsed: the rule is not dropped from the AST.
+        assert!(
+            sheet
+                .rules
+                .iter()
+                .any(|r| matches!(r, ParsedRule::Container(_)))
+        );
+    }
+
+    #[test]
+    fn media_at_rule_is_not_reported_unsupported() {
+        // `@media` really is wired; only `@container` is inert.
+        let src = CssSource::anonymous("@media (min-width: 400px) { a { color: red } }");
+        let sheet = StylesheetParser::new(&src).parse();
+        assert!(sheet.unsupported.is_empty());
     }
 
     #[test]

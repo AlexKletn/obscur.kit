@@ -25,6 +25,13 @@ pub enum SimpleSelector {
     /// A pseudo-class such as `:hover` or `:nth-child(2n+1)`.
     PseudoClass(PseudoClassSelector),
     /// A pseudo-element such as `::before`; stores the name (no `::`).
+    ///
+    /// Parsed and specificity-counted, but **never matched**: the kit generates
+    /// no box for a pseudo-element (there is no `content` property and no
+    /// synthetic node), so
+    /// [`SelectorMatcher`](super::selector_matcher::SelectorMatcher) fails
+    /// closed rather than styling the originating element by mistake.
+    /// `obscur-css` raises an `UnsupportedCssFeature` for the selector (§4.13).
     PseudoElement(Box<str>),
 }
 

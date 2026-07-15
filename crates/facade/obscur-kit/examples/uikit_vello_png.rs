@@ -235,9 +235,13 @@ fn wire_text_stack(runtime: &mut UiRuntime, renderer: &mut VelloRenderer, bytes:
         bytes.clone(),
     );
     renderer.register_font(font_handle(id), bytes);
+    // The shaper answers line-metric queries by `FontId` alone, so it needs the
+    // registry's own per-face metrics; without them the glyphs would be real but
+    // every line box sized from idealized ratios.
+    let shaper = HarfrustShaper::without_font().with_faces(registry.face_metrics());
     runtime.set_font_resolver(Box::new(registry));
     runtime.set_text_itemizer(Box::new(UnicodeTextItemizer::new()));
-    runtime.set_text_shaper(Box::new(HarfrustShaper::without_font()));
+    runtime.set_text_shaper(Box::new(shaper));
 }
 
 /// The scene font handle (`u32`) for a resolved [`FontId`].

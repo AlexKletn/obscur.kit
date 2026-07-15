@@ -1,15 +1,18 @@
 //! The [`HarfrustShaper`] adapter implementing [`TextShaper`] over HarfRust
 //! (spec §5.10).
 
+use std::cell::Cell;
 use std::sync::Arc;
 
 use harfrust::{Direction, FontRef, Language, ShapeOptions, ShaperData, UnicodeBuffer};
-use obscur_text::font::FontFace;
+use obscur_text::font::{FontFace, FontId};
 use obscur_text::shaping::{
     GlyphRun, LineMetrics, ShapedGlyph, ShapingRequest, TextDirection, TextShaper,
 };
 use obscur_text::span::TextRange;
 use read_fonts::{FontRef as ReadFontRef, TableProvider};
+
+use crate::face_metrics::FaceMetrics;
 
 /// A real [`TextShaper`] that shapes text with the HarfRust engine (spec §5.10).
 ///
@@ -25,23 +28,45 @@ use read_fonts::{FontRef as ReadFontRef, TableProvider};
 /// load all yield an empty [`GlyphRun`] rather than a panic, and identical
 /// requests always produce identical output.
 ///
+/// # Line metrics
+///
+/// [`line_metrics`](TextShaper::line_metrics) and
+/// [`line_metrics_for`](TextShaper::line_metrics_for) are asked for a *size* and
+/// at most a [`FontId`] — never for a face — so a font-less shaper can only
+/// answer from real tables if it was handed the registry's
+/// [`FaceMetrics`] with [`with_faces`](Self::with_faces). Do wire it: without it
+/// the glyphs are real but every line box is sized from the idealized 0.8/0.2
+/// ratios. Each query that has to fall back that way is counted by
+/// [`idealized_line_metrics`](Self::idealized_line_metrics), so a host or test
+/// can see the degradation instead of silently shipping fake line boxes.
+///
 /// [`without_font`]: HarfrustShaper::without_font
 #[derive(Debug, Clone, Default)]
 pub struct HarfrustShaper {
     /// The wired host font bytes, or `None` for a font-less shaper that relies on
     /// per-request `Memory` bytes.
     font_bytes: Option<Arc<[u8]>>,
+    /// The registered faces' real metrics, keyed by [`FontId`]; empty until
+    /// [`with_faces`](Self::with_faces) supplies a registry's snapshot.
+    faces: FaceMetrics,
+    /// How many line-metric queries were answered with the idealized ratios
+    /// because no real metrics were reachable for the font. Interior state: the
+    /// metrics methods take `&self`.
+    idealized: Cell<u32>,
 }
 
 impl HarfrustShaper {
     /// Creates a shaper wired to a single host font from its raw `bytes`.
     ///
     /// Every [`shape`](TextShaper::shape) call uses this font, ignoring the
-    /// request face's own source.
+    /// request face's own source, and its `head`/`hhea` answer
+    /// [`line_metrics`](TextShaper::line_metrics).
     #[must_use]
     pub fn from_bytes(bytes: impl Into<Arc<[u8]>>) -> Self {
         Self {
             font_bytes: Some(bytes.into()),
+            faces: FaceMetrics::default(),
+            idealized: Cell::new(0),
         }
     }
 
@@ -49,10 +74,50 @@ impl HarfrustShaper {
     /// [`FontSource::Memory`](obscur_text::font::FontSource::Memory) bytes.
     ///
     /// Without any font, [`shape`](TextShaper::shape) returns an empty run and
-    /// [`can_shape`](TextShaper::can_shape) returns `false`.
+    /// [`can_shape`](TextShaper::can_shape) returns `false`. Pair it with
+    /// [`with_faces`](Self::with_faces) so the faces a
+    /// [`FontRegistry`](crate::FontRegistry) resolves also size their own line
+    /// boxes.
     #[must_use]
     pub const fn without_font() -> Self {
-        Self { font_bytes: None }
+        Self {
+            font_bytes: None,
+            faces: FaceMetrics::empty(),
+            idealized: Cell::new(0),
+        }
+    }
+
+    /// Returns this shaper with `faces` — a
+    /// [`FontRegistry`](crate::FontRegistry)'s
+    /// [`face_metrics`](crate::FontRegistry::face_metrics) snapshot — as the
+    /// source of per-[`FontId`] line metrics (spec §5.10).
+    ///
+    /// This is the only way a shaper can map the id in a
+    /// [`line_metrics_for`](TextShaper::line_metrics_for) query back to the face
+    /// that issued it, so a registered face's line height and baseline come from
+    /// its own `hhea` rather than the idealized ratios.
+    #[must_use]
+    pub fn with_faces(mut self, faces: FaceMetrics) -> Self {
+        self.faces = faces;
+        self
+    }
+
+    /// Returns how many line-metric queries this shaper has answered with the
+    /// idealized ratios ([`LineMetrics::idealized`]) because no real metrics were
+    /// reachable for the font asked about.
+    ///
+    /// Non-zero means some line box on screen was sized by ratio, not by the
+    /// face. The fallback is by design — a shaper with neither wired bytes nor a
+    /// face table must still answer — but it is a degradation, so it is counted
+    /// rather than merely happening.
+    ///
+    /// This counter is an **affordance, not a report**: nothing in the runtime
+    /// reads it, so a host that never asks still gets ratio-sized line boxes
+    /// without being told. Assert on it in a host's own text-stack test to pin
+    /// the wiring down.
+    #[must_use]
+    pub fn idealized_line_metrics(&self) -> u32 {
+        self.idealized.get()
     }
 
     /// Returns the font bytes to shape `request` with: the wired host font if
@@ -62,6 +127,14 @@ impl HarfrustShaper {
             Some(bytes) => Some(bytes),
             None => request.face().source().data(),
         }
+    }
+
+    /// Returns the idealized metrics for `font_size`, counting the fallback so it
+    /// stays observable through
+    /// [`idealized_line_metrics`](Self::idealized_line_metrics).
+    fn idealized(&self, font_size: f32) -> LineMetrics {
+        self.idealized.set(self.idealized.get().saturating_add(1));
+        LineMetrics::idealized(font_size)
     }
 }
 
@@ -143,13 +216,24 @@ impl TextShaper for HarfrustShaper {
     }
 
     fn line_metrics(&self, font_size: f32) -> LineMetrics {
-        // Read the real vertical metrics from the wired host font; fall back to
-        // the idealized default ratios when there is no font (or its tables are
-        // unreadable), so a font-less shaper stays deterministic.
+        // The primary face's metrics — the line-box strut floor. A wired host font
+        // IS the primary face; otherwise the primary face is whatever the registry
+        // handed out `FontId::PRIMARY` to, which is also the id `ParagraphShaper`
+        // pairs with its default face when nothing resolves.
         self.font_bytes
             .as_deref()
             .and_then(|bytes| line_metrics_from_bytes(bytes, font_size))
-            .unwrap_or_else(|| LineMetrics::idealized(font_size))
+            .or_else(|| self.faces.line_metrics(FontId::PRIMARY, font_size))
+            .unwrap_or_else(|| self.idealized(font_size))
+    }
+
+    fn line_metrics_for(&self, font: FontId, font_size: f32) -> LineMetrics {
+        // A taller fallback face must grow its line box (CSS 2.1 §10.8.1), so each
+        // id answers from its OWN face. An id outside the table falls through to
+        // the primary metrics, matching the trait default's delegation.
+        self.faces
+            .line_metrics(font, font_size)
+            .unwrap_or_else(|| self.line_metrics(font_size))
     }
 }
 
@@ -187,16 +271,24 @@ const fn map_direction(direction: TextDirection) -> Direction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::FontRegistry;
     use obscur_text::font::{
         FontAttributes, FontFamily, FontMetrics, FontSource, GenericFamily,
     };
 
-    /// Builds a tiny but valid TrueType font with three glyphs — `.notdef`,
-    /// `'A'` (gid 1), and `'V'` (gid 2) — carrying a Unicode `cmap` (format 6)
-    /// and real `hmtx` advances (500/600/550 units at 1000 upem). This is a
-    /// genuine sfnt HarfRust can load and shape, not a magic-byte blob, so the
-    /// test is fully hermetic (no system fonts).
+    /// Builds [`test_font_with_metrics`] with the idealized-matching vertical
+    /// metrics (ascender 800 / descender −200 / lineGap 0 at 1000 upem).
     fn test_font() -> Vec<u8> {
+        test_font_with_metrics(800, -200, 0)
+    }
+
+    /// Builds a tiny but valid TrueType font with three glyphs — `.notdef`,
+    /// `'A'` (gid 1), and `'V'` (gid 2) — carrying a Unicode `cmap` (format 6),
+    /// real `hmtx` advances (500/600/550 units at 1000 upem), and the given
+    /// `hhea` vertical metrics in font units. This is a genuine sfnt HarfRust can
+    /// load and shape, not a magic-byte blob, so the test is fully hermetic (no
+    /// system fonts).
+    fn test_font_with_metrics(ascender: i16, descender: i16, line_gap: i16) -> Vec<u8> {
         fn head() -> Vec<u8> {
             let mut t = Vec::new();
             t.extend_from_slice(&0x0001_0000u32.to_be_bytes()); // version
@@ -220,12 +312,12 @@ mod tests {
             t
         }
 
-        fn hhea() -> Vec<u8> {
+        fn hhea(ascender: i16, descender: i16, line_gap: i16) -> Vec<u8> {
             let mut t = Vec::new();
             t.extend_from_slice(&0x0001_0000u32.to_be_bytes()); // version
-            t.extend_from_slice(&800i16.to_be_bytes()); // ascender
-            t.extend_from_slice(&(-200i16).to_be_bytes()); // descender
-            t.extend_from_slice(&0i16.to_be_bytes()); // lineGap
+            t.extend_from_slice(&ascender.to_be_bytes());
+            t.extend_from_slice(&descender.to_be_bytes());
+            t.extend_from_slice(&line_gap.to_be_bytes());
             t.extend_from_slice(&[0u8; 24]); // advanceWidthMax .. metricDataFormat
             t.extend_from_slice(&3u16.to_be_bytes()); // numberOfHMetrics
             assert_eq!(t.len(), 36);
@@ -288,7 +380,7 @@ mod tests {
             (b"cmap", cmap()),
             (b"glyf", Vec::new()),
             (b"head", head()),
-            (b"hhea", hhea()),
+            (b"hhea", hhea(ascender, descender, line_gap)),
             (b"hmtx", hmtx()),
             (b"loca", loca()),
             (b"maxp", maxp()),
@@ -445,13 +537,15 @@ mod tests {
 
     #[test]
     fn font_less_line_metrics_fall_back_to_idealized_ratios() {
-        // No wired font -> the idealized default (ascent 0.8·size, line_height
-        // == size), preserving determinism.
+        // No wired font and no face table -> the idealized default (ascent
+        // 0.8·size, line_height == size), preserving determinism.
         let shaper = HarfrustShaper::without_font();
         let metrics = shaper.line_metrics(20.0);
         assert_eq!(metrics.ascent(), 16.0); // 0.8 * 20
         assert_eq!(metrics.descent(), 4.0); // 0.2 * 20
         assert_eq!(metrics.line_height(), 20.0);
+        // The fallback is counted, not silent.
+        assert_eq!(shaper.idealized_line_metrics(), 1);
     }
 
     #[test]
@@ -460,5 +554,124 @@ mod tests {
         let metrics = shaper.line_metrics(16.0);
         assert_eq!(metrics.line_height(), 16.0);
         assert_eq!(metrics.baseline(), 12.8);
+        assert_eq!(shaper.idealized_line_metrics(), 1);
+    }
+
+    /// A registry holding one face whose `hhea` is deliberately NOT the idealized
+    /// 0.8 / 0.2 split: ascender 950, descender −250, lineGap 100 at 1000 upem.
+    fn tall_registry() -> (FontRegistry, FontId) {
+        let mut registry = FontRegistry::new();
+        let id = registry.register(
+            FontFamily::named("Tall"),
+            FontAttributes::default(),
+            test_font_with_metrics(950, -250, 100),
+        );
+        (registry, id)
+    }
+
+    #[test]
+    fn registered_faces_line_metrics_come_from_its_own_hhea_not_the_ratios() {
+        // The font-less shaper every host wires: it shapes from the resolved
+        // face's Memory bytes, and — given the registry's table — must size the
+        // line box from that face's real metrics too.
+        let (registry, id) = tall_registry();
+        let shaper = HarfrustShaper::without_font().with_faces(registry.face_metrics());
+
+        let metrics = shaper.line_metrics_for(id, 40.0);
+        // Real: 950/1000·40 ascent, 250/1000·40 descent, 100/1000·40 line-gap.
+        assert!((metrics.ascent() - 38.0).abs() < 1e-4);
+        assert!((metrics.descent() - 10.0).abs() < 1e-4);
+        assert!((metrics.line_gap() - 4.0).abs() < 1e-4);
+        assert!((metrics.line_height() - 52.0).abs() < 1e-4);
+        // Idealized would be ascent 32 (0.8·40) in a line box of exactly 40.
+        assert_ne!(metrics.ascent(), 40.0 * LineMetrics::IDEAL_ASCENT_RATIO);
+        assert_ne!(metrics.line_height(), 40.0);
+        // Nothing fell back.
+        assert_eq!(shaper.idealized_line_metrics(), 0);
+    }
+
+    #[test]
+    fn the_primary_registered_face_sizes_the_strut() {
+        // `line_metrics` (the strut floor, and the source of a line box's height
+        // when no `line-height` is authored) reads the primary face, id 0.
+        let (registry, id) = tall_registry();
+        assert_eq!(id, FontId::PRIMARY);
+        let shaper = HarfrustShaper::without_font().with_faces(registry.face_metrics());
+
+        let metrics = shaper.line_metrics(40.0);
+        assert!((metrics.baseline() - 38.0).abs() < 1e-4);
+        assert!((metrics.line_height() - 52.0).abs() < 1e-4);
+        assert_eq!(shaper.idealized_line_metrics(), 0);
+    }
+
+    #[test]
+    fn each_face_reports_its_own_metrics_so_a_taller_run_grows_its_line() {
+        let mut registry = FontRegistry::new();
+        let short = registry.register(
+            FontFamily::named("Short"),
+            FontAttributes::default(),
+            test_font_with_metrics(700, -100, 0),
+        );
+        let tall = registry.register(
+            FontFamily::named("Tall"),
+            FontAttributes::default(),
+            test_font_with_metrics(950, -250, 100),
+        );
+        let shaper = HarfrustShaper::without_font().with_faces(registry.face_metrics());
+
+        // Per-id metrics, not one blanket answer for the whole shaper.
+        assert!((shaper.line_metrics_for(short, 100.0).line_height() - 80.0).abs() < 1e-4);
+        assert!((shaper.line_metrics_for(tall, 100.0).line_height() - 130.0).abs() < 1e-4);
+        assert_eq!(shaper.idealized_line_metrics(), 0);
+    }
+
+    #[test]
+    fn a_face_outside_the_table_reports_the_primary_faces_metrics() {
+        let (registry, _) = tall_registry();
+        let shaper = HarfrustShaper::without_font().with_faces(registry.face_metrics());
+
+        // Id 1 was never registered, so there is no face of its own to measure: it
+        // falls through to the primary metrics (the trait default's delegation),
+        // which are still real — no idealized ratios involved.
+        let metrics = shaper.line_metrics_for(FontId::new(1), 40.0);
+        assert!((metrics.line_height() - 52.0).abs() < 1e-4);
+        assert_eq!(shaper.idealized_line_metrics(), 0);
+    }
+
+    #[test]
+    fn a_shaper_handed_no_faces_falls_back_visibly_for_every_id() {
+        // The wiring bug this guards: a font-less shaper installed WITHOUT the
+        // registry's table shapes real glyphs but sizes every line box by ratio.
+        let shaper = HarfrustShaper::without_font();
+        assert_eq!(shaper.line_metrics_for(FontId::PRIMARY, 20.0).line_height(), 20.0);
+        assert_eq!(shaper.line_metrics_for(FontId::new(4), 20.0).baseline(), 16.0);
+        assert_eq!(shaper.idealized_line_metrics(), 2);
+    }
+
+    #[test]
+    fn an_unreadable_registered_face_falls_back_visibly() {
+        // Bytes that are not a font still take an id (registration is
+        // deterministic), but carry no metrics to report.
+        let mut registry = FontRegistry::new();
+        let id = registry.register(
+            FontFamily::named("Broken"),
+            FontAttributes::default(),
+            vec![0u8, 1, 2, 3, 4, 5, 6, 7],
+        );
+        let shaper = HarfrustShaper::without_font().with_faces(registry.face_metrics());
+
+        assert_eq!(shaper.line_metrics_for(id, 20.0).line_height(), 20.0);
+        assert_eq!(shaper.idealized_line_metrics(), 1);
+    }
+
+    #[test]
+    fn a_wired_host_font_still_answers_for_every_id() {
+        // With host bytes and no table, every id reports the wired font's own
+        // metrics (ascent 0.8·size here) rather than falling back.
+        let shaper = HarfrustShaper::from_bytes(test_font_with_metrics(950, -250, 100));
+        let metrics = shaper.line_metrics_for(FontId::new(3), 40.0);
+        assert!((metrics.ascent() - 38.0).abs() < 1e-4);
+        assert!((metrics.line_height() - 52.0).abs() < 1e-4);
+        assert_eq!(shaper.idealized_line_metrics(), 0);
     }
 }

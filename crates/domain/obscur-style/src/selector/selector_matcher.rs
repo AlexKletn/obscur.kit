@@ -37,10 +37,10 @@ impl SelectorMatcher {
     /// Type selectors compare local names ASCII case-insensitively; ids and
     /// classes compare exactly. Attribute selectors require the attribute to be
     /// present and, when an operator is given, to satisfy it. Pseudo-elements
-    /// are accepted and ignored (they match the subject element for now).
-    /// Structural pseudo-classes consult the element's position; state
-    /// pseudo-classes consult its [`PseudoState`]; unmodeled pseudo-classes
-    /// never match.
+    /// never match: the kit generates no box for them, so a compound containing
+    /// one is inert (see [`SimpleSelector::PseudoElement`]). Structural
+    /// pseudo-classes consult the element's position; state pseudo-classes
+    /// consult its [`PseudoState`]; unmodeled pseudo-classes never match.
     #[must_use]
     pub fn matches_compound<E: MatchElement>(compound: &CompoundSelector, element: &E) -> bool {
         compound
@@ -117,9 +117,6 @@ fn compound_at(selector: &ComplexSelector, k: usize) -> &CompoundSelector {
 }
 
 /// Tests a single simple selector against `element`.
-// `Universal` and `PseudoElement` both return `true` but are kept as distinct
-// arms so the pseudo-element handling reads with its explanatory comment.
-#[allow(clippy::match_same_arms)]
 fn matches_simple<E: MatchElement>(simple: &SimpleSelector, element: &E) -> bool {
     match simple {
         SimpleSelector::Type(name) => element
@@ -129,9 +126,14 @@ fn matches_simple<E: MatchElement>(simple: &SimpleSelector, element: &E) -> bool
         SimpleSelector::Class(class) => element.has_class(class),
         SimpleSelector::Id(id) => element.id() == Some(&**id),
         SimpleSelector::Attribute(attr) => matches_attribute(attr, element),
-        // Pseudo-elements select a sub-part of the subject; for style matching
-        // we accept and ignore them (the subject element is the anchor).
-        SimpleSelector::PseudoElement(_) => true,
+        // A pseudo-element selects a *generated box* that the kit does not
+        // create: there is no `content` property and no synthetic node for it to
+        // style. Matching the originating element instead would paint the wrong
+        // box (`.badge::before { color: red }` reddening `.badge` itself), so
+        // this fails closed and matches nothing. `obscur-css` reports the
+        // selector as an unsupported feature, mirroring how the excluded
+        // dynamic-state pseudo-classes are both inert and diagnosed (§4.13).
+        SimpleSelector::PseudoElement(_) => false,
         SimpleSelector::PseudoClass(pseudo) => matches_pseudo_class(pseudo, element),
     }
 }
@@ -411,6 +413,33 @@ mod tests {
         let el = arena.get(root);
         assert!(SelectorMatcher::matches_compound(
             &compound(vec![SimpleSelector::Universal]),
+            &el
+        ));
+    }
+
+    #[test]
+    fn pseudo_element_never_matches_its_originating_element() {
+        // `.badge::before` must not select `.badge`: the kit generates no box
+        // for the pseudo-element, so the rule is inert rather than mis-applied.
+        let mut arena = Arena::default();
+        let mut node = Node::new("span");
+        node.classes = vec!["badge".to_owned()];
+        let root = arena.add(node, None);
+        let el = arena.get(root);
+        assert!(!SelectorMatcher::matches_compound(
+            &compound(vec![
+                class_sel("badge"),
+                SimpleSelector::PseudoElement("before".into()),
+            ]),
+            &el
+        ));
+        assert!(!SelectorMatcher::matches_compound(
+            &compound(vec![SimpleSelector::PseudoElement("after".into())]),
+            &el
+        ));
+        // The bare class still matches — only the pseudo-element compound is inert.
+        assert!(SelectorMatcher::matches_compound(
+            &compound(vec![class_sel("badge")]),
             &el
         ));
     }

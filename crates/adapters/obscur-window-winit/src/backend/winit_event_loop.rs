@@ -73,10 +73,33 @@ pub(crate) struct BackendState {
     pub(crate) winit_to_domain: HashMap<WinitWindowId, WindowId>,
     /// Converted window events awaiting the next `poll_window_events` drain.
     pub(crate) window_events: Vec<(WindowId, WindowEvent)>,
+    /// The window the compositor last told us holds keyboard focus, tracked from
+    /// the native `Focused` events. This is the only *observed* activation state
+    /// the backend has: winit grants focus asynchronously, so `activate` reads
+    /// this rather than assuming its request was honored (spec §6.3).
+    pub(crate) focused: Option<WindowId>,
     /// Window-creation failures recorded by the handler for later inspection;
     /// creation is deferred, so its errors cannot be returned from
     /// `create_window` and are surfaced here instead.
     pub(crate) creation_errors: Vec<WinitBackendError>,
+}
+
+impl BackendState {
+    /// Buffers a converted `event` for `id`, keeping [`BackendState::focused`] in
+    /// step with the compositor's focus verdict (spec §6.3).
+    ///
+    /// Focus tracking lives here rather than inline in the handler so it is
+    /// reachable without an [`ActiveEventLoop`]: the handler's callback can only
+    /// run inside a real winit loop, but this — the part with a decision in it —
+    /// is what `activate` depends on.
+    pub(crate) fn record_window_event(&mut self, id: WindowId, event: WindowEvent) {
+        match event {
+            WindowEvent::FocusGained => self.focused = Some(id),
+            WindowEvent::FocusLost if self.focused == Some(id) => self.focused = None,
+            _ => {}
+        }
+        self.window_events.push((id, event));
+    }
 }
 
 /// The winit [`ApplicationHandler`] that services the shared [`BackendState`]
@@ -116,7 +139,7 @@ impl WinitAppHandler {
         let mut state = self.lock();
 
         for (id, request) in mem::take(&mut state.pending_creates) {
-            let attributes = window_attributes(request.properties());
+            let attributes = window_attributes(&request);
             match event_loop.create_window(attributes) {
                 Ok(window) => {
                     let winit_id = window.id();
@@ -148,6 +171,9 @@ impl WinitAppHandler {
         for id in mem::take(&mut state.pending_closes) {
             if let Some(window) = state.windows.remove(&id) {
                 state.winit_to_domain.remove(&window.winit().id());
+            }
+            if state.focused == Some(id) {
+                state.focused = None;
             }
         }
     }
@@ -189,7 +215,7 @@ impl ApplicationHandler<UserEvent> for WinitAppHandler {
             return;
         };
         if let Some(converted) = self.window_events.convert(&event) {
-            state.window_events.push((domain_id, converted));
+            state.record_window_event(domain_id, converted);
         }
     }
 
@@ -220,14 +246,29 @@ impl ApplicationHandler<UserEvent> for WinitAppHandler {
     }
 }
 
-/// Builds winit [`WindowAttributes`] from the desired domain [`WindowProperties`]
+/// Builds winit [`WindowAttributes`] from a domain [`CreateWindow`] request
 /// (spec §6.1, §6.2).
 ///
-/// Only the creation-time attributes winit accepts are mapped: title, inner
-/// size, resizability, decorations, transparency, always-on-top level, and an
-/// explicit position when one is requested. Post-creation-only concerns (state
-/// toggles) are applied afterwards via [`WinitWindow::apply_properties`].
-fn window_attributes(properties: &WindowProperties) -> WindowAttributes {
+/// The whole request is mapped, not just its [`WindowProperties`]: the §6.2
+/// min/max [`WindowConstraints`](obscur_windowing::window::WindowConstraints)
+/// are creation-time attributes in winit too, so they are pushed here rather
+/// than dropped. Mapped: title, inner size, min/max inner size, resizability,
+/// decorations, transparency, always-on-top level, and an explicit position when
+/// one is requested. Post-creation-only concerns (state toggles) are applied
+/// afterwards via [`WinitWindow::apply_properties`].
+///
+/// The request's [`WindowRelation`](obscur_windowing::window::WindowRelation) is
+/// deliberately **not** mapped. winit's only ownership primitive is
+/// `WindowAttributes::with_parent_window`, which builds a *child* window clipped
+/// into the parent's client area (`WS_CHILD` on Windows, a child on X11) — not
+/// the floating owned dialog §6.1 means — and winit has no modality primitive at
+/// all. Rather than materialize a window that lies about its relation,
+/// [`WinitWindowBackend`]'s `create_window` rejects any request carrying an owner
+/// or a modality before it ever reaches this function.
+///
+/// [`WinitWindowBackend`]: super::WinitWindowBackend
+fn window_attributes(request: &CreateWindow) -> WindowAttributes {
+    let properties = request.properties();
     let mut attributes = WindowAttributes::default()
         .with_title(properties.title.to_string())
         .with_inner_size(LogicalSize::new(
@@ -248,5 +289,120 @@ fn window_attributes(properties: &WindowProperties) -> WindowAttributes {
             f64::from(position.y),
         ));
     }
+    let constraints = request.constraints();
+    if let Some(min) = constraints.min_size {
+        attributes = attributes.with_min_inner_size(LogicalSize::new(
+            f64::from(min.width),
+            f64::from(min.height),
+        ));
+    }
+    if let Some(max) = constraints.max_size {
+        attributes = attributes.with_max_inner_size(LogicalSize::new(
+            f64::from(max.width),
+            f64::from(max.height),
+        ));
+    }
     attributes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use obscur_geometry::Size;
+    use obscur_windowing::window::WindowConstraints;
+    use winit::dpi::Size as WinitSize;
+
+    /// §6.2 min/max constraints are creation-time attributes in winit, so a
+    /// request carrying them must reach the platform rather than sit unread on
+    /// the `CreateWindow`.
+    #[test]
+    fn constraints_reach_the_winit_attributes() {
+        let request = CreateWindow::new(WindowProperties::default()).with_constraints(
+            WindowConstraints::new(Some(Size::new(320.0, 240.0)), Some(Size::new(1280.0, 800.0))),
+        );
+
+        let attributes = window_attributes(&request);
+
+        assert_eq!(
+            attributes.min_inner_size,
+            Some(WinitSize::Logical(LogicalSize::new(320.0, 240.0)))
+        );
+        assert_eq!(
+            attributes.max_inner_size,
+            Some(WinitSize::Logical(LogicalSize::new(1280.0, 800.0)))
+        );
+    }
+
+    /// An unconstrained request must leave both bounds unset rather than pin the
+    /// window to a fabricated default.
+    #[test]
+    fn unconstrained_requests_leave_both_bounds_unset() {
+        let attributes = window_attributes(&CreateWindow::new(WindowProperties::default()));
+        assert_eq!(attributes.min_inner_size, None);
+        assert_eq!(attributes.max_inner_size, None);
+    }
+
+    /// §6.3: the compositor's focus verdict is what `activate` reads back, so a
+    /// native `Focused` event must land in `focused` and not only in the event
+    /// buffer.
+    #[test]
+    fn focus_events_track_the_focused_window() {
+        let mut state = BackendState::default();
+        let first = WindowId::from_raw(1);
+        let second = WindowId::from_raw(2);
+        assert_eq!(state.focused, None);
+
+        state.record_window_event(first, WindowEvent::FocusGained);
+        assert_eq!(state.focused, Some(first));
+
+        // Focus moving on is observed as the new window gaining it.
+        state.record_window_event(second, WindowEvent::FocusGained);
+        assert_eq!(state.focused, Some(second));
+
+        // A stale loss from the window that already lost focus changes nothing.
+        state.record_window_event(first, WindowEvent::FocusLost);
+        assert_eq!(state.focused, Some(second));
+
+        state.record_window_event(second, WindowEvent::FocusLost);
+        assert_eq!(state.focused, None);
+
+        // Every event still reaches the poll buffer regardless.
+        assert_eq!(state.window_events.len(), 4);
+    }
+
+    /// Unrelated events must not disturb the focus record.
+    #[test]
+    fn non_focus_events_leave_focus_alone() {
+        let mut state = BackendState::default();
+        let id = WindowId::from_raw(1);
+        state.record_window_event(id, WindowEvent::FocusGained);
+
+        state.record_window_event(id, WindowEvent::Created);
+        state.record_window_event(id, WindowEvent::Occluded(true));
+        assert_eq!(state.focused, Some(id));
+    }
+
+    /// Either bound alone is honored on its own.
+    #[test]
+    fn a_single_bound_is_mapped_alone() {
+        let min_only = window_attributes(
+            &CreateWindow::new(WindowProperties::default())
+                .with_constraints(WindowConstraints::with_min(Size::new(100.0, 50.0))),
+        );
+        assert_eq!(
+            min_only.min_inner_size,
+            Some(WinitSize::Logical(LogicalSize::new(100.0, 50.0)))
+        );
+        assert_eq!(min_only.max_inner_size, None);
+
+        let max_only = window_attributes(
+            &CreateWindow::new(WindowProperties::default())
+                .with_constraints(WindowConstraints::with_max(Size::new(640.0, 480.0))),
+        );
+        assert_eq!(max_only.min_inner_size, None);
+        assert_eq!(
+            max_only.max_inner_size,
+            Some(WinitSize::Logical(LogicalSize::new(640.0, 480.0)))
+        );
+    }
 }
