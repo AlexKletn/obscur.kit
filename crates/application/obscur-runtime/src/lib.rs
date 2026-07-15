@@ -6,6 +6,7 @@ mod runtime;
 
 pub use runtime::{FrameBudget, KeyDispatch, PointerDispatch, SemanticTreeBuilder, UiRuntime};
 
+pub mod component;
 pub mod frame;
 pub mod invalidation;
 pub mod lifecycle;
