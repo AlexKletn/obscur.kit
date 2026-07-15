@@ -27,3 +27,5 @@ mod from_view_value;
 pub use from_view_value::FromViewValue;
 mod from_props;
 pub use from_props::{FromProps, decode_optional, decode_required, decode_value, prop_value};
+mod erased_component;
+pub use erased_component::ErasedComponent;

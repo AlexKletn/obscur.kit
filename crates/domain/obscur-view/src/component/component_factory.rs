@@ -3,7 +3,7 @@
 
 use obscur_identity::ComponentId;
 
-use crate::component::{ComponentContract, ComponentInstance, InstanceId};
+use crate::component::{ComponentContract, ComponentInstance, ErasedComponent, InstanceId};
 
 /// Object-safe description of how to instantiate one kind of component.
 ///
@@ -21,16 +21,20 @@ use crate::component::{ComponentContract, ComponentInstance, InstanceId};
 /// transitively, the [`ComponentRegistration`](crate::component::ComponentRegistration)
 /// that owns one) is `Debug` without a hand-written impl.
 ///
-/// # Deferred: erased render
+/// # The two halves of an instance
 ///
-/// This trait deliberately does **not** yet bind the author's typed
-/// [`Component::render`](crate::component::Component::render) into the instance.
-/// Driving an *erased render* — decoding a `ViewProperty` slice into each
-/// component's typed `Props` and invoking `render` behind the `dyn` boundary —
-/// depends on a prop-decoding story that does not exist yet, and is a later
-/// runtime concern. A factory today only mints the plain runtime record (in
-/// [`LifecycleState::Created`](crate::lifecycle::LifecycleState::Created)); wiring
-/// live rendering is out of scope for this sub-step.
+/// Instantiating a component mints **two** values, deliberately kept apart:
+///
+/// * [`create_instance`](Self::create_instance) mints the
+///   [`ComponentInstance`] — plain bookkeeping (identity, lifecycle state,
+///   subscription scope) that stays `Debug` and inspectable;
+/// * [`create_component`](Self::create_component) mints the author's component
+///   value behind an [`ErasedComponent`] handle — that is where the component's
+///   [`LocalState`](crate::state::LocalState) fields live, so it is the value a
+///   runtime must keep alive across frames to preserve state.
+///
+/// Splitting them keeps the record free of the erased object (and therefore
+/// `Debug`), while still giving a runtime everything it needs to render.
 pub trait ComponentFactory: core::fmt::Debug {
     /// The stable identity of the component kind this factory instantiates.
     ///
@@ -50,15 +54,35 @@ pub trait ComponentFactory: core::fmt::Debug {
     /// The returned [`ComponentInstance`] is in
     /// [`LifecycleState::Created`](crate::lifecycle::LifecycleState::Created)
     /// and carries the given [`InstanceId`] and this factory's
-    /// [`component_id`](Self::component_id). It does not (yet) carry an erased
-    /// render binding — see the trait-level note on the deferred erased render.
+    /// [`component_id`](Self::component_id). It is bookkeeping only; the
+    /// renderable value comes from [`create_component`](Self::create_component).
     fn create_instance(&self, instance: InstanceId) -> ComponentInstance;
+
+    /// Mints a fresh component value for this kind, behind the object-safe
+    /// [`ErasedComponent`] handle.
+    ///
+    /// This is the renderable half: the returned value holds the component's
+    /// [`LocalState`](crate::state::LocalState) fields, so a runtime keeps **one**
+    /// of these alive per mounted instance and re-renders through it. Dropping it
+    /// drops the component's local state and scoped subscriptions — which is
+    /// exactly the spec's "automatic cleanup" (§2.1).
+    ///
+    /// A typical implementation is `Box::new(MyComponent::default())`; the
+    /// blanket impl on [`ErasedComponent`] makes any `Component` whose
+    /// `Props: FromProps` usable here without extra glue.
+    ///
+    /// [`FromProps`]: crate::component::FromProps
+    fn create_component(&self) -> Box<dyn ErasedComponent>;
 }
 
 #[cfg(test)]
 mod tests {
     use super::ComponentFactory;
-    use crate::component::{ComponentContract, ComponentInstance, InstanceId};
+    use crate::component::{
+        Component, ComponentContext, ComponentContract, ComponentInstance, ErasedComponent,
+        FromProps, InstanceId, PropsError,
+    };
+    use crate::view::{View, ViewProperty};
     use obscur_identity::ComponentId;
 
     /// A trivial factory whose contract is the empty-but-valid contract for its
@@ -66,6 +90,22 @@ mod tests {
     #[derive(Debug)]
     struct StubFactory {
         id: ComponentId,
+    }
+
+    /// A minimal real component, so the stub factory can mint a renderable
+    /// value rather than pretend. Its props decode from anything.
+    struct StubProps;
+    impl FromProps for StubProps {
+        fn from_props(_: &[ViewProperty]) -> Result<Self, PropsError> {
+            Ok(Self)
+        }
+    }
+    struct StubComponent;
+    impl Component for StubComponent {
+        type Props = StubProps;
+        fn render(&mut self, _: &mut ComponentContext<'_>, _: &Self::Props) -> View {
+            View::empty()
+        }
     }
 
     impl ComponentFactory for StubFactory {
@@ -79,6 +119,10 @@ mod tests {
 
         fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
             ComponentInstance::new(instance, self.id)
+        }
+
+        fn create_component(&self) -> Box<dyn ErasedComponent> {
+            Box::new(StubComponent)
         }
     }
 

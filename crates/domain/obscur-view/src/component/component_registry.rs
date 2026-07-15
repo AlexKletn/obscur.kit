@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use obscur_identity::ComponentId;
 
 use crate::component::{
-    ComponentContract, ComponentInstance, ComponentRegistration, InstanceId, RegistryError,
+    ComponentContract, ComponentInstance, ComponentRegistration, ErasedComponent, InstanceId,
+    RegistryError,
 };
 
 /// Maps each [`ComponentId`] to its [`ComponentRegistration`] (spec §2.14).
@@ -92,6 +93,19 @@ impl ComponentRegistry {
             .map(|registration| registration.create_instance(instance))
     }
 
+    /// Mints a fresh renderable component value for `id`, or [`None`] when no
+    /// component is registered under it.
+    ///
+    /// The [`create_instance`](Self::create_instance) counterpart: that returns
+    /// the bookkeeping record, this returns the value the runtime renders through
+    /// and which owns the component's local state.
+    #[must_use]
+    pub fn create_component(&self, id: ComponentId) -> Option<Box<dyn ErasedComponent>> {
+        self.entries
+            .get(&id)
+            .map(ComponentRegistration::create_component)
+    }
+
     /// Returns whether a component is registered under `id`.
     #[must_use]
     pub fn contains(&self, id: ComponentId) -> bool {
@@ -115,14 +129,32 @@ impl ComponentRegistry {
 mod tests {
     use super::ComponentRegistry;
     use crate::component::{
-        ComponentContract, ComponentFactory, ComponentInstance, ComponentRegistration,
-        ComponentVersion, InstanceId, RegistryError,
+        Component, ComponentContext, ComponentContract, ComponentFactory, ComponentInstance,
+        ComponentRegistration, ComponentVersion, ErasedComponent, FromProps, InstanceId,
+        PropsError, RegistryError,
     };
+    use crate::view::{View, ViewProperty};
     use obscur_identity::ComponentId;
 
     #[derive(Debug)]
     struct StubFactory {
         id: ComponentId,
+    }
+
+    /// A minimal real component, so the stub factory can mint a renderable
+    /// value rather than pretend. Its props decode from anything.
+    struct StubProps;
+    impl FromProps for StubProps {
+        fn from_props(_: &[ViewProperty]) -> Result<Self, PropsError> {
+            Ok(Self)
+        }
+    }
+    struct StubComponent;
+    impl Component for StubComponent {
+        type Props = StubProps;
+        fn render(&mut self, _: &mut ComponentContext<'_>, _: &Self::Props) -> View {
+            View::empty()
+        }
     }
 
     impl ComponentFactory for StubFactory {
@@ -135,6 +167,11 @@ mod tests {
         fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
             ComponentInstance::new(instance, self.id)
         }
+
+        fn create_component(&self) -> Box<dyn ErasedComponent> {
+            Box::new(StubComponent)
+        }
+
     }
 
     fn registration(raw: u64) -> ComponentRegistration {
@@ -170,6 +207,40 @@ mod tests {
         assert_eq!(
             reg.contract(ComponentId::from_raw(7)).map(|c| c.id),
             Some(ComponentId::from_raw(7))
+        );
+    }
+
+    #[test]
+    fn a_registered_component_renders_through_the_registry_by_id() {
+        // The whole erasure chain, end to end and by ComponentId alone — which is
+        // all a runtime has when it meets an `Element { component }` node:
+        // registry → factory → erased component → decoded props → typed render.
+        use crate::lifecycle::LifecycleState;
+        use crate::state::SubscriptionScope;
+
+        let mut reg = ComponentRegistry::new();
+        reg.register(registration(7)).expect("register");
+
+        let mut component = reg
+            .create_component(ComponentId::from_raw(7))
+            .expect("a registered kind mints a component");
+
+        let mut scope = SubscriptionScope::new();
+        let mut needs_update = false;
+        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut needs_update);
+        let view = component
+            .render_erased(&mut ctx, &[])
+            .expect("the stub props decode from anything");
+        assert!(view.root().is_empty(), "the stub renders an empty view");
+    }
+
+    #[test]
+    fn an_unregistered_id_mints_nothing() {
+        let reg = ComponentRegistry::new();
+        assert!(reg.create_component(ComponentId::from_raw(7)).is_none());
+        assert!(
+            reg.create_instance(ComponentId::from_raw(7), InstanceId::from_raw(1))
+                .is_none()
         );
     }
 

@@ -3,7 +3,8 @@
 use obscur_identity::ComponentId;
 
 use crate::component::{
-    ComponentContract, ComponentFactory, ComponentInstance, ComponentVersion, InstanceId,
+    ComponentContract, ComponentFactory, ComponentInstance, ComponentVersion, ErasedComponent,
+    InstanceId,
 };
 
 /// One entry in the component registry (spec §2.14).
@@ -78,19 +79,45 @@ impl ComponentRegistration {
     pub fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
         self.factory.create_instance(instance)
     }
+
+    /// Mints a fresh renderable component value of this kind via the stored
+    /// factory — the [`create_instance`](Self::create_instance) counterpart that
+    /// carries the component's local state (spec §2.1).
+    #[must_use]
+    pub fn create_component(&self) -> Box<dyn ErasedComponent> {
+        self.factory.create_component()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::ComponentRegistration;
     use crate::component::{
-        ComponentContract, ComponentFactory, ComponentInstance, ComponentVersion, InstanceId,
+        Component, ComponentContext, ComponentContract, ComponentFactory, ComponentInstance,
+        ComponentVersion, ErasedComponent, FromProps, InstanceId, PropsError,
     };
+    use crate::view::{View, ViewProperty};
     use obscur_identity::ComponentId;
 
     #[derive(Debug)]
     struct StubFactory {
         id: ComponentId,
+    }
+
+    /// A minimal real component, so the stub factory can mint a renderable
+    /// value rather than pretend. Its props decode from anything.
+    struct StubProps;
+    impl FromProps for StubProps {
+        fn from_props(_: &[ViewProperty]) -> Result<Self, PropsError> {
+            Ok(Self)
+        }
+    }
+    struct StubComponent;
+    impl Component for StubComponent {
+        type Props = StubProps;
+        fn render(&mut self, _: &mut ComponentContext<'_>, _: &Self::Props) -> View {
+            View::empty()
+        }
     }
 
     impl ComponentFactory for StubFactory {
@@ -103,6 +130,11 @@ mod tests {
         fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
             ComponentInstance::new(instance, self.id)
         }
+
+        fn create_component(&self) -> Box<dyn ErasedComponent> {
+            Box::new(StubComponent)
+        }
+
     }
 
     fn registration(raw: u64) -> ComponentRegistration {
