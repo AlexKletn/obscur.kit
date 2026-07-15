@@ -82,6 +82,50 @@ fn axis_bp(style: &LayoutStyle, horizontal: bool) -> f32 {
     }
 }
 
+/// The item's **cross**-axis min / max dimensions for the container's flow
+/// direction: `height` bounds across a row, `width` bounds across a column — the
+/// mirror of [`main_bounds`].
+fn cross_bounds(style: &LayoutStyle, is_row: bool) -> (Dimension, Dimension) {
+    if is_row {
+        (style.min_height, style.max_height)
+    } else {
+        (style.min_width, style.max_width)
+    }
+}
+
+/// Clamps an item's cross-axis **border** extent into its authored cross-axis
+/// min/max (CSS Flexbox Level 1 §9.4 step 11 "clamp by min/max cross size").
+///
+/// The main axis has always applied its bounds (via [`clamp_floor`]); the cross
+/// axis dropped them entirely, so an item's `max-height` in a row — or a stretch
+/// that should stop at `max-height` — was ignored. Bounds are resolved against
+/// the container cross extent and mapped through the item's `box_sizing` into the
+/// border extent this value is expressed in, matching how the explicit cross size
+/// is resolved in [`cross_item_size`]. Max applies before min, so min wins on
+/// conflict (per CSS).
+fn clamp_cross(value: f32, style: &LayoutStyle, is_row: bool, container_cross: f32) -> f32 {
+    let (min, max) = cross_bounds(style, is_row);
+    let bp = axis_bp(style, !is_row);
+    let mut clamped = value;
+    if let Some(px) = max.resolve(container_cross) {
+        clamped = clamped.min(style.box_sizing.border_extent(px, bp));
+    }
+    if let Some(px) = min.resolve(container_cross) {
+        clamped = clamped.max(style.box_sizing.border_extent(px, bp));
+    }
+    clamped.max(0.0)
+}
+
+/// The **effective** cross-axis alignment for one item: its own `align-self`,
+/// falling back to the container's `align-items` when `auto` (the initial value).
+///
+/// Flex previously read the container's `align-items` for every item, so a
+/// per-item `align-self` was silently dropped — while grid honoured it. This is
+/// the same `AlignSelf::resolve` grid uses, so both contexts now agree.
+fn item_align(item: &LayoutStyle, container: &LayoutStyle) -> AlignItems {
+    item.align_self.resolve(container.align_items)
+}
+
 /// Single-line (no-wrap) flex layout (spec §4.1, §4.2, §4.6).
 ///
 /// Lays items out along a main axis chosen by `style.flex_direction`, resolves
@@ -698,7 +742,7 @@ fn place_line(args: LineArgs) -> PlacedLine {
         Some(target) => {
             for (pos, &i) in line.iter().enumerate() {
                 let cross = cross_item_size(
-                    style.align_items == AlignItems::Stretch,
+                    item_align(&children[i].style, style) == AlignItems::Stretch,
                     target,
                     &children[i].style,
                     is_row,
@@ -755,8 +799,12 @@ fn place_line(args: LineArgs) -> PlacedLine {
                     cross_style.width
                 };
                 let has_explicit = cross_dim.resolve(container_cross).is_some();
-                let cross = if style.align_items == AlignItems::Stretch && !has_explicit {
-                    lc
+                let cross = if item_align(cross_style, style) == AlignItems::Stretch && !has_explicit
+                {
+                    // A stretch fills the line cross, but must still stop at the
+                    // item's own cross max (§9.4 step 11) — `base_cross` came from
+                    // `cross_item_size` already clamped, this path did not.
+                    clamp_cross(lc, cross_style, is_row, container_cross)
                 } else {
                     base_cross[pos]
                 };
@@ -819,7 +867,7 @@ fn place_line(args: LineArgs) -> PlacedLine {
         let cross = cross_size[pos];
         let cross_start = cross_offset
             + cross_lead[i]
-            + match style.align_items {
+            + match item_align(&children[i].style, style) {
                 AlignItems::FlexStart | AlignItems::Start | AlignItems::Stretch => 0.0,
                 AlignItems::FlexEnd | AlignItems::End => align_ref - cross,
                 AlignItems::Center => (align_ref - cross) / 2.0,
@@ -1039,7 +1087,7 @@ fn cross_item_size(
     index: usize,
     measurer: &mut dyn ChildMeasurer,
 ) -> f32 {
-    if stretch {
+    let raw = if stretch {
         let cross_dim = if is_row {
             cross_style.height
         } else {
@@ -1070,7 +1118,11 @@ fn cross_item_size(
         } else {
             measured.width
         }
-    }
+    };
+    // Every cross size — explicit, stretched, or measured — is clamped by the
+    // item's own cross min/max (§9.4 step 11). Clamping here rather than at each
+    // call site keeps the hypothetical and used cross sizes consistent.
+    clamp_cross(raw, cross_style, is_row, container_cross)
 }
 
 #[cfg(test)]
@@ -1078,8 +1130,8 @@ mod tests {
     use super::FlexLayout;
     use crate::algorithm::{FixedChildMeasurer, LayoutAlgorithm, LayoutChild};
     use crate::model::{
-        AlignItems, BoxSizing, Dimension, FlexDirection, FlexWrap, JustifyContent, LayoutDisplay,
-        LayoutStyle,
+        AlignItems, AlignSelf, BoxSizing, Dimension, FlexDirection, FlexWrap, JustifyContent,
+        LayoutDisplay, LayoutStyle,
     };
     use obscur_geometry::{BoxConstraints, Insets, Point, Size};
     use obscur_identity::NodeId;
@@ -1117,6 +1169,162 @@ mod tests {
 
     fn approx(a: f32, b: f32) {
         assert!((a - b).abs() < 1e-4, "expected {b}, got {a}");
+    }
+
+    // ---- per-item align-self + cross min/max (audit Tier-1 §4) --------------
+
+    /// A fixed-basis item carrying a per-item `align-self` override.
+    fn with_self(raw: u64, basis: f32, align: AlignSelf) -> LayoutChild {
+        let LayoutChild { node, style } = fixed_basis(raw, basis);
+        LayoutChild::new(node, style.with_align_self(align))
+    }
+
+    #[test]
+    fn align_self_overrides_the_containers_align_items() {
+        // The container stretches, but item 2 opts out with `align-self: center`
+        // and item 3 with `flex-end`. Flex read only the container's `align-items`,
+        // so both overrides were silently dropped — while grid honoured them.
+        let style = container(
+            FlexDirection::Row,
+            JustifyContent::FlexStart,
+            AlignItems::Stretch,
+            0.0,
+        );
+        let children = [
+            fixed_basis(1, 50.0),
+            with_self(2, 50.0, AlignSelf::Center),
+            with_self(3, 50.0, AlignSelf::End),
+        ];
+        // The measured (hypothetical) cross size of every item is 20 tall.
+        let mut measurer = FixedChildMeasurer::new(vec![
+            Size::new(50.0, 20.0),
+            Size::new(50.0, 20.0),
+            Size::new(50.0, 20.0),
+        ]);
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(200.0, 100.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        // Item 1 still inherits `stretch`: fills the 100 cross at y=0.
+        assert_eq!(b[0].size().height, 100.0);
+        approx(b[0].origin().y, 0.0);
+        // Item 2 centers its own 20-tall box: (100-20)/2 = 40.
+        assert_eq!(b[1].size().height, 20.0);
+        approx(b[1].origin().y, 40.0);
+        // Item 3 sits at the cross end: 100-20 = 80.
+        assert_eq!(b[2].size().height, 20.0);
+        approx(b[2].origin().y, 80.0);
+    }
+
+    #[test]
+    fn align_self_stretch_opts_into_stretch_under_a_flex_start_container() {
+        // The override works in both directions: a `flex-start` container leaves
+        // items at their measured cross, but `align-self: stretch` fills.
+        let style = container(
+            FlexDirection::Row,
+            JustifyContent::FlexStart,
+            AlignItems::FlexStart,
+            0.0,
+        );
+        let children = [fixed_basis(1, 50.0), with_self(2, 50.0, AlignSelf::Stretch)];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(50.0, 20.0), Size::new(50.0, 20.0)]);
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(200.0, 100.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].size().height, 20.0, "inherits flex-start: measured cross");
+        assert_eq!(b[1].size().height, 100.0, "align-self: stretch fills the cross");
+    }
+
+    #[test]
+    fn a_stretched_item_stops_at_its_own_cross_max() {
+        // `align-items: stretch` would fill the 100 cross, but the item's own
+        // `max-height: 40` caps it (§9.4 step 11). The cross axis dropped its
+        // min/max entirely while the main axis always applied them.
+        let style = container(
+            FlexDirection::Row,
+            JustifyContent::FlexStart,
+            AlignItems::Stretch,
+            0.0,
+        );
+        let LayoutChild { node, style: item } = fixed_basis(1, 50.0);
+        let children = [LayoutChild::new(
+            node,
+            LayoutStyle {
+                max_height: Dimension::Px(40.0),
+                ..item
+            },
+        )];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(50.0, 20.0)]);
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(200.0, 100.0)),
+            &mut measurer,
+        );
+        assert_eq!(out.child_boxes()[0].size().height, 40.0);
+    }
+
+    #[test]
+    fn a_measured_item_is_floored_by_its_own_cross_min() {
+        // A 20-tall measured item under a `flex-start` container is floored to its
+        // own `min-height: 60`.
+        let style = container(
+            FlexDirection::Row,
+            JustifyContent::FlexStart,
+            AlignItems::FlexStart,
+            0.0,
+        );
+        let LayoutChild { node, style: item } = fixed_basis(1, 50.0);
+        let children = [LayoutChild::new(
+            node,
+            LayoutStyle {
+                min_height: Dimension::Px(60.0),
+                ..item
+            },
+        )];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(50.0, 20.0)]);
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(200.0, 100.0)),
+            &mut measurer,
+        );
+        assert_eq!(out.child_boxes()[0].size().height, 60.0);
+    }
+
+    #[test]
+    fn a_column_clamps_its_cross_max_width() {
+        // The cross axis is width in a column: `max-width: 30` caps a stretch.
+        let style = container(
+            FlexDirection::Column,
+            JustifyContent::FlexStart,
+            AlignItems::Stretch,
+            0.0,
+        );
+        let LayoutChild { node, style: item } = fixed_basis(1, 50.0);
+        let children = [LayoutChild::new(
+            node,
+            LayoutStyle {
+                max_width: Dimension::Px(30.0),
+                ..item
+            },
+        )];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(20.0, 50.0)]);
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(200.0, 100.0)),
+            &mut measurer,
+        );
+        assert_eq!(out.child_boxes()[0].size().width, 30.0);
     }
 
     #[test]
