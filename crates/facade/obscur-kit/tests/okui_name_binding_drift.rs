@@ -78,3 +78,74 @@ fn resolved_tags_bind_to_the_real_component_ids() {
     assert_eq!(name_binding::attr_symbol("src"), view::SRC);
     assert_eq!(name_binding::event_symbol("click"), view::EVENT_CLICK);
 }
+
+// ---- widget contract drift (§2.13) ---------------------------------------
+//
+// `widget_contracts()` mirrors each widget's §2.6 builder surface by hand,
+// because `obscur-okui-compiler` is a frontend crate and cannot depend on the
+// components tier. A hand-mirrored list rots silently, so pin it from here —
+// the one place that sees both sides.
+
+#[test]
+fn every_contracted_widget_tag_resolves_to_a_real_widget() {
+    // A contract keyed by a tag the resolver does not know would never be
+    // consulted: `component_id_for` would fall through to CONTAINER.
+    let real: Vec<obscur_kit::identity::ComponentId> = vec![
+        Button::COMPONENT_ID,
+        Input::COMPONENT_ID,
+        Checkbox::COMPONENT_ID,
+        Select::COMPONENT_ID,
+        Menu::COMPONENT_ID,
+        Dialog::COMPONENT_ID,
+        Tabs::COMPONENT_ID,
+        List::COMPONENT_ID,
+        Tree::COMPONENT_ID,
+        Table::COMPONENT_ID,
+        Docking::COMPONENT_ID,
+        Radio::COMPONENT_ID,
+    ];
+    for contract in obscur_kit::okui_compiler::validation::widget_contracts() {
+        let id = name_binding::component_id_for(contract.component());
+        assert!(
+            real.contains(&id),
+            "contract tag {:?} does not resolve to a shipped widget (got {id:?})",
+            contract.component()
+        );
+    }
+}
+
+#[test]
+fn every_shipped_widget_has_a_contract() {
+    // The other direction: adding a widget without a contract silently leaves
+    // its authored surface unchecked — the exact gap this set was seeded to close.
+    let contracts = obscur_kit::okui_compiler::validation::widget_contracts();
+    let tags: Vec<&str> = contracts
+        .iter()
+        .map(obscur_kit::okui_compiler::validation::ComponentContract::component)
+        .collect();
+    for expected in [
+        "Button", "Input", "Checkbox", "Select", "Menu", "Dialog", "Tabs", "List", "Tree",
+        "Table", "Docking", "Radio",
+    ] {
+        assert!(tags.contains(&expected), "shipped widget {expected} has no contract");
+    }
+}
+
+#[test]
+fn contracted_events_use_the_reserved_event_symbols() {
+    // A contract may only allow events that actually have a reserved symbol;
+    // anything else hashes to a fallback the runtime never dispatches, so
+    // allowing it would bless a binding that silently does nothing.
+    for contract in obscur_kit::okui_compiler::validation::widget_contracts() {
+        for event in contract.allowed_events() {
+            let symbol = name_binding::event_symbol(event);
+            assert!(
+                symbol == view::EVENT_CLICK
+                    || symbol == view::EVENT_INPUT
+                    || symbol == view::EVENT_CHANGE,
+                "{} allows event {event:?}, which has no reserved symbol",
+                contract.component()
+            );
+        }
+    }
+}

@@ -20,7 +20,7 @@ use crate::symbol::{Symbol, SymbolTable};
 use crate::typing::TypeError;
 use crate::validation::{
     CapabilityValidator, ComponentContract, ContractValidator, ExpressionValidator,
-    ValidationDiagnostic, builtin_contracts,
+    ValidationDiagnostic, builtin_contracts, widget_contracts,
 };
 
 /// A lookup from component/tag name to its [`ComponentContract`], so the
@@ -43,17 +43,19 @@ impl ContractRegistry {
     }
 
     /// Creates a registry pre-populated with the contracts for every built-in
-    /// view primitive (spec §2.6, §2.13), so a default compile enforces their
-    /// attribute/event surface without the caller registering anything.
+    /// view primitive **and every shipped widget** (spec §2.6, §2.13), so a
+    /// default compile enforces their attribute/event surface without the caller
+    /// registering anything.
     ///
-    /// This is the registry [`Compiler::new`] installs by default; see
-    /// [`builtin_contracts`](crate::validation::builtin_contracts) for the
-    /// covered primitives and why their surface is defined here rather than
-    /// imported from `obscur-view`/`obscur-primitives`.
+    /// This is the registry [`Compiler::new`] installs by default. See
+    /// [`builtin_contracts`](crate::validation::builtin_contracts) and
+    /// [`widget_contracts`](crate::validation::widget_contracts) for what each
+    /// covers, and why the surfaces are defined here rather than imported from
+    /// `obscur-view`/`obscur-primitives`/`obscur-widgets`.
     #[must_use]
     pub fn builtins() -> Self {
         let mut registry = Self::new();
-        for contract in builtin_contracts() {
+        for contract in builtin_contracts().into_iter().chain(widget_contracts()) {
             registry.register(contract);
         }
         registry
@@ -417,6 +419,34 @@ mod tests {
         assert_eq!(ir.root().tag(), "Button");
         assert!(!result.source_map().is_empty());
         assert!(result.source_map().get(ir.root().id()).is_some());
+    }
+
+    #[test]
+    fn the_default_registry_checks_widgets_without_any_registration() {
+        // The point of seeding `widget_contracts`: `<Button>` used to compile
+        // clean whatever you wrote on it, because no contract was registered and
+        // an unknown tag is left unchecked. A DEFAULT compile — no
+        // `with_registry` — now catches a typo and a missing required prop.
+        let typo = Compiler::new("app.okui").compile(&document(
+            "<Button label=\"Save\" laebl=\"Save\" on:click=submit/>",
+        ));
+        assert!(typo.has_errors(), "a typo'd Button attribute must not compile clean");
+
+        let missing = Compiler::new("app.okui").compile(&document("<Button on:click=submit/>"));
+        assert!(missing.has_errors(), "Button requires its `label`");
+
+        // And the honest form still compiles.
+        let ok = Compiler::new("app.okui")
+            .compile(&document("<Button label=\"Save\" disabled=\"true\" on:click=submit/>"));
+        assert!(!ok.has_errors(), "diagnostics: {:?}", ok.diagnostics());
+    }
+
+    #[test]
+    fn the_default_registry_leaves_collection_widgets_open() {
+        // Menu/Tabs/... are registered with no prop surface precisely so they
+        // stay unchecked rather than asserting a vocabulary that does not exist.
+        let result = Compiler::new("app.okui").compile(&document("<Tabs anything=\"1\"/>"));
+        assert!(!result.has_errors(), "diagnostics: {:?}", result.diagnostics());
     }
 
     #[test]

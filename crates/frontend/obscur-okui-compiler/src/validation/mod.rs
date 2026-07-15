@@ -12,7 +12,7 @@
 //!   [`ComponentContract`] — required props and allowed children (§2.13).
 
 mod builtin_contracts;
-pub use builtin_contracts::builtin_contracts;
+pub use builtin_contracts::{builtin_contracts, widget_contracts};
 mod capability_validator;
 pub use capability_validator::CapabilityValidator;
 mod contract_validator;
