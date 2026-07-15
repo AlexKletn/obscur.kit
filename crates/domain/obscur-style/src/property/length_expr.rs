@@ -51,6 +51,22 @@ impl LengthExpr {
         Self::Leaf(length)
     }
 
+    /// Returns `true` when any leaf anywhere in this expression is a `ch` term.
+    ///
+    /// Exhaustive over the tree, because `ch` is not required to be at the top:
+    /// `clamp(10px, 20ch, 50%)` needs the `0` glyph measured just as much as a
+    /// bare `20ch` does. See [`Length::is_ch`].
+    #[must_use]
+    pub fn uses_ch(&self) -> bool {
+        match self {
+            Self::Leaf(length) => length.is_ch(),
+            Self::Product(inner, _) | Self::Quotient(inner, _) => inner.uses_ch(),
+            Self::Sum(a, b) | Self::Diff(a, b) => a.uses_ch() || b.uses_ch(),
+            Self::Min(terms) | Self::Max(terms) => terms.iter().any(Self::uses_ch),
+            Self::Clamp(a, b, c) => a.uses_ch() || b.uses_ch() || c.uses_ch(),
+        }
+    }
+
     /// Resolves this expression to concrete logical pixels against `ctx`.
     ///
     /// Returns [`None`] when any term cannot be folded (an `auto` term, a `%`
@@ -99,6 +115,52 @@ mod tests {
 
     fn ctx() -> LengthContext {
         LengthContext::new(16.0, 20.0, 800.0, 600.0)
+    }
+
+    #[test]
+    fn uses_ch_finds_a_ch_leaf_at_any_depth() {
+        // The point of recursing: `ch` is rarely the top node of the tree.
+        let deep = LengthExpr::Clamp(
+            Box::new(LengthExpr::leaf(Length::px(10.0))),
+            Box::new(LengthExpr::Sum(
+                Box::new(LengthExpr::leaf(Length::px(2.0))),
+                Box::new(LengthExpr::Product(
+                    Box::new(LengthExpr::leaf(Length::Ch(3.0))),
+                    2.0,
+                )),
+            )),
+            Box::new(LengthExpr::leaf(Length::Percent(50.0))),
+        );
+        assert!(deep.uses_ch());
+        assert!(LengthExpr::Min(vec![
+            LengthExpr::leaf(Length::px(1.0)),
+            LengthExpr::leaf(Length::Ch(1.0)),
+        ])
+        .uses_ch());
+    }
+
+    #[test]
+    fn uses_ch_is_false_for_an_expression_of_other_units() {
+        // Must not fire on `em`: the two are different bases, and a false
+        // positive would cost a shaping call on every ordinary stylesheet.
+        let expr = LengthExpr::Sum(
+            Box::new(LengthExpr::leaf(Length::Em(2.0))),
+            Box::new(LengthExpr::Max(vec![
+                LengthExpr::leaf(Length::Rem(1.0)),
+                LengthExpr::leaf(Length::Vw(50.0)),
+            ])),
+        );
+        assert!(!expr.uses_ch());
+    }
+
+    #[test]
+    fn a_ch_term_folds_inside_an_expression() {
+        // 3ch against a measured 10px advance, plus 12px.
+        let expr = LengthExpr::Sum(
+            Box::new(LengthExpr::leaf(Length::Ch(3.0))),
+            Box::new(LengthExpr::leaf(Length::px(12.0))),
+        );
+        assert_eq!(expr.resolve(&ctx().with_ch_width(10.0)), Some(42.0));
     }
 
     #[allow(clippy::unnecessary_box_returns)] // test convenience: builds boxed operands directly

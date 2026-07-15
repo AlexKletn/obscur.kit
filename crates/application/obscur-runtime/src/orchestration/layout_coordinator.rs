@@ -108,16 +108,28 @@ impl LayoutCoordinator {
     /// §4.5): `vw`/`vh`/`vmin`/`vmax` resolve against `viewport`, `rem` against
     /// `root_font_size`, and `em` against each node's own computed `font-size`.
     /// Compute `root_font_size` with [`root_font_size`] from the tree root.
+    ///
+    /// `paragraph` resolves `ch`, the one unit that cannot be folded from numbers
+    /// alone — it needs the `0` glyph shaped (see [`ch_width_for`], which measures
+    /// only for the rare node that writes `ch`). Pass [`None`] when no shaper is
+    /// available; `ch` then takes the specified `0.5em` substitute and every other
+    /// unit is unaffected.
     #[must_use]
     pub fn layout_styles_from(
         &self,
         computed: &ComputedStyles,
         viewport: Size,
         root_font_size: f32,
+        paragraph: Option<&ParagraphShaper>,
     ) -> LayoutStyles {
         computed
             .iter()
-            .map(|(&node, style)| (node, layout_style_from(style, viewport, root_font_size)))
+            .map(|(&node, style)| {
+                (
+                    node,
+                    layout_style_from(style, viewport, root_font_size, paragraph),
+                )
+            })
             .collect()
     }
 
@@ -201,8 +213,9 @@ impl LayoutCoordinator {
         computed: &ComputedStyles,
         viewport: Size,
         root_font_size: f32,
+        paragraph: Option<&ParagraphShaper>,
     ) -> GridTemplates {
-        grid_templates_from(computed, viewport, root_font_size)
+        grid_templates_from(computed, viewport, root_font_size, paragraph)
     }
 
     /// Resolves every grid item's `grid-area: <name>` marker against its
@@ -631,6 +644,75 @@ fn measure_space_advance(
         .sum()
 }
 
+/// Shapes the `0` (ZERO, U+0030) glyph through `paragraph` at `font_size` and
+/// returns its advance — the base every `ch` length resolves against (spec §4.5,
+/// CSS Values 4 §6.1.2).
+///
+/// Returns [`None`] when shaping yields no glyph, which is the honest answer
+/// rather than `0.0`: a zero-width `ch` would silently collapse `width: 60ch` to
+/// nothing, while [`None`] routes the caller to
+/// [`LengthContext::ch_base`]'s specified `0.5em` substitute.
+///
+/// # This measures the same font the text does
+///
+/// Shaped through the same [`measure_face`] + fallback chain + attributes as
+/// [`measure_text_node`], so a `20ch` box and the twenty characters placed in it
+/// are measured against one font, not two. That also means `ch` inherits this
+/// pass's standing limitation: [`measure_face`] is a carrier, and the wired
+/// shaper resolves the *host's* font rather than the node's `font-family`. So
+/// `ch` currently follows the host font — exactly as every other text
+/// measurement here does — and starts following `font-family` on the day real
+/// per-node face resolution lands, with no change to this function.
+// `attributes` stays by reference to match this pass's `shape_paragraph` calls.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn measure_ch_width(
+    paragraph: &ParagraphShaper,
+    fallback: &FontFallback,
+    attributes: &FontAttributes,
+    font_size: f32,
+) -> Option<f32> {
+    // A digit's advance does not depend on the paragraph's base direction, so
+    // this probes LTR rather than threading the node's `direction` in: a run of
+    // one neutral-width glyph reorders to itself.
+    let advance: f32 = paragraph
+        .shape_paragraph(
+            "0",
+            fallback,
+            attributes,
+            &measure_face(),
+            font_size,
+            TextDirection::LeftToRight,
+        )
+        .iter()
+        .flat_map(|run| run.run().glyphs().iter())
+        .map(ShapedGlyph::x_advance)
+        .sum();
+    (advance > 0.0).then_some(advance)
+}
+
+/// The `ch` base for one node, measured only when that node actually needs it.
+///
+/// [`ComputedStyle::uses_ch`] is an allocation-free scan and answers `false` for
+/// essentially every real node; a hit is what pays for the fallback chain and the
+/// shaping call. So a stylesheet that never writes `ch` costs exactly what it did
+/// before `ch` existed, which is the point — `ch` is a rare unit and must not tax
+/// the nodes that do not use it.
+pub(super) fn ch_width_for(
+    computed: &ComputedStyle,
+    paragraph: Option<&ParagraphShaper>,
+) -> Option<f32> {
+    if !computed.uses_ch() {
+        return None;
+    }
+    let paragraph = paragraph?;
+    measure_ch_width(
+        paragraph,
+        &families_for(Some(computed)),
+        &attributes_for(Some(computed)),
+        font_size_px(computed),
+    )
+}
+
 /// Maps a single [`ComputedStyle`] into layout's own [`LayoutStyle`].
 ///
 /// This is the full computed → layout bridge (spec §3.10, §4.2): every field of
@@ -673,9 +755,19 @@ fn measure_space_advance(
 ///   `FlexStart`).
 /// * `align_items` ← [`PropertyId::AlignItems`] keyword against the reserved
 ///   `ALIGN_*` handles (default `Stretch`).
-fn layout_style_from(computed: &ComputedStyle, viewport: Size, root_font_size: f32) -> LayoutStyle {
+fn layout_style_from(
+    computed: &ComputedStyle,
+    viewport: Size,
+    root_font_size: f32,
+    paragraph: Option<&ParagraphShaper>,
+) -> LayoutStyle {
     let default = LayoutStyle::default();
-    let ctx = length_context(computed, viewport, root_font_size);
+    let ctx = length_context(
+        computed,
+        viewport,
+        root_font_size,
+        ch_width_for(computed, paragraph),
+    );
     LayoutStyle {
         display: display_of(computed),
         // Positioning scheme + insets. An unauthored `position` stays `Static`
@@ -842,7 +934,13 @@ pub fn root_font_size(computed: &ComputedStyles, root: Option<NodeId>) -> f32 {
 }
 
 /// The [`LengthContext`] for one node: its own `font-size` for `em`, the
-/// document `root_font_size` for `rem`, and the `viewport` for `vw`/`vh`.
+/// document `root_font_size` for `rem`, the `viewport` for `vw`/`vh`, and
+/// `ch_width` — the measured `0`-glyph advance — for `ch`.
+///
+/// Pass `ch_width: None` when the `0` glyph was not measured, either because the
+/// node writes no `ch` (the usual case, see [`ch_width_for`]) or because no
+/// shaper was in reach; `ch` then resolves through
+/// [`LengthContext::ch_base`]'s `0.5em` substitute.
 ///
 /// The percentage basis is left unknown: a bare `%` is resolved later by layout
 /// against the containing block, and a `%` term inside `calc()` therefore does
@@ -852,13 +950,18 @@ pub(super) fn length_context(
     computed: &ComputedStyle,
     viewport: Size,
     root_font_size: f32,
+    ch_width: Option<f32>,
 ) -> LengthContext {
-    LengthContext::new(
+    let ctx = LengthContext::new(
         font_size_px(computed),
         root_font_size,
         viewport.width,
         viewport.height,
-    )
+    );
+    match ch_width {
+        Some(width) => ctx.with_ch_width(width),
+        None => ctx,
+    }
 }
 
 /// One node's computed `font-size` in logical pixels, defaulting to
@@ -1839,7 +1942,7 @@ mod tests {
     fn mapping_reads_width_and_defaults_display_to_block() {
         let mut computed = ComputedStyle::new();
         computed.set(PropertyId::Width, ComputedValue::length(Length::px(120.0)));
-        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert_eq!(style.width, Dimension::Px(120.0));
         // Height absent -> Auto.
         assert_eq!(style.height, Dimension::Auto);
@@ -1855,7 +1958,7 @@ mod tests {
             ComputedValue::length(Length::Percent(50.0)),
         );
         computed.set(PropertyId::Height, ComputedValue::length(Length::Auto));
-        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert_eq!(style.width, Dimension::Percent(50.0));
         assert_eq!(style.height, Dimension::Auto);
     }
@@ -1878,7 +1981,7 @@ mod tests {
                 Box::new(LengthExpr::Leaf(Length::Em(2.0))),
             )),
         );
-        let style = layout_style_from(&computed, TEST_VIEWPORT, 20.0);
+        let style = layout_style_from(&computed, TEST_VIEWPORT, 20.0, None);
         assert_eq!(style.width, Dimension::Px(48.0)); // 3em
         assert_eq!(style.height, Dimension::Px(40.0)); // 5vw of 800
         assert_eq!(style.min_width, Dimension::Px(40.0)); // 2rem of 20
@@ -1890,7 +1993,7 @@ mod tests {
         let mut computed = ComputedStyle::new();
         computed.set(PropertyId::FontSize, ComputedValue::length(Length::px(10.0)));
         computed.set(PropertyId::Gap, ComputedValue::length(Length::Em(2.0)));
-        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert_eq!(style.gap, 20.0); // 2em of 10px
     }
 
@@ -1915,7 +2018,7 @@ mod tests {
         computed.insert(NodeId::from_raw(1), a);
         computed.insert(NodeId::from_raw(2), ComputedStyle::new());
 
-        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert_eq!(styles.len(), 2);
         assert_eq!(
             styles.get(&NodeId::from_raw(1)).map(|s| s.width),
@@ -2427,7 +2530,7 @@ mod tests {
         );
         computed.set(PropertyId::Top, ComputedValue::length(Length::px(10.0)));
         computed.set(PropertyId::Left, ComputedValue::length(Length::px(5.0)));
-        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert_eq!(style.position, Position::Relative);
         assert_eq!(style.inset.top, Dimension::Px(10.0));
         assert_eq!(style.inset.left, Dimension::Px(5.0));
@@ -2440,7 +2543,7 @@ mod tests {
     fn mapping_defaults_position_to_static() {
         // A node with no authored `position` stays `Static` with all-`auto` insets.
         let computed = ComputedStyle::new();
-        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert_eq!(style.position, Position::Static);
         assert_eq!(style.inset, Inset::AUTO);
     }
@@ -2464,7 +2567,7 @@ mod tests {
                 .expect("concrete"),
         );
         // `grid-row-end` left unset -> Auto.
-        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         let placement = style.grid_placement();
         assert_eq!(placement.column_start(), GridLine::Line(1));
         assert_eq!(placement.column_end(), GridLine::Line(3));
@@ -2479,7 +2582,7 @@ mod tests {
         // A node with no authored line placement keeps the all-Auto default, so it
         // auto-places exactly as before.
         let computed = ComputedStyle::new();
-        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert_eq!(style.grid_placement(), GridPlacement::default());
     }
 
@@ -2500,12 +2603,12 @@ mod tests {
         ] {
             let mut computed = ComputedStyle::new();
             computed.set(PropertyId::GridAutoFlow, ComputedValue::keyword(sym));
-            let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+            let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
             assert_eq!(style.grid_auto_flow(), expected);
         }
         // Absent -> the `Row` (sparse) default.
         let computed = ComputedStyle::new();
-        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert_eq!(style.grid_auto_flow(), GridAutoFlow::Row);
     }
 
@@ -2530,7 +2633,7 @@ mod tests {
             PropertyId::AlignSelf,
             ComputedValue::keyword(layout_keyword::ALIGN_AUTO),
         );
-        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert_eq!(style.justify_items, AlignItems::Center);
         assert_eq!(style.align_items, AlignItems::FlexEnd);
         assert_eq!(style.justify_self, AlignSelf::Start);
@@ -2538,7 +2641,7 @@ mod tests {
 
         // Absent -> the layout defaults (`Stretch` container, `Auto` item).
         let empty = ComputedStyle::new();
-        let default_style = layout_style_from(&empty, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let default_style = layout_style_from(&empty, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert_eq!(default_style.justify_items, AlignItems::Stretch);
         assert_eq!(default_style.justify_self, AlignSelf::Auto);
         assert_eq!(default_style.align_self, AlignSelf::Auto);
@@ -2620,7 +2723,7 @@ mod tests {
             ComputedValue::length(Length::px(50.0)),
         );
 
-        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
 
         assert_eq!(style.display, LayoutDisplay::Flex);
         assert_eq!(
@@ -2662,7 +2765,7 @@ mod tests {
             PropertyId::Display,
             ComputedValue::keyword(layout_keyword::DISPLAY_GRID),
         );
-        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let style = layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert_eq!(style.display, LayoutDisplay::Grid);
         assert!(
             algorithm_for(LayoutDisplay::Grid, NodeId::from_raw(1), &GridTemplates::new(), 0.0)
@@ -2677,7 +2780,7 @@ mod tests {
             PropertyId::Display,
             ComputedValue::keyword(layout_keyword::DISPLAY_NONE),
         );
-        assert_eq!(layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT).display, LayoutDisplay::None);
+        assert_eq!(layout_style_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None).display, LayoutDisplay::None);
     }
 
     #[test]
@@ -2718,7 +2821,7 @@ mod tests {
         }
 
         let coordinator = LayoutCoordinator::new();
-        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         // Sanity: the bridge produced a flex container.
         assert_eq!(styles[&root].display, LayoutDisplay::Flex);
 
@@ -2773,8 +2876,8 @@ mod tests {
         computed.insert(child_b, ComputedStyle::new());
 
         let coordinator = LayoutCoordinator::new();
-        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
-        let templates = coordinator.grid_templates_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
+        let templates = coordinator.grid_templates_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert!(templates.contains_key(&root), "root authored a template");
 
         let boxes = coordinator.layout(
@@ -2827,7 +2930,7 @@ mod tests {
         computed.insert(root, root_style);
 
         let coordinator = LayoutCoordinator::new();
-        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         let boxes = coordinator.layout(
             &tree,
             &styles,
@@ -2860,7 +2963,7 @@ mod tests {
         computed.insert(root, root_style);
 
         let coordinator = LayoutCoordinator::new();
-        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         let boxes = coordinator.layout(
             &tree,
             &styles,
@@ -2925,7 +3028,7 @@ mod tests {
         computed.insert(text, text_style);
 
         let coordinator = LayoutCoordinator::new();
-        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         let boxes = coordinator.layout(
             &tree,
             &styles,
@@ -2986,7 +3089,7 @@ mod tests {
         computed.insert(text, text_computed);
 
         let coordinator = LayoutCoordinator::new();
-        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert_eq!(styles[&text].font_size, 20.0);
         let boxes = coordinator.layout(
             &tree,
@@ -3145,7 +3248,7 @@ mod tests {
 
         // Typed session "abcd" over the placeholder → the slot is sized from "abcd".
         let (tree, computed, field, hint) = build();
-        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         let typed = coordinator.layout_editing(
             &tree,
             &styles,
@@ -3165,7 +3268,7 @@ mod tests {
 
         // Empty session → the slot stays sized from the 1-char placeholder hint.
         let (tree, computed, field, hint) = build();
-        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT);
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         let empty = coordinator.layout_editing(
             &tree,
             &styles,

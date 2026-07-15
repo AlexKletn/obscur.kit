@@ -151,14 +151,27 @@ impl PipelineSnapshot {
 
         let layout = LayoutCoordinator::new();
         let root_font = root_font_size(&computed, tree.root());
-        let mut layout_styles = layout.layout_styles_from(&computed, viewport, root_font);
+        // The same orchestrator also supplies `ch`: the unit is the `0` glyph's
+        // advance, so it must be shaped rather than folded from numbers. Measured
+        // only for a node that writes `ch` — almost none do.
+        let mut layout_styles = layout.layout_styles_from(
+            &computed,
+            viewport,
+            root_font,
+            Some(scene_coordinator.paragraph()),
+        );
         // Named-area placement (`grid-area: <name>` against the container's
         // `grid-template-areas`) needs the tree to resolve, so it patches the
         // freshly built styles here; items with no named area are left untouched.
         layout.resolve_named_grid_areas(&mut layout_styles, tree, &computed);
         // Authored grid templates become a per-node side-table so a grid container
         // dispatches the real track-sizing algorithm (spec §4.1).
-        let grid_templates = layout.grid_templates_from(&computed, viewport, root_font);
+        let grid_templates = layout.grid_templates_from(
+            &computed,
+            viewport,
+            root_font,
+            Some(scene_coordinator.paragraph()),
+        );
         let boxes = layout.layout(
             tree,
             &layout_styles,

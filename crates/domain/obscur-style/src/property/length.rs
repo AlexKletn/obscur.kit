@@ -2,7 +2,7 @@
 //!
 //! [`Length`] models a single CSS length term: absolute pixels, a percentage
 //! (of some base resolved later during layout), the `auto` keyword, and the
-//! font-relative (`em`, `rem`) and viewport-relative (`vw`, `vh`, `vmin`,
+//! font-relative (`em`, `rem`, `ch`) and viewport-relative (`vw`, `vh`, `vmin`,
 //! `vmax`) units (spec §4.5). The relative units carry no absolute value on
 //! their own; [`Length::resolve_px`] folds them to logical pixels against a
 //! [`LengthContext`] at the layout/compute step ("resolve at use time").
@@ -15,9 +15,9 @@ use obscur_geometry::LogicalPx;
 /// A CSS length value.
 ///
 /// Absolute (`Px`) and percentage (`Percent`) terms are self-contained; the
-/// font-relative (`Em` / `Rem`) and viewport-relative (`Vw` / `Vh` / `Vmin` /
-/// `Vmax`) terms carry their coefficient and only become a concrete number once
-/// resolved against a [`LengthContext`] via [`Length::resolve_px`].
+/// font-relative (`Em` / `Rem` / `Ch`) and viewport-relative (`Vw` / `Vh` /
+/// `Vmin` / `Vmax`) terms carry their coefficient and only become a concrete
+/// number once resolved against a [`LengthContext`] via [`Length::resolve_px`].
 ///
 /// Because the variants carry `f32` data, this type derives [`PartialEq`] but
 /// not [`Eq`]/[`Hash`].
@@ -37,6 +37,16 @@ pub enum Length {
     /// A font-relative `rem` length: this many times the document root's
     /// `font-size` (`LengthContext::root_font_size`).
     Rem(f32),
+    /// A font-relative `ch` length: this many times the advance of the `0`
+    /// (ZERO, U+0030) glyph in the element's own font
+    /// ([`LengthContext::ch_base`]).
+    ///
+    /// Unlike `em`, this depends on the *face*, not just the size: it is how a
+    /// column is sized by character count (`width: 60ch`), which is exact in a
+    /// monospace face and approximate in a proportional one. See
+    /// [`LengthContext::ch_base`] for what happens when the glyph cannot be
+    /// measured.
+    Ch(f32),
     /// A viewport-relative `vw` length: this many percent of the viewport width.
     Vw(f32),
     /// A viewport-relative `vh` length: this many percent of the viewport
@@ -72,10 +82,23 @@ impl Length {
         matches!(self, Self::Auto)
     }
 
+    /// Returns `true` when this length is a `ch` term.
+    ///
+    /// Every other unit resolves from numbers a caller already holds; `ch` alone
+    /// needs the `0` glyph *shaped* to answer. This predicate lets a caller find
+    /// out whether that measurement is worth taking before taking it — see
+    /// [`LengthContext::ch_base`](crate::property::LengthContext::ch_base).
+    #[must_use]
+    pub const fn is_ch(self) -> bool {
+        matches!(self, Self::Ch(_))
+    }
+
     /// Resolves this length to concrete logical pixels against `ctx`.
     ///
     /// * `Px` returns its value directly; the font- and viewport-relative units
-    ///   multiply their coefficient by the matching base from `ctx`.
+    ///   multiply their coefficient by the matching base from `ctx` — `Ch`
+    ///   against [`LengthContext::ch_base`], which substitutes `0.5em` when the
+    ///   `0` glyph was not measurable.
     /// * `Percent` resolves only when `ctx.percent_basis` is known (it usually
     ///   is not here — bare percentages are resolved later by layout against the
     ///   containing block), otherwise it returns [`None`].
@@ -86,6 +109,7 @@ impl Length {
             Self::Px(px) => Some(px.0),
             Self::Em(factor) => Some(factor * ctx.font_size),
             Self::Rem(factor) => Some(factor * ctx.root_font_size),
+            Self::Ch(factor) => Some(factor * ctx.ch_base()),
             Self::Vw(pct) => Some(pct / 100.0 * ctx.viewport_width),
             Self::Vh(pct) => Some(pct / 100.0 * ctx.viewport_height),
             Self::Vmin(pct) => Some(pct / 100.0 * ctx.viewport_min()),
@@ -133,6 +157,30 @@ mod tests {
     fn rem_resolves_against_root_font_size() {
         // Root font size (20), not the element font size (16).
         assert_eq!(Length::Rem(2.0).resolve_px(&ctx()), Some(40.0));
+    }
+
+    #[test]
+    fn ch_resolves_against_the_measured_zero_advance() {
+        // The unit's reason to exist: `20ch` is twenty characters wide in a face
+        // whose `0` advances 9.6px — not twenty half-ems.
+        let ctx = ctx().with_ch_width(9.6);
+        assert_eq!(Length::Ch(20.0).resolve_px(&ctx), Some(192.0));
+    }
+
+    #[test]
+    fn an_unmeasured_ch_resolves_through_the_half_em_substitute() {
+        // No measurement available: §6.1.2's 0.5em. Element font-size 16 → 8/ch.
+        assert_eq!(Length::Ch(3.0).resolve_px(&ctx()), Some(24.0));
+    }
+
+    #[test]
+    fn ch_is_not_em_when_the_face_is_measured() {
+        // The two units must not be confused: a monospace `0` advancing a full
+        // em apart, `ch` follows the FACE while `em` follows the size.
+        let narrow = ctx().with_ch_width(8.0);
+        let wide = ctx().with_ch_width(16.0);
+        assert_eq!(Length::Em(1.0).resolve_px(&narrow), Length::Em(1.0).resolve_px(&wide));
+        assert_ne!(Length::Ch(1.0).resolve_px(&narrow), Length::Ch(1.0).resolve_px(&wide));
     }
 
     #[test]

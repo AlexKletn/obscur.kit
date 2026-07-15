@@ -177,6 +177,67 @@ pub enum PropertyValue {
 }
 
 impl PropertyValue {
+    /// Returns `true` when resolving this value needs the `0` glyph measured —
+    /// that is, when it contains a `ch` term anywhere.
+    ///
+    /// # Why a caller asks first
+    ///
+    /// Every other unit folds from numbers the caller already has. `ch` alone
+    /// needs text *shaped* to answer, which costs a font-fallback chain and a
+    /// shaping call. Since almost no stylesheet writes `ch`, a caller checks this
+    /// first and measures only on a hit; the overwhelmingly common answer is
+    /// `false`, and this scan allocates nothing to produce it.
+    ///
+    /// # The arms that answer `false` while carrying lengths
+    ///
+    /// [`BoxShadow`](Self::BoxShadow), [`Transform`](Self::Transform),
+    /// [`BackgroundSize`](Self::BackgroundSize) and friends do hold [`Length`]s,
+    /// and this still answers `false` for them — not an oversight. Those values
+    /// are not resolved against a
+    /// [`LengthContext`](crate::property::LengthContext) at all: they read their
+    /// lengths through [`Length::as_px`], which honors only absolute `px`. `em`,
+    /// `rem` and `vw` are equally inert there today. So this predicate's reach is
+    /// exactly the reach of relative units in general, and `ch` gains support in
+    /// those properties on the day the rest of the relative units do — not before,
+    /// and not separately.
+    ///
+    /// The match is deliberately exhaustive rather than wildcarded, so a new
+    /// length-bearing variant cannot quietly default to "no `ch` here".
+    #[must_use]
+    pub fn uses_ch(&self) -> bool {
+        match self {
+            Self::Length(length) => length.is_ch(),
+            Self::Calc(expr) => expr.uses_ch(),
+            Self::GridTracks(tracks) => tracks.uses_ch(),
+            // Resolved through `Length::as_px` (absolute `px` only), or carrying
+            // no length at all. See the note above.
+            Self::Keyword(_)
+            | Self::Number(_)
+            | Self::Color(_)
+            | Self::LinearGradient(_)
+            | Self::RadialGradient(_)
+            | Self::ConicGradient(_)
+            | Self::BackgroundImageUrl(_)
+            | Self::BackgroundLayers(_)
+            | Self::BackgroundSize(_)
+            | Self::BackgroundPosition(_)
+            | Self::BackgroundRepeat(_)
+            | Self::ObjectFit(_)
+            | Self::BoxShadow(_)
+            | Self::Filter(_)
+            | Self::FontFamilies(_)
+            | Self::GridLine(_)
+            | Self::GridAreas(_)
+            | Self::GridAreaName(_)
+            | Self::Transform(_)
+            | Self::TransformOrigin(_)
+            | Self::CustomRef(_)
+            | Self::Inherit
+            | Self::Initial
+            | Self::Unset => false,
+        }
+    }
+
     /// Returns the color if this value is a [`PropertyValue::Color`].
     #[must_use]
     pub const fn as_color(&self) -> Option<StyleColor> {
@@ -440,6 +501,50 @@ impl PropertyValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uses_ch_fires_only_on_values_that_resolve_against_a_length_context() {
+        use crate::property::{GridTrack, GridTrackList, Length, LengthExpr};
+
+        assert!(PropertyValue::Length(Length::Ch(20.0)).uses_ch());
+        assert!(PropertyValue::Calc(LengthExpr::leaf(Length::Ch(1.0))).uses_ch());
+        assert!(
+            PropertyValue::GridTracks(GridTrackList::new(
+                vec![GridTrack::Fixed(Length::Ch(20.0))].into(),
+                Vec::new().into(),
+            ))
+            .uses_ch()
+        );
+
+        // Other units must not fire: a false positive costs a shaping call on
+        // every ordinary stylesheet.
+        assert!(!PropertyValue::Length(Length::Em(2.0)).uses_ch());
+        assert!(!PropertyValue::Length(Length::px(10.0)).uses_ch());
+        assert!(!PropertyValue::Number(1.0).uses_ch());
+        assert!(!PropertyValue::Initial.uses_ch());
+    }
+
+    #[test]
+    fn uses_ch_is_false_for_a_box_shadow_because_no_unit_is_relative_there() {
+        use crate::property::{BoxShadow, Length};
+
+        // Not an oversight, and the test says so: `emit_box_shadow` reads these
+        // through `Length::as_px`, which honors absolute `px` only — `em` and
+        // `rem` are equally inert there. Measuring the `0` glyph for this value
+        // would buy nothing, because nothing would consume the measurement.
+        let shadow = PropertyValue::BoxShadow(
+            vec![BoxShadow {
+                offset_x: Length::Ch(1.0),
+                offset_y: Length::Ch(1.0),
+                blur: Length::px(0.0),
+                spread: Length::px(0.0),
+                color: None,
+                inset: false,
+            }]
+            .into_boxed_slice(),
+        );
+        assert!(!shadow.uses_ch());
+    }
 
     #[test]
     fn as_color_extracts_only_colors() {

@@ -187,11 +187,19 @@ impl FramePipeline {
         let restyled = !computed.is_empty();
 
         // Layout: map styles into layout styles and arrange the tree. The root
-        // `font-size` supplies the `rem` base; the viewport supplies `vw`/`vh`.
+        // `font-size` supplies the `rem` base; the viewport supplies `vw`/`vh`;
+        // the scene's paragraph orchestrator supplies `ch` by shaping the `0`
+        // glyph — for the rare node that writes `ch`, and no other. It is the
+        // same shaper the measure pass below uses (`self.layout` and `self.scene`
+        // are disjoint fields, so this is a legal split borrow), so a `20ch` box
+        // and the text placed in it are measured against one font.
         let root_font = root_font_size(&computed, tree.root());
-        let mut layout_styles = self
-            .layout
-            .layout_styles_from(&computed, ctx.viewport(), root_font);
+        let mut layout_styles = self.layout.layout_styles_from(
+            &computed,
+            ctx.viewport(),
+            root_font,
+            Some(self.scene.paragraph()),
+        );
         // Named-area placement (`grid-area: <name>` against the container's
         // `grid-template-areas`) needs the tree to resolve, so it patches the
         // freshly built styles here; items with no named area are left untouched.
@@ -206,9 +214,12 @@ impl FramePipeline {
         // Authored grid templates (`grid-template-columns`/`-rows`) become a
         // per-node side-table so a grid container dispatches the real track-sizing
         // algorithm; a grid node with no template falls back to a single column.
-        let grid_templates = self
-            .layout
-            .grid_templates_from(&computed, ctx.viewport(), root_font);
+        let grid_templates = self.layout.grid_templates_from(
+            &computed,
+            ctx.viewport(),
+            root_font,
+            Some(self.scene.paragraph()),
+        );
         // Text leaves are shaped + wrapped to their available width inside the
         // layout pass through the scene's paragraph orchestrator (disjoint field,
         // so a legal split borrow), so `self.scene` later re-wraps and paints

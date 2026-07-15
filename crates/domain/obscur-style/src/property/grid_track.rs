@@ -65,12 +65,59 @@ impl GridTrack {
     pub fn minmax(min: GridTrack, max: GridTrack) -> Self {
         GridTrack::MinMax(Box::new(min), Box::new(max))
     }
+
+    /// Returns `true` when this track's sizing function contains a `ch` term.
+    ///
+    /// `Fr` and `Auto` carry no length at all; `MinMax` recurses into both
+    /// bounds, so `minmax(20ch, 1fr)` answers `true`, and `AutoRepeat` recurses
+    /// into the pattern it repeats — `repeat(auto-fill, 20ch)` sizes every
+    /// repetition from the `0` glyph. See [`Length::is_ch`].
+    #[must_use]
+    pub fn uses_ch(&self) -> bool {
+        match self {
+            Self::Fixed(length) => length.is_ch(),
+            Self::MinMax(min, max) => min.uses_ch() || max.uses_ch(),
+            Self::AutoRepeat { tracks, .. } => tracks.iter().any(Self::uses_ch),
+            Self::Fr(_) | Self::Auto => false,
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::GridTrack;
     use crate::property::Length;
+
+    #[test]
+    fn uses_ch_recurses_through_minmax_and_auto_repeat() {
+        assert!(GridTrack::Fixed(Length::Ch(20.0)).uses_ch());
+        assert!(GridTrack::minmax(GridTrack::Fixed(Length::Ch(20.0)), GridTrack::Fr(1.0)).uses_ch());
+        assert!(GridTrack::minmax(GridTrack::Auto, GridTrack::Fixed(Length::Ch(4.0))).uses_ch());
+        // `repeat(auto-fill, 20ch)`: the pattern is where the `ch` hides.
+        assert!(
+            GridTrack::AutoRepeat {
+                fill: true,
+                tracks: vec![GridTrack::Fixed(Length::Ch(20.0))].into_boxed_slice(),
+            }
+            .uses_ch()
+        );
+    }
+
+    #[test]
+    fn uses_ch_is_false_for_tracks_without_one() {
+        assert!(!GridTrack::Auto.uses_ch());
+        assert!(!GridTrack::Fr(1.0).uses_ch());
+        assert!(!GridTrack::Fixed(Length::px(100.0)).uses_ch());
+        assert!(!GridTrack::Fixed(Length::Em(2.0)).uses_ch(), "`em` is not `ch`");
+        assert!(!GridTrack::minmax(GridTrack::Auto, GridTrack::Fr(1.0)).uses_ch());
+        assert!(
+            !GridTrack::AutoRepeat {
+                fill: false,
+                tracks: vec![GridTrack::Fixed(Length::px(80.0))].into_boxed_slice(),
+            }
+            .uses_ch()
+        );
+    }
 
     #[test]
     fn minmax_boxes_bounds() {

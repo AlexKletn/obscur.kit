@@ -105,6 +105,22 @@ impl ComputedStyle {
         self.values.is_empty()
     }
 
+    /// Returns `true` when any computed value on this node contains a `ch` term.
+    ///
+    /// A caller that must *measure* the `0` glyph to resolve `ch` asks this
+    /// first, so the overwhelmingly common "no `ch` anywhere" node costs an
+    /// allocation-free scan instead of a shaping call. See
+    /// [`PropertyValue::uses_ch`].
+    ///
+    /// Custom properties are not scanned, and need not be: a `var()` reference is
+    /// substituted during the cascade, so `--w: 20ch; width: var(--w)` reaches
+    /// this type as a computed `width` of `20ch` and is found on the `values`
+    /// pass. A custom property that is never referenced resolves nothing.
+    #[must_use]
+    pub fn uses_ch(&self) -> bool {
+        self.values.values().any(|value| value.value().uses_ch())
+    }
+
     /// Convenience getter for the computed `opacity` as a number, if resolved.
     ///
     /// Reads [`PropertyId::Opacity`] and returns the bare number it holds; it
@@ -132,6 +148,29 @@ impl<'a> IntoIterator for &'a ComputedStyle {
 mod tests {
     use super::*;
     use crate::property::StyleColor;
+
+    #[test]
+    fn uses_ch_spots_a_ch_on_any_property() {
+        use crate::property::Length;
+
+        let mut style = ComputedStyle::new();
+        style.set(
+            PropertyId::Color,
+            ComputedValue::from_concrete(PropertyValue::Color(StyleColor::BLACK)).expect("color"),
+        );
+        assert!(!style.uses_ch(), "an ordinary node needs no measurement");
+
+        style.set(
+            PropertyId::Width,
+            ComputedValue::from_concrete(PropertyValue::Length(Length::Ch(20.0))).expect("width"),
+        );
+        assert!(style.uses_ch(), "found on a property other than the first");
+    }
+
+    #[test]
+    fn an_empty_style_uses_no_ch() {
+        assert!(!ComputedStyle::new().uses_ch());
+    }
 
     #[test]
     fn empty_by_default() {

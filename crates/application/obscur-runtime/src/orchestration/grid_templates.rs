@@ -27,7 +27,9 @@ use obscur_layout::algorithm::{AutoRepeat, AutoRepeatMode, GridTemplate, TrackLi
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{GridTrack, Length, LengthContext, PropertyId, PropertyValue};
 
-use super::layout_coordinator::length_context;
+use obscur_text::shaping::ParagraphShaper;
+
+use super::layout_coordinator::{ch_width_for, length_context};
 use super::ComputedStyles;
 
 /// The [`GridTemplate`] derived for every grid node that authored one, keyed by
@@ -45,19 +47,23 @@ pub type GridTemplates = HashMap<NodeId, GridTemplate>;
 ///
 /// Only nodes that authored `grid-template-columns` and/or
 /// `grid-template-rows` produce an entry; a node with neither is skipped, so the
-/// map stays small. `viewport` and `root_font_size` supply the resolution context
-/// for relative / viewport units in a fixed track (`em`, `rem`, `vw`, …), exactly
-/// as in [`layout_styles_from`](super::LayoutCoordinator::layout_styles_from).
+/// map stays small. `viewport`, `root_font_size` and `paragraph` supply the
+/// resolution context for relative / viewport units in a fixed track (`em`,
+/// `rem`, `vw`, `ch`, …), exactly as in
+/// [`layout_styles_from`](super::LayoutCoordinator::layout_styles_from) — so
+/// `grid-template-columns: repeat(3, 20ch)` sizes its tracks from the `0` glyph.
 #[must_use]
 pub fn grid_templates_from(
     computed: &ComputedStyles,
     viewport: Size,
     root_font_size: f32,
+    paragraph: Option<&ParagraphShaper>,
 ) -> GridTemplates {
     computed
         .iter()
         .filter_map(|(&node, style)| {
-            grid_template_for(style, viewport, root_font_size).map(|template| (node, template))
+            grid_template_for(style, viewport, root_font_size, paragraph)
+                .map(|template| (node, template))
         })
         .collect()
 }
@@ -75,6 +81,7 @@ pub fn grid_template_for(
     computed: &ComputedStyle,
     viewport: Size,
     root_font_size: f32,
+    paragraph: Option<&ParagraphShaper>,
 ) -> Option<GridTemplate> {
     let columns = grid_tracks_of(computed, PropertyId::GridTemplateColumns);
     let rows = grid_tracks_of(computed, PropertyId::GridTemplateRows);
@@ -83,7 +90,12 @@ pub fn grid_template_for(
     if columns.is_none() && rows.is_none() && auto_columns.is_none() && auto_rows.is_none() {
         return None;
     }
-    let ctx = length_context(computed, viewport, root_font_size);
+    let ctx = length_context(
+        computed,
+        viewport,
+        root_font_size,
+        ch_width_for(computed, paragraph),
+    );
     let map = |tracks: Option<&[GridTrack]>| track_list_of(tracks.unwrap_or(&[]), &ctx);
     // `grid-auto-columns` / `grid-auto-rows` are flat implicit-track sizing lists
     // (auto-fill / auto-fit is rejected in the CSS layer), so each `GridTrack` maps
@@ -207,7 +219,7 @@ mod tests {
     #[test]
     fn absent_template_yields_none() {
         let computed = ComputedStyle::new();
-        assert!(grid_template_for(&computed, VIEWPORT, ROOT_FONT).is_none());
+        assert!(grid_template_for(&computed, VIEWPORT, ROOT_FONT, None).is_none());
     }
 
     #[test]
@@ -222,7 +234,7 @@ mod tests {
             ]))
             .expect("concrete"),
         );
-        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
+        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT, None).expect("template");
         assert_eq!(
             template.columns().leading(),
             &[TrackSize::Fixed(100.0), TrackSize::Fr(1.0), TrackSize::Auto]
@@ -252,7 +264,7 @@ mod tests {
             )]))
             .expect("concrete"),
         );
-        let template = grid_template_for(&computed, VIEWPORT, 20.0).expect("template");
+        let template = grid_template_for(&computed, VIEWPORT, 20.0, None).expect("template");
         assert_eq!(template.columns().leading(), &[TrackSize::Fixed(32.0)]);
         assert_eq!(template.rows().leading(), &[TrackSize::Fixed(40.0)]);
     }
@@ -268,7 +280,7 @@ mod tests {
             ]))
             .expect("concrete"),
         );
-        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
+        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT, None).expect("template");
         // A bare percentage no longer degrades to `Auto`: it carries its `0..1`
         // fraction to the algorithm, which resolves it against the container size.
         assert_eq!(
@@ -288,7 +300,7 @@ mod tests {
             )]))
             .expect("concrete"),
         );
-        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
+        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT, None).expect("template");
         assert_eq!(
             template.columns().leading(),
             &[TrackSize::minmax(TrackSize::Percent(0.30), TrackSize::Fr(1.0))]
@@ -306,7 +318,7 @@ mod tests {
             )]))
             .expect("concrete"),
         );
-        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
+        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT, None).expect("template");
         assert_eq!(
             template.columns().leading(),
             &[TrackSize::minmax(TrackSize::Fixed(100.0), TrackSize::Fr(1.0))]
@@ -330,7 +342,7 @@ mod tests {
             ]))
             .expect("concrete"),
         );
-        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
+        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT, None).expect("template");
         let columns = template.columns();
         assert_eq!(columns.leading(), &[TrackSize::Fixed(50.0)]);
         assert_eq!(columns.trailing(), &[TrackSize::Fixed(20.0)]);
@@ -350,7 +362,7 @@ mod tests {
             }]))
             .expect("concrete"),
         );
-        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
+        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT, None).expect("template");
         let repeat = template.columns().auto_repeat().expect("auto-repeat present");
         assert_eq!(repeat.mode(), AutoRepeatMode::AutoFit);
     }
@@ -380,7 +392,7 @@ mod tests {
             ]))
             .expect("concrete"),
         );
-        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
+        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT, None).expect("template");
         assert_eq!(template.auto_rows(), &[TrackSize::Fixed(40.0)]);
         assert_eq!(
             template.auto_columns(),
@@ -400,7 +412,7 @@ mod tests {
             )]))
             .expect("concrete"),
         );
-        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
+        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT, None).expect("template");
         assert!(template.columns().is_empty());
         assert_eq!(template.auto_rows(), &[TrackSize::Fixed(40.0)]);
     }
@@ -413,7 +425,7 @@ mod tests {
             ComputedValue::from_concrete(PropertyValue::grid_tracks([GridTrack::Fr(1.0)]))
                 .expect("concrete"),
         );
-        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT).expect("template");
+        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT, None).expect("template");
         assert!(template.auto_columns().is_empty());
         assert!(template.auto_rows().is_empty());
     }
@@ -430,7 +442,7 @@ mod tests {
         computed.insert(NodeId::from_raw(1), with_template);
         computed.insert(NodeId::from_raw(2), ComputedStyle::new());
 
-        let templates = grid_templates_from(&computed, VIEWPORT, ROOT_FONT);
+        let templates = grid_templates_from(&computed, VIEWPORT, ROOT_FONT, None);
         assert_eq!(templates.len(), 1);
         assert!(templates.contains_key(&NodeId::from_raw(1)));
     }

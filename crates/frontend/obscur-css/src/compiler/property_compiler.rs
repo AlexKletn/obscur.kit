@@ -1929,8 +1929,8 @@ fn named_color(keyword: &str) -> Option<StyleColor> {
 }
 
 /// Lowers a dimension into a [`Length`] term, accepting `px` (absolute), `%`
-/// (percentage), the font-relative units (`em` / `rem`) and the viewport units
-/// (`vw` / `vh` / `vmin` / `vmax`). Any other unit is outside the domain's
+/// (percentage), the font-relative units (`em` / `rem` / `ch`) and the viewport
+/// units (`vw` / `vh` / `vmin` / `vmax`). Any other unit is outside the domain's
 /// [`Length`] model and yields [`None`].
 ///
 /// The relative units carry their coefficient symbolically; they resolve to
@@ -1946,6 +1946,8 @@ pub(crate) fn dimension_length(value: f64, unit: &str) -> Option<Length> {
         Some(Length::Em(n))
     } else if unit.eq_ignore_ascii_case("rem") {
         Some(Length::Rem(n))
+    } else if unit.eq_ignore_ascii_case("ch") {
+        Some(Length::Ch(n))
     } else if unit.eq_ignore_ascii_case("vw") {
         Some(Length::Vw(n))
     } else if unit.eq_ignore_ascii_case("vh") {
@@ -5359,6 +5361,34 @@ mod tests {
         assert_eq!(px("width: 10vh"), Some(60.0));
         assert_eq!(px("width: 10vmin"), Some(60.0));
         assert_eq!(px("width: 10vmax"), Some(80.0));
+    }
+
+    #[test]
+    fn lowers_ch_against_the_measured_zero_advance() {
+        use obscur_style::property::LengthContext;
+        // A face whose `0` advances 10px, at font-size 16 — deliberately not
+        // 0.5em (8), so a `ch` that ignored the measurement would show up here.
+        let ctx = LengthContext::new(16.0, 20.0, 800.0, 600.0).with_ch_width(10.0);
+        let px = |text: &str| match value_of(text) {
+            PropertyValue::Length(length) => length.resolve_px(&ctx),
+            other => panic!("expected length, got {other:?}"),
+        };
+        assert_eq!(px("width: 20ch"), Some(200.0), "twenty `0`-advances wide");
+        assert_eq!(px("width: 1CH"), Some(10.0), "units are case-insensitive");
+        // Fractional and zero coefficients carry through unremarkably.
+        assert_eq!(px("width: 0ch"), Some(0.0));
+        assert_eq!(px("width: 2.5ch"), Some(25.0));
+    }
+
+    #[test]
+    fn ch_composes_inside_calc() {
+        use obscur_style::property::LengthContext;
+        let ctx = LengthContext::new(16.0, 20.0, 800.0, 600.0).with_ch_width(10.0);
+        let PropertyValue::Calc(expr) = value_of("width: calc(20ch + 8px)") else {
+            panic!("expected calc");
+        };
+        // A `ch` is an ordinary term in the expression grammar: 20*10 + 8.
+        assert_eq!(expr.resolve(&ctx), Some(208.0));
     }
 
     #[test]

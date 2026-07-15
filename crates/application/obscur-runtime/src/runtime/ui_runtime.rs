@@ -1644,9 +1644,20 @@ impl UiRuntime {
         let layout_needed = self.layout_is_needed(plan, &ctx, first_frame, reconciled, &computed);
         let relaid_out = if layout_needed {
             let root_font = root_font_size(&computed, self.tree.root());
-            let mut layout_styles = self
-                .layout
-                .layout_styles_from(&computed, ctx.viewport(), root_font);
+            // `ch` is the one unit that cannot be folded from numbers the
+            // resolver already holds: it is the `0` glyph's advance, so it must be
+            // shaped. The scene's paragraph orchestrator does that here — only for
+            // a node that actually writes `ch`, which is almost none of them — and
+            // it is the SAME shaper that measures this node's text below, so a
+            // `20ch` box and the twenty characters in it agree on the font.
+            // `layout` and `scene_composer` are disjoint fields: a legal split
+            // borrow.
+            let mut layout_styles = self.layout.layout_styles_from(
+                &computed,
+                ctx.viewport(),
+                root_font,
+                Some(self.scene_composer.paragraph()),
+            );
             // Named-area placement (`grid-area: <name>` against the container's
             // `grid-template-areas`) needs the tree to resolve, so it patches the
             // freshly built styles here; items with no named area are untouched.
@@ -1662,9 +1673,12 @@ impl UiRuntime {
             // per-node side-table so a grid container dispatches the real
             // track-sizing algorithm; a grid node with no template falls back to a
             // single implicit column.
-            let grid_templates = self
-                .layout
-                .grid_templates_from(&computed, ctx.viewport(), root_font);
+            let grid_templates = self.layout.grid_templates_from(
+                &computed,
+                ctx.viewport(),
+                root_font,
+                Some(self.scene_composer.paragraph()),
+            );
             // Text nodes are sized inside the constraint-aware measure/arrange
             // pass: `layout` shapes and wraps each text leaf to its available
             // width through the scene's paragraph orchestrator, so a long string

@@ -65,6 +65,15 @@ impl GridTrackList {
         &self.tracks
     }
 
+    /// Returns `true` when any track in this list is sized with a `ch` term.
+    ///
+    /// Line names carry no lengths, so only the tracks are consulted. See
+    /// [`GridTrack::uses_ch`].
+    #[must_use]
+    pub fn uses_ch(&self) -> bool {
+        self.tracks.iter().any(GridTrack::uses_ch)
+    }
+
     /// The names on each grid line, indexed by 0-based line position. Empty when
     /// no `[name]` group was authored.
     #[must_use]
