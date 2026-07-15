@@ -5,11 +5,7 @@
 //! from one declaration. That is the whole reason the family exists, and it is
 //! checked here against real arranged boxes rather than computed values, so a
 //! mapping that resolved but never moved anything would fail.
-//!
-//! These use `padding-*` and `inset-*` rather than `margin-*` deliberately: a
-//! horizontal `margin-left` does not currently move a flow child at all (a
-//! pre-existing layout gap, unrelated to this mapping — vertical margins do
-//! work), so asserting through it would test the gap rather than the mapping.
+
 #![forbid(unsafe_code)]
 
 use obscur_kit::css::compiler::StylesheetCompiler;
@@ -122,4 +118,24 @@ fn a_later_logical_declaration_beats_an_earlier_physical_one_end_to_end() {
           padding-left: 10px }}\n{ITEM}"
     ));
     assert!((x - 10.0).abs() < 1e-3, "and the other way round, got x={x}");
+}
+
+#[test]
+fn margin_inline_start_is_the_left_edge_under_ltr_and_the_right_under_rtl() {
+    // The family's headline case, through the real parser and layout: ONE
+    // declaration, two sides. (Horizontal margins reach flow layout as of the
+    // §10.3.3 fix — before it this could not have been asserted at all.)
+    let (ltr, _) = item_origin(&format!(
+        "{PAGE}\n.item {{ width: 50px; height: 50px; margin-inline-start: 40px }}"
+    ));
+    assert!((ltr - 40.0).abs() < 1e-3, "ltr: inline-start insets from the left, got x={ltr}");
+
+    let (rtl, _) = item_origin(&format!(
+        ".page {{ width: 300px; height: 300px; direction: rtl }}\n\
+         .item {{ width: 50px; height: 50px; margin-inline-start: 40px }}"
+    ));
+    assert!(
+        rtl.abs() < 1e-3,
+        "rtl: inline-start is the RIGHT edge, so nothing insets the left, got x={rtl}"
+    );
 }

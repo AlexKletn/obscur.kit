@@ -17,8 +17,14 @@ use super::{clamp_content, ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOu
 ///   width; if `Auto`, uses the available content width (`constraints.max.width`
 ///   minus horizontal border + padding). Clamped to be non-negative.
 /// * **Child stacking** — each child is measured with
-///   [`BoxConstraints::loose`] up to `(content_width, remaining_height)`, placed
-///   at the content-box left edge, with its top at the running `y` offset.
+///   [`BoxConstraints::loose`] up to `(content_width − its inline margins,
+///   remaining_height)`, placed at the content-box left edge **plus its
+///   `margin-left`**, with its top at the running `y` offset.
+/// * **Inline margins (CSS 2.1 §10.3.3)** — a child's `margin-left` /
+///   `margin-right` take from the inline space it is offered, so a `width: auto`
+///   child fills what is left, and `margin-left` offsets it. An over-constrained
+///   box (definite width + both margins) resolves by ignoring `margin-right`, the
+///   `direction: ltr` rule. `auto` margins are not applied — see below.
 /// * **Block margins + vertical margin collapsing (CSS 2.1 §8.3.1)** — each
 ///   in-flow child's block-axis (`margin.top` / `margin.bottom`) margins take
 ///   effect, and the bottom margin of one block collapses with the top margin
@@ -54,11 +60,15 @@ use super::{clamp_content, ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOu
 /// a protocol change touching every algorithm. For now the first child's top
 /// margin and the last child's bottom margin are **contained** within this box's
 /// content (no protrusion). Also out of scope: BFC-root collapse suppression
-/// nuances, clearance, and **horizontal margins** — children stay pinned to the
-/// content-box left edge, so `margin-left` / `margin-right` (including
-/// `margin: 0 auto` centering) are not applied. Floats, inline formatting /
-/// line boxes, and writing-mode-aware block direction are likewise not modelled;
-/// block flow is strictly vertical.
+/// nuances and clearance. Floats, inline formatting / line boxes, and
+/// writing-mode-aware block direction are likewise not modelled; block flow is
+/// strictly vertical.
+///
+/// **`auto` horizontal margins** (`margin: 0 auto` centering) are still not
+/// applied, and cannot be until the model can express them: `LayoutStyle::margin`
+/// is `Insets` of `f32`, so `auto` is already resolved away to `0` before layout
+/// sees it. Centering therefore needs `margin` to become a `Dimension` per side,
+/// not a change here.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FlowLayout;
 
@@ -177,10 +187,21 @@ impl LayoutAlgorithm for FlowLayout {
             // margin, since `gap_acc` is 0.
             let separation = gap_acc + pending.solve();
             let remaining_height = (avail_content_height - (y + separation)).max(0.0);
+            // Horizontal margins take from the child's available inline space
+            // (CSS 2.1 §10.3.3: margin-left + border + padding + width + padding
+            // + border + margin-right = the containing block's width), so a
+            // `width: auto` child fills what is left rather than the whole box.
+            let inline_margins = child_style.margin.left + child_style.margin.right;
+            let child_width = (content_width - inline_margins).max(0.0);
             let child_size = measurer.measure_child(
                 index,
-                BoxConstraints::loose(Size::new(content_width, remaining_height)),
+                BoxConstraints::loose(Size::new(child_width, remaining_height)),
             );
+            // …and the leading margin offsets it. An over-constrained box (a
+            // definite width plus both margins) resolves by ignoring
+            // `margin-right`, which falls out of only ever adding `margin.left`
+            // here — the §10.3.3 rule for `direction: ltr`.
+            let left = bp_left + child_style.margin.left;
 
             // An empty, zero-height child with no top/bottom border or padding
             // has adjoining top & bottom margins: it collapses *through*. The
@@ -198,7 +219,7 @@ impl LayoutAlgorithm for FlowLayout {
                 // it does not advance `y` and does not close the set.
                 let top = bp_top + y + gap_acc + pending.solve();
                 child_boxes.push(LayoutBox::new(Rect::new(
-                    Point::new(bp_left, top),
+                    Point::new(left, top),
                     child_size,
                 )));
                 continue;
@@ -209,7 +230,7 @@ impl LayoutAlgorithm for FlowLayout {
             // margin and the gap accumulator resets.
             let top = y + separation;
             child_boxes.push(LayoutBox::new(Rect::new(
-                Point::new(bp_left, bp_top + top),
+                Point::new(left, bp_top + top),
                 child_size,
             )));
             y = top + child_size.height;
@@ -563,4 +584,102 @@ mod tests {
         // Collapsed = min(−6, −10) = −10; B top = 40 + (−10) = 30 (overlaps A).
         assert_eq!(out.child_boxes()[1].origin(), Point::new(0.0, 30.0));
     }
+
+    // ---- inline margins (CSS 2.1 §10.3.3) ----------------------------------
+
+    /// A child carrying only inline-axis (left/right) margins.
+    fn child_inline_margins(raw: u64, left: f32, right: f32) -> LayoutChild {
+        LayoutChild::new(
+            NodeId::from_raw(raw),
+            LayoutStyle {
+                margin: Insets {
+                    top: 0.0,
+                    right,
+                    bottom: 0.0,
+                    left,
+                },
+                ..LayoutStyle::default()
+            },
+        )
+    }
+
+    #[test]
+    fn a_left_margin_offsets_the_child() {
+        // Flow used to pin every child to the content-box left edge, so
+        // `margin-left` did nothing at all — a documented deferral, now closed.
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(50.0, 20.0)]);
+        let out = FlowLayout.layout(
+            &LayoutStyle::default(),
+            &[child_inline_margins(1, 40.0, 0.0)],
+            BoxConstraints::loose(Size::new(300.0, 300.0)),
+            &mut measurer,
+        );
+        assert_eq!(out.child_boxes()[0].origin(), Point::new(40.0, 0.0));
+    }
+
+    #[test]
+    fn inline_margins_take_from_the_space_the_child_is_offered() {
+        // §10.3.3: margin-left + width + margin-right fills the containing block,
+        // so an `auto`-width child gets what the margins leave — not the whole box.
+        // A child wider than the box is clamped to what it was OFFERED, which is
+        // what makes the offered width readable from the placed box.
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(1000.0, 20.0)]);
+        let out = FlowLayout.layout(
+            &LayoutStyle::default(),
+            &[child_inline_margins(1, 30.0, 20.0)],
+            BoxConstraints::loose(Size::new(300.0, 300.0)),
+            &mut measurer,
+        );
+        let placed = out.child_boxes()[0];
+        assert_eq!(placed.origin().x, 30.0, "offset by the leading margin");
+        assert_eq!(
+            placed.size().width,
+            250.0,
+            "300 − 30 − 20: both margins take from the inline space"
+        );
+    }
+
+    #[test]
+    fn inline_margins_never_yield_a_negative_offered_width() {
+        // Margins wider than the box would otherwise offer a negative width.
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(1000.0, 20.0)]);
+        let out = FlowLayout.layout(
+            &LayoutStyle::default(),
+            &[child_inline_margins(1, 400.0, 400.0)],
+            BoxConstraints::loose(Size::new(300.0, 300.0)),
+            &mut measurer,
+        );
+        assert_eq!(out.child_boxes()[0].size().width, 0.0);
+    }
+
+    #[test]
+    fn a_left_margin_stacks_with_the_containers_padding() {
+        // The child sits at padding + margin, not at one or the other.
+        let style = LayoutStyle {
+            padding: Insets::uniform(10.0),
+            ..LayoutStyle::default()
+        };
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(50.0, 20.0)]);
+        let out = FlowLayout.layout(
+            &style,
+            &[child_inline_margins(1, 40.0, 0.0)],
+            BoxConstraints::loose(Size::new(300.0, 300.0)),
+            &mut measurer,
+        );
+        assert_eq!(out.child_boxes()[0].origin(), Point::new(50.0, 10.0));
+    }
+
+    #[test]
+    fn a_child_with_no_inline_margins_is_placed_exactly_as_before() {
+        // The change must be inert for the overwhelming majority of boxes.
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(100.0, 20.0)]);
+        let out = FlowLayout.layout(
+            &LayoutStyle::default(),
+            &[child(1)],
+            BoxConstraints::loose(Size::new(300.0, 300.0)),
+            &mut measurer,
+        );
+        assert_eq!(out.child_boxes()[0].origin(), Point::new(0.0, 0.0));
+    }
+
 }
