@@ -5,7 +5,7 @@ use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 use crate::model::{AlignItems, JustifyContent, LayoutBox, LayoutStyle};
 
 use super::grid::{GridTemplate, TrackSize};
-use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
+use super::{clamp_content, ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 
 /// CSS-grid layout with real per-track sizing (spec §4.1, §4.2).
 ///
@@ -1419,17 +1419,42 @@ impl LayoutAlgorithm for GridLayout {
         // border box is that content extent plus padding (so the container *is* the
         // authored size, even if its tracks do not fill it); an `Auto` axis sizes to
         // the children's bounding box plus padding, exactly as before.
-        let box_width = if style.width.is_auto() {
-            max_right + padding.right
+        //
+        // `max_right`/`max_bottom` are accumulated from the content origin (they
+        // start at `padding.left`/`padding.top`), so subtracting that origin back
+        // off yields the CONTENT extent — the axis `clamp_content` operates on.
+        let own_content_width = if style.width.is_auto() {
+            max_right - padding.left
         } else {
-            content_width + pad_x
+            content_width
         };
-        let box_height = if style.height.is_auto() {
-            max_bottom + padding.bottom
+        let own_content_height = if style.height.is_auto() {
+            max_bottom - padding.top
         } else {
-            content_height + pad_y
+            content_height
         };
-        let border_box = Size::new(box_width, box_height);
+
+        // Clamp the container's OWN box into its authored min/max, exactly as flow
+        // and flex do (spec §4.2). Without this an authored `min-height` /
+        // `max-width` on a `display: grid` element is silently ignored — the same
+        // defect flow and flex carried before `clamp_content` was factored out.
+        let own_w = clamp_content(
+            own_content_width,
+            style.min_width,
+            style.max_width,
+            constraints.max.width,
+            pad_x,
+            style.box_sizing,
+        );
+        let own_h = clamp_content(
+            own_content_height,
+            style.min_height,
+            style.max_height,
+            constraints.max.height,
+            pad_y,
+            style.box_sizing,
+        );
+        let border_box = Size::new(own_w + pad_x, own_h + pad_y);
         let size = constraints.constrain(border_box);
 
         LayoutOutput::new(size, child_boxes)
@@ -1460,6 +1485,101 @@ mod tests {
 
     fn grid(columns: Vec<TrackSize>, rows: Vec<TrackSize>, col_gap: f32, row_gap: f32) -> GridLayout {
         GridLayout::with_template(GridTemplate::new(columns, rows), col_gap, row_gap)
+    }
+
+    // ---- §4.2 own-box min/max clamp (parity with flow + flex) ---------------
+
+    #[test]
+    fn min_height_floors_a_short_grid() {
+        // One 20-tall row, but `min-height: 200` floors the container. Grid used
+        // to honour only the parent constraints, so an authored `min-height` on a
+        // `display: grid` element was silently dropped — flow and flex clamped.
+        let style = LayoutStyle {
+            min_height: Dimension::Px(200.0),
+            ..LayoutStyle::default()
+        };
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(10.0, 20.0)]);
+        let out = grid(vec![TrackSize::Fixed(100.0)], vec![], 0.0, 0.0).layout(
+            &style,
+            &[child(1)],
+            BoxConstraints::loose(Size::new(400.0, 1000.0)),
+            &mut measurer,
+        );
+        assert_eq!(out.size().height, 200.0);
+    }
+
+    #[test]
+    fn max_height_caps_a_tall_grid() {
+        let style = LayoutStyle {
+            max_height: Dimension::Px(50.0),
+            ..LayoutStyle::default()
+        };
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(10.0, 300.0)]);
+        let out = grid(vec![TrackSize::Fixed(100.0)], vec![TrackSize::Fixed(300.0)], 0.0, 0.0)
+            .layout(
+                &style,
+                &[child(1)],
+                BoxConstraints::loose(Size::new(400.0, 1000.0)),
+                &mut measurer,
+            );
+        assert_eq!(out.size().height, 50.0);
+    }
+
+    #[test]
+    fn max_width_caps_an_explicitly_sized_grid() {
+        // The clamp applies to an authored width too, not just the `Auto` axis.
+        let style = LayoutStyle {
+            width: Dimension::Px(400.0),
+            max_width: Dimension::Px(120.0),
+            ..LayoutStyle::default()
+        };
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(10.0, 20.0)]);
+        let out = grid(vec![TrackSize::Fixed(100.0)], vec![], 0.0, 0.0).layout(
+            &style,
+            &[child(1)],
+            BoxConstraints::loose(Size::new(400.0, 1000.0)),
+            &mut measurer,
+        );
+        assert_eq!(out.size().width, 120.0);
+    }
+
+    #[test]
+    fn the_clamp_is_measured_from_the_content_box_under_padding() {
+        // The clamp operates on the CONTENT extent, then padding is added back.
+        // `min-height: 200` under `content-box` sizing means 200 of *content*, so
+        // the border box is 200 + 10 + 10 — the same rule flow applies. This is
+        // what makes the `max_bottom - padding.top` round-trip load-bearing.
+        let style = LayoutStyle {
+            min_height: Dimension::Px(200.0),
+            padding: Insets::uniform(10.0),
+            ..LayoutStyle::default()
+        };
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(10.0, 20.0)]);
+        let out = grid(vec![TrackSize::Fixed(100.0)], vec![], 0.0, 0.0).layout(
+            &style,
+            &[child(1)],
+            BoxConstraints::loose(Size::new(400.0, 1000.0)),
+            &mut measurer,
+        );
+        assert_eq!(out.size().height, 220.0);
+    }
+
+    #[test]
+    fn auto_min_max_leaves_the_grid_byte_identical() {
+        // The clamp must be a no-op when nothing is authored: an `Auto`-height
+        // grid still sizes to its tracks' bounding box plus padding.
+        let style = LayoutStyle {
+            padding: Insets::uniform(10.0),
+            ..LayoutStyle::default()
+        };
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(10.0, 20.0)]);
+        let out = grid(vec![TrackSize::Fixed(100.0)], vec![], 0.0, 0.0).layout(
+            &style,
+            &[child(1)],
+            BoxConstraints::loose(Size::new(400.0, 1000.0)),
+            &mut measurer,
+        );
+        assert_eq!(out.size().height, 40.0);
     }
 
     // (a) `100px 1fr 2fr` across a 400px content width, no gap.
