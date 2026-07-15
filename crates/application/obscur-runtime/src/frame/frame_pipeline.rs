@@ -182,7 +182,7 @@ impl FramePipeline {
         inputs: &StyleInputs,
     ) -> FrameResult {
         // Style: resolve computed styles over the retained tree.
-        let computed = self.style.resolve(tree, inputs);
+        let computed = self.style.resolve(tree, inputs, ctx.viewport());
         let restyled = !computed.is_empty();
 
         // Layout: map styles into layout styles and arrange the tree. The root

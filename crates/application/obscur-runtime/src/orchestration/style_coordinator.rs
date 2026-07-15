@@ -2,8 +2,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use obscur_geometry::Size;
 use obscur_identity::NodeId;
-use obscur_style::computed::{ComputedStyle, StyleResolver};
+use obscur_style::computed::{ComputedStyle, ResolutionContext, StyleResolver};
 use obscur_tree::tree::RetainedTree;
 
 use super::StyleInputs;
@@ -24,6 +25,12 @@ pub type ComputedStyles = HashMap<NodeId, ComputedStyle>;
 /// The walk is cycle-safe and panic-free: a malformed or cyclic child link never
 /// causes a loop, and a node that is unreachable from the root is simply not
 /// resolved.
+///
+/// The same parent-first order is what makes `rem` resolvable at computed-value
+/// time: the root **element** is resolved first (against the initial `font-size`,
+/// which is what `rem` means *on* the root), and its absolute `font-size` becomes
+/// the `rem` base every descendant is resolved against — see
+/// [`ResolutionContext`].
 #[derive(Debug, Clone, Default)]
 pub struct StyleCoordinator {
     /// The stateless resolver that computes each node's style.
@@ -45,8 +52,16 @@ impl StyleCoordinator {
     /// Returns an empty map when the tree has no root. Otherwise the tree is
     /// walked parent-first and each node is resolved against its cascaded
     /// [`StyleInputs`] and its parent's already-computed style.
+    ///
+    /// `viewport` supplies the `vw` / `vh` bases every computed `<length>` is
+    /// absolutized against (spec §4.5).
     #[must_use]
-    pub fn resolve(&self, tree: &RetainedTree, inputs: &StyleInputs) -> ComputedStyles {
+    pub fn resolve(
+        &self,
+        tree: &RetainedTree,
+        inputs: &StyleInputs,
+        viewport: Size,
+    ) -> ComputedStyles {
         let Some(root) = tree.root() else {
             return ComputedStyles::new();
         };
@@ -54,7 +69,11 @@ impl StyleCoordinator {
             tree.get(id)
                 .map_or_else(Vec::new, |node| node.children().to_vec())
         });
-        self.resolve_in_order(&order, inputs)
+        let root_element = order
+            .iter()
+            .map(|&(node, _)| node)
+            .find(|&node| tree.get(node).is_some_and(|n| n.kind().is_element()));
+        self.resolve_in_order(&order, inputs, viewport, root_element)
     }
 
     /// Computes a parent-first (pre-order) traversal from `root`, pairing each
@@ -97,19 +116,43 @@ impl StyleCoordinator {
     /// accumulating map by the time the node is resolved, so inheritance flows
     /// down correctly. A node with no cascaded inputs still gets a computed style
     /// from the resolver's defaults and inheritance.
+    ///
+    /// `root_element` is the node `rem` resolves against: the topmost **element**
+    /// of the walk, which is what `:root` matches. It is not necessarily
+    /// `order[0]` — [`RetainedTree::root`] is a synthetic non-element host node
+    /// whose first element child is the document's actual root element.
+    ///
+    /// Because the walk is parent-first, that element is reached before anything
+    /// that could refer to it, so its computed `font-size` is in hand in time to
+    /// become the `rem` base. It is read back off the resolved style rather than
+    /// recomputed, so `rem` cannot drift from the `font-size` the root actually
+    /// painted at. Until it is reached (i.e. for the synthetic host above it),
+    /// `rem` means the initial `font-size` — the same answer `rem` gets *on* the
+    /// root element itself.
     fn resolve_in_order(
         &self,
         order: &[(NodeId, Option<NodeId>)],
         inputs: &StyleInputs,
+        viewport: Size,
+        root_element: Option<NodeId>,
     ) -> ComputedStyles {
         let mut out: ComputedStyles = HashMap::with_capacity(order.len());
+        let mut ctx = ResolutionContext::for_root(viewport.width, viewport.height);
         for &(node, parent) in order {
             let parent_style = parent.and_then(|p| out.get(&p));
             let computed = self.resolver.resolve(
                 inputs.cascaded_for(node),
                 inputs.custom_for(node),
                 parent_style,
+                ctx,
             );
+            if Some(node) == root_element {
+                ctx = ResolutionContext::new(
+                    StyleResolver::font_size_of(&computed),
+                    viewport.width,
+                    viewport.height,
+                );
+            }
             out.insert(node, computed);
         }
         out
@@ -119,6 +162,11 @@ impl StyleCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A viewport for tests that are about the walk, not about `vw`/`vh`.
+    fn viewport() -> Size {
+        Size::new(800.0, 600.0)
+    }
     use obscur_style::cascade::ResolvedDeclarations;
     use obscur_style::computed::ComputedValue;
     use obscur_style::property::{PropertyId, PropertyValue, StyleColor, layout_keyword};
@@ -139,7 +187,7 @@ mod tests {
         let coordinator = StyleCoordinator::new();
         let tree = RetainedTree::new();
         let inputs = StyleInputs::new();
-        assert!(coordinator.resolve(&tree, &inputs).is_empty());
+        assert!(coordinator.resolve(&tree, &inputs, viewport()).is_empty());
     }
 
     #[test]
@@ -210,7 +258,7 @@ mod tests {
         // child and grandchild have no cascaded inputs of their own.
 
         let coordinator = StyleCoordinator::new();
-        let styles = coordinator.resolve_in_order(&order, &inputs);
+        let styles = coordinator.resolve_in_order(&order, &inputs, viewport(), Some(root));
 
         assert_eq!(color_of(&styles, root), Some(red));
         // Proves parent-first inheritance: descendants inherit the root's color.
@@ -237,7 +285,8 @@ mod tests {
         inputs.set_cascaded(a, a_decls);
         // Child B has no cascaded font-weight of its own.
 
-        let styles = StyleCoordinator::new().resolve_in_order(&order, &inputs);
+        let styles =
+            StyleCoordinator::new().resolve_in_order(&order, &inputs, viewport(), Some(root));
         let weight = |id| match styles
             .get(&id)
             .and_then(|s| s.get(PropertyId::FontWeight))
@@ -260,7 +309,7 @@ mod tests {
         // No inputs at all for any node.
         let inputs = StyleInputs::new();
         let coordinator = StyleCoordinator::new();
-        let styles = coordinator.resolve_in_order(&order, &inputs);
+        let styles = coordinator.resolve_in_order(&order, &inputs, viewport(), Some(root));
 
         // Both nodes are resolved; the child gets defaults/inheritance.
         assert!(styles.contains_key(&child));

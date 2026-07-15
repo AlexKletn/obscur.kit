@@ -2,13 +2,26 @@
 
 use core::fmt;
 
+use obscur_diagnostics::{Diagnostic, DiagnosticCode};
 use obscur_identity::SignalId;
+use obscur_view::boundary::{ComponentFailure, ErrorBoundary, ErrorBoundaryPolicy};
 use obscur_view::component::{
     ComponentContext, ComponentInstance, ErasedComponent, InstanceId, PropsError,
 };
 use obscur_view::lifecycle::{MountContext, UnmountContext};
 use obscur_view::state::{SignalGenerations, StateGeneration};
 use obscur_view::view::{View, ViewProperty};
+
+use crate::component::GuardedRender;
+use crate::recovery::ComponentRecovery;
+
+/// The code every component-render failure is reported under (spec §1.6: codes
+/// are stable and not reused for unrelated conditions).
+///
+/// One code covers every failure a render can report today, because there is
+/// exactly one: a node's authored properties not decoding into the component's
+/// typed props. A render itself cannot fail — see [`ErasedComponent`].
+pub const COMPONENT_PROPS_FAILED: DiagnosticCode = DiagnosticCode::new("view.component.props");
 
 /// One mounted component instance: its bookkeeping record plus the erased value
 /// the runtime actually renders (spec §2.1).
@@ -27,6 +40,15 @@ use obscur_view::view::{View, ViewProperty};
 /// owns — this struct is that owner. The flag is the component's way of saying
 /// "render me again"; the runtime reads it after each render and clears it when
 /// it acts, so a request is never serviced twice.
+///
+/// # The error boundary
+///
+/// Every component is an error boundary by default (spec §1.7), so every
+/// mounted instance owns one — built from the author's
+/// [`error_boundary`](obscur_view::component::Component::error_boundary) policy
+/// and [`fallback`](obscur_view::component::Component::fallback) when it mounts.
+/// [`render`](Self::render) goes *through* it: a failed render is contained,
+/// retried or propagated here, never returned raw to the caller.
 pub struct MountedComponent {
     /// Identity, lifecycle phase and scoped subscriptions.
     instance: ComponentInstance,
@@ -37,19 +59,45 @@ pub struct MountedComponent {
     /// The runtime's dirty mark: this component's output is stale and must be
     /// re-rendered. True from mount (nothing has rendered it yet).
     needs_render: bool,
+    /// This component's §1.7 error boundary, governed by the author's policy.
+    boundary: ErrorBoundary,
+    /// How many failures this boundary has recorded since the component last
+    /// rendered cleanly — the attempt the next failure counts as, and so what
+    /// spends the policy's retry budget. Reset by a healthy render, which is
+    /// what makes the budget per *episode* rather than per instance.
+    attempts: u32,
 }
 
 impl MountedComponent {
-    /// Pairs a freshly minted `instance` record with its `component` value.
+    /// Pairs a freshly minted `instance` record with its `component` value, and
+    /// builds the component's error boundary from its own policy and fallback.
     #[must_use]
     pub fn new(instance: ComponentInstance, component: Box<dyn ErasedComponent>) -> Self {
+        let mut boundary = ErrorBoundary::new(component.error_boundary_erased());
+        if let Some(fallback) = component.fallback_erased() {
+            boundary.set_fallback(fallback);
+        }
         Self {
             instance,
             component,
             needs_update: false,
             // A fresh instance has produced no output yet.
             needs_render: true,
+            boundary,
+            attempts: 0,
         }
+    }
+
+    /// The §1.7 policy governing this component's boundary.
+    #[must_use]
+    pub fn boundary_policy(&self) -> ErrorBoundaryPolicy {
+        self.boundary.policy()
+    }
+
+    /// This component's error boundary.
+    #[must_use]
+    pub const fn boundary(&self) -> &ErrorBoundary {
+        &self.boundary
     }
 
     /// This instance's identity.
@@ -124,17 +172,93 @@ impl MountedComponent {
         self.instance.scope().is_stale_for(source, current)
     }
 
-    /// Renders the component against the node's authored `props`.
+    /// Renders the component against the node's authored `props`, through its
+    /// error boundary (spec §1.7).
     ///
     /// `signals` supplies the current generation of every observable source, so a
     /// dependency recorded by [`ComponentContext::track`] captures the generation
     /// it was actually taken at.
     ///
+    /// # A failed render never returns raw
+    ///
+    /// There is no `Result` here on purpose: a caller handed an error would have
+    /// to decide what happens to the subtree, and that decision is the
+    /// boundary's. A failure comes back as [`GuardedRender::Failed`] with the
+    /// boundary's [`RecoveryResult`](crate::recovery::RecoveryResult) already taken — and with the dirty mark
+    /// already set to match it, because only a *retry* wants this component
+    /// rendered again with the same props. Leaving it stale after any other
+    /// decision would re-fire the failure, and its diagnostic, every frame.
+    pub fn render(&mut self, props: &[ViewProperty], signals: &SignalGenerations) -> GuardedRender {
+        match self.try_render(props, signals) {
+            Ok(view) => {
+                // A healthy render ends the failure episode: the next failure
+                // starts with a full retry budget rather than inheriting the
+                // spent one.
+                self.boundary.reset();
+                self.attempts = 0;
+                GuardedRender::Rendered(view)
+            }
+            Err(error) => self.contain(&error),
+        }
+    }
+
+    /// Applies the §1.7 boundary to a render that failed with `error`.
+    fn contain(&mut self, error: &PropsError) -> GuardedRender {
+        let failure = ComponentFailure::new(
+            self.instance.state(),
+            self.attempts,
+            COMPONENT_PROPS_FAILED,
+            error.to_string(),
+        );
+        self.attempts += 1;
+        let result = ComponentRecovery::new().recover(&mut self.boundary, failure.clone());
+        // A retry is the one decision that wants this component rendered again
+        // as it stands: the props are authored *into* the node, so a later frame
+        // can supply ones that decode. Every other decision is final for these
+        // props.
+        if !result.is_retried() {
+            self.needs_render = false;
+            self.needs_update = false;
+        }
+        let fallback = result.is_fallback().then(|| self.fallback());
+        GuardedRender::Failed {
+            failure,
+            result,
+            fallback,
+        }
+    }
+
+    /// Contains `diagnostic` — a failure that escaped a descendant's disabled
+    /// boundary — at this boundary, returning the failure as recorded here and
+    /// the fallback UI that replaces *this* component's subtree.
+    ///
+    /// The retry budget belongs to the boundary the failure happened in, so a
+    /// boundary catching an escaped failure replaces its subtree rather than
+    /// retrying: the replacement unmounts the descendant that failed, which is
+    /// what containing it means.
+    pub fn contain_escaped(&mut self, diagnostic: Diagnostic) -> (ComponentFailure, View) {
+        let failure =
+            ComponentFailure::from_diagnostic(self.instance.state(), self.attempts, diagnostic);
+        self.attempts += 1;
+        self.boundary.record(failure.clone());
+        (failure, self.fallback())
+    }
+
+    /// The fallback UI to put in place of this component's subtree.
+    ///
+    /// A component that supplied none falls back to *nothing*: the failed
+    /// subtree is emptied rather than left showing the last good output.
+    fn fallback(&self) -> View {
+        self.boundary.fallback_view().cloned().unwrap_or_default()
+    }
+
+    /// Renders the component, reporting a props-decode failure raw.
+    ///
     /// # Errors
     ///
     /// Returns the [`PropsError`] when `props` do not satisfy the component's
     /// typed props; the component is not called in that case.
-    pub fn render(
+    fn try_render(
         &mut self,
         props: &[ViewProperty],
         signals: &SignalGenerations,
@@ -179,8 +303,12 @@ impl fmt::Debug for MountedComponent {
 
 #[cfg(test)]
 mod tests {
-    use super::MountedComponent;
+    use super::{COMPONENT_PROPS_FAILED, MountedComponent};
+    use crate::component::GuardedRender;
+    use crate::recovery::RecoveryResult;
+    use obscur_diagnostics::{Diagnostic, DiagnosticSeverity, DiagnosticSubsystem};
     use obscur_identity::{ComponentId, InternedSymbol};
+    use obscur_view::boundary::{ComponentFailure, ErrorBoundaryPolicy};
     use obscur_view::component::{
         Component, ComponentContext, ComponentInstance, ErasedComponent, FromProps, InstanceId,
         PropsError, decode_required,
@@ -255,6 +383,7 @@ mod tests {
     fn rendered_text(component: &mut MountedComponent, by: i64) -> String {
         let view = component
             .render(&props(by), &SignalGenerations::new())
+            .rendered()
             .expect("props decode");
         let ViewNode::Text { content, .. } = &view.root().nodes()[0] else {
             panic!("counter renders text");
@@ -330,8 +459,181 @@ mod tests {
     fn undecodable_props_do_not_render_the_component() {
         let log = Rc::new(RefCell::new(Vec::new()));
         let mut component = mounted(&log, false);
-        let bad = vec![ViewProperty::new(step(), ViewValue::Text("2".into()))];
-        assert!(component.render(&bad, &SignalGenerations::new()).is_err());
+        assert!(matches!(
+            component.render(&bad_props(), &SignalGenerations::new()),
+            GuardedRender::Failed { .. }
+        ));
         assert!(log.borrow().is_empty(), "render must not have been called");
+    }
+
+    // ---- §1.7: the boundary answers for a failed render ----------------------
+
+    /// A component whose boundary policy and fallback the test chooses.
+    struct Guarded {
+        policy: ErrorBoundaryPolicy,
+        fallback: Option<View>,
+    }
+
+    impl Component for Guarded {
+        type Props = CounterProps;
+
+        fn render(&mut self, _ctx: &mut ComponentContext<'_>, _props: &Self::Props) -> View {
+            text_view("healthy")
+        }
+
+        fn error_boundary(&self) -> ErrorBoundaryPolicy {
+            self.policy
+        }
+
+        fn fallback(&self) -> Option<View> {
+            self.fallback.clone()
+        }
+    }
+
+    fn text_view(content: &str) -> View {
+        View::from_fragment(ViewFragment::from_nodes(vec![ViewNode::text(content)]))
+    }
+
+    fn text_of(view: &View) -> String {
+        let ViewNode::Text { content, .. } = &view.root().nodes()[0] else {
+            panic!("expected a text node");
+        };
+        content.to_string()
+    }
+
+    /// Props of the wrong type: `step` wants a `u32` and gets a string.
+    fn bad_props() -> Vec<ViewProperty> {
+        vec![ViewProperty::new(step(), ViewValue::Text("2".into()))]
+    }
+
+    fn guarded(policy: ErrorBoundaryPolicy, fallback: Option<View>) -> MountedComponent {
+        let mut component = MountedComponent::new(
+            ComponentInstance::new(InstanceId::from_raw(2), ComponentId::from_raw(9)),
+            Box::new(Guarded { policy, fallback }) as Box<dyn ErasedComponent>,
+        );
+        component.mount(&SignalGenerations::new());
+        component
+    }
+
+    fn fail(component: &mut MountedComponent) -> (ComponentFailure, RecoveryResult, Option<View>) {
+        match component.render(&bad_props(), &SignalGenerations::new()) {
+            GuardedRender::Failed {
+                failure,
+                result,
+                fallback,
+            } => (failure, result, fallback),
+            GuardedRender::Rendered(_) => panic!("bad props must not render"),
+        }
+    }
+
+    #[test]
+    fn the_authors_policy_and_fallback_reach_the_boundary() {
+        // The mount reads BOTH `error_boundary()` and `fallback()`; the runtime
+        // never asks the component again.
+        let policy = ErrorBoundaryPolicy::default().with_max_retries(3);
+        let component = guarded(policy, Some(text_view("sorry")));
+        assert_eq!(component.boundary_policy(), policy);
+        assert_eq!(
+            component.boundary().fallback_view().map(text_of),
+            Some("sorry".to_string())
+        );
+    }
+
+    #[test]
+    fn a_first_failure_is_retried_and_stays_stale() {
+        let mut component = guarded(ErrorBoundaryPolicy::default(), Some(text_view("sorry")));
+        let (failure, result, fallback) = fail(&mut component);
+        assert_eq!(result, RecoveryResult::Retried);
+        assert!(fallback.is_none(), "a retry does not replace the subtree");
+        assert_eq!(failure.attempt(), 0);
+        assert_eq!(failure.phase(), LifecycleState::Mounted);
+        assert_eq!(failure.diagnostic().code, COMPONENT_PROPS_FAILED);
+        assert_eq!(failure.diagnostic().severity, DiagnosticSeverity::Error);
+        assert_eq!(failure.diagnostic().subsystem, DiagnosticSubsystem::View);
+        assert!(
+            component.needs_render(),
+            "the retry is the dirty mark surviving"
+        );
+        assert!(component.boundary().is_tripped());
+    }
+
+    #[test]
+    fn an_exhausted_budget_hands_back_the_authors_fallback() {
+        let mut component = guarded(ErrorBoundaryPolicy::default(), Some(text_view("sorry")));
+        let _ = fail(&mut component);
+        let (failure, result, fallback) = fail(&mut component);
+        assert_eq!(result, RecoveryResult::FellBack);
+        assert_eq!(failure.attempt(), 1, "the budget is spent per episode");
+        assert_eq!(fallback.as_ref().map(text_of), Some("sorry".to_string()));
+        assert!(
+            !component.needs_render(),
+            "the fallback is this component's output now; re-rendering it would \
+             fail, and re-report, every frame"
+        );
+    }
+
+    #[test]
+    fn a_component_with_no_fallback_falls_back_to_nothing() {
+        // Not "keep what was there": the failed subtree is emptied, so no stale
+        // output can pass for current.
+        let mut component = guarded(ErrorBoundaryPolicy::default().with_max_retries(0), None);
+        let (_, result, fallback) = fail(&mut component);
+        assert_eq!(result, RecoveryResult::FellBack);
+        assert!(fallback.expect("a fallback is committed").root().is_empty());
+    }
+
+    #[test]
+    fn a_disabled_boundary_propagates_instead_of_retrying_or_falling_back() {
+        let mut component = guarded(ErrorBoundaryPolicy::disabled(), Some(text_view("sorry")));
+        let (_, result, fallback) = fail(&mut component);
+        // The whole point of `disabled()`: no retry, no fallback of its own.
+        assert_eq!(result, RecoveryResult::Propagated);
+        assert!(fallback.is_none());
+        assert!(!component.needs_render());
+        assert!(
+            component.boundary().is_tripped(),
+            "still recorded, so it is still reported"
+        );
+    }
+
+    #[test]
+    fn a_healthy_render_ends_the_failure_episode() {
+        let mut component = guarded(ErrorBoundaryPolicy::default(), None);
+        assert_eq!(fail(&mut component).1, RecoveryResult::Retried);
+
+        // The props that decode arrive: the component recovers on its own.
+        let view = component
+            .render(&props(1), &SignalGenerations::new())
+            .rendered()
+            .expect("good props render");
+        assert_eq!(text_of(&view), "healthy");
+        assert!(!component.boundary().is_tripped());
+
+        // And the next episode starts with a full budget rather than the spent
+        // one — otherwise one bad frame would make every later one fatal.
+        let (failure, result, _) = fail(&mut component);
+        assert_eq!(failure.attempt(), 0);
+        assert_eq!(result, RecoveryResult::Retried);
+    }
+
+    #[test]
+    fn an_escaped_failure_is_recorded_here_and_replaces_this_subtree() {
+        let mut parent = guarded(ErrorBoundaryPolicy::default(), Some(text_view("outer")));
+        let escaped = Diagnostic::new(
+            COMPONENT_PROPS_FAILED,
+            DiagnosticSeverity::Error,
+            DiagnosticSubsystem::View,
+            "a child blew up",
+        );
+        let (failure, fallback) = parent.contain_escaped(escaped);
+        // Re-recorded in THIS boundary's phase and attempt: it is the boundary
+        // answering now.
+        assert_eq!(failure.phase(), LifecycleState::Mounted);
+        assert_eq!(failure.attempt(), 0);
+        assert_eq!(failure.diagnostic().message, "a child blew up");
+        assert!(parent.boundary().is_tripped());
+        // No retry: containing it replaces this subtree, which unmounts the
+        // descendant that failed.
+        assert_eq!(text_of(&fallback), "outer");
     }
 }

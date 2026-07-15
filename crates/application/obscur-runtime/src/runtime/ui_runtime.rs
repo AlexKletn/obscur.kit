@@ -10,8 +10,8 @@ use obscur_accessibility::port::AccessibilityBridge;
 use obscur_accessibility::tree::{SemanticSnapshot, SemanticTree};
 use obscur_diagnostics::SpanAttribution;
 use obscur_diagnostics::{
-    BudgetViolation, DiagnosticSubsystem, NullTelemetrySink, PerformanceCounter, PerformanceSpan,
-    TelemetrySink,
+    BudgetViolation, Diagnostic, DiagnosticSink, DiagnosticSubsystem, NullDiagnosticSink,
+    NullTelemetrySink, PerformanceCounter, PerformanceSpan, RecoveryAction, TelemetrySink,
 };
 use obscur_geometry::{AffineTransform, Point, Size};
 use obscur_identity::SignalId;
@@ -51,6 +51,7 @@ use obscur_text::shaping::{TextDirection, TextItemizer, TextShaper};
 use obscur_tree::node::NodeKind;
 use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
+use obscur_view::boundary::ComponentFailure;
 use obscur_view::component::{ComponentRegistration, RegistryError};
 use obscur_view::view::{EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, View};
 
@@ -61,7 +62,7 @@ use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::invalidation::{Invalidation, InvalidationReason, InvalidationRouter};
 use std::collections::VecDeque;
 
-use crate::component::ComponentStore;
+use crate::component::{ComponentStore, GuardedRender};
 use crate::orchestration::{
     AnimatedKind, AnimationBinding, ComputedStyles, CssMotionRules, DragCoordinator, DragOutcome,
     EditingView, InspectInfo, LayoutBoxes, LayoutCoordinator, MotionCoordinator, NodeInspection,
@@ -70,6 +71,7 @@ use crate::orchestration::{
     overlay_commands, root_font_size, scroll_containers,
 };
 use crate::orchestration::{alignment_for, direction_for, white_space_for};
+use crate::recovery::RecoveryResult;
 use crate::scheduler::{BackpressureDecision, FrameScheduler};
 
 /// How many times [`UiRuntime::render_components`] re-renders newly appeared
@@ -405,6 +407,13 @@ pub struct UiRuntime {
     /// [`set_telemetry_sink`](Self::set_telemetry_sink) to observe spans,
     /// counters and budget violations.
     telemetry: Box<dyn TelemetrySink>,
+    /// The structured-diagnostics destination failures are reported to
+    /// (spec §1.6). Defaults to a [`NullDiagnosticSink`], so an unconfigured
+    /// runtime builds each diagnostic and drops it — the failure path does not
+    /// branch on whether anyone is listening. A host installs a real
+    /// [`DiagnosticSink`] via
+    /// [`set_diagnostic_sink`](Self::set_diagnostic_sink).
+    diagnostics: Box<dyn DiagnosticSink>,
     /// The per-phase cost budgets checked after each frame phase (spec §7.9).
     /// Unbounded by default, so no [`BudgetViolation`] is produced until a host
     /// installs one via [`set_frame_budget`](Self::set_frame_budget). A phase
@@ -581,6 +590,7 @@ impl UiRuntime {
             transition_targets: HashMap::new(),
             css_animations_started: HashSet::new(),
             telemetry: Box::new(NullTelemetrySink),
+            diagnostics: Box::new(NullDiagnosticSink),
             budget: FrameBudget::unbounded(),
             background_work: 0,
             serviced_background: 0,
@@ -995,8 +1005,9 @@ impl UiRuntime {
     /// Installs the CSS-authored motion (`transition`/`@keyframes`) the runtime
     /// drives, replacing any previously installed set (spec §4.17 S4).
     ///
-    /// A host builds a [`CssMotionRules`] from a compiled stylesheet and calls
-    /// this once the stylesheet is (re)compiled. Each style frame the runtime
+    /// Called once the stylesheet is (re)compiled — by the facade's
+    /// `obscur_kit::bootstrap::CssPipeline::install`, which builds the rules from
+    /// the compiled sheet, rather than by each host. Each style frame the runtime
     /// then matches these selector-bound rules against the retained tree and
     /// registers the corresponding timelines with the
     /// [`MotionScheduler`](obscur_motion::scheduler::MotionScheduler): a
@@ -1358,11 +1369,29 @@ impl UiRuntime {
     /// loop. [`MAX_COMPONENT_RENDER_PASSES`] additionally bounds mutual nesting,
     /// so a self-rendering pair truncates the frame rather than hanging it.
     ///
-    /// # A component whose props do not decode
+    /// # A component whose render fails
     ///
-    /// It is not rendered and its existing children are left alone — an authored
-    /// mistake must not silently delete a subtree. The failure is counted as
-    /// `component.props_errors` rather than swallowed.
+    /// Its error boundary answers for it (spec §1.7), and the answer is enacted
+    /// here: a retry leaves the subtree for the next frame, an exhausted budget
+    /// commits the component's fallback UI *over* the subtree, and a disabled
+    /// boundary hands the failure to the nearest enclosing enabled one — whose
+    /// own subtree is then replaced. Every one of those is reported as a
+    /// [`Diagnostic`](obscur_diagnostics::Diagnostic) naming the node and the
+    /// recovery action taken (spec §1.6), on top of the `component.props_errors`
+    /// counter.
+    ///
+    /// # Where the previous output still stands
+    ///
+    /// Two cases leave the failed subtree showing what it last rendered, and
+    /// neither is silent:
+    ///
+    /// - a **retry** keeps it for exactly the frames the policy's budget buys,
+    ///   then replaces it. The component stays stale, so the frame end asks the
+    ///   scheduler for the next one and the budget actually gets spent.
+    /// - a **propagated** failure with no enclosing enabled boundary
+    ///   ([`contain_escaped`](Self::contain_escaped) finding none) leaves it
+    ///   indefinitely: every boundary that could have answered was disabled, so
+    ///   the runtime reports the failure and recovers nothing.
     fn render_components(&mut self) -> bool {
         // The common case by far: no host registrations, nothing mounted.
         if self.components.is_empty() {
@@ -1392,18 +1421,45 @@ impl UiRuntime {
                 // the store alongside the instance, so take a snapshot of it to
                 // keep the two borrows disjoint.
                 let signals = self.components.signals().clone();
-                let Some(mounted) = self.components.get_mut(node) else {
+                // Scoped so the store's borrow ends before the boundary's answer
+                // is enacted, which touches the tree and other instances.
+                let outcome = {
+                    let Some(mounted) = self.components.get_mut(node) else {
+                        continue;
+                    };
+                    mounted.render(&props, &signals)
+                };
+                let committed = match outcome {
+                    GuardedRender::Rendered(view) => {
+                        rendered += 1;
+                        Some((node, view))
+                    }
+                    GuardedRender::Failed {
+                        failure,
+                        result,
+                        fallback,
+                    } => {
+                        errors += 1;
+                        self.report_failure(node, failure.diagnostic(), result.recovery_action());
+                        match fallback {
+                            // The boundary is out of retries: this component's
+                            // own subtree becomes its fallback UI.
+                            Some(view) => Some((node, view)),
+                            None if result.is_propagated() => self.contain_escaped(node, &failure),
+                            // A retry: nothing is committed, the component stays
+                            // stale, and the frame end asks for the frame that
+                            // spends the next of its budget.
+                            None => None,
+                        }
+                    }
+                };
+                let Some((host, view)) = committed else {
                     continue;
                 };
-                let Ok(view) = mounted.render(&props, &signals) else {
-                    errors += 1;
-                    continue;
-                };
-                rendered += 1;
 
                 let (_commit, plan) = self
                     .enactor
-                    .commit_subtree(&self.reconciler, &mut self.tree, node, view.root())
+                    .commit_subtree(&self.reconciler, &mut self.tree, host, view.root())
                     .expect("a component rerender is a single, structurally-valid Rerender");
                 changed |= !plan.is_empty();
                 self.components.sync(&mut self.tree, &plan);
@@ -1429,6 +1485,86 @@ impl UiRuntime {
             self.telemetry.record_counter(&counter);
         }
         changed
+    }
+
+    /// Reports a component failure on the diagnostics channel (spec §1.6).
+    ///
+    /// The boundary already built the record; this anchors it to the `node` it
+    /// concerns and stamps the `recovery` action that was actually taken, which
+    /// are the two §1.6 fields only the runtime knows.
+    fn report_failure(&self, node: NodeId, diagnostic: &Diagnostic, recovery: RecoveryAction) {
+        let mut diagnostic = diagnostic.clone();
+        diagnostic.context.node = Some(node);
+        diagnostic.recovery = recovery;
+        self.diagnostics.emit(&diagnostic);
+    }
+
+    /// Hands a failure that escaped `node`'s disabled boundary to the nearest
+    /// enclosing enabled one (spec §1.7), returning that boundary's node and the
+    /// fallback UI to commit over its subtree.
+    ///
+    /// Returns [`None`] when no enclosing component contains it: the failure
+    /// escapes the component tree entirely, which is what a host asked for by
+    /// disabling every boundary above it. It is still reported — the caller has
+    /// already done so — but nothing recovers it.
+    fn contain_escaped(
+        &mut self,
+        node: NodeId,
+        failure: &ComponentFailure,
+    ) -> Option<(NodeId, View)> {
+        let host = self.enclosing_boundary(node)?;
+        let mut escaped = failure.diagnostic().clone();
+        escaped.message = format!(
+            "{} (escaped the disabled boundary of a descendant component)",
+            escaped.message
+        );
+        let (contained, fallback) = self.components.get_mut(host)?.contain_escaped(escaped);
+        self.report_failure(
+            host,
+            contained.diagnostic(),
+            RecoveryResult::FellBack.recovery_action(),
+        );
+        Some((host, fallback))
+    }
+
+    /// The nearest logical ancestor of `node` holding a component whose error
+    /// boundary is enabled — the boundary a failure escaping `node` belongs to.
+    ///
+    /// The walk is over *logical* parents: a portal moves where a node paints,
+    /// not which component it belongs to (spec §4.14), so the boundary that
+    /// answers for it is the one that generated it.
+    fn enclosing_boundary(&self, node: NodeId) -> Option<NodeId> {
+        let mut current = self.tree.get(node)?.logical_parent.parent();
+        while let Some(id) = current {
+            if let Some(mounted) = self.components.get(id)
+                && mounted.boundary_policy().is_enabled()
+            {
+                return Some(id);
+            }
+            current = self.tree.get(id)?.logical_parent.parent();
+        }
+        None
+    }
+
+    /// Installs the structured-diagnostics `sink` the runtime reports failures
+    /// to (spec §1.6, §7.8), replacing any previously installed sink.
+    ///
+    /// Until one is installed the runtime emits into a [`NullDiagnosticSink`] —
+    /// every diagnostic is *built* and offered exactly as it would be to a real
+    /// sink, then dropped, so listening changes what is observed and never what
+    /// happens. A host that wants them subscribes a
+    /// [`ChannelSink`](obscur_diagnostics::ChannelSink) here, which is also the
+    /// path a `DevTools` backend takes.
+    ///
+    /// # What reaches it
+    ///
+    /// Component-render failures and the §1.7 boundary decision taken for each.
+    /// The engine's other subsystems do not report here yet: layout, style,
+    /// renderer and resource failures still take their own paths (a
+    /// [`BudgetViolation`], a `Result`, a last-good value), and routing those
+    /// through this sink is separate work.
+    pub fn set_diagnostic_sink(&mut self, sink: Box<dyn DiagnosticSink>) {
+        self.diagnostics = sink;
     }
 
     /// Registers a component kind so nodes naming its
@@ -1792,7 +1928,7 @@ impl UiRuntime {
                 &self.pseudo,
                 &environment,
             );
-            let mut computed = self.style.resolve(&self.tree, &inputs);
+            let mut computed = self.style.resolve(&self.tree, &inputs, ctx.viewport());
             // 3a. CSS motion: match selector-bound `transition`/`@keyframes`
             //     rules against the tree over the *resolved* (pre-overlay) values,
             //     starting a timeline for any transitioned property that changed
@@ -5269,9 +5405,15 @@ mod tests {
 
     mod components {
         use super::{runtime_id, viewport};
+        use crate::component::COMPONENT_PROPS_FAILED;
         use crate::frame::FrameReason;
         use crate::runtime::UiRuntime;
+        use obscur_diagnostics::{
+            ChannelSink, Diagnostic, DiagnosticBufferPolicy, DiagnosticChannel, DiagnosticFilter,
+            DiagnosticSeverity, DiagnosticSink, DiagnosticSubsystem, RecoveryAction,
+        };
         use obscur_identity::{ComponentId, InternedSymbol, NodeId, SignalId};
+        use obscur_view::boundary::ErrorBoundaryPolicy;
         use obscur_view::component::{
             Component, ComponentContext, ComponentContract, ComponentFactory, ComponentInstance,
             ComponentRegistration, ComponentVersion, ErasedComponent, FromProps, InstanceId,
@@ -5279,6 +5421,8 @@ mod tests {
         };
         use obscur_view::state::LocalState;
         use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
+        use std::cell::RefCell;
+        use std::rc::Rc;
 
         const COUNTER: ComponentId = ComponentId::from_raw(0xC0FFEE);
 
@@ -5672,8 +5816,8 @@ mod tests {
         }
 
         #[test]
-        fn undecodable_props_leave_the_subtree_alone_rather_than_deleting_it() {
-            // First a good frame, so the component has output.
+        fn undecodable_props_are_retried_once_and_then_stop_showing_stale_output() {
+            // First a good frame, so the component has output to go stale.
             let mut runtime = runtime_with_counter();
             runtime.render_now(&counter_view(2), &[]);
             assert_eq!(rendered_text(&runtime), "2");
@@ -5684,10 +5828,416 @@ mod tests {
                     .with_prop(ViewProperty::new(step(), ViewValue::Text("2".into()))),
             ]));
             runtime.render_now(&bad, &[]);
-            // The instance is still mounted and its previous output still stands:
-            // an authored mistake must not silently delete a subtree.
+            // The default boundary's budget buys the props exactly one frame to
+            // become decodable, so this frame keeps the subtree — deliberately,
+            // and reported, rather than by falling through the failure.
             assert_eq!(runtime.mounted_component_count(), 1);
             assert_eq!(rendered_text(&runtime), "2");
+
+            // The budget is now spent: the last good output does not get to
+            // stand in for the current one indefinitely.
+            runtime.render_now(&bad, &[]);
+            assert_eq!(
+                runtime
+                    .tree()
+                    .get(component_node(&runtime))
+                    .expect("live")
+                    .children(),
+                &[],
+                "the boundary replaced the subtree (this counter has no fallback)"
+            );
+        }
+
+        // ---- §1.7 boundaries, §1.6 diagnostics -----------------------------
+
+        const GUARDED: ComponentId = ComponentId::from_raw(0x0BAD_C0DE);
+        const OUTER: ComponentId = ComponentId::from_raw(0x0011_17E4);
+
+        /// A [`DiagnosticSink`] that collects into a shared buffer, so a test can
+        /// read what the runtime reported after installing the sink by value.
+        #[derive(Debug, Default, Clone)]
+        struct SharedDiagnostics(Rc<RefCell<Vec<Diagnostic>>>);
+
+        /// The shipped [`ChannelSink`], shared: `set_diagnostic_sink` takes the
+        /// sink by value, so a test that wants to drain it needs a handle.
+        struct SharedChannel(Rc<ChannelSink>);
+
+        impl DiagnosticSink for SharedChannel {
+            fn emit(&self, diagnostic: &Diagnostic) {
+                self.0.emit(diagnostic);
+            }
+        }
+
+        impl DiagnosticSink for SharedDiagnostics {
+            fn emit(&self, diagnostic: &Diagnostic) {
+                self.0.borrow_mut().push(diagnostic.clone());
+            }
+        }
+
+        /// A component with the same props as `Counter` — so the same bad
+        /// `step` fails it — whose boundary policy and fallback the test picks.
+        struct Guarded {
+            policy: ErrorBoundaryPolicy,
+            fallback: Option<View>,
+        }
+
+        impl Component for Guarded {
+            type Props = CounterProps;
+            fn render(&mut self, _ctx: &mut ComponentContext<'_>, _props: &Self::Props) -> View {
+                text_view("healthy")
+            }
+            fn error_boundary(&self) -> ErrorBoundaryPolicy {
+                self.policy
+            }
+            fn fallback(&self) -> Option<View> {
+                self.fallback.clone()
+            }
+        }
+
+        #[derive(Debug)]
+        struct GuardedFactory {
+            policy: ErrorBoundaryPolicy,
+            fallback: Option<View>,
+        }
+
+        impl ComponentFactory for GuardedFactory {
+            fn component_id(&self) -> ComponentId {
+                GUARDED
+            }
+            fn contract(&self) -> ComponentContract {
+                ComponentContract::new(GUARDED)
+            }
+            fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
+                ComponentInstance::new(instance, GUARDED)
+            }
+            fn create_component(&self) -> Box<dyn ErasedComponent> {
+                Box::new(Guarded {
+                    policy: self.policy,
+                    fallback: self.fallback.clone(),
+                })
+            }
+        }
+
+        /// Renders one `<Guarded step="2"/>` — a child that always fails to
+        /// decode — so the failure originates *below* this component.
+        struct Outer;
+
+        struct NoProps;
+        impl FromProps for NoProps {
+            fn from_props(_: &[ViewProperty]) -> Result<Self, PropsError> {
+                Ok(Self)
+            }
+        }
+
+        impl Component for Outer {
+            type Props = NoProps;
+            fn render(&mut self, _ctx: &mut ComponentContext<'_>, _props: &Self::Props) -> View {
+                View::from_fragment(ViewFragment::from_nodes(vec![
+                    ViewNode::element(GUARDED)
+                        .with_prop(ViewProperty::new(step(), ViewValue::Text("2".into()))),
+                ]))
+            }
+            fn fallback(&self) -> Option<View> {
+                Some(text_view("outer fallback"))
+            }
+        }
+
+        #[derive(Debug)]
+        struct OuterFactory;
+
+        impl ComponentFactory for OuterFactory {
+            fn component_id(&self) -> ComponentId {
+                OUTER
+            }
+            fn contract(&self) -> ComponentContract {
+                ComponentContract::new(OUTER)
+            }
+            fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
+                ComponentInstance::new(instance, OUTER)
+            }
+            fn create_component(&self) -> Box<dyn ErasedComponent> {
+                Box::new(Outer)
+            }
+        }
+
+        fn text_view(content: &str) -> View {
+            View::from_fragment(ViewFragment::from_nodes(vec![ViewNode::text(content)]))
+        }
+
+        /// A runtime with `<Guarded>` registered under `policy`, plus a sink to
+        /// read the diagnostics back from.
+        fn guarded_runtime(
+            policy: ErrorBoundaryPolicy,
+            fallback: Option<View>,
+        ) -> (UiRuntime, SharedDiagnostics) {
+            let mut runtime = UiRuntime::new(runtime_id(), viewport());
+            runtime
+                .register_component(ComponentRegistration::new(
+                    Box::new(GuardedFactory { policy, fallback }),
+                    ComponentVersion::INITIAL,
+                ))
+                .expect("first registration");
+            let diagnostics = SharedDiagnostics::default();
+            runtime.set_diagnostic_sink(Box::new(diagnostics.clone()));
+            (runtime, diagnostics)
+        }
+
+        /// A `<Guarded step=...>` element; `step` decodes only when it is an int.
+        fn guarded_view(step_value: ViewValue) -> View {
+            View::from_fragment(ViewFragment::from_nodes(vec![
+                ViewNode::element(GUARDED).with_prop(ViewProperty::new(step(), step_value)),
+            ]))
+        }
+
+        /// The text `node`'s only child holds, or `None` when it has no children.
+        fn child_text(runtime: &UiRuntime, node: NodeId) -> Option<String> {
+            let child = *runtime.tree().get(node)?.children().first()?;
+            match runtime.tree().get(child).expect("live").kind() {
+                obscur_tree::node::NodeKind::Text { content } => Some(content.to_string()),
+                other => panic!("expected a text node, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn a_failed_render_is_reported_with_every_field_1_6_asks_for() {
+            let (mut runtime, diagnostics) =
+                guarded_runtime(ErrorBoundaryPolicy::default(), Some(text_view("sorry")));
+            runtime.render_now(&guarded_view(ViewValue::Text("2".into())), &[]);
+
+            let node = component_node(&runtime);
+            let recorded = diagnostics.0.borrow();
+            assert_eq!(recorded.len(), 1, "the failure reached the channel");
+            let diagnostic = &recorded[0];
+            assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+            assert_eq!(diagnostic.subsystem, DiagnosticSubsystem::View);
+            assert_eq!(diagnostic.code, COMPONENT_PROPS_FAILED);
+            assert_eq!(
+                diagnostic.context.node,
+                Some(node),
+                "anchored to the node that failed"
+            );
+            assert_eq!(
+                diagnostic.recovery,
+                RecoveryAction::Retried,
+                "the boundary's budget bought one more frame, and says so"
+            );
+            assert!(!diagnostic.message.is_empty());
+        }
+
+        #[test]
+        fn an_exhausted_boundary_replaces_the_subtree_with_the_authors_fallback() {
+            let (mut runtime, diagnostics) =
+                guarded_runtime(ErrorBoundaryPolicy::default(), Some(text_view("sorry")));
+            let bad = guarded_view(ViewValue::Text("2".into()));
+            runtime.render_now(&bad, &[]);
+            let node = component_node(&runtime);
+            assert_eq!(child_text(&runtime, node), None, "nothing rendered yet");
+
+            runtime.render_now(&bad, &[]);
+            assert_eq!(
+                child_text(&runtime, node),
+                Some("sorry".to_string()),
+                "the fallback UI is what the failed subtree shows"
+            );
+            let recorded = diagnostics.0.borrow();
+            assert_eq!(
+                recorded.iter().map(|d| d.recovery).collect::<Vec<_>>(),
+                vec![RecoveryAction::Retried, RecoveryAction::BoundaryReplaced],
+                "both decisions are reported, in the order they were taken"
+            );
+        }
+
+        #[test]
+        fn a_disabled_boundary_neither_retries_nor_falls_back() {
+            // The same failing component as above, differing ONLY in its policy.
+            let (mut runtime, diagnostics) =
+                guarded_runtime(ErrorBoundaryPolicy::disabled(), Some(text_view("sorry")));
+            let bad = guarded_view(ViewValue::Text("2".into()));
+            runtime.render_now(&bad, &[]);
+            runtime.render_now(&bad, &[]);
+
+            let node = component_node(&runtime);
+            assert_eq!(
+                child_text(&runtime, node),
+                None,
+                "its own fallback is not used: it opted out of containment"
+            );
+            let recorded = diagnostics.0.borrow();
+            assert_eq!(
+                recorded.iter().map(|d| d.recovery).collect::<Vec<_>>(),
+                vec![RecoveryAction::None],
+                "reported once, unrecovered, and not re-fired every frame"
+            );
+        }
+
+        #[test]
+        fn a_failure_escaping_a_disabled_boundary_is_contained_by_the_enclosing_one() {
+            // Outer (enabled, with a fallback) renders Guarded (disabled), whose
+            // props cannot decode. The failure has nowhere to be contained but
+            // the enclosing boundary.
+            let (mut runtime, diagnostics) =
+                guarded_runtime(ErrorBoundaryPolicy::disabled(), Some(text_view("sorry")));
+            runtime
+                .register_component(ComponentRegistration::new(
+                    Box::new(OuterFactory),
+                    ComponentVersion::INITIAL,
+                ))
+                .expect("second registration");
+            runtime.render_now(
+                &View::from_fragment(ViewFragment::from_nodes(vec![ViewNode::element(OUTER)])),
+                &[],
+            );
+
+            let outer = component_node(&runtime);
+            assert_eq!(
+                child_text(&runtime, outer),
+                Some("outer fallback".to_string()),
+                "the enclosing boundary's subtree is what gets replaced"
+            );
+            assert_eq!(
+                runtime.mounted_component_count(),
+                1,
+                "replacing the subtree unmounted the component that failed"
+            );
+            let recorded = diagnostics.0.borrow();
+            assert_eq!(
+                recorded
+                    .iter()
+                    .map(|d| (d.context.node, d.recovery))
+                    .collect::<Vec<_>>(),
+                vec![
+                    (Some(outer_child(&recorded)), RecoveryAction::None),
+                    (Some(outer), RecoveryAction::BoundaryReplaced),
+                ],
+                "the failing node reports no recovery; the boundary that answered \
+                 reports the replacement"
+            );
+        }
+
+        /// The node the first diagnostic named — the failing child, which the
+        /// containment has since unmounted, so the tree can no longer name it.
+        fn outer_child(recorded: &[Diagnostic]) -> NodeId {
+            recorded[0].context.node.expect("anchored to a node")
+        }
+
+        #[test]
+        fn a_component_recovers_when_its_props_decode_again() {
+            let (mut runtime, diagnostics) =
+                guarded_runtime(ErrorBoundaryPolicy::default(), Some(text_view("sorry")));
+            let bad = guarded_view(ViewValue::Text("2".into()));
+            runtime.render_now(&bad, &[]);
+            runtime.render_now(&bad, &[]);
+            let node = component_node(&runtime);
+            assert_eq!(child_text(&runtime, node), Some("sorry".to_string()));
+
+            // The author fixes the attribute: the boundary is not a tombstone.
+            runtime.render_now(&guarded_view(ViewValue::Int(2)), &[]);
+            assert_eq!(child_text(&runtime, node), Some("healthy".to_string()));
+            assert_eq!(
+                diagnostics.0.borrow().len(),
+                2,
+                "recovering is not itself a failure"
+            );
+        }
+
+        #[test]
+        fn the_failure_reaches_a_real_subscriber_through_the_shipped_channel() {
+            // Not a bespoke test sink: the §7.8 ChannelSink/DiagnosticChannel a
+            // host or DevTools backend actually subscribes with. This is the
+            // whole of §1-B — a Diagnostic built by production code arriving at
+            // a subscriber that filtered for it.
+            let sink = Rc::new(ChannelSink::new(DiagnosticChannel::new()));
+            let subscription = sink.channel_mut().subscribe(
+                DiagnosticFilter::min(DiagnosticSeverity::Error),
+                DiagnosticBufferPolicy::unbounded(),
+            );
+
+            let mut runtime = UiRuntime::new(runtime_id(), viewport());
+            runtime
+                .register_component(ComponentRegistration::new(
+                    Box::new(GuardedFactory {
+                        policy: ErrorBoundaryPolicy::default().with_max_retries(0),
+                        fallback: Some(text_view("sorry")),
+                    }),
+                    ComponentVersion::INITIAL,
+                ))
+                .expect("first registration");
+            runtime.set_diagnostic_sink(Box::new(SharedChannel(Rc::clone(&sink))));
+            runtime.render_now(&guarded_view(ViewValue::Text("2".into())), &[]);
+
+            let drained = sink.channel_mut().drain(subscription);
+            assert_eq!(drained.len(), 1, "the subscriber received the failure");
+            assert_eq!(drained[0].code, COMPONENT_PROPS_FAILED);
+            assert_eq!(drained[0].recovery, RecoveryAction::BoundaryReplaced);
+            assert_eq!(drained[0].context.node, Some(component_node(&runtime)));
+        }
+
+        #[test]
+        fn a_retry_schedules_the_frame_that_spends_the_budget() {
+            // A retry keeps the previous output, so it is only honest if the
+            // retry actually arrives: nothing else here would ask for a frame,
+            // and a budget that never gets spent is the stale-UI bug wearing a
+            // diagnostic.
+            let (mut runtime, _diagnostics) =
+                guarded_runtime(ErrorBoundaryPolicy::default(), Some(text_view("sorry")));
+            runtime.render_now(&guarded_view(ViewValue::Text("2".into())), &[]);
+            assert_eq!(
+                runtime.peek_frame_reason(),
+                Some(FrameReason::UiCommit),
+                "the retried component is still stale, so the frame end asks for another"
+            );
+        }
+
+        #[test]
+        fn an_uncontained_propagated_failure_leaves_the_last_output_but_says_so() {
+            // A disabled boundary with no enclosing one: the failure escapes the
+            // component tree. Nothing recovers it, so the last good output does
+            // stand — the honest floor is that it is reported, once, rather than
+            // re-fired every frame.
+            let (mut runtime, diagnostics) =
+                guarded_runtime(ErrorBoundaryPolicy::disabled(), Some(text_view("sorry")));
+            runtime.render_now(&guarded_view(ViewValue::Int(2)), &[]);
+            let node = component_node(&runtime);
+            assert_eq!(child_text(&runtime, node), Some("healthy".to_string()));
+
+            let bad = guarded_view(ViewValue::Text("2".into()));
+            runtime.render_now(&bad, &[]);
+            runtime.render_now(&bad, &[]);
+            assert_eq!(
+                child_text(&runtime, node),
+                Some("healthy".to_string()),
+                "uncontained: the stale output stands, which is what disabling every \
+                 boundary above it asked for"
+            );
+            assert_eq!(
+                diagnostics
+                    .0
+                    .borrow()
+                    .iter()
+                    .map(|d| (d.context.node, d.recovery))
+                    .collect::<Vec<_>>(),
+                vec![(Some(node), RecoveryAction::None)],
+                "reported once and unrecovered — never silent, never a per-frame storm"
+            );
+        }
+
+        #[test]
+        fn a_runtime_with_no_sink_still_takes_the_failure_path() {
+            // The default NullDiagnosticSink must not be a second code path: the
+            // boundary decides and acts identically with nobody listening.
+            let mut runtime = UiRuntime::new(runtime_id(), viewport());
+            runtime
+                .register_component(ComponentRegistration::new(
+                    Box::new(GuardedFactory {
+                        policy: ErrorBoundaryPolicy::default().with_max_retries(0),
+                        fallback: Some(text_view("sorry")),
+                    }),
+                    ComponentVersion::INITIAL,
+                ))
+                .expect("first registration");
+            runtime.render_now(&guarded_view(ViewValue::Text("2".into())), &[]);
+            let node = component_node(&runtime);
+            assert_eq!(child_text(&runtime, node), Some("sorry".to_string()));
         }
     }
 

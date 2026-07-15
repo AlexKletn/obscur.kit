@@ -54,6 +54,9 @@ pub trait ErasedComponent {
 
     /// The component's [`error_boundary`](Component::error_boundary) policy.
     fn error_boundary_erased(&self) -> ErrorBoundaryPolicy;
+
+    /// The component's [`fallback`](Component::fallback) UI.
+    fn fallback_erased(&self) -> Option<View>;
 }
 
 impl<C> ErasedComponent for C
@@ -86,6 +89,10 @@ where
 
     fn error_boundary_erased(&self) -> ErrorBoundaryPolicy {
         self.error_boundary()
+    }
+
+    fn fallback_erased(&self) -> Option<View> {
+        self.fallback()
     }
 }
 

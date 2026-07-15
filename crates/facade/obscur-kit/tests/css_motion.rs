@@ -3,18 +3,16 @@
 //! the runtime's `MotionScheduler`, actually run.
 //!
 //! This exercises the whole wiring through the public facade only: author CSS ->
-//! compile -> build the runtime's [`CssMotionRules`] from the compiled sheet ->
-//! install on a [`UiRuntime`] -> render frames and observe the animated value
-//! flow through style -> motion -> layout.
+//! hand the sources to the kit's [`CssPipeline`] -> render frames and observe the
+//! animated value flow through style -> motion -> layout. The CSS->runtime
+//! plumbing is the kit's, not the test's: a host installs sources and renders.
 #![forbid(unsafe_code)]
 
-use obscur_kit::css::compiler::{CompiledStylesheet, StylesheetCompiler};
-use obscur_kit::css::parser::StylesheetParser;
-use obscur_kit::css::source::CssSource;
+use obscur_kit::bootstrap::CssPipeline;
+use obscur_kit::css::source::{CssSource, SourceId, SourceVersion};
 use obscur_kit::geometry::Size;
 use obscur_kit::identity::{ComponentId, NodeId, RuntimeId};
 use obscur_kit::runtime::UiRuntime;
-use obscur_kit::runtime::orchestration::{CssKeyframeRule, CssMotionRules, CssTransitionRule};
 use obscur_kit::style::selector::PseudoState;
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
@@ -27,40 +25,6 @@ const STYLESHEET: &str = "\
 @keyframes fade { from { opacity: 0; } to { opacity: 1.0; } }\n\
 .spinner { width: 10px; height: 10px; animation: fade 1s; }\n\
 ";
-
-/// Compiles [`STYLESHEET`] through the real CSS frontend.
-fn compile() -> CompiledStylesheet {
-    let source = CssSource::anonymous(STYLESHEET);
-    let parsed = StylesheetParser::new(&source).parse();
-    StylesheetCompiler::new().compile(&parsed)
-}
-
-/// Repackages a compiled stylesheet's selector-associated motion into the
-/// runtime's domain-only [`CssMotionRules`] input — the plumbing a host performs
-/// once per (re)compiled sheet. The CSS->track lowering already happened in the
-/// frontend; this only maps the fields across the crate boundary.
-fn css_motion_rules(compiled: &CompiledStylesheet) -> CssMotionRules {
-    let mut transitions = Vec::new();
-    let mut keyframes = Vec::new();
-    for rule in &compiled.motion_rules {
-        for transition in &rule.transitions {
-            transitions.push(CssTransitionRule::new(
-                rule.selectors.clone(),
-                transition.property,
-                transition.duration_secs,
-                transition.easing,
-            ));
-        }
-        for animation in &rule.animations {
-            keyframes.push(CssKeyframeRule::new(
-                rule.selectors.clone(),
-                animation.tracks.clone(),
-                animation.duration_secs,
-            ));
-        }
-    }
-    CssMotionRules::from_parts(transitions, keyframes)
-}
 
 /// A `.box` element followed by a `.spinner` element, as two top-level nodes.
 fn view() -> View {
@@ -88,24 +52,22 @@ fn box_width(runtime: &UiRuntime, node: NodeId) -> f32 {
 
 #[test]
 fn css_transition_and_keyframes_drive_through_the_scheduler() {
-    let compiled = compile();
-    // The frontend produced selector-associated motion: a `.box` transition and
-    // a resolved `.spinner` animation.
-    assert_eq!(
-        compiled.motion_rules.len(),
-        2,
-        "one motion rule for `.box`, one for `.spinner`"
-    );
-
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 300.0));
-    runtime.set_css_motion(css_motion_rules(&compiled));
+    let mut css = CssPipeline::new();
+    css.install(&mut runtime, &[CssSource::anonymous(STYLESHEET)]);
+
+    // The pipeline carried the frontend's selector-associated motion across: a
+    // `.box` transition and a resolved `.spinner` animation.
+    assert_eq!(css.motion().transitions().len(), 1);
+    assert_eq!(css.motion().keyframes().len(), 1);
+
     let view = view();
-    let sheets = std::slice::from_ref(&compiled.matchable);
+    let sheets = css.sheets().to_vec();
 
     // Frame 1: `.spinner` matches its `@keyframes` rule and registers a keyframe
     // timeline immediately; `.box`'s width has not changed, so its transition
     // has not fired yet.
-    let _ = runtime.render_now(&view, sheets);
+    let _ = runtime.render_now(&view, &sheets);
     let node = box_node(&runtime);
     assert_eq!(
         runtime.active_animations(),
@@ -117,7 +79,7 @@ fn css_transition_and_keyframes_drive_through_the_scheduler() {
     // Hover the box: its computed width changes 100 -> 200, so the transition
     // registers a second timeline. At t == 0 the overlaid width is still 100.
     runtime.set_pseudo_state(node, PseudoState::HOVER);
-    let _ = runtime.render_now(&view, sheets);
+    let _ = runtime.render_now(&view, &sheets);
     assert_eq!(
         runtime.active_animations(),
         2,
@@ -131,16 +93,59 @@ fn css_transition_and_keyframes_drive_through_the_scheduler() {
 
     // Halfway: the width interpolates linearly toward 200.
     runtime.advance_motion(0.5);
-    let _ = runtime.render_now(&view, sheets);
+    let _ = runtime.render_now(&view, &sheets);
     assert_eq!(box_width(&runtime, node), 150.0, "old -> new interpolation");
 
     // End: both timelines finish and the width settles at 200.
     runtime.advance_motion(0.5);
-    let _ = runtime.render_now(&view, sheets);
+    let _ = runtime.render_now(&view, &sheets);
     assert_eq!(
         runtime.active_animations(),
         0,
         "finished timelines are pruned"
     );
     assert_eq!(box_width(&runtime, node), 200.0, "settled at the new width");
+}
+
+/// A host that installs CSS through the kit gets §4.12's parse cache without
+/// asking for it.
+///
+/// Proven by the one observation only a cache can produce: the *same* source
+/// identity at the *same* revision, but with different text, must lay out with
+/// the FIRST revision's rules — a pipeline that re-parsed would pick up the new
+/// text. Bumping the revision then re-parses, so the cache is a cache and not a
+/// one-shot.
+#[test]
+fn the_pipeline_parses_each_source_once_per_revision() {
+    let app = |text: &str| CssSource::new(SourceId::from_raw(1), "app.css", text);
+
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 300.0));
+    let mut css = CssPipeline::new();
+    let view = view();
+
+    css.install(&mut runtime, &[app(".box { width: 100px; height: 50px; }")]);
+    assert_eq!(css.cached_sources(), 1, "the identified source is cached");
+    let _ = runtime.render_now(&view, css.sheets());
+    let node = box_node(&runtime);
+    assert_eq!(box_width(&runtime, node), 100.0);
+
+    // Same id, same (unbumped) revision, different text: a cache hit, so the
+    // text is never read and the width does not move.
+    css.install(&mut runtime, &[app(".box { width: 999px; height: 50px; }")]);
+    let _ = runtime.render_now(&view, css.sheets());
+    assert_eq!(
+        box_width(&runtime, node),
+        100.0,
+        "an unbumped revision is the same source: the cached parse won"
+    );
+
+    // The owner stamps the next revision: the entry no longer matches, so this
+    // one is parsed.
+    css.install(
+        &mut runtime,
+        &[app(".box { width: 999px; height: 50px; }").at_version(SourceVersion::INITIAL.next())],
+    );
+    let _ = runtime.render_now(&view, css.sheets());
+    assert_eq!(box_width(&runtime, node), 999.0, "a new revision re-parsed");
+    assert_eq!(css.cached_sources(), 1, "and replaced the entry, not grew");
 }

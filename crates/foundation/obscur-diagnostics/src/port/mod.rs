@@ -1,7 +1,7 @@
 //! Port module.
 mod diagnostic_sink;
 
-pub use diagnostic_sink::DiagnosticSink;
+pub use diagnostic_sink::{DiagnosticSink, NullDiagnosticSink};
 
 mod telemetry_sink;
 

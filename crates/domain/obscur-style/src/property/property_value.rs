@@ -190,16 +190,26 @@ impl PropertyValue {
     ///
     /// # The arms that answer `false` while carrying lengths
     ///
-    /// [`BoxShadow`](Self::BoxShadow), [`Transform`](Self::Transform),
-    /// [`BackgroundSize`](Self::BackgroundSize) and friends do hold [`Length`]s,
-    /// and this still answers `false` for them — not an oversight. Those values
-    /// are not resolved against a
-    /// [`LengthContext`](crate::property::LengthContext) at all: they read their
-    /// lengths through [`Length::as_px`], which honors only absolute `px`. `em`,
-    /// `rem` and `vw` are equally inert there today. So this predicate's reach is
-    /// exactly the reach of relative units in general, and `ch` gains support in
-    /// those properties on the day the rest of the relative units do — not before,
-    /// and not separately.
+    /// [`BoxShadow`](Self::BoxShadow), [`BackgroundSize`](Self::BackgroundSize)
+    /// and friends do hold [`Length`]s — including, in principle, `ch` ones — and
+    /// this still answers `false` for them. That is a **known gap**, not a
+    /// derivation from anything: `20ch` inside a `box-shadow` offset resolves to
+    /// `0`, silently.
+    ///
+    /// The gap is one-directional and worth stating exactly, because the honest
+    /// answer is not the tidy one. `em` / `rem` / `vw` in those same properties
+    /// *are* honored: the computed-value step absolutizes every length a
+    /// [`PropertyValue`] carries, however nested. `ch` is the sole unit it cannot
+    /// fold there, because it needs the `0` glyph shaped and the computed-value
+    /// step has no shaper in reach. Only the callers that *can* measure — layout,
+    /// via [`ComputedStyle::uses_ch`](crate::computed::ComputedStyle::uses_ch) —
+    /// resolve `ch` at all, and they consume the value kinds below in already-
+    /// absolutized form without re-inspecting them for `ch`.
+    ///
+    /// So widening this predicate alone would buy nothing: a `true` here would
+    /// cost a shaping call whose measurement no consumer of those variants reads.
+    /// Closing the gap means threading a measurement into the computed-value step,
+    /// at which point these arms change with it.
     ///
     /// The match is deliberately exhaustive rather than wildcarded, so a new
     /// length-bearing variant cannot quietly default to "no `ch` here".
@@ -209,8 +219,8 @@ impl PropertyValue {
             Self::Length(length) => length.is_ch(),
             Self::Calc(expr) => expr.uses_ch(),
             Self::GridTracks(tracks) => tracks.uses_ch(),
-            // Resolved through `Length::as_px` (absolute `px` only), or carrying
-            // no length at all. See the note above.
+            // Carrying no length at all, or carrying lengths no `ch`-measuring
+            // caller reads back. See the note above.
             Self::Keyword(_)
             | Self::Number(_)
             | Self::Color(_)
@@ -525,13 +535,15 @@ mod tests {
     }
 
     #[test]
-    fn uses_ch_is_false_for_a_box_shadow_because_no_unit_is_relative_there() {
+    fn uses_ch_is_false_for_a_box_shadow_which_is_a_known_gap() {
         use crate::property::{BoxShadow, Length};
 
-        // Not an oversight, and the test says so: `emit_box_shadow` reads these
-        // through `Length::as_px`, which honors absolute `px` only — `em` and
-        // `rem` are equally inert there. Measuring the `0` glyph for this value
-        // would buy nothing, because nothing would consume the measurement.
+        // Pinned as a GAP, not as intended behaviour: a `ch` inside a box-shadow
+        // resolves to 0. `em`/`rem` here are absolutized at computed-value time
+        // and do work; `ch` alone cannot be, because that step has no shaper.
+        // Answering `true` would cost a shaping call no consumer of this variant
+        // reads back, so the fix is upstream — see `uses_ch`'s docs. When a
+        // measurement reaches the computed-value step, this test should flip.
         let shadow = PropertyValue::BoxShadow(
             vec![BoxShadow {
                 offset_x: Length::Ch(1.0),

@@ -11,9 +11,17 @@
 //!    referenced effective custom property, following chains with a visited-set
 //!    guard so a cycle terminates. An unresolved reference (missing name or a
 //!    cycle) resolves as if the declaration were [`PropertyValue::Unset`].
-//! 3. **Per-property computed value** — the (substituted) cascaded value is
+//! 3. **`font-size`, before anything else** — it is the base its own node's `em`
+//!    resolves against, so it cannot be folded with the context it defines. It is
+//!    resolved against the *parent's* size (which is what `em` and `%` mean on
+//!    this property) and folded to absolute pixels first; see
+//!    [`absolutize::absolute_font_size`].
+//! 4. **Per-property computed value** — the (substituted) cascaded value is
 //!    resolved against the CSS-wide keywords and default inheritance to produce a
-//!    concrete [`ComputedValue`].
+//!    concrete [`ComputedValue`], and then **absolutized**: every `<length>` it
+//!    carries is folded to `px` against the node's own [`LengthContext`] (§4.14 —
+//!    the computed value of a `<length>` is absolute). Downstream consumers read
+//!    pixels; none of them needs a length context.
 //!
 //! # Deliberate limitations
 //!
@@ -32,11 +40,20 @@
 //!   bullet); an *unauthored* node is therefore byte-for-byte unchanged, because
 //!   each property still resolves to exactly the value (or [`None`]) it did before
 //!   — the set merely no longer drops authored values for the added longhands.
+//! * **`ch` is not absolutized here.** Every other unit folds from numbers this
+//!   step already holds; `ch` is the advance of the `0` glyph, which needs text
+//!   *shaped* in the node's own face — and this crate has no shaper. Rather than
+//!   bake in [`LengthContext::ch_base`]'s `0.5em` substitute (which is wrong for
+//!   exactly the monospace faces `ch` exists to serve), a `ch` term is left
+//!   symbolic on the [`ComputedStyle`] for a consumer that can measure it. Layout
+//!   does; paint does not, so `ch` still reaches paint as `0` — the one relative
+//!   unit this pass does not retire.
 
 use crate::cascade::ResolvedDeclarations;
+use crate::computed::absolutize::{absolute_font_size, absolutize_value};
 use crate::computed::{ComputedStyle, ComputedValue};
 use crate::property::{
-    InheritedProperty, Length, PropertyId, PropertyValue, StyleColor, layout_keyword,
+    InheritedProperty, Length, LengthContext, PropertyId, PropertyValue, StyleColor, layout_keyword,
 };
 use obscur_identity::InternedSymbol;
 use std::collections::{HashMap, HashSet};
@@ -44,6 +61,12 @@ use std::collections::{HashMap, HashSet};
 /// The CSS initial `font-weight` (`normal`), and the weight a relative
 /// `bolder` / `lighter` resolves against when there is no parent weight.
 const NORMAL_FONT_WEIGHT: f32 = 400.0;
+
+/// The CSS initial `font-size` (`medium`), in logical pixels.
+///
+/// This is the root element's implicit parent size, and therefore also what `rem`
+/// means *on* the root element (CSS Values 4 §6.1.1).
+const INITIAL_FONT_SIZE: f32 = 16.0;
 
 /// Every modelled longhand the resolver computes.
 ///
@@ -170,6 +193,56 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     // Overflow (pure paint/clip; no layout effect).
     PropertyId::Overflow,
 ];
+
+/// The document-wide bases a computed `<length>` is absolutized against (§4.14).
+///
+/// These are the two things a node's own style cannot supply: the **root**
+/// element's computed `font-size` (the base for `rem`) and the **viewport**
+/// dimensions (the bases for `vw` / `vh` / `vmin` / `vmax`). The node's own
+/// `font-size` — the base for `em` — is not here because the resolver computes it
+/// itself, before every other property.
+///
+/// `rem` has no chicken-and-egg problem: the root's font-size depends only on the
+/// root's own cascaded value and the initial `medium`, so it is known before any
+/// other node is resolved. Build the root's context with
+/// [`ResolutionContext::for_root`], read the root's computed `font-size` back with
+/// [`StyleResolver::font_size_of`], and pass it to
+/// [`ResolutionContext::new`] for every descendant.
+///
+/// Because both fields are `f32`, this derives [`PartialEq`] but not
+/// [`Eq`]/[`Hash`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ResolutionContext {
+    /// The document root's computed `font-size` in logical pixels (base for
+    /// `rem`).
+    pub root_font_size: f32,
+    /// The viewport width in logical pixels (base for `vw`).
+    pub viewport_width: f32,
+    /// The viewport height in logical pixels (base for `vh`).
+    pub viewport_height: f32,
+}
+
+impl ResolutionContext {
+    /// Builds a context whose `rem` base is `root_font_size`.
+    #[must_use]
+    pub const fn new(root_font_size: f32, viewport_width: f32, viewport_height: f32) -> Self {
+        Self {
+            root_font_size,
+            viewport_width,
+            viewport_height,
+        }
+    }
+
+    /// Builds the context for resolving the **root** node itself.
+    ///
+    /// On the root element `rem` refers to the *initial* `font-size` (`medium`),
+    /// not to the root's own computed one — otherwise `html { font-size: 2rem }`
+    /// would be defined in terms of itself.
+    #[must_use]
+    pub const fn for_root(viewport_width: f32, viewport_height: f32) -> Self {
+        Self::new(INITIAL_FONT_SIZE, viewport_width, viewport_height)
+    }
+}
 
 /// Stateless resolver that computes a node's [`ComputedStyle`] from its cascaded
 /// values, its cascaded custom properties, and its parent's computed style.
@@ -475,18 +548,39 @@ impl StyleResolver {
         }
     }
 
+    /// Reads a node's computed `font-size` in logical pixels.
+    ///
+    /// Every style [`resolve`](Self::resolve) produces carries an **absolute**
+    /// `font-size` (the resolver folds it before anything else), so this never
+    /// falls back for a resolved style. The [`INITIAL_FONT_SIZE`] default covers
+    /// only a hand-built [`ComputedStyle`] that never went through the resolver.
+    #[must_use]
+    pub fn font_size_of(style: &ComputedStyle) -> f32 {
+        style
+            .get(PropertyId::FontSize)
+            .and_then(ComputedValue::as_length)
+            .and_then(Length::as_px)
+            .map_or(INITIAL_FONT_SIZE, |px| px.0)
+    }
+
     /// Computes the node's [`ComputedStyle`] from its cascaded declarations, its
     /// cascaded custom properties, and its parent's computed style (§4.14).
     ///
     /// `parent` is [`None`] for the root; every inherited property then falls
     /// back to its initial value. The returned style stores the node's effective
     /// (inheritable) custom properties for its descendants.
+    ///
+    /// `ctx` supplies the document-wide `rem` / viewport bases; the node's own
+    /// `font-size` supplies `em`. Every `<length>` on the returned style is
+    /// absolute, except a `%` (whose containing block layout has not produced), an
+    /// `auto`, and a `ch` (see the module docs).
     #[must_use]
     pub fn resolve(
         self,
         cascaded: &ResolvedDeclarations,
         custom: &HashMap<InternedSymbol, PropertyValue>,
         parent: Option<&ComputedStyle>,
+        ctx: ResolutionContext,
     ) -> ComputedStyle {
         let mut style = ComputedStyle::new();
 
@@ -512,15 +606,65 @@ impl StyleResolver {
         // part of the loop below would make the answer depend on iteration order.
         let rtl = Self::resolves_rtl(cascaded, parent);
 
-        // Steps 2–3: compute each property.
+        // Step 1b: `font-size` before anything else, for the same reason: it is
+        // the base every `em` on this node resolves against, so folding it as
+        // part of the loop below would make the answer depend on iteration order
+        // (§4.14). Its own relative units resolve against the PARENT's size.
+        let font_size = self.resolve_font_size(cascaded, &effective, parent, rtl, ctx);
+        style.set(
+            PropertyId::FontSize,
+            ComputedValue::length(Length::px(font_size)),
+        );
+        let lengths = LengthContext::new(
+            font_size,
+            ctx.root_font_size,
+            ctx.viewport_width,
+            ctx.viewport_height,
+        );
+
+        // Steps 2–4: compute each property, then absolutize the lengths it
+        // carries against the context `font-size` just completed.
         for &property in COMPUTED_PROPERTIES {
+            if property == PropertyId::FontSize {
+                continue;
+            }
             if let Some(value) = self.resolve_property(property, cascaded, &effective, parent, rtl)
             {
-                style.set(property, value);
+                style.set(property, value.map_value(|v| absolutize_value(v, &lengths)));
             }
         }
 
         style
+    }
+
+    /// Resolves this node's `font-size` to absolute logical pixels (§4.14).
+    ///
+    /// The cascaded value goes through the same substitution / CSS-wide-keyword /
+    /// inheritance path as every other property, and the resulting [`Length`] is
+    /// then folded against the *parent's* size — the base `em` and `%` mean on
+    /// this one property. An inherited value is already absolute (the parent's
+    /// pass folded it), so it survives that fold unchanged.
+    fn resolve_font_size(
+        self,
+        cascaded: &ResolvedDeclarations,
+        custom: &HashMap<InternedSymbol, PropertyValue>,
+        parent: Option<&ComputedStyle>,
+        rtl: bool,
+        ctx: ResolutionContext,
+    ) -> f32 {
+        // No parent = the root, whose implicit parent `font-size` is the initial
+        // `medium` — the same value `rem` means there.
+        let parent_font_size = parent.map_or(INITIAL_FONT_SIZE, Self::font_size_of);
+        let specified = self
+            .resolve_property(PropertyId::FontSize, cascaded, custom, parent, rtl)
+            .and_then(|value| value.as_length());
+        absolute_font_size(
+            specified,
+            parent_font_size,
+            ctx.root_font_size,
+            ctx.viewport_width,
+            ctx.viewport_height,
+        )
     }
 
     /// Whether this element's computed `direction` is `rtl`.
@@ -744,6 +888,12 @@ fn resolve_relative_font_weight(parent_weight: f32, bolder: bool) -> f32 {
 mod tests {
     use super::*;
 
+    /// Root font-size 16 (the initial), viewport 800x600: the bases a test that
+    /// is not about relative units resolves against.
+    fn ctx() -> ResolutionContext {
+        ResolutionContext::for_root(800.0, 600.0)
+    }
+
     fn sym(raw: u32) -> InternedSymbol {
         InternedSymbol::from_raw(raw)
     }
@@ -760,7 +910,7 @@ mod tests {
         let mut cascaded = ResolvedDeclarations::new();
         cascaded.insert(PropertyId::Color, PropertyValue::Inherit);
 
-        let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent));
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent), ctx());
         assert_eq!(
             computed
                 .get(PropertyId::Color)
@@ -775,7 +925,7 @@ mod tests {
         let mut cascaded = ResolvedDeclarations::new();
         cascaded.insert(PropertyId::Color, PropertyValue::Inherit);
 
-        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None, ctx());
         assert_eq!(
             computed
                 .get(PropertyId::Color)
@@ -797,7 +947,7 @@ mod tests {
         let mut cascaded = ResolvedDeclarations::new();
         cascaded.insert(PropertyId::Color, PropertyValue::Unset);
 
-        let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent));
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent), ctx());
         assert_eq!(
             computed
                 .get(PropertyId::Color)
@@ -816,7 +966,7 @@ mod tests {
         let mut cascaded = ResolvedDeclarations::new();
         cascaded.insert(PropertyId::Opacity, PropertyValue::Unset);
 
-        let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent));
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent), ctx());
         assert_eq!(computed.opacity(), Some(1.0));
     }
 
@@ -830,7 +980,7 @@ mod tests {
         let mut cascaded = ResolvedDeclarations::new();
         cascaded.insert(PropertyId::Opacity, PropertyValue::CustomRef(name));
 
-        let computed = resolver.resolve(&cascaded, &custom, None);
+        let computed = resolver.resolve(&cascaded, &custom, None, ctx());
         assert_eq!(computed.opacity(), Some(0.5));
     }
 
@@ -845,7 +995,7 @@ mod tests {
         let mut cascaded = ResolvedDeclarations::new();
         cascaded.insert(PropertyId::Opacity, PropertyValue::CustomRef(a));
 
-        let computed = resolver.resolve(&cascaded, &custom, None);
+        let computed = resolver.resolve(&cascaded, &custom, None, ctx());
         assert_eq!(computed.opacity(), Some(0.75));
     }
 
@@ -856,7 +1006,7 @@ mod tests {
         let mut cascaded = ResolvedDeclarations::new();
         cascaded.insert(PropertyId::Opacity, PropertyValue::CustomRef(sym(99)));
 
-        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None, ctx());
         assert_eq!(computed.opacity(), Some(1.0));
     }
 
@@ -872,7 +1022,7 @@ mod tests {
         let mut cascaded = ResolvedDeclarations::new();
         cascaded.insert(PropertyId::Color, PropertyValue::CustomRef(a));
 
-        let computed = resolver.resolve(&cascaded, &custom, None);
+        let computed = resolver.resolve(&cascaded, &custom, None, ctx());
         assert_eq!(
             computed
                 .get(PropertyId::Color)
@@ -893,7 +1043,7 @@ mod tests {
 
         // Nothing cascaded on the child.
         let cascaded = ResolvedDeclarations::new();
-        let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent));
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent), ctx());
 
         // `color` inherits by default -> parent's value.
         assert_eq!(
@@ -918,7 +1068,8 @@ mod tests {
         let mut custom = HashMap::new();
         custom.insert(a, PropertyValue::Number(9.0));
 
-        let computed = resolver.resolve(&ResolvedDeclarations::new(), &custom, Some(&parent));
+        let computed =
+            resolver.resolve(&ResolvedDeclarations::new(), &custom, Some(&parent), ctx());
         assert_eq!(
             computed.custom_property(a),
             Some(&PropertyValue::Number(9.0))
@@ -970,7 +1121,7 @@ mod tests {
             PropertyValue::Keyword(layout_keyword::FONT_WEIGHT_BOLDER),
         );
 
-        let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent));
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent), ctx());
         assert_eq!(weight_of(&computed), Some(900.0));
     }
 
@@ -984,7 +1135,7 @@ mod tests {
         );
 
         // No parent -> the implicit parent weight is `normal` (400) -> lighter 100.
-        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None, ctx());
         assert_eq!(weight_of(&computed), Some(100.0));
     }
 
@@ -997,7 +1148,7 @@ mod tests {
         // An absolute numeric weight is stored verbatim, regardless of the parent.
         let mut parent = ComputedStyle::new();
         parent.set(PropertyId::FontWeight, ComputedValue::number(900.0));
-        let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent));
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), Some(&parent), ctx());
         assert_eq!(weight_of(&computed), Some(500.0));
     }
 
@@ -1008,8 +1159,12 @@ mod tests {
         parent.set(PropertyId::FontWeight, ComputedValue::number(700.0));
 
         // `font-weight` inherits: a child with none takes the parent's weight.
-        let computed =
-            resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), Some(&parent));
+        let computed = resolver.resolve(
+            &ResolvedDeclarations::new(),
+            &HashMap::new(),
+            Some(&parent),
+            ctx(),
+        );
         assert_eq!(weight_of(&computed), Some(700.0));
     }
 
@@ -1018,7 +1173,7 @@ mod tests {
         let resolver = StyleResolver::new();
         assert_eq!(resolver.initial_value(PropertyId::Display), None);
         // With no cascaded value and no parent, `display` cannot be computed yet.
-        let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), None);
+        let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), None, ctx());
         assert_eq!(computed.get(PropertyId::Display), None);
     }
 
@@ -1030,7 +1185,7 @@ mod tests {
 
         // An authored integer `z-index` flows through to the computed style as a
         // number the scene reads for stacking.
-        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None, ctx());
         assert_eq!(
             computed.get(PropertyId::ZIndex).map(ComputedValue::value),
             Some(&PropertyValue::Number(5.0))
@@ -1042,6 +1197,7 @@ mod tests {
             &ResolvedDeclarations::new(),
             &HashMap::new(),
             Some(&computed),
+            ctx(),
         );
         assert_eq!(child.get(PropertyId::ZIndex), None);
     }
@@ -1051,7 +1207,7 @@ mod tests {
         let resolver = StyleResolver::new();
         // `z-index` initial (`auto`) is deferred, so an absent value is unresolved.
         assert_eq!(resolver.initial_value(PropertyId::ZIndex), None);
-        let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), None);
+        let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), None, ctx());
         assert_eq!(computed.get(PropertyId::ZIndex), None);
     }
 
@@ -1070,7 +1226,7 @@ mod tests {
         assert_eq!(resolver.initial_value(PropertyId::BorderTopColor), None);
 
         // With no authored border, width computes to 0 and style/color stay unset.
-        let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), None);
+        let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), None, ctx());
         assert_eq!(
             computed
                 .get(PropertyId::BorderTopWidth)
@@ -1097,7 +1253,7 @@ mod tests {
             );
         }
         // An unauthored node computes every corner to 0.
-        let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), None);
+        let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), None, ctx());
         assert_eq!(
             computed
                 .get(PropertyId::BorderTopLeftRadius)
@@ -1110,14 +1266,19 @@ mod tests {
             PropertyId::BorderTopLeftRadius,
             PropertyValue::Length(Length::px(8.0)),
         );
-        let parent = resolver.resolve(&cascaded, &HashMap::new(), None);
+        let parent = resolver.resolve(&cascaded, &HashMap::new(), None, ctx());
         assert_eq!(
             parent
                 .get(PropertyId::BorderTopLeftRadius)
                 .and_then(ComputedValue::as_length),
             Some(Length::px(8.0))
         );
-        let child = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), Some(&parent));
+        let child = resolver.resolve(
+            &ResolvedDeclarations::new(),
+            &HashMap::new(),
+            Some(&parent),
+            ctx(),
+        );
         assert_eq!(
             child
                 .get(PropertyId::BorderTopLeftRadius)
@@ -1143,7 +1304,7 @@ mod tests {
             PropertyId::BorderTopColor,
             PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
         );
-        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None, ctx());
         assert_eq!(
             computed
                 .get(PropertyId::BorderTopWidth)
@@ -1162,6 +1323,7 @@ mod tests {
             &ResolvedDeclarations::new(),
             &HashMap::new(),
             Some(&computed),
+            ctx(),
         );
         assert_eq!(child.get(PropertyId::BorderTopColor), None);
         assert_eq!(
@@ -1442,7 +1604,7 @@ mod tests {
             PropertyValue::Keyword(layout_keyword::TEXT_OVERFLOW_ELLIPSIS),
         );
 
-        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None, ctx());
 
         assert_eq!(
             computed
@@ -1502,7 +1664,7 @@ mod tests {
             PropertyValue::Length(Length::px(50.0)),
         );
 
-        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None, ctx());
 
         assert_eq!(
             computed
@@ -1531,7 +1693,7 @@ mod tests {
     #[test]
     fn unset_node_is_unchanged() {
         let resolver = StyleResolver::new();
-        let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), None);
+        let computed = resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), None, ctx());
 
         // Deferred keyword / weight initials remain unresolved, so the runtime
         // helpers keep using their hardcoded defaults (byte-for-byte as before).
@@ -1604,7 +1766,7 @@ mod tests {
             ]),
         );
 
-        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None, ctx());
         let tracks = computed
             .get(PropertyId::GridTemplateColumns)
             .map(ComputedValue::value)
@@ -1627,7 +1789,7 @@ mod tests {
             PropertyId::GridAutoRows,
             PropertyValue::grid_tracks([GridTrack::Fixed(Length::px(40.0))]),
         );
-        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None, ctx());
         let tracks = computed
             .get(PropertyId::GridAutoRows)
             .map(ComputedValue::value)
@@ -1640,6 +1802,7 @@ mod tests {
             &ResolvedDeclarations::new(),
             &HashMap::new(),
             Some(&computed),
+            ctx(),
         );
         assert!(child.get(PropertyId::GridAutoRows).is_none());
     }
@@ -1660,7 +1823,7 @@ mod tests {
             PropertyValue::GridLine(GridLineValue::Span(2)),
         );
 
-        let computed = resolver.resolve(&cascaded, &HashMap::new(), None);
+        let computed = resolver.resolve(&cascaded, &HashMap::new(), None, ctx());
         assert_eq!(
             computed
                 .get(PropertyId::GridColumnStart)
@@ -1688,8 +1851,12 @@ mod tests {
             ComputedValue::length(Length::px(30.0)),
         );
 
-        let computed =
-            resolver.resolve(&ResolvedDeclarations::new(), &HashMap::new(), Some(&parent));
+        let computed = resolver.resolve(
+            &ResolvedDeclarations::new(),
+            &HashMap::new(),
+            Some(&parent),
+            ctx(),
+        );
         assert_eq!(
             computed
                 .get(PropertyId::FontSize)
@@ -1702,6 +1869,7 @@ mod tests {
 
     mod logical {
         use super::super::StyleResolver;
+        use super::ctx;
         use crate::cascade::{CascadeOrigin, CascadePriority, ImportantFlag, ResolvedDeclarations};
         use crate::computed::{ComputedStyle, ComputedValue};
         use crate::property::{Length, PropertyId, PropertyValue, layout_keyword};
@@ -1739,7 +1907,7 @@ mod tests {
                     PropertyValue::Keyword(layout_keyword::DIRECTION_RTL),
                 );
             }
-            StyleResolver::new().resolve(&with_direction, &HashMap::new(), None)
+            StyleResolver::new().resolve(&with_direction, &HashMap::new(), None, ctx())
         }
 
         fn margin(style: &ComputedStyle, property: PropertyId) -> Option<Length> {

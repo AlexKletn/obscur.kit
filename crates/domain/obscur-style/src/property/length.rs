@@ -4,10 +4,20 @@
 //! (of some base resolved later during layout), the `auto` keyword, and the
 //! font-relative (`em`, `rem`, `ch`) and viewport-relative (`vw`, `vh`, `vmin`,
 //! `vmax`) units (spec §4.5). The relative units carry no absolute value on
-//! their own; [`Length::resolve_px`] folds them to logical pixels against a
-//! [`LengthContext`] at the layout/compute step ("resolve at use time").
+//! their own; a [`LengthContext`] supplies the bases they fold against.
 //! `calc()` / `min()` / `max()` / `clamp()` combine several such terms and are
 //! modelled by [`LengthExpr`](crate::property::LengthExpr).
+//!
+//! # Two folds, for two different jobs
+//!
+//! * [`Length::absolutize`] runs **once**, at the computed-value step, and is
+//!   what CSS means by "the computed value of a `<length>` is absolute": it turns
+//!   the font- and viewport-relative units into `Px` and leaves everything that
+//!   genuinely cannot be absolute yet (`%`, `auto`, an unmeasured `ch`) alone. A
+//!   consumer downstream of that step reads `Px` and needs no context.
+//! * [`Length::resolve_px`] folds a length **all the way to a number**, including
+//!   a `%` when the caller states its basis. That is a *use*-time operation: only
+//!   layout knows the containing block a percentage resolves against.
 
 use crate::property::LengthContext;
 use obscur_geometry::LogicalPx;
@@ -93,6 +103,34 @@ impl Length {
         matches!(self, Self::Ch(_))
     }
 
+    /// Folds this length's **absolutizable** units to [`Length::Px`], leaving
+    /// every other term symbolic (CSS Values 4 §5: the computed value of a
+    /// `<length>` is absolute).
+    ///
+    /// `em` / `rem` / `vw` / `vh` / `vmin` / `vmax` all resolve from numbers a
+    /// computed-value pass already holds, so they fold here and no downstream
+    /// consumer needs a [`LengthContext`] to read them. Three terms do not fold:
+    ///
+    /// * `Percent` resolves against a containing block that layout has not
+    ///   produced yet, so it stays a percentage. (`ctx.percent_basis` is ignored
+    ///   deliberately: a caller that knows the basis — `font-size: 150%` against
+    ///   the parent's size — folds it with [`resolve_px`](Self::resolve_px)
+    ///   instead, where the basis is a stated input rather than a silent one.)
+    /// * `Auto` has no numeric value at all.
+    /// * `Ch` folds **only** when `ctx` carries a measured `ch_width`. Without
+    ///   one, folding it here would bake in [`LengthContext::ch_base`]'s `0.5em`
+    ///   substitute and permanently mis-size the monospace column `ch` exists
+    ///   for; leaving it symbolic routes it to a consumer that *can* shape the
+    ///   `0` glyph.
+    #[must_use]
+    pub fn absolutize(self, ctx: &LengthContext) -> Self {
+        match self {
+            Self::Px(_) | Self::Percent(_) | Self::Auto => self,
+            Self::Ch(_) if ctx.ch_width.is_none() => self,
+            relative => relative.resolve_px(ctx).map_or(self, Self::px),
+        }
+    }
+
     /// Resolves this length to concrete logical pixels against `ctx`.
     ///
     /// * `Px` returns its value directly; the font- and viewport-relative units
@@ -146,6 +184,58 @@ mod tests {
         // font 16, root 20 (distinct so `em` vs `rem` cannot be confused),
         // viewport 800x600.
         LengthContext::new(16.0, 20.0, 800.0, 600.0)
+    }
+
+    #[test]
+    fn absolutize_folds_every_font_and_viewport_unit_to_px() {
+        let ctx = ctx();
+        assert_eq!(Length::Em(2.0).absolutize(&ctx), Length::px(32.0));
+        assert_eq!(Length::Rem(2.0).absolutize(&ctx), Length::px(40.0));
+        assert_eq!(Length::Vw(5.0).absolutize(&ctx), Length::px(40.0));
+        assert_eq!(Length::Vh(10.0).absolutize(&ctx), Length::px(60.0));
+        assert_eq!(Length::Vmin(10.0).absolutize(&ctx), Length::px(60.0));
+        assert_eq!(Length::Vmax(10.0).absolutize(&ctx), Length::px(80.0));
+    }
+
+    #[test]
+    fn absolutize_is_idempotent_and_leaves_px_alone() {
+        let ctx = ctx();
+        let once = Length::Em(2.0).absolutize(&ctx);
+        // An inherited computed value is absolutized again by the child's own
+        // pass; that second pass must not re-scale it against the child's `em`.
+        assert_eq!(once.absolutize(&ctx), once);
+        assert_eq!(Length::px(7.0).absolutize(&ctx), Length::px(7.0));
+    }
+
+    #[test]
+    fn absolutize_keeps_percent_and_auto_symbolic() {
+        // Neither has an absolute value at computed-value time: `%` needs the
+        // containing block, `auto` needs the used value.
+        let ctx = ctx();
+        assert_eq!(
+            Length::Percent(50.0).absolutize(&ctx),
+            Length::Percent(50.0)
+        );
+        assert_eq!(Length::Auto.absolutize(&ctx), Length::Auto);
+        // Even a KNOWN basis does not tempt it: folding `%` here would strip the
+        // symbol layout needs against a *different* basis.
+        let with_basis = ctx.with_percent_basis(200.0);
+        assert_eq!(
+            Length::Percent(50.0).absolutize(&with_basis),
+            Length::Percent(50.0)
+        );
+    }
+
+    #[test]
+    fn absolutize_folds_ch_only_when_the_zero_glyph_was_measured() {
+        // Unmeasured: staying symbolic keeps the 0.5em substitute out of the
+        // computed value, so a consumer that can shape still gets the real one.
+        assert_eq!(Length::Ch(20.0).absolutize(&ctx()), Length::Ch(20.0));
+        // Measured: it folds like any other font-relative unit.
+        assert_eq!(
+            Length::Ch(20.0).absolutize(&ctx().with_ch_width(9.6)),
+            Length::px(192.0)
+        );
     }
 
     #[test]

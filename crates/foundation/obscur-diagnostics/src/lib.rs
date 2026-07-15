@@ -14,7 +14,9 @@ pub use diagnostic::{
 pub use performance::{
     BudgetViolation, PerformanceBudget, PerformanceCounter, PerformanceSpan, SpanAttribution,
 };
-pub use port::{CollectingTelemetrySink, DiagnosticSink, NullTelemetrySink, TelemetrySink};
+pub use port::{
+    CollectingTelemetrySink, DiagnosticSink, NullDiagnosticSink, NullTelemetrySink, TelemetrySink,
+};
 pub use subscription::{
     ChannelSink, DiagnosticBufferPolicy, DiagnosticChannel, DiagnosticFilter,
     DiagnosticSubscription, OverflowStrategy, SubscriptionId,

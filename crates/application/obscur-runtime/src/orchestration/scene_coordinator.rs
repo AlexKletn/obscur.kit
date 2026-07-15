@@ -2893,10 +2893,11 @@ fn backdrop_blur_of(computed: &ComputedStyles, node: NodeId) -> Option<f32> {
 /// [`DrawShadow`](obscur_scene::command::PaintCommand::DrawShadow) over the border
 /// box `bounds` with corner `radii` (spec §5.2).
 ///
-/// The shadow's lengths are resolved to logical pixels (only absolute `px` is
-/// honored, mirroring [`border_width_of`]); its color falls back to `current` (the
-/// node's computed `color`, i.e. CSS `currentColor`) when the author omitted it.
-/// The renderer applies the offset / spread / blur when it rasterizes.
+/// The shadow's lengths are read as logical pixels (see [`border_width_of`] for
+/// why reading `px` here is sufficient, and for the two terms it is not); its
+/// color falls back to `current` (the node's computed `color`, i.e. CSS
+/// `currentColor`) when the author omitted it. The renderer applies the offset /
+/// spread / blur when it rasterizes.
 fn emit_box_shadow(
     builder: &mut DisplayListBuilder,
     bounds: Rect,
@@ -3406,9 +3407,18 @@ fn uniform_border_ring(bounds: Rect, radii: CornerRadii, width: f32) -> Path {
 /// Reads a node's computed `border-*-width` (`id`) in logical pixels, defaulting
 /// to `0.0` when absent or not an absolute pixel length.
 ///
-/// Only absolute `px` is honored here (mirroring [`font_size_of`]); a relative or
-/// percentage border width contributes no painted edge even though the layout
-/// phase resolves it into the box model — a documented limitation.
+/// Reading only `px` is correct rather than lossy: the computed value of a
+/// `<length>` is already absolute, because the style resolver absolutizes every
+/// length it produces (`em` / `rem` / `vw` / `vh` are folded there, once). This is
+/// what makes paint agree with layout about the same box — a `.1em` border used to
+/// reserve space here and paint nothing.
+///
+/// Two kinds of length still arrive un-absolutized, and both yield `0` — no
+/// painted edge:
+///
+/// * a **percentage** (`border-width` takes none, so this is unreachable for this
+///   property; it is reachable for the radius corners — see [`corner_radii_of`]);
+/// * a **`ch`**, which the resolver cannot fold without a shaper.
 fn border_width_of(computed: &ComputedStyles, node: NodeId, id: PropertyId) -> f32 {
     computed
         .get(&node)
@@ -3421,9 +3431,18 @@ fn border_width_of(computed: &ComputedStyles, node: NodeId, id: PropertyId) -> f
 /// Reads a node's four computed `border-*-radius` corner lengths into a
 /// [`CornerRadii`], in top-left / top-right / bottom-right / bottom-left order.
 ///
-/// Only absolute `px` is honored (mirroring [`border_width_of`]); an absent or
-/// non-pixel corner radius contributes `0` (a square corner), so a node with no
-/// authored radius yields all-zero radii — the pre-radius behaviour.
+/// Relative units are already folded by the resolver (see [`border_width_of`]), so
+/// `border-radius: .5em` rounds correctly. An absent radius contributes `0` (a
+/// square corner), so a node with no authored radius yields all-zero radii — the
+/// pre-radius behaviour.
+///
+/// **`border-radius: 50%` does not work.** A percentage radius resolves against
+/// the box itself (width for the horizontal radius, height for the vertical), so
+/// it cannot be absolutized at computed-value time — and this function reads the
+/// computed length without the `bounds` it would need to resolve it, yielding `0`
+/// (a square corner). The circle idiom therefore remains dead; closing it needs
+/// percentage resolution *here*, and a [`CornerRadii`] that can carry the two
+/// different radii per corner that a `%` on a non-square box produces.
 fn corner_radii_of(computed: &ComputedStyles, node: NodeId) -> CornerRadii {
     CornerRadii {
         top_left: border_width_of(computed, node, PropertyId::BorderTopLeftRadius),
@@ -3715,9 +3734,10 @@ fn text_color_of(computed: &ComputedStyles, node: NodeId) -> Color {
 /// [`DEFAULT_FONT_SIZE`] when absent or not an absolute pixel length.
 ///
 /// This mirrors the layout coordinator's font-size resolution so the scene draws
-/// each text run at the same size the layout phase measured its box with (only
-/// absolute `px` is honored here; relative `font-size` units are a later
-/// extension, matching layout).
+/// each text run at the same size the layout phase measured its box with. Reading
+/// only `px` is sufficient: the resolver computes `font-size` to an absolute pixel
+/// length before any other property (it is the base every `em` folds against), so
+/// `2rem` arrives here as `32px` rather than falling back to the default.
 fn font_size_of(computed: &ComputedStyles, node: NodeId) -> f32 {
     font_size_of_style(computed.get(&node))
 }

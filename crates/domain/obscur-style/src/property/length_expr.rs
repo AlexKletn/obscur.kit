@@ -3,9 +3,14 @@
 //! `calc()`, `min()`, `max()` and `clamp()` combine several length terms with
 //! arithmetic and folding rules (spec §4.13, "Supported"). Rather than evaluate
 //! them at parse time — when the font size and viewport are still unknown — the
-//! compiler lowers them into this symbolic tree, which is resolved to concrete
-//! logical pixels at the layout/compute step against a
-//! [`LengthContext`](crate::property::LengthContext) ("resolve at use time").
+//! compiler lowers them into this symbolic tree.
+//!
+//! The tree is then reduced in two steps against a
+//! [`LengthContext`](crate::property::LengthContext):
+//! [`LengthExpr::absolutize`] folds the font- and viewport-relative *leaves* at
+//! the computed-value step (`calc(50% - 2em)` computes to `calc(50% - 32px)`),
+//! and [`LengthExpr::resolve`] collapses the whole tree to a number once layout
+//! knows the percentage basis.
 //!
 //! The leaves are [`Length`] terms (`px` / `%` / `em` / `rem` / `vw` / `vh` /
 //! …), so an expression can freely mix absolute, font-relative and
@@ -64,6 +69,33 @@ impl LengthExpr {
             Self::Sum(a, b) | Self::Diff(a, b) => a.uses_ch() || b.uses_ch(),
             Self::Min(terms) | Self::Max(terms) => terms.iter().any(Self::uses_ch),
             Self::Clamp(a, b, c) => a.uses_ch() || b.uses_ch() || c.uses_ch(),
+        }
+    }
+
+    /// Absolutizes every leaf against `ctx`, keeping the expression's shape.
+    ///
+    /// This is [`Length::absolutize`] lifted over the tree: the font- and
+    /// viewport-relative leaves become `px` while `%`, `auto` and an unmeasured
+    /// `ch` stay symbolic, so `calc(50% - 2em)` computes to `calc(50% - 32px)`
+    /// exactly as CSS specifies. The tree is *not* folded to a single number —
+    /// that needs the percentage basis, which only layout has.
+    #[must_use]
+    pub fn absolutize(&self, ctx: &LengthContext) -> Self {
+        match self {
+            Self::Leaf(length) => Self::Leaf(length.absolutize(ctx)),
+            Self::Sum(a, b) => Self::Sum(Box::new(a.absolutize(ctx)), Box::new(b.absolutize(ctx))),
+            Self::Diff(a, b) => {
+                Self::Diff(Box::new(a.absolutize(ctx)), Box::new(b.absolutize(ctx)))
+            }
+            Self::Product(a, n) => Self::Product(Box::new(a.absolutize(ctx)), *n),
+            Self::Quotient(a, n) => Self::Quotient(Box::new(a.absolutize(ctx)), *n),
+            Self::Min(args) => Self::Min(args.iter().map(|a| a.absolutize(ctx)).collect()),
+            Self::Max(args) => Self::Max(args.iter().map(|a| a.absolutize(ctx)).collect()),
+            Self::Clamp(min, val, max) => Self::Clamp(
+                Box::new(min.absolutize(ctx)),
+                Box::new(val.absolutize(ctx)),
+                Box::new(max.absolutize(ctx)),
+            ),
         }
     }
 
@@ -153,6 +185,45 @@ mod tests {
             ])),
         );
         assert!(!expr.uses_ch());
+    }
+
+    #[test]
+    fn absolutize_folds_relative_leaves_and_keeps_the_shape() {
+        // calc(50% - 2em) computes to calc(50% - 32px): the `em` is gone, the
+        // `%` survives for layout to resolve against the containing block.
+        let expr = LengthExpr::Diff(
+            Box::new(LengthExpr::leaf(Length::Percent(50.0))),
+            Box::new(LengthExpr::leaf(Length::Em(2.0))),
+        );
+        assert_eq!(
+            expr.absolutize(&ctx()),
+            LengthExpr::Diff(
+                Box::new(LengthExpr::leaf(Length::Percent(50.0))),
+                Box::new(LengthExpr::leaf(Length::px(32.0))),
+            )
+        );
+    }
+
+    #[test]
+    fn absolutize_reaches_every_leaf_of_the_tree() {
+        let deep = LengthExpr::Clamp(
+            Box::new(LengthExpr::leaf(Length::Rem(1.0))),
+            Box::new(LengthExpr::Min(vec![
+                LengthExpr::Product(Box::new(LengthExpr::leaf(Length::Em(1.0))), 2.0),
+                LengthExpr::Quotient(Box::new(LengthExpr::leaf(Length::Vw(50.0))), 2.0),
+            ])),
+            Box::new(LengthExpr::Sum(
+                Box::new(LengthExpr::leaf(Length::Vh(10.0))),
+                Box::new(LengthExpr::Max(vec![LengthExpr::leaf(Length::Vmin(10.0))])),
+            )),
+        );
+        // Root 20, font 16, viewport 800x600 -> clamp(20px, min(32px, 400px/2),
+        // 60px + max(60px)); every leaf is now `px`, so resolving needs no bases.
+        let absolute = deep.absolutize(&ctx());
+        assert_eq!(
+            absolute.resolve(&LengthContext::new(0.0, 0.0, 0.0, 0.0)),
+            deep.resolve(&ctx())
+        );
     }
 
     #[test]

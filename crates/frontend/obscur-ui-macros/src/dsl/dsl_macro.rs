@@ -26,12 +26,12 @@
 //!
 //! - Binding/handler paths are normalised to a dotted, space-free string:
 //!   `{user.name}` becomes the path `"user.name"` (not `"user . name"`).
-//! - Interpolated `{expr}` children lower to a
-//!   [`text`](::obscur_ui_ir::document::UiIrNode::text) node whose *content* is
-//!   the binding path (or stringified expression), because `UiIrNode::text`
-//!   only accepts literal content — the expression cannot be carried as a live
-//!   binding on a text node. Callers needing a dynamic text binding should bind
-//!   a property on an enclosing element instead.
+//! - Interpolated `{expr}` children lower to an
+//!   [`interpolation`](::obscur_ui_ir::document::UiIrNode::interpolation) node
+//!   carrying the expression — the *same* node the `.okui` file lowering builds,
+//!   so `ViewCodegen` emits the same text node from either front end. They used
+//!   to disagree: this one built a literal text node holding the path's spelling,
+//!   so `<div>{user.name}</div>` rendered the characters `user.name`.
 //! - A lone top-level element is emitted as the document root directly; any
 //!   other top level (multiple siblings, or a single text/interpolation node)
 //!   is wrapped in a [`fragment`](::obscur_ui_ir::document::UiIrNode::fragment)
@@ -135,8 +135,9 @@ fn is_loop_tag(tag: &str) -> bool {
 /// ids (root = 0, incrementing).
 fn build_node(node: &DslNode, counter: &mut u64) -> UiIrNode {
     match node {
-        DslNode::Text(content) | DslNode::Interpolation(content) => {
-            UiIrNode::text(take_id(counter), content.as_str())
+        DslNode::Text(content) => UiIrNode::text(take_id(counter), content.as_str()),
+        DslNode::Interpolation(value) => {
+            UiIrNode::interpolation(take_id(counter), build_expression(value))
         }
         DslNode::Element(element) => {
             let id = take_id(counter);
@@ -210,9 +211,9 @@ enum DslNode {
     Element(DslElement),
     /// A bare string literal child, lowered to a literal text node.
     Text(String),
-    /// A `{expr}` interpolation child, lowered to a text node carrying the
-    /// binding path (see the module docs for the limitation).
-    Interpolation(String),
+    /// A `{expr}` interpolation child, holding the resolved expression the
+    /// interpolation node carries.
+    Interpolation(PropValue),
 }
 
 /// A parsed element (or component instance) with its attributes and children.
@@ -273,7 +274,11 @@ impl Parse for DslNode {
             let content;
             braced!(content in input);
             let expr: Expr = content.parse()?;
-            Ok(Self::Interpolation(binding_or_string(&expr)))
+            // Through `classify_prop_value`, so a body `{expr}` faces §2.10's
+            // allow-list exactly as an attribute's does. It never did before,
+            // because it never evaluated: it was carried as text. Now it becomes
+            // real Rust, and a binding that evaluates must be one that was checked.
+            Ok(Self::Interpolation(classify_prop_value(&expr)?))
         } else {
             Err(input.error("expected an element `<..>`, a string literal, or `{ expr }`"))
         }
@@ -562,17 +567,51 @@ mod tests {
     }
 
     #[test]
-    fn text_and_interpolation_children_lower_to_text_nodes() {
+    fn a_string_literal_child_lowers_to_a_text_node() {
         let document = doc(quote! { <div>"hi"</div> });
         let child = &document.root().children()[0];
         assert_eq!(child.kind(), UiIrNodeKind::Text);
         assert_eq!(child.content(), "hi");
         assert_eq!(child.id(), 1);
+    }
 
-        // An interpolation carries its binding PATH as literal content (see the
-        // module docs: `UiIrNode::text` cannot hold a live binding).
+    #[test]
+    fn an_interpolation_child_carries_a_live_binding_not_its_spelling() {
+        // Inverted. This test used to assert `content() == "user.name"` — the
+        // *spelling* of the path as literal text — and it was the clearest
+        // statement of the bug: the assertion said the document renders its own
+        // source code. An interpolation now carries the expression, exactly as an
+        // attribute binding does, and `ViewCodegen` emits it as a text node's
+        // content.
         let document = doc(quote! { <div>{user.name}</div> });
-        assert_eq!(document.root().children()[0].content(), "user.name");
+        let child = &document.root().children()[0];
+        assert_eq!(
+            child.interpolated_value(),
+            Some(&UiIrExpression::Binding("user.name".into()))
+        );
+        assert_eq!(child.content(), "", "no literal content survives");
+    }
+
+    #[test]
+    fn a_literal_interpolation_child_stays_a_literal() {
+        let document = doc(quote! { <div>{5}</div> });
+        assert_eq!(
+            document.root().children()[0].interpolated_value(),
+            Some(&UiIrExpression::Literal(UiIrValue::Int(5)))
+        );
+    }
+
+    #[test]
+    fn an_interpolation_faces_the_same_restrictions_as_an_attribute() {
+        // §2.10 is an allow-list, and a body `{expr}` is now emitted as real Rust,
+        // so it must be checked like any other binding. It was not, while it was
+        // inert.
+        let error = DslMacro::to_document(quote! { <div>{std::fs::read(p)}</div> })
+            .expect_err("a call is outside §2.10's allow-list");
+        assert!(
+            error.to_string().contains("2.10"),
+            "the §2.10 rule reports: {error}"
+        );
     }
 
     #[test]

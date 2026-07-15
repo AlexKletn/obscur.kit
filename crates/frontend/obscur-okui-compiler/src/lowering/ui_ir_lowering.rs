@@ -306,13 +306,13 @@ impl UiIrLowering {
         Ok(node)
     }
 
-    /// Represents an `{expr}` interpolation as a synthetic `Expression` element
-    /// node whose `value` property holds the lowered expression.
+    /// Lowers an `{expr}` interpolation to the IR's
+    /// [interpolation node](UiIrNode::interpolation), carrying the expression
+    /// itself — `ViewCodegen` emits it as the text node's content.
     fn lower_interpolation(&mut self, node: &SyntaxNode, expression: &Expression) -> UiIrNode {
         let id = self.alloc_id();
         self.source_map.record(id, node.offset().unwrap_or(0));
-        UiIrNode::element(id, "Expression")
-            .with_property(UiIrProperty::new("value", self.expr.lower(expression)))
+        UiIrNode::interpolation(id, self.expr.lower(expression))
     }
 }
 
@@ -434,13 +434,11 @@ mod tests {
     }
 
     #[test]
-    fn interpolation_becomes_expression_node() {
+    fn interpolation_becomes_an_interpolation_node() {
         let doc = lower("<T>{count}</T>").expect("lowers");
         let child = &doc.root().children()[0];
-        assert_eq!(child.kind(), UiIrNodeKind::Element);
-        assert_eq!(child.tag(), "Expression");
         assert_eq!(
-            child.property("value"),
+            child.interpolated_value(),
             Some(&UiIrExpression::binding("count"))
         );
     }

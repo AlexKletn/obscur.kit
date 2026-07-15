@@ -37,6 +37,14 @@ impl UiIrNodeKind {
     }
 }
 
+/// The tag of the synthetic element a body `{expr}` lowers to. Private: the
+/// convention is [`UiIrNode::interpolation`]/[`UiIrNode::interpolated_value`],
+/// not a string anyone may match on.
+const INTERPOLATION_TAG: &str = "Expression";
+
+/// The property of that element holding the interpolated expression.
+const INTERPOLATION_VALUE: &str = "value";
+
 /// One node of the UI IR tree, carrying a compiler-assigned stable id
 /// (spec §2.5).
 ///
@@ -103,6 +111,39 @@ impl UiIrNode {
     #[must_use]
     pub fn conditional(id: u64, tag: impl Into<Box<str>>) -> Self {
         Self::bare(id, UiIrNodeKind::Conditional, tag.into(), Box::from(""))
+    }
+
+    /// Creates the node a body `{expr}` interpolation lowers to: a synthetic
+    /// element carrying `value` — the interpolated expression (spec §2.8).
+    ///
+    /// A [`Text`](UiIrNodeKind::Text) node holds literal content only, so an
+    /// interpolation cannot be one: its content is an expression, and only a
+    /// property can carry an expression. Hence a node of its own, paired with
+    /// [`interpolated_value`](Self::interpolated_value) — the constructor and the
+    /// reader of the same private convention, so the two front ends and the
+    /// emitter cannot disagree on the tag by spelling it separately.
+    #[must_use]
+    pub fn interpolation(id: u64, value: UiIrExpression) -> Self {
+        Self::bare(
+            id,
+            UiIrNodeKind::Element,
+            Box::from(INTERPOLATION_TAG),
+            Box::from(""),
+        )
+        .with_property(UiIrProperty::new(INTERPOLATION_VALUE, value))
+    }
+
+    /// Returns the interpolated expression when this node is an
+    /// [`interpolation`](Self::interpolation), else `None`.
+    ///
+    /// An authored `<Expression/>` is a [`Component`](UiIrNodeKind::Component) —
+    /// both front ends classify an uppercase tag that way — so it never answers
+    /// here, and no document can spell its way into being an interpolation.
+    #[must_use]
+    pub fn interpolated_value(&self) -> Option<&UiIrExpression> {
+        (self.kind == UiIrNodeKind::Element && &*self.tag == INTERPOLATION_TAG)
+            .then(|| self.property(INTERPOLATION_VALUE))
+            .flatten()
     }
 
     /// Builds a node with empty property/event/child collections and no key.

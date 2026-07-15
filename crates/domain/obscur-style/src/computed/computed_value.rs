@@ -95,6 +95,17 @@ impl ComputedValue {
         Self(PropertyValue::Number(value))
     }
 
+    /// Returns this value with its wrapped [`PropertyValue`] rewritten by `f`.
+    ///
+    /// Crate-internal, because the concreteness invariant now rides on `f`
+    /// instead of on [`from_concrete`](Self::from_concrete)'s check. The only
+    /// caller is the computed-value absolutization pass, whose rewrite is
+    /// length-for-length — it can turn `2em` into `32px`, and cannot turn
+    /// anything into a CSS-wide keyword or a `var()` reference.
+    pub(super) fn map_value(self, f: impl FnOnce(PropertyValue) -> PropertyValue) -> Self {
+        Self(f(self.0))
+    }
+
     /// Constructs a computed keyword value from its interned symbol.
     #[must_use]
     pub const fn keyword(symbol: InternedSymbol) -> Self {

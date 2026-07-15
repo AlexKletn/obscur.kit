@@ -141,7 +141,7 @@ impl PipelineSnapshot {
         let tree_snapshot = tree.snapshot();
 
         let style = StyleCoordinator::new();
-        let computed = style.resolve(tree, inputs);
+        let computed = style.resolve(tree, inputs, viewport);
 
         // The scene coordinator owns the paragraph orchestrator; build it first so
         // the layout pass shapes and wraps text leaves through the same

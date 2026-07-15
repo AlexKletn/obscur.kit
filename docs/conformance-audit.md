@@ -63,11 +63,15 @@ Three defects the audit found in work from the immediately preceding campaign. A
 
 ### §1 — the dynamic architecture has no execution path
 
-**1-A. A component render failure keeps stale UI and is reported on no channel.**
-`ui_runtime.rs:1393` — `let Ok(view) = mounted.render(..) else { errors += 1; continue; }`. That `continue` is the whole of §1.7. The subtree keeps rendering its *previous frame's output*; the boundary policy is never consulted (`error_boundary_erased()` has zero callers); no `Diagnostic` is constructed; `ErrorBoundaryPolicy::disabled()` is indistinguishable from enabled. The complete vocabulary — `ErrorBoundary`, `ComponentFailure`, `ComponentRecovery`, `SubsystemRecovery`, `RecoveryAction::{Fallback,Retried,BoundaryReplaced}` — is unreachable from a running frame. **Worse than unimplemented: the frame reports success while the UI is silently wrong.**
+**1-A. A component render failure keeps stale UI and is reported on no channel.** — **fixed for component renders.**
+Was: `let Ok(view) = mounted.render(..) else { errors += 1; continue; }`, and that `continue` was the whole of §1.7. Now `MountedComponent` owns an `ErrorBoundary` built from the author's `error_boundary()` and a new `Component::fallback()`, and `render` returns `GuardedRender` — the boundary's decision, taken via `ComponentRecovery`, never a raw `Result`. `render_components` enacts it: a retry leaves the subtree and schedules the frame that spends the budget, an exhausted budget commits the fallback *over* the subtree, and a disabled boundary propagates to the nearest enclosing enabled one, whose subtree is replaced instead. `ErrorBoundaryPolicy::disabled()` now differs from enabled on every axis.
 
-**1-B. No production code in this workspace ever constructs a `Diagnostic`.**
-`Diagnostic` carries exactly the five §1.6 fields and is built zero times outside tests. `DiagnosticSink` has one impl, in its own crate, with no consumers. §1.6's diagnostics contract describes a struct definition, not behaviour.
+Still open, and deliberately: two paths still leave the last output standing. A **retry** does for the frames the budget buys (that is what a retry *is*), and a **propagated failure with no enclosing enabled boundary** does indefinitely — every boundary that could have answered was disabled. Both are reported; neither is silent. `SubsystemRecovery` remains uncalled, so §1.7's "layout, renderer and resource failures use subsystem-specific recovery boundaries" is still unbuilt.
+
+**1-B. No production code in this workspace ever constructs a `Diagnostic`.** — **fixed for this path only.**
+`MountedComponent::contain` builds one (via `ComponentFailure`) under a stable `view.component.props` code, and `UiRuntime::report_failure` stamps the two §1.6 fields only the runtime knows — the node it concerns and the `RecoveryAction` actually taken — before emitting to a `DiagnosticSink` installed by `set_diagnostic_sink`. A test drives it through the shipped `ChannelSink`/`DiagnosticChannel` to a filtered subscriber, so the §7.8 subscription path is exercised end-to-end rather than asserted. The default is a `NullDiagnosticSink`, so the failure path does not branch on whether anyone listens.
+
+This is the *only* producer. Every other subsystem still reports through its own path (a `BudgetViolation`, a `Result`, a last-good value); routing those through the sink is separate work.
 
 **1-C. The kit cannot create a window (§1.4 R8).**
 `obscur-runtime` does not depend on `obscur-windowing`. `WinitWindowBackend` (526 lines) has zero consumers; the one example that opens a window says in prose that it does not use it (`windowed_counter.rs:22-25`). Overlay mode (R10) has no representation.
@@ -76,7 +80,10 @@ Three defects the audit found in work from the immediately preceding campaign. A
 
 **2-A. §2.13 is unenforced where it matters.** Three compounding gaps: the `okui!` macro — self-declared "the spec's *primary* authoring surface" — runs **no** contract validation; the `.okui` path skips any tag with no registered contract; and `register_surface` is called only from a test, so no user component's contract can be checked. "Unknown attributes… are compile errors" holds only for the 20 hard-coded built-in tags, and only on the file path.
 
-**2-B. Dynamic text bindings are silently wrong on both front ends.** `okui! { <div>{user.name}</div> }` renders the literal text **`"user.name"`** (`dsl_macro.rs:138`), and a test at `:551` *asserts the bug*. The `.okui` path renders an empty box. This is the exact defect commit `d1a11bc` claims to have removed — it was fixed for attributes and left live for text, the more common case. The test file is titled "bindings carry values" and every binding test it contains is an **attribute**.
+**2-B. Dynamic text bindings are silently wrong on both front ends.** ~~`okui! { <div>{user.name}</div> }` renders the literal text **`"user.name"`** (`dsl_macro.rs:138`), and a test at `:551` *asserts the bug*. The `.okui` path renders an empty box.~~ **Closed on the codegen path, which is both front ends' production path.** They now build one `UiIrNode::interpolation` carrying the expression, and `ViewCodegen` emits `ViewNode::text(ToString::to_string(&(user.name)))` — the same "a binding is a Rust path" design `d1a11bc` gave attributes. The test that asserted the bug is inverted; `okui_text_binding.rs` proves the value renders, through the real macro with real locals. Two things stay open, neither introduced by that fix:
+
+- `document_to_view_fn` emits a *nullary* `pub fn <name>() -> View`, so a compiled file's bindings can only name what the generated module has around it. A file whose bindings read per-call state does not compile — the function has no parameters to read it from — and giving it them needs a props-signature decision nothing makes yet. This has bounded every `.okui` file binding since `d1a11bc`; text is not special.
+- `UiIrViewBridge`, the *interpreter*, still renders an interpolation as an unknown element (an empty box) and still lowers an attribute binding to its path's spelling. It cannot do better by construction — there is no Rust scope to resolve a path in at runtime — and it has no production consumer (tests plus `showcase_okui_png`). A binding is a compile-time construct here; the bridge is the artifact of that.
 
 **2-C. §2.12 is unimplemented below the type layer.** `ViewNode` does not model slots (one anonymous `children`); `SyntaxKind` has no slot node; `SlotContract`/`SlotCardinality`/`StylePartContract` have zero production consumers; `Template::slot_names()` and `SymbolKind::Slot` are dead. Nothing parses, validates or routes a slot.
 
@@ -160,8 +167,8 @@ Now the builder derives all three from the same attributes the CSS matcher reads
 - **§3.4 steps 9/11/12/13 are absent** — post-layout motion, render graph (`RenderCoordinator` is an empty stub), submit/present (host's), post-frame notifications (zero occurrences).
 - **§3.3 provides 1 of 5 async facilities.** `TaskScope` claims component/window/runtime scoping while only `Runtime` is ever constructed.
 - **§3.5/§3.6: backpressure and stale-skip are unreachable and wrong when reached.** `BackpressurePolicy::bounded(n)` **does not bound** (at capacity `decide` returns `DropStale` and `request` pushes anyway); the runtime uses `unbounded()` regardless. Deadlines have zero consumers. `SchedulerPriority::Background` is unreachable from `from_reason`.
-- **§4.3/§4.12: `StylesheetCache` has zero production consumers** — including the live-CSS-reload demos, which are exactly its workload. §4.2's `LayoutContext`/`LayoutDependency`/`LayoutContainment`/`LayoutCache`/`PropagationResult` likewise.
-- **§4.17's CSS→motion bridge exists only inside an integration test.** `set_css_motion`/`CssMotionRules::from_parts` have no production caller ⇒ **every shipped example that renders CSS is motionless**.
+- **§4.3/§4.12: ~~`StylesheetCache` has zero production consumers~~** — closed: the facade's `bootstrap::CssPipeline` owns one and parses every source through it, so any host installing CSS through the kit gets §4.12 caching. Proven by `tests/css_motion.rs`, which observes a stale-revision hit returning the *old* rules (a re-parsing pipeline lays out the new text). **Still open:** the cache is only reachable via `CssPipeline` — a host that hand-rolls `StylesheetParser` still re-parses, and no shipped demo yet reloads CSS from disk, so the live-reload workload is served in principle, not exercised. §4.2's `LayoutContext`/`LayoutDependency`/`LayoutContainment`/`LayoutCache`/`PropagationResult` remain wholly unwired.
+- **§4.17's ~~CSS→motion bridge exists only inside an integration test~~** — closed: `bootstrap::CssPipeline::install` is the production caller, installing the matchable rules **and** `set_css_motion` together so motion cannot be dropped by forgetting half the wiring. `examples/css_motion_proof.rs` rasterizes a `transition` and an `@keyframes` moving across five frames. **Still open:** `CssPipeline` targets `UiRuntime`; `HeadlessHost` has no motion path of its own, so `counter_headless` (which authors `@keyframes pulse`) stays motionless, and the ~30 existing examples that hand-compile a `Stylesheet` were not migrated — they remain motionless until they adopt the pipeline.
 - **§5.4 `RenderHost`/`OverlayHost` are entirely absent** — zero occurrences of the spec-named types.
 - **§5.10's `LineBreaker` port cannot be swapped** — `DefaultLineBreaker` is a hardcoded local in two files; there is no setter. Whitespace + CJK pairs is not UAX #14.
 - **Real text adapters exist but are not the default, and the facade won't install them.** `KitBootstrap` *builds* `HarfrustShaper`/`FontRegistry`/`UnicodeTextItemizer` and hands them back; there is no installer (contrast `install_vector_resources`, which does install). ~25 examples hand-wire the identical stack.
@@ -211,10 +218,10 @@ Now the builder derives all three from the same attributes the CSS matcher reads
 1. **§4-A** — one absolutization pass at computed-value time retires ~8 silently-wrong rows and fixes the layout/paint disagreement.
 2. **§4-B, §4-C** — both **fail open**; the two most dangerous entries here.
 3. **§7-A** — the a11y tree has the data and publishes the opposite; small fix, real users.
-4. **§1-A/§1-B** — a component failure should not produce stale UI and total silence.
+4. **§1-A/§1-B** — ~~a component failure should not produce stale UI and total silence~~ (done for component renders: `MountedComponent::render` goes through its `ErrorBoundary`, and `UiRuntime::set_diagnostic_sink` carries the `Diagnostic` to a real subscriber). Still open: `SubsystemRecovery` has no callers, so layout/style/renderer/resource failures neither consult a boundary nor report here.
 5. **§5-B** — ~~plumb `FontRegistry`'s real metrics to `line_metrics_for`~~ (done), and give `KitBootstrap` an installer (still open — 27 examples hand-wire the stack).
 6. **§6-B** — return `emulated()`/`conditional()`/`Unsupported` instead of `native()` for work not done.
-7. **Wire what is already built and tested** — `StylesheetCache`, the CSS→motion bridge, `PipelineSnapshot` into `HeadlessHost`, `serve_with_events`.
+7. **Wire what is already built and tested** — ~~`StylesheetCache`, the CSS→motion bridge~~ (both done: `bootstrap::CssPipeline` is the one production caller of each, and `examples/css_motion_proof.rs` proves CSS motion moves in a raster). Still open: `PipelineSnapshot` into `HeadlessHost`, `serve_with_events`.
 8. **Ban `Plugin → render/scene/tree` in xtask** while it costs one line.
 
 ## Test-suite note
@@ -223,6 +230,6 @@ The tests are mostly good and mostly non-vacuous — they test units that nothin
 
 - `headless_host.rs:321-336` — two tests that pass with the entire frame pipeline deleted.
 - `ui_runtime.rs:6925` — comment claims the violation "flows into the diagnostics channel"; the test calls `to_diagnostic()` itself and asserts a pure function's return.
-- `dsl_macro.rs:551` — asserts the `{user.name}` → `"user.name"` bug as intended behaviour.
+- ~~`dsl_macro.rs:551` — asserts the `{user.name}` → `"user.name"` bug as intended behaviour.~~ Inverted with 2-B: it now asserts the interpolation carries a live binding.
 - `frame_plan.rs:274-303` — tests `InvalidateStyle`/`InvalidateLayout` plans, which no production caller can construct.
 - Contract/slot tests (`slot_contract.rs`, `style_part_contract.rs`, …) — would pass unchanged if the feature were deleted from every consumer, because there are none.

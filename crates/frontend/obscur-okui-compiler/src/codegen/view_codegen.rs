@@ -39,16 +39,32 @@
 //!
 //! `{open}` in a `.okui` document emits the Rust expression `open`, verbatim.
 //! There is no evaluator here and there does not need to be one: the emitted code
-//! lands in a scope — the caller's, for the inline `okui!` macro; the generated
-//! function's parameters, for a compiled file — and **Rust resolves it**. A path
-//! that names nothing is a Rust compile error, in the caller's build, pointing at
-//! the caller's code. A field whose type cannot become a
-//! [`ViewValue`](obscur_view::view::ViewValue) is the same. That is the whole
-//! type system of the expression language, borrowed rather than rebuilt.
+//! lands in a scope and **Rust resolves it**. A path that names nothing is a Rust
+//! compile error, in the caller's build, pointing at the caller's code. A field
+//! whose type cannot become a [`ViewValue`](obscur_view::view::ViewValue) — or,
+//! for a body `{expr}`, cannot `Display` — is the same. That is the whole type
+//! system of the expression language, borrowed rather than rebuilt.
+//!
+//! This holds in `<div>{user.name}</div>` too, and that took a second commit: the
+//! body case kept emitting the path's *spelling* as literal text long after the
+//! attribute case stopped. See [`emit_text_content`].
 //!
 //! This is also what makes §2.10's restrictions meaningful rather than
-//! decorative: the deny-list polices what may appear in a path that is about to
+//! decorative: the allow-list polices what may appear in a path that is about to
 //! become real Rust.
+//!
+//! # Which scope, and the gap for a compiled file
+//!
+//! For the inline `okui!` macro the scope is the **caller's**, and a binding reads
+//! the caller's locals — that is the path the tests exercise end to end. For a
+//! compiled file, [`document_to_view_fn`](ViewCodegen::document_to_view_fn) emits
+//! a **nullary** `pub fn <name>() -> View`, so the only scope a binding can
+//! resolve in is whatever the generated module has around it (a `const`, a
+//! `static`, an import). A file whose bindings read per-call state does not
+//! compile — the function has no parameters to read it from — and giving it them
+//! needs a decision about the props signature that nothing here makes yet. The
+//! emitted expression is right on both front ends; only the file front end's
+//! function shape limits what a binding can name.
 //!
 //! # Conditionals are real conditionals
 //!
@@ -342,24 +358,79 @@ fn emit_condition(expression: &UiIrExpression) -> String {
 /// Appends the statement pushing the single `ViewNode` `node` lowers to.
 ///
 /// A transparent fragment and a (still-spliced) loop push their children instead
-/// of a node of their own.
+/// of a node of their own. An [interpolation](UiIrNode::interpolation) pushes a
+/// **text** node — it is a body `{expr}`, and its content is the expression.
 fn emit_node(node: &UiIrNode, out: &mut String, indent: usize, key: Option<&UiIrExpression>) {
+    if let Some(value) = node.interpolated_value() {
+        emit_text(node, out, indent, key, &emit_text_content(value));
+        return;
+    }
     match node.kind() {
         UiIrNodeKind::Text => {
-            let pad = indentation(indent);
             let content = string_literal(node.content());
-            let _ = write!(
-                out,
-                "{pad}__nodes.push(::obscur_view::view::ViewNode::text({content})"
-            );
-            emit_key(node, out, key);
-            out.push_str(");\n");
+            emit_text(node, out, indent, key, &content);
         }
         UiIrNodeKind::Element | UiIrNodeKind::Component => emit_element(node, out, indent, key),
         UiIrNodeKind::Loop => emit_loop(node, out, indent),
         UiIrNodeKind::Fragment | UiIrNodeKind::Conditional => {
             let children: Vec<&UiIrNode> = node.children().iter().collect();
             emit_into(&children, out, indent, key);
+        }
+    }
+}
+
+/// Appends the statement pushing a `ViewNode::text` whose content is the
+/// already-emitted Rust expression `content`.
+fn emit_text(
+    node: &UiIrNode,
+    out: &mut String,
+    indent: usize,
+    key: Option<&UiIrExpression>,
+    content: &str,
+) {
+    let pad = indentation(indent);
+    let _ = write!(
+        out,
+        "{pad}__nodes.push(::obscur_view::view::ViewNode::text({content})"
+    );
+    emit_key(node, out, key);
+    out.push_str(");\n");
+}
+
+/// Emits the Rust expression for a text node's content.
+///
+/// A binding is its **Rust path**, displayed: `<div>{user.name}</div>` becomes
+/// `ViewNode::text(ToString::to_string(&(user.name)))`. It used to emit the path
+/// as a string *literal*, so `{user.name}` rendered the nine characters
+/// `user.name` — the document showing its own source. That was fixed for
+/// attributes and left live here, on the more common case.
+///
+/// `Display` is the bound, where [`emit_value`] uses `Into<ViewValue>`, because
+/// text content is a string and a body `{count}` must render `7` rather than fail
+/// to compile. A type with no `Display` is **rustc's** error in the caller's
+/// build — the same borrowed type system every other binding leans on. (The
+/// emitted tokens are re-parsed from text, so that error lands on the whole
+/// `okui!` invocation, not on the offending expression; only the §2.10 check,
+/// which runs on the parsed input, is spanned that precisely.) Displaying by
+/// reference, so reading a field for text never moves the caller's data.
+///
+/// The path is parenthesised because a "path" is only mostly a path: both front
+/// ends fall back to a binding on the raw text for anything they do not classify
+/// as a literal, so `{a + b}` arrives here as the binding `a + b`, and
+/// `&a + b` is not what the author wrote.
+///
+/// A call emits the empty string for the reason [`emit_value`] emits `Null`:
+/// §2.10 allows only "explicitly exported pure functions", and nothing yet decides
+/// which those are.
+fn emit_text_content(expression: &UiIrExpression) -> String {
+    match expression {
+        UiIrExpression::Binding(path) => format!("::std::string::ToString::to_string(&({path}))"),
+        UiIrExpression::Literal(UiIrValue::Text(text)) => string_literal(text),
+        UiIrExpression::Literal(UiIrValue::Bool(flag)) => string_literal(&flag.to_string()),
+        UiIrExpression::Literal(UiIrValue::Int(number)) => string_literal(&number.to_string()),
+        UiIrExpression::Literal(UiIrValue::Float(number)) => string_literal(&number.to_string()),
+        UiIrExpression::Literal(UiIrValue::Null) | UiIrExpression::Call { .. } => {
+            string_literal("")
         }
     }
 }
