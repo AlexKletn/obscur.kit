@@ -31,7 +31,9 @@ use obscur_scene::color::AlphaMode;
 use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::paint::SceneImage;
 use obscur_scene::scene::{Scene, SceneSnapshot};
+use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_style::computed::{ComputedStyle, ComputedValue};
+use obscur_style::invalidation::StyleInvalidation;
 use obscur_style::matching::{MediaEnvironment, Stylesheet};
 use obscur_style::property::{Length, PropertyId, PropertyValue};
 use obscur_style::selector::{PseudoState, SelectorMatcher};
@@ -50,6 +52,7 @@ use super::{
     FrameBudget, FramePlan, KeyDispatch, PointerDispatch, SemanticTreeBuilder, TextEditSession,
 };
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
+use crate::invalidation::{Invalidation, InvalidationReason, InvalidationRouter};
 use crate::orchestration::{
     overflow_scrolls, root_font_size, scroll_containers, AnimatedKind, AnimationBinding, ComputedStyles,
     overlay_commands, CssMotionRules, EditingView, InspectInfo, LayoutBoxes, LayoutCoordinator,
@@ -158,6 +161,9 @@ pub struct UiRuntime {
     /// The nodes currently under the pointer, topmost-first (hover target at
     /// index `0`).
     hover: HoverChain,
+    /// The non-style inputs the retained boxes were last arranged under (see
+    /// [`LayoutInputs`]). `None` until the first layout runs.
+    last_layout_inputs: Option<LayoutInputs>,
     /// Whether the in-window inspect overlay is active (spec §7.6). When set, a
     /// composed frame appends a highlight over the hovered node's border box so a
     /// developer can debug the running UI directly in the window.
@@ -462,6 +468,7 @@ impl UiRuntime {
             computed: ComputedStyles::new(),
             spatial: SpatialIndex::new(),
             hover: HoverChain::new(),
+            last_layout_inputs: None,
             inspect_mode: false,
             focused: None,
             press_target: None,
@@ -1182,7 +1189,13 @@ impl UiRuntime {
         //    The document root's `font-size` supplies the `rem` base; the
         //    viewport supplies `vw`/`vh` (spec §4.5). When skipped, the retained
         //    boxes and hit-test index carry over unchanged.
-        let relaid_out = if plan.layout() {
+        //
+        //    The plan's flag is a conservative upper bound derived from the frame
+        //    REASON; now that the real computed styles exist, refine it with what
+        //    ACTUALLY changed (spec §3.4 phase 5, §4.3) — a hover that only
+        //    shifts a fill reuses every retained box.
+        let layout_needed = self.layout_is_needed(plan, &ctx, first_frame, &computed);
+        let relaid_out = if layout_needed {
             let root_font = root_font_size(&computed, self.tree.root());
             let mut layout_styles = self
                 .layout
@@ -1239,6 +1252,10 @@ impl UiRuntime {
             );
             let relaid_out = !boxes.is_empty();
             self.boxes = boxes;
+            // Remember the non-style inputs these boxes were arranged under, so a
+            // later frame can only reuse them while the viewport and the sticky
+            // scroll offset are unchanged.
+            self.last_layout_inputs = Some(self.current_layout_inputs(&ctx));
             // Rebuild the hit-test index from the freshly laid-out boxes so the
             // next pointer event tests against this frame's geometry.
             self.rebuild_spatial_index();
@@ -3388,6 +3405,91 @@ impl UiRuntime {
         Some(InspectInfo { node, component, local_name, id, classes, bounds })
     }
 
+    /// Snapshots the non-style inputs the layout phase reads (see
+    /// [`LayoutInputs`]), so a later frame can tell whether the retained boxes
+    /// are still valid.
+    fn current_layout_inputs(&self, ctx: &FrameContext) -> LayoutInputs {
+        LayoutInputs {
+            viewport: ctx.viewport(),
+            scroll: self.viewport_scroll,
+            editing: self.editing_view().map(|view| {
+                (
+                    view.node,
+                    view.text.to_owned(),
+                    view.preedit.map(|preedit| preedit.text.to_owned()),
+                )
+            }),
+        }
+    }
+
+    /// Refines the plan's conservative layout flag with the **actual** per-node
+    /// changes (spec §3.4 phase 5 "classify invalidation", §4.3).
+    ///
+    /// [`FramePlan`] derives its layout flag from the frame's [`FrameReason`]
+    /// alone, so *any* hover asks for a full relayout even when the rule only
+    /// shifts a fill. Layout's real inputs are the tree structure, the viewport +
+    /// sticky scroll offset, and the **layout-affecting** computed properties
+    /// ([`PropertyId::affects_layout`]). For the two hot non-structural reasons
+    /// this routes the real per-node style deltas through the
+    /// [`InvalidationRouter`] — feeding the domain accumulators the invalidation
+    /// model was built for — and answers `false` when no node's box can have
+    /// moved, so the whole layout phase is skipped and the retained boxes (and
+    /// hit-test index) carry over.
+    ///
+    /// Conservative by construction — it only ever *removes* provably redundant
+    /// work:
+    /// * a plan that already skips layout is left alone;
+    /// * a structural (`reconcile`) or first frame always lays out;
+    /// * any reason other than [`Input`](FrameReason::Input) /
+    ///   [`Animation`](FrameReason::Animation) keeps the plan's answer;
+    /// * a moved viewport / scroll offset, or a changed node count, forces layout;
+    /// * an unknown property is layout-affecting by default.
+    fn layout_is_needed(
+        &self,
+        plan: FramePlan,
+        ctx: &FrameContext,
+        first_frame: bool,
+        computed: &ComputedStyles,
+    ) -> bool {
+        if !plan.layout() {
+            return false;
+        }
+        // Structure changed (or there is nothing retained to reuse).
+        if plan.reconcile() || first_frame {
+            return true;
+        }
+        // Only the hot, non-structural reasons are refined.
+        if !matches!(ctx.reason(), FrameReason::Input | FrameReason::Animation) {
+            return true;
+        }
+        // Layout also reads the viewport, the sticky scroll offset and the live
+        // editing text — none of which are computed styles.
+        if self.last_layout_inputs.as_ref() != Some(&self.current_layout_inputs(ctx)) {
+            return true;
+        }
+        // A node cannot appear/disappear without a reconcile, but if the styled
+        // set differs at all the retained boxes cannot be proven valid.
+        if computed.len() != self.computed.len() {
+            return true;
+        }
+
+        // Route the REAL per-node deltas: only a node whose layout-affecting
+        // properties changed dirties the layout phase.
+        let mut router = InvalidationRouter::new();
+        let mut style_invalidation = StyleInvalidation::new();
+        let mut layout_invalidation = LayoutInvalidation::new();
+        for (node, style) in computed {
+            if layout_affecting_changed(self.computed.get(node), style) {
+                router.route(
+                    Invalidation::new(Some(*node), InvalidationReason::StyleChanged),
+                    &mut style_invalidation,
+                    &mut layout_invalidation,
+                );
+            }
+        }
+        router.needs_layout()
+    }
+
     /// Returns a full structured snapshot of the live tree — one
     /// [`NodeInspection`] per node in pre-order — for an agent to observe and
     /// assert on in a headless run (spec §7.6 inspectable tree/styles/layout).
@@ -4046,6 +4148,43 @@ fn px_length_of(style: Option<&ComputedStyle>, id: PropertyId) -> f32 {
 /// Taking `&mut dyn TelemetrySink` (rather than `&mut self`) keeps the borrow
 /// disjoint from the caller's other `self` fields, and makes every call a no-op
 /// under the default [`NullTelemetrySink`].
+/// The **non-style** inputs the retained boxes were arranged under.
+///
+/// Layout does not read the computed styles alone: it also reads the viewport,
+/// the sticky scroll offset, and the focused editable's live text — a keystroke
+/// grows a textarea's box without changing any computed style, which is exactly
+/// why a multiline edit schedules a full [`FrameReason::Input`] frame. The
+/// incremental classification in [`UiRuntime::layout_is_needed`] may only reuse
+/// the retained boxes while **all** of these are unchanged.
+#[derive(Debug, Clone, PartialEq)]
+struct LayoutInputs {
+    /// The viewport the boxes were arranged under.
+    viewport: Size,
+    /// The viewport scroll offset (drives `position: sticky`).
+    scroll: (f32, f32),
+    /// The focused editable's `(node, text, preedit)` — the string the text leaf
+    /// was measured from; `None` when no editing session is active.
+    editing: Option<(NodeId, String, Option<String>)>,
+}
+
+/// Whether any **layout-affecting** computed property differs between the
+/// retained style `old` and the freshly resolved `new` (spec §4.3).
+///
+/// A missing `old` (a node with no retained style) counts as changed. Both
+/// directions are compared so a property that was *dropped* this frame — not just
+/// one that changed value — still dirties layout. Paint-only properties
+/// ([`PropertyId::is_paint_only`]) are ignored: they provably cannot move a box.
+fn layout_affecting_changed(old: Option<&ComputedStyle>, new: &ComputedStyle) -> bool {
+    let Some(old) = old else {
+        return true;
+    };
+    new.iter()
+        .any(|(id, value)| id.affects_layout() && old.get(*id) != Some(value))
+        || old
+            .iter()
+            .any(|(id, value)| id.affects_layout() && new.get(*id) != Some(value))
+}
+
 fn record_phase(
     sink: &mut dyn TelemetrySink,
     name: &'static str,
@@ -4971,6 +5110,83 @@ mod tests {
                 ),
             ],
         )
+    }
+
+    /// `.box { width: 100px; height: 50px } .box:hover { background-color: red }`
+    /// — a hover that shifts only a fill (the wireframe kit's own hover model).
+    fn box_paint_only_hover_sheet() -> Stylesheet {
+        Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![
+                class_rule("box", size(100.0, 50.0)),
+                class_hover_rule(
+                    "box",
+                    vec![BlockDeclaration::normal(
+                        PropertyId::BackgroundColor,
+                        PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
+                    )],
+                ),
+            ],
+        )
+    }
+
+    #[test]
+    fn a_paint_only_hover_reuses_the_retained_boxes() {
+        // THE incremental-invalidation win (§3.4 p5, §4.3): the plan says an
+        // `Input` frame may relayout (it is classified from the REASON alone),
+        // but the hover rule only changes `background-color` — a paint-only
+        // property — so no box can have moved and the whole layout phase is
+        // skipped, reusing the retained boxes.
+        let view = box_view();
+        let sheet = box_paint_only_hover_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.render_now(&view, sheets);
+        let node = counter_child(&runtime);
+        let cold_box = runtime.layout_boxes().get(&node).copied().expect("a laid-out box");
+
+        runtime.set_pseudo_state(node, PseudoState::HOVER);
+        runtime.request_frame(FrameReason::Input);
+        let hot = runtime
+            .run_due_frame(&view, sheets)
+            .expect("the input frame is due");
+
+        assert!(
+            !hot.relaid_out(),
+            "a paint-only hover must not relayout — the retained boxes are provably valid"
+        );
+        assert!(hot.restyled(), "it still restyles so the fill reaches paint");
+        assert!(hot.composed(), "and still re-composes");
+        assert_eq!(
+            runtime.layout_boxes().get(&node).copied(),
+            Some(cold_box),
+            "the retained box carried over unchanged"
+        );
+    }
+
+    #[test]
+    fn a_layout_affecting_hover_still_relayouts() {
+        // The other side of the classification: `.box:hover { width: 200px }`
+        // changes a layout-affecting property, so the layout phase must run.
+        let view = box_view();
+        let sheet = box_hover_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.render_now(&view, sheets);
+        let node = counter_child(&runtime);
+
+        runtime.set_pseudo_state(node, PseudoState::HOVER);
+        runtime.request_frame(FrameReason::Input);
+        let hot = runtime
+            .run_due_frame(&view, sheets)
+            .expect("the input frame is due");
+
+        assert!(hot.relaid_out(), "a width change must relayout");
+        assert_eq!(
+            runtime.layout_boxes().get(&node).map(|b| b.bounds.size.width),
+            Some(200.0),
+            "the hovered box grew to its hover width"
+        );
     }
 
     #[test]

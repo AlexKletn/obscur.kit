@@ -584,6 +584,151 @@ impl PropertyId {
             | Self::Overflow => Inheritance::NotInherited,
         }
     }
+
+    /// Whether this property is **paint-only**: changing it can never change any
+    /// node's box, so a frame in which only paint-only properties changed can
+    /// reuse the retained layout (spec §3.4 phase 5, §4.3 — invalidation is
+    /// classified by what actually changed, not by the frame's reason).
+    ///
+    /// This is a deliberately **conservative allow-list**: a property is
+    /// paint-only only when it provably cannot feed measure/arrange. Everything
+    /// else — including any property added later — answers `false` via the
+    /// catch-all and is treated as layout-affecting, so the failure mode is a
+    /// redundant relayout (slow but correct), never a stale box.
+    ///
+    /// Deliberately **not** paint-only despite looking like it:
+    /// - `border-*-style`: `none` forces the used border width to zero, so it
+    ///   feeds the box.
+    /// - `text-align` / `text-overflow`: both are threaded into the text
+    ///   measure pass here, so a change is treated as layout-affecting.
+    #[must_use]
+    pub const fn is_paint_only(self) -> bool {
+        matches!(
+            self,
+            Self::Color
+                | Self::BackgroundColor
+                | Self::BackgroundImage
+                | Self::BackgroundSize
+                | Self::BackgroundPosition
+                | Self::BackgroundRepeat
+                // How an image fills its box; the box itself is unchanged.
+                | Self::ObjectFit
+                | Self::Opacity
+                // `visibility: hidden` still occupies its box (unlike `display: none`).
+                | Self::Visibility
+                // Paint order only.
+                | Self::ZIndex
+                | Self::BorderTopColor
+                | Self::BorderRightColor
+                | Self::BorderBottomColor
+                | Self::BorderLeftColor
+                // A radius rounds the corners of an unchanged box.
+                | Self::BorderTopLeftRadius
+                | Self::BorderTopRightRadius
+                | Self::BorderBottomRightRadius
+                | Self::BorderBottomLeftRadius
+                // The outline reserves no space (CSS UI 3).
+                | Self::OutlineWidth
+                | Self::OutlineStyle
+                | Self::OutlineColor
+                | Self::OutlineOffset
+                | Self::BoxShadow
+                | Self::Filter
+                | Self::BackdropFilter
+                // CSS transforms are applied at paint time; layout is unaffected.
+                | Self::Transform
+                | Self::TransformOrigin
+        )
+    }
+
+    /// Whether a change to this property can change a node's box — the inverse of
+    /// [`is_paint_only`](Self::is_paint_only). Conservative: any property not on
+    /// the paint-only allow-list — including newly added ones — answers `true`.
+    #[must_use]
+    pub const fn affects_layout(self) -> bool {
+        !self.is_paint_only()
+    }
+}
+
+#[cfg(test)]
+mod paint_only_tests {
+    use super::*;
+
+    #[test]
+    fn typical_hover_properties_are_paint_only() {
+        // The properties a hover/focus rule usually touches must be paint-only,
+        // so such a frame can reuse the retained boxes.
+        for id in [
+            PropertyId::Color,
+            PropertyId::BackgroundColor,
+            PropertyId::BackgroundImage,
+            PropertyId::BorderTopColor,
+            PropertyId::BorderTopLeftRadius,
+            PropertyId::BoxShadow,
+            PropertyId::Opacity,
+            PropertyId::Transform,
+            PropertyId::Filter,
+            PropertyId::OutlineWidth,
+            PropertyId::OutlineColor,
+            PropertyId::ZIndex,
+            PropertyId::Visibility,
+        ] {
+            assert!(id.is_paint_only(), "{id:?} should be paint-only");
+            assert!(!id.affects_layout(), "{id:?} must not force a relayout");
+        }
+    }
+
+    #[test]
+    fn box_and_text_properties_affect_layout() {
+        for id in [
+            PropertyId::Display,
+            PropertyId::Width,
+            PropertyId::Height,
+            PropertyId::MinHeight,
+            PropertyId::MarginTop,
+            PropertyId::PaddingLeft,
+            PropertyId::BorderTopWidth,
+            PropertyId::BoxSizing,
+            PropertyId::Position,
+            PropertyId::Top,
+            PropertyId::Gap,
+            PropertyId::FlexGrow,
+            PropertyId::AlignSelf,
+            PropertyId::GridTemplateColumns,
+            PropertyId::FontSize,
+            PropertyId::FontFamily,
+            PropertyId::LineHeight,
+            PropertyId::LetterSpacing,
+            PropertyId::WhiteSpace,
+            PropertyId::Overflow,
+        ] {
+            assert!(id.affects_layout(), "{id:?} feeds layout");
+            assert!(!id.is_paint_only());
+        }
+    }
+
+    #[test]
+    fn deliberately_conservative_cases_are_layout_affecting() {
+        // `border-style: none` forces the used border width to zero, so it feeds
+        // the box; `text-align`/`text-overflow` are threaded into the text
+        // measure pass here. All three are conservatively layout-affecting.
+        assert!(PropertyId::BorderTopStyle.affects_layout());
+        assert!(PropertyId::TextAlign.affects_layout());
+        assert!(PropertyId::TextOverflow.affects_layout());
+    }
+
+    #[test]
+    fn the_two_classifiers_are_exact_inverses() {
+        for id in [
+            PropertyId::BackgroundColor,
+            PropertyId::Transform,
+            PropertyId::Width,
+            PropertyId::FontSize,
+            PropertyId::BorderTopStyle,
+        ] {
+            assert_eq!(id.affects_layout(), !id.is_paint_only());
+        }
+    }
 }
 
 #[cfg(test)]
