@@ -1758,6 +1758,7 @@ dependencies = [
  "image",
  "obscur-geometry",
  "obscur-resources",
+ "obscur-scene",
  "ttf-parser",
  "usvg",
 ]

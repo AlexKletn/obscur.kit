@@ -13,6 +13,7 @@ obscur-geometry = { workspace = true }
 image = { workspace = true }
 ttf-parser = { workspace = true }
 usvg = { workspace = true }
+obscur-scene = { workspace = true }
 
 [lints]
 workspace = true

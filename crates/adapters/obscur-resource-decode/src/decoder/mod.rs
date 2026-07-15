@@ -5,3 +5,5 @@ mod image_decoder;
 pub use image_decoder::ImageDecoder;
 mod svg_decoder;
 pub use svg_decoder::SvgDecoder;
+mod svg_vectorizer;
+pub use svg_vectorizer::SvgVectorizer;
