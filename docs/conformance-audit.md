@@ -28,6 +28,7 @@ The findings below are recorded **as of commit `f074dba`** and are left unedited
 | §2-3 | Primary proc-macro TSX DSL absent | **Closed.** `obscur-ui-macros` is a real proc-macro crate exporting `okui!` + `#[derive(Contract)]`; `okui!` lowers to `View`-building Rust at expansion time (no runtime IR). `#[derive(Contract)]` is now invocable but still has no in-tree usage. |
 | §4-4 | Grid drops its own min/max clamp | **Closed.** Grid clamps its content extent via the shared `clamp_content`, at parity with flow/flex. |
 | §4-5 | Flex ignores `align-self` + cross min/max | **Closed.** `item_align` resolves per-item `align-self` (the same resolver grid uses); `clamp_cross` applies the item's cross bounds. |
+| §2 (Tier-2) | Shipped widgets have no default contract | **Closed.** `widget_contracts()` seeds all 12 widget tags into the default registry, mirroring each widget's §2.6 builder API; facade drift guards pin the mirror. `command` is deliberately not a prop (it is the event handler); the collection widgets stay open (no string vocabulary exists to mirror); "no children" remains unexpressible by the contract type. |
 | §3-2 | Component-instance / local-state model unwired | Open — the largest remaining Tier-1. A click still rebuilds the whole view (`ReplaceRoot` only). |
 | §6-6 | macOS/Windows providers inert | Open (untestable from this host). |
 | §7-7 | Synthetic input by selector is descriptor-only | Open. |
