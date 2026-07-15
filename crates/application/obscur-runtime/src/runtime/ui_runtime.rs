@@ -61,6 +61,7 @@ use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::invalidation::{Invalidation, InvalidationReason, InvalidationRouter};
 use crate::orchestration::{
     overflow_scrolls, root_font_size, scroll_containers, AnimatedKind, AnimationBinding, ComputedStyles,
+    DragCoordinator, DragOutcome,
     overlay_commands, CssMotionRules, EditingView, InspectInfo, LayoutBoxes, LayoutCoordinator,
     MotionCoordinator, NodeInspection, PreeditView, PseudoStates, SceneCoordinator, ScrollContainer,
     ScrollPaint, StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement, TreeInspection,
@@ -79,6 +80,7 @@ use crate::component::ComponentStore;
 /// frame's tree instead of hanging, and the `component.rendered` counter shows it.
 const MAX_COMPONENT_RENDER_PASSES: usize = 32;
 use crate::transaction::{ReconcileEnactor, TransactionCommit};
+use obscur_data_transfer::drag::{DragSession, DragSource, DropTarget};
 
 /// The maximum gap, in microseconds, between two presses for them to count as a
 /// multi-click (the platform double-click window; 500 ms is the common default).
@@ -284,6 +286,11 @@ pub struct UiRuntime {
     /// The modifier keys currently held, folded from physical modifier-key
     /// press/release transitions so shortcut matching sees the live chord.
     modifiers: Modifiers,
+    /// The data-drag session driver: pointer input drives it while a drag is in
+    /// flight, and its provisional transaction gates what a drop applies (§3.2).
+    drag: DragCoordinator,
+    /// The outcome of the last drag to finish, awaiting `take_drag_outcome`.
+    drag_outcome: Option<DragOutcome>,
     /// The id assigned to the next produced frame.
     next_frame: FrameId,
     /// The phase plan a committed transaction asked for, awaiting the frame that
@@ -541,6 +548,8 @@ impl UiRuntime {
             editing: None,
             commands: CommandRouter::new(),
             modifiers: Modifiers::new(),
+            drag: DragCoordinator::new(),
+            drag_outcome: None,
             staged_plan: None,
             next_frame: FrameId::FIRST,
             viewport,
@@ -2363,6 +2372,37 @@ impl UiRuntime {
             self.update_text_drag(event.position());
         }
 
+        // 3a-dnd. A data drag ([`begin_drag`]) consumes pointer input while it is
+        //    in flight: the move tracks it across drop targets, the release drops
+        //    or cancels it. It returns early because a drag is not a click — a
+        //    release that ends a drag must not also activate whatever it landed
+        //    on, which is the one behaviour a host would notice if this merely ran
+        //    alongside. Hover and focus are equally suppressed: mid-drag, the
+        //    pointer is carrying something, not pointing at things.
+        if self.drag.is_active() {
+            match event.kind() {
+                PointerEventKind::Move => {
+                    if self.drag.pointer_moved(event.position(), target) {
+                        self.request_frame(FrameReason::Input);
+                    }
+                }
+                PointerEventKind::Up => {
+                    // The release carries a position, and it is the one that
+                    // decides where the payload landed — a pointer that moves and
+                    // lets go inside one event must still drop on what it is over.
+                    self.drag.pointer_moved(event.position(), target);
+                    self.finish_drag();
+                }
+                PointerEventKind::Cancel | PointerEventKind::Leave => {
+                    if self.drag.cancel() {
+                        self.request_frame(FrameReason::Input);
+                    }
+                }
+                PointerEventKind::Down | PointerEventKind::Enter => {}
+            }
+            return PointerDispatch::new(target, false, false, None);
+        }
+
         // 3b. Click: a release on the *same* node the press landed on is a click
         //    on that node — it **activates** that control. Activation dispatches
         //    the node's `on-click` command if one is bound (bubbling up its
@@ -2395,6 +2435,81 @@ impl UiRuntime {
         }
 
         PointerDispatch::new(target, hover_changed, focus_changed, command)
+    }
+
+    /// Registers `target` as a drop site for data drags (spec §6.21).
+    ///
+    /// A node with no registration is not a drop site, so a drag over it stages
+    /// nothing and a release on it cancels.
+    pub fn register_drop_target(&mut self, target: DropTarget) {
+        self.drag.register_target(target);
+    }
+
+    /// Removes `node`'s drop-target registration, if any.
+    pub fn unregister_drop_target(&mut self, node: NodeId) {
+        self.drag.unregister_target(node);
+    }
+
+    /// Begins a data drag from `source` (spec §3.2 provisional, §6.21).
+    ///
+    /// While it is in flight, [`handle_pointer`](Self::handle_pointer) drives the
+    /// drag instead of hovering, focusing and clicking: a move tracks it across
+    /// drop targets, a release drops or cancels it. See [`DragCoordinator`] for
+    /// what is provisional about it and what is not.
+    ///
+    /// Returns `false` when a drag is already in flight, having started nothing.
+    pub fn begin_drag(&mut self, source: DragSource) -> bool {
+        let started = self.drag.begin(source);
+        if started {
+            self.request_frame(FrameReason::Input);
+        }
+        started
+    }
+
+    /// The live drag session, for a host drawing the drag; [`None`] when none is
+    /// in flight.
+    #[must_use]
+    pub fn drag_session(&self) -> Option<&DragSession> {
+        self.drag.session()
+    }
+
+    /// The outcome of the last drag to finish, taken once.
+    ///
+    /// This is how a drop reaches the host: `handle_pointer` ends the drag as part
+    /// of dispatching the release, so the outcome is parked here rather than
+    /// squeezed into [`PointerDispatch`] — which every non-dragging caller would
+    /// then have to ignore. Returns [`None`] when no drag has finished since the
+    /// last call.
+    #[must_use]
+    pub fn take_drag_outcome(&mut self) -> Option<DragOutcome> {
+        self.drag_outcome.take()
+    }
+
+    /// Ends an in-flight drag on a pointer release: commits the drop's staged work
+    /// (as one transaction, through [`apply_transaction`](Self::apply_transaction))
+    /// or discards it.
+    ///
+    /// The commit path is what makes the operation vocabulary do something here: a
+    /// drop's [`Rerender`](crate::transaction::UiOperation::Rerender) classifies
+    /// the frame, so exactly the dropped-on node reconciles. A cancel applies
+    /// nothing and requests only the frame that clears the drag's own visuals.
+    fn finish_drag(&mut self) {
+        let version = self.enactor.version();
+        // The enactor's own validator: a drop is checked against the same rules a
+        // reconcile is, not a second set this path invented.
+        let Some(outcome) = self.drag.release(self.enactor.validator(), version) else {
+            return;
+        };
+        match &outcome {
+            DragOutcome::Dropped { commit, .. } => {
+                self.apply_transaction(commit);
+            }
+            DragOutcome::Cancelled => {
+                // Nothing was applied — but the drag's visuals still have to go.
+                self.request_frame(FrameReason::Input);
+            }
+        }
+        self.drag_outcome = Some(outcome);
     }
 
     /// Resolves `event`'s command for a `target` by walking its logical-element

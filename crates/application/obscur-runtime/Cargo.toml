@@ -25,3 +25,4 @@ obscur-layout = { workspace = true }
 obscur-scene = { workspace = true }
 obscur-resources = { workspace = true }
 obscur-interaction = { workspace = true }
+obscur-data-transfer = { workspace = true }
