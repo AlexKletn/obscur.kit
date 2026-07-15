@@ -109,6 +109,15 @@ fn parse_nodes(input: TokenStream) -> Result<Vec<DslNode>, syn::Error> {
     Ok(nodes)
 }
 
+/// Whether `tag` names a conditional control-flow construct rather than an
+/// element (spec §2.11).
+///
+/// The same three names the `.okui` file parser reserves, so the inline macro and
+/// a compiled file classify a document identically — two front ends, one meaning.
+fn is_conditional_tag(tag: &str) -> bool {
+    matches!(tag, "If" | "ElseIf" | "Else")
+}
+
 /// Builds the [`UiIrNode`] for `node`, threading `counter` to assign pre-order
 /// ids (root = 0, incrementing).
 fn build_node(node: &DslNode, counter: &mut u64) -> UiIrNode {
@@ -118,7 +127,14 @@ fn build_node(node: &DslNode, counter: &mut u64) -> UiIrNode {
         }
         DslNode::Element(element) => {
             let id = take_id(counter);
-            let mut ir = if element.is_component {
+            let mut ir = if is_conditional_tag(element.tag.as_str()) {
+                // `<If>` / `<ElseIf>` / `<Else>` are control flow, not elements —
+                // the same classification the `.okui` file parser makes. Building
+                // them as elements is what used to make the macro render every
+                // branch of a chain: three `<span>`-like nodes named `If`,
+                // `ElseIf` and `Else`, none of which conditioned anything.
+                UiIrNode::conditional(id, element.tag.as_str())
+            } else if element.is_component {
                 UiIrNode::component(id, element.tag.as_str())
             } else {
                 UiIrNode::element(id, element.tag.as_str())

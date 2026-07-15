@@ -35,14 +35,36 @@
 //! symbols. The emitted handles are raw values (`from_raw(0x…)`) resolved from
 //! the registry at generation time.
 //!
-//! # Dynamic nodes
+//! # A binding is a Rust path
 //!
-//! Like the bridge, `<If>`/`<For>` are *statically materialised*: a conditional
-//! emits its guarded body and a loop its template body, spliced into the
-//! surrounding fragment. Evaluating a real condition or iterating a live
-//! collection needs runtime data the IR does not carry, so that expansion
-//! remains the runtime's job; a dynamic binding emits its path as placeholder
-//! text.
+//! `{open}` in a `.okui` document emits the Rust expression `open`, verbatim.
+//! There is no evaluator here and there does not need to be one: the emitted code
+//! lands in a scope — the caller's, for the inline `okui!` macro; the generated
+//! function's parameters, for a compiled file — and **Rust resolves it**. A path
+//! that names nothing is a Rust compile error, in the caller's build, pointing at
+//! the caller's code. A field whose type cannot become a
+//! [`ViewValue`](obscur_view::view::ViewValue) is the same. That is the whole
+//! type system of the expression language, borrowed rather than rebuilt.
+//!
+//! This is also what makes §2.10's restrictions meaningful rather than
+//! decorative: the deny-list polices what may appear in a path that is about to
+//! become real Rust.
+//!
+//! # Conditionals are real conditionals
+//!
+//! `<If cond={open}>` emits `if open { … }`. `<ElseIf>` / `<Else>` following it
+//! join the same chain, so exactly one branch renders — the point of having them.
+//!
+//! Emitting a real `if` is why the children of a fragment are collected into a
+//! `Vec` with `push` rather than written as a `vec![…]` literal: a conditional is
+//! a *statement*, and there is no way to spell one as an element of a list
+//! literal. The shape of the generated code follows from the language, not from
+//! preference.
+//!
+//! **`<For>` does not yet iterate** — it still splices its template body once,
+//! and its `each` binding is not consulted. Loops need a loop variable bound over
+//! the body, which is a scope this emitter does not yet open; see
+//! [`emit_into`].
 
 use std::fmt::Write as _;
 
@@ -74,48 +96,173 @@ impl ViewCodegen {
     /// function), indented for embedding.
     #[must_use]
     pub fn document_to_view_expr(document: &UiIrDocument) -> String {
-        let mut out = String::new();
-        out.push_str("    ::obscur_view::view::View::from_fragment(\n");
-        out.push_str("        ::obscur_view::view::ViewFragment::from_nodes(vec![\n");
-        emit_node(document.root(), &mut out, 3);
-        out.push_str("        ]),\n");
-        out.push_str("    )");
-        out
+        let nodes = emit_nodes_block(std::slice::from_ref(&document.root()), 1);
+        format!(
+            "    ::obscur_view::view::View::from_fragment(\n\
+             \x20       ::obscur_view::view::ViewFragment::from_nodes({nodes}),\n\
+             \x20   )"
+        )
     }
 }
 
-/// Appends the `ViewNode` expression(s) `node` lowers to, each as its own
-/// `vec!` element terminated by a comma, at `indent` levels (4 spaces each).
+/// Emits a block expression evaluating to the `Vec<ViewNode>` that `nodes`
+/// lower to, at `indent` levels.
 ///
-/// Most kinds emit exactly one node; a transparent fragment and the statically
-/// materialised conditional/loop splice their children, so several elements may
-/// be appended.
+/// A `Vec` built with `push` rather than a `vec![…]` literal, because a
+/// conditional emits a real `if` — a statement, which no list literal can hold.
+/// Each block declares its own sink, so a nested fragment's pushes cannot reach
+/// an outer one.
+fn emit_nodes_block(nodes: &[&UiIrNode], indent: usize) -> String {
+    let pad = indentation(indent);
+    let inner = indentation(indent + 1);
+    let mut out = String::new();
+    out.push_str("{\n");
+    let _ = writeln!(
+        out,
+        "{inner}let mut __nodes: ::std::vec::Vec<::obscur_view::view::ViewNode> = \
+         ::std::vec::Vec::new();"
+    );
+    emit_into(nodes, &mut out, indent + 1);
+    let _ = writeln!(out, "{inner}__nodes");
+    let _ = write!(out, "{pad}}}");
+    out
+}
+
+/// Appends the statements that push `nodes` into the enclosing `__nodes` sink,
+/// at `indent` levels (4 spaces each).
+///
+/// # Conditionals are grouped, not emitted one by one
+///
+/// `<If>` / `<ElseIf>` / `<Else>` arrive as *siblings*, but they are one
+/// construct: emitting each on its own would produce `if a {…} if b {…} {…}` —
+/// three independent statements, the last of which always runs. So a run of them
+/// is collected and emitted as a single `if / else if / else` chain, which is the
+/// only shape where exactly one branch renders.
+///
+/// A run ends at the first non-conditional sibling, or after an `<Else>` (nothing
+/// may follow the fallback). An `<ElseIf>` / `<Else>` with no `<If>` before it
+/// starts no chain and is emitted as its own branch, which is what a stray
+/// `<Else>` deserves: it renders unconditionally rather than silently attaching
+/// to an unrelated `<If>` further up.
+///
+/// # `<For>` is still spliced
+///
+/// A loop needs its item bound over the body — a scope this emitter does not open
+/// yet — so `<For>` still emits its template once and ignores `each`. It is the
+/// remaining half of §2.11.
+fn emit_into(nodes: &[&UiIrNode], out: &mut String, indent: usize) {
+    let mut index = 0;
+    while index < nodes.len() {
+        let node = nodes[index];
+        if is_chain_head(node) {
+            let end = chain_end(nodes, index);
+            emit_conditional_chain(&nodes[index..end], out, indent);
+            index = end;
+            continue;
+        }
+        emit_node(node, out, indent);
+        index += 1;
+    }
+}
+
+/// Whether `node` opens a conditional chain (an `<If>`).
+fn is_chain_head(node: &UiIrNode) -> bool {
+    node.kind() == UiIrNodeKind::Conditional && node.tag() == "If"
+}
+
+/// The exclusive end of the conditional chain starting at `start`: every
+/// following `<ElseIf>`, up to and including the first `<Else>`.
+fn chain_end(nodes: &[&UiIrNode], start: usize) -> usize {
+    let mut end = start + 1;
+    while end < nodes.len() && nodes[end].kind() == UiIrNodeKind::Conditional {
+        let tag = nodes[end].tag();
+        if tag == "Else" {
+            return end + 1;
+        }
+        if tag != "ElseIf" {
+            break;
+        }
+        end += 1;
+    }
+    end
+}
+
+/// Emits one `if / else if / else` chain, each branch pushing its own body.
+fn emit_conditional_chain(chain: &[&UiIrNode], out: &mut String, indent: usize) {
+    let pad = indentation(indent);
+    let _ = write!(out, "{pad}");
+    for (position, branch) in chain.iter().enumerate() {
+        let head = if branch.tag() == "Else" {
+            " else ".to_owned()
+        } else if position == 0 {
+            format!("if {} ", branch_condition(branch))
+        } else {
+            format!(" else if {} ", branch_condition(branch))
+        };
+        out.push_str(&head);
+        out.push_str("{\n");
+        let children: Vec<&UiIrNode> = branch.children().iter().collect();
+        emit_into(&children, out, indent + 1);
+        let _ = write!(out, "{pad}}}");
+    }
+    out.push('\n');
+}
+
+/// The Rust condition expression for one branch.
+///
+/// A missing `cond` on an `<If>` / `<ElseIf>` emits `false`: a condition that was
+/// never stated is not true, so the branch does not render. The alternative —
+/// rendering a branch whose condition is absent — is the silent-wrong-output
+/// behaviour this whole path exists to remove.
+fn branch_condition(branch: &UiIrNode) -> String {
+    branch
+        .property("cond")
+        .map_or_else(|| "false".to_owned(), emit_condition)
+}
+
+/// Emits an expression in boolean position.
+///
+/// A binding is its Rust path, verbatim — `cond={open}` is `if open`. A literal
+/// `true`/`false` is itself. Anything else (a number, a string, a call) is not a
+/// condition, and emits `false` rather than a type error inside generated code
+/// the author cannot see.
+fn emit_condition(expression: &UiIrExpression) -> String {
+    match expression {
+        UiIrExpression::Binding(path) => path.to_string(),
+        UiIrExpression::Literal(UiIrValue::Bool(flag)) => flag.to_string(),
+        UiIrExpression::Literal(_) | UiIrExpression::Call { .. } => "false".to_owned(),
+    }
+}
+
+/// Appends the statement pushing the single `ViewNode` `node` lowers to.
+///
+/// A transparent fragment and a (still-spliced) loop push their children instead
+/// of a node of their own.
 fn emit_node(node: &UiIrNode, out: &mut String, indent: usize) {
     match node.kind() {
         UiIrNodeKind::Text => {
             let pad = indentation(indent);
             let content = string_literal(node.content());
-            let _ = write!(out, "{pad}::obscur_view::view::ViewNode::text({content})");
+            let _ = write!(out, "{pad}__nodes.push(::obscur_view::view::ViewNode::text({content})");
             emit_key(node, out);
-            out.push_str(",\n");
+            out.push_str(");\n");
         }
         UiIrNodeKind::Element | UiIrNodeKind::Component => emit_element(node, out, indent),
         UiIrNodeKind::Fragment | UiIrNodeKind::Conditional | UiIrNodeKind::Loop => {
-            for child in node.children() {
-                emit_node(child, out, indent);
-            }
+            let children: Vec<&UiIrNode> = node.children().iter().collect();
+            emit_into(&children, out, indent);
         }
     }
 }
 
-/// Appends a single `ViewNode::Element` expression for `node`.
+/// Appends the statement pushing a single `ViewNode::Element` for `node`.
 fn emit_element(node: &UiIrNode, out: &mut String, indent: usize) {
     let pad = indentation(indent);
     let inner = indentation(indent + 1);
     let component = name_binding::component_id_for(node.tag()).raw();
     let _ = writeln!(
         out,
-        "{pad}::obscur_view::view::ViewNode::element(::obscur_identity::ComponentId::from_raw({component:#x}))"
+        "{pad}__nodes.push(::obscur_view::view::ViewNode::element(::obscur_identity::ComponentId::from_raw({component:#x}))"
     );
 
     for property in node.properties() {
@@ -138,20 +285,17 @@ fn emit_element(node: &UiIrNode, out: &mut String, indent: usize) {
 
     let children: Vec<&UiIrNode> = node.children().iter().collect();
     if !children.is_empty() {
+        let block = emit_nodes_block(&children, indent + 1);
         let _ = writeln!(
             out,
-            "{inner}.with_children(::obscur_view::view::ViewFragment::from_nodes(vec!["
+            "{inner}.with_children(::obscur_view::view::ViewFragment::from_nodes({block}))"
         );
-        for child in children {
-            emit_node(child, out, indent + 2);
-        }
-        let _ = writeln!(out, "{inner}]))");
     }
 
     // The key modifier (if any) closes the builder chain before the comma.
     let _ = write!(out, "{inner}");
     emit_key(node, out);
-    out.push_str(",\n");
+    out.push_str(");\n");
 }
 
 /// Appends a `.with_key(…)` modifier for `node`'s key, if it has one; a no-op
@@ -187,13 +331,29 @@ fn emit_key(node: &UiIrNode, out: &mut String) {
 
 /// Emits the `ViewValue` expression for a property's value expression.
 ///
-/// A dynamic binding emits its path as placeholder text (its real value needs
-/// runtime resolution); a call emits `Null`. Mirrors the runtime bridge.
+/// A binding emits its **Rust path**, converted through
+/// [`ViewValue::from`](obscur_view::view::ViewValue): `value={label}` becomes
+/// `ViewValue::from(label.clone())`. It used to emit the path as a string
+/// literal, so `value={user.name}` produced the literal text `"user.name"` — the
+/// placeholder that made every dynamic `.okui` document silently wrong.
+///
+/// The `.clone()` is uniform rather than clever: it works for an owned `String`
+/// and for a `Copy` number alike, and a binding read into a `ViewValue` cannot
+/// move out of the caller's data — a `<For>` body would read the same field on
+/// every iteration.
+///
+/// If the path names nothing, or names something no `ViewValue` can be built
+/// from, **rustc says so** in the caller's build. That is the type checking, and
+/// it is not reimplemented here.
+///
+/// A call still emits `Null`: §2.10 allows "explicitly exported pure functions",
+/// but nothing yet decides which functions those are, and emitting an arbitrary
+/// call would be exactly the unconstrained invocation §2.10 forbids.
 fn emit_value(expression: &UiIrExpression) -> String {
     match expression {
         UiIrExpression::Literal(value) => emit_literal(value),
         UiIrExpression::Binding(path) => {
-            format!("::obscur_view::view::ViewValue::Text({}.into())", string_literal(path))
+            format!("::obscur_view::view::ViewValue::from({path}.clone())")
         }
         UiIrExpression::Call { .. } => "::obscur_view::view::ViewValue::Null".to_owned(),
     }
@@ -288,11 +448,22 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_binding_emits_its_path_as_placeholder_text() {
+    fn a_binding_emits_its_rust_path_not_its_spelling() {
+        // This test used to assert the opposite, and that is the point of it: a
+        // binding emitted `ViewValue::Text("user.name")` — the literal *text* of
+        // the path — so every dynamic `.okui` document rendered its own source
+        // code. Now the path is Rust, and rustc resolves it in the caller's scope.
         let out = expr(
             UiIrNode::element(0, "div").with_property(UiIrProperty::binding("title", "user.name")),
         );
-        assert!(out.contains(r#"ViewValue::Text("user.name".into())"#), "{out}");
+        assert!(
+            out.contains("ViewValue::from(user.name.clone())"),
+            "the path must be emitted as an expression: {out}"
+        );
+        assert!(
+            !out.contains(r#""user.name""#),
+            "and never as its own spelling: {out}"
+        );
     }
 
     #[test]
