@@ -1,5 +1,7 @@
 //! Performance module.
 mod performance_budget;
+mod span_attribution;
+pub use span_attribution::SpanAttribution;
 mod performance_span;
 
 pub use performance_budget::PerformanceBudget;

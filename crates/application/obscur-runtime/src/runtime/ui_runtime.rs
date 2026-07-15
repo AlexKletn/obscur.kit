@@ -8,6 +8,7 @@ use std::fmt;
 
 use obscur_accessibility::port::AccessibilityBridge;
 use obscur_accessibility::tree::{SemanticSnapshot, SemanticTree};
+use obscur_diagnostics::SpanAttribution;
 use obscur_diagnostics::{
     BudgetViolation, DiagnosticSubsystem, NullTelemetrySink, PerformanceCounter, PerformanceSpan,
     TelemetrySink,
@@ -1546,6 +1547,7 @@ impl UiRuntime {
                 "reconcile.nodes",
                 nodes,
                 self.budget.check_reconcile(nodes),
+                ctx.id(),
             );
             changed
         } else {
@@ -1618,6 +1620,7 @@ impl UiRuntime {
                 "style.resolved",
                 count,
                 self.budget.check_style(count),
+                ctx.id(),
             );
             (computed, restyled)
         } else {
@@ -1712,6 +1715,7 @@ impl UiRuntime {
                 "layout.boxes",
                 count,
                 self.budget.check_layout(count),
+                ctx.id(),
             );
             relaid_out
         } else {
@@ -1771,6 +1775,7 @@ impl UiRuntime {
                 "compose.commands",
                 count,
                 self.budget.check_compose(count),
+                ctx.id(),
             );
             // Bracket the whole scene in a root device-scale transform so layout
             // (in logical px) rasterizes at physical resolution. At scale `1.0`
@@ -4714,8 +4719,15 @@ fn record_phase(
     label: &'static str,
     metric: u64,
     violation: Option<BudgetViolation>,
+    frame: FrameId,
 ) {
-    sink.record_span(&PerformanceSpan::new(name, subsystem));
+    // Attribute the span to its frame (spec §7.9). A phase span knows its frame
+    // and nothing narrower — there is no single node a whole layout phase is
+    // about — so `node`/`resource` stay empty rather than being invented.
+    sink.record_span(
+        &PerformanceSpan::new(name, subsystem)
+            .with_attribution(SpanAttribution::frame(frame)),
+    );
     let mut counter = PerformanceCounter::new(subsystem, label);
     counter.add(metric);
     sink.record_counter(&counter);
@@ -6398,6 +6410,59 @@ mod tests {
         assert!(commands.value() > 0, "the matched fill produced a command");
         // No budget configured => no violations.
         assert!(sink.violations.is_empty());
+    }
+
+    #[test]
+    fn every_phase_span_names_the_frame_it_ran_in() {
+        // §7.9 attribution: a span that named only its subsystem was untraceable —
+        // you could see that layout ran, but not which frame's layout. Three frames
+        // over CHANGING views (so every phase actually runs) must stamp three
+        // distinct, increasing frame ids.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let shared = SharedSink::default();
+        runtime.set_telemetry_sink(Box::new(shared.clone()));
+
+        let sheet = counter_stylesheet();
+        let sheets = std::slice::from_ref(&sheet);
+        for width in [10.0_f32, 20.0, 30.0] {
+            let view = View::from_fragment(ViewFragment::from_nodes(vec![
+                ViewNode::element(ComponentId::from_raw(10))
+                    .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into())))
+                    .with_prop(ViewProperty::new(
+                        InternedSymbol::from_raw(0x8000_0055),
+                        ViewValue::Float(f64::from(width)),
+                    )),
+            ]));
+            let _ = runtime.render_now(&view, sheets);
+        }
+
+        let sink = shared.0.borrow();
+        let frames: Vec<u64> = sink
+            .spans
+            .iter()
+            .filter(|span| span.name == "layout")
+            .map(|span| {
+                span.attribution
+                    .frame
+                    .expect("a phase span states its frame")
+                    .raw()
+            })
+            .collect();
+        assert_eq!(frames.len(), 3, "one layout span per frame");
+        assert!(
+            frames.windows(2).all(|pair| pair[1] > pair[0]),
+            "each frame's span names a later frame, got {frames:?}"
+        );
+
+        // A phase span is about a FRAME, not a node — leaving `node` empty is the
+        // honest answer rather than an invented one.
+        let layout = sink
+            .spans
+            .iter()
+            .find(|span| span.name == "layout")
+            .expect("a layout span");
+        assert_eq!(layout.attribution.node, None);
+        assert_eq!(layout.attribution.resource, None);
     }
 
     #[test]

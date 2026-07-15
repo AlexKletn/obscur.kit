@@ -12,7 +12,7 @@ pub use diagnostic::{
     RecoveryAction,
 };
 pub use performance::{
-    BudgetViolation, PerformanceBudget, PerformanceCounter, PerformanceSpan,
+    BudgetViolation, PerformanceBudget, PerformanceCounter, PerformanceSpan, SpanAttribution,
 };
 pub use port::{CollectingTelemetrySink, DiagnosticSink, NullTelemetrySink, TelemetrySink};
 pub use subscription::{

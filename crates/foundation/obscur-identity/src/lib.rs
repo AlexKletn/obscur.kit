@@ -8,7 +8,7 @@ mod key;
 
 pub use generation::{Generation, VersionStamp};
 pub use id::{
-    ComponentId, CorrelationId, NamespaceId, NodeId, OperationId, ResourceId, RuntimeId, SignalId,
-    WindowId,
+    ComponentId, CorrelationId, FrameId, NamespaceId, NodeId, OperationId, ResourceId, RuntimeId,
+    SignalId, WindowId,
 };
 pub use key::{InternedSymbol, StableKey};
