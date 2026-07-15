@@ -2,7 +2,7 @@
 //! §2.10), plus the shared [`ValidationDiagnostic`] used across the validation
 //! module.
 
-use obscur_okui_syntax::ast::{Document, Element};
+use obscur_okui_syntax::ast::{Document, Element, Expression};
 use syn::{BinOp, Expr};
 
 /// A validation issue found while checking a document (spec §2.10, §2.13).
@@ -238,6 +238,17 @@ impl ExpressionValidator {
             }
         }
         for child in element.children() {
+            // A body `{expr}` — `<span>{user.name}</span>` — is an expression like
+            // any other, and it is emitted as real Rust exactly like an attribute's
+            // (`lower_interpolation` carries it as a `value` binding). Checking only
+            // attributes left it unchecked, so `<span>{std::fs::read(p)}</span>`
+            // reached generated code with no §2.10 check at all. The hole was not
+            // in the rule; the rule was simply never shown half the expressions.
+            if let Some(expression) = Expression::cast(child.clone()) {
+                let offset = child.offset().unwrap_or(0);
+                diagnostics.extend(self.validate(&expression.text(), offset));
+                continue;
+            }
             if let Some(child_element) = Element::cast(child) {
                 self.validate_element(&child_element, diagnostics);
             }
@@ -293,6 +304,31 @@ mod tests {
         assert_eq!(validator.validate("std::fs::read(path)", 0).len(), 1);
         // …and it cannot hide inside an allowed shape.
         assert_eq!(validator.validate("count > load_limit()", 0).len(), 1);
+    }
+
+    #[test]
+    fn a_body_interpolation_is_checked_like_an_attribute() {
+        // THE hole, and it was mine: `check_expression` was total over the AST it
+        // was shown, and `validate_element` only showed it attributes. A body
+        // `{expr}` is lowered as a real binding (`lower_interpolation`) and emitted
+        // as real Rust, so this reached generated code with no §2.10 check at all.
+        let validator = ExpressionValidator::new();
+
+        let doc = document("<span>{std::fs::read(p)}</span>");
+        let diagnostics = validator.validate_document(&doc);
+        assert_eq!(diagnostics.len(), 1, "a free call in a body must be refused");
+        assert!(diagnostics[0].message().contains("§2.10"));
+
+        // Nested, so the recursion is proven to carry the check down.
+        let nested = document("<Root><Child>{load_config()}</Child></Root>");
+        assert_eq!(validator.validate_document(&nested).len(), 1);
+
+        // …and an ordinary read in a body still passes.
+        assert!(
+            validator
+                .validate_document(&document("<span>{user.name}</span>"))
+                .is_empty()
+        );
     }
 
     #[test]

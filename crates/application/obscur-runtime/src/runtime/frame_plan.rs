@@ -103,12 +103,25 @@ impl FramePlan {
     ///
     /// [`for_frame`](Self::for_frame) derives the plan from the *category* of a
     /// frame, which is a proxy: `UiCommit` means "something committed", so it
-    /// conservatively runs everything. A committed transaction does not need the
-    /// proxy — it lists the exact changes, so the plan comes from
-    /// [`UiOperation::invalidation`] and says precisely what has to re-run. A
-    /// transaction of nothing but [`InvalidateStyle`](UiOperation::InvalidateStyle)
-    /// restyles without reconciling, because no operation in it claims the tree
-    /// changed.
+    /// conservatively runs everything. A committed transaction lists what actually
+    /// changed, so the plan comes from [`UiOperation::invalidation`]. A transaction
+    /// of nothing but [`InvalidateStyle`](UiOperation::InvalidateStyle) restyles
+    /// **without reconciling**, because no operation in it claims the tree changed.
+    ///
+    /// # It decides WHICH PHASES run, not what they do
+    ///
+    /// The gain is one bit per phase and no more. Every operation's `node` payload
+    /// is **discarded here** — `Rerender { node }` and `ReplaceRoot` collapse to the
+    /// same `reconcile: true`, and a reconciling frame then reconciles the whole
+    /// desired [`View`]. So this narrows a frame from four phases to fewer; it does
+    /// not narrow any phase to a subtree.
+    ///
+    /// That is not a detail to fix here. The phases themselves take no dirty set —
+    /// `StyleCoordinator::resolve` and the layout pass each walk the entire tree —
+    /// so a per-node plan would have nobody to tell. Incremental *within* a phase is
+    /// a change to those passes, and until it happens the node payloads that flow
+    /// through [`Invalidation`] and into `StyleInvalidation`/`LayoutInvalidation` are
+    /// written and never read.
     ///
     /// An **empty** transaction yields an [idle](Self::is_idle) plan: nothing was
     /// asked for, so nothing runs. That is what makes a cancelled provisional
