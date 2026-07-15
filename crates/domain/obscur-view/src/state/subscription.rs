@@ -1,5 +1,6 @@
 //! `Subscription`: an owned token representing one registered subscription.
 
+use obscur_identity::SignalId;
 use crate::state::StateGeneration;
 
 /// Opaque identifier for a subscription within a single
@@ -24,32 +25,47 @@ impl SubscriptionId {
     }
 }
 
-/// An owned token standing in for one active subscription.
+/// One recorded dependency of a component on an observable source (spec §3.1).
 ///
-/// There is no reactive dispatcher yet (that lives in `obscur-runtime`), so a
-/// subscription is modelled honestly as a small owned handle rather than a live
-/// callback registration: it records the [`StateGeneration`] of the source it
-/// was opened against. Ownership is the cleanup mechanism — the token lives
-/// inside its [`SubscriptionScope`](crate::state::SubscriptionScope) and is
-/// released when that scope drops it.
+/// A subscription names the [`source`](Self::source) it depends on and the
+/// [`StateGeneration`] that source was at when the dependency was recorded.
+/// Together those are exactly what "dependency tracking invalidates only
+/// consumers of changed values" needs: when a source advances, a subscription to
+/// *that* source whose observed generation is behind identifies a consumer that
+/// must re-run — and one to any other source does not.
+///
+/// Ownership is the cleanup mechanism: the token lives inside its
+/// [`SubscriptionScope`](crate::state::SubscriptionScope) and is released when
+/// that scope drops it (§2.1 "automatic cleanup").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Subscription {
     id: SubscriptionId,
+    source: SignalId,
     observed: StateGeneration,
 }
 
 impl Subscription {
-    /// Creates a subscription token bound to `id`, opened while the source was
-    /// at generation `observed`.
+    /// Creates a subscription token bound to `id`, recording a dependency on
+    /// `source` while it was at generation `observed`.
     #[must_use]
-    pub const fn new(id: SubscriptionId, observed: StateGeneration) -> Self {
-        Self { id, observed }
+    pub const fn new(id: SubscriptionId, source: SignalId, observed: StateGeneration) -> Self {
+        Self {
+            id,
+            source,
+            observed,
+        }
     }
 
     /// Returns this subscription's id.
     #[must_use]
     pub const fn id(&self) -> SubscriptionId {
         self.id
+    }
+
+    /// The observable source this subscription depends on.
+    #[must_use]
+    pub const fn source(&self) -> SignalId {
+        self.source
     }
 
     /// Returns the source generation observed when the subscription was opened.
@@ -60,6 +76,9 @@ impl Subscription {
 
     /// Returns `true` if `current` is newer than the observed generation, i.e.
     /// the subscribed source changed since this subscription last synced.
+    ///
+    /// `current` must be the generation of [`source`](Self::source); comparing
+    /// against a different source's generation is meaningless.
     #[must_use]
     pub fn is_stale_against(&self, current: StateGeneration) -> bool {
         current.is_newer_than(self.observed)
@@ -68,20 +87,23 @@ impl Subscription {
 
 #[cfg(test)]
 mod tests {
+    use obscur_identity::SignalId;
     use super::{Subscription, SubscriptionId};
     use crate::state::StateGeneration;
 
     #[test]
     fn accessors_round_trip() {
-        let sub = Subscription::new(SubscriptionId::from_raw(3), StateGeneration::INITIAL);
+        let source = SignalId::from_raw(9);
+        let sub = Subscription::new(SubscriptionId::from_raw(3), source, StateGeneration::INITIAL);
         assert_eq!(sub.id().raw(), 3);
+        assert_eq!(sub.source(), source);
         assert_eq!(sub.observed_generation(), StateGeneration::INITIAL);
     }
 
     #[test]
     fn staleness_follows_generation() {
         let seen = StateGeneration::from_raw(4);
-        let sub = Subscription::new(SubscriptionId::from_raw(1), seen);
+        let sub = Subscription::new(SubscriptionId::from_raw(1), SignalId::from_raw(1), seen);
         assert!(sub.is_stale_against(seen.next()));
         assert!(!sub.is_stale_against(seen));
     }

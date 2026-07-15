@@ -94,7 +94,7 @@ mod tests {
     use super::ErasedComponent;
     use crate::component::{Component, ComponentContext, FromProps, PropsError, decode_required};
     use crate::lifecycle::{LifecycleState, MountContext};
-    use crate::state::{LocalState, SubscriptionScope};
+    use crate::state::{LocalState, SignalGenerations, SubscriptionScope};
     use crate::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
     use obscur_identity::{ComponentId, InternedSymbol};
 
@@ -151,7 +151,8 @@ mod tests {
     fn render_text(component: &mut dyn ErasedComponent, props: &[ViewProperty]) -> String {
         let mut scope = SubscriptionScope::new();
         let mut needs_update = false;
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut needs_update);
+        let signals = SignalGenerations::new();
+        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut needs_update, &signals);
         let view = component
             .render_erased(&mut ctx, props)
             .expect("the props decode");
@@ -187,7 +188,8 @@ mod tests {
         let mut erased: Box<dyn ErasedComponent> = Box::new(counter());
         let mut scope = SubscriptionScope::new();
         let mut needs_update = false;
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut needs_update);
+        let signals = SignalGenerations::new();
+        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut needs_update, &signals);
 
         let bad = vec![ViewProperty::new(step_symbol(), ViewValue::Text("2".into()))];
         assert_eq!(
@@ -211,7 +213,8 @@ mod tests {
         let mut erased: Box<dyn ErasedComponent> = Box::new(counter());
         let mut scope = SubscriptionScope::new();
         let mut needs_update = false;
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Created, &mut needs_update);
+        let signals = SignalGenerations::new();
+        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Created, &mut needs_update, &signals);
         let mut mount = MountContext::new(&mut ctx);
         erased.on_mount_erased(&mut mount);
         // The default `error_boundary` still answers through the erasure.

@@ -46,6 +46,7 @@ use obscur_text::shaping::{TextDirection, TextItemizer, TextShaper};
 use obscur_tree::node::NodeKind;
 use obscur_tree::reconciliation::Reconciler;
 use obscur_view::component::{ComponentRegistration, RegistryError};
+use obscur_identity::SignalId;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::{View, EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT};
 
@@ -983,10 +984,14 @@ impl UiRuntime {
                 let Some(props) = self.tree.get(node).map(|n| n.props().to_vec()) else {
                     continue;
                 };
+                // The generations book is read-only during a render and lives on
+                // the store alongside the instance, so take a snapshot of it to
+                // keep the two borrows disjoint.
+                let signals = self.components.signals().clone();
                 let Some(mounted) = self.components.get_mut(node) else {
                     continue;
                 };
-                let Ok(view) = mounted.render(&props) else {
+                let Ok(view) = mounted.render(&props, &signals) else {
                     errors += 1;
                     continue;
                 };
@@ -1048,6 +1053,27 @@ impl UiRuntime {
     #[must_use]
     pub fn mounted_component_count(&self) -> usize {
         self.components.len()
+    }
+
+    /// Records that the value behind the observable `source` changed, and marks
+    /// every component that depends on it for re-render (spec §3.1).
+    ///
+    /// This is the reactive entry point for application state. A host mutates its
+    /// own data — the toolkit provides no store and never reaches into it — and
+    /// then names what changed. The runtime invalidates exactly the components
+    /// whose last render read that source: one that read a different source, or
+    /// none, is untouched. That is what makes a state change cost its consumers
+    /// rather than the document.
+    ///
+    /// A frame is requested only when something actually depends on the source,
+    /// so notifying a source nobody reads is free. Returns how many components
+    /// were invalidated.
+    pub fn notify_signal(&mut self, source: SignalId) -> usize {
+        let invalidated = self.components.notify(source);
+        if invalidated > 0 {
+            self.scheduler.request_reason(FrameReason::UiCommit);
+        }
+        invalidated
     }
 
     /// Installs the runtime-held **view builder** that closes the reactive
@@ -4538,7 +4564,7 @@ mod tests {
         use super::{runtime_id, viewport};
         use crate::frame::FrameReason;
         use crate::runtime::UiRuntime;
-        use obscur_identity::{ComponentId, InternedSymbol, NodeId};
+        use obscur_identity::{ComponentId, InternedSymbol, NodeId, SignalId};
         use obscur_view::component::{
             Component, ComponentContext, ComponentContract, ComponentFactory, ComponentInstance,
             ComponentRegistration, ComponentVersion, ErasedComponent, FromProps, InstanceId,
@@ -4574,11 +4600,17 @@ mod tests {
             /// Ask for exactly one more render, then settle — modelling a
             /// component that advances its own state once.
             self_updates: u32,
+            /// The observable source this component reads, if any. `None` models
+            /// a component that depends on no app state at all.
+            tracks: Option<SignalId>,
         }
 
         impl Component for Counter {
             type Props = CounterProps;
             fn render(&mut self, ctx: &mut ComponentContext<'_>, props: &Self::Props) -> View {
+                if let Some(source) = self.tracks {
+                    ctx.track(source);
+                }
                 self.total.set(*self.total.get() + props.step);
                 if self.self_updates > 0 {
                     self.self_updates -= 1;
@@ -4593,6 +4625,7 @@ mod tests {
         #[derive(Debug)]
         struct CounterFactory {
             self_updates: u32,
+            tracks: Option<SignalId>,
         }
 
         impl ComponentFactory for CounterFactory {
@@ -4609,23 +4642,36 @@ mod tests {
                 Box::new(Counter {
                     total: LocalState::new(0),
                     self_updates: self.self_updates,
+                    tracks: self.tracks,
                 })
             }
         }
 
         fn runtime_with(self_updates: u32) -> UiRuntime {
+            build_runtime(self_updates, None)
+        }
+
+        fn runtime_with_counter() -> UiRuntime {
+            build_runtime(0, None)
+        }
+
+        /// A runtime whose counter declares a dependency on `tracks`.
+        fn runtime_tracking(tracks: SignalId) -> UiRuntime {
+            build_runtime(0, Some(tracks))
+        }
+
+        fn build_runtime(self_updates: u32, tracks: Option<SignalId>) -> UiRuntime {
             let mut runtime = UiRuntime::new(runtime_id(), viewport());
             runtime
                 .register_component(ComponentRegistration::new(
-                    Box::new(CounterFactory { self_updates }),
+                    Box::new(CounterFactory {
+                        self_updates,
+                        tracks,
+                    }),
                     ComponentVersion::INITIAL,
                 ))
                 .expect("first registration");
             runtime
-        }
-
-        fn runtime_with_counter() -> UiRuntime {
-            runtime_with(0)
         }
 
         /// A view with one `<Counter step=N/>` element.
@@ -4678,6 +4724,81 @@ mod tests {
             assert_eq!(component_node(&runtime), node, "the node was reused");
             assert_eq!(runtime.mounted_component_count(), 1, "no remount");
             assert_eq!(rendered_text(&runtime), "5", "2 + 3: the state persisted");
+        }
+
+        const STORE: SignalId = SignalId::from_raw(1);
+        const OTHER: SignalId = SignalId::from_raw(2);
+
+        #[test]
+        fn notifying_a_tracked_signal_re_renders_only_its_consumers() {
+            // THE reactive entry point (§3.1: "dependency tracking invalidates
+            // only consumers of changed values"). The host mutates its own state
+            // and names what changed; the runtime invalidates exactly the
+            // components whose last render READ that source.
+            let mut runtime = runtime_tracking(STORE);
+            runtime.render_now(&counter_view(2), &[]);
+            assert_eq!(rendered_text(&runtime), "2");
+
+            // A source this component does not read invalidates nobody — and so
+            // costs nothing, not even a frame.
+            assert_eq!(runtime.notify_signal(OTHER), 0);
+            assert_eq!(runtime.peek_frame_reason(), None, "no consumer, no frame");
+
+            // The source it does read invalidates it, and schedules the frame.
+            assert_eq!(runtime.notify_signal(STORE), 1);
+            assert_eq!(runtime.peek_frame_reason(), Some(FrameReason::UiCommit));
+
+            runtime
+                .run_due_frame(&counter_view(2), &[])
+                .expect("the requested frame is due");
+            assert_eq!(rendered_text(&runtime), "4", "2 + 2: it re-rendered");
+        }
+
+        #[test]
+        fn a_component_that_tracks_nothing_is_never_invalidated_by_a_signal() {
+            // The asymmetry that makes this worth having: a component reading no
+            // app state is untouched however much state changes.
+            let mut runtime = runtime_with_counter();
+            runtime.render_now(&counter_view(2), &[]);
+            assert_eq!(rendered_text(&runtime), "2");
+
+            assert_eq!(runtime.notify_signal(STORE), 0);
+            assert_eq!(runtime.notify_signal(OTHER), 0);
+            assert_eq!(runtime.peek_frame_reason(), None);
+        }
+
+        #[test]
+        fn a_signal_notified_twice_before_a_frame_costs_one_frame() {
+            // Coalescing is the scheduler's job; notifying is cheap and idempotent
+            // from the caller's side.
+            let mut runtime = runtime_tracking(STORE);
+            runtime.render_now(&counter_view(2), &[]);
+
+            assert_eq!(runtime.notify_signal(STORE), 1);
+            // Already stale, so the second notify finds it dirty but reports it
+            // honestly as still depending on a changed source.
+            assert_eq!(runtime.notify_signal(STORE), 1);
+
+            runtime
+                .run_due_frame(&counter_view(2), &[])
+                .expect("one frame services both");
+            assert_eq!(rendered_text(&runtime), "4", "rendered once, not twice");
+            assert_eq!(runtime.peek_frame_reason(), None, "and settles");
+        }
+
+        #[test]
+        fn a_dependency_taken_this_render_is_seen_as_current() {
+            // The generation is captured at track() time, so a component that just
+            // rendered is NOT immediately stale against the value it just read.
+            let mut runtime = runtime_tracking(STORE);
+            runtime.render_now(&counter_view(2), &[]);
+            runtime.notify_signal(STORE);
+            runtime
+                .run_due_frame(&counter_view(2), &[])
+                .expect("due");
+            assert_eq!(rendered_text(&runtime), "4");
+            // Re-tracked at the new generation: nothing further is pending.
+            assert_eq!(runtime.peek_frame_reason(), None);
         }
 
         #[test]

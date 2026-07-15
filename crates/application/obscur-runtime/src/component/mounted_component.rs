@@ -5,7 +5,9 @@ use core::fmt;
 use obscur_view::component::{
     ComponentContext, ComponentInstance, ErasedComponent, InstanceId, PropsError,
 };
+use obscur_identity::SignalId;
 use obscur_view::lifecycle::{MountContext, UnmountContext};
+use obscur_view::state::{SignalGenerations, StateGeneration};
 use obscur_view::view::{View, ViewProperty};
 
 /// One mounted component instance: its bookkeeping record plus the erased value
@@ -82,7 +84,7 @@ impl MountedComponent {
     }
 
     /// Advances the instance to `Mounted` and runs the component's `on_mount`.
-    pub fn mount(&mut self) {
+    pub fn mount(&mut self, signals: &SignalGenerations) {
         self.instance.mount();
         let Self {
             instance,
@@ -91,7 +93,7 @@ impl MountedComponent {
             ..
         } = self;
         let phase = instance.state();
-        let mut ctx = ComponentContext::new(instance.scope_mut(), phase, needs_update);
+        let mut ctx = ComponentContext::new(instance.scope_mut(), phase, needs_update, signals);
         let mut mount = MountContext::new(&mut ctx);
         component.on_mount_erased(&mut mount);
     }
@@ -101,7 +103,7 @@ impl MountedComponent {
     ///
     /// Called *before* the value is dropped, so a component can act while its
     /// state is still readable — releasing the state itself needs no hook.
-    pub fn unmount(&mut self) {
+    pub fn unmount(&mut self, signals: &SignalGenerations) {
         let Self {
             instance,
             component,
@@ -109,19 +111,34 @@ impl MountedComponent {
             ..
         } = self;
         let phase = instance.state();
-        let mut ctx = ComponentContext::new(instance.scope_mut(), phase, needs_update);
+        let mut ctx = ComponentContext::new(instance.scope_mut(), phase, needs_update, signals);
         let mut unmount = UnmountContext::new(&mut ctx);
         component.on_unmount_erased(&mut unmount);
         self.instance.unmount();
     }
 
+    /// Whether this component depends on `source` and has not seen its `current`
+    /// generation — i.e. it is a consumer of a value that changed (spec §3.1).
+    #[must_use]
+    pub fn depends_on_stale(&self, source: SignalId, current: StateGeneration) -> bool {
+        self.instance.scope().is_stale_for(source, current)
+    }
+
     /// Renders the component against the node's authored `props`.
+    ///
+    /// `signals` supplies the current generation of every observable source, so a
+    /// dependency recorded by [`ComponentContext::track`] captures the generation
+    /// it was actually taken at.
     ///
     /// # Errors
     ///
     /// Returns the [`PropsError`] when `props` do not satisfy the component's
     /// typed props; the component is not called in that case.
-    pub fn render(&mut self, props: &[ViewProperty]) -> Result<View, PropsError> {
+    pub fn render(
+        &mut self,
+        props: &[ViewProperty],
+        signals: &SignalGenerations,
+    ) -> Result<View, PropsError> {
         let Self {
             instance,
             component,
@@ -130,7 +147,11 @@ impl MountedComponent {
         } = self;
         // Read the phase before borrowing the scope mutably.
         let phase = instance.state();
-        let mut ctx = ComponentContext::new(instance.scope_mut(), phase, needs_update);
+        // Dependencies are re-collected every render: a component that reads a
+        // source only on some branch must depend on it only when it actually did,
+        // so last render's tracking must not linger.
+        instance.scope_mut().clear();
+        let mut ctx = ComponentContext::new(instance.scope_mut(), phase, needs_update, signals);
         let view = component.render_erased(&mut ctx, props)?;
 
         // A request raised DURING this render is honoured by the next frame, not
@@ -165,6 +186,7 @@ mod tests {
         PropsError, decode_required,
     };
     use obscur_view::lifecycle::{LifecycleState, MountContext, UnmountContext};
+    use obscur_view::state::SignalGenerations;
     use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -231,7 +253,7 @@ mod tests {
     }
 
     fn rendered_text(component: &mut MountedComponent, by: i64) -> String {
-        let view = component.render(&props(by)).expect("props decode");
+        let view = component.render(&props(by), &SignalGenerations::new()).expect("props decode");
         let ViewNode::Text { content, .. } = &view.root().nodes()[0] else {
             panic!("counter renders text");
         };
@@ -251,7 +273,7 @@ mod tests {
         let log = Rc::new(RefCell::new(Vec::new()));
         let mut component = mounted(&log, false);
         assert_eq!(component.instance().state(), LifecycleState::Created);
-        component.mount();
+        component.mount(&SignalGenerations::new());
         assert_eq!(component.instance().state(), LifecycleState::Mounted);
         assert_eq!(&*log.borrow(), &["mount"]);
     }
@@ -260,8 +282,8 @@ mod tests {
     fn unmount_runs_the_hook_before_retiring_the_instance() {
         let log = Rc::new(RefCell::new(Vec::new()));
         let mut component = mounted(&log, false);
-        component.mount();
-        component.unmount();
+        component.mount(&SignalGenerations::new());
+        component.unmount(&SignalGenerations::new());
         assert_eq!(&*log.borrow(), &["mount", "unmount"]);
         assert_eq!(component.instance().state(), LifecycleState::Unmounted);
         // "Automatic cleanup": the scope is released with the instance.
@@ -307,7 +329,7 @@ mod tests {
         let log = Rc::new(RefCell::new(Vec::new()));
         let mut component = mounted(&log, false);
         let bad = vec![ViewProperty::new(step(), ViewValue::Text("2".into()))];
-        assert!(component.render(&bad).is_err());
+        assert!(component.render(&bad, &SignalGenerations::new()).is_err());
         assert!(log.borrow().is_empty(), "render must not have been called");
     }
 }

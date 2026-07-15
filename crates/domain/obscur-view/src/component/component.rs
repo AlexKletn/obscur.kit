@@ -83,7 +83,7 @@ mod tests {
     use crate::boundary::ErrorBoundaryPolicy;
     use crate::component::ComponentContext;
     use crate::lifecycle::{LifecycleState, MountContext};
-    use crate::state::{LocalState, SubscriptionScope};
+    use crate::state::{LocalState, SignalGenerations, SubscriptionScope};
     use crate::view::View;
 
     /// A minimal component that holds local view state and renders an empty
@@ -126,7 +126,8 @@ mod tests {
         };
         let mut scope = SubscriptionScope::new();
         let mut flag = false;
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut flag);
+        let signals = SignalGenerations::new();
+        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut flag, &signals);
 
         let view = component.render(&mut ctx, &CounterProps { step: 2 });
         assert!(view.root().is_empty());

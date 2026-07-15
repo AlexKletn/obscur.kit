@@ -88,6 +88,7 @@ impl DerefMut for UpdateContext<'_, '_> {
 
 #[cfg(test)]
 mod tests {
+    use crate::state::SignalGenerations;
     use super::UpdateContext;
     use crate::component::ComponentContext;
     use crate::lifecycle::LifecycleState;
@@ -97,7 +98,8 @@ mod tests {
     fn changed_reflects_generation_advance() {
         let mut scope = SubscriptionScope::new();
         let mut flag = false;
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Updating, &mut flag);
+        let signals = SignalGenerations::new();
+        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Updating, &mut flag, &signals);
         let prev = StateGeneration::from_raw(3);
         let next = prev.next();
         let update = UpdateContext::new(&mut ctx, prev, next);
@@ -110,7 +112,8 @@ mod tests {
     fn equal_generations_are_unchanged() {
         let mut scope = SubscriptionScope::new();
         let mut flag = false;
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Updating, &mut flag);
+        let signals = SignalGenerations::new();
+        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Updating, &mut flag, &signals);
         let g = StateGeneration::from_raw(5);
         let update = UpdateContext::new(&mut ctx, g, g);
         assert!(!update.changed());

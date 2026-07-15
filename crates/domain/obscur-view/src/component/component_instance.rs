@@ -126,6 +126,7 @@ impl ComponentInstance {
 
 #[cfg(test)]
 mod tests {
+    use obscur_identity::SignalId;
     use super::ComponentInstance;
     use crate::component::InstanceId;
     use crate::lifecycle::LifecycleState;
@@ -175,7 +176,8 @@ mod tests {
     fn unmount_clears_subscriptions() {
         let mut inst = instance();
         inst.mount();
-        inst.scope_mut().subscribe(StateGeneration::INITIAL);
+        inst.scope_mut()
+            .subscribe(SignalId::from_raw(1), StateGeneration::INITIAL);
         assert_eq!(inst.scope().len(), 1);
         inst.unmount();
         assert!(inst.scope().is_empty());

@@ -60,13 +60,14 @@ mod tests {
     use super::UnmountContext;
     use crate::component::ComponentContext;
     use crate::lifecycle::LifecycleState;
-    use crate::state::SubscriptionScope;
+    use crate::state::{SignalGenerations, SubscriptionScope};
 
     #[test]
     fn forwards_to_context() {
         let mut scope = SubscriptionScope::new();
         let mut flag = false;
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Unmounted, &mut flag);
+        let signals = SignalGenerations::new();
+        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Unmounted, &mut flag, &signals);
         let mut unmount = UnmountContext::new(&mut ctx);
         assert_eq!(unmount.context().phase(), LifecycleState::Unmounted);
     }

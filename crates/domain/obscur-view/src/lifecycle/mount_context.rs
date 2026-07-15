@@ -58,13 +58,14 @@ mod tests {
     use super::MountContext;
     use crate::component::ComponentContext;
     use crate::lifecycle::LifecycleState;
-    use crate::state::SubscriptionScope;
+    use crate::state::{SignalGenerations, SubscriptionScope};
 
     #[test]
     fn forwards_to_context() {
         let mut scope = SubscriptionScope::new();
         let mut flag = false;
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut flag);
+        let signals = SignalGenerations::new();
+        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut flag, &signals);
         let mut mount = MountContext::new(&mut ctx);
         assert_eq!(mount.phase(), LifecycleState::Mounted);
         mount.context().request_update();

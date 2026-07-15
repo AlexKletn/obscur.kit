@@ -1,12 +1,13 @@
 //! `ComponentStore`: the runtime's per-node component instances.
 
-use obscur_identity::{ComponentId, NodeId};
+use obscur_identity::{ComponentId, NodeId, SignalId};
 use obscur_tree::node::{NodeFlags, NodeKind};
 use obscur_tree::reconciliation::ReconciliationPlan;
 use obscur_tree::tree::{RetainedTree, SecondaryMap};
 use obscur_view::component::{
     ComponentRegistration, ComponentRegistry, InstanceId, RegistryError,
 };
+use obscur_view::state::SignalGenerations;
 
 use crate::component::MountedComponent;
 
@@ -38,6 +39,10 @@ pub struct ComponentStore {
     /// Monotonic source of [`InstanceId`]s. Never reused, so an id in a
     /// diagnostic always names one historical instance.
     next_instance: u64,
+    /// The current version of every observable source (spec §3.1). A component
+    /// records which of these its render read; comparing the two is what
+    /// invalidates only the consumers of a value that actually changed.
+    signals: SignalGenerations,
 }
 
 impl ComponentStore {
@@ -103,6 +108,39 @@ impl ComponentStore {
             .collect()
     }
 
+    /// The current version of every observable source, for a caller that renders
+    /// a component itself.
+    #[must_use]
+    pub const fn signals(&self) -> &SignalGenerations {
+        &self.signals
+    }
+
+    /// Records that the value behind `source` changed, and marks every component
+    /// that depends on it stale (spec §3.1: "dependency tracking invalidates only
+    /// consumers of changed values").
+    ///
+    /// Returns how many components were invalidated — zero when nothing reads the
+    /// source, which is the normal and cheap case for an app with many sources.
+    ///
+    /// A component that tracked a *different* source is untouched, and one that
+    /// tracked nothing is never invalidated by any notification. That asymmetry is
+    /// the whole point: it is what a wholesale root rebuild cannot express.
+    pub fn notify(&mut self, source: SignalId) -> usize {
+        let current = self.signals.bump(source);
+        let stale: Vec<NodeId> = self
+            .mounted
+            .iter()
+            .filter(|(_, mounted)| mounted.depends_on_stale(source, current))
+            .map(|(node, _)| node)
+            .collect();
+        for node in &stale {
+            if let Some(mounted) = self.mounted.get_mut(*node) {
+                mounted.mark_dirty();
+            }
+        }
+        stale.len()
+    }
+
     /// Whether any mounted component is waiting to be re-rendered.
     ///
     /// A host reads this after a frame: a component that asked to update during
@@ -161,7 +199,7 @@ impl ComponentStore {
             registration.create_instance(instance),
             registration.create_component(),
         );
-        mounted.mount();
+        mounted.mount(&self.signals);
         self.mounted.insert(node, mounted);
         // Tell reconciliation that this node's children now belong to the
         // component: without the flag, the next root reconcile would see the
@@ -177,7 +215,7 @@ impl ComponentStore {
     /// value afterwards releases that state and the scoped subscriptions.
     fn unmount(&mut self, tree: &mut RetainedTree, node: NodeId) {
         if let Some(mut mounted) = self.mounted.remove(node) {
-            mounted.unmount();
+            mounted.unmount(&self.signals);
         }
         // The node is usually already gone (a Remove op means the reconciler
         // dropped it), but clear the flag defensively for any caller that

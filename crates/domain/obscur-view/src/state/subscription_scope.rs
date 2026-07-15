@@ -1,5 +1,6 @@
 //! `SubscriptionScope`: owns subscriptions and releases them on drop.
 
+use obscur_identity::SignalId;
 use crate::state::state_generation::StateGeneration;
 use crate::state::subscription::{Subscription, SubscriptionId};
 
@@ -30,16 +31,33 @@ impl SubscriptionScope {
         }
     }
 
-    /// Registers a subscription opened while the source was at `observed`,
-    /// returning its freshly minted id.
+    /// Records a dependency on `source`, which was at generation `observed` when
+    /// the dependency was taken, returning the subscription's freshly minted id.
     ///
     /// The scope keeps ownership of the token; the returned id lets the caller
     /// refer to it later (for example to [`unsubscribe`](Self::unsubscribe)).
-    pub fn subscribe(&mut self, observed: StateGeneration) -> SubscriptionId {
+    pub fn subscribe(&mut self, source: SignalId, observed: StateGeneration) -> SubscriptionId {
         let id = SubscriptionId::from_raw(self.next_id);
         self.next_id = self.next_id.wrapping_add(1);
-        self.subscriptions.push(Subscription::new(id, observed));
+        self.subscriptions
+            .push(Subscription::new(id, source, observed));
         id
+    }
+
+    /// Whether any subscription in this scope depends on `source` and is behind
+    /// its `current` generation — i.e. this scope's owner is a consumer of a
+    /// value that changed (spec §3.1).
+    #[must_use]
+    pub fn is_stale_for(&self, source: SignalId, current: StateGeneration) -> bool {
+        self.subscriptions
+            .iter()
+            .any(|s| s.source() == source && s.is_stale_against(current))
+    }
+
+    /// Every source this scope depends on, in the order the dependencies were
+    /// recorded.
+    pub fn sources(&self) -> impl Iterator<Item = SignalId> + '_ {
+        self.subscriptions.iter().map(Subscription::source)
     }
 
     /// Releases a single subscription early, returning it if it was present.
@@ -86,6 +104,7 @@ impl Drop for SubscriptionScope {
 
 #[cfg(test)]
 mod tests {
+    use obscur_identity::SignalId;
     use super::SubscriptionScope;
     use crate::state::StateGeneration;
 
@@ -99,8 +118,8 @@ mod tests {
     #[test]
     fn subscribe_registers_and_mints_unique_ids() {
         let mut scope = SubscriptionScope::new();
-        let a = scope.subscribe(StateGeneration::INITIAL);
-        let b = scope.subscribe(StateGeneration::INITIAL);
+        let a = scope.subscribe(SignalId::from_raw(1), StateGeneration::INITIAL);
+        let b = scope.subscribe(SignalId::from_raw(1), StateGeneration::INITIAL);
         assert_ne!(a, b);
         assert_eq!(scope.len(), 2);
         assert_eq!(
@@ -114,22 +133,22 @@ mod tests {
     #[test]
     fn unsubscribe_removes_one() {
         let mut scope = SubscriptionScope::new();
-        let a = scope.subscribe(StateGeneration::INITIAL);
-        let _b = scope.subscribe(StateGeneration::INITIAL);
+        let a = scope.subscribe(SignalId::from_raw(1), StateGeneration::INITIAL);
+        let _b = scope.subscribe(SignalId::from_raw(1), StateGeneration::INITIAL);
         let removed = scope.unsubscribe(a);
         assert_eq!(removed.map(|s| s.id()), Some(a));
         assert_eq!(scope.len(), 1);
         assert!(scope.get(a).is_none());
         // Removed id is not reused by the next subscription.
-        let c = scope.subscribe(StateGeneration::INITIAL);
+        let c = scope.subscribe(SignalId::from_raw(1), StateGeneration::INITIAL);
         assert_ne!(c, a);
     }
 
     #[test]
     fn clear_releases_all() {
         let mut scope = SubscriptionScope::new();
-        scope.subscribe(StateGeneration::INITIAL);
-        scope.subscribe(StateGeneration::INITIAL);
+        scope.subscribe(SignalId::from_raw(1), StateGeneration::INITIAL);
+        scope.subscribe(SignalId::from_raw(1), StateGeneration::INITIAL);
         scope.clear();
         assert!(scope.is_empty());
     }
@@ -139,7 +158,7 @@ mod tests {
         // Exercised for coverage; real assertion is that this does not leak and
         // clears deterministically.
         let mut scope = SubscriptionScope::new();
-        scope.subscribe(StateGeneration::INITIAL);
+        scope.subscribe(SignalId::from_raw(1), StateGeneration::INITIAL);
         drop(scope);
     }
 }

@@ -216,7 +216,7 @@ mod tests {
         // all a runtime has when it meets an `Element { component }` node:
         // registry → factory → erased component → decoded props → typed render.
         use crate::lifecycle::LifecycleState;
-        use crate::state::SubscriptionScope;
+        use crate::state::{SignalGenerations, SubscriptionScope};
 
         let mut reg = ComponentRegistry::new();
         reg.register(registration(7)).expect("register");
@@ -227,7 +227,8 @@ mod tests {
 
         let mut scope = SubscriptionScope::new();
         let mut needs_update = false;
-        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut needs_update);
+        let signals = SignalGenerations::new();
+        let mut ctx = ComponentContext::new(&mut scope, LifecycleState::Mounted, &mut needs_update, &signals);
         let view = component
             .render_erased(&mut ctx, &[])
             .expect("the stub props decode from anything");
