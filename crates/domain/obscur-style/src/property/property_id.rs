@@ -95,6 +95,38 @@ pub enum PropertyId {
     /// The `padding-left` longhand.
     PaddingLeft,
 
+    // ---- Logical box model (spec §4.13 "logical properties") ----
+    //
+    // These are NOT computed properties of their own: each resolves into its
+    // physical counterpart at computed-value time, per `physical_under`. Keeping
+    // them out of `COMPUTED_PROPERTIES` is deliberate — a node's computed style
+    // holds `margin-left`, and every downstream phase reads that one place rather
+    // than having to ask "or was it declared logically?".
+    /// The `margin-inline-start` logical longhand.
+    MarginInlineStart,
+    /// The `margin-inline-end` logical longhand.
+    MarginInlineEnd,
+    /// The `margin-block-start` logical longhand.
+    MarginBlockStart,
+    /// The `margin-block-end` logical longhand.
+    MarginBlockEnd,
+    /// The `padding-inline-start` logical longhand.
+    PaddingInlineStart,
+    /// The `padding-inline-end` logical longhand.
+    PaddingInlineEnd,
+    /// The `padding-block-start` logical longhand.
+    PaddingBlockStart,
+    /// The `padding-block-end` logical longhand.
+    PaddingBlockEnd,
+    /// The `inset-inline-start` logical longhand.
+    InsetInlineStart,
+    /// The `inset-inline-end` logical longhand.
+    InsetInlineEnd,
+    /// The `inset-block-start` logical longhand.
+    InsetBlockStart,
+    /// The `inset-block-end` logical longhand.
+    InsetBlockEnd,
+
     // ---- Box model: border width (Length-valued, not inherited) ----
     /// The `border-top-width` longhand. Feeds the box model's border insets and,
     /// paired with a non-`none` style, the painted border thickness. Initial `0`.
@@ -366,6 +398,101 @@ pub enum PropertyId {
 }
 
 impl PropertyId {
+    /// The physical property this logical one resolves into, or [`None`] when
+    /// `self` is not a logical property (spec §4.13).
+    ///
+    /// `rtl` is the element's computed `direction`. Only `direction` is consulted
+    /// because only `direction` is modelled: there is no `writing-mode`, so the
+    /// block axis is always vertical and `block-start`/`block-end` map to
+    /// `top`/`bottom` regardless. The moment a `writing-mode` exists this is the
+    /// one place that has to learn about it.
+    ///
+    /// The inline axis is the one that flips: under `rtl`, `inline-start` is the
+    /// RIGHT edge.
+    #[must_use]
+    pub const fn physical_under(self, rtl: bool) -> Option<Self> {
+        Some(match self {
+            // Inline axis: flipped by `direction`.
+            Self::MarginInlineStart => {
+                if rtl {
+                    Self::MarginRight
+                } else {
+                    Self::MarginLeft
+                }
+            }
+            Self::MarginInlineEnd => {
+                if rtl {
+                    Self::MarginLeft
+                } else {
+                    Self::MarginRight
+                }
+            }
+            Self::PaddingInlineStart => {
+                if rtl {
+                    Self::PaddingRight
+                } else {
+                    Self::PaddingLeft
+                }
+            }
+            Self::PaddingInlineEnd => {
+                if rtl {
+                    Self::PaddingLeft
+                } else {
+                    Self::PaddingRight
+                }
+            }
+            Self::InsetInlineStart => {
+                if rtl {
+                    Self::Right
+                } else {
+                    Self::Left
+                }
+            }
+            Self::InsetInlineEnd => {
+                if rtl {
+                    Self::Left
+                } else {
+                    Self::Right
+                }
+            }
+            // Block axis: vertical, and `direction` does not touch it.
+            Self::MarginBlockStart => Self::MarginTop,
+            Self::MarginBlockEnd => Self::MarginBottom,
+            Self::PaddingBlockStart => Self::PaddingTop,
+            Self::PaddingBlockEnd => Self::PaddingBottom,
+            Self::InsetBlockStart => Self::Top,
+            Self::InsetBlockEnd => Self::Bottom,
+            _ => return None,
+        })
+    }
+
+    /// Whether this is a logical property — one that resolves into a physical
+    /// counterpart rather than being computed itself.
+    #[must_use]
+    pub const fn is_logical(self) -> bool {
+        // `ltr` is arbitrary here: a logical property maps under either direction.
+        self.physical_under(false).is_some()
+    }
+
+    /// Every logical property, in a stable order.
+    ///
+    /// Used to find which logical declarations could feed a given physical
+    /// property; there are twelve, so a scan is cheaper than a reverse map.
+    pub const LOGICAL: [Self; 12] = [
+        Self::MarginInlineStart,
+        Self::MarginInlineEnd,
+        Self::MarginBlockStart,
+        Self::MarginBlockEnd,
+        Self::PaddingInlineStart,
+        Self::PaddingInlineEnd,
+        Self::PaddingBlockStart,
+        Self::PaddingBlockEnd,
+        Self::InsetInlineStart,
+        Self::InsetInlineEnd,
+        Self::InsetBlockStart,
+        Self::InsetBlockEnd,
+    ];
+
     /// Returns the property's canonical CSS name as a stable string.
     ///
     /// This is intended for diagnostics and `DevTools` only; it is never used for
@@ -400,6 +527,18 @@ impl PropertyId {
             Self::PaddingRight => "padding-right",
             Self::PaddingBottom => "padding-bottom",
             Self::PaddingLeft => "padding-left",
+            Self::MarginInlineStart => "margin-inline-start",
+            Self::MarginInlineEnd => "margin-inline-end",
+            Self::MarginBlockStart => "margin-block-start",
+            Self::MarginBlockEnd => "margin-block-end",
+            Self::PaddingInlineStart => "padding-inline-start",
+            Self::PaddingInlineEnd => "padding-inline-end",
+            Self::PaddingBlockStart => "padding-block-start",
+            Self::PaddingBlockEnd => "padding-block-end",
+            Self::InsetInlineStart => "inset-inline-start",
+            Self::InsetInlineEnd => "inset-inline-end",
+            Self::InsetBlockStart => "inset-block-start",
+            Self::InsetBlockEnd => "inset-block-end",
             Self::BorderTopWidth => "border-top-width",
             Self::BorderRightWidth => "border-right-width",
             Self::BorderBottomWidth => "border-bottom-width",
@@ -554,6 +693,20 @@ impl PropertyId {
             | Self::MinHeight
             | Self::MaxWidth
             | Self::MaxHeight
+            // Logical box-model properties inherit exactly as their physical
+            // counterparts do: not at all.
+            | Self::MarginInlineStart
+            | Self::MarginInlineEnd
+            | Self::MarginBlockStart
+            | Self::MarginBlockEnd
+            | Self::PaddingInlineStart
+            | Self::PaddingInlineEnd
+            | Self::PaddingBlockStart
+            | Self::PaddingBlockEnd
+            | Self::InsetInlineStart
+            | Self::InsetInlineEnd
+            | Self::InsetBlockStart
+            | Self::InsetBlockEnd
             | Self::Gap
             | Self::FlexBasis
             | Self::FlexGrow

@@ -209,6 +209,22 @@ impl StyleResolver {
     #[must_use]
     pub fn initial_value(self, property: PropertyId) -> Option<ComputedValue> {
         match property {
+            // A logical property has no computed value of its own: it resolves
+            // INTO its physical counterpart, which carries the initial. It is not
+            // in `COMPUTED_PROPERTIES`, so these arms are unreachable in practice
+            // — they exist to keep the match total rather than assumed.
+            PropertyId::MarginInlineStart
+            | PropertyId::MarginInlineEnd
+            | PropertyId::MarginBlockStart
+            | PropertyId::MarginBlockEnd
+            | PropertyId::PaddingInlineStart
+            | PropertyId::PaddingInlineEnd
+            | PropertyId::PaddingBlockStart
+            | PropertyId::PaddingBlockEnd
+            | PropertyId::InsetInlineStart
+            | PropertyId::InsetInlineEnd
+            | PropertyId::InsetBlockStart
+            | PropertyId::InsetBlockEnd => None,
             PropertyId::Color => Some(ComputedValue::color(StyleColor::BLACK)),
             PropertyId::BackgroundColor => Some(ComputedValue::color(StyleColor::TRANSPARENT)),
             // `background-image` initial is `none` (no image). There is no
@@ -490,14 +506,85 @@ impl StyleResolver {
             style.set_custom_property(*name, value.clone());
         }
 
+        // Step 1a: `direction` before anything else. A logical property maps onto
+        // a physical one *through* the computed direction (spec §4.13), so it has
+        // to be known before any box-model property is resolved — resolving it as
+        // part of the loop below would make the answer depend on iteration order.
+        let rtl = Self::resolves_rtl(cascaded, parent);
+
         // Steps 2–3: compute each property.
         for &property in COMPUTED_PROPERTIES {
-            if let Some(value) = self.resolve_property(property, cascaded, &effective, parent) {
+            if let Some(value) = self.resolve_property(property, cascaded, &effective, parent, rtl) {
                 style.set(property, value);
             }
         }
 
         style
+    }
+
+    /// Whether this element's computed `direction` is `rtl`.
+    ///
+    /// Cascaded value first, then the parent's computed one (`direction` inherits),
+    /// then the CSS initial `ltr`. This is the same resolution the `Direction`
+    /// property gets in the loop; it is done early because the logical-property
+    /// mapping below depends on it.
+    fn resolves_rtl(cascaded: &ResolvedDeclarations, parent: Option<&ComputedStyle>) -> bool {
+        if let Some(PropertyValue::Keyword(symbol)) = cascaded.get(PropertyId::Direction) {
+            return *symbol == layout_keyword::DIRECTION_RTL;
+        }
+        parent
+            .and_then(|style| style.get(PropertyId::Direction))
+            .and_then(|value| match value.value() {
+                PropertyValue::Keyword(symbol) => Some(*symbol),
+                _ => None,
+            })
+            .is_some_and(|symbol| symbol == layout_keyword::DIRECTION_RTL)
+    }
+
+    /// The cascaded value for `property`, honouring any **logical** declaration
+    /// that maps onto it (spec §4.13).
+    ///
+    /// A logical property and its physical counterpart are separate `PropertyId`s
+    /// that cascade independently, but CSS decides between them by ordinary cascade
+    /// order. Both winners are therefore compared here, by the priority the cascade
+    /// recorded — the later/stronger declaration wins, exactly as it would between
+    /// two `margin-left` rules.
+    ///
+    /// Ties and missing priorities prefer the physical declaration: a value with no
+    /// recorded priority did not come from a cascade (a test, a runtime override),
+    /// and "the physical one" is the only honest answer when nothing states which
+    /// was declared later.
+    fn cascaded_for<'a>(
+        cascaded: &'a ResolvedDeclarations,
+        property: PropertyId,
+        rtl: bool,
+    ) -> Option<&'a PropertyValue> {
+        let physical = cascaded.get(property);
+        // Only a physical box-model property can have a logical counterpart, so
+        // this scan is skipped entirely for the other ~80 properties.
+        let logical = PropertyId::LOGICAL
+            .iter()
+            .copied()
+            .filter(|candidate| candidate.physical_under(rtl) == Some(property))
+            .filter_map(|candidate| Some((candidate, cascaded.get(candidate)?)))
+            .max_by_key(|(candidate, _)| cascaded.priority_of(*candidate));
+        let Some((candidate, logical_value)) = logical else {
+            return physical;
+        };
+        if physical.is_none() {
+            return Some(logical_value);
+        }
+        match (
+            cascaded.priority_of(candidate),
+            cascaded.priority_of(property),
+        ) {
+            (Some(logical_priority), Some(physical_priority))
+                if logical_priority > physical_priority =>
+            {
+                Some(logical_value)
+            }
+            _ => physical,
+        }
     }
 
     /// Resolves one property to a computed value, or [`None`] if it is left
@@ -508,8 +595,9 @@ impl StyleResolver {
         cascaded: &ResolvedDeclarations,
         custom: &HashMap<InternedSymbol, PropertyValue>,
         parent: Option<&ComputedStyle>,
+        rtl: bool,
     ) -> Option<ComputedValue> {
-        match cascaded.get(property) {
+        match Self::cascaded_for(cascaded, property, rtl) {
             Some(raw) => {
                 // Step 2: substitute var() (unresolved -> Unset).
                 let value = Self::substitute(raw, custom);
@@ -1181,7 +1269,24 @@ mod tests {
                 | PropertyId::OverflowWrap
                 | PropertyId::WordBreak
                 | PropertyId::TabSize
-                | PropertyId::Overflow => {}
+                | PropertyId::Overflow
+                // Logical properties are classified but deliberately NOT computed:
+                // each resolves into its physical counterpart via
+                // `cascaded_for`, so the computed style holds `margin-left` and
+                // every downstream phase reads that one place. The assertion below
+                // exempts them for exactly this reason.
+                | PropertyId::MarginInlineStart
+                | PropertyId::MarginInlineEnd
+                | PropertyId::MarginBlockStart
+                | PropertyId::MarginBlockEnd
+                | PropertyId::PaddingInlineStart
+                | PropertyId::PaddingInlineEnd
+                | PropertyId::PaddingBlockStart
+                | PropertyId::PaddingBlockEnd
+                | PropertyId::InsetInlineStart
+                | PropertyId::InsetInlineEnd
+                | PropertyId::InsetBlockStart
+                | PropertyId::InsetBlockEnd => {}
             }
         }
         let all = [
@@ -1286,6 +1391,12 @@ mod tests {
             assert!(
                 COMPUTED_PROPERTIES.contains(&id),
                 "{} is modelled but not computed — authored values would be dropped",
+                id.name()
+            );
+            assert!(
+                !id.is_logical(),
+                "{} is logical: it must resolve INTO a physical property, not be \
+                 computed alongside one — two sources of truth for one box edge",
                 id.name()
             );
         }
@@ -1538,4 +1649,163 @@ mod tests {
             Some(Length::px(30.0))
         );
     }
+
+    // ---- logical properties (spec §4.13) -----------------------------------
+
+    mod logical {
+        use super::super::StyleResolver;
+        use crate::cascade::{CascadeOrigin, CascadePriority, ImportantFlag, ResolvedDeclarations};
+        use crate::computed::{ComputedStyle, ComputedValue};
+        use crate::property::{Length, PropertyId, PropertyValue, layout_keyword};
+        use crate::selector::SelectorSpecificity;
+        use std::collections::HashMap;
+
+        /// A cascade priority in the author origin at `source_order`, so tests can
+        /// state "this declaration came later" the way real CSS does.
+        fn at(source_order: u32) -> CascadePriority {
+            CascadePriority::new(
+                CascadeOrigin::GlobalApp,
+                ImportantFlag::Normal,
+                SelectorSpecificity::new(0, 1, 0),
+                source_order,
+            )
+        }
+
+        fn px(value: f32) -> PropertyValue {
+            PropertyValue::Length(Length::px(value))
+        }
+
+        /// Resolves `cascaded` with no parent, under the given direction.
+        fn resolve(cascaded: &ResolvedDeclarations, rtl: bool) -> ComputedStyle {
+            let mut with_direction = ResolvedDeclarations::new();
+            for (property, value) in cascaded.iter() {
+                if let Some(priority) = cascaded.priority_of(*property) {
+                    with_direction.insert_with_priority(*property, value.clone(), priority);
+                } else {
+                    with_direction.insert(*property, value.clone());
+                }
+            }
+            if rtl {
+                with_direction.insert(
+                    PropertyId::Direction,
+                    PropertyValue::Keyword(layout_keyword::DIRECTION_RTL),
+                );
+            }
+            StyleResolver::new().resolve(&with_direction, &HashMap::new(), None)
+        }
+
+        fn margin(style: &ComputedStyle, property: PropertyId) -> Option<Length> {
+            style.get(property).and_then(ComputedValue::as_length)
+        }
+
+        #[test]
+        fn an_inline_logical_margin_follows_the_direction() {
+            // THE reason logical properties exist: `margin-inline-start` is the
+            // LEFT edge in ltr and the RIGHT edge in rtl, from one declaration.
+            let mut cascaded = ResolvedDeclarations::new();
+            cascaded.insert_with_priority(PropertyId::MarginInlineStart, px(10.0), at(0));
+
+            let ltr = resolve(&cascaded, false);
+            assert_eq!(margin(&ltr, PropertyId::MarginLeft), Some(Length::px(10.0)));
+            assert_eq!(margin(&ltr, PropertyId::MarginRight), Some(Length::px(0.0)));
+
+            let rtl = resolve(&cascaded, true);
+            assert_eq!(margin(&rtl, PropertyId::MarginRight), Some(Length::px(10.0)));
+            assert_eq!(margin(&rtl, PropertyId::MarginLeft), Some(Length::px(0.0)));
+        }
+
+        #[test]
+        fn the_block_axis_is_unmoved_by_direction() {
+            // No `writing-mode` is modelled, so the block axis is always vertical:
+            // `block-start` is `top` in either direction.
+            let mut cascaded = ResolvedDeclarations::new();
+            cascaded.insert_with_priority(PropertyId::PaddingBlockStart, px(8.0), at(0));
+
+            for rtl in [false, true] {
+                let style = resolve(&cascaded, rtl);
+                assert_eq!(
+                    margin(&style, PropertyId::PaddingTop),
+                    Some(Length::px(8.0)),
+                    "rtl={rtl}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_later_logical_declaration_beats_an_earlier_physical_one() {
+            // The subtle half, and why the cascade priority had to be retained:
+            // `margin-left` and `margin-inline-start` are different PropertyIds that
+            // cascade independently, but CSS decides between them by ordinary order.
+            let mut cascaded = ResolvedDeclarations::new();
+            cascaded.insert_with_priority(PropertyId::MarginLeft, px(1.0), at(0));
+            cascaded.insert_with_priority(PropertyId::MarginInlineStart, px(2.0), at(1));
+
+            let style = resolve(&cascaded, false);
+            assert_eq!(
+                margin(&style, PropertyId::MarginLeft),
+                Some(Length::px(2.0)),
+                "the later declaration wins, whichever form it took"
+            );
+        }
+
+        #[test]
+        fn a_later_physical_declaration_beats_an_earlier_logical_one() {
+            // The same rule the other way round — a logical property is not
+            // privileged, it just participates.
+            let mut cascaded = ResolvedDeclarations::new();
+            cascaded.insert_with_priority(PropertyId::MarginInlineStart, px(2.0), at(0));
+            cascaded.insert_with_priority(PropertyId::MarginLeft, px(1.0), at(1));
+
+            let style = resolve(&cascaded, false);
+            assert_eq!(margin(&style, PropertyId::MarginLeft), Some(Length::px(1.0)));
+        }
+
+        #[test]
+        fn an_important_logical_declaration_outranks_a_later_normal_physical_one() {
+            // Priority is the whole comparison, not just source order.
+            let mut cascaded = ResolvedDeclarations::new();
+            cascaded.insert_with_priority(
+                PropertyId::MarginInlineStart,
+                px(2.0),
+                CascadePriority::new(
+                    CascadeOrigin::GlobalApp,
+                    ImportantFlag::Important,
+                    SelectorSpecificity::new(0, 1, 0),
+                    0,
+                ),
+            );
+            cascaded.insert_with_priority(PropertyId::MarginLeft, px(1.0), at(99));
+
+            let style = resolve(&cascaded, false);
+            assert_eq!(margin(&style, PropertyId::MarginLeft), Some(Length::px(2.0)));
+        }
+
+        #[test]
+        fn opposite_inline_edges_do_not_collide() {
+            let mut cascaded = ResolvedDeclarations::new();
+            cascaded.insert_with_priority(PropertyId::MarginInlineStart, px(3.0), at(0));
+            cascaded.insert_with_priority(PropertyId::MarginInlineEnd, px(5.0), at(1));
+
+            let ltr = resolve(&cascaded, false);
+            assert_eq!(margin(&ltr, PropertyId::MarginLeft), Some(Length::px(3.0)));
+            assert_eq!(margin(&ltr, PropertyId::MarginRight), Some(Length::px(5.0)));
+
+            // Under rtl both swap — start is right, end is left.
+            let rtl = resolve(&cascaded, true);
+            assert_eq!(margin(&rtl, PropertyId::MarginRight), Some(Length::px(3.0)));
+            assert_eq!(margin(&rtl, PropertyId::MarginLeft), Some(Length::px(5.0)));
+        }
+
+        #[test]
+        fn a_logical_property_is_never_computed_itself() {
+            // One box edge, one source of truth: the computed style holds
+            // `margin-left`, so no downstream phase has to ask "or was it declared
+            // logically?".
+            let mut cascaded = ResolvedDeclarations::new();
+            cascaded.insert_with_priority(PropertyId::MarginInlineStart, px(10.0), at(0));
+            let style = resolve(&cascaded, false);
+            assert_eq!(style.get(PropertyId::MarginInlineStart), None);
+        }
+    }
+
 }

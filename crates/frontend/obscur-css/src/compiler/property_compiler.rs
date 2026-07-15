@@ -1063,7 +1063,22 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 94] = [
+    const ALL: [PropertyId; 106] = [
+        // Logical box-model longhands (spec §4.13). They parse exactly like their
+        // physical counterparts — a length — and resolve onto them at
+        // computed-value time via `PropertyId::physical_under`.
+        PropertyId::MarginInlineStart,
+        PropertyId::MarginInlineEnd,
+        PropertyId::MarginBlockStart,
+        PropertyId::MarginBlockEnd,
+        PropertyId::PaddingInlineStart,
+        PropertyId::PaddingInlineEnd,
+        PropertyId::PaddingBlockStart,
+        PropertyId::PaddingBlockEnd,
+        PropertyId::InsetInlineStart,
+        PropertyId::InsetInlineEnd,
+        PropertyId::InsetBlockStart,
+        PropertyId::InsetBlockEnd,
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::BackgroundImage,
@@ -1392,6 +1407,18 @@ fn is_length_longhand(property: PropertyId) -> bool {
             | PropertyId::PaddingRight
             | PropertyId::PaddingBottom
             | PropertyId::PaddingLeft
+            | PropertyId::MarginInlineStart
+            | PropertyId::MarginInlineEnd
+            | PropertyId::MarginBlockStart
+            | PropertyId::MarginBlockEnd
+            | PropertyId::PaddingInlineStart
+            | PropertyId::PaddingInlineEnd
+            | PropertyId::PaddingBlockStart
+            | PropertyId::PaddingBlockEnd
+            | PropertyId::InsetInlineStart
+            | PropertyId::InsetInlineEnd
+            | PropertyId::InsetBlockStart
+            | PropertyId::InsetBlockEnd
             | PropertyId::BorderTopWidth
             | PropertyId::BorderRightWidth
             | PropertyId::BorderBottomWidth
@@ -5418,6 +5445,19 @@ mod tests {
         assert_eq!(
             property_id_from_name("padding-left"),
             Some(PropertyId::PaddingLeft)
+        );
+        // Logical longhands parse by name like any other (spec §4.13).
+        assert_eq!(
+            property_id_from_name("margin-inline-start"),
+            Some(PropertyId::MarginInlineStart)
+        );
+        assert_eq!(
+            property_id_from_name("inset-block-end"),
+            Some(PropertyId::InsetBlockEnd)
+        );
+        assert_eq!(
+            property_id_from_name("padding-inline-end"),
+            Some(PropertyId::PaddingInlineEnd)
         );
         assert_eq!(property_id_from_name("min-width"), Some(PropertyId::MinWidth));
         assert_eq!(property_id_from_name("gap"), Some(PropertyId::Gap));

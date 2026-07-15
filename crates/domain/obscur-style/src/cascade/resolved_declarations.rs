@@ -1,6 +1,7 @@
 //! The per-property cascaded values produced by the cascade:
 //! [`ResolvedDeclarations`] (§4.14).
 
+use crate::cascade::CascadePriority;
 use crate::property::{PropertyId, PropertyValue};
 use std::collections::HashMap;
 use std::collections::hash_map::Iter;
@@ -20,6 +21,18 @@ use std::collections::hash_map::Iter;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResolvedDeclarations {
     values: HashMap<PropertyId, PropertyValue>,
+    /// The priority the winning declaration for each property had.
+    ///
+    /// Kept because a *logical* property and its physical counterpart are two
+    /// separate `PropertyId`s that cascade independently, yet CSS says they
+    /// compete: `margin-left` and `margin-inline-start` on one element are decided
+    /// by ordinary cascade order. By the time the winner-per-property is picked,
+    /// that order is gone — so the priority is retained and the computed-value step
+    /// compares the two winners (spec §4.13 logical properties, §4.14 cascade).
+    ///
+    /// Absent for a value inserted directly (e.g. by a test or a runtime override),
+    /// which is why every read of it is optional.
+    priorities: HashMap<PropertyId, CascadePriority>,
 }
 
 impl ResolvedDeclarations {
@@ -28,17 +41,43 @@ impl ResolvedDeclarations {
     pub fn new() -> Self {
         Self {
             values: HashMap::new(),
+            priorities: HashMap::new(),
         }
     }
 
     /// Wraps a pre-built map of cascaded values.
     #[must_use]
     pub fn from_map(values: HashMap<PropertyId, PropertyValue>) -> Self {
-        Self { values }
+        // No priorities: a map handed in directly did not come from a cascade, so
+        // there is no ordering to record. `priority_of` answers `None`, and the
+        // logical/physical comparison falls back to preferring the physical — the
+        // only honest answer when nothing states which was declared later.
+        Self {
+            values,
+            priorities: HashMap::new(),
+        }
     }
 
     /// Inserts or replaces the cascaded value for a property, returning the
     /// previous value if one was present.
+    /// Records `property`'s winning value together with the `priority` that won
+    /// it, so a later step can compare it against a competing property's winner.
+    pub fn insert_with_priority(
+        &mut self,
+        property: PropertyId,
+        value: PropertyValue,
+        priority: CascadePriority,
+    ) -> Option<PropertyValue> {
+        self.priorities.insert(property, priority);
+        self.values.insert(property, value)
+    }
+
+    /// The priority that won `property`, if it was recorded with one.
+    #[must_use]
+    pub fn priority_of(&self, property: PropertyId) -> Option<CascadePriority> {
+        self.priorities.get(&property).copied()
+    }
+
     pub fn insert(&mut self, property: PropertyId, value: PropertyValue) -> Option<PropertyValue> {
         self.values.insert(property, value)
     }

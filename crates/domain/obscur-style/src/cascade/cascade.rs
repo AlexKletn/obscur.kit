@@ -68,8 +68,11 @@ impl Cascade {
         }
 
         let mut resolved = ResolvedDeclarations::new();
-        for (property, (_, declaration)) in winners {
-            resolved.insert(property, declaration.value().clone());
+        for (property, (priority, declaration)) in winners {
+            // The priority travels with the value: a logical property and its
+            // physical counterpart cascade under different keys but compete, and
+            // only the computed-value step knows the `direction` that pairs them.
+            resolved.insert_with_priority(property, declaration.value().clone(), priority);
         }
         resolved
     }
