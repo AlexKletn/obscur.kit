@@ -1,5 +1,8 @@
 //! The embeddable UI runtime and application-core integrator: [`UiRuntime`].
 
+use obscur_task::{BlockingExecutor, TaskId, TaskResult, TaskScope};
+use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -26,7 +29,7 @@ use obscur_resources::handle::{ResourceHandle, ResourceKind};
 use obscur_resources::hub::{ResourceHub, ResourceRequest};
 use obscur_resources::port::{ResourceDecoder, ResourceLoader, VectorDecoder};
 use obscur_resources::source::ResourceSource;
-use obscur_resources::state::{ResourceError, ResourceMetadata};
+use obscur_resources::state::{ResourceError, ResourceMetadata, ResourceVersion};
 use obscur_scene::color::AlphaMode;
 use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::paint::{SceneImage, SceneVector};
@@ -442,12 +445,12 @@ pub struct UiRuntime {
     /// honest-capability contract). The runtime holds only the domain
     /// [`ResourceLoader`] port; the facade injects a concrete adapter (e.g. an
     /// `FsResourceLoader`) via [`set_resource_providers`](Self::set_resource_providers).
-    resource_loader: Option<Box<dyn ResourceLoader>>,
+    resource_loader: Option<Arc<dyn ResourceLoader + Send + Sync>>,
     /// The injected decoder that turns a loaded image's encoded bytes into RGBA8
     /// pixels + intrinsic size (spec §5.16), or [`None`] when none was installed.
     /// Both a loader and a decoder are required to resolve an image; either absent
     /// means `url()` backgrounds paint nothing.
-    resource_decoder: Option<Box<dyn ResourceDecoder>>,
+    resource_decoder: Option<Arc<dyn ResourceDecoder + Send + Sync>>,
     /// The pure lifecycle/versioning registry for requested image resources (spec
     /// §5.15). It stores only lifecycle + metadata, never the decoded pixels — the
     /// pixels live in [`image_cache`](Self::image_cache) — so the two are kept in
@@ -461,7 +464,7 @@ pub struct UiRuntime {
     /// The host-installed port that parses vector sources (spec §5.17). Absent by
     /// default, in which case an SVG source paints nothing — the same policy an
     /// absent raster decoder has for a bitmap.
-    vector_decoder: Option<Box<dyn VectorDecoder>>,
+    vector_decoder: Option<Arc<dyn VectorDecoder + Send + Sync>>,
     /// The parsed vector documents resolved from an element `src`, keyed like
     /// [`image_cache`](Self::image_cache).
     ///
@@ -469,6 +472,23 @@ pub struct UiRuntime {
     /// `currentColor` paints are still unresolved, so a theme change re-resolves at
     /// compose time and never re-parses (spec §5.17).
     vector_cache: HashMap<Box<str>, SceneVector>,
+    /// The host-installed blocking facility (spec §3.3 "optional blocking-work
+    /// facility", "`spawn_blocking` is explicit and capability-dependent").
+    ///
+    /// Absent by default, and that default is not a degradation: with no executor
+    /// a load runs **synchronously on the frame thread**, exactly as before. What
+    /// installing one buys is that the load leaves the frame — the core is tied to
+    /// no particular async runtime either way (§3.3 "the core is not tied to
+    /// Tokio").
+    blocking_executor: Option<Arc<dyn BlockingExecutor + Send + Sync>>,
+    /// The typed messages finished load tasks deliver back (spec §3.3 "results
+    /// return as typed messages"). The sender is cloned into each job.
+    resource_tx: Sender<TaskResult<ResourceOutcome>>,
+    /// The runtime's end of the same channel, drained by
+    /// [`poll_resource_tasks`](Self::poll_resource_tasks).
+    resource_rx: Receiver<TaskResult<ResourceOutcome>>,
+    /// Monotonic source of [`TaskId`]s for spawned load tasks.
+    next_task: u64,
     /// The [`ResourceHandle`] minted for each requested image URL, retained so the
     /// hub lifecycle (begin_load → complete/fail) is driven per resource and a URL
     /// is requested at most once.
@@ -483,6 +503,7 @@ impl UiRuntime {
     /// first produced frame at [`FrameId::FIRST`].
     #[must_use]
     pub fn new(id: RuntimeId, viewport: Size) -> Self {
+        let resource_channel = channel();
         Self {
             id,
             tree: RetainedTree::new(),
@@ -539,6 +560,10 @@ impl UiRuntime {
             image_cache: HashMap::new(),
             vector_decoder: None,
             vector_cache: HashMap::new(),
+            blocking_executor: None,
+            resource_tx: resource_channel.0,
+            resource_rx: resource_channel.1,
+            next_task: 0,
             image_handles: HashMap::new(),
         }
     }
@@ -557,8 +582,8 @@ impl UiRuntime {
     /// crash.
     pub fn set_resource_providers(
         &mut self,
-        loader: Box<dyn ResourceLoader>,
-        decoder: Box<dyn ResourceDecoder>,
+        loader: Arc<dyn ResourceLoader + Send + Sync>,
+        decoder: Arc<dyn ResourceDecoder + Send + Sync>,
     ) {
         self.resource_loader = Some(loader);
         self.resource_decoder = Some(decoder);
@@ -578,7 +603,106 @@ impl UiRuntime {
     /// that would silently break §5.17's vector guarantee.
     ///
     /// A [`ResourceLoader`] is still required to fetch the bytes.
-    pub fn set_vector_decoder(&mut self, decoder: Box<dyn VectorDecoder>) {
+    /// Installs the blocking-work facility resource loads run on (spec §3.3).
+    ///
+    /// Explicit and capability-dependent by design: without it the runtime is
+    /// still fully functional — a load simply runs on the frame thread, exactly as
+    /// it always did. Installing one moves the load off the frame, and the core
+    /// stays tied to no particular async runtime, because all it ever sees is this
+    /// port (§3.3 "the core is not tied to Tokio").
+    ///
+    /// A completed load returns as a typed message the host drains with
+    /// [`poll_resource_tasks`](Self::poll_resource_tasks). A headless test installs
+    /// a deterministic executor and gets controlled completion for free (§7.4).
+    pub fn set_blocking_executor(&mut self, executor: Arc<dyn BlockingExecutor + Send + Sync>) {
+        self.blocking_executor = Some(executor);
+    }
+
+    /// Drains every finished resource-load task, applying its result, and returns
+    /// how many were applied (spec §3.3, §3.5 `ResourceCompletion`).
+    ///
+    /// A host calls this from its event loop. Draining a completion requests a
+    /// [`FrameReason::ResourceCompletion`] frame, so a load that finishes while the
+    /// UI is idle still gets painted — without the runtime ever waking itself from
+    /// another thread.
+    ///
+    /// A **stale** completion is dropped: the hub rejects a job whose version is
+    /// behind, and the runtime caches nothing for it. That happens when a resource
+    /// was re-requested while an earlier load was still in flight, and it is why
+    /// the outcome carries the version it started under rather than trusting
+    /// arrival order.
+    ///
+    /// Returns `0` — and requests nothing — when no task has finished, so calling
+    /// it every loop iteration is free.
+    pub fn poll_resource_tasks(&mut self) -> usize {
+        let mut applied = 0usize;
+        while let Ok(message) = self.resource_rx.try_recv() {
+            if self.apply_resource_outcome(message.into_payload()) {
+                applied += 1;
+            }
+        }
+        if applied > 0 {
+            self.scheduler
+                .request_reason(FrameReason::ResourceCompletion);
+        }
+        applied
+    }
+
+    /// Applies one finished load, returning whether it was accepted (a stale or
+    /// failed job is not).
+    fn apply_resource_outcome(&mut self, outcome: ResourceOutcome) -> bool {
+        match outcome {
+            ResourceOutcome::Image {
+                key,
+                handle,
+                version,
+                result,
+            } => match result {
+                Ok(image) => {
+                    let metadata = ResourceMetadata::new().with_intrinsic_size(intrinsic_of(&image));
+                    // The hub owns the staleness verdict; `false` means this job
+                    // was superseded, so its pixels must not reach the cache.
+                    if !self.resource_hub.complete(handle, version, metadata) {
+                        return false;
+                    }
+                    self.image_cache.insert(key, image);
+                    true
+                }
+                Err(error) => {
+                    self.resource_hub.fail(handle, version, error);
+                    false
+                }
+            },
+            ResourceOutcome::Vector {
+                key,
+                handle,
+                version,
+                result,
+            } => match result {
+                Ok(vector) => {
+                    let metadata = ResourceMetadata::new().with_intrinsic_size(vector.size());
+                    if !self.resource_hub.complete(handle, version, metadata) {
+                        return false;
+                    }
+                    self.vector_cache.insert(key, vector);
+                    true
+                }
+                Err(error) => {
+                    self.resource_hub.fail(handle, version, error);
+                    false
+                }
+            },
+        }
+    }
+
+    /// Mints the next [`TaskId`].
+    fn next_task_id(&mut self) -> TaskId {
+        let id = TaskId::from_raw(self.next_task);
+        self.next_task += 1;
+        id
+    }
+
+    pub fn set_vector_decoder(&mut self, decoder: Arc<dyn VectorDecoder + Send + Sync>) {
         self.vector_decoder = Some(decoder);
         self.vector_cache.clear();
         self.image_handles.clear();
@@ -600,11 +724,11 @@ impl UiRuntime {
     fn resolve_background_images(&mut self, computed: &ComputedStyles) {
         // Both a loader and a decoder are required; without either, `url()`
         // backgrounds honestly resolve to nothing.
-        let (Some(loader), Some(decoder)) =
-            (self.resource_loader.as_deref(), self.resource_decoder.as_deref())
-        else {
+        // Both a loader and a decoder are required; `load_image` re-checks and
+        // clones them, so this is only the early-out.
+        if self.resource_loader.is_none() || self.resource_decoder.is_none() {
             return;
-        };
+        }
         // Disjoint field borrows: `loader`/`decoder` borrow their fields while the
         // hub and caches are mutated through their own distinct fields.
         for style in computed.values() {
@@ -630,19 +754,45 @@ impl UiRuntime {
             };
             // Load → decode → build the SceneImage; any failure fails the handle
             // and caches nothing (the image is not painted).
-            match load_and_decode_image(loader, decoder, &source) {
-                Ok(image) => {
-                    let metadata = ResourceMetadata::new().with_intrinsic_size(Size::new(
-                        image.width() as f32,
-                        image.height() as f32,
-                    ));
-                    self.resource_hub.complete(handle, version, metadata);
-                    self.image_cache.insert(key, image);
-                }
-                Err(error) => {
-                    self.resource_hub.fail(handle, version, error);
-                }
-            }
+            self.load_image(key, source, handle, version);
+        }
+    }
+
+    /// Runs one image load — off the frame thread when a blocking executor is
+    /// installed, on it when none is (spec §3.3).
+    ///
+    /// Both paths end in the same place: `apply_resource_outcome`, which lets the
+    /// hub rule on staleness. The only difference is *when* — so an app without the
+    /// capability behaves exactly as before rather than losing the feature.
+    fn load_image(
+        &mut self,
+        key: Box<str>,
+        source: ResourceSource,
+        handle: ResourceHandle,
+        version: ResourceVersion,
+    ) {
+        let (Some(loader), Some(decoder)) = (
+            self.resource_loader.clone(),
+            self.resource_decoder.clone(),
+        ) else {
+            return;
+        };
+        let outcome = move || ResourceOutcome::Image {
+            key,
+            handle,
+            version,
+            result: load_and_decode_image(&*loader, &*decoder, &source),
+        };
+        if let Some(executor) = self.blocking_executor.clone() {
+            let tx = self.resource_tx.clone();
+            let id = self.next_task_id();
+            executor.run_blocking(Box::new(move || {
+                // The receiver is gone only if the runtime was dropped mid-load;
+                // there is nothing left to tell, so the send is allowed to fail.
+                let _ = tx.send(TaskResult::new(id, TaskScope::Runtime, outcome()));
+            }));
+        } else {
+            self.apply_resource_outcome(outcome());
         }
     }
 
@@ -661,12 +811,9 @@ impl UiRuntime {
     fn resolve_element_vectors(&mut self) {
         // A loader and a VECTOR decoder are both required; without either, an SVG
         // source honestly resolves to nothing.
-        let (Some(loader), Some(decoder)) = (
-            self.resource_loader.as_deref(),
-            self.vector_decoder.as_deref(),
-        ) else {
+        if self.resource_loader.is_none() || self.vector_decoder.is_none() {
             return;
-        };
+        }
         let sources: Vec<Box<str>> = self
             .tree
             .iter()
@@ -688,30 +835,51 @@ impl UiRuntime {
             let Some(version) = self.resource_hub.begin_load(handle) else {
                 continue;
             };
-            match loader
+            self.load_vector(key, source, handle, version);
+        }
+    }
+
+    /// Runs one vector load — off the frame thread when a blocking executor is
+    /// installed, on it when none is. The image counterpart of
+    /// [`load_image`](Self::load_image).
+    fn load_vector(
+        &mut self,
+        key: Box<str>,
+        source: ResourceSource,
+        handle: ResourceHandle,
+        version: ResourceVersion,
+    ) {
+        let (Some(loader), Some(decoder)) =
+            (self.resource_loader.clone(), self.vector_decoder.clone())
+        else {
+            return;
+        };
+        let outcome = move || ResourceOutcome::Vector {
+            key,
+            handle,
+            version,
+            result: loader
                 .load(&source)
-                .and_then(|loaded| decoder.decode_vector(loaded.bytes()))
-            {
-                Ok(vector) => {
-                    let metadata = ResourceMetadata::new().with_intrinsic_size(vector.size());
-                    self.resource_hub.complete(handle, version, metadata);
-                    self.vector_cache.insert(key, vector);
-                }
-                Err(error) => {
-                    self.resource_hub.fail(handle, version, error);
-                }
-            }
+                .and_then(|loaded| decoder.decode_vector(loaded.bytes())),
+        };
+        if let Some(executor) = self.blocking_executor.clone() {
+            let tx = self.resource_tx.clone();
+            let id = self.next_task_id();
+            executor.run_blocking(Box::new(move || {
+                let _ = tx.send(TaskResult::new(id, TaskScope::Runtime, outcome()));
+            }));
+        } else {
+            self.apply_resource_outcome(outcome());
         }
     }
 
     fn resolve_element_images(&mut self) {
         // Both a loader and a decoder are required; without either, element images
-        // honestly resolve to nothing.
-        let (Some(loader), Some(decoder)) =
-            (self.resource_loader.as_deref(), self.resource_decoder.as_deref())
-        else {
+        // honestly resolve to nothing. `load_image` re-checks and clones them, so
+        // this is only the early-out.
+        if self.resource_loader.is_none() || self.resource_decoder.is_none() {
             return;
-        };
+        }
         // Gather each element node's own image source up front, so the retained-tree
         // borrow is released before the hub / caches are mutated below.
         let sources: Vec<Box<str>> = self
@@ -736,19 +904,7 @@ impl UiRuntime {
             let Some(version) = self.resource_hub.begin_load(handle) else {
                 continue;
             };
-            match load_and_decode_image(loader, decoder, &source) {
-                Ok(image) => {
-                    let metadata = ResourceMetadata::new().with_intrinsic_size(Size::new(
-                        image.width() as f32,
-                        image.height() as f32,
-                    ));
-                    self.resource_hub.complete(handle, version, metadata);
-                    self.image_cache.insert(key, image);
-                }
-                Err(error) => {
-                    self.resource_hub.fail(handle, version, error);
-                }
-            }
+            self.load_image(key, source, handle, version);
         }
     }
 
@@ -4329,6 +4485,38 @@ fn is_activation_key(key: Option<LogicalKey>) -> bool {
 /// Propagates any [`ResourceError`] from the loader or decoder, and returns
 /// [`ResourceError::DecodeFailed`] when the decoded buffer's length does not match
 /// its reported intrinsic size (so [`SceneImage::new`]'s byte-length guard fails).
+/// A decoded image's intrinsic size — its pixel dimensions, which is what
+/// `object-fit` scales from (spec §5.16).
+#[allow(clippy::cast_precision_loss)]
+fn intrinsic_of(image: &SceneImage) -> Size {
+    Size::new(image.width() as f32, image.height() as f32)
+}
+
+/// What a finished resource-load task produced — the typed payload of the
+/// [`TaskResult`] it delivers (spec §3.3 "results return as typed messages").
+///
+/// Each variant carries the `handle` and `version` the job was started under, so
+/// the hub can reject a completion whose resource has since been re-requested
+/// (§3.3 "stale work is discarded using generation/version IDs"). The runtime does
+/// not re-derive staleness: `ResourceHub::complete`/`fail` already own that check.
+#[derive(Debug)]
+enum ResourceOutcome {
+    /// A raster image load, keyed by the authored URL/path.
+    Image {
+        key: Box<str>,
+        handle: ResourceHandle,
+        version: ResourceVersion,
+        result: Result<SceneImage, ResourceError>,
+    },
+    /// A vector document load, keyed the same way.
+    Vector {
+        key: Box<str>,
+        handle: ResourceHandle,
+        version: ResourceVersion,
+        result: Result<SceneVector, ResourceError>,
+    },
+}
+
 /// Whether `src` names a vector document (spec §5.17).
 ///
 /// Decided by extension rather than by sniffing the bytes: an author writing
@@ -5179,7 +5367,7 @@ mod tests {
     #[test]
     fn url_background_image_resolves_and_paints_a_draw_image() {
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        runtime.set_resource_providers(Box::new(MockLoader { fails: false }), Box::new(MockDecoder));
+        runtime.set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
 
         let sheet = img_stylesheet();
         let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
@@ -5209,7 +5397,7 @@ mod tests {
         // A `<img>` element's own `src` loads + decodes into the cache (same path as
         // background images) and paints one DrawImage over its 100×50 box.
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        runtime.set_resource_providers(Box::new(MockLoader { fails: false }), Box::new(MockDecoder));
+        runtime.set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
         let sheet = counter_stylesheet();
         let result = runtime.render_now(&img_src_view("logo"), std::slice::from_ref(&sheet));
         assert_eq!(
@@ -5223,7 +5411,7 @@ mod tests {
     #[test]
     fn element_image_loader_error_paints_no_image_and_does_not_panic() {
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        runtime.set_resource_providers(Box::new(MockLoader { fails: true }), Box::new(MockDecoder));
+        runtime.set_resource_providers(Arc::new(MockLoader { fails: true }), Arc::new(MockDecoder));
         let sheet = counter_stylesheet();
         let result = runtime.render_now(&img_src_view("logo"), std::slice::from_ref(&sheet));
         assert_eq!(
@@ -5246,7 +5434,7 @@ mod tests {
     #[test]
     fn url_background_image_loader_error_paints_no_image_and_does_not_panic() {
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        runtime.set_resource_providers(Box::new(MockLoader { fails: true }), Box::new(MockDecoder));
+        runtime.set_resource_providers(Arc::new(MockLoader { fails: true }), Arc::new(MockDecoder));
 
         let sheet = img_stylesheet();
         let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
@@ -10385,4 +10573,118 @@ mod tests {
         assert_eq!(runs[0].0, 0);
         assert_eq!(runs[0].1, vec![u32::from('h'), u32::from('i')]);
     }
+
+    // ---- async resource loading through the blocking port (§3.3) ------------
+
+    /// A [`BlockingExecutor`] that QUEUES jobs instead of running them, so a test
+    /// controls exactly when a load completes (spec §7.4 "controlled async
+    /// completion"). The real smol adapter runs them on a pool; the deterministic
+    /// shape is what makes the assertions below possible at all.
+    #[derive(Default)]
+    struct QueuedExecutor {
+        jobs: std::sync::Mutex<Vec<Box<dyn FnOnce() + Send + 'static>>>,
+    }
+
+    impl QueuedExecutor {
+        /// Runs every queued job, emptying the queue.
+        fn run_all(&self) {
+            let queued: Vec<_> = std::mem::take(&mut *self.jobs.lock().expect("lock"));
+            for job in queued {
+                job();
+            }
+        }
+
+        fn pending(&self) -> usize {
+            self.jobs.lock().expect("lock").len()
+        }
+    }
+
+    impl obscur_task::BlockingExecutor for QueuedExecutor {
+        fn run_blocking(&self, job: Box<dyn FnOnce() + Send + 'static>) {
+            self.jobs.lock().expect("lock").push(job);
+        }
+    }
+
+    #[test]
+    fn with_no_executor_a_load_still_runs_on_the_frame_thread() {
+        // The capability default is not a degradation: without the port the
+        // runtime behaves exactly as it always did — the image is ready THIS frame.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
+
+        let sheet = img_stylesheet();
+        let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        assert_eq!(draw_image_count(result.snapshot().display_list()), 1);
+        assert_eq!(runtime.poll_resource_tasks(), 0, "nothing was ever spawned");
+    }
+
+    #[test]
+    fn an_installed_executor_moves_the_load_off_the_frame() {
+        // THE §3.3 point: the frame no longer waits for IO. The first frame paints
+        // without the image because the load has not run yet; draining it applies
+        // the result and asks for a ResourceCompletion frame, which paints it.
+        let executor = Arc::new(QueuedExecutor::default());
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
+        runtime.set_blocking_executor(executor.clone());
+
+        let sheet = img_stylesheet();
+        let first = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        assert_eq!(
+            draw_image_count(first.snapshot().display_list()),
+            0,
+            "the frame did not block on the load"
+        );
+        assert_eq!(executor.pending(), 1, "the load was handed to the port");
+
+        // The job finishes on its own thread and posts a typed message back.
+        executor.run_all();
+        assert_eq!(runtime.poll_resource_tasks(), 1, "the completion was applied");
+        assert_eq!(
+            runtime.peek_frame_reason(),
+            Some(FrameReason::ResourceCompletion),
+            "a load that lands while idle asks for its own frame"
+        );
+
+        let second = runtime
+            .run_due_frame(&img_view(), std::slice::from_ref(&sheet))
+            .expect("the ResourceCompletion frame is due");
+        assert_eq!(draw_image_count(second.snapshot().display_list()), 1);
+    }
+
+    #[test]
+    fn polling_with_nothing_finished_costs_nothing() {
+        let executor = Arc::new(QueuedExecutor::default());
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
+        runtime.set_blocking_executor(executor.clone());
+        let sheet = img_stylesheet();
+        runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+
+        // The job is queued but has not run: nothing to apply, no frame requested.
+        assert_eq!(runtime.poll_resource_tasks(), 0);
+        assert_eq!(runtime.peek_frame_reason(), None);
+    }
+
+    #[test]
+    fn a_failed_load_is_applied_as_a_failure_and_paints_nothing() {
+        let executor = Arc::new(QueuedExecutor::default());
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_resource_providers(Arc::new(MockLoader { fails: true }), Arc::new(MockDecoder));
+        runtime.set_blocking_executor(executor.clone());
+
+        let sheet = img_stylesheet();
+        runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        executor.run_all();
+        // A failure is drained but not "applied": it caches nothing, so no frame is
+        // requested for it either.
+        assert_eq!(runtime.poll_resource_tasks(), 0);
+        let list = runtime
+            .render_now(&img_view(), std::slice::from_ref(&sheet))
+            .snapshot()
+            .display_list()
+            .clone();
+        assert_eq!(draw_image_count(&list), 0, "a failed load paints nothing");
+    }
+
 }

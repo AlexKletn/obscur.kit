@@ -132,10 +132,10 @@ impl KitBootstrap {
         sandbox_root: impl Into<std::path::PathBuf>,
     ) {
         runtime.set_resource_providers(
-            Box::new(crate::resource_fs::loader::FsResourceLoader::with_root(
+            std::sync::Arc::new(crate::resource_fs::loader::FsResourceLoader::with_root(
                 sandbox_root,
             )),
-            Box::new(crate::resource_decode::decoder::ImageDecoder::new()),
+            std::sync::Arc::new(crate::resource_decode::decoder::ImageDecoder::new()),
         );
     }
 
@@ -153,7 +153,7 @@ impl KitBootstrap {
     /// so a theme change re-colours it without reparsing.
     #[cfg(feature = "resource-decode")]
     pub fn install_vector_resources(&self, runtime: &mut crate::runtime::UiRuntime) {
-        runtime.set_vector_decoder(Box::new(
+        runtime.set_vector_decoder(std::sync::Arc::new(
             crate::resource_decode::decoder::SvgVectorizer::new(),
         ));
     }

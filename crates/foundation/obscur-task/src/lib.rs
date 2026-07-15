@@ -9,5 +9,5 @@ mod time;
 
 pub use cancellation::{CancellationReason, CancellationSource, CancellationToken};
 pub use port::{BlockingExecutor, BoxFuture, LocalBoxFuture, LocalSpawner, Spawner, Timer};
-pub use task::{TaskId, TaskPriority, TaskScope};
+pub use task::{TaskId, TaskPriority, TaskResult, TaskScope};
 pub use time::{Clock, Deadline, Instant};
