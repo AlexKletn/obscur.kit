@@ -1,9 +1,9 @@
 //! `SelectorResolver`: turning a [`SelectorTarget`] into a concrete node.
 
 use obscur_geometry::Point;
-use obscur_identity::NodeId;
+use obscur_identity::{InternedSymbol, NodeId};
 use obscur_runtime::UiRuntime;
-use obscur_view::view::{TEST_ID, ViewValue};
+use obscur_view::view::{AUTOMATION_ID, TEST_ID, ViewValue};
 
 use crate::input::SelectorTarget;
 
@@ -45,7 +45,8 @@ impl SelectorResolver {
     pub fn resolve(self, runtime: &UiRuntime, target: &SelectorTarget) -> Option<NodeId> {
         match target {
             SelectorTarget::Node(id) => runtime.tree().contains(*id).then_some(*id),
-            SelectorTarget::TestId(id) => Self::by_test_id(runtime, id),
+            SelectorTarget::TestId(id) => Self::by_stable_id(runtime, TEST_ID, id),
+            SelectorTarget::AutomationId(id) => Self::by_stable_id(runtime, AUTOMATION_ID, id),
             SelectorTarget::Coordinate(_) => None,
         }
     }
@@ -72,18 +73,22 @@ impl SelectorResolver {
         ))
     }
 
-    /// The first node, in tree order, whose `test-id` property equals `id`.
+    /// The first node, in tree order, whose `attribute` property equals `id`.
     ///
-    /// `test-id` is read from the node's retained **properties** rather than from
-    /// its style attributes, which is what keeps §7.5's "does not affect CSS
+    /// Shared by `test-id` and `automation-id`: they differ only in which symbol
+    /// they read, so one lookup keyed by the symbol keeps them from drifting — and,
+    /// because the symbols are distinct, a target for one never matches the other.
+    ///
+    /// Both are read from the node's retained **properties** rather than from its
+    /// style attributes, which is what keeps §7.5's "does not affect CSS
     /// specificity / layout / visual output" true by construction.
-    fn by_test_id(runtime: &UiRuntime, id: &str) -> Option<NodeId> {
+    fn by_stable_id(runtime: &UiRuntime, attribute: InternedSymbol, id: &str) -> Option<NodeId> {
         runtime
             .tree()
             .iter()
             .find(|(_, node)| {
                 node.props().iter().any(|prop| {
-                    prop.name() == TEST_ID
+                    prop.name() == attribute
                         && matches!(prop.value(), ViewValue::Text(text) if &**text == id)
                 })
             })
@@ -102,7 +107,9 @@ mod tests {
     use obscur_style::matching::{BlockDeclaration, StyleRule, Stylesheet};
     use obscur_style::property::{Length, PropertyId, PropertyValue};
     use obscur_style::selector::{ComplexSelector, CompoundSelector, SelectorList, SimpleSelector};
-    use obscur_view::view::{CLASS, TEST_ID, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
+    use obscur_view::view::{
+        AUTOMATION_ID, CLASS, TEST_ID, View, ViewFragment, ViewNode, ViewProperty, ViewValue,
+    };
 
     fn runtime_with(view: &View) -> UiRuntime {
         let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 200.0));
@@ -134,7 +141,9 @@ mod tests {
         )
     }
 
-    /// Two sized elements, the second tagged `test-id="submit"`.
+    /// Three sized elements: the second tagged `test-id="submit"`, the third
+    /// tagged `automation-id="submit"` — the SAME string under a different
+    /// identifier, so a resolver that confused the two would be caught.
     fn tagged_view() -> View {
         let boxed = |id: u64| {
             ViewNode::element(ComponentId::from_raw(id))
@@ -143,6 +152,10 @@ mod tests {
         View::from_fragment(ViewFragment::from_nodes(vec![
             boxed(1),
             boxed(2).with_prop(ViewProperty::new(TEST_ID, ViewValue::Text("submit".into()))),
+            boxed(3).with_prop(ViewProperty::new(
+                AUTOMATION_ID,
+                ViewValue::Text("submit".into()),
+            )),
         ]))
     }
 
@@ -156,6 +169,35 @@ mod tests {
         // It is the SECOND child — proving the match is by test-id, not position.
         let root = runtime.tree().root().expect("a root");
         assert_eq!(runtime.tree().get(root).expect("live").children()[1], resolved);
+    }
+
+    #[test]
+    fn a_test_id_and_an_automation_id_never_match_each_other() {
+        // §7.5 lists them as distinct identifiers, and they answer to different
+        // owners — so the same STRING under each must reach different nodes. A
+        // resolver that read one symbol for both would silently cross the wires.
+        let runtime = runtime_with(&tagged_view());
+        let root = runtime.tree().root().expect("a root");
+        let children = runtime.tree().get(root).expect("live").children().to_vec();
+
+        assert_eq!(
+            SelectorResolver::new().resolve(&runtime, &SelectorTarget::test_id("submit")),
+            Some(children[1])
+        );
+        assert_eq!(
+            SelectorResolver::new().resolve(&runtime, &SelectorTarget::automation_id("submit")),
+            Some(children[2]),
+            "the automation-id node, not the test-id one"
+        );
+    }
+
+    #[test]
+    fn an_unknown_automation_id_resolves_to_nothing() {
+        let runtime = runtime_with(&tagged_view());
+        assert_eq!(
+            SelectorResolver::new().resolve(&runtime, &SelectorTarget::automation_id("missing")),
+            None
+        );
     }
 
     #[test]

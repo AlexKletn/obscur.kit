@@ -26,6 +26,13 @@ pub enum SelectorTarget {
     /// A stable `test-id` string, independent of CSS/layout (spec §7.5). The
     /// string is data matched during dispatch, never used for control-flow dispatch.
     TestId(Box<str>),
+    /// A stable `automation-id` string (spec §7.5).
+    ///
+    /// Separate from [`TestId`](Self::TestId) because §7.5 lists them separately
+    /// and they answer to different owners: a test-id is the app's own and renames
+    /// freely; an automation-id is a contract with software outside the codebase.
+    /// A harness that targets one must not accidentally match the other.
+    AutomationId(Box<str>),
     /// A point in the viewport; the node is found by hit-testing during dispatch.
     Coordinate(Point),
 }
@@ -41,6 +48,28 @@ impl SelectorTarget {
     #[must_use]
     pub fn test_id(id: impl Into<Box<str>>) -> Self {
         Self::TestId(id.into())
+    }
+
+    /// Targets a node by its stable `automation-id` string (spec §7.5).
+    #[must_use]
+    pub fn automation_id(id: impl Into<Box<str>>) -> Self {
+        Self::AutomationId(id.into())
+    }
+
+    /// Returns `true` if this is an [`AutomationId`](Self::AutomationId) target.
+    #[must_use]
+    pub const fn is_automation_id(&self) -> bool {
+        matches!(self, Self::AutomationId(_))
+    }
+
+    /// Returns the `automation-id` string for an
+    /// [`AutomationId`](Self::AutomationId) target, else `None`.
+    #[must_use]
+    pub fn automation_id_str(&self) -> Option<&str> {
+        match self {
+            Self::AutomationId(id) => Some(id),
+            _ => None,
+        }
     }
 
     /// Targets a viewport point, resolved to a node by hit-testing during dispatch.

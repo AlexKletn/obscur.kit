@@ -62,6 +62,14 @@ pub const CHECKED: InternedSymbol = InternedSymbol::from_raw(0x0000_0006);
 /// selector resolver. It sits in its own `0x0000_02xx` namespace.
 pub const TEST_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0201);
 
+/// Mirror of `obscur_view::view::AUTOMATION_ID` — a node's stable identifier for
+/// external automation and assistive tooling (spec §7.5).
+///
+/// Separate from [`TEST_ID`] because the two answer to different owners: a test-id
+/// is the app's own and renames freely, an automation-id is a contract with
+/// software that cannot be updated in the same commit.
+pub const AUTOMATION_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0202);
+
 // --- Reserved event symbols (mirror `obscur_view::view::event_name`). ---
 
 /// Reserved `click` event symbol (`obscur_view::view::EVENT_CLICK`).
@@ -168,6 +176,7 @@ pub fn attr_symbol(name: &str) -> InternedSymbol {
         "checked" => CHECKED,
         // A stable testing identifier, not a style attribute (spec §7.5).
         "test-id" => TEST_ID,
+        "automation-id" => AUTOMATION_ID,
         other => fallback_symbol(other),
     }
 }

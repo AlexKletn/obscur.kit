@@ -12,7 +12,7 @@ pub use view_node::ViewNode;
 mod event_name;
 pub use event_name::{EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT};
 mod stable_selector;
-pub use stable_selector::TEST_ID;
+pub use stable_selector::{AUTOMATION_ID, TEST_ID};
 mod style_attribute;
 pub use style_attribute::{CHECKED, CLASS, DISABLED, ID, READONLY, SRC, StyleAttributes, TYPE};
 mod view_property;
