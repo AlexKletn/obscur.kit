@@ -19,6 +19,10 @@ mod semantic_builder;
 
 pub use semantic_builder::SemanticTreeBuilder;
 
+mod input_event;
+pub use input_event::InputEvent;
+mod input_dispatch;
+pub use input_dispatch::InputDispatch;
 mod frame_plan;
 
 pub(crate) use frame_plan::FramePlan;

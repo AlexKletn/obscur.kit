@@ -59,6 +59,8 @@ use super::{
 };
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::invalidation::{Invalidation, InvalidationReason, InvalidationRouter};
+use std::collections::VecDeque;
+
 use crate::orchestration::{
     overflow_scrolls, root_font_size, scroll_containers, AnimatedKind, AnimationBinding, ComputedStyles,
     DragCoordinator, DragOutcome,
@@ -80,6 +82,7 @@ use crate::component::ComponentStore;
 /// frame's tree instead of hanging, and the `component.rendered` counter shows it.
 const MAX_COMPONENT_RENDER_PASSES: usize = 32;
 use crate::transaction::{ReconcileEnactor, TransactionCommit};
+use super::{InputDispatch, InputEvent};
 use obscur_data_transfer::drag::{DragSession, DragSource, DropTarget};
 
 /// The maximum gap, in microseconds, between two presses for them to count as a
@@ -286,6 +289,16 @@ pub struct UiRuntime {
     /// The modifier keys currently held, folded from physical modifier-key
     /// press/release transitions so shortcut matching sees the live chord.
     modifiers: Modifiers,
+    /// Platform input received since the last frame, awaiting the dispatch phase
+    /// (§3.4 phases 1 and 3).
+    input_queue: VecDeque<InputEvent>,
+    /// What the last frame's dispatch phase produced, awaiting `take_input_dispatches`.
+    input_dispatches: Vec<InputDispatch>,
+    /// Whether the dispatch phase is running, which redirects the dispatchers'
+    /// own frame requests into `dispatch_plan` (see `request_frame`).
+    in_dispatch: bool,
+    /// The phases the dispatch phase asked for, merged into the frame running it.
+    dispatch_plan: Option<FramePlan>,
     /// The data-drag session driver: pointer input drives it while a drag is in
     /// flight, and its provisional transaction gates what a drop applies (§3.2).
     drag: DragCoordinator,
@@ -548,6 +561,10 @@ impl UiRuntime {
             editing: None,
             commands: CommandRouter::new(),
             modifiers: Modifiers::new(),
+            input_queue: VecDeque::new(),
+            input_dispatches: Vec::new(),
+            in_dispatch: false,
+            dispatch_plan: None,
             drag: DragCoordinator::new(),
             drag_outcome: None,
             staged_plan: None,
@@ -1056,7 +1073,98 @@ impl UiRuntime {
     /// prioritised by the [`FrameScheduler`]; nothing runs until
     /// [`run_due_frame`](Self::run_due_frame) is called.
     pub fn request_frame(&mut self, reason: FrameReason) -> BackpressureDecision {
+        // A request made while the dispatch phase is running is **coalesced into
+        // the frame that is running it**: that frame has not chosen its plan yet,
+        // so it can serve the request itself. This is not a special case bolted
+        // on — it is what §3.5's "updates are coalesced" means, and `Coalesce` is
+        // the scheduler vocabulary's own word for it.
+        //
+        // Routing it to the scheduler instead would leave a request pending that
+        // the current frame is about to satisfy, and every burst of input would
+        // cost one extra full restyle/relayout/compose that changes nothing.
+        if self.in_dispatch {
+            let wanted = FramePlan::for_frame(reason, false);
+            self.dispatch_plan = Some(match self.dispatch_plan {
+                Some(pending) => pending.merged_with(wanted),
+                None => wanted,
+            });
+            return BackpressureDecision::Coalesce;
+        }
         self.scheduler.request_reason(reason)
+    }
+
+    /// Queues `event` for the frame pipeline's **dispatch phase** and requests the
+    /// frame that will run it (spec §3.4 phases 1 and 3).
+    ///
+    /// # Why queue rather than dispatch now
+    ///
+    /// [`handle_pointer`](Self::handle_pointer) and its siblings dispatch the
+    /// instant they are called, which makes *when* an event is handled a property
+    /// of when the host chose to call — and makes the ordering between input,
+    /// state commits and frames the host's to get right. Queuing moves that into
+    /// the pipeline: events are received (phase 1), the frame is chosen (phase 2),
+    /// and only then is input dispatched (phase 3), before anything commits.
+    ///
+    /// The two paths share one implementation — the queue dispatches *through*
+    /// `handle_pointer` and friends — so an event handled either way does exactly
+    /// the same thing. Only the timing differs, and the immediate entry points
+    /// remain for hosts that want it.
+    ///
+    /// A burst queued between frames is dispatched in order by the single frame
+    /// that serves it, and whatever that dispatch invalidates is folded into that
+    /// same frame's plan rather than scheduling another.
+    pub fn queue_input(&mut self, event: InputEvent) -> BackpressureDecision {
+        self.input_queue.push_back(event);
+        self.request_frame(FrameReason::Input)
+    }
+
+    /// How many queued input events are waiting for the next frame's dispatch
+    /// phase.
+    #[must_use]
+    pub fn pending_input(&self) -> usize {
+        self.input_queue.len()
+    }
+
+    /// Takes what the last frame's dispatch phase produced, in the order the
+    /// events were queued.
+    ///
+    /// Empty when the last frame dispatched nothing. Taken rather than borrowed
+    /// because each frame's dispatches replace the previous frame's: a host that
+    /// does not read them is not accumulating a leak.
+    #[must_use]
+    pub fn take_input_dispatches(&mut self) -> Vec<InputDispatch> {
+        std::mem::take(&mut self.input_dispatches)
+    }
+
+    /// Phase 3 (§3.4): dispatches every queued input event, in order, through the
+    /// same entry points an immediate caller uses.
+    ///
+    /// Returns whether anything was dispatched. Runs before the frame commits or
+    /// chooses its plan, so what dispatch changes — a pseudo-state, focus, the
+    /// editing session — is what this frame goes on to render, and the frames it
+    /// asks for are folded into this one (see [`request_frame`](Self::request_frame)).
+    fn dispatch_queued_input(&mut self) -> bool {
+        if self.input_queue.is_empty() {
+            self.input_dispatches.clear();
+            return false;
+        }
+        // The flag is what redirects the dispatchers' own `request_frame` calls
+        // into this frame's plan; it is cleared before returning on every path.
+        self.in_dispatch = true;
+        let mut dispatches = Vec::with_capacity(self.input_queue.len());
+        while let Some(event) = self.input_queue.pop_front() {
+            dispatches.push(match event {
+                InputEvent::Pointer(event) => InputDispatch::Pointer(self.handle_pointer(event)),
+                InputEvent::Key(event) => InputDispatch::Key(self.handle_key(event)),
+                InputEvent::Composition(event) => InputDispatch::Composition(self.handle_ime(event)),
+                InputEvent::Scroll { delta, position } => {
+                    InputDispatch::Scroll(self.handle_scroll(delta, position))
+                }
+            });
+        }
+        self.in_dispatch = false;
+        self.input_dispatches = dispatches;
+        true
     }
 
     /// Applies a committed [`UiTransaction`](crate::transaction::UiTransaction):
@@ -1543,16 +1651,30 @@ impl UiRuntime {
         // Phase 5 (§3.4): classify what this frame must recalculate. The first
         // frame over an empty tree is always full so every retained output
         // exists before later frames can reuse it.
+        // Phase 3 (§3.4): dispatch the input queued since the last frame — before
+        // anything commits, and before the plan is chosen, so what dispatch
+        // changes is what this frame renders rather than what the next one does.
+        let dispatched = self.dispatch_queued_input();
+
         let first_frame = self.tree.root().is_none();
         // A plan staged by `apply_transaction` wins over the reason-derived one:
         // it was classified from the committed operations themselves, which is
         // what actually changed, rather than from the frame's category — see
         // `FramePlan::for_transaction`. The first-frame guard still overrides
         // both, because there is nothing retained to reuse.
-        let plan = match self.staged_plan.take() {
+        let mut plan = match self.staged_plan.take() {
             Some(staged) if !first_frame => staged,
             _ => FramePlan::for_frame(ctx.reason(), first_frame),
         };
+        // Whatever the dispatch phase invalidated is **merged** in rather than
+        // replacing anything: a hover that restyles and a commit that reconciles
+        // are both owed by this one frame. Merging is also why dispatch never
+        // needs a frame of its own.
+        if let Some(from_dispatch) = self.dispatch_plan.take() {
+            debug_assert!(dispatched, "only the dispatch phase stages a dispatch plan");
+            plan = plan.merged_with(from_dispatch);
+        }
+        let _ = dispatched;
 
         // Open the frame telemetry span (spec §7.9). A `NullTelemetrySink`
         // (the default) makes this and every per-phase record below a no-op, so
