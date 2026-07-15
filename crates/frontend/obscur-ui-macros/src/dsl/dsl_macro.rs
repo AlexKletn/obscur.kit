@@ -42,7 +42,9 @@
 //! Every node is assigned a stable sequential `u64` id during a single
 //! pre-order walk (root = `0`, incrementing).
 
-use obscur_ui_ir::document::{UiIrDocument, UiIrEvent, UiIrNode, UiIrProperty, UiIrValue};
+use obscur_ui_ir::document::{
+    UiIrDocument, UiIrEvent, UiIrExpression, UiIrNode, UiIrProperty, UiIrValue,
+};
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::ext::IdentExt;
@@ -118,6 +120,17 @@ fn is_conditional_tag(tag: &str) -> bool {
     matches!(tag, "If" | "ElseIf" | "Else")
 }
 
+/// Whether `tag` names a collection construct rather than an element
+/// (spec §2.11).
+///
+/// `VirtualFor` is classified with `For` because it is the same construct with a
+/// virtualisation policy attached; the emitter treats them alike until that
+/// policy exists, which is better than classifying it as an element and rendering
+/// a node called `VirtualFor`.
+fn is_loop_tag(tag: &str) -> bool {
+    matches!(tag, "For" | "VirtualFor")
+}
+
 /// Builds the [`UiIrNode`] for `node`, threading `counter` to assign pre-order
 /// ids (root = 0, incrementing).
 fn build_node(node: &DslNode, counter: &mut u64) -> UiIrNode {
@@ -134,6 +147,8 @@ fn build_node(node: &DslNode, counter: &mut u64) -> UiIrNode {
                 // branch of a chain: three `<span>`-like nodes named `If`,
                 // `ElseIf` and `Else`, none of which conditioned anything.
                 UiIrNode::conditional(id, element.tag.as_str())
+            } else if is_loop_tag(element.tag.as_str()) {
+                UiIrNode::loop_node(id, element.tag.as_str())
             } else if element.is_component {
                 UiIrNode::component(id, element.tag.as_str())
             } else {
@@ -143,6 +158,13 @@ fn build_node(node: &DslNode, counter: &mut u64) -> UiIrNode {
                 ir = match attr {
                     DslAttr::Event { event, handler } => {
                         ir.with_event(UiIrEvent::new(event.as_str(), handler.as_str()))
+                    }
+                    // A `<For>`'s mandatory `key` is carried on the Loop node
+                    // itself (spec §2.11), not as a property — the same split the
+                    // `.okui` file lowering makes. Left as a property it reaches
+                    // no consumer, and every item in the list renders unkeyed.
+                    DslAttr::Prop { name, value } if name == "key" && is_loop_tag(element.tag.as_str()) => {
+                        ir.with_key(build_expression(value))
                     }
                     DslAttr::Prop { name, value } => ir.with_property(build_property(name, value)),
                 };
@@ -156,6 +178,19 @@ fn build_node(node: &DslNode, counter: &mut u64) -> UiIrNode {
 }
 
 /// Builds the [`UiIrProperty`] for one attribute.
+/// Builds the [`UiIrExpression`] for a bare attribute value, with no property
+/// name around it — for the places a value stands alone, such as a `<For>`'s key.
+fn build_expression(value: &PropValue) -> UiIrExpression {
+    match value {
+        PropValue::BareTrue => UiIrExpression::literal(UiIrValue::Bool(true)),
+        PropValue::Text(text) => UiIrExpression::literal(UiIrValue::Text(text.as_str().into())),
+        PropValue::Bool(flag) => UiIrExpression::literal(UiIrValue::Bool(*flag)),
+        PropValue::Int(value) => UiIrExpression::literal(UiIrValue::Int(*value)),
+        PropValue::Float(value) => UiIrExpression::literal(UiIrValue::Float(*value)),
+        PropValue::Binding(path) => UiIrExpression::binding(path.as_str()),
+    }
+}
+
 fn build_property(name: &str, value: &PropValue) -> UiIrProperty {
     match value {
         PropValue::BareTrue => UiIrProperty::literal(name, UiIrValue::Bool(true)),

@@ -61,10 +61,15 @@
 //! literal. The shape of the generated code follows from the language, not from
 //! preference.
 //!
-//! **`<For>` does not yet iterate** — it still splices its template body once,
-//! and its `each` binding is not consulted. Loops need a loop variable bound over
-//! the body, which is a scope this emitter does not yet open; see
-//! [`emit_into`].
+//! # Loops are real loops
+//!
+//! `<For each={items} as={item} key={item.id}>` emits `for item in &items { … }`.
+//! `as` names the loop variable, and it is a Rust binding like any other — which
+//! is what lets the body's `{item.name}` be an ordinary path. The collection is
+//! borrowed, so a `<For>` never consumes the caller's data.
+//!
+//! `<Empty>` and `<Separator>` children are the §2.11 slots, not template nodes;
+//! `<Loading>` is deliberately absent — see [`loop_slot`].
 
 use std::fmt::Write as _;
 
@@ -122,7 +127,7 @@ fn emit_nodes_block(nodes: &[&UiIrNode], indent: usize) -> String {
         "{inner}let mut __nodes: ::std::vec::Vec<::obscur_view::view::ViewNode> = \
          ::std::vec::Vec::new();"
     );
-    emit_into(nodes, &mut out, indent + 1);
+    emit_into(nodes, &mut out, indent + 1, None);
     let _ = writeln!(out, "{inner}__nodes");
     let _ = write!(out, "{pad}}}");
     out
@@ -145,23 +150,118 @@ fn emit_nodes_block(nodes: &[&UiIrNode], indent: usize) -> String {
 /// `<Else>` deserves: it renders unconditionally rather than silently attaching
 /// to an unrelated `<If>` further up.
 ///
-/// # `<For>` is still spliced
+/// # The inherited key
 ///
-/// A loop needs its item bound over the body — a scope this emitter does not open
-/// yet — so `<For>` still emits its template once and ignores `each`. It is the
-/// remaining half of §2.11.
-fn emit_into(nodes: &[&UiIrNode], out: &mut String, indent: usize) {
+/// `key` is the identity a `<For>` gives the node it renders for one item. It is
+/// threaded down rather than applied at the loop, because the item's root may sit
+/// under a conditional: `<For><If cond={x}><Row/></If></For>` must still key the
+/// `Row`. A node with a key of its own keeps it; `None` outside a loop leaves
+/// every node exactly as before.
+fn emit_into(nodes: &[&UiIrNode], out: &mut String, indent: usize, key: Option<&UiIrExpression>) {
     let mut index = 0;
     while index < nodes.len() {
         let node = nodes[index];
         if is_chain_head(node) {
             let end = chain_end(nodes, index);
-            emit_conditional_chain(&nodes[index..end], out, indent);
+            emit_conditional_chain(&nodes[index..end], out, indent, key);
             index = end;
             continue;
         }
-        emit_node(node, out, indent);
+        emit_node(node, out, indent, key);
         index += 1;
+    }
+}
+
+/// The reserved child tags of a `<For>` that are slots rather than the item
+/// template (spec §2.11).
+///
+/// `<Loading>` is **not** here. `empty` and `separator` are decidable from the
+/// collection itself — it has a length, and iteration has a between — but nothing
+/// about a Rust collection says it is still loading: that needs a signal from
+/// outside, and the spec does not say what it is. Inventing one (`loading={…}`,
+/// say) would be putting words in the spec's mouth, so the slot stays unparsed
+/// and `<Loading>` is treated as an ordinary child until the signal is defined.
+fn loop_slot(tag: &str) -> bool {
+    matches!(tag, "Empty" | "Separator")
+}
+
+/// Emits a `<For>` as a real Rust `for` loop, with its `empty` / `separator`
+/// slots (spec §2.11).
+///
+/// The shape:
+///
+/// ```ignore
+/// let mut __first = true;            // only when a slot needs it
+/// for item in &items {
+///     if !__first { /* separator */ }
+///     __first = false;
+///     __nodes.push(/* body, keyed */);
+/// }
+/// if __first { /* empty */ }
+/// ```
+///
+/// One flag serves both slots, and that is not a trick: "no separator before the
+/// first item" and "the collection was empty" are the same question — did an
+/// iteration happen yet.
+///
+/// `as={item}` names the loop variable, and it is a Rust binding like any other:
+/// the body's `{item.name}` is then an ordinary path (see the module docs).
+/// Without `as` the item is bound to `_`, which renders the body once per item
+/// with no way to read it — a repeat, which is what a `<For>` that names nothing
+/// asks for.
+///
+/// The collection is walked with `.iter()`, not `&{each}`. Both borrow, so a
+/// `<For>` never consumes the caller's data — but `&{each}` breaks the moment the
+/// binding is already a reference (`&[T]` becomes `&&[T]`, which is not an
+/// iterator), and a caller passing a slice is not doing anything unusual.
+/// `.iter()` reads the same on a `Vec`, a slice, an array and a borrow of any of
+/// them.
+fn emit_loop(node: &UiIrNode, out: &mut String, indent: usize) {
+    let pad = indentation(indent);
+    let inner = indentation(indent + 1);
+
+    let (body, slots): (Vec<&UiIrNode>, Vec<&UiIrNode>) =
+        node.children().iter().partition(|c| !loop_slot(c.tag()));
+    let separator = slots.iter().find(|c| c.tag() == "Separator");
+    let empty = slots.iter().find(|c| c.tag() == "Empty");
+    let needs_flag = separator.is_some() || empty.is_some();
+
+    let Some(each) = node.property("each").map(emit_condition) else {
+        // No collection to walk. Emitting `for _ in &()` would be a type error in
+        // generated code the author never wrote, so a `<For each=…>`-less loop
+        // renders its `empty` slot — which is what "no items" means — and nothing
+        // else.
+        if let Some(empty) = empty {
+            let children: Vec<&UiIrNode> = empty.children().iter().collect();
+            emit_into(&children, out, indent, None);
+        }
+        return;
+    };
+    let binding = node
+        .property("as")
+        .map_or_else(|| "_".to_owned(), emit_condition);
+
+    if needs_flag {
+        let _ = writeln!(out, "{pad}let mut __first = true;");
+    }
+    let _ = writeln!(out, "{pad}for {binding} in {each}.iter() {{");
+    if let Some(separator) = separator {
+        let _ = writeln!(out, "{inner}if !__first {{");
+        let children: Vec<&UiIrNode> = separator.children().iter().collect();
+        emit_into(&children, out, indent + 2, None);
+        let _ = writeln!(out, "{inner}}}");
+    }
+    if needs_flag {
+        let _ = writeln!(out, "{inner}__first = false;");
+    }
+    emit_into(&body, out, indent + 1, node.key());
+    let _ = writeln!(out, "{pad}}}");
+
+    if let Some(empty) = empty {
+        let _ = writeln!(out, "{pad}if __first {{");
+        let children: Vec<&UiIrNode> = empty.children().iter().collect();
+        emit_into(&children, out, indent + 1, None);
+        let _ = writeln!(out, "{pad}}}");
     }
 }
 
@@ -188,7 +288,12 @@ fn chain_end(nodes: &[&UiIrNode], start: usize) -> usize {
 }
 
 /// Emits one `if / else if / else` chain, each branch pushing its own body.
-fn emit_conditional_chain(chain: &[&UiIrNode], out: &mut String, indent: usize) {
+fn emit_conditional_chain(
+    chain: &[&UiIrNode],
+    out: &mut String,
+    indent: usize,
+    key: Option<&UiIrExpression>,
+) {
     let pad = indentation(indent);
     let _ = write!(out, "{pad}");
     for (position, branch) in chain.iter().enumerate() {
@@ -202,7 +307,7 @@ fn emit_conditional_chain(chain: &[&UiIrNode], out: &mut String, indent: usize) 
         out.push_str(&head);
         out.push_str("{\n");
         let children: Vec<&UiIrNode> = branch.children().iter().collect();
-        emit_into(&children, out, indent + 1);
+        emit_into(&children, out, indent + 1, key);
         let _ = write!(out, "{pad}}}");
     }
     out.push('\n');
@@ -238,25 +343,26 @@ fn emit_condition(expression: &UiIrExpression) -> String {
 ///
 /// A transparent fragment and a (still-spliced) loop push their children instead
 /// of a node of their own.
-fn emit_node(node: &UiIrNode, out: &mut String, indent: usize) {
+fn emit_node(node: &UiIrNode, out: &mut String, indent: usize, key: Option<&UiIrExpression>) {
     match node.kind() {
         UiIrNodeKind::Text => {
             let pad = indentation(indent);
             let content = string_literal(node.content());
             let _ = write!(out, "{pad}__nodes.push(::obscur_view::view::ViewNode::text({content})");
-            emit_key(node, out);
+            emit_key(node, out, key);
             out.push_str(");\n");
         }
-        UiIrNodeKind::Element | UiIrNodeKind::Component => emit_element(node, out, indent),
-        UiIrNodeKind::Fragment | UiIrNodeKind::Conditional | UiIrNodeKind::Loop => {
+        UiIrNodeKind::Element | UiIrNodeKind::Component => emit_element(node, out, indent, key),
+        UiIrNodeKind::Loop => emit_loop(node, out, indent),
+        UiIrNodeKind::Fragment | UiIrNodeKind::Conditional => {
             let children: Vec<&UiIrNode> = node.children().iter().collect();
-            emit_into(&children, out, indent);
+            emit_into(&children, out, indent, key);
         }
     }
 }
 
 /// Appends the statement pushing a single `ViewNode::Element` for `node`.
-fn emit_element(node: &UiIrNode, out: &mut String, indent: usize) {
+fn emit_element(node: &UiIrNode, out: &mut String, indent: usize, key: Option<&UiIrExpression>) {
     let pad = indentation(indent);
     let inner = indentation(indent + 1);
     let component = name_binding::component_id_for(node.tag()).raw();
@@ -294,14 +400,16 @@ fn emit_element(node: &UiIrNode, out: &mut String, indent: usize) {
 
     // The key modifier (if any) closes the builder chain before the comma.
     let _ = write!(out, "{inner}");
-    emit_key(node, out);
+    emit_key(node, out, key);
     out.push_str(");\n");
 }
 
 /// Appends a `.with_key(…)` modifier for `node`'s key, if it has one; a no-op
 /// otherwise. Mirrors the runtime bridge's key lowering.
-fn emit_key(node: &UiIrNode, out: &mut String) {
-    let Some(key) = node.key() else { return };
+fn emit_key(node: &UiIrNode, out: &mut String, inherited: Option<&UiIrExpression>) {
+    let Some(key) = node.key().or(inherited) else {
+        return;
+    };
     let key_expr = match key {
         UiIrExpression::Literal(UiIrValue::Int(number)) => {
             format!("::obscur_view::view::ViewKey::from({}u64)", number.cast_unsigned())
@@ -309,8 +417,13 @@ fn emit_key(node: &UiIrNode, out: &mut String) {
         UiIrExpression::Literal(UiIrValue::Text(text)) => {
             format!("::obscur_view::view::ViewKey::from({})", string_literal(text))
         }
+        // The key's Rust path, exactly like any other binding: `key={item.id}` is
+        // `ViewKey::from(item.id.clone())`. It used to emit the path's spelling,
+        // so every item in a list shared the key `"item.id"` — one identity for
+        // the whole collection, which is the opposite of what §2.11's mandatory
+        // stable key is for.
         UiIrExpression::Binding(path) => {
-            format!("::obscur_view::view::ViewKey::from({})", string_literal(path))
+            format!("::obscur_view::view::ViewKey::from({path}.clone())")
         }
         UiIrExpression::Literal(UiIrValue::Bool(flag)) => format!(
             "::obscur_view::view::ViewKey::from({:?})",
