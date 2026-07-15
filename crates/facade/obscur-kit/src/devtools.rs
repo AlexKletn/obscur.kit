@@ -17,6 +17,7 @@ use obscur_devtools_protocol::message::{ControlAction, InjectedEvent, Inspectabl
 use obscur_devtools_server::bridge::{InspectSource, SnapshotInspectSource};
 
 use crate::geometry::Point;
+use crate::identity::NodeId;
 use crate::interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind, PointerId};
 use crate::perf::FrameStats;
 use crate::runtime::UiRuntime;
@@ -80,15 +81,88 @@ pub fn inspect_source_from(runtime: &UiRuntime) -> SnapshotInspectSource {
     // Focus: the current focus + hover targets.
     let focus = SnapshotPayload::summary(format!(
         "focused: {} · hovered: {}",
-        node_label(runtime.focused().map(|n| n.raw())),
-        node_label(runtime.hovered().map(|n| n.raw())),
+        node_label(runtime.focused().map(NodeId::raw)),
+        node_label(runtime.hovered().map(NodeId::raw)),
     ));
 
+    // Accessibility: the semantic tree the runtime already derives from the
+    // retained tree — the same one a platform AX bridge consumes, so an inspector
+    // and a screen reader see one truth rather than two.
+    let semantic = runtime.semantic_snapshot();
+    let accessibility = SnapshotPayload::new(
+        format!("{} semantic node(s)", semantic.len()),
+        semantic.len() as u64,
+        Vec::new(),
+    )
+    .with_detail(
+        semantic
+            .iter()
+            .map(|(node, semantic_node)| format!("#{} {semantic_node:?}", node.raw()))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+
+    // Scene: the composed display list this frame actually paints.
+    let commands = runtime.snapshot();
+    let command_count = commands.display_list().commands().len() as u64;
+    let scene = SnapshotPayload::new(
+        format!("{command_count} paint command(s)"),
+        command_count,
+        Vec::new(),
+    )
+    .with_detail(
+        commands
+            .display_list()
+            .commands()
+            .iter()
+            .map(|command| format!("{command:?}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+
+    // Animations: how many motion timelines are running right now.
+    let running = runtime.active_animation_count() as u64;
+    let animations = SnapshotPayload::new(
+        format!("{running} running timeline(s)"),
+        running,
+        Vec::new(),
+    );
+
+    // Resources: everything requested this session, whatever its state.
+    let requested = runtime.resource_count() as u64;
+    let resources = SnapshotPayload::new(
+        format!("{requested} requested resource(s)"),
+        requested,
+        Vec::new(),
+    );
+
+    // Caches: what is resolved and held, split by kind — a raster image and a
+    // parsed vector document are cached separately and cost differently.
+    let (images, vectors) = runtime.cached_resource_counts();
+    let caches = SnapshotPayload::new(
+        format!("{images} image(s), {vectors} vector document(s)"),
+        (images + vectors) as u64,
+        Vec::new(),
+    )
+    .with_detail(format!(
+        "image_cache: {images}\nvector_cache: {vectors}"
+    ));
+
+    // EventFlow and PluginState are deliberately left to their typed defaults:
+    // the runtime keeps no dispatch log to report a flow from, and the plugin tier
+    // is a declared-deferred skeleton with no state to show. Synthesising either
+    // would give an inspector a confident answer about something that does not
+    // exist — worse than an honest empty.
     SnapshotInspectSource::new()
         .with_snapshot(Inspectable::Tree, tree)
         .with_snapshot(Inspectable::Layout, layout)
         .with_snapshot(Inspectable::Styles, styles)
         .with_snapshot(Inspectable::Focus, focus)
+        .with_snapshot(Inspectable::Accessibility, accessibility)
+        .with_snapshot(Inspectable::Scene, scene)
+        .with_snapshot(Inspectable::Animations, animations)
+        .with_snapshot(Inspectable::Resources, resources)
+        .with_snapshot(Inspectable::Caches, caches)
 }
 
 /// Renders an optional node id as `#N` or `none`.
@@ -153,9 +227,18 @@ pub fn perf_payload(stats: &FrameStats) -> SnapshotPayload {
         ms(stats.max_total()),
         stats.len(),
     );
+    // A saturating cast, not `as`: an `f32` fps is finite and small in practice,
+    // but a degenerate frame time could make it NaN or huge, and a wrapped count
+    // in a diagnostic is worse than a clamped one.
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "clamped to a sane fps range first, so the cast cannot wrap"
+    )]
+    let rounded = fps.round().clamp(0.0, 1_000_000.0) as u64;
     SnapshotPayload::new(
         format!("~{fps:.0} fps · {:.2}ms/frame", ms(stats.avg_total())),
-        fps.round() as u64,
+        rounded,
         Vec::new(),
     )
     .with_detail(detail)

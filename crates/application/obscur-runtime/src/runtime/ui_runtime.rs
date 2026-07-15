@@ -1286,6 +1286,26 @@ impl UiRuntime {
         self.components.register(registration)
     }
 
+    /// How many motion timelines are currently running (spec §7.6 `Animations`).
+    #[must_use]
+    pub fn active_animation_count(&self) -> usize {
+        self.motion.active_count()
+    }
+
+    /// How many resources have been requested this session — loaded, in flight or
+    /// failed (spec §7.6 `Resources`).
+    #[must_use]
+    pub fn resource_count(&self) -> usize {
+        self.resource_hub.len()
+    }
+
+    /// How many decoded images and parsed vector documents are cached
+    /// (spec §7.6 `Caches`).
+    #[must_use]
+    pub fn cached_resource_counts(&self) -> (usize, usize) {
+        (self.image_cache.len(), self.vector_cache.len())
+    }
+
     /// The number of component instances currently mounted.
     #[must_use]
     pub fn mounted_component_count(&self) -> usize {

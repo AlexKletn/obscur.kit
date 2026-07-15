@@ -170,3 +170,57 @@ fn external_client_injects_a_click_that_drives_the_runtime() {
 
     assert!(clicked.get(), "the externally injected click dispatched the button command");
 }
+
+/// Every §7.6 inspect target the runtime can genuinely answer, from a live tree.
+#[test]
+fn every_target_the_runtime_knows_reports_real_state_not_a_default() {
+    // The audit's §7 finding: only Tree/Layout/Styles/Focus/Rendering were
+    // registered, so Animations/Resources/Caches/Accessibility/Scene all fell back
+    // to typed defaults — an inspector saw "0" for state that existed.
+    // The cards carry a background, so the frame genuinely paints something —
+    // an unpainted tree would make the Scene assertion pass for the wrong reason.
+    let sheet = compile(
+        ".row { display: flex; width: 520px; height: 200px }\n\
+         .card { width: 140px; height: 160px; background-color: #336699 }\n",
+    );
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(520.0, 200.0));
+    runtime.render_now(&view(), std::slice::from_ref(&sheet));
+
+    let source = inspect_source_from(&runtime);
+    let count = |target| {
+        obscur_kit::devtools_server::bridge::InspectSource::snapshot(&source, target).entity_count
+    };
+
+    // Accessibility: the semantic tree the runtime derives — the same one a
+    // platform AX bridge consumes, so an inspector and a screen reader agree.
+    assert!(count(Inspectable::Accessibility) > 0, "the semantic tree is real");
+    // Scene: the display list this frame paints.
+    assert!(count(Inspectable::Scene) > 0, "the composed paint commands are real");
+    // Caches / Resources / Animations are legitimately zero here — nothing was
+    // loaded and nothing animates — so assert the payload DESCRIBES rather than
+    // that it counts, which is what a default could never do.
+    let described = |target| {
+        obscur_kit::devtools_server::bridge::InspectSource::snapshot(&source, target).description
+    };
+    assert!(described(Inspectable::Resources).contains("requested"), "{:?}", described(Inspectable::Resources));
+    assert!(described(Inspectable::Caches).contains("image"), "{:?}", described(Inspectable::Caches));
+    assert!(described(Inspectable::Animations).contains("timeline"), "{:?}", described(Inspectable::Animations));
+}
+
+#[test]
+fn event_flow_and_plugin_state_stay_honest_defaults() {
+    // Not an oversight, and not a synthesised answer: the runtime keeps no
+    // dispatch log to report a flow from, and the plugin tier is a declared-
+    // deferred skeleton. An inspector is told nothing rather than told a
+    // confident fiction about state that does not exist.
+    let sheet = compile(".row { width: 520px; height: 200px }");
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(520.0, 200.0));
+    runtime.render_now(&view(), std::slice::from_ref(&sheet));
+
+    let source = inspect_source_from(&runtime);
+    for target in [Inspectable::EventFlow, Inspectable::PluginState] {
+        let payload =
+            obscur_kit::devtools_server::bridge::InspectSource::snapshot(&source, target);
+        assert_eq!(payload.entity_count, 0, "{target:?} claims nothing");
+    }
+}
