@@ -10,7 +10,18 @@ publish = false
 [lints]
 workspace = true
 
+# The spec's §2.8 PRIMARY authoring surface is a real proc-macro (`okui!`), with
+# the `.okui` file codegen as the fallback path — so this crate exports macros
+# rather than expansion logic others call.
+[lib]
+proc-macro = true
+
 [dependencies]
 proc-macro2 = { workspace = true }
 quote = { workspace = true }
 syn = { workspace = true }
+# Expansion lowers the DSL to UI IR and emits `View`-building Rust AT COMPILE
+# TIME (the same lowering the `.okui` build step runs), so no IR or `.okui`
+# machinery is present at runtime.
+obscur-ui-ir = { workspace = true }
+obscur-okui-compiler = { workspace = true }

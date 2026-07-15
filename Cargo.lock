@@ -1510,6 +1510,10 @@ dependencies = [
 [[package]]
 name = "obscur-devtools"
 version = "0.0.0"
+dependencies = [
+ "obscur-devtools-protocol",
+ "obscur-devtools-server",
+]
 
 [[package]]
 name = "obscur-devtools-protocol"
@@ -1571,6 +1575,8 @@ dependencies = [
  "obscur-capability",
  "obscur-css",
  "obscur-data-transfer",
+ "obscur-devtools-protocol",
+ "obscur-devtools-server",
  "obscur-diagnostics",
  "obscur-geometry",
  "obscur-headless",
@@ -1935,6 +1941,8 @@ dependencies = [
 name = "obscur-ui-macros"
 version = "0.0.0"
 dependencies = [
+ "obscur-okui-compiler",
+ "obscur-ui-ir",
  "proc-macro2",
  "quote",
  "syn",

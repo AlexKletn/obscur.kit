@@ -1,9 +1,9 @@
 //! `DslMacro`: expansion logic for the TSX-like Rust DSL (spec §2.8).
 //!
-//! This module turns a JSX/TSX-like element tree into Rust tokens that build an
-//! [`::obscur_ui_ir::document::UiIrDocument`] at runtime. It is pure token-in /
-//! token-out logic: the macro crate emits leading-`::` paths as tokens and does
-//! **not** depend on `obscur-ui-ir`; the generated code references those paths.
+//! This module parses a JSX/TSX-like element tree into a
+//! [`UiIrDocument`] **while the macro runs**. The document is not emitted or
+//! interpreted: `okui!` hands it straight to `ViewCodegen`, which lowers it to
+//! ordinary `View`-building Rust, so no IR survives into the built crate.
 //!
 //! # Grammar
 //!
@@ -40,9 +40,9 @@
 //! # Id scheme
 //!
 //! Every node is assigned a stable sequential `u64` id during a single
-//! pre-order walk (root = `0`, incrementing); the integer literals are baked
-//! into the generated constructor calls.
+//! pre-order walk (root = `0`, incrementing).
 
+use obscur_ui_ir::document::{UiIrDocument, UiIrEvent, UiIrNode, UiIrProperty, UiIrValue};
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::ext::IdentExt;
@@ -54,55 +54,100 @@ use syn::{
 
 /// Expander for the TSX-like Rust DSL (spec §2.8).
 ///
-/// Call [`DslMacro::expand`] with the DSL token stream to obtain the generated
-/// block expression building an [`::obscur_ui_ir::document::UiIrDocument`], or a
-/// [`syn::Error`] for malformed input.
+/// [`DslMacro::to_document`] parses the DSL into a real [`UiIrDocument`] during
+/// expansion; `okui!` then lowers that document through `ViewCodegen`, so the
+/// emitted code builds a `View` directly and no IR exists at runtime.
 #[derive(Debug)]
-pub struct DslMacro;
+pub(crate) struct DslMacro;
 
 impl DslMacro {
-    /// Expands the TSX-like DSL token stream into Rust tokens that build an
-    /// obscur-ui-ir [`::obscur_ui_ir::document::UiIrDocument`].
+    /// Parses the DSL token stream into a [`UiIrDocument`] at expansion time.
+    ///
+    /// The document is built, not emitted, so the caller can lower it further
+    /// while the macro is still running.
     ///
     /// # Errors
     ///
-    /// Returns a [`syn::Error`] on empty input, on malformed element syntax
-    /// (missing `>`, unexpected tokens), on a mismatched closing tag, or when a
-    /// braced value cannot be parsed as a [`syn::Expr`].
-    pub fn expand(input: TokenStream) -> Result<TokenStream, syn::Error> {
-        let parser = |stream: ParseStream| -> syn::Result<Vec<DslNode>> {
-            let mut nodes = Vec::new();
-            while !stream.is_empty() {
-                nodes.push(stream.parse::<DslNode>()?);
-            }
-            Ok(nodes)
-        };
-        let nodes = parser.parse2(input)?;
-        if nodes.is_empty() {
-            return Err(syn::Error::new(
-                Span::call_site(),
-                "expected a DSL element, but the input was empty",
-            ));
-        }
-
+    /// Returns a [`syn::Error`] on empty input, on malformed element syntax, on
+    /// a mismatched closing tag, or when a braced value is not a [`syn::Expr`].
+    pub(crate) fn to_document(input: TokenStream) -> Result<UiIrDocument, syn::Error> {
+        let nodes = parse_nodes(input)?;
         let mut counter: u64 = 0;
         let root = if nodes.len() == 1 && matches!(nodes[0], DslNode::Element(_)) {
-            gen_node(&nodes[0], &mut counter)
+            build_node(&nodes[0], &mut counter)
         } else {
-            let id = take_id(&mut counter);
-            let mut ts = quote! { ::obscur_ui_ir::document::UiIrNode::fragment(#id) };
+            let mut fragment = UiIrNode::fragment(take_id(&mut counter));
             for node in &nodes {
-                let child = gen_node(node, &mut counter);
-                ts = quote! { #ts.with_child(#child) };
+                fragment = fragment.with_child(build_node(node, &mut counter));
             }
-            ts
+            fragment
         };
+        Ok(UiIrDocument::new(root))
+    }
+}
 
-        Ok(quote! {
-            {
-                ::obscur_ui_ir::document::UiIrDocument::new(#root)
+/// Parses the whole DSL token stream into its top-level nodes.
+///
+/// # Errors
+///
+/// Returns a [`syn::Error`] on empty input or malformed element syntax.
+fn parse_nodes(input: TokenStream) -> Result<Vec<DslNode>, syn::Error> {
+    let parser = |stream: ParseStream| -> syn::Result<Vec<DslNode>> {
+        let mut nodes = Vec::new();
+        while !stream.is_empty() {
+            nodes.push(stream.parse::<DslNode>()?);
+        }
+        Ok(nodes)
+    };
+    let nodes = parser.parse2(input)?;
+    if nodes.is_empty() {
+        return Err(syn::Error::new(
+            Span::call_site(),
+            "expected a DSL element, but the input was empty",
+        ));
+    }
+    Ok(nodes)
+}
+
+/// Builds the [`UiIrNode`] for `node`, threading `counter` to assign pre-order
+/// ids (root = 0, incrementing).
+fn build_node(node: &DslNode, counter: &mut u64) -> UiIrNode {
+    match node {
+        DslNode::Text(content) | DslNode::Interpolation(content) => {
+            UiIrNode::text(take_id(counter), content.as_str())
+        }
+        DslNode::Element(element) => {
+            let id = take_id(counter);
+            let mut ir = if element.is_component {
+                UiIrNode::component(id, element.tag.as_str())
+            } else {
+                UiIrNode::element(id, element.tag.as_str())
+            };
+            for attr in &element.attrs {
+                ir = match attr {
+                    DslAttr::Event { event, handler } => {
+                        ir.with_event(UiIrEvent::new(event.as_str(), handler.as_str()))
+                    }
+                    DslAttr::Prop { name, value } => ir.with_property(build_property(name, value)),
+                };
             }
-        })
+            for child in &element.children {
+                ir = ir.with_child(build_node(child, counter));
+            }
+            ir
+        }
+    }
+}
+
+/// Builds the [`UiIrProperty`] for one attribute.
+fn build_property(name: &str, value: &PropValue) -> UiIrProperty {
+    match value {
+        PropValue::BareTrue => UiIrProperty::literal(name, UiIrValue::Bool(true)),
+        PropValue::Text(text) => UiIrProperty::text(name, text.as_str()),
+        PropValue::Bool(flag) => UiIrProperty::literal(name, UiIrValue::Bool(*flag)),
+        PropValue::Int(value) => UiIrProperty::literal(name, UiIrValue::Int(*value)),
+        PropValue::Float(value) => UiIrProperty::literal(name, UiIrValue::Float(*value)),
+        PropValue::Binding(path) => UiIrProperty::binding(name, path.as_str()),
     }
 }
 
@@ -347,275 +392,153 @@ fn take_id(counter: &mut u64) -> u64 {
     id
 }
 
-/// Generates the constructor-call tokens for `node`, threading `counter` to
-/// assign pre-order ids.
-fn gen_node(node: &DslNode, counter: &mut u64) -> TokenStream {
-    match node {
-        DslNode::Text(content) | DslNode::Interpolation(content) => {
-            let id = take_id(counter);
-            quote! { ::obscur_ui_ir::document::UiIrNode::text(#id, #content) }
-        }
-        DslNode::Element(element) => {
-            let id = take_id(counter);
-            let ctor = Ident::new(
-                if element.is_component {
-                    "component"
-                } else {
-                    "element"
-                },
-                Span::call_site(),
-            );
-            let tag = &element.tag;
-            let mut ts = quote! { ::obscur_ui_ir::document::UiIrNode::#ctor(#id, #tag) };
-            for attr in &element.attrs {
-                let attr_ts = gen_attr(attr);
-                ts = quote! { #ts #attr_ts };
-            }
-            for child in &element.children {
-                let child_ts = gen_node(child, counter);
-                ts = quote! { #ts.with_child(#child_ts) };
-            }
-            ts
-        }
-    }
-}
-
-/// Generates the builder-call tokens (`.with_property(..)` / `.with_event(..)`)
-/// for a single attribute.
-fn gen_attr(attr: &DslAttr) -> TokenStream {
-    match attr {
-        DslAttr::Event { event, handler } => quote! {
-            .with_event(::obscur_ui_ir::document::UiIrEvent::new(#event, #handler))
-        },
-        DslAttr::Prop { name, value } => {
-            let property = match value {
-                PropValue::BareTrue => quote! {
-                    ::obscur_ui_ir::document::UiIrProperty::literal(
-                        #name,
-                        ::obscur_ui_ir::document::UiIrValue::Bool(true)
-                    )
-                },
-                PropValue::Text(text) => quote! {
-                    ::obscur_ui_ir::document::UiIrProperty::text(#name, #text)
-                },
-                PropValue::Bool(flag) => quote! {
-                    ::obscur_ui_ir::document::UiIrProperty::literal(
-                        #name,
-                        ::obscur_ui_ir::document::UiIrValue::Bool(#flag)
-                    )
-                },
-                PropValue::Int(value) => quote! {
-                    ::obscur_ui_ir::document::UiIrProperty::literal(
-                        #name,
-                        ::obscur_ui_ir::document::UiIrValue::Int(#value)
-                    )
-                },
-                PropValue::Float(value) => quote! {
-                    ::obscur_ui_ir::document::UiIrProperty::literal(
-                        #name,
-                        ::obscur_ui_ir::document::UiIrValue::Float(#value)
-                    )
-                },
-                PropValue::Binding(path) => quote! {
-                    ::obscur_ui_ir::document::UiIrProperty::binding(#name, #path)
-                },
-            };
-            quote! { .with_property(#property) }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use obscur_ui_ir::document::{UiIrExpression, UiIrNodeKind};
     use quote::quote;
 
-    fn expand(input: TokenStream) -> String {
-        DslMacro::expand(input)
-            .expect("expansion should succeed")
-            .to_string()
+    /// Lowers the DSL to the IR document the `okui!` macro hands to `ViewCodegen`.
+    fn doc(input: TokenStream) -> UiIrDocument {
+        DslMacro::to_document(input).expect("expansion should succeed")
+    }
+
+    /// The named property's expression on `node`.
+    fn prop<'a>(node: &'a UiIrNode, name: &str) -> &'a UiIrExpression {
+        node.property(name)
+            .unwrap_or_else(|| panic!("property {name:?} is present"))
     }
 
     #[test]
-    fn self_closing_element_emits_single_element_node() {
-        let out = expand(quote! { <div/> });
-        assert!(
-            out.contains(r#"UiIrNode :: element (0u64 , "div")"#),
-            "{out}"
-        );
-        assert!(out.contains("UiIrDocument :: new"), "{out}");
+    fn self_closing_element_lowers_to_a_single_element_node() {
+        let document = doc(quote! { <div/> });
+        let root = document.root();
+        assert_eq!(root.kind(), UiIrNodeKind::Element);
+        assert_eq!(root.tag(), "div");
+        assert_eq!(root.id(), 0);
+        assert!(root.is_leaf());
     }
 
     #[test]
-    fn uppercase_tag_is_a_component() {
-        let out = expand(quote! { <Button/> });
-        assert!(
-            out.contains(r#"UiIrNode :: component (0u64 , "Button")"#),
-            "{out}"
-        );
+    fn uppercase_tag_is_a_component_and_lowercase_is_an_element() {
+        assert_eq!(doc(quote! { <Button/> }).root().kind(), UiIrNodeKind::Component);
+        assert_eq!(doc(quote! { <Button/> }).root().tag(), "Button");
+        assert_eq!(doc(quote! { <container/> }).root().kind(), UiIrNodeKind::Element);
     }
 
     #[test]
-    fn lowercase_tag_is_an_element() {
-        let out = expand(quote! { <container/> });
-        assert!(
-            out.contains(r#"UiIrNode :: element (0u64 , "container")"#),
-            "{out}"
-        );
-    }
-
-    #[test]
-    fn string_property_emits_text_property() {
-        let out = expand(quote! { <div id="x"/> });
-        assert!(
-            out.contains(r#"UiIrProperty :: text ("id" , "x")"#),
-            "{out}"
+    fn string_property_lowers_to_a_text_literal() {
+        let document = doc(quote! { <div id="x"/> });
+        assert_eq!(
+            prop(document.root(), "id"),
+            &UiIrExpression::Literal(UiIrValue::Text("x".into()))
         );
     }
 
     #[test]
-    fn bool_literal_property() {
-        let out = expand(quote! { <div enabled={true}/> });
-        assert!(
-            out.contains(r#"UiIrProperty :: literal ("enabled" , :: obscur_ui_ir :: document :: UiIrValue :: Bool (true))"#),
-            "{out}"
-        );
-    }
-
-    #[test]
-    fn int_literal_property() {
-        let out = expand(quote! { <div count={5}/> });
-        assert!(out.contains(r"UiIrValue :: Int (5i64)"), "{out}");
-    }
-
-    #[test]
-    fn float_literal_property() {
-        let out = expand(quote! { <div ratio={1.5}/> });
-        assert!(out.contains(r"UiIrValue :: Float (1.5f64)"), "{out}");
+    fn literal_properties_keep_their_types() {
+        let document = doc(quote! { <div enabled={true} count={5} ratio={1.5}/> });
+        let root = document.root();
+        assert_eq!(prop(root, "enabled"), &UiIrExpression::Literal(UiIrValue::Bool(true)));
+        assert_eq!(prop(root, "count"), &UiIrExpression::Literal(UiIrValue::Int(5)));
+        assert_eq!(prop(root, "ratio"), &UiIrExpression::Literal(UiIrValue::Float(1.5)));
     }
 
     #[test]
     fn bare_attribute_is_boolean_true() {
-        let out = expand(quote! { <div disabled/> });
-        assert!(
-            out.contains(r#"UiIrProperty :: literal ("disabled" , :: obscur_ui_ir :: document :: UiIrValue :: Bool (true))"#),
-            "{out}"
+        let document = doc(quote! { <div disabled/> });
+        assert_eq!(
+            prop(document.root(), "disabled"),
+            &UiIrExpression::Literal(UiIrValue::Bool(true))
         );
     }
 
     #[test]
-    fn binding_property_uses_normalised_dotted_path() {
-        let out = expand(quote! { <div title={user.name}/> });
-        assert!(
-            out.contains(r#"UiIrProperty :: binding ("title" , "user.name")"#),
-            "{out}"
-        );
+    fn binding_property_uses_a_normalised_dotted_path() {
+        // `{user.name}` must normalise to "user.name", not the spaced token form.
+        let document = doc(quote! { <div title={user.name} value={count}/> });
+        let root = document.root();
+        assert_eq!(prop(root, "title"), &UiIrExpression::Binding("user.name".into()));
+        assert_eq!(prop(root, "value"), &UiIrExpression::Binding("count".into()));
     }
 
     #[test]
-    fn single_ident_binding_property() {
-        let out = expand(quote! { <div value={count}/> });
-        assert!(
-            out.contains(r#"UiIrProperty :: binding ("value" , "count")"#),
-            "{out}"
-        );
+    fn event_handler_lowers_to_an_event_binding() {
+        let document = doc(quote! { <Button on:click={on_ok}/> });
+        let events = document.root().events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event(), "click");
+        assert_eq!(events[0].handler(), "on_ok");
     }
 
     #[test]
-    fn event_handler_emits_event() {
-        let out = expand(quote! { <Button on:click={on_ok}/> });
-        assert!(out.contains(r#"with_event (:: obscur_ui_ir :: document :: UiIrEvent :: new ("click" , "on_ok"))"#), "{out}");
-    }
+    fn text_and_interpolation_children_lower_to_text_nodes() {
+        let document = doc(quote! { <div>"hi"</div> });
+        let child = &document.root().children()[0];
+        assert_eq!(child.kind(), UiIrNodeKind::Text);
+        assert_eq!(child.content(), "hi");
+        assert_eq!(child.id(), 1);
 
-    #[test]
-    fn text_child_emits_text_node_with_next_id() {
-        let out = expand(quote! { <div>"hi"</div> });
-        assert!(
-            out.contains(r#"UiIrNode :: element (0u64 , "div")"#),
-            "{out}"
-        );
-        assert!(out.contains(r#"UiIrNode :: text (1u64 , "hi")"#), "{out}");
-    }
-
-    #[test]
-    fn interpolation_child_lowers_to_text_binding_path() {
-        let out = expand(quote! { <div>{user.name}</div> });
-        assert!(
-            out.contains(r#"UiIrNode :: text (1u64 , "user.name")"#),
-            "{out}"
-        );
+        // An interpolation carries its binding PATH as literal content (see the
+        // module docs: `UiIrNode::text` cannot hold a live binding).
+        let document = doc(quote! { <div>{user.name}</div> });
+        assert_eq!(document.root().children()[0].content(), "user.name");
     }
 
     #[test]
     fn nested_children_get_incrementing_preorder_ids() {
-        let out = expand(quote! {
+        let document = doc(quote! {
             <div>
                 <span>"a"</span>
                 <span>"b"</span>
             </div>
         });
-        assert!(
-            out.contains(r#"UiIrNode :: element (0u64 , "div")"#),
-            "{out}"
-        );
-        assert!(
-            out.contains(r#"UiIrNode :: element (1u64 , "span")"#),
-            "{out}"
-        );
-        assert!(out.contains(r#"UiIrNode :: text (2u64 , "a")"#), "{out}");
-        assert!(
-            out.contains(r#"UiIrNode :: element (3u64 , "span")"#),
-            "{out}"
-        );
-        assert!(out.contains(r#"UiIrNode :: text (4u64 , "b")"#), "{out}");
+        let root = document.root();
+        assert_eq!(root.id(), 0);
+        let ids: Vec<u64> = root.children().iter().map(UiIrNode::id).collect();
+        assert_eq!(ids, vec![1, 3], "pre-order: each span's text takes the next id");
+        assert_eq!(root.children()[0].children()[0].id(), 2);
+        assert_eq!(root.children()[1].children()[0].id(), 4);
+        assert_eq!(document.root().node_count(), 5);
     }
 
     #[test]
     fn multiple_roots_are_wrapped_in_a_fragment() {
-        let out = expand(quote! { <div/><span/> });
-        assert!(out.contains(r"UiIrNode :: fragment (0u64)"), "{out}");
-        assert!(
-            out.contains(r#"UiIrNode :: element (1u64 , "div")"#),
-            "{out}"
-        );
-        assert!(
-            out.contains(r#"UiIrNode :: element (2u64 , "span")"#),
-            "{out}"
-        );
+        let document = doc(quote! { <div/><span/> });
+        let root = document.root();
+        assert_eq!(root.kind(), UiIrNodeKind::Fragment);
+        assert_eq!(root.id(), 0);
+        assert_eq!(root.children().len(), 2);
+        assert_eq!(root.children()[0].tag(), "div");
+        assert_eq!(root.children()[1].tag(), "span");
+    }
+
+    #[test]
+    fn a_lone_text_root_is_also_wrapped_in_a_fragment() {
+        // Only a lone ELEMENT becomes the root directly.
+        assert_eq!(doc(quote! { "hi" }).root().kind(), UiIrNodeKind::Fragment);
     }
 
     #[test]
     fn component_with_property_event_and_text_child() {
-        let out = expand(quote! {
+        let document = doc(quote! {
             <Button label="OK" on:click={on_ok}>"OK"</Button>
         });
-        assert!(
-            out.contains(r#"UiIrNode :: component (0u64 , "Button")"#),
-            "{out}"
+        let root = document.root();
+        assert_eq!(root.kind(), UiIrNodeKind::Component);
+        assert_eq!(root.tag(), "Button");
+        assert_eq!(
+            prop(root, "label"),
+            &UiIrExpression::Literal(UiIrValue::Text("OK".into()))
         );
-        assert!(
-            out.contains(r#"UiIrProperty :: text ("label" , "OK")"#),
-            "{out}"
-        );
-        assert!(
-            out.contains(r#"UiIrEvent :: new ("click" , "on_ok")"#),
-            "{out}"
-        );
-        assert!(out.contains(r#"UiIrNode :: text (1u64 , "OK")"#), "{out}");
+        assert_eq!(root.events()[0].handler(), "on_ok");
+        assert_eq!(root.children()[0].content(), "OK");
     }
 
     #[test]
-    fn empty_input_is_an_error() {
-        assert!(DslMacro::expand(quote! {}).is_err());
-    }
-
-    #[test]
-    fn mismatched_closing_tag_is_an_error() {
-        assert!(DslMacro::expand(quote! { <a></b> }).is_err());
-    }
-
-    #[test]
-    fn missing_closing_tag_is_an_error() {
-        assert!(DslMacro::expand(quote! { <div> }).is_err());
+    fn malformed_input_is_an_error_not_a_panic() {
+        assert!(DslMacro::to_document(quote! {}).is_err(), "empty input");
+        assert!(DslMacro::to_document(quote! { <a></b> }).is_err(), "mismatched tag");
+        assert!(DslMacro::to_document(quote! { <div> }).is_err(), "missing closing tag");
     }
 }

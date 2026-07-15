@@ -32,7 +32,7 @@ use syn::{Data, DeriveInput, Fields, LitStr, Type, spanned::Spanned};
 /// Call [`ContractDerive::expand`] with the annotated item's tokens to obtain
 /// the generated inherent `impl` (or a [`syn::Error`] for unsupported inputs).
 #[derive(Debug)]
-pub struct ContractDerive;
+pub(crate) struct ContractDerive;
 
 impl ContractDerive {
     /// Expands `#[derive(Contract)]` on a props struct into an inherent impl
@@ -48,7 +48,7 @@ impl ContractDerive {
     /// Returns a [`syn::Error`] when the input cannot be parsed as a
     /// [`syn::DeriveInput`], when the item is not a named-field struct, or when
     /// an unrecognised `#[contract(...)]` attribute or value is encountered.
-    pub fn expand(input: TokenStream) -> Result<TokenStream, syn::Error> {
+    pub(crate) fn expand(input: TokenStream) -> Result<TokenStream, syn::Error> {
         let derive_input: DeriveInput = syn::parse2(input)?;
         let struct_ident = &derive_input.ident;
         let (impl_generics, ty_generics, where_clause) = derive_input.generics.split_for_impl();

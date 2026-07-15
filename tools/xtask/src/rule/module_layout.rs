@@ -1,11 +1,32 @@
 //! Rule: `mod.rs` and `lib.rs` contain only structure, not entities (spec §3.1).
 
+use std::ffi::OsStr;
 use std::fs;
 use std::path::Path;
 
 use crate::violation::{Violation, collect};
 
 const RULE: &str = "module-layout";
+
+/// Whether `file` is the `lib.rs` of a `proc-macro = true` crate.
+///
+/// Such a root is exempt: Rust *requires* `#[proc_macro]` / `#[proc_macro_derive]`
+/// entry points to live in the crate root, so the file cannot be pure structure
+/// however the crate is organised — the rule would forbid what the language
+/// mandates. The convention's intent still holds by construction: the entry
+/// points stay thin adapters and the expansion logic lives in modules.
+fn is_proc_macro_crate_root(file: &Path) -> bool {
+    if file.file_name() != Some(OsStr::new("lib.rs")) {
+        return false;
+    }
+    // `<crate>/src/lib.rs` → `<crate>/Cargo.toml`.
+    let Some(manifest) = file.parent().and_then(Path::parent).map(|dir| dir.join("Cargo.toml"))
+    else {
+        return false;
+    };
+    fs::read_to_string(manifest)
+        .is_ok_and(|text| text.lines().any(|line| line.trim() == "proc-macro = true"))
+}
 
 /// Checks every `mod.rs`/`lib.rs` under the workspace.
 pub(crate) fn check(root: &Path) -> Vec<Violation> {
@@ -15,6 +36,9 @@ pub(crate) fn check(root: &Path) -> Vec<Violation> {
 
     let mut out = Vec::new();
     for file in files {
+        if is_proc_macro_crate_root(&file) {
+            continue;
+        }
         let Ok(text) = fs::read_to_string(&file) else {
             continue;
         };
