@@ -35,7 +35,7 @@ fn probe(
 ) -> f32 {
     let mut widest = 0.0_f32;
     for (index, child) in children.iter().enumerate() {
-        let margin = child.style().margin;
+        let margin = child.style().margin.or_zero();
         let margins = margin.left + margin.right;
         // `UNBOUNDED - margins` stays unbounded; a zero offer stays zero.
         let available = (offer - margins).max(0.0);
@@ -103,8 +103,8 @@ pub(crate) fn intrinsic_inline_size(
 mod tests {
     use super::{intrinsic_inline_size, probe};
     use crate::algorithm::{ChildMeasurer, LayoutChild};
-    use crate::model::{Dimension, LayoutStyle};
-    use obscur_geometry::{BoxConstraints, Insets, Size};
+    use crate::model::{Dimension, LayoutStyle, MarginEdges};
+    use obscur_geometry::{BoxConstraints, Size};
     use obscur_identity::NodeId;
 
     /// A child that behaves like a paragraph: it fills the width it is offered,
@@ -122,7 +122,7 @@ mod tests {
         }
     }
 
-    fn child(margin: Insets) -> LayoutChild {
+    fn child(margin: MarginEdges) -> LayoutChild {
         LayoutChild::new(
             NodeId::from_raw(1),
             LayoutStyle {
@@ -133,7 +133,7 @@ mod tests {
     }
 
     fn plain() -> LayoutChild {
-        child(Insets::uniform(0.0))
+        child(MarginEdges::ZERO)
     }
 
     fn one() -> Vec<LayoutChild> {
@@ -178,7 +178,7 @@ mod tests {
                 Size::new(100.0, 10.0)
             }
         }
-        let children = vec![child(Insets { top: 0.0, right: 25.0, bottom: 0.0, left: 15.0 })];
+        let children = vec![child(MarginEdges::px(0.0, 25.0, 0.0, 15.0))];
         assert_eq!(
             probe(&children, f32::INFINITY, 100.0, &mut Fixed),
             140.0,

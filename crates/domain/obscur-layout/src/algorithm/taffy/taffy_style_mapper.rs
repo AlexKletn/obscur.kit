@@ -24,6 +24,7 @@
 
 use crate::model::{
     AlignItems, Dimension, FlexDirection, FlexWrap, JustifyContent, LayoutDisplay, LayoutStyle,
+    Margin, MarginEdges,
 };
 use obscur_geometry::Insets;
 
@@ -71,7 +72,7 @@ impl TaffyStyleMapper {
                 width: self.dimension(style.max_width),
                 height: self.dimension(style.max_height),
             },
-            margin: self.insets_lpa(style.margin),
+            margin: self.margin_lpa(style.margin),
             padding: self.insets_lp(style.padding),
             border: self.insets_lp(style.border),
             flex_direction: Self::flex_direction(style.flex_direction),
@@ -121,13 +122,23 @@ impl TaffyStyleMapper {
         }
     }
 
-    /// Maps obscur [`Insets`] to a `taffy::Rect<LengthPercentageAuto>` (used for margin).
-    fn insets_lpa(&self, insets: Insets) -> taffy::Rect<taffy::LengthPercentageAuto> {
+    /// Maps obscur [`MarginEdges`] to a `taffy::Rect<LengthPercentageAuto>`.
+    ///
+    /// Unlike the intrinsic sizing keywords — which `taffy::Dimension` cannot say
+    /// at all, see [`dimension`](Self::dimension) — `auto` margins map exactly:
+    /// `LengthPercentageAuto::Auto` is the same value with the same meaning, and
+    /// taffy distributes leftover space to it. So `margin: 0 auto` centres through
+    /// this adapter as it does natively, and nothing here needs a caveat.
+    fn margin_lpa(&self, margin: MarginEdges) -> taffy::Rect<taffy::LengthPercentageAuto> {
+        let edge = |m: Margin| match m {
+            Margin::Px(value) => taffy::LengthPercentageAuto::Length(value),
+            Margin::Auto => taffy::LengthPercentageAuto::Auto,
+        };
         taffy::Rect {
-            left: taffy::LengthPercentageAuto::Length(insets.left),
-            right: taffy::LengthPercentageAuto::Length(insets.right),
-            top: taffy::LengthPercentageAuto::Length(insets.top),
-            bottom: taffy::LengthPercentageAuto::Length(insets.bottom),
+            left: edge(margin.left),
+            right: edge(margin.right),
+            top: edge(margin.top),
+            bottom: edge(margin.bottom),
         }
     }
 

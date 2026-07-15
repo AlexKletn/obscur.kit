@@ -10,6 +10,7 @@ use obscur_layout::algorithm::{
 };
 use obscur_layout::model::{
     AlignItems, AlignSelf, BoxSizing, Dimension, FlexDirection, FlexWrap, Inset, JustifyContent,
+    Margin, MarginEdges,
     LayoutBox, LayoutDisplay, LayoutStyle, Position,
 };
 use obscur_style::computed::{ComputedStyle, ComputedValue};
@@ -803,7 +804,7 @@ fn layout_style_from(
         min_height: dimension_of(computed, PropertyId::MinHeight, &ctx),
         max_width: dimension_of(computed, PropertyId::MaxWidth, &ctx),
         max_height: dimension_of(computed, PropertyId::MaxHeight, &ctx),
-        margin: insets_of(
+        margin: margin_edges_of(
             computed,
             PropertyId::MarginTop,
             PropertyId::MarginRight,
@@ -1038,6 +1039,43 @@ fn length_px_of(computed: &ComputedStyle, property: PropertyId, ctx: &LengthCont
 }
 
 /// Builds pixel [`Insets`] from the four edge longhands (top/right/bottom/left).
+/// Resolves the four margin longhands into [`MarginEdges`], keeping `auto`
+/// **unresolved** (CSS 2.1 §10.3.3).
+///
+/// This is the margin twin of [`insets_of`], and differs in the one way that
+/// matters: `auto` survives as [`Margin::Auto`] instead of being folded to `0`.
+/// It cannot be folded here — `auto` means "take the leftover", and how much is
+/// left depends on the box's used width, which layout has not computed yet. That
+/// premature `0` is exactly what used to make `margin: 0 auto` do nothing.
+///
+/// A percentage margin still resolves to `0`, as it does for every other inset:
+/// [`Margin`] models no `Percent` variant yet.
+fn margin_edges_of(
+    computed: &ComputedStyle,
+    top: PropertyId,
+    right: PropertyId,
+    bottom: PropertyId,
+    left: PropertyId,
+    ctx: &LengthContext,
+) -> MarginEdges {
+    MarginEdges {
+        top: margin_of(computed, top, ctx),
+        right: margin_of(computed, right, ctx),
+        bottom: margin_of(computed, bottom, ctx),
+        left: margin_of(computed, left, ctx),
+    }
+}
+
+/// Resolves one margin longhand into a [`Margin`]: an authored `auto` stays
+/// [`Margin::Auto`], every other value folds to logical pixels exactly as
+/// [`length_px_of`] does.
+fn margin_of(computed: &ComputedStyle, property: PropertyId, ctx: &LengthContext) -> Margin {
+    match computed.get(property).map(ComputedValue::value) {
+        Some(&PropertyValue::Length(Length::Auto)) => Margin::Auto,
+        _ => Margin::Px(length_px_of(computed, property, ctx)),
+    }
+}
+
 fn insets_of(
     computed: &ComputedStyle,
     top: PropertyId,
@@ -2753,12 +2791,7 @@ mod tests {
         assert_eq!(style.display, LayoutDisplay::Flex);
         assert_eq!(
             style.margin,
-            Insets {
-                top: 1.0,
-                right: 2.0,
-                bottom: 3.0,
-                left: 4.0
-            }
+            MarginEdges::px(1.0, 2.0, 3.0, 4.0)
         );
         assert_eq!(
             style.padding,
@@ -3190,12 +3223,7 @@ mod tests {
         col_style.flex_direction = FlexDirection::Column;
 
         let mut slot_style = flex_row_start.clone();
-        slot_style.margin = Insets {
-            top: 0.0,
-            right: 0.0,
-            bottom: 12.0,
-            left: 0.0,
-        };
+        slot_style.margin = MarginEdges::px(0.0, 0.0, 12.0, 0.0);
 
         let cap_style = LayoutStyle::default()
             .with_display(LayoutDisplay::Block)

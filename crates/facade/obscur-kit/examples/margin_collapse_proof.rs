@@ -27,12 +27,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use obscur_geometry::BoxConstraints;
-use obscur_kit::geometry::{Insets, Point, Rect, Size};
+use obscur_kit::geometry::{Point, Rect, Size};
 use obscur_kit::identity::{ComponentId, NodeId};
 use obscur_kit::layout::algorithm::{
     FixedChildMeasurer, FlowLayout, LayoutAlgorithm, LayoutChild,
 };
-use obscur_kit::layout::model::{LayoutBox, LayoutStyle};
+use obscur_kit::layout::model::{LayoutBox, LayoutStyle, MarginEdges};
 use obscur_kit::render::frame::{FrameSubmission, RenderFrame};
 use obscur_kit::render::target::{BitmapTarget, RenderTarget};
 use obscur_kit::render::{Renderer, RendererId};
@@ -53,12 +53,7 @@ const COLS_X: [f32; 4] = [20.0, 160.0, 300.0, 440.0];
 /// Build a child carrying only block-axis margins.
 fn child(raw: u64, top: f32, bottom: f32) -> LayoutChild {
     let style = LayoutStyle {
-        margin: Insets {
-            top,
-            bottom,
-            left: 0.0,
-            right: 0.0,
-        },
+        margin: MarginEdges::px(top, 0.0, bottom, 0.0),
         ..LayoutStyle::default()
     };
     LayoutChild::new(NodeId::from_raw(raw), style)

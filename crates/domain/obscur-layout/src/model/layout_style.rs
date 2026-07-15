@@ -2,6 +2,7 @@
 
 use crate::algorithm::{GridAutoFlow, GridPlacement};
 use crate::model::{
+    MarginEdges,
     AlignItems, AlignSelf, BoxSizing, Dimension, FlexDirection, FlexWrap, Inset, JustifyContent,
     LayoutDisplay, Position,
 };
@@ -60,8 +61,10 @@ pub struct LayoutStyle {
     /// size − border − padding, floored at `0`). An `Auto` size is unaffected.
     pub box_sizing: BoxSizing,
 
-    /// Space reserved outside the border box (margin edges).
-    pub margin: Insets,
+    /// Space reserved outside the border box (margin edges). Each edge may be
+    /// `auto`, which absorbs leftover space rather than reserving a fixed amount
+    /// — the `margin: 0 auto` centring rule (CSS 2.1 §10.3.3).
+    pub margin: MarginEdges,
     /// Space reserved between the border box and the content box (padding edges).
     pub padding: Insets,
     /// Border thickness on each edge.
@@ -158,7 +161,7 @@ impl Default for LayoutStyle {
             max_width: Dimension::Auto,
             max_height: Dimension::Auto,
             box_sizing: BoxSizing::ContentBox,
-            margin: Insets::uniform(0.0),
+            margin: MarginEdges::ZERO,
             padding: Insets::uniform(0.0),
             border: Insets::uniform(0.0),
             flex_direction: FlexDirection::Row,
@@ -319,7 +322,7 @@ mod tests {
     use super::LayoutStyle;
     use crate::model::{
         AlignItems, AlignSelf, Dimension, FlexDirection, FlexWrap, Inset, JustifyContent,
-        LayoutDisplay, Position,
+        LayoutDisplay, MarginEdges, Position,
     };
     use obscur_geometry::Insets;
 
@@ -331,7 +334,7 @@ mod tests {
         assert!(style.height.is_auto());
         assert!(style.min_width.is_auto());
         assert!(style.max_height.is_auto());
-        assert_eq!(style.margin, Insets::uniform(0.0));
+        assert_eq!(style.margin, MarginEdges::ZERO);
         assert_eq!(style.padding, Insets::uniform(0.0));
         assert_eq!(style.border, Insets::uniform(0.0));
         assert_eq!(style.flex_direction, FlexDirection::Row);

@@ -30,11 +30,20 @@ use super::{
 ///   [`BoxConstraints::loose`] up to `(content_width − its inline margins,
 ///   remaining_height)`, placed at the content-box left edge **plus its
 ///   `margin-left`**, with its top at the running `y` offset.
-/// * **Inline margins (CSS 2.1 §10.3.3)** — a child's `margin-left` /
+/// * **Inline margins (CSS 2.1 §10.3.3)** — a child's *fixed* `margin-left` /
 ///   `margin-right` take from the inline space it is offered, so a `width: auto`
 ///   child fills what is left, and `margin-left` offsets it. An over-constrained
 ///   box (definite width + both margins) resolves by ignoring `margin-right`, the
-///   `direction: ltr` rule. `auto` margins are not applied — see below.
+///   `direction: ltr` rule.
+/// * **`auto` inline margins (CSS 2.1 §10.3.3)** — an `auto` edge reserves
+///   nothing; it *absorbs* the space left over once the child's used width is
+///   known. Both edges `auto` splits the leftover evenly — `margin: 0 auto`
+///   centring; one edge `auto` takes it all, pushing the box to the other side.
+///   A `width: auto` child needs no special case: it already filled what it was
+///   offered, so the leftover is zero and its `auto` margins resolve to zero,
+///   exactly as §10.3.3 says. In the block axis `auto` is always zero
+///   (§10.6.3): a container's height *is* its content, so there is no leftover
+///   to absorb.
 /// * **Block margins + vertical margin collapsing (CSS 2.1 §8.3.1)** — each
 ///   in-flow child's block-axis (`margin.top` / `margin.bottom`) margins take
 ///   effect, and the bottom margin of one block collapses with the top margin
@@ -74,11 +83,11 @@ use super::{
 /// writing-mode-aware block direction are likewise not modelled; block flow is
 /// strictly vertical.
 ///
-/// **`auto` horizontal margins** (`margin: 0 auto` centering) are still not
-/// applied, and cannot be until the model can express them: `LayoutStyle::margin`
-/// is `Insets` of `f32`, so `auto` is already resolved away to `0` before layout
-/// sees it. Centering therefore needs `margin` to become a `Dimension` per side,
-/// not a change here.
+/// **Percentage margins** are not resolved: [`Margin`](crate::model::Margin)
+/// models a length or `auto`, and the CSS bridge folds a `%` margin to `0` before
+/// layout sees it. Adding a `Percent` variant is what unblocks them, and every
+/// `match` on `Margin` stops compiling until it says what to do — which is the
+/// reason the type is an enum rather than an `f32` plus a flag.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FlowLayout;
 
@@ -216,8 +225,11 @@ impl LayoutAlgorithm for FlowLayout {
             if index > 0 {
                 gap_acc += style.gap;
             }
-            // This child's top margin joins the currently-open collapsing set.
-            pending = pending.adjoin(child_style.margin.top);
+            // This child's top margin joins the currently-open collapsing set. A
+            // block-axis `auto` margin is zero in normal flow (CSS 2.1 §10.6.3):
+            // there is no leftover block space for it to absorb, because the
+            // container's height is what the children add up to.
+            pending = pending.adjoin(child_style.margin.top.or_zero());
 
             // Separation before this child: the additive gap plus the collapsed
             // margin. For the first child this is just its (contained) top
@@ -228,17 +240,41 @@ impl LayoutAlgorithm for FlowLayout {
             // (CSS 2.1 §10.3.3: margin-left + border + padding + width + padding
             // + border + margin-right = the containing block's width), so a
             // `width: auto` child fills what is left rather than the whole box.
-            let inline_margins = child_style.margin.left + child_style.margin.right;
-            let child_width = (content_width - inline_margins).max(0.0);
+            // Only the *fixed* edges take: an `auto` margin reserves nothing, it
+            // absorbs what is left after the child has been sized.
+            let fixed_inline = child_style.margin.left.or_zero() + child_style.margin.right.or_zero();
+            let child_width = (content_width - fixed_inline).max(0.0);
             let child_size = measurer.measure_child(
                 index,
                 BoxConstraints::loose(Size::new(child_width, remaining_height)),
             );
-            // …and the leading margin offsets it. An over-constrained box (a
-            // definite width plus both margins) resolves by ignoring
-            // `margin-right`, which falls out of only ever adding `margin.left`
-            // here — the §10.3.3 rule for `direction: ltr`.
-            let left = bp_left + child_style.margin.left;
+            // …and the leading margin offsets it — §10.3.3's inline solve, now that
+            // the child's used width is known:
+            //
+            // * neither edge `auto` — `margin-left` offsets, and an over-constrained
+            //   box (definite width plus both margins) resolves by ignoring
+            //   `margin-right`. That falls out of only ever adding the left edge
+            //   here: the rule for `direction: ltr`.
+            // * both `auto` — the leftover splits evenly, which is `margin: 0 auto`
+            //   centring.
+            // * one `auto` — it takes the whole leftover, pushing the box to the
+            //   other edge.
+            //
+            // A `width: auto` child needs no special case: it already filled the
+            // space it was offered, so the leftover is zero and its `auto` margins
+            // resolve to zero — exactly what §10.3.3 says. Centring engages only for
+            // a child whose width is definite (or intrinsic, which is how
+            // `width: fit-content; margin: 0 auto` centres).
+            let leftover = (content_width - fixed_inline - child_size.width).max(0.0);
+            let left_margin = match (
+                child_style.margin.left.is_auto(),
+                child_style.margin.right.is_auto(),
+            ) {
+                (true, true) => leftover / 2.0,
+                (true, false) => leftover,
+                (false, _) => child_style.margin.left.or_zero(),
+            };
+            let left = bp_left + left_margin;
 
             // An empty, zero-height child with no top/bottom border or padding
             // has adjoining top & bottom margins: it collapses *through*. The
@@ -251,7 +287,7 @@ impl LayoutAlgorithm for FlowLayout {
                 && child_style.padding.bottom == 0.0;
 
             if collapses_through {
-                pending = pending.adjoin(child_style.margin.bottom);
+                pending = pending.adjoin(child_style.margin.bottom.or_zero());
                 // Place the zero-height box at the (current) collapsed boundary;
                 // it does not advance `y` and does not close the set.
                 let top = bp_top + y + gap_acc + pending.solve();
@@ -271,7 +307,7 @@ impl LayoutAlgorithm for FlowLayout {
                 child_size,
             )));
             y = top + child_size.height;
-            pending = CollapsingMargins::EMPTY.adjoin(child_style.margin.bottom);
+            pending = CollapsingMargins::EMPTY.adjoin(child_style.margin.bottom.or_zero());
             gap_acc = 0.0;
         }
 
@@ -325,7 +361,7 @@ impl LayoutAlgorithm for FlowLayout {
 mod tests {
     use super::FlowLayout;
     use crate::algorithm::{FixedChildMeasurer, LayoutAlgorithm, LayoutChild};
-    use crate::model::{Dimension, LayoutStyle};
+    use crate::model::{Dimension, LayoutStyle, MarginEdges};
     use obscur_geometry::{BoxConstraints, Insets, Point, Size};
     use obscur_identity::NodeId;
 
@@ -336,12 +372,7 @@ mod tests {
     /// A child carrying only block-axis (top/bottom) margins.
     fn child_margins(raw: u64, top: f32, bottom: f32) -> LayoutChild {
         let style = LayoutStyle {
-            margin: Insets {
-                top,
-                bottom,
-                left: 0.0,
-                right: 0.0,
-            },
+            margin: MarginEdges::px(top, 0.0, bottom, 0.0),
             ..LayoutStyle::default()
         };
         LayoutChild::new(NodeId::from_raw(raw), style)
@@ -639,12 +670,7 @@ mod tests {
         LayoutChild::new(
             NodeId::from_raw(raw),
             LayoutStyle {
-                margin: Insets {
-                    top: 0.0,
-                    right,
-                    bottom: 0.0,
-                    left,
-                },
+                margin: MarginEdges::px(0.0, right, 0.0, left),
                 ..LayoutStyle::default()
             },
         )

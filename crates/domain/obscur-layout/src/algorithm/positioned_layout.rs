@@ -65,7 +65,10 @@ impl LayoutAlgorithm for PositionedLayout {
         let mut max_bottom = padding.top;
 
         for (index, child) in children.iter().enumerate() {
-            let margin = child.style.margin;
+            // A positioned child is placed at its offset, not fitted into leftover
+            // space, so there is no leftover for an `auto` margin to absorb: CSS
+            // 2.1 §10.3.7 resolves it to zero, which is what `or_zero` reads.
+            let margin = child.style.margin.or_zero();
             let size = measurer.measure_child(index, child_constraints);
             let origin = Point::new(padding.left + margin.left, padding.top + margin.top);
             child_boxes.push(LayoutBox::new(Rect::new(origin, size)));
@@ -92,16 +95,16 @@ impl LayoutAlgorithm for PositionedLayout {
 mod tests {
     use super::PositionedLayout;
     use crate::algorithm::{FixedChildMeasurer, LayoutAlgorithm, LayoutChild};
-    use crate::model::{Dimension, LayoutStyle};
+    use crate::model::{Dimension, LayoutStyle, Margin, MarginEdges};
     use obscur_geometry::{BoxConstraints, Insets, Point, Size};
     use obscur_identity::NodeId;
 
     fn child_at(raw: u64, left: f32, top: f32) -> LayoutChild {
         let style = LayoutStyle {
-            margin: Insets {
-                top,
-                left,
-                ..Insets::default()
+            margin: MarginEdges {
+                top: Margin::Px(top),
+                left: Margin::Px(left),
+                ..MarginEdges::ZERO
             },
             ..LayoutStyle::default()
         };

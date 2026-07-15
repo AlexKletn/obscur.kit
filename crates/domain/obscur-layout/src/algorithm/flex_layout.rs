@@ -265,7 +265,18 @@ impl LayoutAlgorithm for FlexLayout {
         let mut main_trail = Vec::with_capacity(count);
         let mut cross_lead = Vec::with_capacity(count);
         for child in children {
-            let m = child.style.margin;
+            // Flex reads margins purely as lengths, so an `auto` edge is taken as
+            // `0` here.
+            //
+            // That is a real gap, not a rounding: CSS Flexbox §8.1 gives `auto`
+            // margins a *second* job on a flex item — they absorb the line's free
+            // space before `justify-content` sees it, which is how `margin-left:
+            // auto` pushes an item to the end of a row. Implementing that means
+            // teaching the free-space distribution below about auto edges, not
+            // changing this line. Until then a flex item's `auto` margin behaves as
+            // zero, and `justify-content` decides alone. Block layout does honour
+            // `auto` margins (see `FlowLayout`), so `margin: 0 auto` centres there.
+            let m = child.style.margin.or_zero();
             let (lead, trail) = if is_row {
                 if is_reverse {
                     (m.right, m.left)

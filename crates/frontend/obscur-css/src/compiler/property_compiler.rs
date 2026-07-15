@@ -181,11 +181,16 @@ impl PropertyCompiler {
         if decl.name.eq_ignore_ascii_case("grid-area") {
             return expand_grid_area_shorthand(decl, specificity, origin, source_order, selector);
         }
-        if let Some((align, justify)) = place_shorthand_sides(&decl.name) {
-            return expand_place_shorthand(
+        // The two-longhand shorthands: `place-*` (`<align> <justify>`) and the
+        // logical box-model pairs (`<start> <end>`). Different families, identical
+        // shape — see `expand_pair_shorthand`.
+        if let Some((first, second)) = place_shorthand_sides(&decl.name)
+            .or_else(|| logical_pair_shorthand_sides(&decl.name))
+        {
+            return expand_pair_shorthand(
                 decl,
-                align,
-                justify,
+                first,
+                second,
                 specificity,
                 origin,
                 source_order,
@@ -700,19 +705,60 @@ fn place_shorthand_sides(name: &str) -> Option<(PropertyId, PropertyId)> {
     }
 }
 
-/// Expands a `place-items` / `place-self` shorthand into its `align-*` /
-/// `justify-*` longhands (spec CSS Box Alignment).
+/// Returns the two longhand [`PropertyId`]s (`start`, `end`) a **logical**
+/// box-model shorthand expands into, or [`None`] for any other name (spec §4.13).
 ///
-/// The value is `<align> [<justify>]`: with a single component both longhands
-/// take it; with two, the FIRST is the align side and the SECOND the justify
-/// side (`place-items: center start` → `align-items: center; justify-items:
-/// start`). Each side is lowered through its own longhand rules (so `place-self`
-/// accepts `auto` while `place-items` does not, and a CSS-wide keyword like
-/// `inherit` still resolves). A side that does not lower, or a value that is
-/// empty or longer than two components, degrades the whole shorthand to a single
-/// [`CompiledDeclaration::Unsupported`].
+/// `margin-inline` / `margin-block` / `padding-inline` / `padding-block` /
+/// `inset-inline` / `inset-block` each set the two edges of one axis, in
+/// `<start> <end>` order — the flow-relative twin of how `margin` fans out to
+/// four physical edges.
+///
+/// # Why the axis shorthands are here and the 4-value ones are not
+///
+/// CSS also defines `margin` / `padding` / `inset` *themselves* as accepting
+/// logical values under `writing-mode`, but in a horizontal-tb, ltr/rtl engine
+/// those shorthands are exactly the physical ones — which
+/// [`box_shorthand_sides`] already expands. The axis shorthands are the ones that
+/// say something physical CSS cannot: "both inline edges", whichever sides those
+/// turn out to be.
+fn logical_pair_shorthand_sides(name: &str) -> Option<(PropertyId, PropertyId)> {
+    if name.eq_ignore_ascii_case("margin-inline") {
+        Some((PropertyId::MarginInlineStart, PropertyId::MarginInlineEnd))
+    } else if name.eq_ignore_ascii_case("margin-block") {
+        Some((PropertyId::MarginBlockStart, PropertyId::MarginBlockEnd))
+    } else if name.eq_ignore_ascii_case("padding-inline") {
+        Some((PropertyId::PaddingInlineStart, PropertyId::PaddingInlineEnd))
+    } else if name.eq_ignore_ascii_case("padding-block") {
+        Some((PropertyId::PaddingBlockStart, PropertyId::PaddingBlockEnd))
+    } else if name.eq_ignore_ascii_case("inset-inline") {
+        Some((PropertyId::InsetInlineStart, PropertyId::InsetInlineEnd))
+    } else if name.eq_ignore_ascii_case("inset-block") {
+        Some((PropertyId::InsetBlockStart, PropertyId::InsetBlockEnd))
+    } else {
+        None
+    }
+}
+
+/// Expands a two-longhand shorthand into its pair (spec CSS Box Alignment for
+/// `place-*`, §4.13 for the logical box-model pairs).
+///
+/// The value is `<first> [<second>]`: with a single component both longhands take
+/// it; with two, the FIRST is `first` and the SECOND is `second`. That covers both
+/// families this serves, because both order their pair the same way the shorthand
+/// name reads:
+///
+/// * `place-items: center start` → `align-items: center; justify-items: start`;
+/// * `margin-inline: 10px 20px` → `margin-inline-start: 10px;
+///   margin-inline-end: 20px`.
+///
+/// Each side is lowered through its **own** longhand rules, which is what lets one
+/// expander serve both: `place-self` accepts `auto` while `place-items` does not,
+/// `margin-inline-start` accepts a length, and a CSS-wide keyword like `inherit`
+/// still resolves — none of which this function needs to know. A side that does
+/// not lower, or a value that is empty or longer than two components, degrades the
+/// whole shorthand to a single [`CompiledDeclaration::Unsupported`].
 #[allow(clippy::too_many_arguments)]
-fn expand_place_shorthand(
+fn expand_pair_shorthand(
     decl: &ParsedDeclaration,
     align: PropertyId,
     justify: PropertyId,
@@ -5608,6 +5654,130 @@ mod tests {
         assert_eq!(
             value_of("align-self: auto"),
             PropertyValue::Keyword(layout_keyword::ALIGN_AUTO)
+        );
+    }
+
+    /// The `(property, value)` pairs a shorthand compiles to, in order.
+    fn pairs_of(css: &str) -> Vec<(PropertyId, PropertyValue)> {
+        compile_all(css)
+            .iter()
+            .map(|c| (standard_of(c).property(), standard_of(c).value().clone()))
+            .collect()
+    }
+
+    #[test]
+    fn a_logical_axis_shorthand_expands_start_then_end() {
+        assert_eq!(
+            pairs_of("margin-inline: 10px 20px"),
+            vec![
+                (
+                    PropertyId::MarginInlineStart,
+                    PropertyValue::Length(Length::px(10.0))
+                ),
+                (
+                    PropertyId::MarginInlineEnd,
+                    PropertyValue::Length(Length::px(20.0))
+                ),
+            ],
+            "the first component is the START edge"
+        );
+    }
+
+    #[test]
+    fn a_logical_axis_shorthand_replicates_a_single_value_to_both_edges() {
+        assert_eq!(
+            pairs_of("padding-block: 8px"),
+            vec![
+                (
+                    PropertyId::PaddingBlockStart,
+                    PropertyValue::Length(Length::px(8.0))
+                ),
+                (
+                    PropertyId::PaddingBlockEnd,
+                    PropertyValue::Length(Length::px(8.0))
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn every_logical_axis_shorthand_reaches_its_own_pair() {
+        // Each of the six names must land on its OWN two longhands — a copy-paste
+        // slip in the table would otherwise send `padding-inline` to the margins.
+        let cases = [
+            (
+                "margin-inline: 1px",
+                [PropertyId::MarginInlineStart, PropertyId::MarginInlineEnd],
+            ),
+            (
+                "margin-block: 1px",
+                [PropertyId::MarginBlockStart, PropertyId::MarginBlockEnd],
+            ),
+            (
+                "padding-inline: 1px",
+                [PropertyId::PaddingInlineStart, PropertyId::PaddingInlineEnd],
+            ),
+            (
+                "padding-block: 1px",
+                [PropertyId::PaddingBlockStart, PropertyId::PaddingBlockEnd],
+            ),
+            (
+                "inset-inline: 1px",
+                [PropertyId::InsetInlineStart, PropertyId::InsetInlineEnd],
+            ),
+            (
+                "inset-block: 1px",
+                [PropertyId::InsetBlockStart, PropertyId::InsetBlockEnd],
+            ),
+        ];
+        for (css, expected) in cases {
+            let ids: Vec<_> = compile_all(css)
+                .iter()
+                .map(|c| standard_of(c).property())
+                .collect();
+            assert_eq!(ids, expected.to_vec(), "for `{css}`");
+        }
+    }
+
+    #[test]
+    fn a_logical_axis_shorthand_accepts_the_units_its_longhands_do() {
+        // Lowered through each longhand's own rules, so relative units and a
+        // unitless zero work exactly as on the physical edges.
+        assert_eq!(
+            pairs_of("margin-inline: 2em 0"),
+            vec![
+                (PropertyId::MarginInlineStart, PropertyValue::Length(Length::Em(2.0))),
+                (PropertyId::MarginInlineEnd, PropertyValue::Length(Length::px(0.0))),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_logical_axis_shorthand_with_too_many_components_is_unsupported() {
+        // `margin-inline` names one axis: two edges, never four.
+        let out = compile_all("margin-inline: 1px 2px 3px");
+        assert!(
+            matches!(out.as_slice(), [CompiledDeclaration::Unsupported(_)]),
+            "expected one unsupported declaration, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn the_physical_box_shorthands_still_take_four_values() {
+        // The regression guard: adding the axis pair must not have captured
+        // `margin` / `padding` themselves, which fan out to four edges.
+        let ids: Vec<_> = compile_all("margin: 1px 2px 3px 4px")
+            .iter()
+            .map(|c| standard_of(c).property())
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                PropertyId::MarginTop,
+                PropertyId::MarginRight,
+                PropertyId::MarginBottom,
+                PropertyId::MarginLeft,
+            ]
         );
     }
 
