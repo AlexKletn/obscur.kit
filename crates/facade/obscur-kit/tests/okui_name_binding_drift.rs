@@ -156,8 +156,7 @@ fn contracted_events_use_the_reserved_event_symbols() {
 // view tree actually carries on that property. The derive computes it at
 // expansion time; this pins the result against the real view-side constants.
 
-#[derive(obscur_kit::ui_macros::Contract)]
-#[expect(dead_code, reason = "the fields exist to be reflected into the contract")]
+#[derive(Debug, obscur_kit::ui_macros::Contract)]
 struct ProbeProps {
     /// A reserved attribute name: must resolve to `view::DISABLED`, not a hash.
     disabled: bool,
@@ -208,4 +207,83 @@ fn a_derived_contract_can_be_checked_against_a_real_view_node() {
             );
         }
     }
+}
+
+// ---- #[derive(Contract)] generates the prop decoder (§3.1) ----------------
+//
+// `ComponentFactory` documented prop decoding as the missing keystone blocking an
+// erased render ("depends on a prop-decoding story that does not exist yet").
+// These prove the derive now emits it, against REAL view properties built the way
+// the view layer builds them — the only check that would have caught the symbol
+// drift the tests above pin.
+
+#[test]
+fn a_derived_props_struct_decodes_real_view_properties() {
+    use obscur_kit::view::component::FromProps;
+    use obscur_kit::view::view::{ViewProperty, ViewValue};
+
+    let props = vec![
+        ViewProperty::new(view::DISABLED, ViewValue::Bool(true)),
+        ViewProperty::new(
+            name_binding::attr_symbol("placeholder"),
+            ViewValue::Text("type here".into()),
+        ),
+        ViewProperty::new(
+            name_binding::attr_symbol("label"),
+            ViewValue::Text("OK".into()),
+        ),
+    ];
+
+    let decoded = ProbeProps::from_props(&props).expect("decodes");
+    assert!(decoded.disabled);
+    assert_eq!(decoded.placeholder, "type here");
+    assert_eq!(decoded.label.as_deref(), Some("OK"));
+}
+
+#[test]
+fn an_absent_optional_prop_is_none_and_an_absent_required_one_errors() {
+    use obscur_kit::view::component::{FromProps, PropsError};
+    use obscur_kit::view::view::{ViewProperty, ViewValue};
+
+    // `label` is `Option<String>`, so omitting it is fine.
+    let decoded = ProbeProps::from_props(&[
+        ViewProperty::new(view::DISABLED, ViewValue::Bool(false)),
+        ViewProperty::new(
+            name_binding::attr_symbol("placeholder"),
+            ViewValue::Text("x".into()),
+        ),
+    ])
+    .expect("decodes without the optional prop");
+    assert_eq!(decoded.label, None);
+
+    // `disabled` is required: omitting it names the REAL view symbol.
+    let error = ProbeProps::from_props(&[ViewProperty::new(
+        name_binding::attr_symbol("placeholder"),
+        ViewValue::Text("x".into()),
+    )])
+    .expect_err("a missing required prop is an error");
+    assert_eq!(error, PropsError::Missing { name: view::DISABLED });
+}
+
+#[test]
+fn a_wrongly_typed_prop_is_an_error_not_a_silent_default() {
+    use obscur_kit::view::component::{FromProps, PropsError};
+    use obscur_kit::view::view::{ViewProperty, ViewValue};
+
+    // An author writing `disabled="true"` (text, not bool) must be told.
+    let error = ProbeProps::from_props(&[
+        ViewProperty::new(view::DISABLED, ViewValue::Text("true".into())),
+        ViewProperty::new(
+            name_binding::attr_symbol("placeholder"),
+            ViewValue::Text("x".into()),
+        ),
+    ])
+    .expect_err("a wrongly typed prop is an error");
+    assert_eq!(
+        error,
+        PropsError::Type {
+            name: view::DISABLED,
+            expected: "bool"
+        }
+    );
 }

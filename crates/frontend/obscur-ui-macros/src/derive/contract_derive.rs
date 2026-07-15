@@ -85,6 +85,7 @@ impl ContractDerive {
         // string tooling surface, skipping `#[contract(skip)]`.
         let mut entries = TokenStream::new();
         let mut surface_entries = TokenStream::new();
+        let mut field_inits = TokenStream::new();
         for field in &named.named {
             let parsed = FieldModel::parse(field)?;
             if let Some(tokens) = parsed.contract_tokens() {
@@ -93,6 +94,7 @@ impl ContractDerive {
             if let Some(tokens) = parsed.surface_tokens() {
                 surface_entries.extend(tokens);
             }
+            field_inits.extend(parsed.from_props_tokens());
         }
 
         let children_tokens = struct_attrs.children.map(|kind| {
@@ -138,6 +140,16 @@ impl ContractDerive {
                     ::obscur_view::contract::ComponentSurface::new(#component_name_literal)
                     #surface_entries
                     #surface_children_tokens
+                }
+            }
+
+            impl #impl_generics ::obscur_view::component::FromProps
+                for #struct_ident #ty_generics #where_clause
+            {
+                fn from_props(
+                    props: &[::obscur_view::view::ViewProperty],
+                ) -> ::core::result::Result<Self, ::obscur_view::component::PropsError> {
+                    ::core::result::Result::Ok(Self { #field_inits })
                 }
             }
         })
@@ -201,6 +213,10 @@ impl StructAttrs {
 /// The parsed model of a single struct field for contract generation.
 #[derive(Debug)]
 struct FieldModel {
+    /// The field's actual Rust identifier, used to initialise it in the
+    /// generated `FromProps` impl (the authored `name` may be overridden and so
+    /// cannot stand in for it).
+    ident: syn::Ident,
     /// The name string used for hashing (field ident or `name = "..."` override).
     name: String,
     /// The normalized textual type string used for the payload/value-type hash.
@@ -238,11 +254,65 @@ impl FieldModel {
         let attrs = FieldAttrs::parse(field)?;
         let name = attrs.name.clone().unwrap_or_else(|| ident.to_string());
         Ok(Self {
+            ident: ident.clone(),
             name,
             type_string: normalized_type_string(&field.ty),
             is_option: type_is_option(&field.ty),
             attrs,
         })
+    }
+
+    /// Lowers the field into its `<ident>: <expr>` initialiser for the generated
+    /// [`FromProps`] impl.
+    ///
+    /// The three shapes mirror [`contract_tokens`](Self::contract_tokens) exactly,
+    /// so what the contract *declares* and what the decoder *reads* cannot drift:
+    ///
+    /// * a skipped or event field is not a prop at all, so it is not decoded — it
+    ///   takes its [`Default`]. (This is why deriving `Contract` on a struct with
+    ///   a non-`Default` skipped field is a compile error, which is the honest
+    ///   outcome: there is nothing to decode it from.)
+    /// * an `Option<T>` decodes optionally — absent or `Null` yields `None`, but a
+    ///   present-yet-unreadable value is still an error;
+    /// * a `#[contract(default)]` field falls back to its [`Default`] when absent;
+    /// * every other field is required.
+    ///
+    /// The target type is never named: it is inferred from the field being
+    /// initialised, so no `Option<T>` inner-type extraction is needed.
+    ///
+    /// [`FromProps`]: ::obscur_view::component::FromProps
+    /// [`Default`]: ::core::default::Default
+    fn from_props_tokens(&self) -> TokenStream {
+        let ident = &self.ident;
+
+        if self.attrs.skip || self.attrs.event {
+            return quote! { #ident: ::core::default::Default::default(), };
+        }
+
+        let name_sym = Literal::u32_unsuffixed(name_symbol(&self.name));
+        let symbol = quote! { ::obscur_identity::InternedSymbol::from_raw(#name_sym) };
+
+        if self.is_option {
+            return quote! {
+                #ident: ::obscur_view::component::decode_optional(props, #symbol)?,
+            };
+        }
+        if self.attrs.default {
+            return quote! {
+                #ident: match ::obscur_view::component::prop_value(props, #symbol) {
+                    ::core::option::Option::None
+                    | ::core::option::Option::Some(::obscur_view::view::ViewValue::Null) => {
+                        ::core::default::Default::default()
+                    }
+                    ::core::option::Option::Some(value) => {
+                        ::obscur_view::component::decode_value(value, #symbol)?
+                    }
+                },
+            };
+        }
+        quote! {
+            #ident: ::obscur_view::component::decode_required(props, #symbol)?,
+        }
     }
 
     /// Lowers the field into its typed `.with_prop(...)` / `.with_event(...)`
@@ -674,7 +744,11 @@ mod tests {
         });
         // One prop in the surface (skipped field absent).
         assert_eq!(generated.matches("requiring_prop").count(), 1);
-        assert!(!generated.contains("ignore_me"));
+        // The skipped field contributes no NAME to the surface. It does still
+        // appear as an ident in the generated `FromProps` impl — a struct literal
+        // must initialise every field — so the check is on the quoted name.
+        assert!(!generated.contains(r#""ignore_me""#), "{generated}");
+        assert!(generated.contains(r#""keep""#), "{generated}");
     }
 
     #[test]
