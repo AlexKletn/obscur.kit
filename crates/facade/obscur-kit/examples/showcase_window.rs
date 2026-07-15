@@ -458,7 +458,11 @@ impl ShowcaseWindow {
         // present rate (the `[perf]` FPS) is real rather than event-driven.
         if let Some(report) = self.profiler.record(cpu, present) {
             println!("[perf] {report}");
-            self.inspect.set(live_source(&self.runtime, self.profiler.stats()));
+            // Building a live source walks + formats the whole tree, so only
+            // pay for it while a DevTools client is actually attached.
+            if self.inspect.has_client() {
+                self.inspect.set(live_source(&self.runtime, self.profiler.stats()));
+            }
         }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
@@ -496,8 +500,10 @@ fn devtools_serve(listener: &SocketListener, source: &SharedInspectSource) {
         authenticator.register_token("dev", ScopeSet::all_read());
         let mut endpoint = DevToolsEndpoint::new(authenticator, RuntimeBridge::new(source.clone()));
         endpoint.enable();
+        source.client_connected();
         // A client-side fault ends that session, not the server.
         let _ = SocketTransport::new(stream).serve(&mut endpoint);
+        source.client_disconnected();
     }
 }
 

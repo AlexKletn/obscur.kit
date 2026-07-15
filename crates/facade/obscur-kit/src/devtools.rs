@@ -10,6 +10,7 @@
 //! keeps the source `Send`-able onto the serving thread without borrowing the
 //! runtime.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use obscur_devtools_protocol::message::{ControlAction, InjectedEvent, Inspectable, SnapshotPayload};
@@ -178,25 +179,57 @@ pub fn live_source(runtime: &UiRuntime, stats: &FrameStats) -> SnapshotInspectSo
 /// [`DevToolsEndpoint`](obscur_devtools_server::endpoint::DevToolsEndpoint) on a
 /// serving thread answers every inspect from the latest snapshot. Cloning shares
 /// the same inner state (an `Arc`), so updates on one handle are visible on all.
+///
+/// # Pay only while someone is watching
+///
+/// Building a live source walks the whole tree and formats every node
+/// ([`inspect_source_from`]), which is far too expensive to do on a frame nobody
+/// is inspecting. The serving side brackets each session with
+/// [`client_connected`](Self::client_connected)/[`client_disconnected`](Self::client_disconnected),
+/// and the host gates its publish on [`has_client`](Self::has_client) — so an
+/// unobserved window pays nothing.
 #[derive(Clone, Default)]
 pub struct SharedInspectSource {
     inner: Arc<Mutex<SnapshotInspectSource>>,
+    /// Live DevTools sessions; the host only publishes while this is non-zero.
+    clients: Arc<AtomicUsize>,
 }
 
 impl SharedInspectSource {
-    /// Creates a shared source backed by an empty snapshot.
+    /// Creates a shared source backed by an empty snapshot, with no clients.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Replaces the backing snapshot with `source` (called each frame by the host).
+    /// Replaces the backing snapshot with `source` (called by the host while
+    /// [`has_client`](Self::has_client)).
     ///
     /// A poisoned lock (a serving thread panicked mid-read) is recovered rather
     /// than propagated, so a DevTools client fault never takes down the host.
     pub fn set(&self, source: SnapshotInspectSource) {
         let mut guard = self.inner.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         *guard = source;
+    }
+
+    /// Whether at least one DevTools session is currently connected — the host's
+    /// gate for doing the (expensive) live-source build at all.
+    #[must_use]
+    pub fn has_client(&self) -> bool {
+        self.clients.load(Ordering::Relaxed) > 0
+    }
+
+    /// Registers a newly accepted DevTools session (called by the serving side).
+    pub fn client_connected(&self) {
+        self.clients.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Retires a finished DevTools session (called by the serving side).
+    pub fn client_disconnected(&self) {
+        // Saturating: an unmatched disconnect must never wrap to "many clients".
+        let _ = self
+            .clients
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| Some(n.saturating_sub(1)));
     }
 }
 
