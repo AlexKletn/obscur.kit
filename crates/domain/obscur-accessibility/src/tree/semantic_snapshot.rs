@@ -11,10 +11,10 @@ use super::SemanticTree;
 /// An immutable, versioned snapshot of a [`SemanticTree`] (spec §7.1).
 ///
 /// Platform adapters consume **snapshots**, not the live tree: a snapshot
-/// clones the semantic nodes into an owned map, captures the
-/// [`root`](Self::root), and stamps the tree's [`version`](Self::version) at the
-/// moment of capture. It is immutable after construction — it exposes only read
-/// accessors and no mutators.
+/// clones the semantic nodes into an owned map, copies the tree's parent→child
+/// links, captures the [`root`](Self::root), and stamps the tree's
+/// [`version`](Self::version) at the moment of capture. It is immutable after
+/// construction — it exposes only read accessors and no mutators.
 ///
 /// Because the live tree advances its version on every mutation, a retained
 /// snapshot can be checked with [`is_stale_against`](Self::is_stale_against)
@@ -24,6 +24,15 @@ use super::SemanticTree;
 pub struct SemanticSnapshot {
     /// Owned copies of the semantic nodes, keyed by their retained [`NodeId`].
     nodes: BTreeMap<NodeId, SemanticNode>,
+    /// The ordered child id lists at the moment of capture, keyed by parent.
+    ///
+    /// A snapshot is what every platform adapter builds its native tree from, and
+    /// §7.1's structure lives in these links, not in the nodes: without them an
+    /// adapter can only reconstruct hierarchy from explicit
+    /// [`Owns`](crate::semantic::SemanticRelation::Owns) relations, which a
+    /// projection of a plain parent→child tree has no reason to carry — so the
+    /// whole tree arrives flattened onto its root.
+    children: BTreeMap<NodeId, Vec<NodeId>>,
     /// The tree root at the moment of capture, if any.
     root: Option<NodeId>,
     /// The tree version at the moment of capture.
@@ -33,13 +42,22 @@ pub struct SemanticSnapshot {
 impl SemanticSnapshot {
     /// Builds a snapshot from the current state of `tree`.
     ///
-    /// Clones every semantic node, captures the root, and records the tree's
-    /// current version through its public accessors.
+    /// Clones every semantic node and its ordered child list, captures the root,
+    /// and records the tree's current version through its public accessors.
     #[must_use]
     pub fn from_tree(tree: &SemanticTree) -> Self {
-        let nodes = tree.iter().map(|(id, node)| (id, node.clone())).collect();
+        let nodes: BTreeMap<NodeId, SemanticNode> =
+            tree.iter().map(|(id, node)| (id, node.clone())).collect();
+        let children = nodes
+            .keys()
+            .filter_map(|&id| {
+                let list = tree.children(id);
+                (!list.is_empty()).then(|| (id, list.to_vec()))
+            })
+            .collect();
         Self {
             nodes,
+            children,
             root: tree.root(),
             version: tree.version(),
         }
@@ -49,6 +67,19 @@ impl SemanticSnapshot {
     #[must_use]
     pub fn get(&self, id: NodeId) -> Option<&SemanticNode> {
         self.nodes.get(&id)
+    }
+
+    /// Returns the ordered child ids captured for `id`, or an empty slice if it
+    /// had none.
+    ///
+    /// This is the captured tree's structure, and the source an adapter builds a
+    /// platform tree's hierarchy from. Ids are returned exactly as the live tree
+    /// held them, including any that name a node absent from this snapshot — a
+    /// caller that must produce a connected tree filters against
+    /// [`contains`](Self::contains).
+    #[must_use]
+    pub fn children(&self, id: NodeId) -> &[NodeId] {
+        self.children.get(&id).map_or(&[], Vec::as_slice)
     }
 
     /// Returns the captured tree root, if any.
@@ -125,6 +156,16 @@ mod tests {
             snap.get(NodeId::from_raw(1)).map(SemanticNode::node),
             Some(NodeId::from_raw(1))
         );
+    }
+
+    /// A snapshot is the only thing platform adapters see, so dropping the
+    /// tree's links would hand every adapter a flat tree with no hierarchy left
+    /// to publish.
+    #[test]
+    fn from_tree_captures_the_child_links() {
+        let snap = SemanticSnapshot::from_tree(&populated());
+        assert_eq!(snap.children(NodeId::from_raw(1)), &[NodeId::from_raw(2)]);
+        assert!(snap.children(NodeId::from_raw(2)).is_empty(), "a leaf");
     }
 
     #[test]

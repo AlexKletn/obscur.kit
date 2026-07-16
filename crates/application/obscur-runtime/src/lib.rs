@@ -5,8 +5,8 @@
 mod runtime;
 
 pub use runtime::{
-    FrameBudget, InputDispatch, InputEvent, KeyDispatch, PointerDispatch, SemanticTreeBuilder,
-    UiRuntime,
+    FrameBudget, ImageCache, InputDispatch, InputEvent, KeyDispatch, PointerDispatch,
+    SemanticTreeBuilder, UiRuntime,
 };
 
 pub mod component;

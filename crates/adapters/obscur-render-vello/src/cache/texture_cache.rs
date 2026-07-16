@@ -1,8 +1,9 @@
-//! A runtime cache of GPU textures reused across frames (spec §5.19).
+//! An unbounded map of GPU textures. See the module docs: this is not a §5.19
+//! cache and has no callers.
 
 use std::collections::HashMap;
 
-/// An in-memory cache of [`wgpu::Texture`]s keyed by a content hash (spec §5.19).
+/// An in-memory map of [`wgpu::Texture`]s keyed by a content hash.
 ///
 /// Uploading image data to the GPU is expensive; a scene that draws the same
 /// image every frame should upload it once and reuse the resident texture. This

@@ -1546,6 +1546,8 @@ dependencies = [
  "obscur-identity",
  "obscur-interaction",
  "obscur-layout",
+ "obscur-motion",
+ "obscur-resources",
  "obscur-runtime",
  "obscur-scene",
  "obscur-style",
@@ -1570,6 +1572,7 @@ dependencies = [
 name = "obscur-kit"
 version = "0.0.0"
 dependencies = [
+ "accesskit",
  "obscur-accessibility",
  "obscur-accessibility-accesskit",
  "obscur-cache-fs",

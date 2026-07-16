@@ -1,11 +1,11 @@
-//! A runtime cache of converted Bézier paths (spec §5.19).
+//! An unbounded map of converted Bézier paths. See the module docs: this is
+//! not a §5.19 cache and has no callers.
 
 use std::collections::HashMap;
 
 use vello::kurbo::BezPath;
 
-/// An in-memory cache of converted [`BezPath`]s keyed by a content hash
-/// (spec §5.19).
+/// An in-memory map of converted [`BezPath`]s keyed by a content hash.
 ///
 /// Path conversion (obscur-scene → kurbo) is pure but not free; a scene that
 /// re-draws the same geometry every frame would otherwise re-run the conversion

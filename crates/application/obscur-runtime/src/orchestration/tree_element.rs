@@ -31,7 +31,7 @@ use super::PseudoStates;
 ///   `:focus`, …) are sourced from an optional per-node [`PseudoStates`] map the
 ///   runtime owns. A cursor built with [`new`](Self::new) carries no source and
 ///   reports no interaction state (the stateless matching path used by
-///   `run_matched`/`HeadlessHost`); a cursor built with
+///   `run_matched`); a cursor built with
 ///   [`with_pseudo`](Self::with_pseudo) reads that map, so `:hover`/`:focus`
 ///   finally match once the runtime records the state. Navigation preserves the
 ///   source, so ancestor/sibling combinators over pseudo-classes work too.
@@ -61,8 +61,10 @@ impl<'a> TreeElement<'a> {
     ///
     /// The cursor carries no interaction-state source, so
     /// [`pseudo_state`](MatchElement::pseudo_state) always reports
-    /// [`PseudoState::empty`]. This is the path `run_matched` and the headless
-    /// host use, where no live interaction state exists.
+    /// [`PseudoState::empty`]. This is the path `run_matched` uses, where no
+    /// live interaction state exists. A [`UiRuntime`](crate::UiRuntime) — and so
+    /// the headless host, which drives one — takes
+    /// [`with_pseudo`](Self::with_pseudo) instead.
     #[must_use]
     pub const fn new(tree: &'a RetainedTree, id: NodeId) -> Self {
         Self {

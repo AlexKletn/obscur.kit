@@ -51,8 +51,9 @@ impl KitBootstrap {
     }
 
     /// Builds a deterministic [`HeadlessHost`](crate::headless::HeadlessHost) —
-    /// the reference wiring of the frame pipeline for reproducible, offscreen
-    /// rendering and tests. Always available (no feature gate).
+    /// a real runtime driven by a deterministic clock and executor, for
+    /// reproducible, offscreen rendering and tests. Always available (no feature
+    /// gate).
     #[must_use]
     pub fn headless_host(&self) -> crate::headless::HeadlessHost {
         crate::headless::HeadlessHost::new(crate::identity::RuntimeId::from_raw(self.runtime_id))
@@ -156,6 +157,60 @@ impl KitBootstrap {
         runtime.set_vector_decoder(std::sync::Arc::new(
             crate::resource_decode::decoder::SvgVectorizer::new(),
         ));
+    }
+
+    /// Injects the AccessKit accessibility bridge into `runtime` so every frame
+    /// publishes its semantic tree, and returns the shared bridge the host
+    /// publishes *from* (spec §7.1).
+    ///
+    /// This is the §7.1 output path's kit half, and it is here for the same reason
+    /// [`CssPipeline`](super::CssPipeline) is: joining the runtime's semantic
+    /// projection to a platform adapter is fixed plumbing every host needs and
+    /// none should hand-write. The facade constructs the concrete adapter and hands
+    /// the runtime a domain port, so the application layer depends only on
+    /// [`AccessibilityBridge`](crate::accessibility::port::AccessibilityBridge) —
+    /// never on this adapter crate. From here on, each frame that changes the
+    /// retained tree or moves focus converts a fresh AccessKit `TreeUpdate` into
+    /// the returned bridge; nothing in the application ever pushes it.
+    ///
+    /// # What the host must still supply
+    ///
+    /// **This does not by itself reach a screen reader**, and the returned handle
+    /// is the reason: AccessKit's platform half needs an OS window, which this kit
+    /// never owns. A host completes the path with the platform adapter for its
+    /// windowing layer (`accesskit_winit`, `accesskit_unix`, …) and, on each of its
+    /// own event-loop turns:
+    ///
+    /// - feeds [`last_tree_update`](crate::accesskit_bridge::bridge::AccessKitBridge::last_tree_update)
+    ///   to that adapter — re-reading it whenever
+    ///   [`is_dirty`](crate::accesskit_bridge::bridge::AccessKitBridge::is_dirty)
+    ///   or a frame ran;
+    /// - drains [`take_announcements`](crate::accesskit_bridge::bridge::AccessKitBridge::take_announcements)
+    ///   into the platform's live-region events;
+    /// - translates each inbound AccessKit `ActionRequest` with
+    ///   [`ActionConverter::from_accesskit`](crate::accesskit_bridge::conversion::ActionConverter::from_accesskit)
+    ///   and enqueues it with
+    ///   [`push_action`](crate::accesskit_bridge::bridge::AccessKitBridge::push_action).
+    ///
+    /// That last one is only half of §7.1's "accessibility actions enter the same
+    /// command/event model as ordinary input": the runtime does **not** drain
+    /// [`poll_actions`](crate::accessibility::port::AccessibilityBridge::poll_actions),
+    /// so an action an assistive technology requests reaches the bridge and stops
+    /// there. The inbound path is unbuilt; this installs the outbound one.
+    ///
+    /// Not calling this leaves the runtime's honest-capability default: no semantic
+    /// tree is built at all.
+    #[cfg(feature = "accesskit")]
+    #[must_use]
+    pub fn install_accessibility(
+        &self,
+        runtime: &mut crate::runtime::UiRuntime,
+    ) -> std::rc::Rc<std::cell::RefCell<crate::accesskit_bridge::bridge::AccessKitBridge>> {
+        let bridge = std::rc::Rc::new(std::cell::RefCell::new(
+            crate::accesskit_bridge::bridge::AccessKitBridge::new(),
+        ));
+        runtime.set_accessibility_bridge(bridge.clone());
+        bridge
     }
 
     /// Builds the default filesystem persistent cache store, if a cache root was
@@ -323,5 +378,23 @@ mod tests {
     #[test]
     fn builds_system_shell_provider() {
         let _shell = KitBootstrap::new().system_shell_provider();
+    }
+
+    /// The install is what makes accessibility a kit facility rather than
+    /// something each host hand-wires. `tests/accessibility_output_path.rs` proves
+    /// what the installed bridge is then handed; this proves the one call arms it.
+    #[cfg(feature = "accesskit")]
+    #[test]
+    fn install_accessibility_arms_the_runtimes_output_path() {
+        let mut runtime = crate::runtime::UiRuntime::new(
+            crate::identity::RuntimeId::from_raw(1),
+            crate::geometry::Size::new(100.0, 100.0),
+        );
+        assert!(!runtime.has_accessibility_bridge());
+        let _bridge = KitBootstrap::new().install_accessibility(&mut runtime);
+        assert!(
+            runtime.has_accessibility_bridge(),
+            "one call, and every frame publishes"
+        );
     }
 }

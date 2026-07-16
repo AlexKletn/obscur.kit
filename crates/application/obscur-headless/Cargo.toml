@@ -22,3 +22,9 @@ obscur-style = { workspace = true }
 obscur-layout = { workspace = true }
 obscur-scene = { workspace = true }
 obscur-runtime = { workspace = true }
+
+[dev-dependencies]
+# The host exposes its `UiRuntime`, so exercising the motion and resource paths
+# it drives means naming their domain types.
+obscur-motion = { workspace = true }
+obscur-resources = { workspace = true }

@@ -113,9 +113,12 @@ mod tests {
 
     /// Renders `sample_view` into a fresh host and returns the host so the test
     /// can read its retained tree and viewport.
-    fn rendered_host(inputs: &StyleInputs) -> HeadlessHost {
+    ///
+    /// No stylesheet is needed: every caller styles through the `StyleInputs` it
+    /// hands to `PipelineSnapshot::capture`, which resolves them itself.
+    fn rendered_host() -> HeadlessHost {
         let mut host = HeadlessHost::new(RuntimeId::from_raw(1));
-        host.render(&sample_view(), inputs);
+        host.render_styled(&sample_view(), &[]);
         host
     }
 
@@ -131,7 +134,7 @@ mod tests {
         // §5.13 deterministic-slice guarantee: capture twice → equal, and their
         // normalized forms are equal.
         let inputs = StyleInputs::new();
-        let host = rendered_host(&inputs);
+        let host = rendered_host();
         let viewport = host.config().viewport();
 
         let first = PipelineSnapshot::capture(host.tree(), &inputs, viewport);
@@ -149,14 +152,14 @@ mod tests {
     #[test]
     fn styled_child_produces_content_and_sorted_nodes() {
         // Style a discovered child node so the pipeline has real content.
-        let mut host = rendered_host(&StyleInputs::new());
+        let mut host = rendered_host();
         let child = first_child(&host).expect("root has at least one child");
 
         let mut inputs = StyleInputs::new();
         inputs.set_cascaded(child, styled_box_decls());
 
         // Re-render under the new inputs, then capture.
-        host.render(&sample_view(), &inputs);
+        host.render_styled(&sample_view(), &[]);
         let snapshot = PipelineSnapshot::capture(host.tree(), &inputs, host.config().viewport());
 
         assert!(snapshot.node_count() > 0, "the tree has nodes");
@@ -191,7 +194,7 @@ mod tests {
         // The paint, accessibility, and render-graph summaries survive
         // normalization and are deterministic across two captures.
         let inputs = StyleInputs::new();
-        let host = rendered_host(&inputs);
+        let host = rendered_host();
         let viewport = host.config().viewport();
 
         let snapshot = PipelineSnapshot::capture(host.tree(), &inputs, viewport);

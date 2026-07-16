@@ -4,7 +4,7 @@
 //! §5.2/§6.1 determinism boundary holds.
 
 mod display_converter;
-pub use display_converter::DisplayConverter;
+pub use display_converter::{DisplayConverter, MonitorSnapshot};
 mod keyboard_converter;
 pub use keyboard_converter::KeyboardConverter;
 mod pointer_converter;

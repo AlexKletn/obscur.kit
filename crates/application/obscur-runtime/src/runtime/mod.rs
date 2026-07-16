@@ -3,6 +3,10 @@ mod ui_runtime;
 
 pub use ui_runtime::UiRuntime;
 
+mod image_cache;
+
+pub use image_cache::ImageCache;
+
 mod text_edit_session;
 
 pub(crate) use text_edit_session::TextEditSession;

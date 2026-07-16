@@ -1,9 +1,10 @@
-//! A runtime cache of rasterized glyph run data (spec §5.19).
+//! An unbounded map of rasterized glyph run data. See the module docs: this is
+//! not a §5.19 cache and has no callers.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// A single cached glyph's rasterized coverage (spec §5.19).
+/// A single cached glyph's rasterized coverage.
 ///
 /// Holds the glyph's pixel dimensions and its coverage bytes behind a shared
 /// [`Arc`] so a cache hit is a cheap pointer clone rather than a copy. The blob
@@ -30,8 +31,7 @@ impl GlyphEntry {
     }
 }
 
-/// An in-memory cache of rasterized glyphs keyed by a font+size+glyph hash
-/// (spec §5.19).
+/// An in-memory map of rasterized glyphs keyed by a font+size+glyph hash.
 ///
 /// Rasterizing a glyph run is costly and highly repetitive — the same glyph at
 /// the same size recurs across frames and across text. This cache stores each

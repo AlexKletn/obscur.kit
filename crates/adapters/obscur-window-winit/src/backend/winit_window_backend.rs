@@ -309,14 +309,19 @@ impl WindowBackend for WinitWindowBackend {
     }
 
     fn displays(&self) -> Vec<Display> {
-        // Monitor enumeration needs an ActiveEventLoop; a host obtains displays
-        // through the event loop directly rather than through this snapshot.
-        Vec::new()
+        // Monitor handles are only reachable through an ActiveEventLoop, so the
+        // handler re-enumerates them on each turn and this reads what it left,
+        // exactly as `window()` reads a record the handler materialized. Empty
+        // until the first turn, which is when the topology first exists to know.
+        self.lock().displays.clone()
     }
 
     fn primary_display(&self) -> Option<DisplayId> {
-        // See displays(): no monitor handle is reachable without the event loop.
-        None
+        self.lock()
+            .displays
+            .iter()
+            .find(|display| display.is_primary())
+            .map(Display::id)
     }
 
     #[allow(clippy::match_same_arms)] // Each feature is documented distinctly.
@@ -348,9 +353,7 @@ impl WindowBackend for WinitWindowBackend {
     }
 
     fn poll_display_events(&mut self) -> Vec<DisplayEvent> {
-        // Display hotplug events require monitor tracking through the event loop,
-        // which this snapshot backend does not perform.
-        Vec::new()
+        std::mem::take(&mut self.lock().display_events)
     }
 }
 
@@ -829,11 +832,66 @@ mod tests {
         );
     }
 
+    fn a_display(raw: u64, width: f32) -> Display {
+        Display::new(
+            DisplayId::from_raw(raw),
+            obscur_windowing::display::DisplayMode::new(Size::new(width, 1080.0)),
+        )
+    }
+
+    /// §6.6: before the first loop turn there is no topology to report, and the
+    /// port must say so rather than invent one.
     #[test]
-    fn displays_and_display_events_are_empty() {
+    fn displays_are_empty_until_the_handler_has_enumerated() {
         let mut backend = backend();
         assert!(backend.displays().is_empty());
         assert_eq!(backend.primary_display(), None);
+        assert!(backend.poll_display_events().is_empty());
+    }
+
+    /// §6.6: `displays()` hands out the topology the handler enumerated, whole —
+    /// the port is a reader of that snapshot, not a source of defaults.
+    #[test]
+    fn displays_report_the_enumerated_topology() {
+        let backend = backend();
+        let enumerated = vec![
+            a_display(0, 1920.0).primary(true),
+            a_display(1, 3840.0).with_name("DELL U2720Q"),
+        ];
+        backend.lock().record_displays(enumerated.clone());
+
+        assert_eq!(backend.displays(), enumerated);
+        assert_eq!(backend.primary_display(), Some(DisplayId::from_raw(0)));
+    }
+
+    /// A topology with no monitor marked primary — winit reports none on Wayland
+    /// — must not promote the first one.
+    #[test]
+    fn primary_display_is_none_when_no_monitor_is_primary() {
+        let backend = backend();
+        backend
+            .lock()
+            .record_displays(vec![a_display(0, 1920.0), a_display(1, 3840.0)]);
+
+        assert_eq!(backend.displays().len(), 2);
+        assert_eq!(backend.primary_display(), None);
+    }
+
+    /// §6.6: the derived hotplug events reach the port's poll, and drain.
+    #[test]
+    fn poll_display_events_drains_what_enumeration_derived() {
+        let mut backend = backend();
+        backend
+            .lock()
+            .record_displays(vec![a_display(0, 1920.0).primary(true)]);
+
+        assert_eq!(
+            backend.poll_display_events(),
+            vec![
+                DisplayEvent::Connected(DisplayId::from_raw(0)),
+                DisplayEvent::PrimaryChanged(DisplayId::from_raw(0)),
+            ]
+        );
         assert!(backend.poll_display_events().is_empty());
     }
 
@@ -868,6 +926,9 @@ mod tests {
     #[test]
     fn is_object_safe() {
         let backend: Box<dyn WindowBackend> = Box::new(WinitWindowBackend::new());
-        assert!(backend.displays().is_empty());
+        assert_eq!(
+            backend.supports(WindowFeature::AlwaysOnTop),
+            SupportLevel::Native
+        );
     }
 }

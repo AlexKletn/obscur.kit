@@ -1,11 +1,14 @@
 //! The embeddable UI runtime and application-core integrator: [`UiRuntime`].
 
 use obscur_task::{BlockingExecutor, TaskId, TaskResult, TaskScope};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
+use obscur_accessibility::event::AccessibilityFocus;
 use obscur_accessibility::port::AccessibilityBridge;
 use obscur_accessibility::tree::{SemanticSnapshot, SemanticTree};
 use obscur_diagnostics::SpanAttribution;
@@ -13,7 +16,7 @@ use obscur_diagnostics::{
     BudgetViolation, Diagnostic, DiagnosticSink, DiagnosticSubsystem, NullDiagnosticSink,
     NullTelemetrySink, PerformanceCounter, PerformanceSpan, RecoveryAction, TelemetrySink,
 };
-use obscur_geometry::{AffineTransform, Point, Size};
+use obscur_geometry::{AffineTransform, Point, Rect, Size};
 use obscur_identity::SignalId;
 use obscur_identity::{InternedSymbol, NodeId, RuntimeId};
 use obscur_interaction::command::{
@@ -28,6 +31,9 @@ use obscur_motion::timeline::{Timeline, TimelineId};
 use obscur_motion::track::{Keyframe, KeyframeTrack};
 use obscur_motion::transition::TransitionInterruption;
 use obscur_motion::value::MotionValue;
+use obscur_resources::cache::{
+    CacheBudget, CacheKey, CacheStatistics, EvictionPolicy, VisibilityPriority,
+};
 use obscur_resources::handle::{ResourceHandle, ResourceKind};
 use obscur_resources::hub::{ResourceHub, ResourceRequest};
 use obscur_resources::port::{ResourceDecoder, ResourceLoader, VectorDecoder};
@@ -83,7 +89,7 @@ use crate::scheduler::{BackpressureDecision, FrameScheduler};
 /// mutually, would otherwise spin the frame forever. Exceeding it truncates that
 /// frame's tree instead of hanging, and the `component.rendered` counter shows it.
 const MAX_COMPONENT_RENDER_PASSES: usize = 32;
-use super::{InputDispatch, InputEvent};
+use super::{ImageCache, InputDispatch, InputEvent};
 use crate::transaction::{ReconcileEnactor, TransactionCommit};
 use obscur_data_transfer::drag::{DragSession, DragSource, DropTarget};
 
@@ -135,12 +141,20 @@ struct PointerClick {
 ///
 /// # Relationship to `HeadlessHost`
 ///
-/// [`HeadlessHost`](../../obscur_headless/host/struct.HeadlessHost.html) remains
-/// the deterministic, windowless **test host** that wraps
-/// [`FramePipeline`](crate::frame::FramePipeline) and force-renders every call.
-/// `UiRuntime` is the *production* integrator: same deterministic core, but
-/// scheduler-gated and stateful (retained boxes, live pseudo-state). The two are
-/// intentionally distinct entry points.
+/// [`HeadlessHost`](../../obscur_headless/host/struct.HeadlessHost.html) is the
+/// deterministic, windowless **test host**, and it *drives a `UiRuntime`* rather
+/// than standing beside one: it force-renders through
+/// [`render_now`](Self::render_now) and adds §7.4's two facilities — a
+/// deterministic clock feeding [`advance_motion`](Self::advance_motion), and a
+/// deterministic executor installed via
+/// [`set_blocking_executor`](Self::set_blocking_executor). A headless frame is
+/// therefore the *same* frame a window renders, which is the only way the
+/// harness can test motion, resource completion, or anything else that lives
+/// here rather than in [`FramePipeline`](crate::frame::FramePipeline).
+///
+/// `FramePipeline` remains the bare deterministic core — a pure function of
+/// `(tree, view, inputs, viewport)` with no clock and no async seam. It is what
+/// `UiRuntime` is built from, not an alternative host.
 ///
 /// [`FramePipeline`]: crate::frame::FramePipeline
 pub struct UiRuntime {
@@ -492,11 +506,30 @@ pub struct UiRuntime {
     /// pixels live in [`image_cache`](Self::image_cache) — so the two are kept in
     /// step by URL.
     resource_hub: ResourceHub,
-    /// The decoded images resolved from `background-image: url(...)`, keyed by the
-    /// raw authored URL/path string, handed to the scene coordinator each compose.
-    /// A URL is inserted once its bytes load and decode; a failed load caches
-    /// nothing (the image simply is not painted).
-    image_cache: HashMap<Box<str>, SceneImage>,
+    /// The decoded images resolved from `background-image: url(...)` and element
+    /// `src`, keyed by the raw authored URL/path string, handed to the scene
+    /// coordinator each compose. A URL is inserted once its bytes load and decode;
+    /// a failed load caches nothing (the image simply is not painted).
+    ///
+    /// Decoded pixels are the frame's largest per-URL cost, so this is the cache
+    /// the §5.19 budget/eviction/metrics tier is applied to — see [`ImageCache`]
+    /// and [`set_image_cache_budget`](Self::set_image_cache_budget). Unbudgeted by
+    /// default.
+    image_cache: ImageCache,
+    /// The host-installed platform accessibility port (spec §7.1). Absent by
+    /// default, in which case no frame builds a semantic tree at all — the same
+    /// honest-capability default an absent vector decoder has for an SVG.
+    ///
+    /// Shared rather than owned outright: an adapter's platform half lives in the
+    /// host (an `accesskit_winit`/`accesskit_unix` push loop reading what the
+    /// bridge converted), so the host must keep a handle to the very object this
+    /// runtime feeds. A `Box` here would make the frame path the bridge's sole
+    /// reachable owner and leave the host nothing to publish from.
+    accessibility: Option<Rc<RefCell<dyn AccessibilityBridge>>>,
+    /// The focus last published to [`accessibility`](Self::accessibility), so a
+    /// frame can tell whether focus moved since — and so the next push reports the
+    /// node it actually moved *from*.
+    published_focus: Option<NodeId>,
     /// The host-installed port that parses vector sources (spec §5.17). Absent by
     /// default, in which case an SVG source paints nothing — the same policy an
     /// absent raster decoder has for a bitmap.
@@ -601,7 +634,9 @@ impl UiRuntime {
             resource_loader: None,
             resource_decoder: None,
             resource_hub: ResourceHub::new(),
-            image_cache: HashMap::new(),
+            image_cache: ImageCache::new(),
+            accessibility: None,
+            published_focus: None,
             vector_decoder: None,
             vector_cache: HashMap::new(),
             blocking_executor: None,
@@ -710,7 +745,16 @@ impl UiRuntime {
                     if !self.resource_hub.complete(handle, version, metadata) {
                         return false;
                     }
-                    self.image_cache.insert(key, image);
+                    // The pixels enter the cache through its §5.19 budget: an
+                    // over-budget cache evicts to seat them, and the URLs it gave up
+                    // must lose their hub bookkeeping or they could never load again.
+                    let evicted = self.image_cache.insert(
+                        key,
+                        CacheKey::for_resource(handle.id()),
+                        version,
+                        image,
+                    );
+                    self.release_evicted(evicted);
                     true
                 }
                 Err(error) => {
@@ -745,6 +789,126 @@ impl UiRuntime {
         let id = TaskId::from_raw(self.next_task);
         self.next_task += 1;
         id
+    }
+
+    /// Drops the hub bookkeeping for each URL the image cache `evicted` (spec
+    /// §5.19 eviction).
+    ///
+    /// [`image_handles`](Self::image_handles) is the "already requested, do not
+    /// retry" guard the resolve pass consults. An evicted URL left in it would
+    /// never be requested again and its image would silently stop painting for the
+    /// life of the process — so eviction has to release the handle too, which is
+    /// exactly what lets a still-referenced image load again next frame.
+    fn release_evicted(&mut self, evicted: Vec<Box<str>>) {
+        for url in evicted {
+            if let Some(handle) = self.image_handles.remove(&url) {
+                self.resource_hub.release(handle);
+            }
+        }
+    }
+
+    /// Sets the memory budget the decoded-image cache is held under, evicting down
+    /// to it immediately, and returns how many images that evicted (spec §5.19
+    /// *memory budgets*).
+    ///
+    /// The default is [`CacheBudget::unlimited`]: every decoded image stays
+    /// resident for the life of the runtime, which is what a host that never calls
+    /// this gets. Passing a byte or entry cap makes the cache evict by the
+    /// installed [`EvictionPolicy`] — least visible first, then least recently
+    /// looked up — and an evicted image reloads when a later frame references it
+    /// again. A budget smaller than the frame's live set therefore trades memory
+    /// for reloads; that is the caller's choice to make.
+    ///
+    /// [`CacheBudget::disabled`] admits nothing. For this cache that means no
+    /// image is ever resident and none paints — it is the residency store, not a
+    /// memo of something compose could recompute, so there is no uncached path to
+    /// fall back to.
+    pub fn set_image_cache_budget(&mut self, budget: CacheBudget) -> usize {
+        let evicted = self.image_cache.set_budget(budget);
+        let count = evicted.len();
+        self.release_evicted(evicted);
+        count
+    }
+
+    /// The memory budget the decoded-image cache is held under (spec §5.19).
+    #[must_use]
+    pub fn image_cache_budget(&self) -> CacheBudget {
+        self.image_cache.budget()
+    }
+
+    /// Installs the strategy the decoded-image cache evicts by (spec §5.19
+    /// *eviction*), replacing [`EvictionPolicy::VisibilityAware`] (the default).
+    pub fn set_image_eviction_policy(&mut self, policy: EvictionPolicy) {
+        self.image_cache.set_policy(policy);
+    }
+
+    /// The decoded-image cache's live metrics: hits, misses, evictions,
+    /// insertions, resident entries and resident bytes (spec §5.19 *`DevTools`
+    /// metrics*).
+    #[must_use]
+    pub fn image_cache_statistics(&self) -> CacheStatistics {
+        self.image_cache.statistics()
+    }
+
+    /// Records each resident image's on-screen priority for this frame, so
+    /// eviction drops what nothing is showing first (spec §5.19 *visibility
+    /// priority*).
+    ///
+    /// A URL is [`Visible`](VisibilityPriority::Visible) when some node that
+    /// references it has an arranged box intersecting the viewport,
+    /// [`Offscreen`](VisibilityPriority::Offscreen) when its nodes are all
+    /// scrolled out or unarranged, and — by the cache's own default for a URL that
+    /// appears here at all — [`Hidden`](VisibilityPriority::Hidden) when the tree
+    /// no longer references it. The strongest reference wins: one on-screen use
+    /// keeps an image resident.
+    ///
+    /// [`NearViewport`](VisibilityPriority::NearViewport) is never produced: it
+    /// would need a prefetch margin, and the runtime has no notion of one.
+    fn mark_image_visibility(&mut self, computed: &ComputedStyles) {
+        // The viewport in document coordinates: layout boxes are absolute, and
+        // `viewport_scroll` is the document point pinned to its top-left.
+        let viewport = Rect::new(
+            Point::new(self.viewport_scroll.0, self.viewport_scroll.1),
+            self.viewport,
+        );
+        let mut referenced: HashMap<Box<str>, VisibilityPriority> = HashMap::new();
+        for (node, style) in computed {
+            if let Some(url) = style
+                .get(PropertyId::BackgroundImage)
+                .and_then(ComputedValue::as_background_image_url)
+            {
+                let priority = self.image_priority(*node, viewport);
+                referenced
+                    .entry(url.into())
+                    .and_modify(|best| *best = (*best).max(priority))
+                    .or_insert(priority);
+            }
+        }
+        let element_sources: Vec<(NodeId, Box<str>)> = self
+            .tree
+            .iter()
+            .filter_map(|(node, n)| n.attributes().image_source().map(|s| (node, s.into())))
+            .collect();
+        for (node, src) in element_sources {
+            let priority = self.image_priority(node, viewport);
+            referenced
+                .entry(src)
+                .and_modify(|best| *best = (*best).max(priority))
+                .or_insert(priority);
+        }
+        self.image_cache.mark_visibility(&referenced);
+    }
+
+    /// `node`'s contribution to an image's visibility: on screen when its arranged
+    /// border box intersects `viewport`. A node with no arranged box (never laid
+    /// out, or `display: none`) shows nothing, so it contributes `Offscreen`.
+    fn image_priority(&self, node: NodeId, viewport: Rect) -> VisibilityPriority {
+        match self.boxes.get(&node) {
+            Some(layout_box) if rects_intersect(layout_box.bounds, viewport) => {
+                VisibilityPriority::Visible
+            }
+            _ => VisibilityPriority::Offscreen,
+        }
     }
 
     pub fn set_vector_decoder(&mut self, decoder: Arc<dyn VectorDecoder + Send + Sync>) {
@@ -783,7 +947,10 @@ impl UiRuntime {
             else {
                 continue;
             };
-            if self.image_cache.contains_key(url) || self.image_handles.contains_key(url) {
+            // Asking through `record_lookup` is what makes this frame's reference
+            // count as a hit and stamp the entry's recency, so eviction can tell a
+            // live image from a stale one (spec §5.19).
+            if self.image_cache.record_lookup(url) || self.image_handles.contains_key(url) {
                 // Already resolved, or already attempted (and failed): do not retry.
                 continue;
             }
@@ -936,7 +1103,7 @@ impl UiRuntime {
             .filter(|src| !is_vector_source(src))
             .collect();
         for key in sources {
-            if self.image_cache.contains_key(&key) || self.image_handles.contains_key(&key) {
+            if self.image_cache.record_lookup(&key) || self.image_handles.contains_key(&key) {
                 // Already resolved, or already attempted (and failed): do not retry.
                 continue;
             }
@@ -2068,6 +2235,11 @@ impl UiRuntime {
         // 5. Compose: build the display list, install it, publish a snapshot.
         //    When skipped, the retained scene's current snapshot is republished.
         if plan.compose() {
+            // Score every resident image against this frame's tree and boxes BEFORE
+            // resolving new ones, so an eviction triggered by the loads below drops
+            // what this frame stopped showing rather than what it is about to paint
+            // (spec §5.19 visibility priority).
+            self.mark_image_visibility(&computed);
             // Resolve any `background-image: url(...)` referenced by this frame's
             // computed styles into decoded images (load → decode → cache) BEFORE
             // composing, so the coordinator can paint the ready ones. A no-op when
@@ -2099,7 +2271,7 @@ impl UiRuntime {
                 &computed,
                 &self.boxes,
                 editing,
-                &self.image_cache,
+                self.image_cache.images(),
                 &self.vector_cache,
                 &scroll,
             );
@@ -2146,6 +2318,13 @@ impl UiRuntime {
         let mut phases = PerformanceCounter::new(DiagnosticSubsystem::Runtime, "frame.phases_run");
         phases.add(phases_run);
         self.telemetry.record_counter(&phases);
+
+        // Publish the accessibility projection of what this frame committed (spec
+        // §7.1). It runs here, after reconcile has settled the tree and dispatch
+        // has settled focus, so what a screen reader is told is what this frame
+        // actually produced — not the previous frame's tree. A no-op unless a host
+        // installed a bridge.
+        self.publish_accessibility(reconciled);
 
         // Retain the computed styles for a later frame that skips the style
         // phase, then advance the frame counter.
@@ -4633,11 +4812,93 @@ impl UiRuntime {
         SemanticTreeBuilder::snapshot(&self.tree, self.focused)
     }
 
-    /// Pushes the current semantic snapshot to a platform
+    /// Installs the platform [`AccessibilityBridge`] every frame publishes its
+    /// semantic projection to, replacing any previously installed one, and pushes
+    /// the current tree to it immediately (spec §7.1).
+    ///
+    /// This is the runtime half of the §7.1 output path: from here on, each frame
+    /// that changes the retained tree or moves focus rebuilds the semantic
+    /// projection and pushes it — the application never calls
+    /// [`push_accessibility`](Self::push_accessibility) itself, exactly as it
+    /// never calls the vector decoder. Accessibility is a **port**, so the runtime
+    /// depends only on the domain trait; the facade builds the real adapter (an
+    /// `AccessKitBridge`) and injects it here.
+    ///
+    /// The immediate push is what makes installation order not matter: install
+    /// before the first frame and that frame publishes, install after and the tree
+    /// already on screen is published now rather than at the next unrelated
+    /// change.
+    ///
+    /// # What this does not do
+    ///
+    /// Installing a bridge does not reach an assistive technology by itself. The
+    /// bridge converts; the **platform** push (`accesskit_winit` / `accesskit_unix`
+    /// and the window they need) is the host's. Draining
+    /// [`poll_actions`](AccessibilityBridge::poll_actions) back into input is
+    /// nobody's yet: the runtime does not, so an action an assistive technology
+    /// requests reaches the bridge and stops there (§7.1 L27 is unbuilt — this is
+    /// the outbound half only).
+    ///
+    /// Leaving this unset is the honest-capability default: no semantic tree is
+    /// built at all, and a frame pays one `Option::is_none` check for the privilege.
+    pub fn set_accessibility_bridge(&mut self, bridge: Rc<RefCell<dyn AccessibilityBridge>>) {
+        self.accessibility = Some(bridge);
+        self.publish_accessibility_now();
+    }
+
+    /// Returns whether a platform [`AccessibilityBridge`] is installed — i.e.
+    /// whether frames publish a semantic tree at all.
+    #[must_use]
+    pub fn has_accessibility_bridge(&self) -> bool {
+        self.accessibility.is_some()
+    }
+
+    /// Pushes the current focus and semantic snapshot to a platform
     /// [`AccessibilityBridge`], feeding the retained tree's accessibility
     /// projection into UI Automation / AX / AT-SPI / web a11y (spec §7.1).
-    pub fn push_accessibility(&self, bridge: &mut dyn AccessibilityBridge) {
+    ///
+    /// Focus goes first because it is not carried *by* the snapshot as far as an
+    /// adapter is concerned: the semantic nodes record which one is
+    /// [`focused`](obscur_accessibility::semantic::SemanticState::focused), but an
+    /// adapter converts a tree against the focus target it was last *told*, so a
+    /// snapshot pushed alone would arrive with the platform's focus still on
+    /// whatever it was — for AccessKit, the root.
+    ///
+    /// The runtime calls this itself for the bridge installed by
+    /// [`set_accessibility_bridge`](Self::set_accessibility_bridge); it is public
+    /// for a host that drives a bridge of its own instead.
+    pub fn push_accessibility(&mut self, bridge: &mut dyn AccessibilityBridge) {
+        bridge.set_focus(&AccessibilityFocus::new(self.focused, self.published_focus));
         bridge.update_tree(&self.semantic_snapshot());
+        self.published_focus = self.focused;
+    }
+
+    /// Publishes this frame's semantic projection to the installed bridge, if the
+    /// projection could have changed (spec §7.1).
+    ///
+    /// `tree_changed` is the frame's own reconcile result, so the walk that builds
+    /// the projection runs only when the retained tree it reads actually changed or
+    /// when focus moved. A hover, animation or idle frame re-publishes nothing,
+    /// which is why the push can sit on the frame path at all: the semantic tree is
+    /// a full walk of the retained tree, and a screen reader has no use for the
+    /// same tree sixty times a second.
+    fn publish_accessibility(&mut self, tree_changed: bool) {
+        if self.accessibility.is_none() || (!tree_changed && self.published_focus == self.focused) {
+            return;
+        }
+        self.publish_accessibility_now();
+    }
+
+    /// Pushes to the installed bridge unconditionally; a no-op with none
+    /// installed.
+    fn publish_accessibility_now(&mut self) {
+        // Cloning the handle first keeps the `&mut self` push disjoint from the
+        // field borrow; the bridge is shared with the host by construction, so this
+        // is a refcount bump rather than a copy of anything.
+        let Some(bridge) = self.accessibility.clone() else {
+            return;
+        };
+        self.push_accessibility(&mut *bridge.borrow_mut());
     }
 
     /// Returns the mutable scene's current state (as a shared reference).
@@ -5042,6 +5303,18 @@ fn is_activation_key(key: Option<LogicalKey>) -> bool {
 #[allow(clippy::cast_precision_loss)]
 fn intrinsic_of(image: &SceneImage) -> Size {
     Size::new(image.width() as f32, image.height() as f32)
+}
+
+/// Whether two axis-aligned rectangles overlap in any area.
+///
+/// Half-open on every edge, matching [`Rect::contains`]: a box that merely touches
+/// the viewport's edge shows no pixel and so does not count as visible. A
+/// zero-extent box never intersects anything.
+fn rects_intersect(a: Rect, b: Rect) -> bool {
+    a.origin.x < b.right()
+        && b.origin.x < a.right()
+        && a.origin.y < b.bottom()
+        && b.origin.y < a.bottom()
 }
 
 /// What a finished resource-load task produced — the typed payload of the
@@ -7124,6 +7397,170 @@ mod tests {
         let mut bridge = RecordingAccessibilityBridge::new();
         runtime.push_accessibility(&mut bridge);
         assert_eq!(bridge.tree_updates, 1, "the snapshot reached the bridge");
+    }
+
+    // ---- §7.1 the semantic tree's output path -------------------------------
+
+    /// A bridge that keeps what it was handed. Counting pushes would let a test
+    /// pass while the runtime published an empty or stale tree, so this retains
+    /// the snapshot itself and the tests assert what is *in* it.
+    #[derive(Default)]
+    struct CapturingBridge {
+        last: Option<SemanticSnapshot>,
+        focus: Option<AccessibilityFocus>,
+        pushes: u32,
+    }
+
+    impl AccessibilityBridge for CapturingBridge {
+        fn update_tree(&mut self, snapshot: &SemanticSnapshot) {
+            self.last = Some(snapshot.clone());
+            self.pushes += 1;
+        }
+        fn apply_update(&mut self, _update: &obscur_accessibility::tree::SemanticUpdate) {}
+        fn set_focus(&mut self, focus: &AccessibilityFocus) {
+            self.focus = Some(*focus);
+        }
+        fn announce(&mut self, _message: &str, _assertive: bool) {}
+        fn poll_actions(&mut self) -> Vec<obscur_accessibility::event::AccessibilityAction> {
+            Vec::new()
+        }
+    }
+
+    /// Installs a capturing bridge and returns the shared handle a host would
+    /// keep.
+    fn install_capture(runtime: &mut UiRuntime) -> Rc<RefCell<CapturingBridge>> {
+        let bridge = Rc::new(RefCell::new(CapturingBridge::default()));
+        runtime.set_accessibility_bridge(bridge.clone());
+        bridge
+    }
+
+    /// The node the semantic snapshot gave `role`, if exactly one has it.
+    fn semantic_with_role(
+        snapshot: &SemanticSnapshot,
+        role: obscur_accessibility::semantic::SemanticRole,
+    ) -> Option<obscur_accessibility::semantic::SemanticNode> {
+        snapshot
+            .iter()
+            .find(|(_, node)| node.role() == role)
+            .map(|(_, node)| node.clone())
+    }
+
+    /// The §7-A residue: the builder derives the truth, but until the frame path
+    /// pushed it, the only caller was a test. An ordinary frame — nobody calling
+    /// `push_accessibility` — must land the tree on the installed bridge.
+    #[test]
+    fn an_ordinary_frame_publishes_the_semantic_tree_to_the_installed_bridge() {
+        use obscur_accessibility::semantic::SemanticRole;
+
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let bridge = install_capture(&mut runtime);
+
+        let _ = runtime.render_now(&button_state_view(true), &[]);
+
+        let seen = bridge.borrow();
+        let snapshot = seen.last.as_ref().expect("a frame published a snapshot");
+        assert!(
+            snapshot.root().is_some(),
+            "the frame's own tree, not the empty one the install pushed"
+        );
+        let button =
+            semantic_with_role(snapshot, SemanticRole::Button).expect("the button was published");
+        assert_eq!(button.name(), Some("Save"));
+        assert!(
+            button.state().disabled,
+            "the state §7-A fixed in the builder is what reached the bridge"
+        );
+        assert!(button.actions().is_empty());
+    }
+
+    /// A 100x50 `button` with class `btn`, and the sheet that sizes it, so a
+    /// press can actually hit it.
+    fn sized_button() -> (View, Stylesheet) {
+        use obscur_view::view::TYPE;
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(21))
+                .with_prop(ViewProperty::new(TYPE, ViewValue::Text("button".into())))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("btn".into())))
+                .with_children(ViewFragment::from_nodes(vec![ViewNode::text("Save")])),
+        ]));
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![class_rule("btn", size(100.0, 50.0))],
+        );
+        (view, sheet)
+    }
+
+    /// Focus is what a screen reader follows, and an adapter converts a tree
+    /// against the focus it was last *told* — so a frame that only moves focus
+    /// must still publish, and must report the node focus moved from.
+    #[test]
+    fn moving_focus_publishes_the_move_and_the_tree_that_reflects_it() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let bridge = install_capture(&mut runtime);
+        let (view, sheet) = sized_button();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&view, sheets);
+        let button = button_node(&runtime);
+
+        let settled = bridge.borrow().pushes;
+        // A real press through the real input path is what moves focus.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        assert_eq!(runtime.focused(), Some(button), "the press focused it");
+        let _ = runtime.render_now(&view, sheets);
+
+        let seen = bridge.borrow();
+        assert!(seen.pushes > settled, "a focus move reaches the platform");
+        assert_eq!(
+            seen.focus.expect("focus pushed"),
+            AccessibilityFocus::moved_to(button, None),
+            "reported as a move from nothing to the button"
+        );
+        assert!(
+            seen.last
+                .as_ref()
+                .and_then(|s| s.get(button))
+                .expect("the button is in the published tree")
+                .state()
+                .focused,
+            "and the published tree agrees about which node has it"
+        );
+    }
+
+    /// The push sits on the frame path, and the semantic tree is a full walk of
+    /// the retained tree — so a frame that changed neither the tree nor focus must
+    /// not rebuild and re-publish it.
+    #[test]
+    fn a_frame_that_changes_nothing_republishes_nothing() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let bridge = install_capture(&mut runtime);
+        let view = button_state_view(false);
+        let _ = runtime.render_now(&view, &[]);
+
+        let settled = bridge.borrow().pushes;
+        let _ = runtime.render_now(&view, &[]);
+        let _ = runtime.render_now(&view, &[]);
+        assert_eq!(
+            bridge.borrow().pushes,
+            settled,
+            "an idempotent frame publishes nothing new"
+        );
+    }
+
+    /// A host that installs a bridge after the UI is already on screen must not
+    /// have to wait for an unrelated change to publish what is already there.
+    #[test]
+    fn installing_a_bridge_publishes_the_tree_already_on_screen() {
+        use obscur_accessibility::semantic::SemanticRole;
+
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        assert!(!runtime.has_accessibility_bridge());
+        let _ = runtime.render_now(&button_state_view(false), &[]);
+
+        let bridge = install_capture(&mut runtime);
+        assert!(runtime.has_accessibility_bridge());
+        let seen = bridge.borrow();
+        let snapshot = seen.last.as_ref().expect("install published");
+        assert!(semantic_with_role(snapshot, SemanticRole::Button).is_some());
     }
 
     // ---- §4.17 S4: CSS transitions / @keyframes driven through motion --------

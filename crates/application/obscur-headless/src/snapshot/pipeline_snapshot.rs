@@ -344,7 +344,7 @@ mod tests {
             ComponentId::from_raw(10),
         )]));
         let mut host = HeadlessHost::new(RuntimeId::from_raw(1));
-        host.render(&view, &StyleInputs::new());
+        host.render_styled(&view, &[]);
         let child = {
             let tree = host.tree();
             let root = tree.root().expect("root");
@@ -362,7 +362,7 @@ mod tests {
             decls.insert(PropertyId::Height, PropertyValue::Length(Length::px(50.0)));
             inputs.set_cascaded(child, decls);
         }
-        host.render(&view, &inputs);
+        host.render_styled(&view, &[]);
 
         let snapshot = PipelineSnapshot::capture(host.tree(), &inputs, host.config().viewport());
 
@@ -387,7 +387,7 @@ mod tests {
                 .with_prop(ViewProperty::new(TYPE, ViewValue::Text("button".into()))),
         ]));
         let mut host = HeadlessHost::new(RuntimeId::from_raw(1));
-        host.render(&view, &StyleInputs::new());
+        host.render_styled(&view, &[]);
 
         let snapshot =
             PipelineSnapshot::capture(host.tree(), &StyleInputs::new(), host.config().viewport());

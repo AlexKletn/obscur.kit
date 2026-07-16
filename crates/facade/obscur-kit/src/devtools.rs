@@ -157,14 +157,28 @@ pub fn inspect_source_from(runtime: &UiRuntime) -> SnapshotInspectSource {
     );
 
     // Caches: what is resolved and held, split by kind — a raster image and a
-    // parsed vector document are cached separately and cost differently.
+    // parsed vector document are cached separately and cost differently. The image
+    // cache is budgeted (§5.19), so its live bytes and hit/miss/eviction counters
+    // are reported too: a count alone cannot answer why an image was dropped, which
+    // is the question a budgeted cache exists to raise.
     let (images, vectors) = runtime.cached_resource_counts();
+    let stats = runtime.image_cache_statistics();
     let caches = SnapshotPayload::new(
         format!("{images} image(s), {vectors} vector document(s)"),
         (images + vectors) as u64,
         Vec::new(),
     )
-    .with_detail(format!("image_cache: {images}\nvector_cache: {vectors}"));
+    .with_detail(format!(
+        "image_cache: {images} ({bytes} bytes)\n\
+         image_cache hits: {hits}\n\
+         image_cache misses: {misses}\n\
+         image_cache evictions: {evictions}\n\
+         vector_cache: {vectors}",
+        bytes = stats.bytes(),
+        hits = stats.hits(),
+        misses = stats.misses(),
+        evictions = stats.evictions(),
+    ));
 
     // EventFlow and PluginState are deliberately left to their typed defaults:
     // the runtime keeps no dispatch log to report a flow from, and the plugin tier
