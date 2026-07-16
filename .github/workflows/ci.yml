@@ -82,11 +82,19 @@ jobs:
   msrv:
     name: MSRV build (1.90)
     if: github.event_name == 'schedule'
+    # `rust-toolchain.toml` pins 1.96.1, and rustup ranks that file ABOVE the
+    # `rustup default` this action performs — so without the env var below the job
+    # installs 1.90, builds 1.96.1, and reports "MSRV build (1.90)" in green.
+    # Verified on a dev machine: `rustup toolchain list` shows `stable (default)`
+    # and `1.96.1 (active)` side by side. RUSTUP_TOOLCHAIN outranks the file.
+    env:
+      RUSTUP_TOOLCHAIN: 1.90.0
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.90.0
       - uses: Swatinem/rust-cache@v2
+      - run: rustc --version | grep -q '1\.90\.' || { rustc --version; echo "not the MSRV toolchain"; exit 1; }
       - run: cargo build --workspace
 
   wasm:
