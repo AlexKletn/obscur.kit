@@ -8,7 +8,7 @@
 //! here instead of silently desynchronising the two `.okui` lowering paths.
 #![forbid(unsafe_code)]
 
-use obscur_kit::ui_ir::name_binding;
+use obscur_kit::ui_ir::name_binding::{self, TagPosition};
 use obscur_kit::view::view;
 
 use obscur_kit::primitives::{Canvas, Container, ForeignSurface, Image, Layer, Portal, Scroll};
@@ -73,12 +73,15 @@ fn widget_component_ids_match_their_source() {
 fn resolved_tags_bind_to_the_real_component_ids() {
     // The registry's resolver, not just its constants, lands on the real ids.
     assert_eq!(
-        name_binding::component_id_for("Button"),
+        name_binding::component_id_for("Button", TagPosition::Component),
         Button::COMPONENT_ID
     );
-    assert_eq!(name_binding::component_id_for("img"), Image::COMPONENT_ID);
     assert_eq!(
-        name_binding::component_id_for("div"),
+        name_binding::component_id_for("img", TagPosition::Element),
+        Image::COMPONENT_ID
+    );
+    assert_eq!(
+        name_binding::component_id_for("div", TagPosition::Element),
         Container::COMPONENT_ID
     );
     assert_eq!(name_binding::attr_symbol("src"), view::SRC);
@@ -95,7 +98,8 @@ fn resolved_tags_bind_to_the_real_component_ids() {
 #[test]
 fn every_contracted_widget_tag_resolves_to_a_real_widget() {
     // A contract keyed by a tag the resolver does not know would never be
-    // consulted: `component_id_for` would fall through to CONTAINER.
+    // consulted: `component_id_for` would fall through to that tag's own
+    // user-component id, which no shipped widget is registered under.
     let real: Vec<obscur_kit::identity::ComponentId> = vec![
         Button::COMPONENT_ID,
         Input::COMPONENT_ID,
@@ -111,7 +115,7 @@ fn every_contracted_widget_tag_resolves_to_a_real_widget() {
         Radio::COMPONENT_ID,
     ];
     for contract in obscur_kit::okui_compiler::validation::widget_contracts() {
-        let id = name_binding::component_id_for(contract.component());
+        let id = name_binding::component_id_for(contract.component(), TagPosition::Component);
         assert!(
             real.contains(&id),
             "contract tag {:?} does not resolve to a shipped widget (got {id:?})",

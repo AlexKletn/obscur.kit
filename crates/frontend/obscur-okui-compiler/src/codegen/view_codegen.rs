@@ -35,6 +35,22 @@
 //! symbols. The emitted handles are raw values (`from_raw(0x…)`) resolved from
 //! the registry at generation time.
 //!
+//! A tag naming **no** built-in resolves by the node's kind: a `<div>` is the
+//! `Container` box, and a `<Card>` is
+//! [`user_component_id("Card")`](name_binding::user_component_id) — the id
+//! `#[derive(Contract)]` computes for the same name, so a host that registers
+//! `CardProps::contract().id` mounts the author's component under the authored
+//! tag. Codegen never asks the §2.14 registry what `Card` is and could not: that
+//! registry is a runtime value of `Box<dyn ComponentFactory>` trait objects,
+//! while this runs during the host crate's own compilation. The name is what the
+//! two sides share.
+//!
+//! What that does not buy is a diagnostic: a tag naming a component nobody
+//! registered emits an id nothing mounts, and — since no part of matching,
+//! layout or paint reads a `ComponentId` — still renders as the same box it
+//! silently rendered as before. See [`name_binding`]'s module docs for why that
+//! rule cannot be stated once for both front ends.
+//!
 //! # A binding is a Rust path
 //!
 //! `{open}` in a `.okui` document emits the Rust expression `open`, verbatim.
@@ -90,7 +106,7 @@
 use std::fmt::Write as _;
 
 use obscur_ui_ir::document::{UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrValue};
-use obscur_ui_ir::name_binding;
+use obscur_ui_ir::name_binding::{self, TagPosition};
 
 /// Emits ordinary Rust source building a [`View`](obscur_view::view::View) from
 /// a compiled [`UiIrDocument`].
@@ -370,7 +386,8 @@ fn emit_node(node: &UiIrNode, out: &mut String, indent: usize, key: Option<&UiIr
             let content = string_literal(node.content());
             emit_text(node, out, indent, key, &content);
         }
-        UiIrNodeKind::Element | UiIrNodeKind::Component => emit_element(node, out, indent, key),
+        UiIrNodeKind::Element => emit_element(node, out, indent, key, TagPosition::Element),
+        UiIrNodeKind::Component => emit_element(node, out, indent, key, TagPosition::Component),
         UiIrNodeKind::Loop => emit_loop(node, out, indent),
         UiIrNodeKind::Fragment | UiIrNodeKind::Conditional => {
             let children: Vec<&UiIrNode> = node.children().iter().collect();
@@ -436,10 +453,21 @@ fn emit_text_content(expression: &UiIrExpression) -> String {
 }
 
 /// Appends the statement pushing a single `ViewNode::Element` for `node`.
-fn emit_element(node: &UiIrNode, out: &mut String, indent: usize, key: Option<&UiIrExpression>) {
+///
+/// `position` comes from the caller's [`UiIrNodeKind`], which is where the front
+/// ends already recorded their component-vs-element verdict; it decides only what
+/// an unrecognised tag falls back to (a `Container` box, or the component's own
+/// name-derived id — see [`name_binding::component_id_for`]).
+fn emit_element(
+    node: &UiIrNode,
+    out: &mut String,
+    indent: usize,
+    key: Option<&UiIrExpression>,
+    position: TagPosition,
+) {
     let pad = indentation(indent);
     let inner = indentation(indent + 1);
-    let component = name_binding::component_id_for(node.tag()).raw();
+    let component = name_binding::component_id_for(node.tag(), position).raw();
     let _ = writeln!(
         out,
         "{pad}__nodes.push(::obscur_view::view::ViewNode::element(::obscur_identity::ComponentId::from_raw({component:#x}))"

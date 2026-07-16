@@ -203,35 +203,63 @@ fn absolutize_track(track: &GridTrack, ctx: &LengthContext) -> GridTrack {
 /// * `em` and `%` are relative to `parent_font_size` (`1.5em` and `150%` are the
 ///   same declaration on this property);
 /// * `rem` is relative to `root_font_size`, `vw`/`vh` to the viewport;
-/// * `ch` is the one term with nowhere to go: it needs the `0` glyph shaped in
-///   *this* node's face, which is not resolvable without a shaper. It falls back
-///   to the parent's size — the same answer an unresolvable `font-size` gets —
-///   rather than to `ch_base`'s `0.5em` substitute, which would silently halve
-///   the text.
+/// * `ch` is relative to the **parent's** `0` advance, supplied as
+///   `parent_ch_width` — see below.
 ///
 /// `parent_font_size` is the root's implicit parent value (the `medium` initial)
 /// for the root node, which is also what `rem` means on the root element.
+///
+/// # `font-size: 2ch` is not circular
+///
+/// It looks like it must be: `ch` is the advance of the `0` glyph in the font used
+/// to render the element, and that font's size is the very thing being computed.
+/// CSS Values 4 §6.1.2 cuts the knot explicitly, in the paragraph after the unit
+/// table:
+///
+/// > When used in the value of any `font-*` property on the element they refer to,
+/// > the font-relative lengths resolve against the computed metrics of the
+/// > **parent** element — or against the computed metrics corresponding to the
+/// > initial values of the font and line-height properties, if the element has no
+/// > parent.
+///
+/// So `2ch` here means two of the *parent's* `0` advances, which are fully known
+/// by the time this node is resolved — the same rule that already makes `em` and
+/// `%` resolvable on this property. `parent_ch_width` is that measurement.
+///
+/// [`None`] means no measurement was available (no [`ChMetrics`] port, or a port
+/// that could not measure). The fallback is then the parent's size — the same
+/// answer an unresolvable `font-size` gets, and deliberately *not* `ch_base`'s
+/// `0.5em` substitute, which would silently halve the text.
+///
+/// [`ChMetrics`]: super::ChMetrics
 pub(super) fn absolute_font_size(
     specified: Option<Length>,
     parent_font_size: f32,
     root_font_size: f32,
     viewport_width: f32,
     viewport_height: f32,
+    parent_ch_width: Option<f32>,
 ) -> f32 {
     let Some(specified) = specified else {
         return parent_font_size;
     };
-    // The parent's size is BOTH the `em` base and the `%` basis on this property,
-    // so a stated basis is honest here in a way it is not anywhere else.
-    let ctx = LengthContext::new(
+    // Every base here is the PARENT's, per §6.1.2 above: its size is both the `em`
+    // base and the `%` basis, and its `0` advance is the `ch` base. A stated basis
+    // is honest here in a way it is not anywhere else.
+    let mut ctx = LengthContext::new(
         parent_font_size,
         root_font_size,
         viewport_width,
         viewport_height,
     )
     .with_percent_basis(parent_font_size);
+    if let Some(ch_width) = parent_ch_width {
+        ctx = ctx.with_ch_width(ch_width);
+    }
     match specified {
-        Length::Ch(_) => parent_font_size,
+        // Unmeasured `ch` must not reach `resolve_px`, which would silently apply
+        // `ch_base`'s `0.5em` substitute to a font-size and halve the text.
+        Length::Ch(_) if parent_ch_width.is_none() => parent_font_size,
         length => length.resolve_px(&ctx).unwrap_or(parent_font_size),
     }
 }
@@ -481,11 +509,11 @@ mod tests {
     fn font_size_resolves_em_and_percent_against_the_parent() {
         // `2em` and `200%` are the same declaration on `font-size`.
         assert_eq!(
-            absolute_font_size(Some(Length::Em(2.0)), 10.0, 16.0, 800.0, 600.0),
+            absolute_font_size(Some(Length::Em(2.0)), 10.0, 16.0, 800.0, 600.0, None),
             20.0
         );
         assert_eq!(
-            absolute_font_size(Some(Length::Percent(200.0)), 10.0, 16.0, 800.0, 600.0),
+            absolute_font_size(Some(Length::Percent(200.0)), 10.0, 16.0, 800.0, 600.0, None),
             20.0
         );
     }
@@ -494,7 +522,7 @@ mod tests {
     fn font_size_resolves_rem_against_the_root_not_the_parent() {
         // The audit's headline case, at its source: `2rem` is 2 x the ROOT size.
         assert_eq!(
-            absolute_font_size(Some(Length::Rem(2.0)), 10.0, 16.0, 800.0, 600.0),
+            absolute_font_size(Some(Length::Rem(2.0)), 10.0, 16.0, 800.0, 600.0, None),
             32.0
         );
     }
@@ -502,11 +530,11 @@ mod tests {
     #[test]
     fn font_size_resolves_viewport_units_and_absolute_px() {
         assert_eq!(
-            absolute_font_size(Some(Length::Vw(5.0)), 16.0, 16.0, 800.0, 600.0),
+            absolute_font_size(Some(Length::Vw(5.0)), 16.0, 16.0, 800.0, 600.0, None),
             40.0
         );
         assert_eq!(
-            absolute_font_size(Some(Length::px(24.0)), 16.0, 16.0, 800.0, 600.0),
+            absolute_font_size(Some(Length::px(24.0)), 16.0, 16.0, 800.0, 600.0, None),
             24.0
         );
     }
@@ -514,20 +542,23 @@ mod tests {
     #[test]
     fn an_absent_or_unresolvable_font_size_falls_back_to_the_parent() {
         // Absent -> inherit the parent's size (`font-size` inherits).
-        assert_eq!(absolute_font_size(None, 24.0, 16.0, 800.0, 600.0), 24.0);
+        assert_eq!(
+            absolute_font_size(None, 24.0, 16.0, 800.0, 600.0, None),
+            24.0
+        );
         // `auto` is not a font-size; `ch` needs a shaper this step has no reach
         // to. Both take the parent's size rather than invent one.
         assert_eq!(
-            absolute_font_size(Some(Length::Auto), 24.0, 16.0, 800.0, 600.0),
+            absolute_font_size(Some(Length::Auto), 24.0, 16.0, 800.0, 600.0, None),
             24.0
         );
         assert_eq!(
-            absolute_font_size(Some(Length::Ch(2.0)), 24.0, 16.0, 800.0, 600.0),
+            absolute_font_size(Some(Length::Ch(2.0)), 24.0, 16.0, 800.0, 600.0, None),
             24.0,
             "not 0.5em x 2 = the parent size by accident: a 3ch would give 24 too"
         );
         assert_eq!(
-            absolute_font_size(Some(Length::Ch(9.0)), 24.0, 16.0, 800.0, 600.0),
+            absolute_font_size(Some(Length::Ch(9.0)), 24.0, 16.0, 800.0, 600.0, None),
             24.0
         );
     }

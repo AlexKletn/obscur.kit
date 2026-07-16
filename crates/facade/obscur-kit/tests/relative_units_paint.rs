@@ -260,6 +260,69 @@ fn an_em_border_and_the_equivalent_px_border_paint_the_same_edge() {
     );
 }
 
+// ---- ch -------------------------------------------------------------------
+
+// The audit's measured `ch` case, and the last unit to die at this seam: at HEAD
+// `.box{width:100px;font-size:40px;border-style:solid;border-width:1ch}` arranged
+// a 148px border box — 24px of `ch` per side — and painted a 0px edge. `ch` is a
+// length like any other; the computed value must already be absolute.
+//
+// The default `MockTextShaper` advances 0.6em per glyph, so `1ch` at font-size 40
+// is 24. That number is chosen because it disagrees with BOTH foils: the `0.5em`
+// substitute the spec allows only when the `0` glyph cannot be measured would
+// paint 20, and the old bug painted 0.
+#[test]
+fn a_border_width_in_ch_paints_exactly_what_layout_reserved() {
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), VIEWPORT);
+    let sheet = compile(
+        ".box{width:100px;height:60px;font-size:40px;border-style:solid;\
+         border-width:1ch;border-color:#ff0000}",
+    );
+    let result = rt.render_now(&one_box_view(), std::slice::from_ref(&sheet));
+    assert!(result.is_balanced(), "the display list is well-formed");
+
+    let bounds = layout_bounds(&rt);
+    // Layout's side of the seam, unchanged: a 24px ring around a 100x60 box.
+    assert!(
+        (bounds.size.width - 148.0).abs() < 1e-3 && (bounds.size.height - 108.0).abs() < 1e-3,
+        "layout reserved a 24px ch ring (148x108 border box), got {:?}",
+        bounds.size
+    );
+
+    let painted = painted_edge_extent(result.snapshot().display_list().commands(), bounds);
+    assert!(
+        (painted - 24.0).abs() < 1e-3,
+        "1ch at font-size 40 must paint the 24px edge layout reserved, got {painted} \
+         (0 is the old seam; 20 would mean `ch` baked in the 0.5em substitute)"
+    );
+}
+
+// `font-size: 2ch` is the case round five called unreachable, on the grounds that
+// the `0` glyph "must be shaped in this node's own face". CSS Values 4 says the
+// opposite, and says it explicitly (§6.1.2, the paragraph after the unit table):
+//
+// > When used in the value of any font-* property on the element they refer to,
+// > the font-relative lengths resolve against the computed metrics of the PARENT
+// > element.
+//
+// So there is no circularity to break: `2ch` on `font-size` means two of the
+// PARENT's `0` advances. The parent is at 20px and the mock advances 0.6em, so the
+// parent's `ch` is 12 and `.box` paints at 24. The old answer — silently falling
+// back to the parent's font-size — was 20, so this discriminates.
+#[test]
+fn font_size_in_ch_resolves_against_the_parents_metrics() {
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), VIEWPORT);
+    let sheet = compile(".page{font-size:20px}.box{font-size:2ch}");
+    let result = rt.render_now(&text_view("Ag"), std::slice::from_ref(&sheet));
+
+    let run_size = painted_font_size(result.snapshot().display_list().commands());
+    assert!(
+        (run_size - 24.0).abs() < 1e-3,
+        "2ch against a 20px parent whose `0` advances 12px is 24px, got {run_size} \
+         (20 would mean `ch` fell back to the parent's font-size)"
+    );
+}
+
 // ---- box-shadow -----------------------------------------------------------
 
 // `box-shadow` offsets/blur/spread in relative units used to become 0 silently.

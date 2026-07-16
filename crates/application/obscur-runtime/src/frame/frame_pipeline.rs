@@ -7,8 +7,8 @@ use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
 
 use crate::orchestration::{
-    LayoutCoordinator, SceneCoordinator, StyleCoordinator, StyleInputs, StyleMatchingCoordinator,
-    root_font_size,
+    LayoutCoordinator, SceneCoordinator, ShapedChMetrics, StyleCoordinator, StyleInputs,
+    StyleMatchingCoordinator, root_font_size,
 };
 use crate::transaction::ReconcileEnactor;
 
@@ -181,8 +181,17 @@ impl FramePipeline {
         reconciled: bool,
         inputs: &StyleInputs,
     ) -> FrameResult {
-        // Style: resolve computed styles over the retained tree.
-        let computed = self.style.resolve(tree, inputs, ctx.viewport());
+        // Style: resolve computed styles over the retained tree. The scene's
+        // paragraph orchestrator comes along as the `ch` port, so `ch` folds to
+        // pixels here with every other relative unit rather than being left for
+        // layout to measure and paint to read as `0`. It is the same shaper the
+        // measure and compose passes below use (`self.style` and `self.scene` are
+        // disjoint fields, so this is a legal split borrow), so a `20ch` box, the
+        // text in it, and the pixels for both agree on one font.
+        let ch_metrics = ShapedChMetrics::new(self.scene.paragraph());
+        let computed = self
+            .style
+            .resolve(tree, inputs, ctx.viewport(), Some(&ch_metrics));
         let restyled = !computed.is_empty();
 
         // Layout: map styles into layout styles and arrange the tree. The root

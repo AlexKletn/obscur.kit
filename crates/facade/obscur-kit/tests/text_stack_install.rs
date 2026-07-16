@@ -354,6 +354,79 @@ fn ch_resolves_to_the_installed_faces_measured_zero_advance() {
     );
 }
 
+/// The installed face's `0` advance must reach **paint**, not just layout.
+///
+/// # Why this exists next to the test above, which looks identical
+///
+/// `ch_resolves_to_the_installed_faces_measured_zero_advance` reads `item_width`
+/// off the **layout** boxes, and layout has always been able to measure `ch`
+/// itself (`ch_width_for`). So it passes whether or not the computed-value step
+/// resolves `ch` — verified by neutering that step, which leaves it green. It
+/// pins the *font*, and cannot pin the *seam*.
+///
+/// Paint is the half that could not measure: it reads the computed property
+/// through `Length::as_px`, which honours absolute `px` only, so a `ch` that
+/// survives the fold reaches it as `0`. Asserting a painted border edge is
+/// therefore the assertion layout's fallback cannot rescue.
+///
+/// The sans face is load-bearing here for the reason the module header gives:
+/// Noto Sans Mono's `0` is `600/1000` and `MockTextShaper::ADVANCE_RATIO` is
+/// `0.6` — equal at every size, so a mono assertion passes with the whole install
+/// reverted. Noto Sans's `572/1000` discriminates all three candidate answers:
+/// 9.152 measured, 9.6 mocked, 8.0 substituted.
+#[test]
+fn a_ch_border_paints_the_installed_sans_faces_zero_advance() {
+    const N: f32 = 4.0;
+    let css = ".page { width: 400px; height: 400px } \
+               .item { font-family: sans-serif; font-size: 16px; width: 40px; height: 20px; \
+                       border-style: solid; border-width: 4ch; border-color: #ff0000 }";
+
+    let (runtime, item) = render(css, "x", true);
+    let bounds = runtime
+        .layout_boxes()
+        .get(&item)
+        .copied()
+        .expect("the item is laid out")
+        .bounds;
+    let painted = painted_edge_extent(runtime.snapshot().display_list().commands(), bounds);
+
+    assert!(
+        (painted - N * SANS_CH_16).abs() < 1e-2,
+        "`4ch` in Noto Sans is 4 x 9.152 = {}, painted {painted} \
+         (0 would mean `ch` never left the computed style)",
+        N * SANS_CH_16
+    );
+    // All three foils, explicitly — the answer is none of them.
+    assert!(painted > 0.0, "the old seam painted nothing at all");
+    assert!(
+        (painted - N * MOCK_CH_16).abs() > 1.0,
+        "the measured answer must differ from the mock's {}, or the install asserts nothing",
+        N * MOCK_CH_16
+    );
+    assert!(
+        (painted - N * CH_SUBSTITUTE_16).abs() > 1.0,
+        "the measured answer must differ from the 0.5em substitute's {}",
+        N * CH_SUBSTITUTE_16
+    );
+}
+
+/// The painted width of the item's **top** border edge, or `0.0` when no edge was
+/// painted — which is precisely the old seam's signature, so it must not be
+/// confusable with a real measurement.
+fn painted_edge_extent(commands: &[PaintCommand], bounds: obscur_kit::geometry::Rect) -> f32 {
+    commands
+        .iter()
+        .filter_map(|c| match c {
+            PaintCommand::DrawPath { path, .. } => path.bounds(),
+            _ => None,
+        })
+        .filter(|r| {
+            (r.origin.y - bounds.origin.y).abs() < 1e-3 && r.size.width >= bounds.size.width - 1e-3
+        })
+        .map(|r| r.size.height)
+        .fold(0.0f32, f32::max)
+}
+
 /// The mono face's `ch` is still worth pinning — just not against the mock. This
 /// asserts it against the **`0.5em` substitute**, which is the foil that matters
 /// for `ch`: 9.6px real against 8.0px substituted is the 20% mis-sizing that

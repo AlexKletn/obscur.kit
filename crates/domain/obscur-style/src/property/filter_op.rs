@@ -84,6 +84,20 @@ impl FilterOp {
         !matches!(self, Self::DropShadow(_) | Self::Blur(_))
     }
 
+    /// Whether this op carries a `ch` term.
+    ///
+    /// Only `drop-shadow()` carries lengths at all: `blur(<length>)`'s radius is
+    /// already an `f32` by computed-value time (the CSS lowering resolved it), so
+    /// a `blur(1ch)` is lost before this is asked — a lowering-side limitation
+    /// mirrored in `absolutize_filter`, not papered over here.
+    #[must_use]
+    pub const fn uses_ch(&self) -> bool {
+        match self.as_drop_shadow() {
+            Some(shadow) => shadow.uses_ch(),
+            None => false,
+        }
+    }
+
     /// Whether this is a [`FilterOp::DropShadow`].
     #[must_use]
     pub const fn is_drop_shadow(&self) -> bool {

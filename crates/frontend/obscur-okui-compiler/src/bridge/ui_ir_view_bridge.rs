@@ -2,7 +2,7 @@
 //! (spec §2.15, §2.11).
 
 use obscur_ui_ir::document::{UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrValue};
-use obscur_ui_ir::name_binding;
+use obscur_ui_ir::name_binding::{self, TagPosition};
 use obscur_view::view::{
     View, ViewEventBinding, ViewFragment, ViewKey, ViewNode, ViewProperty, ViewValue,
 };
@@ -16,7 +16,12 @@ use obscur_view::view::{
 /// - **Element / Component** → a [`ViewNode::Element`] whose
 ///   [`ComponentId`](obscur_identity::ComponentId) is resolved through the shared
 ///   [`name_binding`] registry: a built-in widget/primitive tag binds to its real
-///   `COMPONENT_ID`, every other tag to the generic `Container`. IR
+///   `COMPONENT_ID`; otherwise the node's **kind** decides — an
+///   [`Element`](UiIrNodeKind::Element) binds to the generic `Container`, a
+///   [`Component`](UiIrNodeKind::Component) to its own
+///   [`user_component_id`](name_binding::user_component_id), which is the id
+///   `#[derive(Contract)]` gives the same name and therefore the id a host
+///   registers the component under. IR
 ///   [`properties`](UiIrNode::properties) become [`ViewProperty`]s (the reserved
 ///   `class`/`id`/`type`/`src`/`disabled`/`checked` attributes map to the
 ///   `obscur-view` symbols the reconciler/matcher read; every other name is
@@ -70,7 +75,8 @@ impl UiIrViewBridge {
                 }
                 vec![view]
             }
-            UiIrNodeKind::Element | UiIrNodeKind::Component => vec![lower_element(node)],
+            UiIrNodeKind::Element => vec![lower_element(node, TagPosition::Element)],
+            UiIrNodeKind::Component => vec![lower_element(node, TagPosition::Component)],
             UiIrNodeKind::Fragment | UiIrNodeKind::Conditional | UiIrNodeKind::Loop => node
                 .children()
                 .iter()
@@ -84,11 +90,16 @@ impl UiIrViewBridge {
 ///
 /// Names bind through the shared [`name_binding`] registry: the tag resolves to
 /// a real [`ComponentId`](obscur_identity::ComponentId) (a built-in widget or
-/// primitive, else the generic `Container`), reserved attributes/events resolve
-/// to the `obscur-view` symbols the reconciler/matcher/dispatcher read, and the
-/// handler command resolves to a deterministic hashed symbol.
-fn lower_element(node: &UiIrNode) -> ViewNode {
-    let mut view = ViewNode::element(name_binding::component_id_for(node.tag()));
+/// primitive; else the generic `Container` for an element, or the component's own
+/// name-derived id for a component), reserved attributes/events resolve to the
+/// `obscur-view` symbols the reconciler/matcher/dispatcher read, and the handler
+/// command resolves to a deterministic hashed symbol.
+///
+/// `position` comes from the caller's [`UiIrNodeKind`] rather than from the tag's
+/// spelling: the front ends already decided component-vs-element and recorded it
+/// on the node, and re-deriving it here would be a second copy of their rule.
+fn lower_element(node: &UiIrNode, position: TagPosition) -> ViewNode {
+    let mut view = ViewNode::element(name_binding::component_id_for(node.tag(), position));
     for property in node.properties() {
         view = view.with_prop(ViewProperty::new(
             name_binding::attr_symbol(property.name()),

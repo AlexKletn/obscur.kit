@@ -16,10 +16,12 @@
 //! # Mapping
 //!
 //! - **Tags → [`ComponentId`]**: the built-in widgets and non-container
-//!   primitives map to their stable `COMPONENT_ID`; every other tag (`div`,
-//!   `span`, `header`, an app-defined element) maps to the generic
-//!   [`Container`](CONTAINER) primitive, so it is a real, styleable box rather
-//!   than an opaque hash.
+//!   primitives map to their stable `COMPONENT_ID`. What an unrecognised tag maps
+//!   to depends on the [`TagPosition`] it was written in — an *element* tag
+//!   (`div`, `span`, `header`) maps to the generic [`Container`](CONTAINER)
+//!   primitive, so it is a real, styleable box; a *component* tag (`Card`) maps
+//!   to [`user_component_id`], the id `#[derive(Contract)]` computes for the very
+//!   same name.
 //! - **Attribute names → [`InternedSymbol`]**: the CSS/reserved attributes
 //!   (`class`, `id`, `type`, `src`, `disabled`, `checked`) map to the reserved
 //!   `obscur-view` symbols the reconciler and matcher read; any other name is
@@ -28,6 +30,50 @@
 //! - **Event names → [`InternedSymbol`]**: `click`/`input`/`change` map to the
 //!   reserved `EVENT_*` symbols the runtime's dispatcher resolves; any other name
 //!   is hashed like an attribute.
+//!
+//! # Why a component tag is not a box
+//!
+//! It used to be. [`component_id_for`] took a tag and nothing else, and resolved
+//! **every** unrecognised name to [`CONTAINER`] — so `<Card/>` was not a
+//! mis-checked component and not a rejected one, it was a generic div, silently.
+//! §2.13's contract validation "skips any tag with no registered contract" was
+//! checking nothing, because the tag was never going to *be* a component.
+//!
+//! The position is now an argument rather than a guess, and it is the
+//! distinction both front ends already make and then threw away (the `.okui`
+//! lowering's `starts_uppercase`, the macro's `is_component`, both of which
+//! produce a `UiIrNodeKind::Component`). A caller must now *state* which
+//! fallback it wants, so the wrong one can no longer be picked by omission —
+//! though it remains perfectly spellable, and only the call sites' agreement
+//! with their node's kind keeps it right.
+//!
+//! # The id of a component nobody here can see
+//!
+//! §2.14's `ComponentRegistry` is a **runtime** value holding
+//! `Box<dyn ComponentFactory>` trait objects. A code generator cannot consult it:
+//! `CardProps::contract()` is a function that runs when the built crate runs, and
+//! codegen runs while that crate is still being compiled. So the binding does not
+//! ask a registry what `Card` is — it computes the id from the **name**, exactly
+//! as `#[derive(Contract)]` does at expansion time (the derive calls straight into
+//! [`component_id_for`], so there is one definition rather than two that agree by
+//! luck). A host that registers the derived contract's id and an author who writes
+//! the tag therefore meet on the same handle without either knowing about the
+//! other.
+//!
+//! What this does **not** do is make an unregistered tag loud. `<Crad/>` (a typo)
+//! binds to `user_component_id("Crad")`, nothing is registered under it, and it
+//! mounts nothing — no diagnostic. Nor is it even visibly different: no part of
+//! matching, cascade, layout or paint reads a `ComponentId` (only
+//! `ComponentStore::mount` does), so a typo'd component tag still renders as the
+//! same box it silently rendered as before. What it can no longer do is collide
+//! with [`CONTAINER`] and mount whatever a host registered there.
+//!
+//! Making it loud is the half this does not close. The file front end could
+//! (its `Compiler` already takes a `ContractRegistry`); the `okui!` macro cannot,
+//! for the reason above — so the rule cannot be stated once for both front ends,
+//! and stating it for one is the drift the `<VirtualFor>`-was-`<For>` finding was
+//! written against. `okui_user_component.rs`'s
+//! `an_unregistered_component_tag_mounts_nothing` pins the residue.
 //!
 //! # Drift
 //!
@@ -124,17 +170,34 @@ pub const DOCKING: ComponentId = ComponentId::from_raw(0x00D0_000B);
 /// The radio widget (`obscur_widgets::Radio`).
 pub const RADIO: ComponentId = ComponentId::from_raw(0x00D0_000C);
 
-/// Resolves a tag name to the [`ComponentId`] it binds to.
+/// Which authoring position a tag was written in — the component-vs-element
+/// distinction both front ends already make.
+///
+/// This is an argument rather than something [`component_id_for`] infers,
+/// because the two positions have genuinely different fallbacks and the resolver
+/// used to pick one of them for everything. It is not re-derived from the tag's
+/// spelling here: the front ends own that rule (`.okui` lowering's
+/// `starts_uppercase`, the macro's `is_component`), they record their verdict on
+/// the IR node's [`UiIrNodeKind`](crate::document::UiIrNodeKind), and a second
+/// copy of the rule in this crate could only ever drift from it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TagPosition {
+    /// An element tag — `div`, `span`, `header`, `img`. Falls back to the
+    /// generic [`CONTAINER`] box.
+    Element,
+    /// A component tag — `Button`, `Card`. Falls back to [`user_component_id`].
+    Component,
+}
+
+/// The [`ComponentId`] of the built-in this tag names, or [`None`] when it names
+/// no built-in.
 ///
 /// Built-in widgets and non-container primitives resolve to their stable
 /// `COMPONENT_ID`; the lowercase `img`/`canvas`/… element spellings resolve to
-/// the same primitive as their PascalCase component spelling. Every other tag —
-/// `div`, `span`, `header`, an app-defined element — resolves to the generic
-/// [`CONTAINER`] primitive, so an authored element is always a real, styleable
-/// box.
+/// the same primitive as their PascalCase component spelling.
 #[must_use]
-pub fn component_id_for(tag: &str) -> ComponentId {
-    match tag {
+pub fn builtin_component_id(tag: &str) -> Option<ComponentId> {
+    let id = match tag {
         // Widgets (PascalCase component spelling).
         "Button" => BUTTON,
         "Input" => INPUT,
@@ -155,9 +218,52 @@ pub fn component_id_for(tag: &str) -> ComponentId {
         "Portal" | "portal" => PORTAL,
         "Layer" | "layer" => LAYER,
         "ForeignSurface" => FOREIGN_SURFACE,
-        // Every other tag is a generic styleable box.
-        _ => CONTAINER,
+        // Every other tag names no built-in; what it binds to depends on the
+        // position it was written in (see `component_id_for`).
+        _ => return None,
+    };
+    Some(id)
+}
+
+/// Resolves a tag name, written in `position`, to the [`ComponentId`] it binds
+/// to.
+///
+/// A built-in's **id** always wins: `<Button/>` resolves to the shipped widget's
+/// `COMPONENT_ID` rather than to a hash of the string, and `img`/`Image` are the
+/// same primitive. That is a claim about the handle, not about what renders — a
+/// host that registers its own factory under `Button::COMPONENT_ID` (which is
+/// what `#[contract(name = "Button")]` derives) takes the tag over, and this
+/// function neither knows nor prevents it.
+///
+/// Otherwise the fallback follows the position — an element tag is the generic
+/// [`CONTAINER`] box, a component tag is its own [`user_component_id`].
+#[must_use]
+pub fn component_id_for(tag: &str, position: TagPosition) -> ComponentId {
+    if let Some(builtin) = builtin_component_id(tag) {
+        return builtin;
     }
+    match position {
+        TagPosition::Element => CONTAINER,
+        TagPosition::Component => user_component_id(tag),
+    }
+}
+
+/// The [`ComponentId`] a **user** component tag binds to: FNV-1a 64 of the name,
+/// lifted into a high namespace (top bit set).
+///
+/// This is the id `#[derive(Contract)]` puts on `ComponentContract::id` for the
+/// same name, and the whole reason an author's `<Card/>` and a host's
+/// `register_component(…)` meet without either consulting the other: the name is
+/// the shared secret. The derive does not re-implement it — it calls
+/// [`component_id_for`] — so the two cannot drift.
+///
+/// The top bit is set for the same reason [`fallback_symbol`] sets it: every
+/// built-in `COMPONENT_ID` is a small low-range constant, so a hashed name can
+/// never *alias* one. That makes the two namespaces disjoint by construction
+/// rather than by the odds on a 64-bit hash.
+#[must_use]
+pub fn user_component_id(tag: &str) -> ComponentId {
+    ComponentId::from_raw(hash_name_64(tag) | 0x8000_0000_0000_0000)
 }
 
 /// Resolves an attribute name to the [`InternedSymbol`] it binds to.
@@ -217,31 +323,105 @@ fn hash_name_32(name: &str) -> u32 {
     hash
 }
 
+/// Deterministic FNV-1a 64-bit hash of a name — the [`ComponentId`]-width
+/// counterpart of [`hash_name_32`].
+#[must_use]
+fn hash_name_64(name: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in name.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn known_widget_tags_map_to_their_component_ids() {
-        assert_eq!(component_id_for("Button"), BUTTON);
-        assert_eq!(component_id_for("Input"), INPUT);
-        assert_eq!(component_id_for("Checkbox"), CHECKBOX);
-        assert_eq!(component_id_for("Select"), SELECT);
+        assert_eq!(component_id_for("Button", TagPosition::Component), BUTTON);
+        assert_eq!(component_id_for("Input", TagPosition::Component), INPUT);
+        assert_eq!(
+            component_id_for("Checkbox", TagPosition::Component),
+            CHECKBOX
+        );
+        assert_eq!(component_id_for("Select", TagPosition::Component), SELECT);
+    }
+
+    #[test]
+    fn a_builtin_wins_in_either_position() {
+        // The built-in match runs before the fallback, so no position can turn a
+        // shipped widget into a box or into a name hash.
+        assert_eq!(component_id_for("Button", TagPosition::Element), BUTTON);
+        assert_eq!(component_id_for("Button", TagPosition::Component), BUTTON);
+        assert_eq!(builtin_component_id("Button"), Some(BUTTON));
+        assert_eq!(builtin_component_id("Card"), None);
     }
 
     #[test]
     fn image_element_and_component_spellings_agree() {
-        assert_eq!(component_id_for("img"), IMAGE);
-        assert_eq!(component_id_for("Image"), IMAGE);
+        assert_eq!(component_id_for("img", TagPosition::Element), IMAGE);
+        assert_eq!(component_id_for("Image", TagPosition::Component), IMAGE);
     }
 
     #[test]
-    fn generic_and_unknown_tags_fall_back_to_container() {
-        assert_eq!(component_id_for("div"), CONTAINER);
-        assert_eq!(component_id_for("span"), CONTAINER);
-        assert_eq!(component_id_for("header"), CONTAINER);
-        assert_eq!(component_id_for("app"), CONTAINER);
-        assert_eq!(component_id_for("something-custom"), CONTAINER);
+    fn generic_and_unknown_element_tags_fall_back_to_container() {
+        for tag in ["div", "span", "header", "app", "something-custom"] {
+            assert_eq!(component_id_for(tag, TagPosition::Element), CONTAINER);
+        }
+    }
+
+    #[test]
+    fn an_unrecognised_component_tag_is_its_own_id_not_a_box() {
+        // The regression this position argument exists for: `<Card/>` used to be
+        // a `div`. It is now Card.
+        assert_eq!(
+            component_id_for("Card", TagPosition::Component),
+            user_component_id("Card")
+        );
+        assert_ne!(component_id_for("Card", TagPosition::Component), CONTAINER);
+        // And two different components are two different ids — a hash that
+        // collapsed them would be no better than CONTAINER.
+        assert_ne!(user_component_id("Card"), user_component_id("Panel"));
+    }
+
+    #[test]
+    fn user_component_ids_live_outside_the_builtin_range() {
+        // Disjoint by construction, not by luck: a user id carries the top bit
+        // and every built-in handle is a small low-range constant.
+        for tag in ["Card", "Panel", "MyVeryLongComponentName", ""] {
+            assert!(user_component_id(tag).raw() & 0x8000_0000_0000_0000 != 0);
+        }
+        for builtin in [
+            CONTAINER,
+            IMAGE,
+            SCROLL,
+            CANVAS,
+            PORTAL,
+            LAYER,
+            FOREIGN_SURFACE,
+            BUTTON,
+            INPUT,
+            CHECKBOX,
+            SELECT,
+            MENU,
+            DIALOG,
+            TABS,
+            LIST,
+            TREE,
+            TABLE,
+            DOCKING,
+            RADIO,
+        ] {
+            assert_eq!(builtin.raw() & 0x8000_0000_0000_0000, 0);
+        }
+    }
+
+    #[test]
+    fn user_component_ids_are_deterministic() {
+        assert_eq!(user_component_id("Card"), user_component_id("Card"));
     }
 
     #[test]

@@ -706,8 +706,8 @@ fn draw_shadow(
     let kurbo_rect = KurboRect::new(x0, y0, x1, y1);
     // Spec §6.1.1: an outset shadow's corner radii are the box radii grown by
     // `+spread` (a sharp corner stays sharp) so the rounded corners stay
-    // concentric with the box.
-    let radius = blurred_shadow_radius(radii.offset(spread));
+    // concentric with the box, eased where a radius is smaller than the spread.
+    let radius = blurred_shadow_radius(radii.spread_offset(spread));
     // Map the CSS blur radius to a gaussian standard deviation.
     let std_dev = f64::from(blur.max(0.0)) / 2.0;
     let peniko_color = ColorConverter::new().convert(color);
@@ -820,7 +820,12 @@ fn draw_inset_shadow(
     let iy1 = by1 + oy - sp;
     if ix1 > ix0 && iy1 > iy0 {
         let inner = KurboRect::new(ix0, iy0, ix1, iy1);
-        let inner_radius = (radius - sp).max(0.0);
+        // Spec §6.1.1, as on the drop path: the hole's radii are the box radii
+        // contracted by `spread`, so they take `−spread`. Offsetting the eight
+        // radii *before* collapsing to Vello's single scalar (rather than
+        // subtracting from the already-collapsed `radius`) is what lets §6.1.1's
+        // per-axis easing apply at all, and matches the drop path's ordering.
+        let inner_radius = blurred_shadow_radius(radii.spread_offset(-spread));
         let std_dev = f64::from(blur.max(0.0)) / 2.0;
         // Opaque punch: `DestOut` clears the destination by the source alpha.
         let punch = peniko::Color::new([
@@ -1189,6 +1194,43 @@ mod tests {
     }
 
     #[test]
+    fn a_spread_shadows_corner_radius_is_eased_in_the_encoding() {
+        use obscur_geometry::CornerRadii;
+        // Spec §6.1.1 on the GPU path, read back from the encoding rather than
+        // trusted. A 100x100 box, 50px radius, 100px spread (r = .5): the shadow's
+        // corner radius must be the eased
+        //   50 + 100 x (1 + (.5 - 1)^3) = 137.5,
+        // not the raw 50 + 100 = 150.
+        //
+        // `Scene::encoding()` is public, and `vello_encoding 0.9`'s
+        // `DrawBlurRoundedRect` is `{ color: DrawColor(u32), width: f32,
+        // height: f32, radius: f32, std_dev: f32 }` pushed to `draw_data` as five
+        // u32 words by `Encoding::encode_blurred_rounded_rect` — so the radius this
+        // backend actually hands Vello is word 3.
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawShadow {
+            rect: Rect::new(Point::new(100.0, 100.0), Size::new(100.0, 100.0)),
+            radii: CornerRadii::uniform(50.0),
+            color: Color::BLACK,
+            blur: 0.0,
+            spread: 100.0,
+            offset: (0.0, 0.0),
+            inset: false,
+        }]);
+        let scene = SceneConverter::new().convert(&list);
+        let draw_data = &scene.encoding().draw_data;
+        assert_eq!(
+            draw_data.len(),
+            5,
+            "one blurred rounded rect: [rgba, width, height, radius, std_dev]"
+        );
+        let radius = f32::from_bits(draw_data[3]);
+        assert!(
+            (radius - 137.5).abs() < 1e-3,
+            "§6.1.1: Vello must receive the eased 137.5, not the raw 150 — got {radius}"
+        );
+    }
+
+    #[test]
     fn inset_shadow_produces_non_empty_balanced_scene() {
         use obscur_geometry::CornerRadii;
         let list = DisplayList::from_commands(vec![PaintCommand::DrawShadow {
@@ -1204,6 +1246,48 @@ mod tests {
         // and every pushed layer is popped (must not panic or dangle).
         let scene = SceneConverter::new().convert(&list);
         assert!(!scene.encoding().is_empty());
+    }
+
+    #[test]
+    fn an_inset_shadows_negative_spread_eases_the_hole_in_the_encoding() {
+        use obscur_geometry::CornerRadii;
+        // §6.1.1's second trigger on the GPU path: an inset shadow contracts by
+        // `spread`, so a NEGATIVE spread grows its hole and must ease.
+        //
+        // 600x600 box, 50px radius, spread -100, offset (300,300). The punched hole
+        // is (200,200)-(1000,1000) — 800x800 — with radius 137.5 eased vs 150 raw.
+        //
+        // The inset path encodes several draw objects (clip, fill, the blur punch),
+        // so the blur record is located by its own width/height signature rather
+        // than a hardcoded tag offset: `DrawBlurRoundedRect` is
+        // `[rgba, width, height, radius, std_dev]`, so the radius is the word right
+        // after the 800/800 pair.
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawShadow {
+            rect: Rect::new(Point::new(0.0, 0.0), Size::new(600.0, 600.0)),
+            radii: CornerRadii::uniform(50.0),
+            color: Color::BLACK,
+            blur: 0.0,
+            spread: -100.0,
+            offset: (300.0, 300.0),
+            inset: true,
+        }]);
+        let scene = SceneConverter::new().convert(&list);
+        let words: Vec<f32> = scene
+            .encoding()
+            .draw_data
+            .iter()
+            .map(|w| f32::from_bits(*w))
+            .collect();
+        let at = words
+            .windows(3)
+            .position(|w| (w[0] - 800.0).abs() < 1e-3 && (w[1] - 800.0).abs() < 1e-3 && w[2] > 1.0)
+            .expect("the 800x800 hole's blur record must be encoded");
+        let radius = words[at + 2];
+        assert!(
+            (radius - 137.5).abs() < 1e-3,
+            "§6.1.1: an inset shadow's negative spread must ease the hole to 137.5, \
+             not grow it raw to 150 — got {radius}"
+        );
     }
 
     #[test]

@@ -815,14 +815,16 @@ fn measure_space_advance(
 /// Shaped through the same [`measure_face`] + fallback chain + attributes as
 /// [`measure_text_node`], so a `20ch` box and the twenty characters placed in it
 /// are measured against one font, not two. That also means `ch` inherits this
-/// pass's standing limitation: [`measure_face`] is a carrier, and the wired
-/// shaper resolves the *host's* font rather than the node's `font-family`. So
-/// `ch` currently follows the host font — exactly as every other text
-/// measurement here does — and starts following `font-family` on the day real
-/// per-node face resolution lands, with no change to this function.
+/// pass's standing limitation — though it is narrower than it reads: the node's
+/// families are passed here and the resolver's fallback chain picks the face, so
+/// `ch` **does** follow `font-family` (a monospace node measures its own `0`).
+/// Only the [`measure_face`] carrier is ignored. What is genuinely open is a
+/// family that resolves to no registered face: this answers `None`, layout takes
+/// `ch_base`'s 0.5em substitute, and paint reads `0` — the two disagree, which is
+/// the seam `ChMetrics` exists to close and does not close here.
 // `attributes` stays by reference to match this pass's `shape_paragraph` calls.
 #[allow(clippy::trivially_copy_pass_by_ref)]
-fn measure_ch_width(
+pub(super) fn measure_ch_width(
     paragraph: &ParagraphShaper,
     fallback: &FontFallback,
     attributes: &FontAttributes,
@@ -1139,7 +1141,7 @@ pub(super) fn length_context(
 
 /// One node's computed `font-size` in logical pixels, defaulting to
 /// [`DEFAULT_FONT_SIZE`] when absent or not an absolute pixel length.
-fn font_size_px(computed: &ComputedStyle) -> f32 {
+pub(super) fn font_size_px(computed: &ComputedStyle) -> f32 {
     computed
         .get(PropertyId::FontSize)
         .and_then(ComputedValue::as_length)

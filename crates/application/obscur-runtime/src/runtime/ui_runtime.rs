@@ -74,8 +74,8 @@ use crate::orchestration::{
     AnimatedKind, AnimationBinding, ComputedStyles, CssMotionRules, DragCoordinator, DragOutcome,
     EditingView, InspectInfo, LayoutBoxes, LayoutCoordinator, MeasureCache, MotionCoordinator,
     NodeInspection, PreeditView, PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint,
-    StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement, TreeInspection,
-    overflow_scrolls, overlay_commands, root_font_size, scroll_containers,
+    ShapedChMetrics, StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement,
+    TreeInspection, overflow_scrolls, overlay_commands, root_font_size, scroll_containers,
 };
 use crate::orchestration::{alignment_for, direction_for, white_space_for};
 use crate::recovery::RecoveryResult;
@@ -4793,7 +4793,14 @@ impl UiRuntime {
             &self.pseudo,
             environment,
         );
-        let computed = self.style.resolve(&self.tree, &inputs, viewport);
+        // The scene's paragraph orchestrator is the `ch` port, so `ch` folds to
+        // pixels here with every other relative unit. It is the same shaper the
+        // measure and compose passes use (disjoint fields, so a legal split
+        // borrow), so `ch` and the text it sizes agree on one font.
+        let ch_metrics = ShapedChMetrics::new(self.scene_composer.paragraph());
+        let computed = self
+            .style
+            .resolve(&self.tree, &inputs, viewport, Some(&ch_metrics));
         self.inputs = inputs;
         // Every node's style is freshly resolved, so nothing in the new map carries
         // a motion sample and the stash of pre-overlay values describes a map that
@@ -4845,12 +4852,17 @@ impl UiRuntime {
             environment,
             dirty,
         );
+        // Same port as the full resolve above: an incrementally restyled node must
+        // land on the identical `ch`, or a node's border would change width purely
+        // because it was re-resolved by a different path.
+        let ch_metrics = ShapedChMetrics::new(self.scene_composer.paragraph());
         let restyle = self.style.resolve_incremental(
             &self.tree,
             &self.inputs,
             viewport,
             dirty,
             &mut computed,
+            Some(&ch_metrics),
         );
         for (node, previous) in restyle.previous {
             // The overlay snapshot above is the older of the two, so it wins.

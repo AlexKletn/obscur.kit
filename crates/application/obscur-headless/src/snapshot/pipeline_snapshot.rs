@@ -4,8 +4,8 @@ use obscur_accessibility::tree::SemanticSnapshot;
 use obscur_geometry::Size;
 use obscur_runtime::SemanticTreeBuilder;
 use obscur_runtime::orchestration::{
-    ComputedStyles, LayoutBoxes, LayoutCoordinator, SceneCoordinator, StyleCoordinator,
-    StyleInputs, root_font_size,
+    ComputedStyles, LayoutBoxes, LayoutCoordinator, SceneCoordinator, ShapedChMetrics,
+    StyleCoordinator, StyleInputs, root_font_size,
 };
 use obscur_scene::command::DisplayList;
 use obscur_scene::scene::{Scene, SceneSnapshot};
@@ -140,14 +140,21 @@ impl PipelineSnapshot {
     pub fn capture(tree: &RetainedTree, inputs: &StyleInputs, viewport: Size) -> Self {
         let tree_snapshot = tree.snapshot();
 
-        let style = StyleCoordinator::new();
-        let computed = style.resolve(tree, inputs, viewport);
-
         // The scene coordinator owns the paragraph orchestrator; build it first so
-        // the layout pass shapes and wraps text leaves through the same
-        // orchestrator the scene later re-wraps and paints with (so box height and
-        // painted line count agree, deterministically).
+        // every later stage shapes through the same orchestrator the scene finally
+        // re-wraps and paints with (so box height and painted line count agree,
+        // deterministically). It is built before the style stage, not just before
+        // layout, because the style stage needs it too: it is the `ch` port.
         let scene_coordinator = SceneCoordinator::new();
+
+        // `ch` is the `0` glyph's advance, so it must be shaped rather than folded
+        // from numbers. Supplying the port here folds it to pixels at
+        // computed-value time like every other relative unit — which is what makes
+        // this snapshot's *paint* stage agree with its *layout* stage about a `ch`
+        // box, rather than reserving space and painting nothing.
+        let ch_metrics = ShapedChMetrics::new(scene_coordinator.paragraph());
+        let style = StyleCoordinator::new();
+        let computed = style.resolve(tree, inputs, viewport, Some(&ch_metrics));
 
         let layout = LayoutCoordinator::new();
         let root_font = root_font_size(&computed, tree.root());

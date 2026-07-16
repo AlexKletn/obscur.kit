@@ -16,20 +16,20 @@
 //! There are two *different* schemes here, and the distinction is load-bearing:
 //!
 //! - **Names that also exist in the desired view tree** — each prop/event field
-//!   name — are resolved through the shared `obscur_ui_ir::name_binding`
-//!   registry ([`name_symbol`] / [`event_name_symbol`]), because a contract's
-//!   prop symbol is only useful if it equals the `ViewProperty::name()` a real
-//!   node carries. `name_binding` maps reserved names (`class`, `id`, `type`,
-//!   `src`, `disabled`, `checked`; `click`, `input`, `change`) to fixed low
-//!   constants and everything else to `fnv32(name) | 0x8000_0000`. A bare
-//!   `fnv32` — which this derive used to emit — agrees with that only by luck,
-//!   whenever the hash happens to already carry the top bit.
+//!   name, the component's own name, and a slot's `child = "Tag"` — are resolved
+//!   through the shared `obscur_ui_ir::name_binding` registry ([`name_symbol`] /
+//!   [`event_name_symbol`] / [`component_id`]), because a contract's handle is
+//!   only useful if it equals the one a real node carries. `name_binding` maps
+//!   reserved names (`class`, `id`, `type`, `src`, `disabled`, `checked`;
+//!   `click`, `input`, `change`) to fixed low constants and everything else to
+//!   `fnv32(name) | 0x8000_0000`; a component name maps to its built-in's
+//!   `COMPONENT_ID` or to `fnv64(name) | 1<<63`. A bare `fnv32`/`fnv64` — which
+//!   this derive used to emit — agrees with that only by luck.
 //! - **Names that exist only inside the contract model** — the component name
-//!   symbol, the component id, each field's normalized *type* string, and a
-//!   §2.12 slot's name — have no view-tree counterpart to agree with, so they
-//!   stay plain FNV-1a ([`fnv32`] / [`fnv64`]). A slot name is one of these
-//!   because a `slot="header"` reaches the tree as the *value* of a property,
-//!   never as a symbol.
+//!   symbol, each field's normalized *type* string, and a §2.12 slot's name —
+//!   have no view-tree counterpart to agree with, so they stay plain FNV-1a
+//!   ([`fnv32`]). A slot name is one of these because a `slot="header"` reaches
+//!   the tree as the *value* of a property, never as a symbol.
 //!
 //! # Slots (§2.12)
 //!
@@ -94,7 +94,7 @@ impl ContractDerive {
         let component_name = struct_attrs
             .name
             .unwrap_or_else(|| struct_ident.to_string());
-        let component_id = Literal::u64_unsuffixed(fnv64(&component_name));
+        let component_id = Literal::u64_unsuffixed(component_id(&component_name));
         let name_sym = Literal::u32_unsuffixed(fnv32(&component_name));
         let component_name_literal = LitStr::new(&component_name, derive_input.ident.span());
 
@@ -273,12 +273,14 @@ impl SlotModel {
     /// Lowers the slot into its `.with_slot(...)` entry on the **typed**
     /// contract.
     ///
-    /// Child tags are named by `fnv64`, the derive's own component-id scheme, so
-    /// this agrees with `OtherProps::contract().id` — the typed model's internal
-    /// spelling of the same tag. It does **not** agree with the `ComponentId` a
-    /// front end emits for that tag (`name_binding::component_id_for` resolves
-    /// every unregistered tag to `Container`); that disagreement predates slots
-    /// and is not made worse here.
+    /// Child tags are named through [`component_id`], the shared `name_binding`
+    /// resolution, so this agrees with `OtherProps::contract().id` **and** with
+    /// the `ComponentId` a front end emits for that tag. It used to agree with
+    /// only the first: a bare `fnv64` matched the typed model's internal spelling
+    /// while `name_binding::component_id_for` resolved every unregistered tag to
+    /// `Container`, so a slot's `child = "Tab"` named a handle no authored `<Tab/>`
+    /// ever carried. Closing that is the same change that makes `<Card/>` a
+    /// component at all.
     fn contract_tokens(&self) -> TokenStream {
         let name_sym = Literal::u32_unsuffixed(fnv32(&self.name));
         let cardinality = self.cardinality.variant();
@@ -286,7 +288,7 @@ impl SlotModel {
             quote!(::obscur_view::contract::ChildContract::Any)
         } else {
             let ids = self.children.iter().map(|tag| {
-                let id = Literal::u64_unsuffixed(fnv64(tag));
+                let id = Literal::u64_unsuffixed(component_id(tag));
                 quote!(::obscur_identity::ComponentId::from_raw(#id))
             });
             quote!(::obscur_view::contract::ChildContract::Only(
@@ -660,21 +662,29 @@ fn fnv32(s: &str) -> u32 {
     hash
 }
 
-/// FNV-1a 64-bit hash of `s`, used to derive stable [`ComponentId`] ids.
-fn fnv64(s: &str) -> u64 {
-    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-    const PRIME: u64 = 0x0000_0100_0000_01b3;
-    let mut hash = OFFSET;
-    for byte in s.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(PRIME);
-    }
-    hash
+/// The [`ComponentId`] raw value a component **name** binds to, resolved through
+/// the shared `name_binding` registry — the component-side mirror of
+/// [`name_symbol`].
+///
+/// This is the id an authored `<Name/>` lowers to on both front ends, which is
+/// the only value a contract's `id` can usefully be: a host registers the
+/// component under `MyProps::contract().id`, and the runtime mounts it when a
+/// node carries that same handle. A separate hash here would agree with the tag
+/// only by luck — and for a name that happens to be a built-in's (`Button`), not
+/// even that.
+///
+/// [`ComponentId`]: obscur_identity::ComponentId
+fn component_id(name: &str) -> u64 {
+    obscur_ui_ir::name_binding::component_id_for(
+        name,
+        obscur_ui_ir::name_binding::TagPosition::Component,
+    )
+    .raw()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ContractDerive, event_name_symbol, fnv32, fnv64, name_symbol};
+    use super::{ContractDerive, component_id, event_name_symbol, fnv32, name_symbol};
     use quote::quote;
 
     /// Collapses generated tokens to a single-spaced string for tolerant
@@ -767,11 +777,16 @@ mod tests {
             #[contract(name = "Button")]
             struct MyProps {}
         });
-        let button_id = fnv64("Button");
+        // `name = "Button"` names the shipped widget, so the id IS the widget's —
+        // not a hash of the string. That is the point: a contract for the tag
+        // `Button` must describe the handle an authored `<Button/>` carries.
+        let button_id = component_id("Button");
         let button_name = fnv32("Button");
         assert!(overridden.contains(&format!("from_raw ({button_id})")));
         assert!(overridden.contains(&format!("from_raw ({button_name})")));
         assert!(!default_named.contains(&format!("from_raw ({button_id})")));
+        // The override moved the id off the struct ident's own.
+        assert!(default_named.contains(&format!("from_raw ({})", component_id("MyProps"))));
     }
 
     #[test]
@@ -1047,10 +1062,27 @@ mod tests {
     fn fnv_helpers_are_deterministic_and_distinct() {
         assert_eq!(fnv32("hello"), fnv32("hello"));
         assert_ne!(fnv32("hello"), fnv32("world"));
-        assert_eq!(fnv64("hello"), fnv64("hello"));
-        assert_ne!(fnv64("hello"), fnv64("world"));
         // Empty string is the bare FNV offset basis.
         assert_eq!(fnv32(""), 0x811c_9dc5);
-        assert_eq!(fnv64(""), 0xcbf2_9ce4_8422_2325);
+    }
+
+    #[test]
+    fn component_ids_are_the_ones_the_view_tree_carries() {
+        // The component-id counterpart of `prop_name_symbols_are_the_ones_the_
+        // view_tree_carries`, and the same bug: a bare `fnv64` names a handle no
+        // authored tag ever carries, so a host registering `contract().id` would
+        // wait forever for a node that never arrives. Both sides now resolve the
+        // name through `name_binding`.
+        assert_eq!(
+            component_id("Card"),
+            obscur_ui_ir::name_binding::user_component_id("Card").raw()
+        );
+        // And a name that IS a built-in's resolves to the built-in, not a hash —
+        // the case a separate scheme could not get right even in principle.
+        assert_eq!(
+            component_id("Button"),
+            obscur_ui_ir::name_binding::BUTTON.raw()
+        );
+        assert_ne!(component_id("Card"), component_id("Panel"));
     }
 }

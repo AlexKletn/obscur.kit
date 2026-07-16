@@ -68,6 +68,15 @@ impl ConicGradient {
         self.center_y
     }
 
+    /// Whether the center is a `ch` term.
+    ///
+    /// Covers exactly the lengths `absolutize_conic` folds; the start angle is an
+    /// angle and the stop offsets are percentages.
+    #[must_use]
+    pub const fn uses_ch(&self) -> bool {
+        self.center_x().is_ch() || self.center_y().is_ch()
+    }
+
     /// Returns the gradient's color stops.
     #[must_use]
     pub const fn stops(&self) -> &[GradientStop] {

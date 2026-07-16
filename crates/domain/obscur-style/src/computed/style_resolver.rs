@@ -40,18 +40,25 @@
 //!   bullet); an *unauthored* node is therefore byte-for-byte unchanged, because
 //!   each property still resolves to exactly the value (or [`None`]) it did before
 //!   — the set merely no longer drops authored values for the added longhands.
-//! * **`ch` is not absolutized here.** Every other unit folds from numbers this
-//!   step already holds; `ch` is the advance of the `0` glyph, which needs text
-//!   *shaped* in the node's own face — and this crate has no shaper. Rather than
-//!   bake in [`LengthContext::ch_base`]'s `0.5em` substitute (which is wrong for
-//!   exactly the monospace faces `ch` exists to serve), a `ch` term is left
-//!   symbolic on the [`ComputedStyle`] for a consumer that can measure it. Layout
-//!   does; paint does not, so `ch` still reaches paint as `0` — the one relative
-//!   unit this pass does not retire.
+//! * **`ch` absolutizes only when the caller supplies metrics.** Every other unit
+//!   folds from numbers this step already holds; `ch` is the advance of the `0`
+//!   glyph, which needs text *shaped* in the node's own face, and this crate has
+//!   no shaper and should not have one. It therefore *asks*, through the
+//!   [`ChMetrics`] port on [`ResolutionContext`] — the measurement is threaded
+//!   into computed-value time rather than deferred to whichever consumer happens
+//!   to own a shaper. A caller that attaches one gets `ch` folded to `px` like
+//!   every other unit, and paint reads it correctly.
+//!
+//!   A caller that attaches **no** port leaves `ch` symbolic on the
+//!   [`ComputedStyle`], exactly as before this port existed: this step will not
+//!   bake in [`LengthContext::ch_base`]'s `0.5em` substitute, which is wrong for
+//!   exactly the monospace faces `ch` exists to serve. Layout can still measure
+//!   such a term; paint cannot, so on that path `ch` still reaches paint as `0`.
+//!   The seam is closed for callers that supply metrics, not by construction.
 
 use crate::cascade::ResolvedDeclarations;
 use crate::computed::absolutize::{absolute_font_size, absolutize_value};
-use crate::computed::{ComputedStyle, ComputedValue};
+use crate::computed::{ChMetrics, ComputedStyle, ComputedValue};
 use crate::property::{
     InheritedProperty, Length, LengthContext, PropertyId, PropertyValue, StyleColor, layout_keyword,
 };
@@ -194,13 +201,32 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::Overflow,
 ];
 
+/// The properties that select a **face**, and therefore decide what the `0` glyph
+/// measures — the inputs [`ChMetrics::zero_advance`] needs (CSS Values 4 §6.1.2:
+/// `ch` is the advance of `0` *"in the font used to render it"*).
+///
+/// `font-size` is not here: it selects a *size*, not a face, and the resolver has
+/// to compute it separately anyway (it is the base its own node's `em` resolves
+/// against). Both halves are set on the style before the port is asked.
+///
+/// Every entry must be a property that cannot carry a `<length>`, since these are
+/// resolved before a [`LengthContext`] exists. All three hold today — a family
+/// list, a number, and a keyword respectively — and all three land in
+/// `absolutize_value`'s identity arm.
+const FACE_PROPERTIES: &[PropertyId] = &[
+    PropertyId::FontFamily,
+    PropertyId::FontWeight,
+    PropertyId::FontStyle,
+];
+
 /// The document-wide bases a computed `<length>` is absolutized against (§4.14).
 ///
-/// These are the two things a node's own style cannot supply: the **root**
-/// element's computed `font-size` (the base for `rem`) and the **viewport**
-/// dimensions (the bases for `vw` / `vh` / `vmin` / `vmax`). The node's own
-/// `font-size` — the base for `em` — is not here because the resolver computes it
-/// itself, before every other property.
+/// These are the things a node's own style cannot supply: the **root** element's
+/// computed `font-size` (the base for `rem`), the **viewport** dimensions (the
+/// bases for `vw` / `vh` / `vmin` / `vmax`), and the **font metrics** port that
+/// measures the `0` glyph (the base for `ch`). The node's own `font-size` — the
+/// base for `em` — is not here because the resolver computes it itself, before
+/// every other property.
 ///
 /// `rem` has no chicken-and-egg problem: the root's font-size depends only on the
 /// root's own cascaded value and the initial `medium`, so it is known before any
@@ -209,10 +235,19 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
 /// [`StyleResolver::font_size_of`], and pass it to
 /// [`ResolutionContext::new`] for every descendant.
 ///
-/// Because both fields are `f32`, this derives [`PartialEq`] but not
-/// [`Eq`]/[`Hash`].
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ResolutionContext {
+/// `ch` is the one base that is a *measurement* rather than a number, so it
+/// arrives as a port ([`ChMetrics`]) rather than as an `f32`: its value depends
+/// on the node's own resolved font, which only the resolver knows, so the resolver
+/// has to be able to *ask* mid-resolution rather than be told up front. Attach one
+/// with [`with_metrics`](Self::with_metrics); a context without one resolves every
+/// other unit exactly as before and leaves `ch` to the specified fallbacks.
+///
+/// This does not implement [`PartialEq`]: a port has no meaningful value equality,
+/// and nothing compares contexts. [`Debug`] is hand-written for the same reason —
+/// so that implementing [`ChMetrics`] does not oblige an implementor to derive
+/// [`Debug`], which no other port in this workspace requires.
+#[derive(Clone, Copy)]
+pub struct ResolutionContext<'a> {
     /// The document root's computed `font-size` in logical pixels (base for
     /// `rem`).
     pub root_font_size: f32,
@@ -220,16 +255,35 @@ pub struct ResolutionContext {
     pub viewport_width: f32,
     /// The viewport height in logical pixels (base for `vh`).
     pub viewport_height: f32,
+    /// The port that measures the `0` glyph (base for `ch`), when the caller has
+    /// one. [`None`] leaves `ch` to the specified fallbacks — see
+    /// [`with_metrics`](Self::with_metrics).
+    pub metrics: Option<&'a dyn ChMetrics>,
 }
 
-impl ResolutionContext {
-    /// Builds a context whose `rem` base is `root_font_size`.
+impl std::fmt::Debug for ResolutionContext<'_> {
+    /// Reports whether a [`ChMetrics`] port is attached, not what it is: a port
+    /// is opaque, and "is one attached?" is the question a `ch` bug asks.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolutionContext")
+            .field("root_font_size", &self.root_font_size)
+            .field("viewport_width", &self.viewport_width)
+            .field("viewport_height", &self.viewport_height)
+            .field("metrics", &self.metrics.map(|_| "<ChMetrics>"))
+            .finish()
+    }
+}
+
+impl<'a> ResolutionContext<'a> {
+    /// Builds a context whose `rem` base is `root_font_size`, with no font
+    /// metrics — see [`with_metrics`](Self::with_metrics).
     #[must_use]
     pub const fn new(root_font_size: f32, viewport_width: f32, viewport_height: f32) -> Self {
         Self {
             root_font_size,
             viewport_width,
             viewport_height,
+            metrics: None,
         }
     }
 
@@ -241,6 +295,21 @@ impl ResolutionContext {
     #[must_use]
     pub const fn for_root(viewport_width: f32, viewport_height: f32) -> Self {
         Self::new(INITIAL_FONT_SIZE, viewport_width, viewport_height)
+    }
+
+    /// Attaches the port that measures the `0` glyph, making `ch` absolutize like
+    /// every other relative unit.
+    ///
+    /// Without one, `ch` cannot be folded to pixels here and is left symbolic on
+    /// the [`ComputedStyle`] for a downstream consumer that can measure it — which
+    /// is what the resolver did for every caller before this port existed. That
+    /// path is still correct for a consumer that measures (layout does), and still
+    /// wrong for one that does not (paint reads `0`), so a caller that *can* supply
+    /// metrics should.
+    #[must_use]
+    pub const fn with_metrics(mut self, metrics: &'a dyn ChMetrics) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 }
 
@@ -606,15 +675,37 @@ impl StyleResolver {
         // part of the loop below would make the answer depend on iteration order.
         let rtl = Self::resolves_rtl(cascaded, parent);
 
-        // Step 1b: `font-size` before anything else, for the same reason: it is
-        // the base every `em` on this node resolves against, so folding it as
-        // part of the loop below would make the answer depend on iteration order
-        // (§4.14). Its own relative units resolve against the PARENT's size.
+        // Step 1b: the face-selecting `font-*` properties, so the `ch` measurement
+        // in step 1d has a face to select. None of them can carry a `<length>` (a
+        // family list, a number, a keyword — all three land in `absolutize_value`'s
+        // identity arm), which is exactly why they can be resolved before a length
+        // context exists.
+        //
+        // These are resolved here IN ADDITION to the loop below, not instead of it:
+        // `resolve_property` is deterministic, so the loop recomputes the identical
+        // value and overwrites this one with it. That is deliberate. Skipping them
+        // in the loop would save three resolutions per node and buy a trap — the
+        // loop's fold is what `absolutize_value`'s exhaustive match guards, and a
+        // property that silently bypasses it is the exact defect that match exists
+        // to prevent. The early set feeds the port; the loop remains the authority.
+        for &property in FACE_PROPERTIES {
+            if let Some(value) = self.resolve_property(property, cascaded, &effective, parent, rtl)
+            {
+                style.set(property, value);
+            }
+        }
+
+        // Step 1c: `font-size` before every remaining property: it is the base
+        // every `em` on this node resolves against, so folding it as part of the
+        // loop below would make the answer depend on iteration order (§4.14). Its
+        // own relative units resolve against the PARENT's size — including `ch`,
+        // which is why the parent's metrics are measured here and not the node's.
         let font_size = self.resolve_font_size(cascaded, &effective, parent, rtl, ctx);
         style.set(
             PropertyId::FontSize,
             ComputedValue::length(Length::px(font_size)),
         );
+
         let lengths = LengthContext::new(
             font_size,
             ctx.root_font_size,
@@ -624,12 +715,46 @@ impl StyleResolver {
 
         // Steps 2–4: compute each property, then absolutize the lengths it
         // carries against the context `font-size` just completed.
+        //
+        // A value that contains a `ch` is set aside instead: it cannot be folded
+        // until the `0` glyph is measured, and measuring costs a font-fallback
+        // chain and a shaping call. `deferred` stays empty — and `Vec::new`
+        // allocates nothing — for the overwhelming majority of nodes, which is the
+        // point: a stylesheet that never writes `ch` must cost exactly what it did
+        // before `ch` was resolvable here. This is the same discipline layout's
+        // `ch_width_for` already applied; it is not a new tax on every node.
+        let mut deferred: Vec<(PropertyId, ComputedValue)> = Vec::new();
         for &property in COMPUTED_PROPERTIES {
             if property == PropertyId::FontSize {
                 continue;
             }
             if let Some(value) = self.resolve_property(property, cascaded, &effective, parent, rtl)
             {
+                if value.value().uses_ch() {
+                    deferred.push((property, value));
+                } else {
+                    style.set(property, value.map_value(|v| absolutize_value(v, &lengths)));
+                }
+            }
+        }
+
+        // Step 5: the node's OWN `ch` base, measured once and only if something
+        // asked for it. `style` now carries this node's resolved `font-size` and
+        // its face-selecting `font-*` properties — exactly, and only, what the port
+        // is promised — so the `0` glyph is measured in the face this node will
+        // actually paint in, at the size it will actually paint at. This is the
+        // measurement threaded INTO computed-value time: with it `ch` folds here
+        // like every other unit, and paint stops reading `0`.
+        //
+        // With no port, or a port that cannot measure, the deferred values are set
+        // unfolded and their `ch` terms stay symbolic — the pre-port behaviour, and
+        // still better than baking in `ch_base`'s `0.5em` substitute.
+        if !deferred.is_empty() {
+            let lengths = match ctx.metrics.and_then(|metrics| metrics.zero_advance(&style)) {
+                Some(ch_width) => lengths.with_ch_width(ch_width),
+                None => lengths,
+            };
+            for (property, value) in deferred {
                 style.set(property, value.map_value(|v| absolutize_value(v, &lengths)));
             }
         }
@@ -658,13 +783,45 @@ impl StyleResolver {
         let specified = self
             .resolve_property(PropertyId::FontSize, cascaded, custom, parent, rtl)
             .and_then(|value| value.as_length());
+        // `font-size: 2ch` needs the PARENT's `0` advance, not this node's — see
+        // `absolute_font_size`. Measured only when the declaration is actually a
+        // `ch`: the port shapes a glyph, and `font-size` is on every node while
+        // `font-size: <n>ch` is on almost none.
+        let parent_ch_width = specified
+            .filter(|length| length.is_ch())
+            .and(ctx.metrics)
+            .and_then(|metrics| metrics.zero_advance(&Self::font_context_of(parent)));
         absolute_font_size(
             specified,
             parent_font_size,
             ctx.root_font_size,
             ctx.viewport_width,
             ctx.viewport_height,
+            parent_ch_width,
         )
+    }
+
+    /// The style a [`ChMetrics`] port should measure to get the **parent's**
+    /// metrics, per CSS Values 4 §6.1.2.
+    ///
+    /// For a node with a parent this is simply the parent's computed style, which
+    /// already carries its resolved `font-size` and face.
+    ///
+    /// For the **root**, §6.1.2 says a font-relative unit on a `font-*` property
+    /// resolves *"against the computed metrics corresponding to the initial values
+    /// of the font and line-height properties, if the element has no parent"* — so
+    /// the answer is not "unmeasurable", it is "measure the initial font". That is
+    /// a style carrying the initial `font-size` and no `font-family`, which is
+    /// exactly what an implementor reads as the default face.
+    fn font_context_of(parent: Option<&ComputedStyle>) -> ComputedStyle {
+        parent.cloned().unwrap_or_else(|| {
+            let mut initial = ComputedStyle::new();
+            initial.set(
+                PropertyId::FontSize,
+                ComputedValue::length(Length::px(INITIAL_FONT_SIZE)),
+            );
+            initial
+        })
     }
 
     /// Whether this element's computed `direction` is `rtl`.
@@ -890,7 +1047,7 @@ mod tests {
 
     /// Root font-size 16 (the initial), viewport 800x600: the bases a test that
     /// is not about relative units resolves against.
-    fn ctx() -> ResolutionContext {
+    fn ctx() -> ResolutionContext<'static> {
         ResolutionContext::for_root(800.0, 600.0)
     }
 

@@ -87,6 +87,20 @@ impl BoxShadow {
         self.color
     }
 
+    /// Whether any of the four lengths is a `ch` term — the question
+    /// [`PropertyValue::uses_ch`](crate::property::PropertyValue::uses_ch) asks
+    /// before paying for a `0`-glyph measurement.
+    ///
+    /// Covers exactly the lengths `absolutize_shadow` folds, which is what makes
+    /// the predicate and the fold agree.
+    #[must_use]
+    pub const fn uses_ch(&self) -> bool {
+        self.offset_x().is_ch()
+            || self.offset_y().is_ch()
+            || self.blur().is_ch()
+            || self.spread().is_ch()
+    }
+
     /// Returns whether this is an `inset` shadow.
     #[must_use]
     pub const fn is_inset(&self) -> bool {

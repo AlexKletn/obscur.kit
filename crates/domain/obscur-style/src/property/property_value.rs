@@ -188,59 +188,58 @@ impl PropertyValue {
     /// first and measures only on a hit; the overwhelmingly common answer is
     /// `false`, and this scan allocates nothing to produce it.
     ///
-    /// # The arms that answer `false` while carrying lengths
+    /// # This must mirror `absolutize_value`
     ///
-    /// [`BoxShadow`](Self::BoxShadow), [`BackgroundSize`](Self::BackgroundSize)
-    /// and friends do hold [`Length`]s — including, in principle, `ch` ones — and
-    /// this still answers `false` for them. That is a **known gap**, not a
-    /// derivation from anything: `20ch` inside a `box-shadow` offset resolves to
-    /// `0`, silently.
+    /// This predicate exists to decide whether the computed-value step should pay
+    /// for a measurement before folding a value. It is therefore only correct if
+    /// it answers `true` for **every** value that fold could resolve a `ch` in —
+    /// a `false` here means the fold runs without a `ch` base, and any `ch` inside
+    /// survives as a symbolic term that paint reads as `0`.
     ///
-    /// The gap is one-directional and worth stating exactly, because the honest
-    /// answer is not the tidy one. `em` / `rem` / `vw` in those same properties
-    /// *are* honored: the computed-value step absolutizes every length a
-    /// [`PropertyValue`] carries, however nested. `ch` is the sole unit it cannot
-    /// fold there, because it needs the `0` glyph shaped and the computed-value
-    /// step has no shaper in reach. Only the callers that *can* measure — layout,
-    /// via [`ComputedStyle::uses_ch`](crate::computed::ComputedStyle::uses_ch) —
-    /// resolve `ch` at all, and they consume the value kinds below in already-
-    /// absolutized form without re-inspecting them for `ch`.
+    /// So the two walks are a pair: `absolutize_value` visits every [`Length`] a
+    /// [`PropertyValue`] carries, and this visits the same ones asking only
+    /// [`Length::is_ch`]. Both matches are exhaustive rather than wildcarded, so a
+    /// new length-bearing variant cannot quietly default to "no `ch` here" in
+    /// either.
     ///
-    /// So widening this predicate alone would buy nothing: a `true` here would
-    /// cost a shaping call whose measurement no consumer of those variants reads.
-    /// Closing the gap means threading a measurement into the computed-value step,
-    /// at which point these arms change with it.
-    ///
-    /// The match is deliberately exhaustive rather than wildcarded, so a new
-    /// length-bearing variant cannot quietly default to "no `ch` here".
+    /// This used to answer `false` for [`BoxShadow`](Self::BoxShadow),
+    /// [`BackgroundSize`](Self::BackgroundSize) and friends — a documented gap that
+    /// made `box-shadow: 1ch 0` resolve to `0` silently. That gap was a
+    /// *consequence* of `ch` being unresolvable at computed-value time: widening
+    /// the predicate alone would have bought a shaping call whose answer nothing
+    /// read. Now that [`ChMetrics`](crate::computed::ChMetrics) threads the
+    /// measurement into the fold, the answer is read, and these arms close with it.
     #[must_use]
     pub fn uses_ch(&self) -> bool {
         match self {
             Self::Length(length) => length.is_ch(),
             Self::Calc(expr) => expr.uses_ch(),
             Self::GridTracks(tracks) => tracks.uses_ch(),
-            // Carrying no length at all, or carrying lengths no `ch`-measuring
-            // caller reads back. See the note above.
+            Self::BoxShadow(shadows) => shadows.iter().any(BoxShadow::uses_ch),
+            Self::Filter(ops) => ops.iter().any(FilterOp::uses_ch),
+            Self::BackgroundSize(size) => size.uses_ch(),
+            Self::BackgroundPosition(position) => position.x().is_ch() || position.y().is_ch(),
+            Self::TransformOrigin(origin) => origin.x().is_ch() || origin.y().is_ch(),
+            Self::RadialGradient(gradient) => gradient.uses_ch(),
+            Self::ConicGradient(gradient) => gradient.uses_ch(),
+            Self::BackgroundLayers(layers) => layers.iter().any(BackgroundLayer::uses_ch),
+            // Carrying no length at all. `linear-gradient` carries an angle and
+            // stop offsets; `transform` and `filter: blur()` were flattened to
+            // numbers by the CSS lowering (so a relative unit is lost *there*, not
+            // here — see `absolutize_filter`); a `var()` reference is substituted
+            // before this is asked.
             Self::Keyword(_)
             | Self::Number(_)
             | Self::Color(_)
             | Self::LinearGradient(_)
-            | Self::RadialGradient(_)
-            | Self::ConicGradient(_)
             | Self::BackgroundImageUrl(_)
-            | Self::BackgroundLayers(_)
-            | Self::BackgroundSize(_)
-            | Self::BackgroundPosition(_)
             | Self::BackgroundRepeat(_)
             | Self::ObjectFit(_)
-            | Self::BoxShadow(_)
-            | Self::Filter(_)
             | Self::FontFamilies(_)
             | Self::GridLine(_)
             | Self::GridAreas(_)
             | Self::GridAreaName(_)
             | Self::Transform(_)
-            | Self::TransformOrigin(_)
             | Self::CustomRef(_)
             | Self::Inherit
             | Self::Initial
@@ -534,16 +533,19 @@ mod tests {
         assert!(!PropertyValue::Initial.uses_ch());
     }
 
+    /// This test used to assert the opposite, under the name
+    /// `uses_ch_is_false_for_a_box_shadow_which_is_a_known_gap`, and its comment
+    /// said: *"When a measurement reaches the computed-value step, this test should
+    /// flip."* [`ChMetrics`](crate::computed::ChMetrics) is that measurement, so it
+    /// has flipped.
     #[test]
-    fn uses_ch_is_false_for_a_box_shadow_which_is_a_known_gap() {
+    fn uses_ch_finds_a_ch_nested_in_a_box_shadow() {
         use crate::property::{BoxShadow, Length};
 
-        // Pinned as a GAP, not as intended behaviour: a `ch` inside a box-shadow
-        // resolves to 0. `em`/`rem` here are absolutized at computed-value time
-        // and do work; `ch` alone cannot be, because that step has no shaper.
-        // Answering `true` would cost a shaping call no consumer of this variant
-        // reads back, so the fix is upstream — see `uses_ch`'s docs. When a
-        // measurement reaches the computed-value step, this test should flip.
+        // A `ch` reachable only through a nested length: if this answered `false`
+        // the resolver would fold the shadow with no `ch` base and the offset would
+        // survive as a symbolic term that paint reads as 0 — the exact defect that
+        // made this a documented gap.
         let shadow = PropertyValue::BoxShadow(
             vec![BoxShadow {
                 offset_x: Length::Ch(1.0),
@@ -555,7 +557,23 @@ mod tests {
             }]
             .into_boxed_slice(),
         );
-        assert!(!shadow.uses_ch());
+        assert!(shadow.uses_ch());
+
+        // The same shadow with no `ch` must NOT fire: a false positive costs a
+        // shaping call on every ordinary stylesheet, which is what the deferral in
+        // `StyleResolver::resolve` exists to avoid.
+        let absolute = PropertyValue::BoxShadow(
+            vec![BoxShadow {
+                offset_x: Length::Em(1.0),
+                offset_y: Length::px(2.0),
+                blur: Length::px(0.0),
+                spread: Length::px(0.0),
+                color: None,
+                inset: false,
+            }]
+            .into_boxed_slice(),
+        );
+        assert!(!absolute.uses_ch());
     }
 
     #[test]

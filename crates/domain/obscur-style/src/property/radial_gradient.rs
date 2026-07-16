@@ -77,6 +77,20 @@ impl RadialGradient {
         self.center_y
     }
 
+    /// Whether the center or an explicit radius is a `ch` term.
+    ///
+    /// Covers exactly the lengths `absolutize_radial` folds; the stop offsets are
+    /// percentages, not lengths.
+    #[must_use]
+    pub const fn uses_ch(&self) -> bool {
+        self.center_x().is_ch()
+            || self.center_y().is_ch()
+            || match self.size() {
+                RadialSize::Length(length) => length.is_ch(),
+                _ => false,
+            }
+    }
+
     /// Returns the gradient's color stops.
     #[must_use]
     pub const fn stops(&self) -> &[GradientStop] {

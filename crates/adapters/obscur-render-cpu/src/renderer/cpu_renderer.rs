@@ -786,10 +786,12 @@ fn draw_shadow_approx(
         return;
     }
     let shadow_rect = Rect::new(Point::new(x, y), Size::new(w, h));
-    // Spec §7.1.1: an outset shadow's corner radii are the box radii grown by
-    // `+spread` (a sharp corner stays sharp), so the rounded corners on the
-    // spread-inflated rect stay concentric with the box's corners.
-    let path = Path::rounded_rect(shadow_rect, radii.offset(spread));
+    // CSS Backgrounds 3 §6.1.1: an outset shadow's corner radii are the box radii
+    // grown by `+spread` (a sharp corner stays sharp), so the rounded corners on
+    // the spread-inflated rect stay concentric with the box's corners — with
+    // §6.1.1's easing where a radius is smaller than the spread, which is why this
+    // is `spread_offset` and not the raw `offset` primitive §4.2 uses.
+    let path = Path::rounded_rect(shadow_rect, radii.spread_offset(spread));
     let Some(sk_path) = to_sk_path(&path) else {
         return;
     };
@@ -849,10 +851,14 @@ fn draw_inset_shadow_approx(
         Path::rounded_rect(rect, radii)
     } else {
         let inner = Rect::new(Point::new(ix, iy), Size::new(iw, ih));
-        // Spec §7.1.1: an inset shadow's radii are the box radii shrunk by
-        // `−spread` on the deflated inner rect (a sharp corner stays sharp), so
-        // the lit hole stays concentric with the box's rounded corners.
-        Path::rounded_rect_ring(rect, radii, inner, radii.offset(-spread))
+        // CSS Backgrounds 3 §6.1.1: an inset shadow CONTRACTS by `spread`, so its
+        // radii take `−spread` (a sharp corner stays sharp) and the lit hole stays
+        // concentric with the box's rounded corners. `spread_offset` handles the
+        // sign: a positive spread shrinks here and is a plain subtraction, while a
+        // negative authored spread grows the hole and takes §6.1.1's easing —
+        // the spec's "in the case of an inner shadow, less than the absolute value
+        // of a negative spread distance" trigger.
+        Path::rounded_rect_ring(rect, radii, inner, radii.spread_offset(-spread))
     };
     let Some(sk_path) = to_sk_path(&path) else {
         return;
@@ -1752,6 +1758,128 @@ mod tests {
         assert_eq!(
             renderer.supports_effect(SceneEffect::Shadow),
             SupportLevel::Limited
+        );
+    }
+
+    #[test]
+    fn a_spread_shadows_corner_is_eased_not_grown_raw() {
+        // Spec §6.1.1, in pixels: the rule is only real if the rasterizer obeys it.
+        // A 100x100 box with a 50px radius and a 100px spread (r = .5, the spec's
+        // own ratio). The shadow rect is the box inflated by the spread — origin
+        // (0,0), 300x300 — and its corner radius is
+        //   50 + 100 x (1 + (.5 - 1)^3) = 137.5,   NOT the raw 50 + 100 = 150.
+        // Neither radius is clamped by §4.5 on a 300x300 rect (137.5*2 and 150*2
+        // both fit), so nothing downstream can mask the difference.
+        //
+        // The two arcs differ where it counts: on the top-left diagonal a corner of
+        // radius R starts painting at t = R * (1 - 1/sqrt(2)), i.e. t = 40.27 for
+        // 137.5 but t = 43.93 for 150. Pixel (42,42) sits between them — inside the
+        // eased corner, cut away by the raw one. It is the whole bug, one pixel.
+        let rect = Rect::new(Point::new(100.0, 100.0), Size::new(100.0, 100.0));
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawShadow {
+            rect,
+            radii: CornerRadii::uniform(50.0),
+            color: Color::BLACK,
+            blur: 0.0,
+            spread: 100.0,
+            offset: (0.0, 0.0),
+            inset: false,
+        }]);
+        let submission = FrameSubmission::new(RenderFrame::new(
+            SceneSnapshot::new(list, SceneGeneration::from_raw(1)),
+            Size::new(300.0, 300.0),
+        ));
+        let mut renderer = CpuRenderer::default();
+        let _ = renderer.render(&submission, &bitmap_target(300.0, 300.0));
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+
+        // Control: deep inside the shadow, painted under either radius. If this is
+        // blank the probe below proves nothing (a shadow that never drew would
+        // "pass" a test asserting absence).
+        assert!(
+            pixmap.pixel(150, 150).expect("center").alpha() > 0,
+            "the spread shadow must actually be drawn"
+        );
+        // Control: (20,20) is outside BOTH arcs (t = 20 < 40.27) — this is the
+        // corner being cut at all, and it anchors which corner is under test.
+        assert_eq!(
+            pixmap.pixel(20, 20).expect("outer corner").alpha(),
+            0,
+            "the shadow's top-left corner must be rounded away here"
+        );
+        // Control: (60,60) is inside both (t = 60 > 43.93).
+        assert!(
+            pixmap.pixel(60, 60).expect("inner diagonal").alpha() > 0,
+            "the corner must be filled past both arcs"
+        );
+        // The discriminating pixel. Raw growth (radius 150) rounds this away.
+        assert!(
+            pixmap.pixel(42, 42).expect("the eased corner").alpha() > 0,
+            "§6.1.1: the spread shadow's corner radius must be the eased 137.5, \
+             not the raw 150 — a raw +spread cuts this pixel away"
+        );
+    }
+
+    #[test]
+    fn an_inset_shadows_negative_spread_eases_the_hole_it_grows() {
+        // §6.1.1's *second* trigger, which only an inset shadow can reach: "or in
+        // the case of an inner shadow, less than the absolute value of a negative
+        // spread distance". An inset shadow CONTRACTS by `spread`, so a negative
+        // spread GROWS its hole — and growth is the eased direction.
+        //
+        // 600x600 box, 50px radius, spread -100, offset (300,300). The lit hole is
+        // the box grown by 100 and shifted by 300: origin (200,200), 800x800, with
+        // radii 50 + 100 x (1 + (.5 - 1)^3) = 137.5 eased, 150 raw. The offset is
+        // what makes this observable at all: with no offset a negative-spread hole
+        // swallows the whole box and nothing paints.
+        //
+        // On the hole's top-left diagonal the arc starts at t = (200 + R) - R/sqrt(2),
+        // i.e. 240.27 eased vs 243.93 raw. Pixel (242,242) is inside the eased hole
+        // (unpainted) but outside the raw one (painted) — the sign of the bug is
+        // INVERTED here versus the drop-shadow probe, which is exactly why this
+        // case needs its own test.
+        let rect = Rect::new(Point::new(0.0, 0.0), Size::new(600.0, 600.0));
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawShadow {
+            rect,
+            radii: CornerRadii::uniform(50.0),
+            color: Color::BLACK,
+            blur: 0.0,
+            spread: -100.0,
+            offset: (300.0, 300.0),
+            inset: true,
+        }]);
+        let submission = FrameSubmission::new(RenderFrame::new(
+            SceneSnapshot::new(list, SceneGeneration::from_raw(1)),
+            Size::new(600.0, 600.0),
+        ));
+        let mut renderer = CpuRenderer::default();
+        let _ = renderer.render(&submission, &bitmap_target(600.0, 600.0));
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+
+        // Control: well outside the hole — the inset shadow is drawn at all.
+        assert!(
+            pixmap.pixel(100, 100).expect("lit band").alpha() > 0,
+            "the inset shadow must actually be drawn"
+        );
+        // Control: deep inside the hole under either radius — the hole exists.
+        assert_eq!(
+            pixmap.pixel(400, 400).expect("hole centre").alpha(),
+            0,
+            "the lit hole must be punched out"
+        );
+        // Control: inside the hole's corner bite under either radius, so the corner
+        // is genuinely rounded and this diagonal is the one under test.
+        assert!(
+            pixmap.pixel(230, 230).expect("corner bite").alpha() > 0,
+            "the hole's corner must be rounded away here"
+        );
+        // The discriminating pixel: a raw -spread grows the hole's radius to 150
+        // and uncovers this pixel.
+        assert_eq!(
+            pixmap.pixel(242, 242).expect("the eased hole edge").alpha(),
+            0,
+            "§6.1.1: an inset shadow's negative spread must ease the hole to 137.5, \
+             not grow it raw to 150 — a raw radius leaves this pixel lit"
         );
     }
 

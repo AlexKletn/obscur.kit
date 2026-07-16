@@ -39,6 +39,18 @@ pub enum BackgroundLayer {
 }
 
 impl BackgroundLayer {
+    /// Whether this layer carries a `ch` term.
+    ///
+    /// Mirrors `absolutize_layer`: only the radial and conic forms carry lengths.
+    #[must_use]
+    pub const fn uses_ch(&self) -> bool {
+        match self {
+            Self::Radial(gradient) => gradient.uses_ch(),
+            Self::Conic(gradient) => gradient.uses_ch(),
+            Self::Linear(_) | Self::Url(_) => false,
+        }
+    }
+
     /// Collapses a single layer back to the flat one-value
     /// [`PropertyValue`] it corresponds to.
     ///
