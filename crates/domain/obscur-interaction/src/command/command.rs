@@ -1,5 +1,7 @@
 //! The [`Command`] unified action descriptor (spec §6.7).
 
+use obscur_identity::InternedSymbol;
+
 use crate::command::Shortcut;
 
 /// A unified action descriptor (spec §6.7).
@@ -11,10 +13,26 @@ use crate::command::Shortcut;
 /// shortcut, icon); the dynamic runtime state (enabled/checked/visible) lives in
 /// [`CommandState`](crate::command::CommandState), and dispatch lives in a
 /// handler outside this pure-domain crate.
+///
+/// # Why the id is an `InternedSymbol`
+///
+/// The id is the **app-owned command symbol** every live surface already routes:
+/// the symbol [`CommandRouter`](crate::command::CommandRouter) resolves a
+/// shortcut to, the symbol a `MenuItem` fires, and the symbol the runtime
+/// registers a handler for. It is deliberately *not* a string. This crate has no
+/// string→symbol interner and cannot reach one — [`InternedSymbol::from_raw`] is
+/// the type's only constructor, and the workspace's single interner belongs to
+/// the CSS compiler (a `frontend` crate this `domain` crate may not depend on),
+/// mints sequential ids that would collide with app-assigned symbols, and
+/// documents itself as not shared. A string-keyed id could therefore never name
+/// the thing that routes: it would be a parallel identity no surface could act
+/// on. Keying on the routed symbol is what lets one `Command` drive every
+/// surface.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Command {
-    /// The stable command id linking every surface to this action.
-    id: Box<str>,
+    /// The stable command symbol linking every surface to this action; the same
+    /// symbol shortcuts resolve to and handlers are registered for.
+    id: InternedSymbol,
     /// The human-readable title shown in menus, palettes, and toolbars.
     title: Box<str>,
     /// The keyboard shortcut, if any, that triggers this command.
@@ -24,12 +42,12 @@ pub struct Command {
 }
 
 impl Command {
-    /// Creates a command with a stable `id` and human-readable `title`, with no
-    /// shortcut or icon.
+    /// Creates a command with the app-owned command symbol `id` and
+    /// human-readable `title`, with no shortcut or icon.
     #[must_use]
-    pub fn new(id: impl Into<Box<str>>, title: impl Into<Box<str>>) -> Self {
+    pub fn new(id: InternedSymbol, title: impl Into<Box<str>>) -> Self {
         Self {
-            id: id.into(),
+            id,
             title: title.into(),
             shortcut: None,
             icon: None,
@@ -50,10 +68,10 @@ impl Command {
         self
     }
 
-    /// Returns the stable command id.
+    /// Returns the stable command symbol every surface routes.
     #[must_use]
-    pub fn id(&self) -> &str {
-        &self.id
+    pub const fn id(&self) -> InternedSymbol {
+        self.id
     }
 
     /// Returns the human-readable title.
@@ -80,10 +98,13 @@ mod tests {
     use super::*;
     use crate::command::{LogicalKey, Modifier};
 
+    /// The app-owned command symbol, as an application would define it.
+    const CMD_SAVE: InternedSymbol = InternedSymbol::from_raw(0x5A7E);
+
     #[test]
     fn new_has_no_shortcut_or_icon() {
-        let cmd = Command::new("file.save", "Save");
-        assert_eq!(cmd.id(), "file.save");
+        let cmd = Command::new(CMD_SAVE, "Save");
+        assert_eq!(cmd.id(), CMD_SAVE);
         assert_eq!(cmd.title(), "Save");
         assert_eq!(cmd.shortcut(), None);
         assert_eq!(cmd.icon(), None);
@@ -92,7 +113,7 @@ mod tests {
     #[test]
     fn builder_sets_shortcut_and_icon() {
         let sc = Shortcut::new(LogicalKey::character('s')).with(Modifier::Ctrl);
-        let cmd = Command::new("file.save", "Save")
+        let cmd = Command::new(CMD_SAVE, "Save")
             .with_shortcut(sc)
             .with_icon("save");
 

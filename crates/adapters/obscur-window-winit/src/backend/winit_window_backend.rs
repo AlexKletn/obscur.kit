@@ -19,6 +19,7 @@ use obscur_windowing::request::{
 use obscur_windowing::window::{Window, WindowEvent, WindowRelation, WindowState};
 
 use super::winit_event_loop::{BackendState, WinitAppHandler};
+use super::winit_window::WinitWindow;
 
 /// A [`WindowBackend`] backed by winit 0.30 (spec §6.1-6.6, §2.7).
 ///
@@ -126,6 +127,56 @@ impl WinitWindowBackend {
     #[must_use]
     pub fn app_handler(&self) -> WinitAppHandler {
         WinitAppHandler::new(Arc::clone(&self.state))
+    }
+
+    /// Returns a shared handle to the live winit window materialized for `id`,
+    /// or `None` if no OS window stands behind that id *yet* (spec §6.1).
+    ///
+    /// # Why this exists, and why it is here rather than on the port
+    ///
+    /// A host that renders needs the *platform* handle, not just an id: wgpu
+    /// builds a `Surface<'static>` from an `Arc<Window>`. Without some way to get
+    /// one, the port is unusable for exactly the hosts it exists to serve —
+    /// `create_window` hands back an id and the live window it names is
+    /// unreachable, which is why every windowed example calls
+    /// `event_loop.create_window` itself and this backend went a whole campaign
+    /// with no caller.
+    ///
+    /// A `winit::window::Window` plainly cannot appear on [`WindowBackend`], a
+    /// domain trait that a WASM or headless backend also implements. But it would
+    /// **overclaim to say the domain has no vocabulary for a window handle at
+    /// all**: `raw-window-handle` 0.6 is platform-neutral, is already in this
+    /// tree (winit depends on it), covers Web as well as native, and is precisely
+    /// what wgpu consumes —
+    /// `SurfaceTarget::DisplayAndWindow(Box<dyn DisplayAndWindowHandle + 'window>)`
+    /// (`wgpu-29.0.3/src/api/surface.rs:280`). A port method handing back
+    /// `Box<dyn HasWindowHandle + HasDisplayHandle + 'static>` is a real
+    /// alternative, and it is the one that would let a host stay backend-agnostic
+    /// all the way to its swapchain.
+    ///
+    /// It is **not taken here**, and the reason is a tradeoff rather than an
+    /// impossibility: it puts a platform-handle dependency into the pure
+    /// `obscur-windowing` domain crate, and it obliges every backend — including
+    /// the headless [`NullWindowBackend`](obscur_windowing::port::NullWindowBackend) —
+    /// to have an answer for a method most of them can only refuse. The escape
+    /// hatch is offered on this adapter instead: the one layer that is already
+    /// winit-specific, and which a host choosing this backend already names.
+    /// The cost of that choice is real and should be stated: a host's
+    /// swapchain setup is pinned to winit even though the rest of its
+    /// window handling is not.
+    ///
+    /// # `None` is the deferred window, not an error
+    ///
+    /// Creation is deferred (see the type-level docs): `create_window` mints the
+    /// id now and the [`WinitAppHandler`](super::WinitAppHandler) builds the OS
+    /// window on the next loop turn. Between those two moments the id is valid
+    /// and the window does not exist, so this answers `None` rather than block or
+    /// fabricate a handle. A host resolves it after the pump — the arrival of
+    /// [`WindowEvent::Created`] from `poll_window_events` is the signal that it
+    /// will now answer `Some`. An unknown or closed id also answers `None`.
+    #[must_use]
+    pub fn native_window(&self, id: WindowId) -> Option<Arc<winit::window::Window>> {
+        self.lock().windows.get(&id).map(WinitWindow::shared)
     }
 
     /// Mints the next fresh [`WindowId`] from the owned monotonic counter.
@@ -420,6 +471,275 @@ fn drops_presentation_controls(mode: &PresentationMode) -> bool {
         || mode.safe_escape != SafeEscapePolicy::Allow
 }
 
+/// The live end-to-end proof that a host can reach a real OS window through this
+/// backend (spec §6.1).
+///
+/// Every other test in this crate is pure — it exercises a projection or a
+/// decision with no platform underneath. That is deliberate, and it is also why
+/// this backend went a whole campaign with zero consumers: nothing here ever
+/// proved that `create_window` *produces* a window a host can render to, only
+/// that the request was well-formed. This one opens a real window.
+///
+/// # Why there is exactly one test here
+///
+/// winit permits **one event loop per process, ever** — a second `build()`
+/// returns [`EventLoopError::RecreationAttempt`](winit::error::EventLoopError)
+/// ("The event loop can't be re-created", `winit-0.30/src/error.rs:39`). A second
+/// live test would therefore not fail, it would *silently skip*, and which of the
+/// two skipped would depend on test-harness ordering. So the whole lifecycle —
+/// deferred creation, materialization, handle identity, close — is asserted
+/// across the turns of this single loop.
+///
+/// # It is `#[ignore]`d, and that is deliberate — read this before un-ignoring
+///
+/// This test **does not run** under `cargo test --workspace`. Run it explicitly:
+///
+/// ```text
+/// cargo test -p obscur-window-winit --lib -- --ignored a_host_reaches
+/// ```
+///
+/// Two independent reasons, and either alone would be enough:
+///
+/// 1. **It would prove nothing where CI runs it.** `build()` fails with no
+///    display, so headlessly [`display_event_loop`] answers `None` and the test
+///    returns green having asserted *nothing*. A test that passes vacuously in
+///    the one place it runs unattended is worse than no test: it reports a
+///    working path it never checked.
+/// 2. **It would be a standing hazard where it *does* run.** On a developer
+///    machine with a display it opens and destroys two real OS windows on every
+///    `cargo test --workspace`. Hyprland — this project's development
+///    compositor — has a live SEGV in its `SSwipeUpdateEvent` handler when a
+///    window is created or destroyed while a touchpad gesture is in flight. That
+///    is Hyprland's bug and not this toolkit's, but an unignored test makes every
+///    routine test run roll that die, and it has already taken the compositor
+///    down once during this work.
+///
+/// So the value it has is as an *attended* proof: run by hand, on a machine with
+/// a display, by someone who is changing this path and wants it checked. It is
+/// the only test in this crate that proves `create_window` yields a window a host
+/// can actually render to — every other test here, including
+/// `native_window_is_none_until_the_handler_pumps` below, is pure and can only
+/// prove the request was well-formed or the deferred state is honest.
+///
+/// **Consequence, stated plainly: the `Some` half of [`WinitWindowBackend::native_window`]
+/// — the half the six windowed examples exist to use — has no automated
+/// regression gate.** Nothing in CI will catch its breaking. That is a real
+/// residual gap, not a solved problem, and it is bounded by the fact that no
+/// display is available to CI rather than by anything this crate chose.
+#[cfg(all(test, target_os = "linux"))]
+mod live_tests {
+    use super::*;
+    use obscur_windowing::window::WindowProperties;
+    use winit::application::ApplicationHandler;
+    use winit::event::WindowEvent as WinitWindowEvent;
+    use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+    use winit::window::WindowId as WinitWindowId;
+
+    use super::super::winit_event_loop::{UserEvent, WinitAppHandler};
+
+    /// Builds the process's one event loop, or `None` where there is no display.
+    ///
+    /// `with_any_thread` is required, not a convenience: winit panics when an
+    /// event loop is built off the main thread ("Attempting to create the event
+    /// loop off the main thread will panic", `winit-0.30/src/event_loop.rs:90`),
+    /// and the Rust test harness runs every test on a spawned thread. The X11
+    /// extension trait is imported rather than the Wayland one for no reason
+    /// beyond having to pick: both are implemented for the same
+    /// `EventLoopBuilder<T>` and both assign the same backend-agnostic field —
+    /// `self.platform_specific.any_thread = any_thread` at `x11.rs:134` and
+    /// `wayland.rs:73`, where `any_thread: bool` is one field on the *shared*
+    /// linux `PlatformSpecificEventLoopAttributes` (`platform_impl/linux/mod.rs:57`),
+    /// not a per-backend one. So either import works under either session, and
+    /// importing both would only make the call ambiguous.
+    fn display_event_loop() -> Option<EventLoop<UserEvent>> {
+        use winit::platform::x11::EventLoopBuilderExtX11;
+
+        match EventLoop::<UserEvent>::with_user_event()
+            .with_any_thread(true)
+            .build()
+        {
+            Ok(event_loop) => Some(event_loop),
+            // Print, never swallow. A silent `.ok()` here is how this test passes
+            // while proving nothing — the reason it skipped must reach the log so
+            // "0 windows opened" can be told apart from "the path is fine".
+            Err(error) => {
+                eprintln!("[live] no event loop, skipping: {error}");
+                None
+            }
+        }
+    }
+
+    /// What the probe managed to observe from inside the running loop.
+    ///
+    /// Each field is an `Option` so an assertion cannot pass by never having run:
+    /// a turn that never happened leaves `None`, which fails against the
+    /// `Some(true)` the test demands.
+    #[derive(Debug, Default)]
+    struct Observations {
+        /// Whether each window's platform handle was reachable once pumped.
+        handles_after_pump: Option<(bool, bool)>,
+        /// Whether each id's handle is *its own* window — the window whose native
+        /// events route back to that same id.
+        each_handle_routes_to_its_own_id: Option<(bool, bool)>,
+        /// Whether the port reported both materializations to the host.
+        created_events: Option<bool>,
+        /// Whether the closed window's handle went, and the other one stayed.
+        handles_after_closing_the_first: Option<(bool, bool)>,
+    }
+
+    /// A host handler driving the whole window lifecycle through the port.
+    ///
+    /// It is also the smallest demonstration of the composition a real host
+    /// performs: [`WinitAppHandler`] is itself a whole [`ApplicationHandler`], so
+    /// a host that wants its own callbacks *wraps* it and forwards, rather than
+    /// replacing it — and holds the backend alongside, the two sharing state.
+    struct LiveProbe {
+        /// The backend's handler, forwarded to on every callback.
+        inner: WinitAppHandler,
+        /// The port handle the host issues its operations on.
+        backend: WinitWindowBackend,
+        /// The two windows this probe created through the port. Two, not one,
+        /// because §6.1 is a *multi-window* API and because one window cannot
+        /// tell "the handle for this id" apart from "a handle".
+        ids: (WindowId, WindowId),
+        /// Turns of `about_to_wait` seen so far.
+        turn: u32,
+        /// What was observed, read by the test after the loop returns.
+        observed: Observations,
+    }
+
+    impl LiveProbe {
+        /// Returns whether the live handle for `id` is the window whose native
+        /// events route back to `id`.
+        fn handle_routes_to_own_id(&self, id: WindowId) -> bool {
+            self.backend.native_window(id).is_some_and(|window| {
+                self.backend.lock().winit_to_domain.get(&window.id()) == Some(&id)
+            })
+        }
+    }
+
+    impl ApplicationHandler<UserEvent> for LiveProbe {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            self.inner.resumed(event_loop);
+        }
+
+        fn window_event(
+            &mut self,
+            event_loop: &ActiveEventLoop,
+            id: WinitWindowId,
+            event: WinitWindowEvent,
+        ) {
+            self.inner.window_event(event_loop, id, event);
+        }
+
+        fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+            // Poll, not Wait: the close issued on turn 0 is serviced by turn 1's
+            // pump, and under `Wait` that turn would never come on an idle
+            // compositor — the loop would block for an input event that is not
+            // coming and the test would hang.
+            event_loop.set_control_flow(ControlFlow::Poll);
+            self.inner.about_to_wait(event_loop);
+            let (first, second) = self.ids;
+
+            if self.turn == 0 {
+                self.observed.handles_after_pump = Some((
+                    self.backend.native_window(first).is_some(),
+                    self.backend.native_window(second).is_some(),
+                ));
+                self.observed.each_handle_routes_to_its_own_id = Some((
+                    self.handle_routes_to_own_id(first),
+                    self.handle_routes_to_own_id(second),
+                ));
+                let events = self.backend.poll_window_events();
+                self.observed.created_events = Some(
+                    events.contains(&(first, WindowEvent::Created))
+                        && events.contains(&(second, WindowEvent::Created)),
+                );
+                // Close only the first; the next turn's pump performs it.
+                self.backend.close_window(CloseWindow::request(first));
+            } else {
+                self.observed.handles_after_closing_the_first = Some((
+                    self.backend.native_window(first).is_some(),
+                    self.backend.native_window(second).is_some(),
+                ));
+                event_loop.exit();
+            }
+            self.turn += 1;
+        }
+    }
+
+    /// The claim the whole fix rests on: a host can create windows through the
+    /// port and get back the platform handles it needs to present to — and each
+    /// handle is *the window the handler materialized for that id*, not some
+    /// window and not a fabrication.
+    ///
+    /// Two windows, and the identity assertion is deliberately not `is_some()`.
+    /// `winit_to_domain` is the map that routes native events back to a domain id,
+    /// so proving each returned handle's winit id is the key that maps back to the
+    /// id it was asked for proves the host's swapchain and the backend's event
+    /// routing name the same OS window. A `native_window` that ignored its `id` and
+    /// handed out *a* live window would satisfy every `is_some()` here and still
+    /// fail — which is what the second window buys.
+    #[test]
+    #[ignore = "opens real OS windows: attended proof only, and vacuous headless — see the module docs"]
+    fn a_host_reaches_its_own_real_windows_through_the_port() {
+        let Some(event_loop) = display_event_loop() else {
+            return; // Headless: nothing to open a window on. See the module docs.
+        };
+
+        let mut backend = WinitWindowBackend::new();
+        let mut create = |title: &str| {
+            backend
+                .create_window(CreateWindow::new(
+                    WindowProperties::default().with_title(title),
+                ))
+                .expect("a top-level modeless window is satisfiable")
+        };
+        let ids = (create("port probe A"), create("port probe B"));
+
+        // Deferred creation: both ids are already valid and neither OS window is
+        // there. This is the state a host sees between `create_window` and the
+        // first loop turn, and it must be an honest `None`.
+        assert!(backend.native_window(ids.0).is_none());
+        assert!(backend.native_window(ids.1).is_none());
+
+        let mut probe = LiveProbe {
+            inner: backend.app_handler(),
+            backend,
+            ids,
+            turn: 0,
+            observed: Observations::default(),
+        };
+        event_loop.run_app(&mut probe).expect("the loop runs");
+
+        let observed = probe.observed;
+        assert_eq!(
+            observed.handles_after_pump,
+            Some((true, true)),
+            "the handler materializes every queued window on its first turn, and \
+             the host must be able to reach them: this is what each windowed \
+             example calls `event_loop.create_window` itself to get"
+        );
+        assert_eq!(
+            observed.each_handle_routes_to_its_own_id,
+            Some((true, true)),
+            "each handle handed to the host must be the window whose native events \
+             route back to the id it was asked for"
+        );
+        assert_eq!(
+            observed.created_events,
+            Some(true),
+            "the port must report the materializations the host waits on"
+        );
+        assert_eq!(
+            observed.handles_after_closing_the_first,
+            Some((false, true)),
+            "a closed window's handle must not outlive the close, and closing one \
+             window must not take its sibling with it"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,6 +772,29 @@ mod tests {
         assert_eq!(&*record.properties().title, "Main");
         // The create request was queued for the handler to materialize.
         assert_eq!(backend.lock().pending_creates.len(), 2);
+    }
+
+    /// The deferred window, stated as a contract: between `create_window` and the
+    /// handler's first turn the id is valid and no OS window stands behind it, so
+    /// the platform handle is honestly absent rather than fabricated. An unknown
+    /// id is the same absence.
+    ///
+    /// This is the half of `native_window` that is decidable without a display,
+    /// so it is the half that runs in CI; the `Some` half needs a real window and
+    /// lives in `live_tests`, which is inert headlessly.
+    #[test]
+    fn native_window_is_none_until_the_handler_pumps() {
+        let mut backend = backend();
+        let id = backend
+            .create_window(CreateWindow::new(WindowProperties::default()))
+            .expect("create always succeeds (deferred)");
+
+        assert!(backend.window(id).is_some(), "the domain record exists now");
+        assert!(
+            backend.native_window(id).is_none(),
+            "but no OS window does until the handler pumps"
+        );
+        assert!(backend.native_window(WindowId::from_raw(404)).is_none());
     }
 
     /// §6.1: winit has no owner relation and no modality. Returning an id here

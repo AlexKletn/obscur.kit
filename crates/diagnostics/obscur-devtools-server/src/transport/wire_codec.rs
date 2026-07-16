@@ -429,6 +429,7 @@ fn push_protocol_error(buf: &mut Vec<u8>, error: &ProtocolError) {
         ProtocolError::UnknownCommand => push_u8(buf, 3),
         ProtocolError::MalformedMessage => push_u8(buf, 4),
         ProtocolError::ControlDisabled => push_u8(buf, 5),
+        ProtocolError::InjectionUnavailable => push_u8(buf, 6),
     }
 }
 
@@ -444,6 +445,7 @@ fn read_protocol_error(cursor: &mut Cursor<'_>) -> Result<ProtocolError, WireErr
         3 => Ok(ProtocolError::UnknownCommand),
         4 => Ok(ProtocolError::MalformedMessage),
         5 => Ok(ProtocolError::ControlDisabled),
+        6 => Ok(ProtocolError::InjectionUnavailable),
         other => Err(WireError::UnknownTag(other)),
     }
 }
@@ -753,6 +755,10 @@ mod tests {
                 required: PermissionScope::Control,
             }),
             ClientBound::Error(ProtocolError::LimitExceeded { limit: 64 }),
+            // A host that cannot receive injected input must be able to *say* so
+            // over the socket; a refusal that does not survive the wire is a
+            // refusal the CLI never hears.
+            ClientBound::Error(ProtocolError::InjectionUnavailable),
         ];
         for message in messages {
             let bytes = WireCodec::encode_client_bound(&message);

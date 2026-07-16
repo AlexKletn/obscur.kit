@@ -29,6 +29,16 @@ pub enum ProtocolError {
     MalformedMessage,
     /// Control operations are disabled in this (production) build (spec §7.7).
     ControlDisabled,
+    /// The command was authorized, but this host has nothing that can receive an
+    /// injected event, so it will not pretend to have delivered one (spec §7.6).
+    ///
+    /// Distinct from [`Unauthorized`](Self::Unauthorized) on purpose: the client
+    /// holds the `Inject` scope and the endpoint says so. What is missing is a
+    /// runtime on the other side — a host serving inspect-only state (the
+    /// `obscur-devtools serve` demo host has no runtime at all) has nowhere to
+    /// put a synthetic click. Telling the client "unauthorized" would send it
+    /// hunting for a token it already has.
+    InjectionUnavailable,
 }
 
 impl fmt::Display for ProtocolError {
@@ -47,6 +57,9 @@ impl fmt::Display for ProtocolError {
             Self::MalformedMessage => write!(f, "malformed protocol message"),
             Self::ControlDisabled => {
                 write!(f, "control operations are disabled in this build")
+            }
+            Self::InjectionUnavailable => {
+                write!(f, "this host accepts no injected input")
             }
         }
     }
@@ -69,10 +82,25 @@ mod tests {
             ProtocolError::UnknownCommand,
             ProtocolError::MalformedMessage,
             ProtocolError::ControlDisabled,
+            ProtocolError::InjectionUnavailable,
         ];
         for e in errs {
             assert!(!format!("{e}").is_empty());
         }
+    }
+
+    #[test]
+    fn injection_unavailable_is_not_an_authorization_failure() {
+        // The two mean different things to a client: one says "get a better
+        // token", the other says "this host has no runtime to click on".
+        let e = ProtocolError::InjectionUnavailable;
+        assert_ne!(
+            e,
+            ProtocolError::Unauthorized {
+                required: PermissionScope::Inject
+            }
+        );
+        assert!(!format!("{e}").contains("requires"));
     }
 
     #[test]

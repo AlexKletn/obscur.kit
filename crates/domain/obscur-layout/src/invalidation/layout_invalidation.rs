@@ -9,21 +9,33 @@ use std::collections::HashMap;
 /// with the typed [`LayoutInvalidationReason`] that first invalidated it
 /// (spec §4.3).
 ///
-/// # Status: the layout phase does not consume this
+/// # Status: the layout phase consumes this, for measure only
 ///
-/// This type is what §4.3's "typed invalidation reasons" *should* be, and it is
-/// not yet what the runtime runs on. `UiRuntime::layout_is_needed` populates one
-/// of these from real per-node style deltas and then reads **nothing** off it: it
-/// takes the accompanying `InvalidationRouter`'s `needs_layout()` boolean and
-/// throws the accumulator away. Layout is still all-or-nothing per frame —
-/// `LayoutCoordinator::layout_editing` takes no dirty set and arranges the whole
-/// tree.
+/// `UiRuntime::layout_phase` populates one of these from real per-node style
+/// deltas and hands it to `LayoutCoordinator::layout_invalidated`, which drops
+/// exactly the `MeasureCache` entries it can have invalidated and serves every
+/// other node's size without re-measuring. So a hover that changes one node's
+/// width re-measures that node and its ancestor chain, not the tree.
 ///
-/// So the per-node half of §4.3 is real on the **style** phase only
-/// (`StyleCoordinator::resolve_incremental` consumes a `StyleInvalidation`), and
-/// the equivalent for layout is unbuilt. Do not read the rest of this doc as a
-/// description of shipped behaviour; it describes the contract this type offers to
-/// a consumer that does not exist yet.
+/// What that does **not** yet cover, stated plainly:
+///
+/// * **Arrange is not incremental.** The walk still visits every node and re-runs
+///   every container's algorithm; only `measure` is gated on this set. That is
+///   deliberate — it is what makes the reuse safe, since all of §4.3's
+///   propagation is still performed — but the phase remains O(nodes) per frame.
+/// * **The `note_*` gates below are not what the runtime calls.** It records
+///   through [`invalidate`](Self::invalidate) /
+///   [`note_style_changed`](Self::note_style_changed) only. The downward gate is
+///   instead exact-by-construction in the measure cache's key (a child
+///   re-measures precisely when its constraints differ), and the upward gate is a
+///   whole-ancestor-chain closure rather than a
+///   [`PropagationResult`]-driven early stop, because nothing populates a
+///   [`LayoutContext`]'s [`LayoutDependency`](crate::context::LayoutDependency) in
+///   production. Until something does,
+///   [`note_constraints_changed`](Self::note_constraints_changed),
+///   [`note_child_changed`](Self::note_child_changed) and
+///   [`note_upward`](Self::note_upward) are offered to a consumer that does not
+///   exist yet — read them as a contract, not as shipped behaviour.
 ///
 /// It is **decoupled from the tree**: it neither stores nor walks parent/child
 /// links. The runtime performs the actual tree walk — finding parents, children,

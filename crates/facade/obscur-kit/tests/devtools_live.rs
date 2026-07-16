@@ -25,7 +25,7 @@ use obscur_kit::devtools_server::auth::Authenticator;
 use obscur_kit::devtools_server::bridge::{NullInspectSource, RuntimeBridge};
 use obscur_kit::devtools_server::endpoint::DevToolsEndpoint;
 use obscur_kit::devtools_server::transport::{
-    ClientBound, EventQueue, SocketClient, SocketListener, SocketTransport,
+    ClientBound, EventQueue, InjectionQueue, SocketClient, SocketListener, SocketTransport,
 };
 use obscur_kit::geometry::Size;
 use obscur_kit::identity::{ComponentId, InternedSymbol, RuntimeId};
@@ -222,20 +222,25 @@ fn external_client_injects_a_click_that_drives_the_runtime() {
     ]));
     runtime.render_now(&btn, std::slice::from_ref(&sheet));
 
-    // Serve one session with inject scope; the thread returns the endpoint so the
-    // host (this thread) can drain what the client injected.
+    // Serve one session with inject scope on its own thread — which is the real
+    // shape of a host: the endpoint owns the session (token, scopes, audit log)
+    // and a `UiRuntime` is not `Send`, so the runtime stays here. The host holds
+    // the `InjectionQueue` and hands the endpoint only the push end, so what the
+    // client injects lands on a queue THIS thread can drain.
+    let injections = InjectionQueue::new();
+    let sink = injections.sink();
     let listener = SocketListener::bind_loopback().expect("bind");
     let addr = listener.local_addr().expect("addr").expect("tcp addr");
     let handle = thread::spawn(move || {
         let mut auth = Authenticator::new();
         auth.register_token("agent", ScopeSet::all());
-        let mut endpoint = DevToolsEndpoint::new(auth, RuntimeBridge::new(NullInspectSource));
+        let mut endpoint = DevToolsEndpoint::new(auth, RuntimeBridge::new(NullInspectSource))
+            .with_injection_sink(sink);
         endpoint.enable();
         let stream = listener.accept().expect("accept");
         SocketTransport::new(stream)
             .serve(&mut endpoint)
             .expect("serve");
-        endpoint
     });
 
     // The external agent injects a press+release over the socket at the button.
@@ -249,24 +254,33 @@ fn external_client_injects_a_click_that_drives_the_runtime() {
     .into_iter()
     .enumerate()
     {
-        client
+        let reply = client
             .command(&CommandMessage::new(
                 CommandId::new(id as u64 + 1),
                 CommandKind::Inject(event),
             ))
             .expect("inject io");
+        // The acknowledgement is the endpoint's claim that the event was
+        // delivered — assert it, because the whole §7-C finding was that this
+        // very reply was a lie.
+        assert_eq!(
+            reply,
+            ClientBound::Acknowledged(CommandId::new(id as u64 + 1)),
+            "a host with a runtime acknowledges"
+        );
     }
     drop(client);
+    handle.join().expect("join");
 
-    // Host drains the queued injections and applies them to the runtime.
-    let mut endpoint = handle.join().expect("join");
-    let injected = endpoint.drain_injections();
+    // Host drains the queued injections — on its own thread, from its own handle
+    // — and applies them to the runtime.
+    let drained = injections.drain();
     assert_eq!(
-        injected.len(),
+        drained.len(),
         2,
-        "both injected events reached the endpoint queue"
+        "both injected events reached the host's queue"
     );
-    for event in injected {
+    for event in drained {
         apply_injected(&mut runtime, event);
     }
 
@@ -274,6 +288,66 @@ fn external_client_injects_a_click_that_drives_the_runtime() {
         clicked.get(),
         "the externally injected click dispatched the button command"
     );
+}
+
+/// The disjoint half of the test above: an inspect-only host — one that serves
+/// real live state but installs no injection sink — refuses the click instead of
+/// acknowledging it (§7-C).
+#[test]
+fn an_inspect_only_host_refuses_an_injected_click_over_the_socket() {
+    use obscur_kit::devtools_protocol::error::ProtocolError;
+    use obscur_kit::devtools_protocol::message::InjectedEvent;
+
+    let sheet = compile(".btn { width: 100px; height: 40px }");
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 100.0));
+    runtime.render_now(&View::default(), std::slice::from_ref(&sheet));
+
+    // A host that publishes its real tree, and nothing else: no runtime is
+    // reachable from the serving thread, which is precisely the shape every
+    // windowed host in this workspace has.
+    let source = inspect_source_from(&runtime);
+    let listener = SocketListener::bind_loopback().expect("bind");
+    let addr = listener.local_addr().expect("addr").expect("tcp addr");
+    let handle = thread::spawn(move || {
+        let mut auth = Authenticator::new();
+        auth.register_token("agent", ScopeSet::all());
+        let mut endpoint = DevToolsEndpoint::new(auth, RuntimeBridge::new(source));
+        endpoint.enable();
+        let stream = listener.accept().expect("accept");
+        SocketTransport::new(stream)
+            .serve(&mut endpoint)
+            .expect("serve");
+    });
+
+    let mut client = SocketClient::connect_loopback(addr).expect("connect");
+    let request = HandshakeRequest::new(VersionRange::exact(ProtocolVersion::CURRENT), "agent");
+    let response = client.handshake(&request).expect("handshake");
+    assert!(response.is_accepted(), "the inject scope IS granted here");
+
+    let reply = client
+        .command(&CommandMessage::new(
+            CommandId::new(1),
+            CommandKind::Inject(InjectedEvent::PointerDown { x: 50, y: 20 }),
+        ))
+        .expect("inject io");
+    assert_eq!(
+        reply,
+        ClientBound::Error(ProtocolError::InjectionUnavailable),
+        "a host with nowhere to deliver a click must not acknowledge one"
+    );
+
+    // Reading the same session still works — the refusal is about the runtime's
+    // reachability, not about the session.
+    let reply = client
+        .command(&CommandMessage::new(
+            CommandId::new(2),
+            CommandKind::Inspect(Inspectable::Tree),
+        ))
+        .expect("inspect io");
+    assert!(matches!(reply, ClientBound::Snapshot(_)), "{reply:?}");
+
+    drop(client);
+    handle.join().expect("join");
 }
 
 /// Every §7.6 inspect target the runtime can genuinely answer, from a live tree.

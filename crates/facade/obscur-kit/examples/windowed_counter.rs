@@ -15,14 +15,46 @@
 //!
 //! # Wiring
 //!
-//! 1. **Window / event loop** — a winit 0.30 [`ApplicationHandler`]: `resumed`
-//!    creates the window (held as an [`Arc`] so wgpu can build a
-//!    `Surface<'static>` from it) and initialises wgpu + the swapchain surface;
-//!    `window_event` handles resize, close, and redraw. (The toolkit also ships
-//!    `obscur_kit::window_winit::backend::WinitWindowBackend`, the pull-based
-//!    [`WindowBackend`] port; here we create the window directly in `resumed`,
-//!    which is the simplest correct path and keeps the render-side wiring the
-//!    focus of the example.)
+//! 1. **Window / event loop** — the window is created **through the toolkit's
+//!    own §6 window port**, not by calling winit directly. The host issues
+//!    [`WindowBackend::create_window`] on a
+//!    [`WinitWindowBackend`] with domain [`WindowProperties`], and gets a
+//!    [`WindowId`] back straight away; creation is *deferred*, so the OS window
+//!    is materialized by the backend's [`WinitAppHandler`] on the next event-loop
+//!    turn. This host therefore **wraps** that handler — every winit callback
+//!    forwards to it first — and then reads what it left: the platform handle via
+//!    [`WinitWindowBackend::native_window`] (an [`Arc<Window>`], which is what
+//!    wgpu needs to build a `Surface<'static>`), and the window's lifecycle via
+//!    the port's [`WindowBackend::poll_window_events`] — domain `Resized` drives
+//!    the swapchain, domain `CloseRequested` exits.
+//!
+//!    **Input is deliberately not on that path.** The port carries §6.1 window
+//!    lifecycle, not keystrokes: pointer/keyboard/IME stay on the raw winit
+//!    events, converted by the adapter's `PointerConverter`/`KeyboardConverter`.
+//!    That split is the design, not a gap.
+//!
+//!    **What this host still reaches around the port for** — stated because
+//!    "created through the port" invites the reading that *everything* goes
+//!    through it, and that is not true here:
+//!
+//!    - `window.request_redraw()` — frame scheduling is §3.5, not §6. The port
+//!      does have a path (`UserEvent::WakeUp` makes the handler redraw every live
+//!      window); this host calls the handle directly because it already holds it.
+//!    - `window.set_ime_allowed(true)` — §5.12 IME, not a §6 window property.
+//!    - `window.inner_size()` / `window.scale_factor()` at startup — the port
+//!      reports later changes as domain `Resized` / `ScaleFactorChanged`, but has
+//!      no pull-based accessor for the *initial* extent.
+//!
+//!    So the honest claim is narrower than "the host is backend-agnostic": window
+//!    **creation, lifecycle and close** go through the port and name no winit
+//!    type; presentation and input do not, and the `Arc<Window>` needed for the
+//!    swapchain is fetched from the winit adapter, not the port. See
+//!    `WinitWindowBackend::native_window` for why that handle is on the adapter.
+//!
+//!    Beware one unit trap when copying this host: domain `Resized` carries
+//!    **physical** pixels while `WindowProperties::size` is **logical**. This
+//!    example is correct only because both coincide at scale 1 — see the known
+//!    defect noted on `window_winit::conversion::WindowEventConverter::convert`.
 //! 2. **GPU device + surface** — wgpu `Instance → Surface → Adapter → Device →
 //!    Queue`, with the device/queue handed to `VelloDevice::new` so the adapter
 //!    never owns the async `request_adapter` path (spec §2.7). The surface is
@@ -132,13 +164,16 @@ use obscur_kit::text_harfrust::{FontRegistry, HarfrustShaper};
 use obscur_kit::text_unicode::UnicodeTextItemizer;
 use obscur_kit::view::view::{CLASS, View, ViewNode, ViewProperty, ViewValue};
 use obscur_kit::widgets::button::Button;
+use obscur_kit::window_winit::backend::{UserEvent, WinitAppHandler, WinitWindowBackend};
 use obscur_kit::window_winit::conversion::{KeyboardConverter, PointerConverter};
+use obscur_kit::windowing::port::WindowBackend;
+use obscur_kit::windowing::request::{CloseWindow, CreateWindow};
+use obscur_kit::windowing::window::{WindowEvent as DomainWindowEvent, WindowProperties};
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
 use winit::event::{ElementState, Ime, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::PhysicalKey as WinitPhysicalKey;
-use winit::window::{Window, WindowAttributes, WindowId};
+use winit::window::{Window, WindowId};
 
 /// Commands the two buttons fire when activated (interned symbol handles).
 const CMD_DECREMENT: InternedSymbol = InternedSymbol::from_raw(0x1001);
@@ -148,8 +183,20 @@ const CMD_INCREMENT: InternedSymbol = InternedSymbol::from_raw(0x1002);
 /// swapchain surface, the embeddable [`UiRuntime`] frame driver, and the counter
 /// UI state.
 struct WindowedCounter {
-    /// The live winit window (an [`Arc`] so wgpu can build a `Surface<'static>`
-    /// from it), created lazily in [`ApplicationHandler::resumed`].
+    /// The toolkit's §6 window backend: the host issues `create_window` /
+    /// `close_window` / `poll_window_events` on this, never on winit directly.
+    backend: WinitWindowBackend,
+    /// The backend's own event-loop handler, which this host wraps. Every winit
+    /// callback forwards to it first; it materializes the deferred window,
+    /// applies queued property work, and converts native events into the domain
+    /// events `poll_window_events` hands back.
+    handler: WinitAppHandler,
+    /// The identity the port minted for our window. Valid from `create_window`
+    /// onward — before the OS window behind it exists.
+    window_id: obscur_kit::identity::WindowId,
+    /// The live platform window, fetched from the backend via `native_window`
+    /// once the handler has materialized it (an [`Arc`] so wgpu can build a
+    /// `Surface<'static>` from it).
     window: Option<Arc<Window>>,
     /// The on-screen swapchain surface, created alongside the window.
     surface: Option<VelloSurface>,
@@ -182,7 +229,7 @@ impl WindowedCounter {
     /// on `resumed`). The runtime starts at a placeholder viewport matching the
     /// initial window size; [`sync_viewport`](Self::sync_viewport) sets the real
     /// physical extent once the surface exists.
-    fn new() -> Self {
+    fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let count = Rc::new(Cell::new(0));
         let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(480.0, 240.0));
 
@@ -209,7 +256,22 @@ impl WindowedCounter {
         }
         runtime.set_stylesheets(vec![counter_stylesheet()]);
 
-        Self {
+        // Create the window THROUGH THE PORT: domain properties in, a `WindowId`
+        // out, no winit type named. The id is live immediately; the OS window it
+        // names is built by `handler` on the first event-loop turn (deferred
+        // creation), which is why `window`/`surface` stay `None` until `resumed`.
+        let mut backend = WinitWindowBackend::new();
+        let window_id = backend.create_window(CreateWindow::new(
+            WindowProperties::default()
+                .with_title("obscur-kit — windowed counter")
+                .with_size(Size::new(480.0, 240.0)),
+        ))?;
+        let handler = backend.app_handler();
+
+        Ok(Self {
+            backend,
+            handler,
+            window_id,
             window: None,
             surface: None,
             device: None,
@@ -217,7 +279,7 @@ impl WindowedCounter {
             runtime,
             count,
             cursor: (0.0, 0.0),
-        }
+        })
     }
 
     /// Assembles a domain button [`PointerEvent`] at the tracked cursor.
@@ -248,6 +310,48 @@ impl WindowedCounter {
             let config = surface.config();
             let viewport = Size::new(config.width as f32, config.height as f32);
             self.runtime.set_viewport(viewport);
+        }
+    }
+
+    /// Drains the **port's** domain window events and acts on them (spec §6.1).
+    ///
+    /// This is the §6.1 lifecycle path: the backend's handler converted the native
+    /// events, and the host reads them as backend-agnostic
+    /// [`DomainWindowEvent`]s — the same values a WASM or headless backend would
+    /// report — rather than matching on winit variants.
+    ///
+    /// - `Resized` reconfigures the swapchain and the layout viewport.
+    /// - `CloseRequested` is a *request*: §6.1 leaves the decision to the
+    ///   application, so the host answers it by asking the port to close the
+    ///   window and then leaving the loop.
+    fn drain_window_events(&mut self, event_loop: &ActiveEventLoop) {
+        for (id, event) in self.backend.poll_window_events() {
+            match event {
+                DomainWindowEvent::Resized(size) => {
+                    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                    let (width, height) = (size.width as u32, size.height as u32);
+                    if let (Some(surface), Some(device)) =
+                        (self.surface.as_mut(), self.device.as_ref())
+                    {
+                        surface.resize(device, width, height);
+                    }
+                    // Keep the layout viewport in step with the new extent (the
+                    // surface/device borrows above have ended) and schedule a
+                    // frame so the next redraw re-lays-out under it.
+                    self.sync_viewport();
+                    self.runtime.request_frame(FrameReason::WindowChange);
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                }
+                DomainWindowEvent::CloseRequested => {
+                    // We honor it: close through the port, then leave.
+                    let result = self.backend.close_window(CloseWindow::request(id));
+                    println!("[window] close requested -> port answered {result:?}");
+                    event_loop.exit();
+                }
+                _ => {}
+            }
         }
     }
 
@@ -314,32 +418,38 @@ impl WindowedCounter {
     }
 }
 
-impl ApplicationHandler for WindowedCounter {
-    /// Creates the window, the swapchain surface, and the GPU-backed renderer
-    /// once the platform is ready.
+impl ApplicationHandler<UserEvent> for WindowedCounter {
+    /// Picks up the window the **port** created, then builds the swapchain
+    /// surface and the GPU-backed renderer on it.
+    ///
+    /// The window itself is not created here — `WindowedCounter::new` already
+    /// asked the port for it. What happens here is the other half of deferred
+    /// creation: forwarding to `self.handler` is what materializes the queued
+    /// OS window, and `native_window` is what hands this host the `Arc<Window>`
+    /// wgpu needs. Forward first, read second; the reverse order sees `None`.
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        // Let the backend's handler service the loop turn: it builds the window
+        // queued by `create_window` and enumerates the displays.
+        self.handler.resumed(event_loop);
+
         // `resumed` can fire more than once (e.g. on Android); build only once.
         if self.window.is_some() {
             return;
         }
 
-        // 1. Create the real winit window, owned via `Arc` so wgpu can build a
-        //    `Surface<'static>` from a cloned handle.
-        let attributes = WindowAttributes::default()
-            .with_title("obscur-kit — windowed counter")
-            .with_inner_size(LogicalSize::new(480.0, 240.0));
-        let window = match event_loop.create_window(attributes) {
-            Ok(window) => Arc::new(window),
-            Err(error) => {
-                eprintln!("failed to create window: {error}");
-                event_loop.exit();
-                return;
-            }
+        // 1. Take the live platform handle for the id the port minted for us.
+        //    `None` here means the backend could not materialize the window;
+        //    it records the reason rather than panicking.
+        let Some(window) = self.backend.native_window(self.window_id) else {
+            eprintln!("the window backend did not materialize a window");
+            event_loop.exit();
+            return;
         };
         // Allow the platform IME to deliver composition events for this window
         // (spec §5.12). A real app toggles this per focused editable; the counter
         // has no text field, so it is enabled once here — the `WindowEvent::Ime`
-        // arm below then drives `UiRuntime::handle_ime` end-to-end.
+        // arm below then drives `UiRuntime::handle_ime` end-to-end. IME is not a
+        // §6 window property, so it is set on the platform handle directly.
         window.set_ime_allowed(true);
 
         // 2. Initialise wgpu + the swapchain surface and build the Vello
@@ -395,29 +505,25 @@ impl ApplicationHandler for WindowedCounter {
         }
     }
 
-    /// Routes window events: resize reconfigures the swapchain, redraw presents a
-    /// frame, and close exits.
+    /// Routes window events.
+    ///
+    /// Every native event is forwarded to the backend's handler first, which
+    /// converts the §6.1 lifecycle ones (resize, close, focus, scale) into domain
+    /// [`DomainWindowEvent`]s for [`Self::drain_window_events`] to act on. What is
+    /// handled *here* is what the window port deliberately does not carry: pointer,
+    /// keyboard and IME input, plus the redraw that presents a frame.
     fn window_event(
         &mut self,
         event_loop: &ActiveEventLoop,
-        _window_id: WindowId,
+        window_id: WindowId,
         event: WindowEvent,
     ) {
+        // Forward first: this is what buffers the domain lifecycle events that
+        // `drain_window_events` reads on the next `about_to_wait`.
+        self.handler
+            .window_event(event_loop, window_id, event.clone());
+
         match event {
-            WindowEvent::Resized(new_size) => {
-                if let (Some(surface), Some(device)) = (self.surface.as_mut(), self.device.as_ref())
-                {
-                    surface.resize(device, new_size.width, new_size.height);
-                }
-                // Keep the layout viewport in step with the new extent (the
-                // surface/device borrows above have ended) and schedule a frame
-                // so the next redraw re-lays-out under it.
-                self.sync_viewport();
-                self.runtime.request_frame(FrameReason::WindowChange);
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
-            }
             WindowEvent::CursorMoved { position, .. } => {
                 // Track the raw position for the geometric click regions, then
                 // feed the *real* domain path: winit → `PointerConverter::moved`
@@ -504,9 +610,29 @@ impl ApplicationHandler for WindowedCounter {
                 }
             }
             WindowEvent::RedrawRequested => self.render_frame(),
-            WindowEvent::CloseRequested => event_loop.exit(),
+            // Close is NOT handled here: the handler converted it into a domain
+            // `CloseRequested`, and `drain_window_events` decides what to do with
+            // it — which is what §6.1 means by "the application decides whether to
+            // honor it".
             _ => {}
         }
+    }
+
+    /// Services the backend's queued work each turn, then acts on the domain
+    /// window events it produced.
+    ///
+    /// Forwarding to the handler here is not optional: it is what applies any
+    /// operation the host issued on the backend between turns (the
+    /// `close_window` below, property updates, later `create_window` calls).
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.handler.about_to_wait(event_loop);
+        self.drain_window_events(event_loop);
+    }
+
+    /// Forwards the frame scheduler's cross-thread wake-up to the backend, which
+    /// turns it into a redraw request on every live window (spec §3.5).
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
+        self.handler.user_event(event_loop, event);
     }
 }
 
@@ -755,8 +881,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("== obscur-kit windowed counter ==");
     println!("(full backend: winit window + wgpu/Vello GPU renderer, on-screen present)\n");
 
-    let event_loop = EventLoop::new()?;
-    let mut app = WindowedCounter::new();
+    // A `UserEvent` loop, because the backend's handler is an
+    // `ApplicationHandler<UserEvent>`: that is the §3.5 cross-thread wake-up
+    // channel a frame scheduler nudges the loop through.
+    let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
+    let mut app = WindowedCounter::new()?;
     event_loop.run_app(&mut app)?;
     Ok(())
 }

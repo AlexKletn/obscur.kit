@@ -1,6 +1,8 @@
 //! Command module.
 mod command;
 pub use command::Command;
+mod command_registry;
+pub use command_registry::CommandRegistry;
 mod command_router;
 pub use command_router::CommandRouter;
 mod command_state;

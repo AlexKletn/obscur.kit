@@ -139,3 +139,51 @@ fn a_scope_authorised_subscribe_is_still_denied_by_a_host_that_cannot_push() {
     drop(client);
     handle.join().expect("join");
 }
+
+#[test]
+fn a_scope_authorised_inject_is_still_refused_by_a_host_with_no_runtime() {
+    // §7-C, the write half, and the mirror of the test above: `obscur-devtools
+    // inject click 40 12` against this host printed `acknowledged command #1` and
+    // NOTHING drained the queue — the endpoint held the events in a field the
+    // host's own thread could not reach. The inject scope IS granted here, so
+    // this is not a permission refusal; it is the host declining to claim a
+    // click it has no runtime to deliver to.
+    let (addr, handle) = spawn_host("dev", ScopeSet::all());
+
+    let mut client = SocketClient::connect_loopback(addr).expect("connect");
+    assert!(
+        cli::handshake(&mut client, "dev")
+            .expect("io")
+            .is_accepted()
+    );
+
+    for (id, event) in [
+        InjectedEvent::PointerDown { x: 40, y: 12 },
+        InjectedEvent::PointerUp { x: 40, y: 12 },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let reply = cli::inject(&mut client, id as u64 + 1, event).expect("io");
+        assert_eq!(
+            reply,
+            ClientBound::Error(ProtocolError::InjectionUnavailable),
+            "the demo host owns no runtime, so it must not acknowledge a click"
+        );
+    }
+
+    // The refusal is distinguishable from a permission failure in what the CLI
+    // prints, which is the whole reason it is its own variant.
+    assert!(
+        cli::format_client_bound(&ClientBound::Error(ProtocolError::InjectionUnavailable))
+            .contains("InjectionUnavailable")
+    );
+
+    // A read on the same session still works: refusing to inject is not the host
+    // refusing to talk.
+    let reply = cli::inspect(&mut client, 3, Inspectable::Tree).expect("io");
+    assert!(matches!(reply, ClientBound::Snapshot(_)), "{reply:?}");
+
+    drop(client);
+    handle.join().expect("join");
+}

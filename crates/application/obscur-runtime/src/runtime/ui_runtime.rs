@@ -20,7 +20,8 @@ use obscur_geometry::{AffineTransform, Point, Rect, Size};
 use obscur_identity::SignalId;
 use obscur_identity::{InternedSymbol, NodeId, RuntimeId};
 use obscur_interaction::command::{
-    CommandRouter, KeyEvent, LogicalKey, Modifier, Modifiers, NamedKey, Shortcut,
+    Command, CommandRegistry, CommandRouter, CommandState, KeyEvent, LogicalKey, Modifier,
+    Modifiers, NamedKey, Shortcut,
 };
 use obscur_interaction::hover::{HoverChain, HoverTransition};
 use obscur_interaction::pointer::{PointerEvent, PointerEventKind};
@@ -71,10 +72,10 @@ use std::collections::VecDeque;
 use crate::component::{ComponentStore, GuardedRender};
 use crate::orchestration::{
     AnimatedKind, AnimationBinding, ComputedStyles, CssMotionRules, DragCoordinator, DragOutcome,
-    EditingView, InspectInfo, LayoutBoxes, LayoutCoordinator, MotionCoordinator, NodeInspection,
-    PreeditView, PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint, StyleCoordinator,
-    StyleInputs, StyleMatchingCoordinator, TreeElement, TreeInspection, overflow_scrolls,
-    overlay_commands, root_font_size, scroll_containers,
+    EditingView, InspectInfo, LayoutBoxes, LayoutCoordinator, MeasureCache, MotionCoordinator,
+    NodeInspection, PreeditView, PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint,
+    StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement, TreeInspection,
+    overflow_scrolls, overlay_commands, root_font_size, scroll_containers,
 };
 use crate::orchestration::{alignment_for, direction_for, white_space_for};
 use crate::recovery::RecoveryResult;
@@ -179,6 +180,16 @@ pub struct UiRuntime {
     style: StyleCoordinator,
     /// Drives layout over the retained tree.
     layout: LayoutCoordinator,
+    /// The `measure(node, constraints)` results retained across frames — §4.2's
+    /// "layout context … may cache measure/layout results", and what makes §3.4
+    /// step 8 *incremental*: the frame's [`LayoutInvalidation`] evicts the entries
+    /// it can have changed and the rest are served without re-measuring.
+    ///
+    /// Every reuse rests on the preconditions
+    /// [`LayoutCoordinator::layout_invalidated`] documents, so anything that
+    /// changes a layout input **outside** the computed styles the classifier diffs
+    /// must clear it — see the shaping-port setters, which do.
+    measure_cache: MeasureCache,
     /// Composes the paint-ordered display list.
     scene_composer: SceneCoordinator,
     /// The event-driven scheduler gating [`run_due_frame`](Self::run_due_frame).
@@ -325,6 +336,13 @@ pub struct UiRuntime {
     /// the resolved command through the same handler registry a pointer click
     /// uses.
     commands: CommandRouter,
+    /// The unified action descriptors and their live state, keyed by the same
+    /// command symbol the router resolves to and handlers are registered for
+    /// (spec §6.7). Populated by [`register_command`](Self::register_command);
+    /// consulted by [`dispatch_command`](Self::dispatch_command), so a
+    /// registered command that is disabled or hidden is inert on *every*
+    /// surface — shortcut, menu, and click alike.
+    command_registry: CommandRegistry,
     /// The modifier keys currently held, folded from physical modifier-key
     /// press/release transitions so shortcut matching sees the live chord.
     modifiers: Modifiers,
@@ -605,6 +623,7 @@ impl UiRuntime {
             matcher: StyleMatchingCoordinator::new(),
             style: StyleCoordinator::new(),
             layout: LayoutCoordinator::new(),
+            measure_cache: MeasureCache::new(),
             scene_composer: SceneCoordinator::new(),
             scheduler: FrameScheduler::new(),
             pseudo: PseudoStates::new(),
@@ -627,6 +646,7 @@ impl UiRuntime {
             change_handlers: HashMap::new(),
             editing: None,
             commands: CommandRouter::new(),
+            command_registry: CommandRegistry::new(),
             modifiers: Modifiers::new(),
             input_queue: VecDeque::new(),
             input_dispatches: Vec::new(),
@@ -1226,6 +1246,10 @@ impl UiRuntime {
     /// determinism, so all default-path tests are unchanged.
     pub fn set_text_shaper(&mut self, shaper: Box<dyn TextShaper>) {
         self.scene_composer.set_text_shaper(shaper);
+        // The measure cache's retained sizes were produced by the OUTGOING port:
+        // a different one shapes/wraps to different sizes, and that is a layout
+        // input no computed-style diff can see. Drop them (spec §4.3).
+        self.measure_cache.clear();
     }
 
     /// Installs a text `itemizer` on the owned scene coordinator, replacing the
@@ -1239,6 +1263,10 @@ impl UiRuntime {
     /// unset keeps the single-run default, preserving headless determinism.
     pub fn set_text_itemizer(&mut self, itemizer: Box<dyn TextItemizer>) {
         self.scene_composer.set_itemizer(itemizer);
+        // The measure cache's retained sizes were produced by the OUTGOING port:
+        // a different one shapes/wraps to different sizes, and that is a layout
+        // input no computed-style diff can see. Drop them (spec §4.3).
+        self.measure_cache.clear();
     }
 
     /// Installs a font `resolver` on the owned scene coordinator, replacing the
@@ -1251,6 +1279,10 @@ impl UiRuntime {
     /// it unset falls every run back to the primary face (font `0`).
     pub fn set_font_resolver(&mut self, resolver: Box<dyn FontResolver>) {
         self.scene_composer.set_font_resolver(resolver);
+        // The measure cache's retained sizes were produced by the OUTGOING port:
+        // a different one shapes/wraps to different sizes, and that is a layout
+        // input no computed-style diff can see. Drop them (spec §4.3).
+        self.measure_cache.clear();
     }
 
     /// Installs a `hyphenator` on the owned scene coordinator, replacing the
@@ -1266,6 +1298,10 @@ impl UiRuntime {
     /// preserves headless determinism, so all default-path tests are unchanged.
     pub fn set_hyphenator(&mut self, hyphenator: Box<dyn Hyphenator>) {
         self.scene_composer.set_hyphenator(hyphenator);
+        // The measure cache's retained sizes were produced by the OUTGOING port:
+        // a different one shapes/wraps to different sizes, and that is a layout
+        // input no computed-style diff can see. Drop them (spec §4.3).
+        self.measure_cache.clear();
     }
 
     /// Requests a frame for `reason`, returning the scheduler's admission
@@ -2166,12 +2202,16 @@ impl UiRuntime {
         //
         //    The plan's flag is a conservative upper bound derived from the frame
         //    REASON; now that the reconcile result and the real computed styles
-        //    exist, refine it with what ACTUALLY changed (spec §3.4 phase 5, §4.3)
-        //    — a hover that only shifts a fill reuses every retained box, even on
-        //    the reactive path where every frame is classified structural.
-        let layout_needed =
-            self.layout_is_needed(plan, &ctx, first_frame, reconciled, &computed, &delta);
-        let relaid_out = if layout_needed {
+        //    exist, refine it into what ACTUALLY changed (spec §3.4 phase 5 + step
+        //    8, §4.3) — a hover that only shifts a fill reuses every retained box,
+        //    even on the reactive path where every frame is classified structural,
+        //    and a hover that DOES move one box re-measures that box's contexts
+        //    rather than the tree.
+        let layout_phase =
+            self.layout_phase(plan, &ctx, first_frame, reconciled, &computed, &delta);
+        let relaid_out = if matches!(layout_phase, LayoutPhase::Skip) {
+            false
+        } else {
             let root_font = root_font_size(&computed, self.tree.root());
             // `ch` is the one unit that cannot be folded from numbers the
             // resolver already holds: it is the `0` glyph's advance, so it must be
@@ -2227,7 +2267,20 @@ impl UiRuntime {
             // `tree` and `scene_composer` are disjoint fields, so this is a legal
             // split borrow.
             let editing = self.editing_view();
-            let boxes = self.layout.layout_editing(
+            // §3.4 step 8: **incremental** layout. The classifier above named the
+            // contexts whose inputs moved; hand that set — and the measure cache
+            // carried over from the last laid-out frame — to the coordinator, which
+            // drops exactly the entries the set can have invalidated and serves the
+            // rest without re-measuring. `Full` passes `None`, which drops the whole
+            // cache and reproduces the historical all-or-nothing pass byte-for-byte.
+            //
+            // `layout`, `tree`, `measure_cache` and `scene_composer` are disjoint
+            // fields: a legal split borrow.
+            let dirty = match &layout_phase {
+                LayoutPhase::Invalidated(dirty) => Some(dirty),
+                LayoutPhase::Skip | LayoutPhase::Full => None,
+            };
+            let boxes = self.layout.layout_invalidated(
                 &self.tree,
                 &layout_styles,
                 &computed,
@@ -2239,6 +2292,8 @@ impl UiRuntime {
                 self.scene_composer.paragraph(),
                 self.scene_composer.hyphenator(),
                 editing,
+                &self.measure_cache,
+                dirty,
             );
             let relaid_out = !boxes.is_empty();
             self.boxes = boxes;
@@ -2261,8 +2316,6 @@ impl UiRuntime {
                 ctx.id(),
             );
             relaid_out
-        } else {
-            false
         };
 
         // 5. Compose: build the display list, install it, publish a snapshot.
@@ -3173,7 +3226,18 @@ impl UiRuntime {
     /// With no handler registered this is a no-op that returns `false` and
     /// schedules no frame, so an unbound command (or one whose handler the app
     /// never registered) can never panic or perturb runtime state.
+    ///
+    /// A command **registered** in the [`command_registry`](Self::command_registry)
+    /// whose [`CommandState`] is not actionable (disabled or hidden) is inert:
+    /// its handler does not run and no frame is requested, whichever surface
+    /// asked — a keyboard shortcut, a menu item, or a pointer click all funnel
+    /// through here, so one state governs every surface (spec §6.7). A symbol
+    /// with no registered command is unconstrained, so applications routing raw
+    /// symbols without a descriptor are unaffected.
     fn dispatch_command(&mut self, command: InternedSymbol) -> bool {
+        if !self.command_registry.permits_dispatch(command) {
+            return false;
+        }
         let ran = if let Some(handler) = self.handlers.get_mut(&command) {
             handler();
             true
@@ -4422,6 +4486,50 @@ impl UiRuntime {
         &self.commands
     }
 
+    /// Registers a unified [`Command`] descriptor and binds its shortcut, if it
+    /// declares one (spec §6.7).
+    ///
+    /// This is the single registration that lights up every surface at once. The
+    /// command's [`id`](Command::id) is the app-owned symbol the application
+    /// already registers a handler for via [`on_command`](Self::on_command) and
+    /// binds `on-click` to in the View, so:
+    ///
+    /// - its [`shortcut`](Command::shortcut) is bound into the
+    ///   [`CommandRouter`] here — no separate [`bind_command`](Self::bind_command)
+    ///   call, and no chance of the menu and the keyboard disagreeing about
+    ///   which chord runs the action;
+    /// - its [`title`](Command::title) and enabled-ness drive a kit-rendered
+    ///   menu built with `Menu::from_registry`;
+    /// - its [`CommandState`] gates [`dispatch_command`](Self::dispatch_command),
+    ///   so [`set_command_state`](Self::set_command_state) disabling it stops the
+    ///   shortcut, the menu item, and the click together.
+    ///
+    /// Re-registering a symbol replaces its descriptor and resets its state.
+    /// Registering does not itself schedule a frame.
+    pub fn register_command(&mut self, command: Command) {
+        if let Some(shortcut) = command.shortcut() {
+            self.commands.bind(shortcut, command.id());
+        }
+        self.command_registry.register(command);
+    }
+
+    /// Returns the unified action descriptors and their live state (spec §6.7).
+    #[must_use]
+    pub const fn command_registry(&self) -> &CommandRegistry {
+        &self.command_registry
+    }
+
+    /// Sets the live [`CommandState`] of a registered command, returning whether
+    /// a command was registered under `command` (spec §6.7).
+    ///
+    /// Because [`dispatch_command`](Self::dispatch_command) consults this state,
+    /// disabling or hiding a command here makes it inert on every surface at
+    /// once. Setting state does not itself schedule a frame; the next frame
+    /// rebuilds any menu from the registry.
+    pub fn set_command_state(&mut self, command: InternedSymbol, state: CommandState) -> bool {
+        self.command_registry.set_state(command, state)
+    }
+
     /// Returns the modifier keys currently held (folded from physical modifier
     /// key transitions seen by [`handle_key`](Self::handle_key)).
     #[must_use]
@@ -4632,7 +4740,7 @@ impl UiRuntime {
     ///
     /// # Why `reconciled` and not `plan.reconcile()`
     ///
-    /// Identical to the reasoning in [`layout_is_needed`](Self::layout_is_needed):
+    /// Identical to the reasoning in [`layout_phase`](Self::layout_phase):
     /// the reactive path classifies every frame as structural, so gating on the
     /// plan would never take this path from a real windowed host. Reconcile reports
     /// whether it actually changed anything, and an empty commit proves the tree is
@@ -4758,8 +4866,9 @@ impl UiRuntime {
         )
     }
 
-    /// Refines the plan's conservative layout flag with the **actual** per-node
-    /// changes (spec §3.4 phase 5 "classify invalidation", §4.3).
+    /// Refines the plan's conservative layout flag into **what** this frame's
+    /// layout phase must do, from the actual per-node changes (spec §3.4 phase 5
+    /// "classify invalidation" + step 8 "perform incremental layout", §4.3).
     ///
     /// [`FramePlan`] derives its layout flag from the frame's [`FrameReason`]
     /// alone, so *any* hover asks for a full relayout even when the rule only
@@ -4768,16 +4877,26 @@ impl UiRuntime {
     /// ([`PropertyId::affects_layout`]). For the two hot non-structural reasons
     /// this routes the real per-node style deltas through the
     /// [`InvalidationRouter`] — feeding the domain accumulators the invalidation
-    /// model was built for — and answers `false` when no node's box can have
-    /// moved, so the whole layout phase is skipped and the retained boxes (and
-    /// hit-test index) carry over.
+    /// model was built for — and returns:
+    ///
+    /// * [`Skip`](LayoutPhase::Skip) when no node's box can have moved, so the
+    ///   whole phase is skipped and the retained boxes (and hit-test index) carry
+    ///   over;
+    /// * [`Invalidated`](LayoutPhase::Invalidated) carrying the very
+    ///   [`LayoutInvalidation`] the router filled, naming the contexts that must be
+    ///   re-measured — everything else is served from the retained
+    ///   [`MeasureCache`];
+    /// * [`Full`](LayoutPhase::Full) when the frame cannot say, which re-measures
+    ///   the tree exactly as it always did.
     ///
     /// Conservative by construction — it only ever *removes* provably redundant
     /// work:
     /// * a plan that already skips layout is left alone;
-    /// * a first frame, or a reconcile that ACTUALLY changed the tree, lays out;
-    /// * any reason outside the refined set below keeps the plan's answer;
-    /// * a moved viewport / scroll offset, or a changed node count, forces layout;
+    /// * a first frame, or a reconcile that ACTUALLY changed the tree, lays out in
+    ///   full;
+    /// * any reason outside the refined set below lays out in full;
+    /// * a moved viewport / scroll offset, or a changed node count, lays out in
+    ///   full;
     /// * an unknown property is layout-affecting by default.
     ///
     /// # Why `reconciled` and not `plan.reconcile()`
@@ -4810,7 +4929,7 @@ impl UiRuntime {
     /// node's style was not recomputed and therefore cannot have changed — and it
     /// hands over exactly their previous styles. A hover on one node then costs one
     /// property comparison here, not one per node in the tree.
-    fn layout_is_needed(
+    fn layout_phase(
         &self,
         plan: FramePlan,
         ctx: &FrameContext,
@@ -4818,25 +4937,25 @@ impl UiRuntime {
         reconciled: bool,
         computed: &ComputedStyles,
         delta: &StyleDelta,
-    ) -> bool {
+    ) -> LayoutPhase {
         if !plan.layout() {
-            return false;
+            return LayoutPhase::Skip;
         }
         // The tree actually changed, or there is nothing retained to reuse.
         if reconciled || first_frame {
-            return true;
+            return LayoutPhase::Full;
         }
         // Only the reasons whose layout inputs are fully covered below are refined.
         if !matches!(
             ctx.reason(),
             FrameReason::Input | FrameReason::Animation | FrameReason::UiCommit
         ) {
-            return true;
+            return LayoutPhase::Full;
         }
         // Layout also reads the viewport, the sticky scroll offset and the live
         // editing text — none of which are computed styles.
         if self.last_layout_inputs.as_ref() != Some(&self.current_layout_inputs(ctx)) {
-            return true;
+            return LayoutPhase::Full;
         }
 
         // Route the REAL per-node deltas: only a node whose layout-affecting
@@ -4862,7 +4981,7 @@ impl UiRuntime {
                 // styled set differs at all the retained boxes cannot be proven
                 // valid.
                 if computed.len() != self.computed.len() {
-                    return true;
+                    return LayoutPhase::Full;
                 }
                 for &node in computed.keys() {
                     route(node, self.computed.get(&node));
@@ -4876,7 +4995,7 @@ impl UiRuntime {
                 // from `replaced` proves nothing about it. Cannot happen while the
                 // retained map covers the tree; if it ever does, lay out.
                 if *introduced {
-                    return true;
+                    return LayoutPhase::Full;
                 }
                 // The candidates are every node this frame's style phase wrote:
                 // the ones it re-resolved, plus the ones the motion overlay
@@ -4896,7 +5015,16 @@ impl UiRuntime {
                 }
             }
         }
-        router.needs_layout()
+        // Act on both halves of what the router just produced: its verdict decides
+        // WHETHER the phase runs, and the accumulator it filled decides WHICH
+        // contexts it re-measures. Reading only the boolean — and dropping the
+        // per-node set — is what used to make `LayoutInvalidation` write-only and
+        // layout all-or-nothing.
+        if router.needs_layout() {
+            LayoutPhase::Invalidated(layout_invalidation)
+        } else {
+            LayoutPhase::Skip
+        }
     }
 
     /// Returns a full structured snapshot of the live tree — one
@@ -5726,8 +5854,9 @@ fn px_length_of(style: Option<&ComputedStyle>, id: PropertyId) -> f32 {
 /// the sticky scroll offset, and the focused editable's live text — a keystroke
 /// grows a textarea's box without changing any computed style, which is exactly
 /// why a multiline edit schedules a full [`FrameReason::Input`] frame. The
-/// incremental classification in [`UiRuntime::layout_is_needed`] may only reuse
-/// the retained boxes while **all** of these are unchanged.
+/// incremental classification in [`UiRuntime::layout_phase`] may only reuse the
+/// retained boxes — or the retained measures — while **all** of these are
+/// unchanged.
 #[derive(Debug, Clone, PartialEq)]
 struct LayoutInputs {
     /// The viewport the boxes were arranged under.
@@ -5766,10 +5895,32 @@ struct StyleKey {
     pseudo: PseudoStates,
 }
 
+/// What this frame's layout phase must do (spec §3.4 step 8 "perform incremental
+/// layout", §4.3).
+///
+/// The three answers [`UiRuntime::layout_phase`] can give, in increasing cost.
+/// This is the layout twin of the style phase's
+/// [`RestyleScope`]/[`StyleInvalidation`] pair: the classifier does not decide
+/// *whether* to run a phase and then run all of it — it decides *what* the phase
+/// has to touch.
+enum LayoutPhase {
+    /// No node's box can have moved: the phase is skipped entirely and the
+    /// retained boxes + hit-test index carry over.
+    Skip,
+    /// The frame cannot prove which contexts changed (the tree moved, the viewport
+    /// moved, a resource landed, …), so every node is re-measured and the retained
+    /// [`MeasureCache`] is dropped.
+    Full,
+    /// Exactly these contexts' inputs changed. Every other node's measure is served
+    /// from the retained [`MeasureCache`] — see
+    /// [`LayoutCoordinator::layout_invalidated`] for what that reuse rests on.
+    Invalidated(LayoutInvalidation),
+}
+
 /// What the style phase left for the layout classifier to compare against
 /// (spec §3.4 phase 5, §4.3).
 ///
-/// [`UiRuntime::layout_is_needed`] answers "could any box have moved?" by diffing
+/// [`UiRuntime::layout_phase`] answers "could any box have moved?" by diffing
 /// each node's layout-affecting properties against what it had before. Which nodes
 /// it must ask about depends on how the styles were produced, and so does where
 /// the "before" lives — hence this enum rather than an unconditional whole-map
@@ -7962,6 +8113,108 @@ mod tests {
         );
     }
 
+    /// Three sibling `.box` elements, so a hover on one has clean siblings to be
+    /// about.
+    fn three_box_view() -> View {
+        View::from_fragment(ViewFragment::from_nodes(
+            (0..3)
+                .map(|i| {
+                    ViewNode::element(ComponentId::from_raw(10 + i))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("box".into())))
+                })
+                .collect(),
+        ))
+    }
+
+    #[test]
+    fn a_layout_affecting_hover_remeasures_only_the_hovered_node() {
+        // §3.4 step 8: the phase is named "perform **incremental** layout", and this
+        // is the half `a_layout_affecting_hover_still_relayouts` leaves open. That
+        // test proves the phase RUNS; this one proves it does not re-measure the
+        // whole tree to do it.
+        //
+        // The hover is on the LAST sibling, because a flow hands each child a
+        // `remaining_height` net of its preceding siblings — so only a change to the
+        // last one leaves every other child's constraints untouched. Widening past
+        // that needs per-context `LayoutDependency` wiring; see
+        // `LayoutCoordinator::layout_invalidated`.
+        let view = three_box_view();
+        let sheet = box_hover_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.render_now(&view, sheets);
+
+        let root = runtime.tree().root().expect("a root");
+        let boxes = runtime.tree().get(root).expect("root").children().to_vec();
+        let [first, second, last] = <[NodeId; 3]>::try_from(boxes).expect("three siblings");
+
+        // The cold frame measured all three.
+        for node in [first, second, last] {
+            assert!(
+                runtime.measure_cache.measured(node),
+                "the cold frame must measure {node:?}",
+            );
+        }
+
+        runtime.set_pseudo_state(last, PseudoState::HOVER);
+        runtime.request_frame(FrameReason::Input);
+        let hot = runtime
+            .run_due_frame(&view, sheets)
+            .expect("the input frame is due");
+
+        assert!(hot.relaid_out(), "a width change must relayout");
+        assert!(
+            runtime.measure_cache.measured(last),
+            "the hovered node's width changed, so it must re-measure",
+        );
+        // The claim. Without it, "incremental layout" is just "layout".
+        assert!(
+            !runtime.measure_cache.measured(first),
+            "an unhovered sibling must not re-measure",
+        );
+        assert!(
+            !runtime.measure_cache.measured(second),
+            "an unhovered sibling must not re-measure",
+        );
+        // And it is still CORRECT: the hovered box really did grow, and the ones
+        // served from the cache kept the boxes a full pass gives them.
+        assert_eq!(
+            runtime.layout_boxes()[&last].size().width,
+            200.0,
+            "the hover rule applied",
+        );
+        for node in [first, second] {
+            assert_eq!(
+                runtime.layout_boxes()[&node].size().width,
+                100.0,
+                "a cache-served sibling keeps its box",
+            );
+        }
+    }
+
+    #[test]
+    fn swapping_the_shaper_drops_the_retained_measures() {
+        // The measure cache's sizes were produced by the outgoing shaping ports, and
+        // a port swap is a layout input that no computed-style diff can see. If the
+        // cache survived it, the next incremental frame would serve sizes measured
+        // by a shaper that is gone.
+        let view = three_box_view();
+        let sheet = box_hover_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.render_now(&view, sheets);
+        assert!(
+            !runtime.measure_cache.is_empty(),
+            "the cold frame retained measures",
+        );
+
+        runtime.set_text_shaper(Box::new(obscur_text::shaping::MockTextShaper::new()));
+        assert!(
+            runtime.measure_cache.is_empty(),
+            "a shaper swap must drop every retained measure",
+        );
+    }
+
     #[test]
     fn a_layout_affecting_hover_still_relayouts() {
         // The other side of the classification: `.box:hover { width: 200px }`
@@ -8371,7 +8624,7 @@ mod tests {
         assert_eq!(frame_spans, 3);
         // Only the FIRST frame lays out. Frames 2-3 re-render an identical view:
         // reconcile commits empty and no layout-affecting style changed, so
-        // `layout_is_needed` skips the phase and the retained boxes carry over.
+        // `layout_phase` skips the phase and the retained boxes carry over.
         let layout_spans = sink.spans.iter().filter(|s| s.name == "layout").count();
         assert_eq!(layout_spans, 1, "an unchanged re-render must not relayout");
         // 5 spans for the full first frame, 4 for each layout-free repeat.
@@ -9718,6 +9971,109 @@ mod tests {
             Some(LogicalKey::character('s')),
         ));
         assert_eq!(bare_s.command(), None);
+    }
+
+    /// §6.7: registering ONE unified `Command` binds its shortcut, and its ONE
+    /// `CommandState` governs every surface that fires it.
+    ///
+    /// The command is registered once — no separate `bind_command` call — and the
+    /// keyboard finds it. Disabling that one descriptor then stops the shortcut
+    /// *and* the click, which is the property that makes this a unified model
+    /// rather than a parallel vocabulary: both surfaces funnel through
+    /// `dispatch_command`, which consults the registry.
+    #[test]
+    fn registered_command_binds_its_shortcut_and_its_state_gates_every_surface() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&panel_view(), sheets);
+
+        let ran = Rc::new(Cell::new(0_u32));
+        let counter = Rc::clone(&ran);
+        runtime.on_command(CMD_SAVE, move || counter.set(counter.get() + 1));
+
+        // ONE registration: the descriptor carries its own shortcut.
+        let ctrl_s = Shortcut::new(LogicalKey::character('s')).with(Modifier::Ctrl);
+        runtime.register_command(Command::new(CMD_SAVE, "Save").with_shortcut(ctrl_s));
+
+        // The shortcut was bound by registering alone.
+        assert_eq!(
+            runtime.command_router().bindings_for(CMD_SAVE),
+            vec![ctrl_s],
+            "register_command must bind the descriptor's own shortcut"
+        );
+        // The descriptor is reachable by the SAME symbol the router resolves.
+        assert_eq!(
+            runtime.command_registry().get(CMD_SAVE).map(Command::title),
+            Some("Save")
+        );
+
+        // Focus the node, hold Ctrl.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let _ = runtime.run_due_frame(&panel_view(), sheets);
+        let _ = runtime.handle_key(KeyEvent::press(PhysicalKey::ControlLeft, None));
+
+        let press_s = || KeyEvent::press(PhysicalKey::KeyS, Some(LogicalKey::character('s')));
+
+        // Enabled: the shortcut runs the handler.
+        let hit = runtime.handle_key(press_s());
+        assert_eq!(hit.command(), Some(CMD_SAVE));
+        assert_eq!(ran.get(), 1, "an enabled command's shortcut runs it");
+
+        // Disable the ONE descriptor.
+        assert!(runtime.set_command_state(CMD_SAVE, CommandState::new().enabled(false)));
+
+        // Surface 1 — shortcut: still resolves, but is now inert.
+        let blocked = runtime.handle_key(press_s());
+        assert_eq!(
+            blocked.command(),
+            Some(CMD_SAVE),
+            "the router still resolves the chord; the STATE is what refuses it"
+        );
+        assert_eq!(
+            ran.get(),
+            1,
+            "a disabled command's shortcut must not run it"
+        );
+
+        // Surface 2 — click/activation on the node bound to the same symbol.
+        assert!(!runtime.dispatch_command(CMD_SAVE));
+        assert_eq!(ran.get(), 1, "a disabled command's click must not run it");
+
+        // Hidden is independently inert.
+        assert!(runtime.set_command_state(CMD_SAVE, CommandState::new().visible(false)));
+        let _ = runtime.handle_key(press_s());
+        assert_eq!(ran.get(), 1, "a hidden command's shortcut must not run it");
+
+        // Re-enabling restores every surface at once.
+        assert!(runtime.set_command_state(CMD_SAVE, CommandState::new()));
+        let _ = runtime.handle_key(press_s());
+        assert_eq!(ran.get(), 2, "re-enabling restores the shortcut");
+        assert!(runtime.dispatch_command(CMD_SAVE));
+        assert_eq!(ran.get(), 3, "re-enabling restores the click");
+    }
+
+    /// A symbol with no registered `Command` is unconstrained: the registry
+    /// describes commands, it does not gate symbols routed without one. This is
+    /// what keeps every existing raw-symbol application working.
+    #[test]
+    fn unregistered_command_symbol_is_not_gated_by_the_registry() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&panel_view(), sheets);
+
+        let ran = Rc::new(Cell::new(0_u32));
+        let counter = Rc::clone(&ran);
+        runtime.on_command(CMD_SAVE, move || counter.set(counter.get() + 1));
+
+        // Never registered as a Command, and a *different* command is disabled.
+        runtime.register_command(Command::new(CMD_B, "Other"));
+        assert!(runtime.set_command_state(CMD_B, CommandState::new().enabled(false)));
+
+        assert!(runtime.command_registry().permits_dispatch(CMD_SAVE));
+        assert!(runtime.dispatch_command(CMD_SAVE));
+        assert_eq!(ran.get(), 1);
     }
 
     #[test]

@@ -497,6 +497,11 @@ mod tests {
 
     #[test]
     fn virtual_for_lowers_to_loop_node_tagged_virtual_for() {
+        // Lowering is not where a `<VirtualFor>` is refused — `Compiler::compile`
+        // is (`CollectionValidator`, §2.11), and its diagnostics accumulate
+        // rather than stopping the pass. So this pass still classifies the tag,
+        // and reaching this IR at all means someone ignored the compile's
+        // `has_errors()` — the same contract every other rule here has.
         let doc = lower("<VirtualFor each={rows} key={id}><R/></VirtualFor>").expect("lowers");
         assert_eq!(doc.root().kind(), UiIrNodeKind::Loop);
         assert_eq!(doc.root().tag(), "VirtualFor");

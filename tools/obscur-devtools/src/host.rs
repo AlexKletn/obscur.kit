@@ -13,7 +13,7 @@
 //! real deployment would register a [`SnapshotInspectSource`] refreshed from its
 //! live runtime instead of the static demo payloads here.
 //!
-//! # Why this host denies subscriptions
+//! # Why this host denies subscriptions, and refuses injection
 //!
 //! There is no runtime behind these payloads, so nothing here can *produce* an
 //! event — and rather than fabricate one, the demo serves request/reply with
@@ -23,6 +23,19 @@
 //! a queue that
 //! [`SocketTransport::serve_with_events`](obscur_devtools_server::transport::SocketTransport::serve_with_events)
 //! fans out, as the windowed examples do.
+//!
+//! The same absence decides the *write* direction. There is no runtime to click
+//! on either, so this host installs no
+//! [`InjectionSink`](obscur_devtools_server::transport::InjectionSink) and the
+//! endpoint answers every `Inject` with
+//! [`ProtocolError::InjectionUnavailable`](obscur_devtools_protocol::error::ProtocolError::InjectionUnavailable).
+//! `obscur-devtools inject` used to print `acknowledged command #1` here for a
+//! click that reached nothing at all. A host with a runtime does the opposite:
+//! it holds an
+//! [`InjectionQueue`](obscur_devtools_server::transport::InjectionQueue), hands
+//! [`sink`](obscur_devtools_server::transport::InjectionQueue::sink) to its
+//! endpoint, and applies what it drains with
+//! `obscur_kit::devtools::apply_injected`.
 
 use std::io;
 

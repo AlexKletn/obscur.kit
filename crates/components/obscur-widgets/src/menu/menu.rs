@@ -2,6 +2,7 @@
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
+use obscur_interaction::command::{Command, CommandRegistry, CommandState};
 use obscur_primitives::Text;
 use obscur_view::view::{
     EVENT_CLICK, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
@@ -37,6 +38,23 @@ impl MenuItem {
     pub fn disabled(mut self) -> Self {
         self.enabled = false;
         self
+    }
+
+    /// Derives an item from a unified [`Command`] and its live [`CommandState`]
+    /// (spec §6.7).
+    ///
+    /// The item is a *projection* of the one action descriptor, not a second
+    /// copy of it: the label is the command's [`title`](Command::title), the
+    /// fired command is its [`id`](Command::id) — the same symbol its shortcut
+    /// resolves to and its handler is registered for — and the item is enabled
+    /// exactly while the state is. Editing the command edits the menu.
+    #[must_use]
+    pub fn from_command(command: &Command, state: CommandState) -> Self {
+        Self {
+            label: command.title().into(),
+            command: command.id(),
+            enabled: state.is_enabled(),
+        }
     }
 
     /// Returns the item label.
@@ -130,6 +148,41 @@ impl Menu {
     {
         self.items.extend(items);
         self
+    }
+
+    /// Builds a closed menu from `ids` looked up in `registry`, in the given
+    /// order (spec §6.7).
+    ///
+    /// This is the kit-rendered menu surface of the unified action model: each
+    /// item is derived from the registered [`Command`] via
+    /// [`MenuItem::from_command`], so titles and enabled-ness come from the one
+    /// descriptor rather than being restated here.
+    ///
+    /// An id is **omitted** from the menu when it is not registered (there is no
+    /// title to show and no state to honour) or when its state is not
+    /// [`visible`](CommandState::is_visible) — `visible` is what hides an action
+    /// from its surfaces, while [`enabled`](CommandState::is_enabled) renders it
+    /// greyed and inert.
+    #[must_use]
+    pub fn from_registry<I>(registry: &CommandRegistry, ids: I) -> Self
+    where
+        I: IntoIterator<Item = InternedSymbol>,
+    {
+        let items = ids
+            .into_iter()
+            .filter_map(|id| {
+                let command = registry.get(id)?;
+                let state = registry.state(id)?;
+                state
+                    .is_visible()
+                    .then(|| MenuItem::from_command(command, state))
+            })
+            .collect();
+        Self {
+            items,
+            open: false,
+            highlighted: None,
+        }
     }
 
     /// Opens the menu.
@@ -371,6 +424,54 @@ mod tests {
     #[test]
     fn semantic_role_is_menu() {
         assert_eq!(sample().semantic_role(), SemanticRole::Menu);
+    }
+
+    /// §6.7: the kit-rendered menu is a projection of the unified action model —
+    /// labels and enabled-ness come from the registered `Command`/`CommandState`,
+    /// and the fired symbol is the command's own id (the same symbol its shortcut
+    /// resolves to), not a value restated at the menu.
+    #[test]
+    fn from_registry_projects_titles_state_and_the_routed_symbol() {
+        let mut registry = CommandRegistry::new();
+        registry.register(Command::new(cmd(0x10), "Cut"));
+        registry.register(Command::new(cmd(0x11), "Copy"));
+        registry.register(Command::new(cmd(0x12), "Paste"));
+        // One state change at the model, honoured by the menu surface.
+        registry.set_state(cmd(0x11), CommandState::new().enabled(false));
+
+        let menu = Menu::from_registry(&registry, [cmd(0x10), cmd(0x11), cmd(0x12)]);
+        assert_eq!(menu.len(), 3);
+        assert_eq!(menu.items[0].label(), "Cut");
+        assert_eq!(menu.items[1].label(), "Copy");
+        // Enabled-ness is the COMMAND's state, not a menu-local flag.
+        assert!(menu.items[0].is_enabled());
+        assert!(!menu.items[1].is_enabled());
+        // The item fires the command's own routed symbol.
+        assert_eq!(menu.items[2].command(), cmd(0x12));
+
+        // The disabled command is skipped by highlight nav and cannot activate,
+        // driven purely by the registry state.
+        let mut menu = menu;
+        menu.open();
+        menu.highlight_next();
+        menu.highlight_next();
+        assert_eq!(menu.highlighted(), Some(2), "disabled Copy is skipped");
+        assert_eq!(menu.activate(), Some(cmd(0x12)));
+    }
+
+    /// `visible` is what removes an action from a surface; `enabled` only greys
+    /// it. An unregistered id has no title or state to project, so it is omitted.
+    #[test]
+    fn from_registry_omits_hidden_and_unregistered_commands() {
+        let mut registry = CommandRegistry::new();
+        registry.register(Command::new(cmd(0x10), "Cut"));
+        registry.register(Command::new(cmd(0x11), "Copy"));
+        registry.set_state(cmd(0x11), CommandState::new().visible(false));
+
+        let menu = Menu::from_registry(&registry, [cmd(0x10), cmd(0x11), cmd(0xDEAD)]);
+        assert_eq!(menu.len(), 1, "hidden and unregistered ids are omitted");
+        assert_eq!(menu.items[0].label(), "Cut");
+        assert!(Menu::from_registry(&registry, []).is_empty());
     }
 
     #[test]

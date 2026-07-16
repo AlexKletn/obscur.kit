@@ -44,7 +44,8 @@
 
 use obscur_okui_compiler::compile::ContractRegistry;
 use obscur_okui_compiler::validation::{
-    AttributeUse, ElementUse, MemberArity, MemberUse, SlotUse, ViolationAnchor, check_contract,
+    AttributeUse, ElementUse, MemberArity, MemberUse, SlotUse, ViolationAnchor, check_collection,
+    check_contract,
 };
 use obscur_ui_ir::document::{
     UiIrDocument, UiIrEvent, UiIrExpression, UiIrNode, UiIrProperty, UiIrValue,
@@ -129,10 +130,15 @@ fn is_conditional_tag(tag: &str) -> bool {
 /// Whether `tag` names a collection construct rather than an element
 /// (spec §2.11).
 ///
-/// `VirtualFor` is classified with `For` because it is the same construct with a
-/// virtualisation policy attached; the emitter treats them alike until that
-/// policy exists, which is better than classifying it as an element and rendering
-/// a node called `VirtualFor`.
+/// `VirtualFor` is still classified with `For` — §2.11 says it is a collection,
+/// and misclassifying it as an element would render a node called `VirtualFor`.
+/// What it no longer does is *compile*:
+/// [`check_collection`](obscur_okui_compiler::validation::check_collection)
+/// refuses it in [`validate_element`], which runs before any of this, because the
+/// emitter treats the two alike and a `<VirtualFor>` that silently materializes
+/// every item is a performance contract nobody keeps. This predicate keeps both
+/// names so the refusal reads as "a loop we will not compile" rather than "an
+/// unknown component".
 fn is_loop_tag(tag: &str) -> bool {
     matches!(tag, "For" | "VirtualFor")
 }
@@ -454,28 +460,45 @@ fn validate_contracts(nodes: &[DslNode]) -> syn::Result<()> {
 /// Checks `element` and its element descendants, accumulating every violation
 /// into `error` rather than stopping at the first — the same
 /// report-them-all policy `Compiler::compile` follows.
+///
+/// Two rules run here, and both are the compiler's own: the §2.12/§2.13 contract
+/// ([`check_contract`]) and the §2.11 collection rule ([`check_collection`]),
+/// which refuses a `<VirtualFor>`. The macro adds the [`Span`], which is the
+/// whole reason this front end reports better than the file one — the author's
+/// build stops on the tag they wrote.
 fn validate_element(
     element: &DslElement,
     registry: &ContractRegistry,
     error: &mut Option<syn::Error>,
 ) {
+    if let Err(message) = check_collection(&element.tag) {
+        push_error(error, syn::Error::new(element.span, message));
+    }
     if let Some(contract) = registry.get(&element.tag) {
         let instance = DslInstance::of(element);
         for violation in check_contract(&instance.as_use(), contract) {
-            let reported = syn::Error::new(
-                instance.span_of(violation.anchor(), element.span),
-                violation.message(contract.component()),
+            push_error(
+                error,
+                syn::Error::new(
+                    instance.span_of(violation.anchor(), element.span),
+                    violation.message(contract.component()),
+                ),
             );
-            match error {
-                Some(existing) => existing.combine(reported),
-                None => *error = Some(reported),
-            }
         }
     }
     for child in &element.children {
         if let DslNode::Element(child) = child {
             validate_element(child, registry, error);
         }
+    }
+}
+
+/// Folds `reported` into the accumulated `error`, so one expansion reports every
+/// violation it found rather than only the first.
+fn push_error(error: &mut Option<syn::Error>, reported: syn::Error) {
+    match error {
+        Some(existing) => existing.combine(reported),
+        None => *error = Some(reported),
     }
 }
 
@@ -983,6 +1006,37 @@ mod tests {
             rejection(quote! { <Button label="OK"><span slot="icon"/></Button> })
                 .contains("declares no slots"),
             "a slot assignment must name a declared slot"
+        );
+    }
+
+    #[test]
+    fn virtual_for_is_refused_rather_than_compiled_as_a_plain_for() {
+        // §2-D: `<VirtualFor>` parsed, classified and lowered with its tag, and
+        // `emit_loop` never read the tag — so a performance contract was accepted
+        // and kept by nothing. It is now a compile error on the author's tag.
+        let message = rejection(quote! {
+            <div><VirtualFor each={rows} as={row} key={row.id}><span/></VirtualFor></div>
+        });
+        assert!(
+            message.contains("`<VirtualFor>` is not implemented"),
+            "the author is told the tag is refused, got: {message}"
+        );
+        assert!(
+            message.contains("Use `<For>`"),
+            "and what to write instead, got: {message}"
+        );
+    }
+
+    #[test]
+    fn a_plain_for_still_compiles() {
+        // The other half: the refusal must be about `<VirtualFor>` alone. A
+        // rule that also broke `<For>` would be breakage, not enforcement.
+        assert!(
+            DslMacro::to_document(quote! {
+                <div><For each={rows} as={row} key={row.id}><span/></For></div>
+            })
+            .is_ok(),
+            "`<For>` is the collection construct that is really implemented"
         );
     }
 

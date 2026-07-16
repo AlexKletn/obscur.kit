@@ -1,6 +1,6 @@
 //! Drives layout over the retained tree: [`LayoutCoordinator`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use obscur_geometry::{BoxConstraints, Insets, Point, Rect, Size};
 use obscur_identity::{InternedSymbol, NodeId};
@@ -8,6 +8,7 @@ use obscur_layout::algorithm::{
     ChildMeasurer, FlexLayout, FlowLayout, GridAutoFlow, GridLayout, GridLine, GridPlacement,
     LayoutAlgorithm, LayoutChild,
 };
+use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_layout::model::{
     AlignItems, AlignSelf, BoxSizing, Dimension, FlexDirection, FlexWrap, Inset, JustifyContent,
     LayoutBox, LayoutDisplay, LayoutStyle, Margin, MarginEdges, Position,
@@ -165,13 +166,18 @@ impl LayoutCoordinator {
     /// # Redundant work
     ///
     /// The selected algorithm runs once per node during `arrange`, and each run
-    /// re-measures that node's children (which recurses). A per-pass
-    /// [`MeasureCache`] memoizes `measure(node, constraints)`, so a node sized
-    /// under identical constraints is measured (and its text shaped) **once per
-    /// frame** rather than once per ancestor — the dominant cost on a deep,
-    /// text-heavy tree (spec §4.2). Re-measures under *different* constraints
-    /// (intrinsic vs. final sizing) are still distinct; collapsing those needs an
-    /// intrinsic-size cache or incremental invalidation (a later phase).
+    /// re-measures that node's children (which recurses). A [`MeasureCache`]
+    /// memoizes `measure(node, constraints)`, so a node sized under identical
+    /// constraints is measured (and its text shaped) **once per frame** rather than
+    /// once per ancestor — the dominant cost on a deep, text-heavy tree (spec
+    /// §4.2). Re-measures under *different* constraints (intrinsic vs. final
+    /// sizing) are still distinct; collapsing those needs an intrinsic-size cache.
+    ///
+    /// This entry point builds a fresh cache per call, so it re-measures the tree
+    /// every frame. To carry the cache across frames and re-measure only what a
+    /// [`LayoutInvalidation`] says changed, call
+    /// [`layout_invalidated`](Self::layout_invalidated) — which is what the runtime
+    /// does.
     // The tree, the per-node side-tables, the viewport + scroll offset, and the
     // shaper are the cohesive inputs of one layout entry point.
     #[allow(clippy::too_many_arguments)]
@@ -345,6 +351,113 @@ impl LayoutCoordinator {
         hyphenator: Option<&dyn Hyphenator>,
         editing: Option<EditingView<'_>>,
     ) -> LayoutBoxes {
+        // One measure memoization for this pass only (see [`MeasureCache`]): every
+        // node is measured from scratch, exactly as before the cache could outlive a
+        // frame.
+        self.arrange_all(
+            tree,
+            styles,
+            computed,
+            grid_templates,
+            viewport,
+            scroll_offset,
+            paragraph,
+            hyphenator,
+            editing,
+            &MeasureCache::new(),
+        )
+    }
+
+    /// Lays out like [`layout_editing`](Self::layout_editing) but re-measures
+    /// **only** the layout contexts `dirty` can have changed, serving every other
+    /// node's size from `cache` (spec §3.4 step 8 "perform incremental layout",
+    /// §4.3).
+    ///
+    /// This is layout's half of the §4.3 model, and it is the twin of
+    /// [`StyleCoordinator::resolve_incremental`](super::StyleCoordinator::resolve_incremental):
+    /// the same walk as the full pass, with the expensive step gated on a typed
+    /// dirty set. `dirty` = [`None`] means "this frame cannot say", which drops the
+    /// whole cache and reproduces [`layout_editing`](Self::layout_editing) exactly.
+    ///
+    /// # What is incremental, and what is not
+    ///
+    /// **Measure** is. `arrange` is **not**: the walk still visits every node and
+    /// re-runs every container's algorithm, so a sibling's size still moves every
+    /// later sibling, a flex line still re-runs whole, and every absolute box is
+    /// still rewritten. That is what makes this safe rather than clever — all of
+    /// §4.3's propagation is still *performed*, this only declines to recompute the
+    /// measures feeding it that provably cannot have changed. Text shaping and
+    /// wrapping is the dominant cost it removes; the O(nodes) arrange walk remains.
+    ///
+    /// # What the caller owes
+    ///
+    /// `cache` must hold only entries this same coordinator produced over a tree,
+    /// style set, shaper and hyphenator that differ from this frame's in **no** way
+    /// other than what `dirty` records, and `dirty` must record **every** node whose
+    /// layout inputs changed — see [`invalidated_measures`] for the exact dependency
+    /// list a retained entry rests on. A node missing from `dirty` is not checked;
+    /// its retained size is *assumed* still correct. A caller that cannot promise
+    /// that must pass [`None`], which is always sound.
+    // The same cohesive layout inputs as `layout_editing`, plus the two this entry
+    // point exists for.
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub fn layout_invalidated(
+        &self,
+        tree: &RetainedTree,
+        styles: &LayoutStyles,
+        computed: &ComputedStyles,
+        grid_templates: &GridTemplates,
+        viewport: Size,
+        scroll_offset: (f32, f32),
+        paragraph: &ParagraphShaper,
+        hyphenator: Option<&dyn Hyphenator>,
+        editing: Option<EditingView<'_>>,
+        cache: &MeasureCache,
+        dirty: Option<&LayoutInvalidation>,
+    ) -> LayoutBoxes {
+        // Act on the dirty set: drop exactly the entries it can have invalidated,
+        // and drop everything when it cannot bound them (or when there is no set).
+        match dirty.and_then(|dirty| invalidated_measures(tree, dirty)) {
+            Some(evicted) => cache.evict(&evicted),
+            None => cache.clear(),
+        }
+        self.arrange_all(
+            tree,
+            styles,
+            computed,
+            grid_templates,
+            viewport,
+            scroll_offset,
+            paragraph,
+            hyphenator,
+            editing,
+            cache,
+        )
+    }
+
+    /// The arrange walk shared by every entry point: arranges the root under a
+    /// tight `viewport` constraint and returns every reachable node's absolute box,
+    /// measuring through `cache`.
+    ///
+    /// Sharing this walk is what makes the full and incremental paths agree by
+    /// construction rather than by coincidence: they differ **only** in what
+    /// `cache` already holds when it starts.
+    // The cohesive layout inputs of one walk, plus the cache it measures through.
+    #[allow(clippy::too_many_arguments)]
+    fn arrange_all(
+        &self,
+        tree: &RetainedTree,
+        styles: &LayoutStyles,
+        computed: &ComputedStyles,
+        grid_templates: &GridTemplates,
+        viewport: Size,
+        scroll_offset: (f32, f32),
+        paragraph: &ParagraphShaper,
+        hyphenator: Option<&dyn Hyphenator>,
+        editing: Option<EditingView<'_>>,
+        cache: &MeasureCache,
+    ) -> LayoutBoxes {
         let mut boxes = LayoutBoxes::new();
         let Some(root) = tree.root() else {
             return boxes;
@@ -352,8 +465,7 @@ impl LayoutCoordinator {
         // The root's containing block — and the fixed-positioning reference for
         // every `position: fixed` descendant — is the viewport rect at the origin.
         let viewport_rect = Rect::new(Point::ORIGIN, viewport);
-        // One measure memoization for the whole pass (see [`MeasureCache`]).
-        let cache = MeasureCache::default();
+        cache.begin_pass();
         arrange(
             tree,
             styles,
@@ -1389,16 +1501,216 @@ fn padding_box(border_box: Rect, border: Insets) -> Rect {
     Rect::new(Point::new(x, y), Size::new(width, height))
 }
 
-/// A per-layout-pass memoization of [`measure`]: a `(node, constraints)` pair is
-/// sized **once per frame**, collapsing the redundant re-measurement (and text
-/// reshaping) the measure/arrange walk would otherwise do — `arrange(parent)`
-/// measures a subtree, then `arrange(child)` re-measures it under the same
-/// constraints, and so on down the depth. Keyed by the node and the constraint's
-/// four `f32` bit patterns (exact, no hashing/collisions). `RefCell` allows the
-/// short borrow for a lookup/insert to nest inside the recursive algorithm call
-/// that happens between them.
-type MeasureCache = std::cell::RefCell<HashMap<MeasureKey, Size>>;
+/// A memoization of [`measure`]: a `(node, constraints)` pair is sized **once**,
+/// collapsing the redundant re-measurement (and text reshaping) the
+/// measure/arrange walk would otherwise do — `arrange(parent)` measures a subtree,
+/// then `arrange(child)` re-measures it under the same constraints, and so on down
+/// the depth. Keyed by the node and the constraint's four `f32` bit patterns
+/// (exact, no hashing/collisions). `RefCell` allows the short borrow for a
+/// lookup/insert to nest inside the recursive algorithm call that happens between
+/// them.
+///
+/// # It is the §4.2 "measure cache", and it lives longer than a pass
+///
+/// [`layout_editing`](LayoutCoordinator::layout_editing) builds a fresh one per
+/// call, so it memoizes within one frame only. A caller that keeps one across
+/// frames and hands it to
+/// [`layout_invalidated`](LayoutCoordinator::layout_invalidated) instead gets the
+/// §4.3 mechanism: that entry point drops exactly the entries a
+/// [`LayoutInvalidation`] can have changed and every surviving entry is served
+/// without re-measuring. Reuse across frames is sound **only** through
+/// `layout_invalidated`, whose doc states the preconditions the caller owes.
+///
+/// [`measured`](Self::measured) / [`measured_count`](Self::measured_count) report
+/// what the **last** pass actually computed — the frame's real measure cost, and
+/// the only way to tell a served entry from a recomputed one.
+#[derive(Debug, Default)]
+pub struct MeasureCache {
+    /// The memoized sizes.
+    entries: std::cell::RefCell<HashMap<MeasureKey, Size>>,
+    /// The nodes whose size the current pass actually computed (one entry per
+    /// cache miss, so a node measured under two distinct constraints appears
+    /// twice). Reset at the top of each pass.
+    measured: std::cell::RefCell<Vec<NodeId>>,
+}
+
 type MeasureKey = (NodeId, u32, u32, u32, u32);
+
+impl MeasureCache {
+    /// Creates an empty cache.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The memoized size of `key`, if any.
+    fn get(&self, key: &MeasureKey) -> Option<Size> {
+        self.entries.borrow().get(key).copied()
+    }
+
+    /// Memoizes `size` for `key` and records that `node` was actually measured.
+    fn record(&self, key: MeasureKey, node: NodeId, size: Size) {
+        self.entries.borrow_mut().insert(key, size);
+        self.measured.borrow_mut().push(node);
+    }
+
+    /// Starts a pass: forgets what the previous pass measured, keeping the
+    /// memoized sizes.
+    fn begin_pass(&self) {
+        self.measured.borrow_mut().clear();
+    }
+
+    /// Forgets every memoized size.
+    pub fn clear(&self) {
+        self.entries.borrow_mut().clear();
+        self.measured.borrow_mut().clear();
+    }
+
+    /// Drops every memoized size of every node in `nodes`, keeping the rest.
+    pub fn evict(&self, nodes: &HashSet<NodeId>) {
+        self.entries
+            .borrow_mut()
+            .retain(|&(node, ..), _| !nodes.contains(&node));
+    }
+
+    /// Whether the last pass **computed** `node`'s size, as opposed to serving it
+    /// from a retained entry or never asking for it at all.
+    #[must_use]
+    pub fn measured(&self, node: NodeId) -> bool {
+        self.measured.borrow().contains(&node)
+    }
+
+    /// How many measures the last pass computed (cache misses, not distinct
+    /// nodes).
+    #[must_use]
+    pub fn measured_count(&self) -> usize {
+        self.measured.borrow().len()
+    }
+
+    /// How many `(node, constraints)` sizes are memoized.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.borrow().len()
+    }
+
+    /// Whether nothing is memoized.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.borrow().is_empty()
+    }
+}
+
+/// The nodes whose memoized `measure` can differ because of `dirty`, or [`None`]
+/// when that set cannot be bounded and the whole cache must be dropped (spec
+/// §4.3).
+///
+/// # What `measure(N, c)` actually reads
+///
+/// This function is the written-down form of that dependency list, and every
+/// clause below exists because [`measure`] reads the thing it names. For a node
+/// `N` under constraints `c`, `measure` reads:
+///
+/// * `styles[M]`, `computed[M]`, `grid_templates[M]` and `tree.get(M)` for every
+///   `M` in `N`'s subtree — the walk recurses through
+///   [`children_of`], so **any** dirty node makes every one of its ancestors'
+///   measures suspect. That is §4.3's *upward* propagation, and it is why the
+///   ancestor chain of each dirty node is evicted.
+/// * `computed[parent(M)]` for a text `M`, via [`overflow_for_text`] — the
+///   container's `text-overflow` is threaded into the text measure. So a dirty
+///   node's **children** are evicted too. That read follows the *logical* parent
+///   link while the measure recursion follows the *child* link; the two are set by
+///   separate calls, so both are checked rather than assumed to agree.
+/// * `computed[tree.root()]`, via [`root_font_size`] — the `rem` base every text
+///   metric and (through [`length_context`]) every relative length resolves
+///   against. It is global, so a dirty root cannot be bounded: the answer is
+///   [`None`].
+///
+/// Nothing else: a node's measure does not read its ancestors' *sizes* (that is
+/// what `c` carries) nor its siblings' anything. Which is the whole point —
+/// §4.3's *downward* rule ("propagate down only when constraints change") needs no
+/// clause here because it is already exact in the cache key: a child re-measures
+/// precisely when the constraints handed to it differ, since a different `c` is a
+/// different key and therefore a miss.
+///
+/// # It is a superset, deliberately
+///
+/// Every branch that cannot prove a bound answers [`None`] (drop everything), so
+/// the failure mode is a redundant re-measure, never a stale box: a dirty node the
+/// walk cannot reach from the root, an absent root, and a dirty root all widen to
+/// the full pass.
+fn invalidated_measures(
+    tree: &RetainedTree,
+    dirty: &LayoutInvalidation,
+) -> Option<HashSet<NodeId>> {
+    if dirty.is_empty() {
+        return Some(HashSet::new());
+    }
+    // No root: nothing was arranged, so nothing retained can be trusted.
+    let root = tree.root()?;
+    // The root's `font-size` is the `rem` base of every node's lengths and text
+    // metrics, so a change to it can move any box in the tree. Unboundable.
+    if dirty.is_invalidated(root) {
+        return None;
+    }
+
+    // Parent links derived from `children()` — the exact links the measure
+    // recursion follows (see [`children_of`]) — rather than from
+    // `logical_parent()`, which is a separately-set field that nothing forces to
+    // stay the inverse of the child links. (The reconciler does set both together,
+    // and `Portal::apply` moves only the VISUAL parent, so today they agree; this
+    // walk simply does not need them to.) Cycle-safe: `visited` emits each node
+    // once.
+    let mut parent_of: HashMap<NodeId, NodeId> = HashMap::new();
+    let mut visited: HashSet<NodeId> = HashSet::new();
+    let mut order: Vec<NodeId> = Vec::new();
+    let mut stack: Vec<NodeId> = vec![root];
+    while let Some(node) = stack.pop() {
+        if !visited.insert(node) {
+            continue;
+        }
+        order.push(node);
+        let Some(record) = tree.get(node) else {
+            continue;
+        };
+        for &child in record.children() {
+            if !visited.contains(&child) {
+                parent_of.insert(child, node);
+                stack.push(child);
+            }
+        }
+    }
+    // A dirty node the walk never reached has no known ancestor chain, so the set
+    // of measures it can have changed is unknown.
+    if dirty.iter().any(|(node, _)| !visited.contains(node)) {
+        return None;
+    }
+
+    let mut evict: HashSet<NodeId> = HashSet::new();
+    for (&node, _) in dirty.iter() {
+        evict.insert(node);
+        // Upward: every context that measured *through* this node.
+        let mut current = node;
+        for _ in 0..MAX_DEPTH {
+            let Some(&parent) = parent_of.get(&current) else {
+                break;
+            };
+            evict.insert(parent);
+            current = parent;
+        }
+    }
+    // A text node reads its container's computed `text-overflow`, so a dirty
+    // node's children re-measure. Both link kinds are checked (see above).
+    for &node in &order {
+        let structural = parent_of.get(&node).copied();
+        let logical = tree.get(node).and_then(|n| n.logical_parent().parent());
+        if structural.is_some_and(|parent| dirty.is_invalidated(parent))
+            || logical.is_some_and(|parent| dirty.is_invalidated(parent))
+        {
+            evict.insert(node);
+        }
+    }
+    Some(evict)
+}
 
 /// The exact cache key for `measure(node, constraints)`.
 fn measure_key(node: NodeId, constraints: BoxConstraints) -> MeasureKey {
@@ -1514,7 +1826,7 @@ fn measure(
     // Memoize on (node, constraints): the arrange walk measures the same node
     // under the same constraints many times per frame; return the first result.
     let key = measure_key(node, constraints);
-    if let Some(&hit) = cache.borrow().get(&key) {
+    if let Some(hit) = cache.get(&key) {
         return hit;
     }
     let style = style_of(styles, node);
@@ -1567,7 +1879,7 @@ fn measure(
             word_spacing_for(computed.get(&node), style.font_size, root_font),
             tab_size_for(computed.get(&node), style.font_size, root_font),
         );
-        cache.borrow_mut().insert(key, size);
+        cache.record(key, node, size);
         return size;
     }
     let Some(algorithm) = algorithm_for(style.display, node, grid_templates, style.gap) else {
@@ -1592,7 +1904,7 @@ fn measure(
     };
     let out = algorithm.layout(&style, &children, constraints, &mut measurer);
     let size = out.size();
-    cache.borrow_mut().insert(key, size);
+    cache.record(key, node, size);
     size
 }
 
@@ -1656,48 +1968,27 @@ fn arrange(
     // A text node is a constraint-aware leaf: shape + wrap to `max.width` and
     // write the wrapped box, bypassing the box algorithms (spec §5.10). It has
     // no laid-out children, so there is nothing to recurse into.
-    if let Some(content) = tree.get(node).and_then(|n| n.kind().text()) {
-        let fallback = families_for(computed.get(&node));
-        let attributes = attributes_for(computed.get(&node));
-        let direction = direction_for(computed.get(&node));
-        let alignment = alignment_for(computed.get(&node));
-        let overflow = overflow_for_text(tree, computed, node);
-        // The document root's `font-size` for any `rem` in the text metrics (CSS
-        // Values 4 §5.1.1); `em` / `%` resolve against this node's own font size.
-        let root_font = root_font_size(computed, tree.root());
-        let line_height = line_height_for(computed.get(&node), style.font_size, root_font);
-        let white_space = white_space_for(computed.get(&node));
-        // The SAME string the measure pass sizes and the scene phase paints, via the
-        // shared `display_text` seam (CSS Text 3 §4.1.1): the focused editable's text
-        // shapes its live session buffer RAW (exact caret byte offsets), everything
-        // else runs `text-transform` (§2.1) + `white-space` collapsing (§4.1.1);
-        // post-shape spacing (§8.1/§8.2) + tab stops (§4.3) follow inside
-        // `measure_text_node`, so the arranged box matches the painted lines.
-        let active = editing_override(tree, node, editing);
-        let content = display_text(
-            content,
-            active,
-            text_transform_for(computed.get(&node)),
-            white_space,
-        );
-        let size = measure_text_node(
-            content.as_ref(),
-            &style,
-            &fallback,
-            &attributes,
-            direction,
-            alignment,
-            overflow,
-            white_space,
-            overflow_wrap_for(computed.get(&node)),
-            word_break_for(computed.get(&node)),
+    //
+    // The size comes from [`measure`], which is where that shaping lives: this
+    // used to inline a byte-identical copy of it, which meant the arrange walk
+    // re-shaped every text leaf on every frame no matter what the measure cache
+    // held. Routing it through the one implementation is what lets a retained entry
+    // actually save the work (spec §4.2 "may cache measure/layout results"), and
+    // leaves the size itself unchanged — `measure` returns exactly this branch's
+    // answer for a text node.
+    if tree.get(node).is_some_and(|n| n.kind().text().is_some()) {
+        let size = measure(
+            tree,
+            styles,
+            computed,
+            grid_templates,
+            node,
             constraints,
             paragraph,
             hyphenator,
-            line_height,
-            letter_spacing_for(computed.get(&node), style.font_size, root_font),
-            word_spacing_for(computed.get(&node), style.font_size, root_font),
-            tab_size_for(computed.get(&node), style.font_size, root_font),
+            editing,
+            depth,
+            cache,
         );
         boxes.insert(node, LayoutBox::new(Rect::new(origin, size)));
         return;
@@ -3479,6 +3770,343 @@ mod tests {
             (empty[&hint].size().width - advance).abs() < 0.5,
             "empty session leaves the slot sized from the 1-char placeholder hint, got {}",
             empty[&hint].size().width,
+        );
+    }
+
+    // ---- §3.4 step 8: incremental layout ----------------------------------
+
+    /// `root` (a 400x300 block) > `wrapper` > three text siblings.
+    ///
+    /// The wrapper exists because `arrange` drives the root's algorithm directly
+    /// and never routes it through [`measure`] — so the root never appears in the
+    /// cache at all, and an *upward* propagation claim needs a real measured
+    /// ancestor to be about.
+    ///
+    /// `wrapper_size` gives the wrapper an explicit width/height; [`None`] leaves
+    /// it auto-sized, so its box grows with its content.
+    ///
+    /// Returns the tree, the computed styles, and `(root, wrapper, a, b, c)`.
+    fn flow_of_three_texts(
+        wrapper_size: Option<(f32, f32)>,
+    ) -> (RetainedTree, ComputedStyles, [NodeId; 5]) {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let wrapper = add_child(&mut tree, root, 1);
+        let a = add_text_child(&mut tree, wrapper, "alpha");
+        let b = add_text_child(&mut tree, wrapper, "bravo");
+        let c = add_text_child(&mut tree, wrapper, "charlie");
+
+        let sized = |width: f32, height: f32| {
+            let mut style = ComputedStyle::new();
+            style.set(PropertyId::Width, ComputedValue::length(Length::px(width)));
+            style.set(
+                PropertyId::Height,
+                ComputedValue::length(Length::px(height)),
+            );
+            style
+        };
+        let mut computed = ComputedStyles::new();
+        computed.insert(root, sized(400.0, 300.0));
+        computed.insert(
+            wrapper,
+            match wrapper_size {
+                Some((width, height)) => sized(width, height),
+                None => ComputedStyle::new(),
+            },
+        );
+        for node in [a, b, c] {
+            computed.insert(node, ComputedStyle::new());
+        }
+        (tree, computed, [root, wrapper, a, b, c])
+    }
+
+    /// Lays `tree` out through `cache`, re-deriving the layout styles each call
+    /// exactly as the runtime does.
+    fn lay_out(
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+        paragraph: &ParagraphShaper,
+        cache: &MeasureCache,
+        dirty: Option<&LayoutInvalidation>,
+    ) -> LayoutBoxes {
+        let coordinator = LayoutCoordinator::new();
+        let styles = coordinator.layout_styles_from(computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
+        coordinator.layout_invalidated(
+            tree,
+            &styles,
+            computed,
+            &GridTemplates::new(),
+            Size::new(400.0, 300.0),
+            (0.0, 0.0),
+            paragraph,
+            None,
+            None,
+            cache,
+            dirty,
+        )
+    }
+
+    #[test]
+    fn incremental_layout_remeasures_only_the_dirty_node_and_its_ancestors() {
+        // The wrapper is explicitly sized, which is what makes this subtree one
+        // "whose size provably cannot change its parent's": §4.2's invalidation
+        // boundary. An auto-sized container instead re-sizes with its content, and
+        // its new box is a new constraint for every child — see
+        // `an_auto_container_reoffers_constraints_to_its_whole_flow`.
+        let (tree, mut computed, [_root, wrapper, a, b, c]) =
+            flow_of_three_texts(Some((400.0, 300.0)));
+        let paragraph = test_paragraph();
+        let cache = MeasureCache::new();
+
+        // Frame 1: nothing retained, so everything is measured.
+        lay_out(&tree, &computed, &paragraph, &cache, None);
+        for node in [wrapper, a, b, c] {
+            assert!(cache.measured(node), "frame 1 must measure {node:?}");
+        }
+
+        // Frame 2: the LAST sibling's own font-size changes, and the frame says so.
+        // Last, because a flow hands each child a `remaining_height` net of its
+        // preceding siblings — so only a change to the last one leaves every other
+        // child's constraints untouched. See
+        // `a_size_change_remeasures_the_later_siblings_it_moves`.
+        computed.get_mut(&c).expect("styled").set(
+            PropertyId::FontSize,
+            ComputedValue::length(Length::px(32.0)),
+        );
+        let mut dirty = LayoutInvalidation::new();
+        dirty.note_style_changed(c);
+        lay_out(&tree, &computed, &paragraph, &cache, Some(&dirty));
+
+        // The changed node re-measures...
+        assert!(cache.measured(c), "the dirty node must re-measure");
+        // ...and so does its container: §4.3's upward propagation. `c` grew, and that
+        // is a contribution to `wrapper`'s content size.
+        assert!(
+            cache.measured(wrapper),
+            "the dirty node's ancestor must re-measure — its child's size changed",
+        );
+        // But the clean siblings do NOT. This is the whole claim: `a` and `b` are
+        // handed the same constraints they were handed last frame, and nothing they
+        // read changed, so their sizes are served from the cache and their text is
+        // never re-shaped.
+        assert!(!cache.measured(a), "a clean sibling must not re-measure");
+        assert!(!cache.measured(b), "a clean sibling must not re-measure");
+        assert!(
+            cache.measured_count() <= 4,
+            "only the dirty node and its one ancestor, each under at most its probe \
+             and arrange constraints — got {}",
+            cache.measured_count(),
+        );
+    }
+
+    #[test]
+    fn an_auto_container_reoffers_constraints_to_its_whole_flow() {
+        // The honest other half, pinned rather than left to surprise someone.
+        //
+        // `FlowLayout` hands each child
+        // `remaining_height = avail_content_height - (preceding heights)`, and an
+        // auto-sized container's `avail_content_height` is its own box — which grew.
+        // So growing ANY child of an auto container genuinely changes the
+        // constraints every child is measured under, later siblings and earlier ones
+        // alike. §4.3 propagates down "only when constraints change" — and here they
+        // DO change, so these re-measures are required, not wasted: a cache hit
+        // would be a stale box, not a saving.
+        //
+        // Collapsing them needs a per-context `LayoutDependency` recording that a
+        // text leaf's size ignores the block-axis constraint
+        // (`LayoutContext::should_remeasure`). Nothing populates that yet, so this
+        // is exactly where the incremental pass stops.
+        let (tree, mut computed, [_root, _wrapper, a, b, c]) = flow_of_three_texts(None);
+        let paragraph = test_paragraph();
+        let cache = MeasureCache::new();
+        lay_out(&tree, &computed, &paragraph, &cache, None);
+
+        computed.get_mut(&a).expect("styled").set(
+            PropertyId::FontSize,
+            ComputedValue::length(Length::px(32.0)),
+        );
+        let mut dirty = LayoutInvalidation::new();
+        dirty.note_style_changed(a);
+        lay_out(&tree, &computed, &paragraph, &cache, Some(&dirty));
+
+        assert!(cache.measured(a), "the dirty node re-measures");
+        assert!(
+            cache.measured(b) && cache.measured(c),
+            "an auto container's grown box re-offers every child a new constraint",
+        );
+    }
+
+    /// A [`Hyphenator`] that proposes no break (identical to [`NullHyphenator`])
+    /// but counts how many times the wrap pass consulted it.
+    ///
+    /// This is the probe for work the [`MeasureCache`] cannot see: it is called
+    /// from inside [`measure_text_node`]'s wrap, on whatever path reaches it. So a
+    /// pass that re-wraps a text leaf increments it whether it went through
+    /// [`measure`] or shaped the leaf itself.
+    #[derive(Debug, Default)]
+    struct CountingHyphenator {
+        calls: std::cell::Cell<usize>,
+    }
+
+    impl Hyphenator for CountingHyphenator {
+        fn hyphenate(&self, _word: &str) -> Vec<usize> {
+            self.calls.set(self.calls.get() + 1);
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn the_arrange_walk_sizes_text_through_the_cache_too() {
+        // `arrange` used to carry a byte-identical copy of `measure`'s text branch,
+        // so it re-shaped and re-wrapped every text leaf on every frame no matter
+        // what the cache held — the cache saved the *probe* and nothing else.
+        //
+        // The hyphenator counts the wrap itself, which is the work at stake:
+        // paragraph shaping is already memoized by `ParagraphShaper`, but
+        // `apply_spacing` / `apply_tab_stops` / `wrap_strut_hyphenated` are not, and
+        // they run per text leaf per frame.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        // A word far wider than the container, so the wrap must consult the
+        // hyphenator; the hyphenator proposes nothing, so the boxes are unchanged.
+        let text = add_text_child(&mut tree, root, "supercalifragilisticexpialidocious");
+
+        let mut computed = ComputedStyles::new();
+        let mut root_style = ComputedStyle::new();
+        root_style.set(PropertyId::Width, ComputedValue::length(Length::px(100.0)));
+        root_style.set(PropertyId::Height, ComputedValue::length(Length::px(200.0)));
+        computed.insert(root, root_style);
+        computed.insert(text, ComputedStyle::new());
+
+        let paragraph = test_paragraph();
+        let hyphenator = CountingHyphenator::default();
+        let coordinator = LayoutCoordinator::new();
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
+        let lay_out = |cache: &MeasureCache, dirty: Option<&LayoutInvalidation>| {
+            coordinator.layout_invalidated(
+                &tree,
+                &styles,
+                &computed,
+                &GridTemplates::new(),
+                Size::new(100.0, 200.0),
+                (0.0, 0.0),
+                &paragraph,
+                Some(&hyphenator),
+                None,
+                cache,
+                dirty,
+            )
+        };
+
+        let cache = MeasureCache::new();
+        let first = lay_out(&cache, None);
+        let after_first = hyphenator.calls.get();
+        assert!(
+            after_first > 0,
+            "the fixture must actually reach the wrap, or this test proves nothing",
+        );
+
+        // Frame 2: nothing changed at all. Not one line box may be re-wrapped.
+        let second = lay_out(&cache, Some(&LayoutInvalidation::new()));
+        assert_eq!(
+            hyphenator.calls.get(),
+            after_first,
+            "an unchanged frame re-wrapped text: the arrange walk is not going \
+             through the measure cache",
+        );
+        assert_eq!(first, second, "and it must still produce the same boxes");
+        assert_eq!(cache.measured_count(), 0, "nothing was measured at all");
+    }
+
+    #[test]
+    fn incremental_layout_agrees_with_a_full_pass_box_for_box() {
+        // The reuse is only worth anything if it is INDISTINGUISHABLE from the full
+        // pass. A sibling's size moves every later sibling in a flow, so this also
+        // pins that the arrange half still propagates: `a` growing must push `b`
+        // and `c` down even though neither re-measured.
+        let (tree, mut computed, [_root, _wrapper, a, ..]) = flow_of_three_texts(None);
+        let paragraph = test_paragraph();
+
+        let cache = MeasureCache::new();
+        lay_out(&tree, &computed, &paragraph, &cache, None);
+        let before = lay_out(&tree, &computed, &paragraph, &MeasureCache::new(), None);
+
+        computed.get_mut(&a).expect("styled").set(
+            PropertyId::FontSize,
+            ComputedValue::length(Length::px(32.0)),
+        );
+        let mut dirty = LayoutInvalidation::new();
+        dirty.note_style_changed(a);
+
+        let incremental = lay_out(&tree, &computed, &paragraph, &cache, Some(&dirty));
+        let full = lay_out(&tree, &computed, &paragraph, &MeasureCache::new(), None);
+
+        assert_eq!(
+            incremental, full,
+            "an incremental pass must produce the full pass's boxes exactly",
+        );
+        assert_ne!(
+            incremental, before,
+            "the change must actually have moved something, or this proves nothing",
+        );
+    }
+
+    #[test]
+    fn a_dirty_root_drops_the_whole_cache() {
+        // The root's `font-size` is the `rem` base every node's lengths resolve
+        // against, so no retained size survives it.
+        let (tree, computed, [root, wrapper, a, b, c]) = flow_of_three_texts(None);
+        let paragraph = test_paragraph();
+        let cache = MeasureCache::new();
+        lay_out(&tree, &computed, &paragraph, &cache, None);
+
+        let mut dirty = LayoutInvalidation::new();
+        dirty.note_style_changed(root);
+        assert!(
+            invalidated_measures(&tree, &dirty).is_none(),
+            "a dirty root cannot be bounded",
+        );
+
+        lay_out(&tree, &computed, &paragraph, &cache, Some(&dirty));
+        for node in [wrapper, a, b, c] {
+            assert!(cache.measured(node), "{node:?} must re-measure");
+        }
+    }
+
+    #[test]
+    fn an_unreachable_dirty_node_drops_the_whole_cache() {
+        // A node the walk cannot reach from the root has no known ancestor chain,
+        // so the set of measures it can have changed is unknown.
+        let (tree, ..) = flow_of_three_texts(None);
+        let mut dirty = LayoutInvalidation::new();
+        dirty.note_style_changed(NodeId::from_raw(9_999));
+        assert!(invalidated_measures(&tree, &dirty).is_none());
+    }
+
+    #[test]
+    fn a_dirty_container_evicts_its_text_children() {
+        // A text node's measure reads its CONTAINER's computed `text-overflow`
+        // (see `overflow_for_text`), so a dirty container re-measures its children
+        // even though nothing of theirs changed.
+        let (mut tree, _computed, [root, wrapper, a, ..]) = flow_of_three_texts(None);
+        // A second, unrelated container so there is something that must survive.
+        let other = add_child(&mut tree, root, 2);
+        let other_text = add_text_child(&mut tree, other, "elsewhere");
+
+        let mut dirty = LayoutInvalidation::new();
+        dirty.note_style_changed(wrapper);
+        let evicted = invalidated_measures(&tree, &dirty).expect("boundable");
+        assert!(evicted.contains(&wrapper), "the dirty node itself");
+        assert!(evicted.contains(&root), "its ancestor");
+        assert!(
+            evicted.contains(&a),
+            "its text child reads its `text-overflow`",
+        );
+        assert!(
+            !evicted.contains(&other) && !evicted.contains(&other_text),
+            "an unrelated sibling subtree must survive",
         );
     }
 }

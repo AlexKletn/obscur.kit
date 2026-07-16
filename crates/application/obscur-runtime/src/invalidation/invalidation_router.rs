@@ -76,16 +76,32 @@ fn layout_reason(reason: InvalidationReason) -> LayoutInvalidationReason {
 ///
 /// # What its callers actually use
 ///
-/// The dirty-phase **booleans**, and only those. `FramePlan::for_frame` /
-/// `for_transaction` read `needs_style()`/`needs_layout()`/`needs_scene()`;
-/// `UiRuntime::layout_is_needed` routes this frame's real per-node style deltas
-/// through it and then reads `needs_layout()`. In every case the accumulators it
-/// filled are dropped unread — nothing consults them for *which* nodes.
+/// `FramePlan::for_frame` / `for_transaction` read the dirty-phase **booleans**
+/// only (`needs_style()`/`needs_layout()`/`needs_scene()`) and drop the
+/// accumulators unread. For `for_frame` that costs nothing — it routes only
+/// *global* invalidations (node `None`), which record no per-node entry. For
+/// `for_transaction` it is a real discard: `UiOperation::invalidation` names a
+/// node for everything but `ReplaceRoot`, so a per-node set is built there and
+/// thrown away. That is harmless today only because of what production actually
+/// emits — `drag_coordinator.rs:257` sends `Rerender`/`ReplaceRoot`, which *are*
+/// structural and relayout in full. It is **not** harmless in general: an
+/// `InvalidateLayout` commit is neither (`frame_plan.rs:313` asserts
+/// `!plan.reconcile()` for one), and `layout_phase`'s own router sees no computed-
+/// style delta for it — `LayoutChanged` means geometry moved *without* the style
+/// changing — so such a commit is silently skipped rather than relaid out. Nothing
+/// constructs one outside tests, which is why no frame is wrong; the gap predates
+/// the per-node set and is not closed by it.
 ///
-/// So the spec's "recalculation starts at the nearest affected context" is not
-/// realised here. Where it is realised — the style phase's per-node restyle — the
-/// set comes from `RestyleScope` reading the live interaction state, on a path that
-/// does not involve this router at all.
+/// `UiRuntime::layout_phase` uses both halves: it routes this frame's real
+/// per-node style deltas through here, reads `needs_layout()` to decide **whether**
+/// the layout phase runs, and hands the [`LayoutInvalidation`] this filled to
+/// `LayoutCoordinator::layout_invalidated` to decide **which** contexts it
+/// re-measures. So the spec's "recalculation starts at the nearest affected
+/// context" is realised through this router for layout's measure step.
+///
+/// The [`StyleInvalidation`] this fills is still dropped unread by every caller:
+/// the style phase's per-node restyle takes its set from `RestyleScope` reading the
+/// live interaction state, on a path that does not involve this router at all.
 ///
 /// The dirty-phase flags accumulate across calls to [`route`](Self::route) within
 /// a frame and are cleared by [`reset`](Self::reset); the domain accumulators are

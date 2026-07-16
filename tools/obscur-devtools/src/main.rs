@@ -14,6 +14,7 @@ use std::process::ExitCode;
 
 use obscur_devtools::cli;
 use obscur_devtools::host;
+use obscur_devtools_protocol::error::ProtocolError;
 use obscur_devtools_protocol::message::{
     HandshakeResponse, InjectedEvent, PermissionScope, ScopeSet,
 };
@@ -276,6 +277,20 @@ fn run_inject(args: &[String]) -> Result<(), String> {
     for (index, event) in events.into_iter().enumerate() {
         let reply = cli::inject(&mut client, index as u64 + 1, event).map_err(|e| e.to_string())?;
         println!("{}", cli::format_client_bound(&reply));
+        // A refusal is the host saying it has nowhere to put the click, so say so
+        // rather than leaving the user to re-read a `{:?}`. The demo host is
+        // exactly this case: it serves snapshots and owns no runtime.
+        if matches!(
+            reply,
+            ClientBound::Error(ProtocolError::InjectionUnavailable)
+        ) {
+            println!(
+                "note: this host has no runtime to inject into, so the event was refused rather\n      \
+                 than acknowledged and dropped. Attach to a host that installs an InjectionQueue\n      \
+                 and applies what it drains (obscur_kit::devtools::apply_injected)."
+            );
+            return Ok(());
+        }
     }
     Ok(())
 }

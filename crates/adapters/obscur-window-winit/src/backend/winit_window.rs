@@ -46,6 +46,19 @@ impl WinitWindow {
         &self.window
     }
 
+    /// Returns a shared handle to the live winit window.
+    ///
+    /// [`Self::winit`] borrows, which is enough to *drive* the window but not to
+    /// *present* to it: `wgpu::Instance::create_surface` needs an owned
+    /// `impl Into<SurfaceTarget<'static>>` to build a `Surface<'static>`, and
+    /// `Arc<Window>` is the handle that satisfies it. Handing out the [`Arc`]
+    /// rather than a borrow is what lets a host build its swapchain against a
+    /// window this backend created (spec §6.1).
+    #[must_use]
+    pub fn shared(&self) -> Arc<NativeWindow> {
+        Arc::clone(&self.window)
+    }
+
     /// Reconciles the live winit window against the desired domain `props`
     /// (spec §6.2).
     ///

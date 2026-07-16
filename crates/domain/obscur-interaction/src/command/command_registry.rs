@@ -1,0 +1,200 @@
+//! The [`CommandRegistry`] mapping command symbols to their descriptor and
+//! state (spec §6.7).
+
+use std::collections::HashMap;
+
+use obscur_identity::InternedSymbol;
+
+use crate::command::{Command, CommandState};
+
+/// Maps command symbols to their [`Command`] descriptor and [`CommandState`]
+/// (spec §6.7).
+///
+/// This is the join that makes one action descriptor drive many surfaces. Every
+/// live surface routes an app-owned command [`InternedSymbol`] — a shortcut
+/// resolved by [`CommandRouter`](crate::command::CommandRouter), a menu item
+/// fired by a click, a handler registered on the runtime. The registry keys the
+/// *description* (title, icon, shortcut) and the *state* (enabled, checked,
+/// visible) on that **same** symbol, so a surface holding a symbol can ask for
+/// the title to show, and any surface about to fire one can ask whether it is
+/// actionable right now.
+///
+/// A symbol need not be registered: the registry describes commands, it does not
+/// gate their existence. [`permits_dispatch`](Self::permits_dispatch) states the
+/// resulting policy — an unregistered symbol is unconstrained, a registered one
+/// is inert unless its state is actionable.
+#[derive(Debug, Clone, Default)]
+pub struct CommandRegistry {
+    /// Descriptor and live state, keyed by the routed command symbol.
+    entries: HashMap<InternedSymbol, (Command, CommandState)>,
+}
+
+impl CommandRegistry {
+    /// Creates an empty registry.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+        }
+    }
+
+    /// Registers `command` under its own [`id`](Command::id) with the default
+    /// live [`CommandState`], returning the previously registered command with
+    /// that symbol, if any.
+    ///
+    /// Re-registering a symbol replaces its descriptor **and** resets its state:
+    /// the new descriptor arrives with the default state, exactly as a first
+    /// registration would.
+    pub fn register(&mut self, command: Command) -> Option<Command> {
+        let id = command.id();
+        self.entries
+            .insert(id, (command, CommandState::new()))
+            .map(|(previous, _)| previous)
+    }
+
+    /// Returns the descriptor registered for `id`, if any.
+    #[must_use]
+    pub fn get(&self, id: InternedSymbol) -> Option<&Command> {
+        self.entries.get(&id).map(|(command, _)| command)
+    }
+
+    /// Returns the live state registered for `id`, if any.
+    #[must_use]
+    pub fn state(&self, id: InternedSymbol) -> Option<CommandState> {
+        self.entries.get(&id).map(|&(_, state)| state)
+    }
+
+    /// Sets the live state of `id`, returning whether a command was registered
+    /// under that symbol (a state set on an unregistered symbol is discarded,
+    /// since there is no descriptor for it to belong to).
+    pub fn set_state(&mut self, id: InternedSymbol, state: CommandState) -> bool {
+        match self.entries.get_mut(&id) {
+            Some((_, slot)) => {
+                *slot = state;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Whether dispatching `id` is permitted right now.
+    ///
+    /// This is the policy every surface shares, stated once: a symbol with **no**
+    /// registered command is unconstrained (`true`) — the registry describes
+    /// commands, it does not gate symbols an application routes without one. A
+    /// symbol **with** a registered command is permitted only while its state is
+    /// [`actionable`](CommandState::is_actionable), so disabling or hiding one
+    /// command makes it inert on every surface at once: shortcut, menu, and
+    /// click alike.
+    #[must_use]
+    pub fn permits_dispatch(&self, id: InternedSymbol) -> bool {
+        self.state(id)
+            .is_none_or(|state: CommandState| state.is_actionable())
+    }
+
+    /// Returns whether a command is registered under `id`.
+    #[must_use]
+    pub fn contains(&self, id: InternedSymbol) -> bool {
+        self.entries.contains_key(&id)
+    }
+
+    /// Returns the number of registered commands.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Returns whether the registry has no registered commands.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::{LogicalKey, Modifier, Shortcut};
+
+    const CMD_SAVE: InternedSymbol = InternedSymbol::from_raw(0x5A7E);
+    const CMD_OPEN: InternedSymbol = InternedSymbol::from_raw(0x0BE1);
+    const CMD_UNREGISTERED: InternedSymbol = InternedSymbol::from_raw(0xDEAD);
+
+    #[test]
+    fn register_keys_the_command_on_its_own_symbol() {
+        let mut registry = CommandRegistry::new();
+        assert!(registry.is_empty());
+
+        let save = Shortcut::new(LogicalKey::character('s')).with(Modifier::Ctrl);
+        assert!(
+            registry
+                .register(Command::new(CMD_SAVE, "Save").with_shortcut(save))
+                .is_none()
+        );
+
+        assert_eq!(registry.len(), 1);
+        assert!(registry.contains(CMD_SAVE));
+        // The registry is reachable by the SAME symbol a shortcut resolves to.
+        let found = registry.get(CMD_SAVE).expect("registered");
+        assert_eq!(found.id(), CMD_SAVE);
+        assert_eq!(found.title(), "Save");
+        assert_eq!(found.shortcut(), Some(save));
+        assert_eq!(registry.get(CMD_UNREGISTERED), None);
+    }
+
+    #[test]
+    fn register_replaces_descriptor_and_resets_state() {
+        let mut registry = CommandRegistry::new();
+        registry.register(Command::new(CMD_SAVE, "Save"));
+        assert!(registry.set_state(CMD_SAVE, CommandState::new().enabled(false)));
+
+        let previous = registry.register(Command::new(CMD_SAVE, "Save As"));
+        assert_eq!(previous.map(|c| c.title().to_owned()), Some("Save".into()));
+        assert_eq!(registry.len(), 1);
+        assert_eq!(registry.get(CMD_SAVE).map(Command::title), Some("Save As"));
+        // The fresh descriptor arrives with the default (live) state.
+        assert_eq!(registry.state(CMD_SAVE), Some(CommandState::new()));
+    }
+
+    #[test]
+    fn state_round_trips_and_is_none_when_unregistered() {
+        let mut registry = CommandRegistry::new();
+        registry.register(Command::new(CMD_SAVE, "Save"));
+
+        assert_eq!(registry.state(CMD_SAVE), Some(CommandState::new()));
+        assert_eq!(registry.state(CMD_UNREGISTERED), None);
+
+        let checked = CommandState::new().with_checked(Some(true));
+        assert!(registry.set_state(CMD_SAVE, checked));
+        assert_eq!(registry.state(CMD_SAVE), Some(checked));
+
+        // Setting state on an unregistered symbol reports false and stores nothing.
+        assert!(!registry.set_state(CMD_UNREGISTERED, checked));
+        assert_eq!(registry.state(CMD_UNREGISTERED), None);
+    }
+
+    #[test]
+    fn permits_dispatch_gates_registered_commands_only() {
+        let mut registry = CommandRegistry::new();
+        registry.register(Command::new(CMD_SAVE, "Save"));
+        registry.register(Command::new(CMD_OPEN, "Open"));
+
+        // Registered + default state: permitted.
+        assert!(registry.permits_dispatch(CMD_SAVE));
+        // Unregistered: unconstrained, the registry gates nothing it never described.
+        assert!(registry.permits_dispatch(CMD_UNREGISTERED));
+
+        // Disabled and hidden are each independently inert.
+        registry.set_state(CMD_SAVE, CommandState::new().enabled(false));
+        assert!(!registry.permits_dispatch(CMD_SAVE));
+        registry.set_state(CMD_SAVE, CommandState::new().visible(false));
+        assert!(!registry.permits_dispatch(CMD_SAVE));
+
+        // Gating one command leaves its neighbour alone.
+        assert!(registry.permits_dispatch(CMD_OPEN));
+
+        // Re-enabling restores it.
+        registry.set_state(CMD_SAVE, CommandState::new());
+        assert!(registry.permits_dispatch(CMD_SAVE));
+    }
+}
