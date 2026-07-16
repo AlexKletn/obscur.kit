@@ -52,8 +52,15 @@ pub struct Subscription {
     pub id: SubscriptionId,
     /// The topic this subscription delivers.
     pub topic: Topic,
-    /// Whether the subscription was actually granted (denied when the
-    /// [`SUBSCRIPTION_LIMIT`] would be exceeded or the scope is missing).
+    /// Whether the subscription was actually granted.
+    ///
+    /// `false` means no event will ever arrive on it and the client should not
+    /// wait for one: the server denies rather than accepting a subscription it
+    /// cannot honour — today, when the session is being served request/reply and
+    /// nothing will push. A missing `Subscribe` scope and an exceeded
+    /// [`SUBSCRIPTION_LIMIT`] are refused earlier still, as a
+    /// [`ProtocolError`](crate::error::ProtocolError), so they never reach this
+    /// record.
     pub granted: bool,
 }
 
@@ -69,6 +76,10 @@ impl Subscription {
     }
 
     /// Creates a denied subscription record.
+    ///
+    /// A denial carries no live subscription, so `id` is conventionally
+    /// [`SubscriptionId::default`] — the server mints live ids from 1, so a zero
+    /// id can never collide with one.
     #[must_use]
     pub const fn denied(id: SubscriptionId, topic: Topic) -> Self {
         Self {

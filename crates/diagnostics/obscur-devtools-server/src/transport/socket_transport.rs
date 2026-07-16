@@ -7,10 +7,18 @@
 //! [`WireCodec`](crate::transport::WireCodec) messages off a
 //! [`SocketStream`], feeds each into the *unchanged* endpoint (handshake →
 //! authorize → dispatch → audit), and writes the endpoint's typed response back.
-//! The transport is a pure conduit — it never bypasses authentication, never
-//! grants scopes, and enables nothing: a fresh endpoint is still disabled by
-//! default and rejects every handshake until the host calls
-//! [`enable`](DevToolsEndpoint::enable) (spec §7.7).
+//! The transport never bypasses authentication, never grants a scope, and
+//! enables nothing: a fresh endpoint is still disabled by default and rejects
+//! every handshake until the host calls [`enable`](DevToolsEndpoint::enable)
+//! (spec §7.7).
+//!
+//! It writes exactly one bit of session state, and only
+//! [`serve_with_events`](SocketTransport::serve_with_events) does: that this
+//! session's events are being serviced, which is a fact about the loop the
+//! caller is standing in rather than a permission. It cannot loosen an
+//! authorisation — a `Subscribe` is still checked against the granted
+//! [`ScopeSet`](obscur_devtools_protocol::message::ScopeSet) first, and this bit
+//! only decides whether a scope-authorised subscription is honoured or denied.
 //!
 //! A single [`serve`](SocketTransport::serve) call handles one connected client
 //! session in its own thread; the endpoint's session state (negotiated version,
@@ -106,6 +114,13 @@ impl SocketTransport {
     /// fans each out through the endpoint — so subscription state, scopes and
     /// authentication stay exactly where they were, on this thread.
     ///
+    /// # Why this is what grants a subscription
+    ///
+    /// Entering this loop is what makes `granted: true` true, so it is this call
+    /// — not the host's word for it — that marks the endpoint as servicing event
+    /// push. An endpoint driven by [`serve`](Self::serve) instead denies every
+    /// `Subscribe`, because nothing there would ever drain a queue.
+    ///
     /// # Why a read timeout
     ///
     /// A blocking read parks here until the client speaks, so a queued event could
@@ -127,6 +142,7 @@ impl SocketTransport {
         events: &EventQueue,
         poll: Duration,
     ) -> io::Result<()> {
+        endpoint.mark_event_push_serviced();
         self.stream.set_read_timeout(Some(poll))?;
         loop {
             match self.serve_one(endpoint) {

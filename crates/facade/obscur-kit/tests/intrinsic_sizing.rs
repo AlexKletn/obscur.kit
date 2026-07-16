@@ -17,6 +17,29 @@
 //! `n` characters at 16px is exactly `n * 9.6` wide. Every expectation below is
 //! written from the actual string, which is what makes a wrong answer visible
 //! rather than plausible.
+//!
+//! # The consumers, not just the `width`
+//!
+//! A keyword being answered on `width` says nothing about the other places CSS
+//! allows one, and for a long time `width` was the only place that measured. So
+//! this file also drives the **bounds** (`min-width: min-content` flooring a
+//! narrower authored width, `max-width: max-content` capping a stretching box)
+//! and **grid** (`grid-template-columns: min-content 1fr`, which used to abort
+//! the whole declaration at CSS lowering and take the `1fr` with it). The grid
+//! tests use an ordinary element as the grid item — not a bare text leaf —
+//! because that is the case that has to work and the case that was hollow.
+//!
+//! Three places still degrade a keyword to `auto`, and are deliberately not
+//! covered here because covering them would be asserting a wrong answer:
+//!
+//! * a flex or grid **container's own** `width` / `height` — `display: flex;
+//!   width: min-content` fills its parent;
+//! * a flex or grid container's own `min-`/`max-` bounds, which impose no clamp
+//!   (only flow measures its bounds);
+//! * a flex item's **cross**-axis size and cross bounds.
+//!
+//! Each needs a min-content pass over a formatting context that has none — flow's
+//! probe stacks children, which is not what a flex row or a grid does.
 
 #![forbid(unsafe_code)]
 
@@ -209,6 +232,178 @@ fn an_intrinsic_width_is_still_floored_by_min_width() {
     assert!(
         (width - 300.0).abs() < 1e-3,
         "min-content (86.4) floored by min-width, got {width}"
+    );
+}
+
+#[test]
+fn min_width_min_content_floors_a_narrower_authored_width() {
+    // The keywords are values of the BOUNDS too, not just of `width` (CSS Sizing 3
+    // §4.1). A 40px box whose content cannot break below `wonderful` (86.4) is
+    // floored at 86.4 and overflows — the bound was silently ignored before.
+    let (width, height) = item_size(&format!(
+        ".page {{ width: 400px; height: 400px; font-size: {FONT}px }} \
+         .item {{ width: 40px; min-width: min-content }}"
+    ));
+    assert!(
+        (width - LONGEST_WORD).abs() < 1e-3,
+        "`min-width: min-content` floors at {LONGEST_WORD}, got {width}"
+    );
+    assert!(width > 40.0, "it really did overflow the authored width");
+    // The independent witness: the children were laid out at the FLOORED width,
+    // so the text wraps into three lines rather than the many a 40px box needs.
+    assert!(
+        (height - FONT * 3.0).abs() < 1e-3,
+        "three words, three lines at the floored width, got {height}"
+    );
+}
+
+#[test]
+fn max_width_max_content_caps_a_stretching_box() {
+    // `width: auto` fills its 400px container; `max-width: max-content` caps it at
+    // the width the content actually wants.
+    let (width, _) = item_size(&format!(
+        ".page {{ width: 400px; height: 400px; font-size: {FONT}px }} \
+         .item {{ max-width: max-content }}"
+    ));
+    assert!(
+        (width - ONE_LINE).abs() < 1e-3,
+        "`max-width: max-content` caps at {ONE_LINE}, got {width}"
+    );
+    assert!(width < 400.0, "the cap did nothing and the box stretched");
+}
+
+#[test]
+fn min_height_min_content_floors_a_shorter_authored_height() {
+    // The block axis: `min-content` and `max-content` coincide with the content
+    // height there, so this floors the 5px box at the one line of text it holds.
+    let (_, height) = item_size(&format!(
+        ".page {{ width: 400px; height: 400px; font-size: {FONT}px }} \
+         .item {{ height: 5px; min-height: min-content }}"
+    ));
+    assert!(
+        (height - FONT).abs() < 1e-3,
+        "`min-height: min-content` floors at the one line of text ({FONT}), got {height}"
+    );
+}
+
+#[test]
+fn an_auto_bound_still_imposes_no_limit() {
+    // The regression guard for the bounds path: `min-width`/`max-width` unset must
+    // leave an `auto` box filling its container, exactly as before.
+    let (width, _) = item_size(&page_with("auto"));
+    assert!((width - 400.0).abs() < 1e-3, "got {width}");
+}
+
+/// The `.item` (holding `TEXT`) and `.tail` boxes of a two-item `.page` grid.
+/// Both children are ordinary elements, which is the case that matters: a grid
+/// item is normally a box, not a bare text leaf.
+fn grid_items(css: &str) -> [(f32, f32, f32); 2] {
+    let sheet = compile(css);
+    let component = ComponentId::from_raw(0x00C0_0001);
+    let item = ViewNode::element(component)
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("item".into())))
+        .with_children(ViewFragment::from_nodes(vec![ViewNode::text(TEXT)]));
+    let tail = ViewNode::element(component)
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("tail".into())));
+    let page = ViewNode::element(component)
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("page".into())))
+        .with_children(ViewFragment::from_nodes(vec![item, tail]));
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![page]));
+
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(600.0, 400.0));
+    runtime.render_now(&view, std::slice::from_ref(&sheet));
+    let root = runtime.tree().root().expect("a root");
+    let page_id = runtime.tree().get(root).expect("live").children()[0];
+    let kids = runtime
+        .tree()
+        .get(page_id)
+        .expect("live")
+        .children()
+        .to_vec();
+    std::array::from_fn(|i| {
+        let b = runtime.layout_boxes().get(&kids[i]).expect("laid out");
+        (b.origin().x, b.size().width, b.size().height)
+    })
+}
+
+/// A 400px grid whose first column is `track` and whose second is `1fr`.
+fn grid_page(track: &str) -> String {
+    format!(
+        ".page {{ display: grid; width: 400px; font-size: {FONT}px; \
+           grid-template-columns: {track} 1fr }} \
+         .tail {{ height: 10px }}"
+    )
+}
+
+#[test]
+fn a_min_content_column_hugs_its_item_and_the_fr_takes_the_rest() {
+    // The whole §4-D chain in one assertion: `min-content` survives CSS lowering
+    // (it used to abort the declaration and take the `1fr` with it), reaches the
+    // track-sizing algorithm as a real sizing function (not `auto`), and is
+    // answered by probing the item — which is a BLOCK, so the probe has to carry
+    // through its `width: auto` to the text inside it.
+    let [(item_x, item_w, item_h), (tail_x, tail_w, _)] = grid_items(&grid_page("min-content"));
+    assert!(
+        (item_w - LONGEST_WORD).abs() < 1e-3,
+        "the min-content column hugs `wonderful` = {LONGEST_WORD}, got {item_w}"
+    );
+    assert!((item_x - 0.0).abs() < 1e-3, "the item leads, got {item_x}");
+    // The `1fr` really took the REST — which is only true if the first track was
+    // sized at all. If the template had been dropped, both items would sit in one
+    // implicit column at x = 0.
+    assert!(
+        (tail_x - LONGEST_WORD).abs() < 1e-3,
+        "the fr column starts after the min-content one, got {tail_x}"
+    );
+    assert!(
+        (tail_w - (400.0 - LONGEST_WORD)).abs() < 1e-3,
+        "the fr column takes the remaining {}, got {tail_w}",
+        400.0 - LONGEST_WORD
+    );
+    // The independent witness that it is min-content and not something that
+    // merely looks small: the text wrapped into three lines under it.
+    assert!(
+        (item_h - FONT * 3.0).abs() < 1e-3,
+        "three words, three lines, got {item_h}"
+    );
+}
+
+#[test]
+fn a_max_content_column_puts_its_item_on_one_line() {
+    // The same chain for the other keyword, and the two must disagree.
+    let [(_, item_w, item_h), (tail_x, tail_w, _)] = grid_items(&grid_page("max-content"));
+    assert!(
+        (item_w - ONE_LINE).abs() < 1e-3,
+        "the max-content column fits all 21 characters = {ONE_LINE}, got {item_w}"
+    );
+    assert!(
+        (item_h - FONT).abs() < 1e-3,
+        "one line tall, got {item_h} (it wrapped, so the offer was not unbounded)"
+    );
+    assert!((tail_x - ONE_LINE).abs() < 1e-3, "tail.x, got {tail_x}");
+    assert!(
+        (tail_w - (400.0 - ONE_LINE)).abs() < 1e-3,
+        "the fr column takes the rest, got {tail_w}"
+    );
+}
+
+#[test]
+fn a_content_keyword_column_is_not_an_auto_column() {
+    // `auto` is the fallback the keywords used to degrade to (when they were not
+    // dropping the whole declaration). If any of these agreed, this file would be
+    // testing nothing: an `auto` column beside a `1fr` stretches to hold the
+    // item's whole line, while the two keywords each answer with a different
+    // property of the content.
+    let [(_, min_w, _), _] = grid_items(&grid_page("min-content"));
+    let [(_, max_w, _), _] = grid_items(&grid_page("max-content"));
+    let [(_, auto_w, _), _] = grid_items(&grid_page("auto"));
+    assert!(
+        min_w < max_w,
+        "min-content {min_w} must be narrower than max-content {max_w}"
+    );
+    assert!(
+        (min_w - auto_w).abs() > 1e-3,
+        "min-content {min_w} is indistinguishable from auto {auto_w}"
     );
 }
 

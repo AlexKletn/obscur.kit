@@ -5,7 +5,8 @@ use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 use crate::model::{Dimension, LayoutBox, LayoutStyle};
 
 use super::{
-    ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput, clamp_content, intrinsic_inline_size,
+    ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput, clamp_content_measured,
+    intrinsic_inline_size,
 };
 
 /// Normal-flow / block layout (spec §4.1, §4.2).
@@ -26,6 +27,12 @@ use super::{
 ///   measuring pass. In the **block** axis the two intrinsic sizes coincide with
 ///   the content height, so `height: max-content` is `height: auto` for a block
 ///   and needs no separate path.
+/// * **Intrinsic min/max bounds** — `min-width` / `max-width` take the same
+///   keywords, and are answered by the same probe as an intrinsic `width`, so
+///   `min-width: min-content` floors the box at its widest unbreakable run
+///   whatever its `width` resolved to. Their block-axis twins ride on the
+///   coincidence above: an intrinsic `min-height` / `max-height` is the height the
+///   children stacked to, at no extra measuring cost.
 /// * **Child stacking** — each child is measured with
 ///   [`BoxConstraints::loose`] up to `(content_width − its inline margins,
 ///   remaining_height)`, placed at the content-box left edge **plus its
@@ -172,16 +179,46 @@ impl LayoutAlgorithm for FlowLayout {
         // `max-content`.
         let stretch = (constraints.max.width - bp_x).max(0.0);
         let explicit = style.width.resolve(constraints.max.width);
-        // `auto` normally stretches to the space offered — but under an unbounded
-        // offer there is no such space, and stretching would make the box
-        // infinitely wide, poisoning every size derived from it. CSS Sizing 3 §5.2:
-        // against an infinite available space, `auto` sizes to `max-content`. The
-        // same applies to a percentage, which §5.1 already turned into `auto` by
+        // `auto` normally stretches to the space offered — but at the two ends of
+        // the range there is no space to stretch to, and the offer is a QUESTION
+        // about the content rather than an amount of room (see `BoxConstraints`'s
+        // `constrain_allowing_overflow`, which reads the offers the same way).
+        // CSS Sizing 3 §5.2 answers both: against an infinite available space
+        // `auto` sizes to `max-content`, and under a min-content constraint it
+        // sizes to `min-content`.
+        //
+        // * **Unbounded** — stretching would make the box infinitely wide and
+        //   poison every size derived from it. This box is being measured for
+        //   someone else's `max-content`.
+        // * **Zero** — stretching to `0` makes the box vanish and its content
+        //   overflow, and the number is worthless to whoever asked. This box is
+        //   being measured for someone else's `min-content` — a `min-content`
+        //   grid track, or a `min-width: min-content` ancestor. Without this an
+        //   intrinsic probe answers `0` for every box that is not a bare text
+        //   leaf, and the keyword is hollow one level down.
+        //
+        // Both apply to a percentage too, which §5.1 already turned into `auto` by
         // refusing to resolve against an indefinite basis (see `Dimension::resolve`)
         // — so `width: 50%` inside a `max-content` box contributes its content, not
         // half of infinity.
-        let width = if explicit.is_none() && !style.width.is_intrinsic() && !stretch.is_finite() {
+        //
+        // # The case this gets wrong, deliberately
+        //
+        // A box in a *genuinely* zero-wide containing block (a 20px parent with
+        // 10px of padding on each side) now reports its min-content and overflows,
+        // where CSS says its used width is `0` and only its content overflows.
+        // Zero cannot be both "no room" and "how little can you be?" in a model
+        // that infers intent from the number — `BoxConstraints` would have to carry
+        // the min-content constraint explicitly, a change to that type and to every
+        // algorithm. Between the two readings this picks the one with a real caller:
+        // the probe, which is dead without it. The degenerate box was overflowing
+        // its parent either way.
+        let width = if explicit.is_some() || style.width.is_intrinsic() {
+            style.width
+        } else if !stretch.is_finite() {
             Dimension::MaxContent
+        } else if stretch <= 0.0 {
+            Dimension::MinContent
         } else {
             style.width
         };
@@ -199,11 +236,30 @@ impl LayoutAlgorithm for FlowLayout {
                         .map_or(stretch, |w| style.box_sizing.content_extent(w, bp_x))
                         .max(0.0)
                 });
-        // Clamp the content width into the authored min/max-width (spec §4.2).
-        let content_width = clamp_content(
-            content_width,
+        // Clamp the content width into the authored min/max-width (spec §4.2). An
+        // intrinsic BOUND is measured exactly like an intrinsic width — the same
+        // probe, so `min-width: min-content` floors the box at the run it cannot
+        // break, whatever the `width` said. `intrinsic_inline_size` answers `None`
+        // for a bound that is not a keyword without measuring anything, so a
+        // non-intrinsic bound costs nothing.
+        let min_width_measured = intrinsic_inline_size(
             style.min_width,
+            children,
+            stretch,
+            avail_content_height,
+            measurer,
+        );
+        let max_width_measured = intrinsic_inline_size(
             style.max_width,
+            children,
+            stretch,
+            avail_content_height,
+            measurer,
+        );
+        let content_width = clamp_content_measured(
+            content_width,
+            (style.min_width, min_width_measured),
+            (style.max_width, max_width_measured),
             constraints.max.width,
             bp_x,
             style.box_sizing,
@@ -333,10 +389,17 @@ impl LayoutAlgorithm for FlowLayout {
         // Clamp the content height into the authored min/max-height (spec §4.2) —
         // e.g. `min-height: 100vh` fills a tall viewport even when the content is
         // short. Previously dropped: flow honoured only the parent constraints.
-        let content_height = clamp_content(
+        //
+        // An intrinsic bound needs no probe in the BLOCK axis: a block does not
+        // reflow vertically, so `min-content`, `max-content` and `fit-content` all
+        // coincide with the height the children already stacked to (the same
+        // reason `height: max-content` is `height: auto` here — see the type docs).
+        let block_intrinsic =
+            |bound: Dimension| bound.is_intrinsic().then_some(children_content_height);
+        let content_height = clamp_content_measured(
             content_height,
-            style.min_height,
-            style.max_height,
+            (style.min_height, block_intrinsic(style.min_height)),
+            (style.max_height, block_intrinsic(style.max_height)),
             constraints.max.height,
             bp_y,
             style.box_sizing,
@@ -755,5 +818,60 @@ mod tests {
             &mut measurer,
         );
         assert_eq!(out.child_boxes()[0].origin(), Point::new(0.0, 0.0));
+    }
+
+    // ---- `auto` at the two ends of the offer (CSS Sizing 3 §5.2) -----------
+
+    /// A child that answers the offer: it fills the inline space it is given, but
+    /// never below `min` (its longest unbreakable word) and never above `max` (its
+    /// whole content on one line).
+    struct Paragraph {
+        min: f32,
+        max: f32,
+    }
+
+    impl crate::algorithm::ChildMeasurer for Paragraph {
+        fn measure_child(&mut self, _index: usize, constraints: BoxConstraints) -> Size {
+            Size::new(constraints.max.width.clamp(self.min, self.max), 10.0)
+        }
+    }
+
+    fn paragraph_box_width(offer: f32) -> f32 {
+        FlowLayout
+            .layout(
+                &LayoutStyle::default(),
+                &[child(1)],
+                BoxConstraints::loose(Size::new(offer, 100.0)),
+                &mut Paragraph {
+                    min: 30.0,
+                    max: 200.0,
+                },
+            )
+            .size()
+            .width
+    }
+
+    #[test]
+    fn an_auto_width_box_offered_no_space_reports_its_min_content() {
+        // A zero offer is the min-content probe, so the box answers with the 30 it
+        // cannot break below rather than stretching to `0` and vanishing. This is
+        // what carries an intrinsic probe THROUGH a box: without it a `min-content`
+        // grid track or a `min-width: min-content` ancestor gets `0` for every item
+        // that is not a bare text leaf.
+        assert_eq!(paragraph_box_width(0.0), 30.0);
+    }
+
+    #[test]
+    fn an_auto_width_box_offered_unbounded_space_reports_its_max_content() {
+        // The other end, unchanged: an infinite offer yields a finite want.
+        assert_eq!(paragraph_box_width(f32::INFINITY), 200.0);
+    }
+
+    #[test]
+    fn an_auto_width_box_offered_real_space_still_stretches_into_it() {
+        // The guard that matters most: between the two ends `auto` fills its
+        // container exactly as it always has.
+        assert_eq!(paragraph_box_width(150.0), 150.0);
+        assert_eq!(paragraph_box_width(300.0), 300.0);
     }
 }

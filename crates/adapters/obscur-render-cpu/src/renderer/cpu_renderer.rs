@@ -17,7 +17,14 @@
 //! backend will do with an effect before a host asks for it, and
 //! [`Renderer::render`] emits [`RendererError::UnsupportedEffect`] into the
 //! [`CpuRenderer::set_diagnostic_sink`] sink for every effect a scene demands that
-//! the list below drops. The approximations:
+//! the list below drops.
+//!
+//! An effect this backend *does* draw, only approximately, is not in that set — it
+//! is `Limited`, not `Unavailable` — so its restriction is emitted separately, and
+//! only when the scene actually trips it: today that is a text run whose font is
+//! not registered here. The other
+//! approximations below are unconditional properties of the rasterizer, declared by
+//! `supports_effect` rather than announced per frame. The approximations:
 //!
 //! - **Gradient brushes** rasterize as a flat solid of the gradient's first stop
 //!   color (spec §5.2 permits rasterization to differ). A stop-less gradient is
@@ -28,9 +35,14 @@
 //!   at that opacity, so overlapping opaque children blend as one group (not
 //!   double-darkened per element) and nested layers multiply. A trivial layer
 //!   (opacity `1.0`) stays a cheap passthrough — children draw directly, so the
-//!   plain path is byte-identical. The layer's **clip, blend mode, transform, and
-//!   effects** are still *not* honored here (only its opacity) — a documented
-//!   approximation; `filter` / `backdrop-filter` remain absent.
+//!   plain path is byte-identical. A layer's own **clip** *is* honored: it
+//!   resolves through the same rule as a [`PushClip`] of the same region, so a
+//!   layer clip and a clip command confine drawing identically and agree with the
+//!   GPU backend (spec §5.2). The layer's **blend mode, transform, and effects**
+//!   are still *not* honored here — a documented approximation; `filter` /
+//!   `backdrop-filter` remain absent.
+//!
+//! [`PushClip`]: obscur_scene::command::PaintCommand::PushClip
 //! - **Mask clips** (as opposed to geometric shape clips) inherit the current
 //!   effective clip, since coverage from separate source content is not
 //!   rasterized here.
@@ -82,8 +94,8 @@ use obscur_geometry::{AffineTransform, CornerRadii, Point, Rect, Size};
 use obscur_render::frame::{FrameSubmission, PresentResult};
 use obscur_render::target::RenderTarget;
 use obscur_render::{
-    EffectFallbackReporter, Renderer, RendererCapabilities, RendererError, RendererId, SceneEffect,
-    unsupported_effects,
+    EffectFallback, EffectFallbackReporter, Renderer, RendererCapabilities, RendererError,
+    RendererId, SceneEffect, text_run_font_handles, unsupported_effects,
 };
 use obscur_scene::clip::{Clip, ClipShape};
 use obscur_scene::color::{AlphaMode, Color};
@@ -160,8 +172,25 @@ impl CpuRenderer {
     /// This backend approximates the GPU-class effects by design (see
     /// [`Renderer::supports_effect`]); the sink is how a host is *told* which of the
     /// effects its scene asked for will not appear, rather than discovering it by
-    /// looking at the pixels. Each such effect is reported once, the first time a
-    /// rendered scene demands it.
+    /// looking at the pixels. Two kinds arrive here, each once:
+    ///
+    /// - a [`RendererError::UnsupportedEffect`] per effect a rendered scene demands
+    ///   that this backend reports [`Unavailable`](SupportLevel::Unavailable);
+    /// - an [`EffectFallback`] per effect it *did* draw, approximated, because the
+    ///   restriction its [`Limited`](SupportLevel::Limited) level names actually bit
+    ///   on that scene — today, a text run whose font is not registered here.
+    ///
+    /// Not every approximation is announced — the text fallback above is the only one
+    /// today. [`Renderer::supports_effect`] remains the complete statement of what
+    /// this backend does with an effect.
+    ///
+    /// Installing a sink is the **host's** job and nothing in this workspace does it:
+    /// the default is a [`NullDiagnosticSink`], and the `Renderer` port carries no
+    /// sink, so a generic runtime cannot install one — only whoever constructs this
+    /// concrete backend can. Until it is called, both diagnostics above are built and
+    /// dropped. That is deliberate (the render path does not branch on whether anyone
+    /// is listening), but it does mean §5.2's "explicit diagnostics" are *available*
+    /// here, not *delivered*.
     pub fn set_diagnostic_sink(&mut self, sink: Arc<dyn DiagnosticSink>) {
         self.diagnostics = sink;
     }
@@ -196,6 +225,39 @@ impl CpuRenderer {
     #[must_use]
     pub const fn frames_rendered(&self) -> u64 {
         self.frames_rendered
+    }
+
+    /// The [`SceneEffect::Text`] fallbacks this backend will take drawing `list`:
+    /// one per font handle whose runs will rasterize as box-coverage cells instead
+    /// of real glyph outlines (spec §5.2).
+    ///
+    /// The predicate is [`draw_text_run`]'s own resolution rule, restated: an exact
+    /// registry hit whose bytes `skrifa` accepts. It has to be — a scan that
+    /// disagrees with the paint path reports a fallback that did not happen, or
+    /// stays quiet about one that did, which is the failure this whole diagnostic
+    /// exists to end.
+    fn text_fallbacks(&self, list: &obscur_scene::command::DisplayList) -> Vec<EffectFallback> {
+        text_run_font_handles(list)
+            .into_iter()
+            .filter(|handle| !self.has_outlines_for(*handle))
+            .map(|handle| {
+                EffectFallback::new(
+                    SceneEffect::Text,
+                    format!(
+                        "no usable font is registered for handle {handle}, so its runs \
+                         rasterize as advance-width coverage cells, not glyph outlines; \
+                         register one with CpuRenderer::register_font"
+                    ),
+                )
+            })
+            .collect()
+    }
+
+    /// Whether a run tagged with `handle` will draw real outlines here.
+    fn has_outlines_for(&self, handle: u32) -> bool {
+        self.fonts
+            .get(&handle)
+            .is_some_and(|bytes| FontRef::new(bytes).is_ok())
     }
 }
 
@@ -260,9 +322,16 @@ impl Renderer for CpuRenderer {
         // Tell the host, before drawing, every effect this scene asks for that the
         // rasterization below will not reproduce — then draw the documented
         // approximation anyway, which is the CPU backend's standing policy.
-        let unsupported = unsupported_effects(&*self, submission.frame().scene().display_list());
+        let display_list = submission.frame().scene().display_list();
+        let unsupported = unsupported_effects(&*self, display_list);
         let sink = Arc::clone(&self.diagnostics);
         self.fallbacks.report(&unsupported, sink.as_ref());
+        // The other half of that sentence: an effect this backend *does* draw, but
+        // whose documented restriction bites on THIS scene. Unlike the list above,
+        // it cannot be read off `supports_effect` — `Text` is `Limited` whether or
+        // not the host registered the font a given run needs.
+        let degraded = self.text_fallbacks(display_list);
+        self.fallbacks.report_fallbacks(&degraded, sink.as_ref());
 
         let root_pixmap = tiny_skia::Pixmap::new(width, height).ok_or_else(|| {
             CpuRenderError::PixmapAllocationFailed { width, height }.into_renderer_error()
@@ -359,41 +428,7 @@ impl Renderer for CpuRenderer {
                 }
                 PaintCommand::PushClip(clip) => {
                     let parent = clip_stack.last().and_then(Option::as_ref);
-                    let entry = match clip {
-                        Clip::Shape(shape) => {
-                            let domain_path = clip_shape_to_domain_path(shape);
-                            match to_sk_path(&domain_path) {
-                                Some(sk_path) => build_clip_mask(
-                                    width,
-                                    height,
-                                    &sk_path,
-                                    to_sk_fill_rule(domain_path.fill_rule()),
-                                    parent,
-                                    current,
-                                )
-                                .or_else(|| parent.cloned()),
-                                // An empty/degenerate outline encloses no area, so
-                                // the clip admits nothing — an all-zero mask, NOT
-                                // the parent. The extent here is known (it is
-                                // empty); inheriting would paint content the author
-                                // clipped away, and would disagree with Vello,
-                                // whose empty outline already admits nothing
-                                // (spec §5.2: clipping must match across backends).
-                                // Only an allocation failure falls back to parent.
-                                None => empty_clip_mask(width, height).or_else(|| parent.cloned()),
-                            }
-                        }
-                        // A mask carries only *how* to read coverage, never the
-                        // source it comes from, so a mask clip states no extent at
-                        // all (`Clip::bounds()` is `None` for exactly this reason).
-                        // Unknown extent is not empty extent: inherit the enclosing
-                        // clip, which asserts nothing the domain has not stated, and
-                        // matches Vello. This is the §5.8 fallback, not mask
-                        // support — coverage is not applied on either backend, and
-                        // neither raises the diagnostic §5.8 asks an explicit
-                        // fallback to carry.
-                        Clip::Mask(_) => parent.cloned(),
-                    };
+                    let entry = resolve_clip_entry(clip, parent, width, height, current);
                     clip_stack.push(entry);
                 }
                 PaintCommand::PopClip => {
@@ -406,9 +441,24 @@ impl Renderer for CpuRenderer {
                 // blends as one (overlapping opaque children are not double-
                 // darkened). A trivial layer (opacity `1.0`) stays a passthrough:
                 // it pushes no offscreen, so the plain path is byte-identical. The
-                // layer's own clip / blend-mode / transform / effect fields are not
-                // honored here (only its opacity) — a documented approximation.
+                // layer's own blend-mode / transform / effect fields are still not
+                // honored here — a documented approximation.
                 PaintCommand::PushLayer(layer) => {
+                    // A layer's own clip confines its subtree exactly as a
+                    // `PushClip` of the same region would, and it reaches this
+                    // backend in production: the coordinator brackets every
+                    // `filter: blur()` / color-matrix group with `with_clip`.
+                    // Vello honors it (`push_layer`'s bounding shape), so ignoring
+                    // it here painted content the author clipped away and made the
+                    // two backends disagree (spec §5.2: clipping must match). One
+                    // entry per push keeps the stack balanced with `PopLayer`
+                    // whether or not the layer carries a clip.
+                    let parent = clip_stack.last().and_then(Option::as_ref);
+                    let entry = layer.clip().map_or_else(
+                        || parent.cloned(),
+                        |clip| resolve_clip_entry(clip, parent, width, height, current),
+                    );
+                    clip_stack.push(entry);
                     if layer.opacity() < 1.0 {
                         match targets
                             .last()
@@ -428,6 +478,12 @@ impl Renderer for CpuRenderer {
                     }
                 }
                 PaintCommand::PopLayer => {
+                    // The layer's clip leaves force with the layer that opened it.
+                    // Popping unconditionally (rather than only when a layer is
+                    // open) is what keeps a malformed list agreeing with Vello,
+                    // which counts clips and layers on one shared depth and pops
+                    // whatever is on top for either kind of pop.
+                    let _ = clip_stack.pop();
                     // Balance a stray pop; composite the offscreen when this layer
                     // opened one.
                     if let Some(Some(opacity)) = layer_stack.pop() {
@@ -999,6 +1055,54 @@ fn clip_shape_to_domain_path(shape: &ClipShape) -> Path {
 /// be allocated.
 fn empty_clip_mask(width: u32, height: u32) -> Option<tiny_skia::Mask> {
     tiny_skia::Mask::new(width, height)
+}
+
+/// Resolves a [`Clip`] against the enclosing `parent` mask into the effective
+/// clip in force for the commands it encloses.
+///
+/// Shared by [`PaintCommand::PushClip`] and by a layer's own
+/// [`clip`](obscur_scene::layer::SceneLayer::clip) so the two cannot drift: a
+/// layer clip and a clip command naming the same region confine drawing
+/// identically, as Vello resolves both through one rule (spec §5.2 requires
+/// clipping to match across backends).
+fn resolve_clip_entry(
+    clip: &Clip,
+    parent: Option<&tiny_skia::Mask>,
+    width: u32,
+    height: u32,
+    transform: tiny_skia::Transform,
+) -> Option<tiny_skia::Mask> {
+    match clip {
+        Clip::Shape(shape) => {
+            let domain_path = clip_shape_to_domain_path(shape);
+            match to_sk_path(&domain_path) {
+                Some(sk_path) => build_clip_mask(
+                    width,
+                    height,
+                    &sk_path,
+                    to_sk_fill_rule(domain_path.fill_rule()),
+                    parent,
+                    transform,
+                )
+                .or_else(|| parent.cloned()),
+                // An empty/degenerate outline encloses no area, so the clip admits
+                // nothing — an all-zero mask, NOT the parent. The extent here is
+                // known (it is empty); inheriting would paint content the author
+                // clipped away, and would disagree with Vello, whose empty outline
+                // already admits nothing. Only an allocation failure falls back to
+                // the parent.
+                None => empty_clip_mask(width, height).or_else(|| parent.cloned()),
+            }
+        }
+        // A mask carries only *how* to read coverage, never the source it comes
+        // from, so a mask clip states no extent at all (`Clip::bounds()` is `None`
+        // for exactly this reason). Unknown extent is not empty extent: inherit the
+        // enclosing clip, which asserts nothing the domain has not stated, and
+        // matches Vello. This is the §5.8 fallback, not mask support — coverage is
+        // not applied on either backend, and neither raises the diagnostic §5.8
+        // asks an explicit fallback to carry.
+        Clip::Mask(_) => parent.cloned(),
+    }
 }
 
 /// Builds the clip mask in force after pushing `sk_path` onto a `parent` clip.
@@ -1696,6 +1800,127 @@ mod tests {
         renderer.set_diagnostic_sink(sink.clone());
         // A solid fill demands no effect this backend lacks.
         let _ = renderer.render(&red_rect_submission(), &bitmap_target(16.0, 16.0));
+        assert!(sink.messages().is_empty());
+    }
+
+    /// A one-glyph run tagged with font handle `handle`, in a 16×16 frame.
+    fn text_submission(handle: u32) -> FrameSubmission {
+        let run = GlyphRun::new(vec![PositionedGlyph::new(1, 0, 0.0, 12.0, 8.0)], 12.0, "a")
+            .with_font(handle);
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawText {
+            origin: Point::new(1.0, 1.0),
+            run,
+            brush: Brush::solid(Color::BLACK),
+        }]);
+        FrameSubmission::new(RenderFrame::new(
+            SceneSnapshot::new(list, SceneGeneration::from_raw(1)),
+            Size::new(16.0, 16.0),
+        ))
+    }
+
+    #[test]
+    fn a_text_run_without_its_font_tells_the_host_it_degraded() {
+        // Spec §5.2: unsupported effects AND FALLBACKS are explicit diagnostics.
+        // `Text` is `Limited`, so it raises no `unsupported effect` — yet a run whose
+        // font was never registered does not draw its glyphs, it draws boxes. The
+        // table declares that restriction; only this says it actually bit.
+        let sink = Arc::new(RecordingSink::default());
+        let mut renderer = CpuRenderer::default();
+        renderer.set_diagnostic_sink(sink.clone());
+
+        let result = renderer.render(&text_submission(3), &bitmap_target(16.0, 16.0));
+
+        // The frame still presents: the fallback IS the documented approximation.
+        assert!(result.expect("presented").is_presented());
+        let messages = sink.messages();
+        assert_eq!(messages.len(), 1, "one fallback, once: {messages:?}");
+        assert!(
+            messages[0].starts_with(
+                "degraded effect: text (no usable font is registered \
+                                     for handle 3"
+            ),
+            "the diagnostic must name the effect and the handle: {messages:?}"
+        );
+
+        // A second frame with the same gap does not re-raise it.
+        let _ = renderer.render(&text_submission(3), &bitmap_target(16.0, 16.0));
+        assert_eq!(sink.messages().len(), 1);
+    }
+
+    #[test]
+    fn a_text_run_with_its_font_registered_raises_nothing() {
+        // The other direction, and the one that keeps the diagnostic worth reading: a
+        // run that draws real outlines has not fallen back, so it must stay silent.
+        // Reporting `Limited` unconditionally would fire on every well-fonted frame.
+        let sink = Arc::new(RecordingSink::default());
+        let mut renderer = CpuRenderer::default();
+        renderer.set_diagnostic_sink(sink.clone());
+        renderer.register_font(3, outline_font());
+
+        let _ = renderer.render(&text_submission(3), &bitmap_target(16.0, 16.0));
+
+        assert!(
+            sink.messages().is_empty(),
+            "a run drawing real outlines has not degraded: {:?}",
+            sink.messages()
+        );
+    }
+
+    #[test]
+    fn a_font_registered_under_another_handle_does_not_cover_this_run() {
+        // The predicate must be `draw_text_run`'s: an EXACT registry hit. This
+        // backend has no id-0 primary fallback (Vello does), so a run tagged 3 with
+        // only handle 9 registered draws boxes — and must say so.
+        let sink = Arc::new(RecordingSink::default());
+        let mut renderer = CpuRenderer::default();
+        renderer.set_diagnostic_sink(sink.clone());
+        renderer.register_font(9, outline_font());
+        renderer.register_font(0, outline_font());
+
+        let _ = renderer.render(&text_submission(3), &bitmap_target(16.0, 16.0));
+
+        assert_eq!(sink.messages().len(), 1, "handle 3 is still uncovered");
+    }
+
+    #[test]
+    fn registered_but_unparseable_bytes_are_still_a_fallback() {
+        // `draw_text_run` needs bytes `skrifa` accepts, not merely a registry entry,
+        // so a registry-only scan would call this run covered and stay silent while
+        // the paint path drew boxes.
+        let sink = Arc::new(RecordingSink::default());
+        let mut renderer = CpuRenderer::default();
+        renderer.set_diagnostic_sink(sink.clone());
+        renderer.register_font(3, vec![0xAA; 64]);
+
+        let _ = renderer.render(&text_submission(3), &bitmap_target(16.0, 16.0));
+
+        assert_eq!(
+            sink.messages().len(),
+            1,
+            "unparseable bytes draw boxes, exactly like no bytes"
+        );
+    }
+
+    #[test]
+    fn an_empty_text_run_is_not_a_fallback() {
+        // A run with no glyphs draws nothing whether or not its font resolves, so a
+        // missing font costs it nothing and there is nothing to report.
+        let sink = Arc::new(RecordingSink::default());
+        let mut renderer = CpuRenderer::default();
+        renderer.set_diagnostic_sink(sink.clone());
+        let run = GlyphRun::new(Vec::new(), 12.0, "").with_font(3);
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawText {
+            origin: Point::new(1.0, 1.0),
+            run,
+            brush: Brush::solid(Color::BLACK),
+        }]);
+        let submission = FrameSubmission::new(RenderFrame::new(
+            SceneSnapshot::new(list, SceneGeneration::from_raw(1)),
+            Size::new(16.0, 16.0),
+        ));
+
+        let _ = renderer.render(&submission, &bitmap_target(16.0, 16.0));
+
         assert!(sink.messages().is_empty());
     }
 

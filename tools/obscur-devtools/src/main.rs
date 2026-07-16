@@ -207,12 +207,39 @@ fn run_subscribe(args: &[String]) -> Result<(), String> {
     let mut client = connect_and_handshake(&options)?;
     let reply = cli::subscribe(&mut client, 1, topic).map_err(|e| e.to_string())?;
     println!("{}", cli::format_client_bound(&reply));
-    if matches!(reply, ClientBound::Subscription(_)) {
-        println!(
-            "note: the socket transport answers request/reply; live event push is a server follow-up"
-        );
+    match &reply {
+        // A denial is the server saying it will never push on this session, so
+        // say so rather than leaving the user watching a silent socket.
+        ClientBound::Subscription(subscription) if !subscription.granted => {
+            println!(
+                "note: this host serves request/reply and pushes no events, so nothing would arrive.\n      \
+                 The demo host (`obscur-devtools serve`) has no runtime to report on; attach to a\n      \
+                 host that publishes, such as obscur-kit's showcase_window example."
+            );
+        }
+        ClientBound::Subscription(_) => {
+            print_pushed_events(&mut client);
+        }
+        _ => {}
     }
     Ok(())
+}
+
+/// Streams pushed events to stdout until the connection ends or the user
+/// interrupts — a granted subscription now delivers, so print what arrives.
+fn print_pushed_events(client: &mut SocketClient) {
+    println!("subscribed · streaming events (^C to stop)");
+    loop {
+        match client.receive() {
+            Ok(Some(reply)) => println!("{}", cli::format_client_bound(&reply)),
+            // A clean close: the host ended the session.
+            Ok(None) => return,
+            Err(error) => {
+                eprintln!("stream ended: {error}");
+                return;
+            }
+        }
+    }
 }
 
 /// `inject <down|up|click> <x> <y>`: connect, handshake, and inject synthetic

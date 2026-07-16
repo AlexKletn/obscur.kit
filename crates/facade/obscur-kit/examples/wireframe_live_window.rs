@@ -46,17 +46,19 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use obscur_kit::css::compiler::StylesheetCompiler;
 use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
-use obscur_kit::devtools::{SharedInspectSource, live_source};
+use obscur_kit::devtools::{
+    DiagnosticEventSink, RuntimeEventPublisher, SharedInspectSource, live_source,
+};
 use obscur_kit::devtools_protocol::message::ScopeSet;
 use obscur_kit::devtools_server::auth::Authenticator;
 use obscur_kit::devtools_server::bridge::RuntimeBridge;
 use obscur_kit::devtools_server::endpoint::DevToolsEndpoint;
-use obscur_kit::devtools_server::transport::{SocketListener, SocketTransport};
+use obscur_kit::devtools_server::transport::{EventQueue, SocketListener, SocketTransport};
 use obscur_kit::geometry::{Point, Size};
 use obscur_kit::identity::RuntimeId;
 use obscur_kit::interaction::command::KeyEvent;
@@ -107,6 +109,14 @@ struct WireframeWindow {
     modifiers: ModifiersState,
     profiler: FrameProfiler,
     inspect: SharedInspectSource,
+    /// The pushed half: events this host produces for subscribed DevTools
+    /// clients. The frame thread pushes; the serving thread fans out through the
+    /// endpoint, which still decides who may hear each one.
+    events: EventQueue,
+    /// Turns the runtime's real frame-commit and focus transitions into events on
+    /// `events`; component-failure diagnostics reach the same queue through the
+    /// `DiagnosticEventSink` installed on the runtime.
+    publisher: RuntimeEventPublisher,
 }
 
 impl WireframeWindow {
@@ -216,6 +226,14 @@ impl WireframeWindow {
         }
         runtime.set_stylesheets(vec![compile(wireframe::stylesheet())]);
 
+        // DevTools event push: the runtime reports its component failures onto
+        // the queue as they happen, and `publisher` adds the frame/focus
+        // transitions each frame — the producers that make a subscription mean
+        // something. Without one the endpoint would refuse to grant any.
+        let events = EventQueue::new();
+        runtime.set_diagnostic_sink(Box::new(DiagnosticEventSink::new(events.clone())));
+        let publisher = RuntimeEventPublisher::attach(&runtime, events.clone());
+
         Self {
             window: None,
             surface: None,
@@ -228,6 +246,8 @@ impl WireframeWindow {
             modifiers: ModifiersState::empty(),
             profiler: FrameProfiler::new(),
             inspect: SharedInspectSource::new(),
+            events,
+            publisher,
         }
     }
 
@@ -328,6 +348,12 @@ impl WireframeWindow {
         }
         let present = present_start.elapsed();
 
+        // Frame/focus events for any subscriber, gated on an attached client for
+        // the same reason the live source is: at 60fps an unwatched host would
+        // otherwise churn the bounded queue every frame for nobody.
+        if self.inspect.has_client() {
+            self.publisher.publish(&self.runtime);
+        }
         if let Some(report) = self.profiler.record(cpu, present) {
             println!("[perf] {report}");
             // Building a live source walks + formats the whole tree, so only
@@ -356,24 +382,40 @@ impl WireframeWindow {
         if let Ok(Some(addr)) = listener.local_addr() {
             println!(
                 "[devtools] live endpoint on {addr}\n\
-                 [devtools] try: obscur-devtools inspect all --tcp {addr} --token dev"
+                 [devtools] try: obscur-devtools inspect all --tcp {addr} --token dev\n\
+                 [devtools] or:  obscur-devtools subscribe focus --tcp {addr} --token dev   (or: frames | diagnostics)"
             );
         }
         let shared = self.inspect.clone();
-        thread::spawn(move || devtools_serve(&listener, &shared));
+        let events = self.events.clone();
+        thread::spawn(move || devtools_serve(&listener, &shared, &events));
     }
 }
 
-/// Serves the DevTools endpoint over `listener` forever, one session at a time,
-/// each answering inspects from the shared, per-frame-refreshed `source`.
-fn devtools_serve(listener: &SocketListener, source: &SharedInspectSource) {
+/// Serves the DevTools endpoint over `listener` forever, one session at a time:
+/// each answers inspects from the shared, per-frame-refreshed `source` and is
+/// pushed whatever the frame thread put on `events`.
+///
+/// # Scopes
+///
+/// `observer()` = read + subscribe. Deliberately **not** `all()`: control and
+/// injection stay ungranted, so an attached client can watch this window but not
+/// steer it. Subscribe is granted only because this host genuinely services it
+/// (`serve_with_events` below).
+fn devtools_serve(listener: &SocketListener, source: &SharedInspectSource, events: &EventQueue) {
     while let Ok(stream) = listener.accept() {
         let mut authenticator = Authenticator::new();
-        authenticator.register_token("dev", ScopeSet::all_read());
+        authenticator.register_token("dev", ScopeSet::observer());
         let mut endpoint = DevToolsEndpoint::new(authenticator, RuntimeBridge::new(source.clone()));
         endpoint.enable();
         source.client_connected();
-        let _ = SocketTransport::new(stream).serve(&mut endpoint);
+        // The 20ms poll bounds how long a queued event waits; the thread sleeps
+        // in `read` between wakes rather than spinning.
+        let _ = SocketTransport::new(stream).serve_with_events(
+            &mut endpoint,
+            events,
+            Duration::from_millis(20),
+        );
         source.client_disconnected();
     }
 }

@@ -35,7 +35,11 @@ use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput, clamp_con
 ///    `Fixed(px)` → `px`; `Percent(f)` → `f * content_width` (its basis is the
 ///    grid container's content extent, known only here); `Auto` → the largest
 ///    measured content width among the items auto-placed in it (measured under
-///    loose constraints); `Fr(f)` → a share `f / Σfr` of the space left after the
+///    loose constraints); `MinContent` / `MaxContent` → the largest min-content /
+///    max-content contribution among its items, each measured by offering the item
+///    no inline space / unbounded inline space (CSS Sizing 3 §4.1) — unlike `Auto`
+///    these ignore the space the container has and do not stretch into it;
+///    `Fr(f)` → a share `f / Σfr` of the space left after the
 ///    fixed + percentage + auto tracks; and
 ///    `MinMax(min, max)` → the `max` function resolved, then floored at the `min`
 ///    function (so `minmax(px, fr)` grows flexibly from `px` up). `fr` space is
@@ -172,31 +176,62 @@ impl GridLayout {
 // `(base, fr, floor)` single-pass model. Reimplemented from the spec; the
 // `taffy` crate was read for cross-reference only (not copied).
 //
-// # Content contributions (approximation, documented)
+// # Content contributions, and what `auto` approximates
 //
-// The spec feeds each item's min-content AND max-content contribution into the
-// span-distribution sub-steps. We do not yet compute a distinct min/max-content
-// pair, so we approximate BOTH by a single measured contribution (the item's
-// size under a loose constraint). This collapses §11.5's five sub-steps to the
-// two that our track types (`Fixed`/`Percent`/`Auto`/`Fr`/`minmax`) exercise —
-// (a) grow the *base* of intrinsic-min (`auto`) tracks and (d) grow the *growth
-// limit* of intrinsic-max (`auto`) tracks. A proper min/max-content pair is a
-// separate follow-up; the STRUCTURE (two-value, span distribution, fr-restart,
-// maximise, stretch) is the fix even with a single measure.
+// §11.5 distributes an item's contribution to the tracks it spans, and WHICH
+// contribution depends on the sizing function of each spanned track. Three are
+// modelled here, one per intrinsic track type ([`Contributions`]):
+//
+// * a `min-content` track takes the item's min-content contribution — measured
+//   under an offer of no space;
+// * a `max-content` track takes its max-content contribution — measured under an
+//   unbounded offer;
+// * an `auto` track takes a single measure of the item under the container's own
+//   loose offer. This is an APPROXIMATION, and the one place this file departs
+//   from the spec: `auto` is formally `minmax(min-content, max-content)`, whose
+//   base should grow to the min-content contribution and whose growth limit to
+//   the max-content one. The single loose measure lands between the two — it is
+//   what the item wants in the space this container has — and it is what every
+//   `auto` track in this engine has always been sized by. Splitting it is a
+//   behaviour change to the overwhelmingly common track type, so it stays a
+//   documented approximation; the two keyword tracks, which have no legacy
+//   behaviour to preserve, probe for real.
 // ---------------------------------------------------------------------------
 
 /// Small epsilon so space distribution stops at ~0 instead of looping on f32
 /// rounding error (spec's distribution loops have no natural fixpoint at 0).
 const DISTRIBUTE_THRESHOLD: f32 = 1e-6;
 
+/// Which content contribution an intrinsic sizing function is fed by (§11.5).
+///
+/// One kind per intrinsic track type, and the reason this is an enum rather than
+/// a bool: a track sized by `min-content` and one sized by `max-content` are both
+/// "intrinsic", but they must be grown by *different numbers*, so the item has to
+/// supply — and each sub-step has to pick — the right one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    /// An `auto` track: the item's size under the container's own loose offer
+    /// (the documented approximation — see the module note above).
+    Auto,
+    /// A `min-content` track: the item measured under an offer of no space.
+    Min,
+    /// A `max-content` track: the item measured under an unbounded offer.
+    Max,
+}
+
+/// Every intrinsic kind, in the order §11.5 works through them: the smallest
+/// contribution first, so a track sized by a larger one is never grown twice.
+const KINDS: [Kind; 3] = [Kind::Auto, Kind::Min, Kind::Max];
+
 /// A track's resolved *min* sizing function (§11.4). A `Percent`/`Fixed` min is
-/// a definite length; `auto` (and a standalone/`minmax` `fr` min) is intrinsic.
+/// a definite length; `auto`, `min-content`, `max-content` (and a standalone /
+/// `minmax` `fr` min) are intrinsic.
 #[derive(Clone, Copy)]
 enum MinFn {
     /// A definite length (fixed px or a resolved percentage).
     Fixed(f32),
-    /// An intrinsic (`auto`) minimum — grows to fit content contributions.
-    Intrinsic,
+    /// An intrinsic minimum — grows to fit the [`Kind`]'s content contribution.
+    Intrinsic(Kind),
 }
 
 /// A track's resolved *max* sizing function (§11.4).
@@ -204,10 +239,65 @@ enum MinFn {
 enum MaxFn {
     /// A definite length (fixed px or a resolved percentage): the growth limit.
     Fixed(f32),
-    /// An intrinsic (`auto`) maximum — an infinite initial growth limit.
-    Intrinsic,
+    /// An intrinsic maximum — an infinite initial growth limit, grown to fit the
+    /// [`Kind`]'s content contribution.
+    Intrinsic(Kind),
     /// A flexible (`fr`) maximum with the given flex factor.
     Flex(f32),
+}
+
+impl MinFn {
+    /// The contribution kind this min sizing function is fed by, or [`None`] when
+    /// it is a definite length that takes no contribution at all.
+    fn kind(self) -> Option<Kind> {
+        match self {
+            Self::Fixed(_) => None,
+            Self::Intrinsic(kind) => Some(kind),
+        }
+    }
+}
+
+impl MaxFn {
+    /// The contribution kind this max sizing function is fed by; [`None`] for a
+    /// definite length and for `fr` (whose growth limit is settled by §11.7, not
+    /// by content).
+    fn kind(self) -> Option<Kind> {
+        match self {
+            Self::Fixed(_) | Self::Flex(_) => None,
+            Self::Intrinsic(kind) => Some(kind),
+        }
+    }
+}
+
+/// One item's content contribution for each intrinsic [`Kind`] it crosses.
+///
+/// A kind the item crosses no track of stays `0` and is never measured: an item
+/// in a grid of plain `auto` tracks costs exactly the one measure it always did.
+#[derive(Clone, Copy, Default)]
+struct Contributions {
+    auto: f32,
+    min: f32,
+    max: f32,
+}
+
+impl Contributions {
+    /// This item's contribution for `kind`.
+    fn of(self, kind: Kind) -> f32 {
+        match kind {
+            Kind::Auto => self.auto,
+            Kind::Min => self.min,
+            Kind::Max => self.max,
+        }
+    }
+
+    /// The contribution slot for `kind`, to fill in from a measure.
+    fn slot(&mut self, kind: Kind) -> &mut f32 {
+        match kind {
+            Kind::Auto => &mut self.auto,
+            Kind::Min => &mut self.min,
+            Kind::Max => &mut self.max,
+        }
+    }
 }
 
 /// One track's two-value sizing state during the §11 pipeline.
@@ -246,7 +336,9 @@ fn min_fn_of(track: &TrackSize, axis: f32) -> MinFn {
     match track {
         TrackSize::Fixed(px) => MinFn::Fixed(px.max(0.0)),
         TrackSize::Percent(f) => MinFn::Fixed((f * axis).max(0.0)),
-        TrackSize::Auto => MinFn::Intrinsic,
+        TrackSize::Auto => MinFn::Intrinsic(Kind::Auto),
+        TrackSize::MinContent => MinFn::Intrinsic(Kind::Min),
+        TrackSize::MaxContent => MinFn::Intrinsic(Kind::Max),
         TrackSize::Fr(_) => MinFn::Fixed(0.0),
         TrackSize::MinMax(min, _) => match min.as_ref() {
             // An `fr` is not a valid `minmax` minimum — floor at 0.
@@ -257,31 +349,39 @@ fn min_fn_of(track: &TrackSize, axis: f32) -> MinFn {
 }
 
 /// The `max` sizing function of a track (§11.4). A nested `minmax` as the `max`
-/// bound is not meaningful; it is treated as intrinsic (content-sized).
+/// bound is not meaningful; it is treated as `auto` (content-sized).
 fn max_fn_of(track: &TrackSize, axis: f32) -> MaxFn {
     match track {
         TrackSize::Fixed(px) => MaxFn::Fixed(px.max(0.0)),
         TrackSize::Percent(f) => MaxFn::Fixed((f * axis).max(0.0)),
-        TrackSize::Auto => MaxFn::Intrinsic,
+        TrackSize::Auto => MaxFn::Intrinsic(Kind::Auto),
+        TrackSize::MinContent => MaxFn::Intrinsic(Kind::Min),
+        TrackSize::MaxContent => MaxFn::Intrinsic(Kind::Max),
         TrackSize::Fr(f) => MaxFn::Flex(f.max(0.0)),
         TrackSize::MinMax(_, max) => match max.as_ref() {
-            TrackSize::MinMax(_, _) => MaxFn::Intrinsic,
+            TrackSize::MinMax(_, _) => MaxFn::Intrinsic(Kind::Auto),
             other => max_fn_of(other, axis),
         },
     }
 }
 
-/// Whether a track participates in intrinsic (content) sizing — i.e. an item
-/// spanning it must be measured to feed §11.5. True for `auto` and any `minmax`
-/// with an `auto` bound (its min grows the base, its max grows the growth
-/// limit); false for pure fixed/percentage/`fr` tracks, which take no content
-/// contribution (a standalone `fr`'s min is floored at `0`, see [`min_fn_of`]).
-fn track_is_intrinsic(track: &TrackSize) -> bool {
-    let is_auto = |t: &TrackSize| matches!(t, TrackSize::Auto);
-    match track {
-        TrackSize::Auto => true,
-        TrackSize::MinMax(min, max) => is_auto(min) || is_auto(max),
+/// Whether a track takes the `kind` content contribution — i.e. an item spanning
+/// it must be measured that way to feed §11.5.
+///
+/// True when either of the track's two sizing functions is that kind: its min
+/// grows the base, its max grows the growth limit, and either one alone is reason
+/// enough to measure. A pure fixed/percentage/`fr` track takes no contribution at
+/// all (a standalone `fr`'s min is floored at `0`, see [`min_fn_of`]).
+fn track_takes(track: &TrackSize, kind: Kind) -> bool {
+    let bound = |t: &TrackSize| match t {
+        TrackSize::Auto => kind == Kind::Auto,
+        TrackSize::MinContent => kind == Kind::Min,
+        TrackSize::MaxContent => kind == Kind::Max,
         _ => false,
+    };
+    match track {
+        TrackSize::MinMax(min, max) => bound(min) || bound(max),
+        other => bound(other),
     }
 }
 
@@ -331,12 +431,27 @@ fn distribute_up_to_limits(
     space
 }
 
-/// §11.5 sub-step (a) — grow the *base* of intrinsic-min tracks spanned by one
-/// item to fit its (approximated) contribution, then record the per-track
-/// increase as this sub-step's planned increase (flushed by [`flush_base`] so
-/// same-batch items don't double-count).
-fn distribute_to_base(tracks: &mut [Track], start: usize, span: usize, contribution: f32) {
+/// §11.5 sub-step (a) — grow the *base* of the tracks spanned by one item whose
+/// **min** sizing function is `kind`, to fit that kind's contribution, then
+/// record the per-track increase as this sub-step's planned increase (flushed by
+/// [`flush_base`] so same-batch items don't double-count).
+///
+/// Tracks of another kind in the same span are left alone: they have their own
+/// sub-step, with their own contribution. They do count toward the `sum` the
+/// contribution is measured against, per §11.5.1 — the space to place is what the
+/// item needs beyond *every* track it spans.
+fn distribute_to_base(
+    tracks: &mut [Track],
+    start: usize,
+    span: usize,
+    contribution: f32,
+    kind: Kind,
+) {
     let hi = (start + span).min(tracks.len());
+    let affected = |t: &Track| t.min_fn.kind() == Some(kind);
+    if !tracks[start..hi].iter().any(affected) {
+        return;
+    }
     for t in &mut tracks[start..hi] {
         t.increase = 0.0;
     }
@@ -345,16 +460,13 @@ fn distribute_to_base(tracks: &mut [Track], start: usize, span: usize, contribut
     if extra <= 0.0 {
         return;
     }
-    let affected = |t: &Track| matches!(t.min_fn, MinFn::Intrinsic);
     let leftover =
         distribute_up_to_limits(tracks, start, hi, extra, affected, |t| t.base, |t| t.limit);
     // §11.5.1 "distribute space beyond limits": if affected tracks are frozen,
     // give the remainder to those with an intrinsic max (or, failing that, to
     // all affected tracks) growing without limit.
     if leftover > DISTRIBUTE_THRESHOLD {
-        let beyond = |t: &Track| {
-            matches!(t.min_fn, MinFn::Intrinsic) && matches!(t.max_fn, MaxFn::Intrinsic)
-        };
+        let beyond = |t: &Track| affected(t) && t.max_fn.kind().is_some();
         if tracks[start..hi].iter().any(beyond) {
             distribute_up_to_limits(
                 tracks,
@@ -383,18 +495,25 @@ fn distribute_to_base(tracks: &mut [Track], start: usize, span: usize, contribut
     }
 }
 
-/// §11.5 sub-step (d) — grow the *growth limit* of intrinsic-max tracks spanned
-/// by one item to fit its contribution. Space goes only to tracks whose limit
-/// is still infinite (or newly `infinitely_growable`); if none, it is
-/// distributed beyond limits to all affected tracks.
-fn distribute_to_limit(tracks: &mut [Track], start: usize, span: usize, contribution: f32) {
+/// §11.5 sub-step (d) — grow the *growth limit* of the tracks spanned by one item
+/// whose **max** sizing function is `kind`, to fit that kind's contribution.
+/// Space goes only to tracks whose limit is still infinite (or newly
+/// `infinitely_growable`); if none, it is distributed beyond limits to all
+/// affected tracks.
+fn distribute_to_limit(
+    tracks: &mut [Track],
+    start: usize,
+    span: usize,
+    contribution: f32,
+    kind: Kind,
+) {
     let hi = (start + span).min(tracks.len());
-    for t in &mut tracks[start..hi] {
-        t.increase = 0.0;
-    }
-    let affected = |t: &Track| matches!(t.max_fn, MaxFn::Intrinsic);
+    let affected = |t: &Track| t.max_fn.kind() == Some(kind);
     if !tracks[start..hi].iter().any(affected) {
         return;
+    }
+    for t in &mut tracks[start..hi] {
+        t.increase = 0.0;
     }
     let sum: f32 = tracks[start..hi]
         .iter()
@@ -443,6 +562,15 @@ fn distribute_to_limit(tracks: &mut [Track], start: usize, span: usize, contribu
     }
 }
 
+/// The intrinsic [`Kind`]s some track is sized by, in [`KINDS`] order, read
+/// through one of the two sizing functions.
+fn present_kinds(tracks: &[Track], of: impl Fn(&Track) -> Option<Kind>) -> Vec<Kind> {
+    KINDS
+        .into_iter()
+        .filter(|&kind| tracks.iter().any(|t| of(t) == Some(kind)))
+        .collect()
+}
+
 /// Flush planned base increases into `base` (§11.5, between sub-steps).
 fn flush_base(tracks: &mut [Track]) {
     for t in tracks {
@@ -474,8 +602,30 @@ fn flush_limit(tracks: &mut [Track]) {
 /// batches (span-1 first). Within each batch, sub-step (a) grows intrinsic-min
 /// bases and sub-step (d) grows intrinsic-max growth limits, each via
 /// [`distribute_up_to_limits`] over only the item's spanned tracks, flushing
-/// planned increases between sub-steps. Items are `(start, span, contribution)`.
-fn resolve_intrinsic(tracks: &mut [Track], items: &[(usize, usize, f32)]) {
+/// planned increases between sub-steps. Items are
+/// `(start, span, contributions)`.
+///
+/// Each sub-step runs once per intrinsic [`Kind`], because the spec's sub-steps
+/// are exactly that: "content-based minimums" grows the min-content tracks by the
+/// min-content contribution, "max-content minimums" grows the max-content tracks
+/// by the max-content one. A track has one min and one max sizing function, so
+/// the passes touch disjoint sets.
+///
+/// Their order is not fully inert, though: besides the `sum` each later pass
+/// measures its extra space against, `flush_limit` clears the §11.5.1
+/// infinitely-growable flag that the next pass reads (see the body). For a grid
+/// whose tracks are sized by one kind — the common case — that is unobservable.
+/// For a mixed grid it is a real ordering dependency, and no spec-exactness is
+/// claimed for one.
+fn resolve_intrinsic(tracks: &mut [Track], items: &[(usize, usize, Contributions)]) {
+    // Only the kinds some track is actually sized by. A pass for an absent kind
+    // would place no space, but it would not be a no-op: `flush_limit` clears the
+    // §11.5.1 infinitely-growable flag, which the NEXT pass reads. Skipping the
+    // absent kinds keeps a grid of plain `auto` tracks running exactly the one
+    // pass it always ran.
+    let min_kinds = present_kinds(tracks, |t| t.min_fn.kind());
+    let max_kinds = present_kinds(tracks, |t| t.max_fn.kind());
+
     let mut order: Vec<usize> = (0..items.len()).collect();
     // Ascending span; span-1 items sized first (spec batches by span count).
     order.sort_by_key(|&i| items[i].1);
@@ -487,21 +637,25 @@ fn resolve_intrinsic(tracks: &mut [Track], items: &[(usize, usize, f32)]) {
             j += 1;
         }
         // Sub-step (a): intrinsic minimums → base sizes.
-        for &k in &order[i..j] {
-            let (start, sp, contribution) = items[k];
-            if contribution > 0.0 {
-                distribute_to_base(tracks, start, sp, contribution);
+        for &kind in &min_kinds {
+            for &k in &order[i..j] {
+                let (start, sp, contributions) = items[k];
+                if contributions.of(kind) > 0.0 {
+                    distribute_to_base(tracks, start, sp, contributions.of(kind), kind);
+                }
             }
+            flush_base(tracks);
         }
-        flush_base(tracks);
         // Sub-step (d): intrinsic maximums → growth limits.
-        for &k in &order[i..j] {
-            let (start, sp, contribution) = items[k];
-            if contribution > 0.0 {
-                distribute_to_limit(tracks, start, sp, contribution);
+        for &kind in &max_kinds {
+            for &k in &order[i..j] {
+                let (start, sp, contributions) = items[k];
+                if contributions.of(kind) > 0.0 {
+                    distribute_to_limit(tracks, start, sp, contributions.of(kind), kind);
+                }
             }
+            flush_limit(tracks);
         }
-        flush_limit(tracks);
         i = j;
     }
     // Final: raise any growth limit below its base; give any still-∞ growth
@@ -598,11 +752,13 @@ fn expand_flexible(tracks: &mut [Track], avail: f32) {
 /// equally among tracks whose *max* sizing function is `auto`. The caller only
 /// invokes this when the container axis is definite and its content alignment is
 /// `stretch`/`normal` (the default), matching the spec's preconditions.
+///
+/// `auto` only: a `min-content` / `max-content` track is sized by its content and
+/// nothing else, which is the one place the three visibly part company. §11.8 is
+/// written against `auto` for exactly that reason.
 fn stretch_auto(tracks: &mut [Track], avail: f32) {
-    let count = tracks
-        .iter()
-        .filter(|t| matches!(t.max_fn, MaxFn::Intrinsic))
-        .count();
+    let stretchable = |t: &Track| matches!(t.max_fn, MaxFn::Intrinsic(Kind::Auto));
+    let count = tracks.iter().filter(|t| stretchable(t)).count();
     if count == 0 {
         return;
     }
@@ -613,7 +769,7 @@ fn stretch_auto(tracks: &mut [Track], avail: f32) {
     }
     let per = free / count as f32;
     for t in tracks.iter_mut() {
-        if matches!(t.max_fn, MaxFn::Intrinsic) {
+        if stretchable(t) {
             t.base += per;
         }
     }
@@ -627,8 +783,9 @@ fn stretch_auto(tracks: &mut [Track], avail: f32) {
 /// `definite` is whether the container's size along this axis is authored (not
 /// `auto`) and `stretch` whether its content alignment routes to §11.8 (the
 /// `stretch`/`normal` default). `items` are the grid items as
-/// `(start_track, span, content_contribution)`; only items crossing an intrinsic
-/// track need a real contribution (others pass `0`).
+/// `(start_track, span, contributions)`; only items crossing an intrinsic track
+/// need a real contribution, and only of the [`Kind`]s they cross (others pass
+/// `0`).
 ///
 /// Simple cases — fixed tracks, a single `1fr` split with no floors, and
 /// non-spanning items — resolve to the same sizes as the previous single-pass
@@ -640,7 +797,7 @@ fn resolve_tracks(
     gap: f32,
     definite: bool,
     stretch: bool,
-    items: &[(usize, usize, f32)],
+    items: &[(usize, usize, Contributions)],
 ) -> Vec<f32> {
     let n = track_sizes.len();
     if n == 0 {
@@ -658,11 +815,11 @@ fn resolve_tracks(
             let max_fn = max_fn_of(ts, available);
             let base = match min_fn {
                 MinFn::Fixed(v) => v,
-                MinFn::Intrinsic => 0.0,
+                MinFn::Intrinsic(_) => 0.0,
             };
             let mut limit = match max_fn {
                 MaxFn::Fixed(v) => v,
-                MaxFn::Intrinsic | MaxFn::Flex(_) => f32::INFINITY,
+                MaxFn::Intrinsic(_) | MaxFn::Flex(_) => f32::INFINITY,
             };
             if limit < base {
                 limit = base;
@@ -1274,17 +1431,28 @@ impl LayoutAlgorithm for GridLayout {
         let loose = BoxConstraints::loose(Size::new(content_width, content_height));
         let col_definite = !style.width.is_auto();
         let col_stretch = matches!(style.justify_content, JustifyContent::FlexStart);
-        let mut col_items: Vec<(usize, usize, f32)> = Vec::with_capacity(count);
+        let mut col_items: Vec<(usize, usize, Contributions)> = Vec::with_capacity(count);
         for i in 0..count {
             let (start, span) = (place_col[i], col_span[i]);
-            let crosses_intrinsic = (start..(start + span).min(cols_effective.len()))
-                .any(|c| track_is_intrinsic(&cols_effective[c]));
-            let contribution = if crosses_intrinsic {
-                measurer.measure_child(i, loose).width
-            } else {
-                0.0
-            };
-            col_items.push((start, span, contribution));
+            let spanned = &cols_effective[start..(start + span).min(cols_effective.len())];
+            // One measure per intrinsic kind this item's span actually crosses.
+            // The `min-content` / `max-content` probes offer no space / unbounded
+            // space along the INLINE axis, exactly as `intrinsic_inline_size` does
+            // for a flow box: the item answers with the width it needs rather than
+            // the width it was given (`BoxConstraints::constrain_allowing_overflow`).
+            let mut contributions = Contributions::default();
+            for kind in KINDS {
+                if !spanned.iter().any(|t| track_takes(t, kind)) {
+                    continue;
+                }
+                let offer = match kind {
+                    Kind::Auto => loose,
+                    Kind::Min => BoxConstraints::loose(Size::new(0.0, content_height)),
+                    Kind::Max => BoxConstraints::loose(Size::new(f32::INFINITY, content_height)),
+                };
+                *contributions.slot(kind) = measurer.measure_child(i, offer).width;
+            }
+            col_items.push((start, span, contributions));
         }
         let mut col_sizes = resolve_tracks(
             &cols_effective,
@@ -1336,17 +1504,23 @@ impl LayoutAlgorithm for GridLayout {
             .collect();
         let row_definite = !style.height.is_auto();
         let row_stretch = matches!(style.align_content, JustifyContent::FlexStart);
-        let mut row_items: Vec<(usize, usize, f32)> = Vec::with_capacity(count);
+        let mut row_items: Vec<(usize, usize, Contributions)> = Vec::with_capacity(count);
         for i in 0..count {
             let (start, span) = (place_row[i], row_span[i]);
-            let crosses_intrinsic = (start..(start + span).min(rows_effective.len()))
-                .any(|r| track_is_intrinsic(&rows_effective[r]));
-            let contribution = if crosses_intrinsic {
-                item_size[i].height
-            } else {
-                0.0
-            };
-            row_items.push((start, span, contribution));
+            let spanned = &rows_effective[start..(start + span).min(rows_effective.len())];
+            // In the BLOCK axis all three contributions are the same number, and it
+            // needs no probe: the item's width is already fixed to its column span,
+            // and at a fixed width a box does not reflow vertically — its
+            // min-content, max-content and natural heights coincide. So a
+            // `min-content` row is fed the height already measured above, and costs
+            // no extra measure at all (the inline axis is where they diverge).
+            let mut contributions = Contributions::default();
+            for kind in KINDS {
+                if spanned.iter().any(|t| track_takes(t, kind)) {
+                    *contributions.slot(kind) = item_size[i].height;
+                }
+            }
+            row_items.push((start, span, contributions));
         }
         let mut row_sizes = resolve_tracks(
             &rows_effective,
@@ -3196,5 +3370,149 @@ mod tests {
         assert_eq!(b[0].size().width, 150.0);
         assert_eq!(b[1].origin().x, 150.0);
         assert_eq!(b[1].size().width, 150.0);
+    }
+
+    // ---- min-content / max-content tracks (audit Tier-1 §4-D) --------------
+
+    /// An item that answers the offer like a paragraph: it fills the inline space
+    /// it is given, never below `min` (its longest unbreakable word) and never
+    /// above `max` (its whole content on one line). [`FixedChildMeasurer`] cannot
+    /// catch a probe that is not probing — it returns the same size whatever it is
+    /// offered — so these tests need a measurer with an opinion.
+    struct Paragraph {
+        min: f32,
+        max: f32,
+    }
+
+    impl crate::algorithm::ChildMeasurer for Paragraph {
+        fn measure_child(&mut self, _index: usize, constraints: BoxConstraints) -> Size {
+            Size::new(constraints.max.width.clamp(self.min, self.max), 10.0)
+        }
+    }
+
+    /// The single column's width under `track`, in a `line`-wide grid holding one
+    /// paragraph item (min-content 30, max-content 200).
+    fn one_track_width(track: TrackSize, line: f32) -> f32 {
+        let out = grid(vec![track], vec![], 0.0, 0.0).layout(
+            &LayoutStyle::default(),
+            &[child(1)],
+            BoxConstraints::loose(Size::new(line, 1000.0)),
+            &mut Paragraph {
+                min: 30.0,
+                max: 200.0,
+            },
+        );
+        out.child_boxes()[0].size().width
+    }
+
+    #[test]
+    fn a_min_content_column_is_the_widest_unbreakable_run() {
+        // The probe offers the item no inline space, so it reports the 30 it cannot
+        // break below — NOT the 100 the container has to give.
+        assert_eq!(one_track_width(TrackSize::MinContent, 100.0), 30.0);
+    }
+
+    #[test]
+    fn a_max_content_column_is_the_content_on_one_line() {
+        // Unbounded offer → the item's whole content on one line (200), which
+        // OVERFLOWS the 100px container: `max-content` is a question about the
+        // content, and the container's answer is not it.
+        assert_eq!(one_track_width(TrackSize::MaxContent, 100.0), 200.0);
+    }
+
+    #[test]
+    fn min_content_max_content_and_auto_columns_all_disagree() {
+        // If any two of these agreed, the probes would not be probing. The 100px
+        // container is the case that separates them: `auto` takes the space it has
+        // (the documented single-measure approximation), while the two keywords
+        // each report a different property of the content and ignore the container.
+        let min = one_track_width(TrackSize::MinContent, 100.0);
+        let max = one_track_width(TrackSize::MaxContent, 100.0);
+        let auto = one_track_width(TrackSize::Auto, 100.0);
+        assert_eq!((min, max, auto), (30.0, 200.0, 100.0));
+    }
+
+    #[test]
+    fn a_min_content_column_beside_an_fr_gives_the_fr_the_rest() {
+        // The pair that makes the keyword worth having: a content-hugging label
+        // column beside a flexible one. The label takes its 30, the `1fr` takes
+        // the other 270.
+        let out = grid(
+            vec![TrackSize::MinContent, TrackSize::Fr(1.0)],
+            vec![],
+            0.0,
+            0.0,
+        )
+        .layout(
+            &LayoutStyle::default(),
+            &[child(1), child(2)],
+            BoxConstraints::loose(Size::new(300.0, 1000.0)),
+            &mut Paragraph {
+                min: 30.0,
+                max: 200.0,
+            },
+        );
+        let b = out.child_boxes();
+        assert_eq!(b[0].size().width, 30.0);
+        assert_eq!(b[1].origin().x, 30.0);
+        assert_eq!(b[1].size().width, 270.0);
+    }
+
+    #[test]
+    fn a_minmax_min_content_floor_is_the_min_content_size_not_the_auto_one() {
+        // `minmax(min-content, 1fr) 100px` in a 200px grid. The floor is the item's
+        // MIN-content size (30), which the `1fr` then covers — so the flexible
+        // track gets its 100 and the grid fits. Were the floor `auto`'s single
+        // loose measure (200, the space the container has), the base would exceed
+        // the `fr` share and the grid would overflow to 200 + 100. The `minmax`
+        // recursion is what has to carry the keyword down to the min bound.
+        let out = grid(
+            vec![
+                TrackSize::minmax(TrackSize::MinContent, TrackSize::Fr(1.0)),
+                TrackSize::Fixed(100.0),
+            ],
+            vec![],
+            0.0,
+            0.0,
+        )
+        .layout(
+            &LayoutStyle::default(),
+            &[child(1), child(2)],
+            BoxConstraints::loose(Size::new(200.0, 1000.0)),
+            &mut Paragraph {
+                min: 30.0,
+                max: 200.0,
+            },
+        );
+        let b = out.child_boxes();
+        assert_eq!(
+            b[0].size().width,
+            100.0,
+            "1fr of the 100 left after the 100px"
+        );
+        assert_eq!(b[1].origin().x, 100.0, "the fixed track is not pushed out");
+    }
+
+    #[test]
+    fn a_content_keyword_row_takes_the_items_height() {
+        // The block axis: with its width fixed to the column, the item's three
+        // intrinsic heights coincide, so a `min-content` row is its measured
+        // height — 10 here — and not the 1000 the container offers.
+        let out = grid(
+            vec![TrackSize::Fixed(100.0)],
+            vec![TrackSize::MinContent],
+            0.0,
+            0.0,
+        )
+        .layout(
+            &LayoutStyle::default(),
+            &[child(1)],
+            BoxConstraints::loose(Size::new(300.0, 1000.0)),
+            &mut Paragraph {
+                min: 30.0,
+                max: 200.0,
+            },
+        );
+        assert_eq!(out.child_boxes()[0].size().height, 10.0);
     }
 }

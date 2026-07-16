@@ -12,6 +12,17 @@
 //! explicitly, every session authenticates a token, and scopes are honoured. A
 //! real deployment would register a [`SnapshotInspectSource`] refreshed from its
 //! live runtime instead of the static demo payloads here.
+//!
+//! # Why this host denies subscriptions
+//!
+//! There is no runtime behind these payloads, so nothing here can *produce* an
+//! event — and rather than fabricate one, the demo serves request/reply with
+//! [`SocketTransport::serve`] and lets the endpoint deny every `Subscribe`
+//! honestly. Seeing a live subscription needs a host with something real to
+//! report: `obscur-kit`'s `DiagnosticEventSink`/`RuntimeEventPublisher` feeding
+//! a queue that
+//! [`SocketTransport::serve_with_events`](obscur_devtools_server::transport::SocketTransport::serve_with_events)
+//! fans out, as the windowed examples do.
 
 use std::io;
 

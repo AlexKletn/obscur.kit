@@ -9,17 +9,32 @@
 //! frame and hands it to the endpoint (the host-provides-device pattern), which
 //! keeps the source `Send`-able onto the serving thread without borrowing the
 //! runtime.
+//!
+//! # The pushed half
+//!
+//! Inspecting is pull; a subscription is push. [`DiagnosticEventSink`] and
+//! [`RuntimeEventPublisher`] are the producers that give a subscription
+//! something to deliver — they turn the runtime's real diagnostics, tree commits
+//! and focus changes into protocol events on an
+//! [`EventQueue`](obscur_devtools_server::transport::EventQueue) that
+//! [`SocketTransport::serve_with_events`](obscur_devtools_server::transport::SocketTransport::serve_with_events)
+//! fans out. A host that serves with plain
+//! [`serve`](obscur_devtools_server::transport::SocketTransport::serve) instead
+//! has no such loop, and its endpoint therefore *denies* subscriptions rather
+//! than granting one nothing would service.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use obscur_devtools_protocol::message::{
-    ControlAction, InjectedEvent, Inspectable, SnapshotPayload,
+    ControlAction, EventKind, EventSeverity, InjectedEvent, Inspectable, SnapshotPayload, Topic,
 };
 use obscur_devtools_server::bridge::{InspectSource, SnapshotInspectSource};
+use obscur_devtools_server::transport::EventQueue;
 
+use crate::diagnostics::{Diagnostic, DiagnosticSeverity, DiagnosticSink};
 use crate::geometry::Point;
-use crate::identity::NodeId;
+use crate::identity::{NodeId, VersionStamp};
 use crate::interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind, PointerId};
 use crate::perf::FrameStats;
 use crate::runtime::UiRuntime;
@@ -330,6 +345,131 @@ impl InspectSource for SharedInspectSource {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .snapshot(target)
+    }
+}
+
+/// Republishes the runtime's structured diagnostics (§7.8) as DevTools
+/// [`Topic::Diagnostics`] events (§7.6), so an external subscriber sees a failure
+/// as it happens rather than by polling for it.
+///
+/// Install it on the runtime with
+/// [`set_diagnostic_sink`](crate::runtime::UiRuntime::set_diagnostic_sink) and
+/// hand a [`clone`](Clone::clone) of the same [`EventQueue`] to
+/// [`SocketTransport::serve_with_events`](obscur_devtools_server::transport::SocketTransport::serve_with_events).
+/// The sink states only *what happened*; the serving thread's endpoint still
+/// decides who — if anyone — is subscribed and may hear it, so installing this
+/// grants a client nothing it was not already authorised for.
+///
+/// # What reaches it
+///
+/// Exactly what reaches the runtime's sink: component-render failures and the
+/// §1.7 boundary decision taken for each. Layout, style, renderer and resource
+/// failures still take their own paths and do not arrive here — see
+/// `set_diagnostic_sink`'s own list. The [`DiagnosticContext`] (node, component)
+/// is **not** carried onto the wire: [`EventKind::Diagnostic`] has no field for
+/// it, so a subscriber gets severity, code and message only.
+///
+/// [`DiagnosticContext`]: crate::diagnostics::DiagnosticContext
+pub struct DiagnosticEventSink {
+    events: EventQueue,
+}
+
+impl DiagnosticEventSink {
+    /// Creates a sink publishing onto `events`.
+    #[must_use]
+    pub fn new(events: EventQueue) -> Self {
+        Self { events }
+    }
+}
+
+impl DiagnosticSink for DiagnosticEventSink {
+    fn emit(&self, diagnostic: &Diagnostic) {
+        // A full queue drops its oldest and counts the loss in
+        // `EventQueue::dropped`, which is where a host reads it; failing the
+        // emit here would only turn a reported gap into an unreported one.
+        let _ = self.events.push(
+            Topic::Diagnostics,
+            EventKind::Diagnostic {
+                severity: event_severity(diagnostic.severity),
+                code: diagnostic.code.as_str().into(),
+                message: diagnostic.message.as_str().into(),
+            },
+        );
+    }
+}
+
+/// Maps the runtime's severity ladder onto the protocol's identical one.
+const fn event_severity(severity: DiagnosticSeverity) -> EventSeverity {
+    match severity {
+        DiagnosticSeverity::Trace => EventSeverity::Trace,
+        DiagnosticSeverity::Info => EventSeverity::Info,
+        DiagnosticSeverity::Warning => EventSeverity::Warning,
+        DiagnosticSeverity::Error => EventSeverity::Error,
+        DiagnosticSeverity::Critical => EventSeverity::Critical,
+    }
+}
+
+/// Publishes a live runtime's frame and focus transitions onto a DevTools
+/// [`EventQueue`] (spec §7.6 [`Topic::Frames`] / [`Topic::Focus`]).
+///
+/// The host calls [`publish`](Self::publish) once per frame; each call compares
+/// the runtime's real state against what was last published and emits an event
+/// only on a genuine change — so the stream reports transitions the runtime
+/// actually made, and an idle frame produces nothing.
+///
+/// # What it reports, and what it does not
+///
+/// * [`Topic::Frames`] — one [`EventKind::FrameCommitted`] per advance of the
+///   runtime's [`commit_version`](crate::runtime::UiRuntime::commit_version),
+///   carrying that version as the id. A frame whose reconcile changed nothing
+///   does not advance the version, so it is not reported: the topic is
+///   *tree-commit* events, not present/vsync events.
+/// * [`Topic::Focus`] — one [`EventKind::FocusChanged`] per change of
+///   [`focused`](crate::runtime::UiRuntime::focused).
+/// * [`Topic::Lifecycle`] — **nothing**. The runtime exposes no lifecycle
+///   transition stream to derive it from, so a `Lifecycle` subscriber on a host
+///   that publishes only through this type is granted a subscription that stays
+///   silent. That gap is open.
+pub struct RuntimeEventPublisher {
+    events: EventQueue,
+    /// The last commit stamp published, seeded from the runtime at
+    /// [`attach`](Self::attach) so the publisher reports what happens *after* it
+    /// is installed and never invents a frame for state that predates it.
+    last_commit: VersionStamp,
+    /// The last focus target published, seeded the same way.
+    last_focus: Option<NodeId>,
+}
+
+impl RuntimeEventPublisher {
+    /// Starts publishing `runtime`'s transitions onto `events`, taking the
+    /// runtime's current commit version and focus as the baseline.
+    #[must_use]
+    pub fn attach(runtime: &UiRuntime, events: EventQueue) -> Self {
+        Self {
+            events,
+            last_commit: runtime.commit_version(),
+            last_focus: runtime.focused(),
+        }
+    }
+
+    /// Publishes an event for each of `runtime`'s transitions since the last
+    /// call. Cheap enough for every frame: two reads and two comparisons when
+    /// nothing changed.
+    pub fn publish(&mut self, runtime: &UiRuntime) {
+        let commit = runtime.commit_version();
+        if commit != self.last_commit {
+            self.last_commit = commit;
+            // See `DiagnosticEventSink::emit` on the dropped return.
+            let _ = self.events.push(
+                Topic::Frames,
+                EventKind::FrameCommitted { id: commit.raw() },
+            );
+        }
+        let focus = runtime.focused();
+        if focus != self.last_focus {
+            self.last_focus = focus;
+            let _ = self.events.push(Topic::Focus, EventKind::FocusChanged);
+        }
     }
 }
 

@@ -186,7 +186,10 @@ fn absolutize_track(track: &GridTrack, ctx: &LengthContext) -> GridTrack {
             fill: *fill,
             tracks: tracks.iter().map(|t| absolutize_track(t, ctx)).collect(),
         },
-        GridTrack::Fr(_) | GridTrack::Auto => track.clone(),
+        // No length to absolutize: a fraction, and the content-sized keywords.
+        GridTrack::Fr(_) | GridTrack::Auto | GridTrack::MinContent | GridTrack::MaxContent => {
+            track.clone()
+        }
     }
 }
 

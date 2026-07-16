@@ -5,8 +5,8 @@
 pub mod renderer;
 
 pub use renderer::{
-    EffectFallbackReporter, HeadlessRenderer, Renderer, RendererCapabilities, RendererError,
-    RendererId, SceneEffect, unsupported_effects,
+    EffectFallback, EffectFallbackReporter, HeadlessRenderer, Renderer, RendererCapabilities,
+    RendererError, RendererId, SceneEffect, text_run_font_handles, unsupported_effects,
 };
 
 pub mod extension;

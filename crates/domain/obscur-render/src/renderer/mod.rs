@@ -8,8 +8,8 @@ pub use renderer_id::RendererId;
 mod effect_report;
 mod scene_effect;
 pub use effect_report::{
-    EffectFallbackReporter, UNSUPPORTED_EFFECT, scene_effects, unsupported_effect_error,
-    unsupported_effects,
+    EFFECT_FALLBACK, EffectFallback, EffectFallbackReporter, UNSUPPORTED_EFFECT, scene_effects,
+    text_run_font_handles, unsupported_effect_error, unsupported_effects,
 };
 pub use scene_effect::SceneEffect;
 

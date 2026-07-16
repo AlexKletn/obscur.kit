@@ -6,8 +6,8 @@ use obscur_capability::SupportLevel;
 use obscur_diagnostics::{DiagnosticSink, NullDiagnosticSink};
 use obscur_render::frame::{FrameSubmission, PresentResult};
 use obscur_render::renderer::{
-    EffectFallbackReporter, Renderer, RendererCapabilities, RendererError, RendererId, SceneEffect,
-    unsupported_effects,
+    EffectFallback, EffectFallbackReporter, Renderer, RendererCapabilities, RendererError,
+    RendererId, SceneEffect, text_run_font_handles, unsupported_effects,
 };
 use obscur_render::target::RenderTarget;
 
@@ -98,11 +98,27 @@ impl VelloRenderer {
         }
     }
 
-    /// Installs the [`DiagnosticSink`] the §5.2 explicit fallback diagnostics are
-    /// emitted to: one [`RendererError::UnsupportedEffect`] per effect a rendered
-    /// scene demands that this backend reports
-    /// [`Unavailable`](SupportLevel::Unavailable), raised the first time it is
-    /// demanded. See [`Renderer::supports_effect`] for what that is.
+    /// Installs the [`DiagnosticSink`] the §5.2 explicit diagnostics are emitted to.
+    /// Two kinds arrive here, each raised the first time it applies:
+    ///
+    /// - a [`RendererError::UnsupportedEffect`] per effect a rendered scene demands
+    ///   that this backend reports [`Unavailable`](SupportLevel::Unavailable);
+    /// - an [`EffectFallback`] per effect it *did* draw, approximated, because the
+    ///   restriction its [`Limited`](SupportLevel::Limited) level names actually bit
+    ///   on that scene — today, a text run this renderer has no font for, which is
+    ///   dropped silently and so is invisible in the output.
+    ///
+    /// Not every approximation is announced — the text fallback above is the only one
+    /// today. [`Renderer::supports_effect`] remains the complete statement of what
+    /// this backend does with an effect.
+    ///
+    /// Installing a sink is the **host's** job and nothing in this workspace does it:
+    /// the default is a [`NullDiagnosticSink`], and the `Renderer` port carries no
+    /// sink, so a generic runtime cannot install one — only whoever constructs this
+    /// concrete backend can. Until it is called, both diagnostics above are built and
+    /// dropped. That is deliberate (the render path does not branch on whether anyone
+    /// is listening), but it does mean §5.2's "explicit diagnostics" are *available*
+    /// here, not *delivered*.
     pub fn set_diagnostic_sink(&mut self, sink: Arc<dyn DiagnosticSink>) {
         self.diagnostics = sink;
     }
@@ -146,6 +162,41 @@ impl VelloRenderer {
     /// [`Self::register_font`]) is called, text runs are skipped.
     pub fn set_font(&mut self, font_bytes: Vec<u8>) {
         self.register_font(0, font_bytes);
+    }
+
+    /// The [`SceneEffect::Text`] fallbacks this backend will take drawing `list`:
+    /// one per font handle whose runs will be skipped for want of a font
+    /// (spec §5.2).
+    ///
+    /// This backend's restriction on `Text` is harsher than the CPU rasterizer's —
+    /// there is no box-coverage stand-in here, the run is simply not drawn — which
+    /// is why naming it matters most: nothing appears, so there is no artifact for a
+    /// host to notice.
+    ///
+    /// The predicate is [`SceneConverter::can_draw_text`], i.e. `font_for`'s registry
+    /// lookup, because that is the only gate the draw path applies. It is therefore
+    /// **narrower than the CPU backend's**, which also requires the bytes to parse:
+    /// registering unparseable bytes here satisfies this scan and raises nothing,
+    /// and Vello's own glyph pipeline then **panics** rather than drawing nothing
+    /// (`Scene::draw_glyphs` unwraps its `FontRef`). Reporting it would mean parsing
+    /// fonts this backend never parses, so it is left un-diagnosed rather than
+    /// guessed at — but the failure is a crash, not a blank run, and a host that
+    /// registers untrusted bytes owns that.
+    fn text_fallbacks(&self, list: &DisplayList) -> Vec<EffectFallback> {
+        text_run_font_handles(list)
+            .into_iter()
+            .filter(|handle| !self.scene_converter.can_draw_text(*handle))
+            .map(|handle| {
+                EffectFallback::new(
+                    SceneEffect::Text,
+                    format!(
+                        "no font is registered for handle {handle} and none for the \
+                         primary handle 0, so its runs are skipped and draw nothing; \
+                         register one with VelloRenderer::register_font"
+                    ),
+                )
+            })
+            .collect()
     }
 
     /// Whether a GPU device is attached and rendering can submit work.
@@ -193,6 +244,14 @@ impl VelloRenderer {
         let unsupported = unsupported_effects(&*self, display_list);
         let sink = Arc::clone(&self.diagnostics);
         self.fallbacks.report(&unsupported, sink.as_ref());
+        // The other half of that sentence: an effect this backend *does* draw, but
+        // whose documented restriction bites on THIS scene. It cannot be read off
+        // `supports_effect` — `Text` is `Limited` whether or not the host registered
+        // the font a given run needs — and this is the fallback that costs a host
+        // the most to discover by looking: an unregistered run is dropped in
+        // silence, so the text is simply absent with nothing to see.
+        let degraded = self.text_fallbacks(display_list);
+        self.fallbacks.report_fallbacks(&degraded, sink.as_ref());
 
         // `backdrop-filter` frosts the frame accumulated so far, so it cannot be
         // rendered in a single Vello pass: fall to the segmented compositing path.
@@ -1021,6 +1080,63 @@ mod tests {
     fn a_scene_within_the_backends_means_raises_nothing() {
         let sink = Arc::new(RecordingSink::default());
         let mut renderer = VelloRenderer::new(RendererId::from_raw(12));
+        renderer.set_diagnostic_sink(sink.clone());
+        let _ = renderer.render(&submission(1), &a_target());
+        assert!(sink.messages().is_empty());
+    }
+
+    /// A one-glyph run tagged with font handle `handle`.
+    fn text_submission(handle: u32) -> FrameSubmission {
+        use obscur_scene::text::{GlyphRun, PositionedGlyph};
+        let run = GlyphRun::new(vec![PositionedGlyph::new(1, 0, 0.0, 12.0, 8.0)], 12.0, "a")
+            .with_font(handle);
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawText {
+            origin: obscur_geometry::Point::new(1.0, 1.0),
+            run,
+            brush: obscur_scene::paint::Brush::solid(obscur_scene::color::Color::BLACK),
+        }]);
+        FrameSubmission::new(RenderFrame::new(
+            SceneSnapshot::new(list, SceneGeneration::from_raw(1)),
+            Size::new(64.0, 48.0),
+        ))
+    }
+
+    #[test]
+    fn a_text_run_without_its_font_tells_the_host_it_was_skipped() {
+        // Spec §5.2: unsupported effects AND FALLBACKS are explicit diagnostics.
+        // `Text` is `Limited`, so it raises no `unsupported effect` — and this
+        // backend's restriction is that an uncovered run is dropped in silence.
+        // Nothing is drawn, so nothing on screen tells the host why. The report runs
+        // before the GPU submission, so it is observable without a device.
+        let sink = Arc::new(RecordingSink::default());
+        let mut renderer = VelloRenderer::new(RendererId::from_raw(13));
+        renderer.set_diagnostic_sink(sink.clone());
+
+        let _ = renderer.render(&text_submission(3), &a_target());
+
+        let messages = sink.messages();
+        assert_eq!(messages.len(), 1, "one fallback, once: {messages:?}");
+        assert!(
+            messages[0].starts_with("degraded effect: text (no font is registered for handle 3"),
+            "the diagnostic must name the effect and the handle: {messages:?}"
+        );
+
+        // A property of this renderer's registry, not of the frame: not re-raised.
+        let _ = renderer.render(&text_submission(3), &a_target());
+        assert_eq!(sink.messages().len(), 1);
+    }
+
+    #[test]
+    fn an_empty_scene_raises_no_text_fallback() {
+        // The anti-noise direction at this level: a scene with no text must not
+        // acquire a text diagnostic just because `Text` is declared `Limited`. The
+        // positive case (a run its registry DOES cover) is pinned on
+        // `SceneConverter::can_draw_text`, the predicate this scan calls, because
+        // driving a covered run through `render` here would need a parseable font —
+        // `vello::DrawGlyphs::draw` unwraps `FontRef::from_index` — and this crate's
+        // tests have no font file to hand.
+        let sink = Arc::new(RecordingSink::default());
+        let mut renderer = VelloRenderer::new(RendererId::from_raw(14));
         renderer.set_diagnostic_sink(sink.clone());
         let _ = renderer.render(&submission(1), &a_target());
         assert!(sink.messages().is_empty());

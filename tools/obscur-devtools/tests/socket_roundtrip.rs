@@ -7,7 +7,10 @@
 use std::thread;
 
 use obscur_devtools::{cli, host};
-use obscur_devtools_protocol::message::{HandshakeResponse, Inspectable, ScopeSet};
+use obscur_devtools_protocol::error::ProtocolError;
+use obscur_devtools_protocol::message::{
+    HandshakeResponse, InjectedEvent, Inspectable, PermissionScope, ScopeSet,
+};
 use obscur_devtools_server::transport::{ClientBound, SocketClient, SocketListener};
 
 /// Binds a loopback host serving exactly one session with `token`/`scopes`, and
@@ -94,7 +97,12 @@ fn unknown_token_is_rejected() {
 }
 
 #[test]
-fn read_only_session_cannot_control_but_a_subscribe_is_granted() {
+fn a_scope_authorised_subscribe_is_still_denied_by_a_host_that_cannot_push() {
+    // This test used to assert the bug as intended behaviour: the demo host is
+    // request/reply, nothing here ever produces an event, and yet a Subscribe
+    // came back `granted: true` — a handshake with a lie in it. The subscribe
+    // scope IS granted, so this is not a permission refusal; it is the server
+    // declining to promise a delivery it has no producer for.
     use obscur_devtools_protocol::message::Topic;
 
     let (addr, handle) = spawn_host("dev", ScopeSet::observer());
@@ -106,13 +114,27 @@ fn read_only_session_cannot_control_but_a_subscribe_is_granted() {
             .is_accepted()
     );
 
-    // observer() grants read + subscribe, so a Subscribe is granted...
     let reply = cli::subscribe(&mut client, 1, Topic::Frames).expect("io");
     let ClientBound::Subscription(subscription) = reply else {
-        panic!("expected a subscription grant: {reply:?}");
+        panic!("expected a subscription record: {reply:?}");
     };
-    assert!(subscription.granted);
+    assert!(
+        !subscription.granted,
+        "the demo host has no event producer, so it must not claim one"
+    );
     assert_eq!(subscription.topic, Topic::Frames);
+
+    // And a control command is still refused on the scope, unchanged.
+    let reply = cli::inject(&mut client, 2, InjectedEvent::PointerDown { x: 1, y: 1 }).expect("io");
+    assert!(
+        matches!(
+            reply,
+            ClientBound::Error(ProtocolError::Unauthorized {
+                required: PermissionScope::Inject
+            })
+        ),
+        "{reply:?}"
+    );
 
     drop(client);
     handle.join().expect("join");

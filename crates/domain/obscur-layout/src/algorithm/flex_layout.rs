@@ -55,10 +55,32 @@ fn content_max_main(
     is_row: bool,
     container_cross: f32,
 ) -> f32 {
+    probe_main(measurer, index, is_row, f32::INFINITY, container_cross)
+}
+
+/// The main-axis size item `index` reports when offered `main_offer` of main-axis
+/// space and the container's cross extent.
+///
+/// The one measuring primitive behind every intrinsic answer flex needs: `0` is
+/// the `min-content` offer (nothing wraps that can be broken), [`f32::INFINITY`]
+/// the `max-content` one (nothing wraps that does not have to). The offer is
+/// **loose** — `min: ZERO` — so an item that cannot fit reports the size it needs
+/// rather than the space it was given, which is the whole point of the probe (see
+/// [`BoxConstraints::constrain_allowing_overflow`]).
+///
+/// The answer is a **border**-box extent, like every measured size, so no
+/// `box-sizing` mapping applies to it.
+fn probe_main(
+    measurer: &mut dyn ChildMeasurer,
+    index: usize,
+    is_row: bool,
+    main_offer: f32,
+    container_cross: f32,
+) -> f32 {
     let max = if is_row {
-        Size::new(f32::INFINITY, container_cross)
+        Size::new(main_offer, container_cross)
     } else {
-        Size::new(container_cross, f32::INFINITY)
+        Size::new(container_cross, main_offer)
     };
     let measured = measurer.measure_child(
         index,
@@ -71,6 +93,48 @@ fn content_max_main(
         measured.width
     } else {
         measured.height
+    }
+}
+
+/// The item's main-axis size for an **intrinsic** `flex-basis` / `width` /
+/// `height` keyword, or [`None`] when `dim` is not one (CSS Sizing 3 §4.1).
+///
+/// The flex twin of [`intrinsic_inline_size`](super::intrinsic_inline_size), and
+/// the same three answers — but flex asks them of ONE item rather than of a run of
+/// stacked children, and asks along whichever axis is the main one, so the probe
+/// is a measure of that item instead of a pass over children:
+///
+/// * `min-content` — the item offered no main-axis space;
+/// * `max-content` — the item offered unbounded main-axis space;
+/// * `fit-content` — `min(max-content, max(min-content, stretch))`, where
+///   `stretch` is the container's main extent (CSS 2.1 §10.3.5's shrink-to-fit).
+///
+/// Without this the keywords fell through [`Dimension::resolve`]'s [`None`] into
+/// the measured-natural-size fallback — i.e. `flex-basis: max-content` silently
+/// meant `flex-basis: auto`.
+///
+/// # Cost
+///
+/// One extra measure per intrinsic item (`fit-content` two), and only for an item
+/// that authored a keyword: [`Dimension::resolve`]-shaped values return here
+/// immediately without measuring.
+fn intrinsic_main(
+    measurer: &mut dyn ChildMeasurer,
+    index: usize,
+    dim: Dimension,
+    is_row: bool,
+    container_main: f32,
+    container_cross: f32,
+) -> Option<f32> {
+    match dim {
+        Dimension::MinContent => Some(probe_main(measurer, index, is_row, 0.0, container_cross)),
+        Dimension::MaxContent => Some(content_max_main(measurer, index, is_row, container_cross)),
+        Dimension::FitContent => {
+            let min = probe_main(measurer, index, is_row, 0.0, container_cross);
+            let max = content_max_main(measurer, index, is_row, container_cross);
+            Some(max.min(container_main.max(min)))
+        }
+        Dimension::Auto | Dimension::Px(_) | Dimension::Percent(_) => None,
     }
 }
 
@@ -109,6 +173,10 @@ fn cross_bounds(style: &LayoutStyle, is_row: bool) -> (Dimension, Dimension) {
 /// border extent this value is expressed in, matching how the explicit cross size
 /// is resolved in [`cross_item_size`]. Max applies before min, so min wins on
 /// conflict (per CSS).
+///
+/// An **intrinsic** cross bound (`max-height: max-content` on a row item) is
+/// still dropped: `resolve` answers [`None`] for a keyword, so it imposes no
+/// limit here. Only the MAIN axis measures its keywords (see [`intrinsic_main`]).
 fn clamp_cross(value: f32, style: &LayoutStyle, is_row: bool, container_cross: f32) -> f32 {
     let (min, max) = cross_bounds(style, is_row);
     let bp = axis_bp(style, !is_row);
@@ -150,7 +218,17 @@ fn item_align(item: &LayoutStyle, container: &LayoutStyle) -> AlignItems {
 /// 2. Each item's **base main size** is `flex_basis` (resolved against the
 ///    container main extent); else its main-axis size (`width` for a row,
 ///    `height` for a column); else its measured natural main size (measured with
-///    loose constraints up to the container content box). Never negative.
+///    loose constraints up to the container content box). Never negative. An
+///    **intrinsic** keyword on either source (`flex-basis: min-content`,
+///    `width: fit-content`) is answered by measuring the item under a zero /
+///    unbounded main-axis offer — see [`intrinsic_main`].
+///
+///    Two neighbours of that path still degrade an intrinsic keyword to `auto`:
+///    an item's **cross**-axis size and bounds (step 5 / [`clamp_cross`]), and
+///    the **container's own** `width` / `height` and `min-`/`max-` bounds in
+///    step 1 — `display: flex; width: min-content` fills its parent. Both want a
+///    min-content size *of a flex line*, which nothing here computes: the item
+///    probes above answer for one item, not for the line they share.
 /// 3. `free = container_main - (sum of base sizes) - gap * (count - 1)`.
 /// 4. If `free > 0` and `sum(flex_grow) > 0`, each item grows by
 ///    `free * grow_i / sum(grow)`. If `free < 0` and the scaled shrink factor
@@ -348,30 +426,54 @@ impl LayoutAlgorithm for FlexLayout {
             // border-box extent the item occupies (`content-box` adds the item's
             // main-axis border + padding). The measured fallback already reports a
             // border box, so it is used as-is.
-            let base = child
-                .style
-                .flex_basis
-                .resolve(container_main)
-                .or_else(|| main_dim.resolve(container_main))
-                .map_or_else(
-                    || {
-                        let measured = measurer.measure_child(
-                            index,
-                            BoxConstraints::loose(Size::new(content_width, content_height)),
-                        );
-                        if is_row {
-                            measured.width
-                        } else {
-                            measured.height
-                        }
-                    },
-                    |explicit| {
-                        child
-                            .style
-                            .box_sizing
-                            .border_extent(explicit, axis_bp(&child.style, is_row))
-                    },
+            //
+            // Each source is asked for an INTRINSIC answer before an arithmetic
+            // one, because `Dimension::resolve` cannot tell the two apart: it
+            // answers `None` for `min-content` exactly as it does for `auto`, so
+            // an unasked keyword falls through to the next source and, in the end,
+            // to the natural-size fallback — `flex-basis: max-content` meaning
+            // `flex-basis: auto`. `intrinsic_main` measures nothing for a
+            // non-keyword, so the common item costs what it always did.
+            let explicit_main = |explicit: f32| {
+                child
+                    .style
+                    .box_sizing
+                    .border_extent(explicit, axis_bp(&child.style, is_row))
+            };
+            let basis = child.style.flex_basis;
+            let base = if let Some(px) = intrinsic_main(
+                &mut *measurer,
+                index,
+                basis,
+                is_row,
+                container_main,
+                container_cross,
+            ) {
+                px
+            } else if let Some(explicit) = basis.resolve(container_main) {
+                explicit_main(explicit)
+            } else if let Some(px) = intrinsic_main(
+                &mut *measurer,
+                index,
+                main_dim,
+                is_row,
+                container_main,
+                container_cross,
+            ) {
+                px
+            } else if let Some(explicit) = main_dim.resolve(container_main) {
+                explicit_main(explicit)
+            } else {
+                let measured = measurer.measure_child(
+                    index,
+                    BoxConstraints::loose(Size::new(content_width, content_height)),
                 );
+                if is_row {
+                    measured.width
+                } else {
+                    measured.height
+                }
+            };
             let (min_main, max_main) = main_bounds(&child.style, is_row);
             let fb = base.max(0.0);
             let max_val = max_main.resolve(container_main).unwrap_or(f32::INFINITY);
@@ -1243,7 +1345,7 @@ fn cross_item_size(
 #[cfg(test)]
 mod tests {
     use super::FlexLayout;
-    use crate::algorithm::{FixedChildMeasurer, LayoutAlgorithm, LayoutChild};
+    use crate::algorithm::{ChildMeasurer, FixedChildMeasurer, LayoutAlgorithm, LayoutChild};
     use crate::model::{
         AlignItems, AlignSelf, BoxSizing, Dimension, FlexDirection, FlexWrap, JustifyContent,
         LayoutDisplay, LayoutStyle,
@@ -2470,5 +2572,163 @@ mod tests {
             measurer.calls, 3,
             "only the clamped item spends a §4.5 measure"
         );
+    }
+
+    // ---- intrinsic flex-basis / main size (audit Tier-1 §4-D) --------------
+
+    /// An item that behaves like a paragraph: it fills the inline space it is
+    /// offered, but never below `min` (its longest unbreakable word) and never
+    /// above `max` (its whole content on one line). Unlike
+    /// [`FixedChildMeasurer`] it ANSWERS the offer, which is the only way a probe
+    /// can be caught not probing.
+    struct Paragraph {
+        min: f32,
+        max: f32,
+    }
+
+    impl crate::algorithm::ChildMeasurer for Paragraph {
+        fn measure_child(&mut self, _index: usize, constraints: BoxConstraints) -> Size {
+            Size::new(constraints.max.width.clamp(self.min, self.max), 10.0)
+        }
+    }
+
+    /// A row of one item with the given main-axis style, in a `line` wide
+    /// container: the item's arranged width. Neither grow nor shrink, so what
+    /// comes back IS the flex base size.
+    fn base_width_of(main: LayoutStyle, line: f32, measurer: &mut dyn ChildMeasurer) -> f32 {
+        let style = container(
+            FlexDirection::Row,
+            JustifyContent::FlexStart,
+            AlignItems::FlexStart,
+            0.0,
+        );
+        let children = [LayoutChild::new(NodeId::from_raw(1), main)];
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(line, 50.0)),
+            measurer,
+        );
+        out.child_boxes()[0].size().width
+    }
+
+    /// An item with the given `flex-basis`, rigid on both flex factors.
+    fn rigid_basis(basis: Dimension) -> LayoutStyle {
+        LayoutStyle {
+            display: LayoutDisplay::Flex,
+            flex_basis: basis,
+            flex_grow: 0.0,
+            flex_shrink: 0.0,
+            ..LayoutStyle::default()
+        }
+    }
+
+    #[test]
+    fn flex_basis_max_content_measures_rather_than_degrading_to_auto() {
+        // A 100px row holding an item whose content wants 200 on one line.
+        // `flex-basis: max-content` is 200 and overflows; `auto` would have taken
+        // the 100 it was offered — which is what the keyword silently did before,
+        // because `Dimension::resolve` answers `None` for it exactly as for `auto`.
+        let mut m = Paragraph {
+            min: 30.0,
+            max: 200.0,
+        };
+        approx(
+            base_width_of(rigid_basis(Dimension::MaxContent), 100.0, &mut m),
+            200.0,
+        );
+        approx(
+            base_width_of(rigid_basis(Dimension::Auto), 100.0, &mut m),
+            100.0,
+        );
+    }
+
+    #[test]
+    fn flex_basis_min_content_measures_rather_than_degrading_to_auto() {
+        // The same 100px row: `min-content` is the 30-wide unbreakable run, so the
+        // item shrinks to its widest word instead of filling the line.
+        let mut m = Paragraph {
+            min: 30.0,
+            max: 200.0,
+        };
+        approx(
+            base_width_of(rigid_basis(Dimension::MinContent), 100.0, &mut m),
+            30.0,
+        );
+    }
+
+    #[test]
+    fn an_intrinsic_width_feeds_the_flex_base_when_flex_basis_is_auto() {
+        // §9.2 step 3: with `flex-basis: auto` the item's main-axis SIZE supplies
+        // the base — including when it is a keyword, which used to fall through to
+        // the natural-size measure.
+        let mut m = Paragraph {
+            min: 30.0,
+            max: 200.0,
+        };
+        let style = LayoutStyle {
+            display: LayoutDisplay::Flex,
+            width: Dimension::MinContent,
+            flex_grow: 0.0,
+            flex_shrink: 0.0,
+            ..LayoutStyle::default()
+        };
+        approx(base_width_of(style, 100.0, &mut m), 30.0);
+    }
+
+    #[test]
+    fn fit_content_basis_shrinks_a_fill_available_item_to_its_content() {
+        // The item is a nested `width: auto` block: it fills whatever it is
+        // offered, and reports its own 200-wide content only when the offer is
+        // unbounded. `fit-content` = min(max-content 200, max(min-content 0,
+        // stretch 400)) = 200 — the content. `auto` fills the 400px row, which is
+        // the answer `fit-content` degraded to before.
+        struct FillAvailable;
+        impl crate::algorithm::ChildMeasurer for FillAvailable {
+            fn measure_child(&mut self, _index: usize, constraints: BoxConstraints) -> Size {
+                let width = if constraints.max.width.is_finite() {
+                    constraints.max.width
+                } else {
+                    200.0
+                };
+                Size::new(width, 10.0)
+            }
+        }
+        approx(
+            base_width_of(
+                rigid_basis(Dimension::FitContent),
+                400.0,
+                &mut FillAvailable,
+            ),
+            200.0,
+        );
+        approx(
+            base_width_of(rigid_basis(Dimension::Auto), 400.0, &mut FillAvailable),
+            400.0,
+        );
+    }
+
+    #[test]
+    fn an_intrinsic_basis_costs_no_measure_for_an_item_that_authored_none() {
+        // The guard on the cost of the extra probes: an ordinary auto-basis item
+        // in a stretching row (which needs no cross measure either) still spends
+        // exactly one measure, so the keywords are paid for only by the items that
+        // author them.
+        let style = container(
+            FlexDirection::Row,
+            JustifyContent::FlexStart,
+            AlignItems::Stretch,
+            0.0,
+        );
+        let children = [auto_item(1), auto_item(2)];
+        let mut measurer =
+            CountingMeasurer::new(vec![Size::new(30.0, 10.0), Size::new(30.0, 10.0)]);
+        FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(400.0, 50.0)),
+            &mut measurer,
+        );
+        assert_eq!(measurer.calls, 2, "one base measure per item, no probes");
     }
 }

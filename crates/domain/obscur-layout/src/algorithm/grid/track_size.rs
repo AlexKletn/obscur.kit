@@ -4,8 +4,8 @@
 ///
 /// A track's size is resolved by the grid algorithm from the container's
 /// available space, the other tracks, and — for content-sized tracks — the items
-/// placed in it (spec §4.1 grid track sizing). This enum models the four track
-/// sizing functions this crate supports:
+/// placed in it (spec §4.1 grid track sizing). This enum models the track sizing
+/// functions this crate supports:
 ///
 /// * [`Fixed`](TrackSize::Fixed) — a resolved pixel length. The CSS side resolves
 ///   any absolute or relative unit (`px`, `em`, `vw`, …) to a plain `f32` *before*
@@ -22,6 +22,12 @@
 ///   proportion to their fraction (analogous to `flex-grow`).
 /// * [`Auto`](TrackSize::Auto) — content-sized. The track is sized to the largest
 ///   content size among the items placed in it.
+/// * [`MinContent`](TrackSize::MinContent) / [`MaxContent`](TrackSize::MaxContent)
+///   — the intrinsic track sizing keywords. Like [`Auto`](TrackSize::Auto) they
+///   are content-sized, but they name *which* content size: the smallest the items
+///   can be without overflowing, or the size they want given unbounded space (CSS
+///   Sizing 3 §4.1). Unlike `auto` they do not stretch to absorb leftover space
+///   (CSS Grid §11.8).
 /// * [`MinMax`](TrackSize::MinMax) — a `minmax(min, max)` clamp. The track is
 ///   sized by its `max` function but is never smaller than its `min` function;
 ///   `minmax(100px, 1fr)` grows flexibly from a `100px` floor. A [`Percent`]
@@ -46,12 +52,17 @@ pub enum TrackSize {
     Fr(f32),
     /// Content-sized: as large as the biggest item placed in the track.
     Auto,
+    /// `min-content`: the largest **min-content** contribution among the items
+    /// placed in the track — each measured under an offer of no space.
+    MinContent,
+    /// `max-content`: the largest **max-content** contribution among the items
+    /// placed in the track — each measured under an unbounded offer.
+    MaxContent,
     /// `minmax(min, max)`: sized by `max`, floored at `min`.
     ///
-    /// Each bound is itself a [`TrackSize`] (conventionally one of
-    /// [`Fixed`](TrackSize::Fixed), [`Percent`](TrackSize::Percent),
-    /// [`Fr`](TrackSize::Fr), or [`Auto`](TrackSize::Auto)); an `fr` bound is only
-    /// meaningful as the `max`.
+    /// Each bound is itself a [`TrackSize`] (conventionally a length, a
+    /// percentage, `fr`, or one of the content-sized keywords); an `fr` bound is
+    /// only meaningful as the `max`.
     MinMax(Box<TrackSize>, Box<TrackSize>),
 }
 

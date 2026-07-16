@@ -173,12 +173,18 @@ fn grid_tracks_of(computed: &ComputedStyle, property: PropertyId) -> Option<&[Gr
 /// A [`GridTrack::Fixed`] length is resolved to logical pixels against `ctx`; a
 /// bare percentage — its basis is the not-yet-known container content size —
 /// becomes a [`TrackSize::Percent`] fraction the algorithm resolves later, and
-/// `auto` (no numeric value) degrades to [`TrackSize::Auto`]. `fr`, `auto`, and
-/// `minmax` map structurally, recursing on the `minmax` bounds.
+/// `auto` (no numeric value) degrades to [`TrackSize::Auto`]. `fr`, `auto`,
+/// `min-content` / `max-content`, and `minmax` map structurally, recursing on the
+/// `minmax` bounds.
 fn track_size_of(track: &GridTrack, ctx: &LengthContext) -> TrackSize {
     match track {
         GridTrack::Fixed(length) => fixed_track_size(*length, ctx),
         GridTrack::Fr(fraction) => TrackSize::Fr(*fraction),
+        // The content keywords carry no length either, and unlike a percentage
+        // they have no basis to wait for: the algorithm answers them by measuring
+        // the items placed in the track.
+        GridTrack::MinContent => TrackSize::MinContent,
+        GridTrack::MaxContent => TrackSize::MaxContent,
         GridTrack::MinMax(min, max) => {
             TrackSize::minmax(track_size_of(min, ctx), track_size_of(max, ctx))
         }
@@ -312,6 +318,31 @@ mod tests {
                 TrackSize::Percent(0.30),
                 TrackSize::Fr(1.0)
             )]
+        );
+    }
+
+    #[test]
+    fn content_keyword_tracks_carry_to_the_layout_track_list() {
+        let mut computed = ComputedStyle::new();
+        computed.set(
+            PropertyId::GridTemplateColumns,
+            ComputedValue::from_concrete(PropertyValue::grid_tracks([
+                GridTrack::MinContent,
+                GridTrack::Fr(1.0),
+                GridTrack::minmax(GridTrack::MinContent, GridTrack::MaxContent),
+            ]))
+            .expect("concrete"),
+        );
+        let template = grid_template_for(&computed, VIEWPORT, ROOT_FONT, None).expect("template");
+        // They do NOT degrade to `Auto`: the algorithm answers each by measuring
+        // the items with the offer that keyword names.
+        assert_eq!(
+            template.columns().leading(),
+            &[
+                TrackSize::MinContent,
+                TrackSize::Fr(1.0),
+                TrackSize::minmax(TrackSize::MinContent, TrackSize::MaxContent),
+            ]
         );
     }
 

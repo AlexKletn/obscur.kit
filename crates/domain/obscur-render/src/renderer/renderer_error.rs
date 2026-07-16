@@ -16,9 +16,12 @@ pub enum RendererError {
     /// The GPU device was lost; see [`DeviceLoss`] for the reason and whether
     /// the runtime may rebuild and retry.
     DeviceLost(DeviceLoss),
-    /// The backend cannot reproduce the named effect. This is the explicit
-    /// fallback diagnostic of spec §5.2, in the form
-    /// [`SceneEffect::name`](crate::renderer::SceneEffect::name) gives it.
+    /// The backend cannot reproduce the named effect at all. This is the
+    /// *unsupported effect* half of spec §5.2's explicit diagnostics, in the form
+    /// [`SceneEffect::name`](crate::renderer::SceneEffect::name) gives it. The
+    /// *fallback* half — an effect that was drawn, but approximated — is
+    /// [`EffectFallback`](crate::renderer::EffectFallback), which is not an error:
+    /// nothing failed.
     ///
     /// Both in-tree backends **emit** it rather than **return** it: they own a
     /// documented fallback for every effect they report

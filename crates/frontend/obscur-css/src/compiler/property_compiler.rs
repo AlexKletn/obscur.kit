@@ -1830,12 +1830,35 @@ fn tracks_from_components(values: &[ParsedValue]) -> Option<Vec<GridTrack>> {
     Some(out)
 }
 
-/// Lowers one non-`repeat` track: `auto`, an `<fr>`, a `<length>`, or
-/// `minmax(min, max)`. Returns [`None`] for anything else.
+/// Lowers one non-`repeat` track: `auto`, `min-content`, `max-content`, an
+/// `<fr>`, a `<length>`, or `minmax(min, max)`. Returns [`None`] for anything
+/// else.
+///
+/// # An unrecognised track takes the whole declaration with it
+///
+/// Returning [`None`] here aborts the entire `grid-template-columns` value, not
+/// just this track — the callers propagate it, and the declaration degrades to an
+/// unsupported-feature diagnostic. That is deliberate (a track list with one
+/// track silently dropped would shift every item into the wrong column, which is
+/// worse than not laying out the template at all), and it is why the two content
+/// keywords being missing here was worth more than it looked: a single
+/// `min-content` in the list took the other tracks down with it.
+///
+/// `fit-content` is **not** here, and is still an unrecognised track: CSS Grid
+/// spells it `fit-content(<length-percentage>)` — a function with an argument,
+/// with no bare-keyword form on a track — and the argument is not modelled. It
+/// therefore still degrades the declaration.
 fn grid_track_scalar(value: &ParsedValue) -> Option<GridTrack> {
     match value {
         ParsedValue::Keyword(keyword) if keyword.eq_ignore_ascii_case("auto") => {
             Some(GridTrack::Auto)
+        }
+
+        ParsedValue::Keyword(keyword) if keyword.eq_ignore_ascii_case("min-content") => {
+            Some(GridTrack::MinContent)
+        }
+        ParsedValue::Keyword(keyword) if keyword.eq_ignore_ascii_case("max-content") => {
+            Some(GridTrack::MaxContent)
         }
         ParsedValue::Dimension { value, unit } if unit.eq_ignore_ascii_case("fr") => {
             Some(GridTrack::Fr(narrow_f32(*value)))
@@ -6780,6 +6803,62 @@ mod tests {
                 GridTrack::Fixed(Length::Em(2.0)),
             ]
         );
+    }
+
+    #[test]
+    fn lowers_the_content_keyword_tracks() {
+        assert_eq!(
+            tracks("grid-template-columns: min-content"),
+            vec![GridTrack::MinContent]
+        );
+        assert_eq!(
+            tracks("grid-template-columns: MAX-CONTENT"),
+            vec![GridTrack::MaxContent]
+        );
+        assert_eq!(
+            tracks("grid-auto-columns: min-content"),
+            vec![GridTrack::MinContent]
+        );
+    }
+
+    #[test]
+    fn one_content_keyword_track_no_longer_drops_the_whole_list() {
+        // The defect this test exists for: `min-content` was not a track the
+        // grammar knew, and an unknown track aborts the ENTIRE declaration — so
+        // one keyword took the `1fr` and the `100px` down with it and the element
+        // laid out with no template at all.
+        assert_eq!(
+            tracks("grid-template-columns: min-content 1fr 100px"),
+            vec![
+                GridTrack::MinContent,
+                GridTrack::Fr(1.0),
+                GridTrack::Fixed(Length::px(100.0)),
+            ]
+        );
+    }
+
+    #[test]
+    fn lowers_content_keywords_inside_minmax_and_repeat() {
+        assert_eq!(
+            tracks("grid-template-columns: minmax(min-content, 1fr)"),
+            vec![GridTrack::minmax(GridTrack::MinContent, GridTrack::Fr(1.0))]
+        );
+        assert_eq!(
+            tracks("grid-template-columns: repeat(2, max-content)"),
+            vec![GridTrack::MaxContent, GridTrack::MaxContent]
+        );
+    }
+
+    #[test]
+    fn a_bare_fit_content_track_is_still_unsupported() {
+        // CSS Grid has no bare `fit-content` track — it is
+        // `fit-content(<length-percentage>)`, whose argument this crate does not
+        // model — so it stays an unsupported-feature diagnostic rather than being
+        // quietly accepted as something else.
+        assert!(matches!(
+            compile("grid-template-columns: fit-content").0,
+            CompiledDeclaration::Unsupported(_)
+        ));
     }
 
     #[test]

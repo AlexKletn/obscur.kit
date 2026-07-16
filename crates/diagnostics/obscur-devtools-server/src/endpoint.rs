@@ -4,7 +4,7 @@ use obscur_devtools_protocol::error::ProtocolError;
 use obscur_devtools_protocol::message::{
     CommandId, CommandKind, CommandMessage, ControlAction, HandshakeRejection, HandshakeRequest,
     HandshakeResponse, InjectedEvent, Inspectable, ProtocolVersion, ScopeSet, SnapshotMessage,
-    Subscription, Topic, VersionRange,
+    Subscription, SubscriptionId, Topic, VersionRange,
 };
 
 use crate::auth::Authenticator;
@@ -63,6 +63,11 @@ pub enum CommandOutcome {
 ///   [`ScopeSet`] using its own required scope, so the four capability classes
 ///   are independent.
 /// * **Limit-enforcing** — subscriptions are bounded by the manager's limit.
+/// * **Grant-honest** — a `Subscribe` is granted only when this session is
+///   actually being driven by a loop that pushes events (see
+///   [`services_event_push`](Self::services_event_push)); otherwise it is
+///   answered with a *denied* [`Subscription`] rather than a grant nothing
+///   will service.
 /// * **Audited** — dangerous (`Control`/`Inject`) commands are appended to the
 ///   audit log before they take effect.
 /// * **No arbitrary execution** — control/injection resolve to typed
@@ -81,6 +86,14 @@ pub struct DevToolsEndpoint<S> {
     connected: bool,
     enabled: bool,
     control_excluded: bool,
+    /// Whether a loop that actually drains an [`EventQueue`] and writes the
+    /// fan-out is driving this session. Only such a loop sets it — see
+    /// [`mark_event_push_serviced`](Self::mark_event_push_serviced) — so it can
+    /// never claim more than is true, and a `Subscribe` is denied while it is
+    /// `false`.
+    ///
+    /// [`EventQueue`]: crate::transport::EventQueue
+    event_push: bool,
     audit_log: Vec<AuditEntry>,
     /// Authorized synthetic input events awaiting the host, in arrival order.
     /// The endpoint never touches the runtime itself (spec §7.7); the host
@@ -107,6 +120,7 @@ impl<S: InspectSource> DevToolsEndpoint<S> {
             connected: false,
             enabled: false,
             control_excluded: false,
+            event_push: false,
             audit_log: Vec::new(),
             pending_injections: Vec::new(),
             pending_controls: Vec::new(),
@@ -196,6 +210,16 @@ impl<S: InspectSource> DevToolsEndpoint<S> {
                 self.bridge.inspect(command.id, *target),
             )),
             CommandKind::Subscribe(topic) => {
+                // A grant is a promise to deliver. This session is request/reply
+                // only unless a pushing loop said otherwise, and a client told
+                // `granted: true` by one waits forever for an event that has no
+                // path to it — so deny, and let the client know now.
+                if !self.event_push {
+                    return Ok(CommandOutcome::Subscribed(Subscription::denied(
+                        SubscriptionId::default(),
+                        *topic,
+                    )));
+                }
                 let id = self.subscriptions.subscribe(*topic)?;
                 Ok(CommandOutcome::Subscribed(Subscription::granted(
                     id, *topic,
@@ -276,6 +300,31 @@ impl<S: InspectSource> DevToolsEndpoint<S> {
     #[must_use]
     pub fn control_excluded(&self) -> bool {
         self.control_excluded
+    }
+
+    /// Whether this session will actually deliver pushed events — and therefore
+    /// whether a `Subscribe` is granted rather than denied.
+    ///
+    /// False until a serving loop that pushes takes the endpoint over, which is
+    /// today only
+    /// [`SocketTransport::serve_with_events`](crate::transport::SocketTransport::serve_with_events).
+    /// A session driven by [`SocketTransport::serve`](crate::transport::SocketTransport::serve)
+    /// stays request/reply and reports `false`.
+    #[must_use]
+    pub fn services_event_push(&self) -> bool {
+        self.event_push
+    }
+
+    /// Declares that the caller's loop drains an
+    /// [`EventQueue`](crate::transport::EventQueue) and writes this endpoint's
+    /// [`fan_out`](Self::fan_out) to the client, so subscriptions may be granted.
+    ///
+    /// Deliberately crate-visible: the promise that `granted: true` makes is
+    /// only truthful if the code holding the endpoint really does push, and a
+    /// host outside this crate cannot push without going through a transport
+    /// here. That keeps the flag a fact rather than a claim.
+    pub(crate) fn mark_event_push_serviced(&mut self) {
+        self.event_push = true;
     }
 
     /// Builds the events to push to subscribers of `topic` for `kind`.
@@ -443,8 +492,64 @@ mod tests {
     }
 
     #[test]
+    fn event_push_never_loosens_the_subscribe_scope_check() {
+        // The §7.7 boundary must be unmoved by the push work: a session without
+        // the Subscribe scope is refused on the scope, before the grant question
+        // is ever reached — whether or not anyone is pushing.
+        for pushing in [false, true] {
+            let mut ep = endpoint_with(ScopeSet::all_read(), "dev");
+            if pushing {
+                ep.mark_event_push_serviced();
+            }
+            ep.handshake(&handshake("dev"));
+            assert_eq!(
+                ep.dispatch(&CommandMessage::new(
+                    CommandId::new(1),
+                    CommandKind::Subscribe(Topic::Frames),
+                )),
+                Err(ProtocolError::Unauthorized {
+                    required: PermissionScope::Subscribe
+                }),
+                "pushing={pushing}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_subscribe_is_denied_when_nothing_will_push() {
+        // The §7-C lie: an endpoint nobody pushes through used to answer
+        // `granted: true` and leave the client waiting forever.
+        let mut ep = endpoint_with(ScopeSet::all(), "dev");
+        ep.handshake(&handshake("dev"));
+        assert!(!ep.services_event_push());
+
+        let outcome = ep
+            .dispatch(&CommandMessage::new(
+                CommandId::new(1),
+                CommandKind::Subscribe(Topic::Frames),
+            ))
+            .expect("subscribe is authorised — it is refused on the merits, not the scope");
+        match outcome {
+            CommandOutcome::Subscribed(subscription) => {
+                assert!(!subscription.granted, "denied, not silently accepted");
+                assert_eq!(subscription.topic, Topic::Frames);
+            }
+            other => panic!("expected a subscription record, got {other:?}"),
+        }
+        // And nothing was registered, so no fan-out can pretend otherwise.
+        assert!(ep.subscriptions().is_empty());
+        assert!(
+            ep.fan_out(Topic::Frames, &EventKind::FrameCommitted { id: 1 })
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn end_to_end_handshake_subscribe_inspect_and_audit() {
         let mut ep = endpoint_with(ScopeSet::all(), "dev");
+        // Stand in for the pushing serving loop, which is what makes a grant
+        // honest (see `SocketTransport::serve_with_events`).
+        ep.mark_event_push_serviced();
 
         // Handshake.
         assert!(ep.handshake(&handshake("dev")).is_accepted());

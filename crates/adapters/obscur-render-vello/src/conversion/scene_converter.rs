@@ -205,6 +205,17 @@ impl SceneConverter {
         self.fonts.get(&id).or_else(|| self.fonts.get(&0))
     }
 
+    /// Whether a run tagged with handle `id` will draw at all here, or be skipped
+    /// for want of a font (spec §5.2).
+    ///
+    /// [`font_for`](Self::font_for)'s own rule, exposed so the renderer can tell a
+    /// host *which* runs its scene will lose. It has to be that same rule: a scan
+    /// that disagrees with the draw path reports a skip that did not happen, or
+    /// stays quiet about one that did.
+    pub(crate) fn can_draw_text(&self, id: u32) -> bool {
+        self.font_for(id).is_some()
+    }
+
     /// Converts an obscur-scene [`DisplayList`] into a single [`vello::Scene`],
     /// drawing any `filter: blur` subtree **inline and un-blurred**.
     ///
@@ -1281,6 +1292,29 @@ mod tests {
         }]);
         let scene = converter.convert(&list);
         assert!(scene.encoding().is_empty());
+    }
+
+    #[test]
+    fn can_draw_text_answers_exactly_what_font_for_resolves() {
+        // The §5.2 fallback scan asks this before reporting a run skipped, so it has
+        // to agree with `font_for` on every case — a stricter answer invents a
+        // fallback that never happens, a looser one stays quiet while the run
+        // vanishes.
+        let mut converter = SceneConverter::new();
+        // Nothing registered: no run draws.
+        assert!(!converter.can_draw_text(0));
+        assert!(!converter.can_draw_text(3));
+
+        // A non-primary face covers its own handle only.
+        converter.register_font(1, FontData::new(Blob::from(vec![9u8]), 0));
+        assert!(converter.can_draw_text(1));
+        assert!(!converter.can_draw_text(3));
+
+        // A primary (id 0) covers every handle, which is why an uncovered run is a
+        // fallback here only when the primary is missing too.
+        converter.register_font(0, FontData::new(Blob::from(vec![7u8]), 0));
+        assert!(converter.can_draw_text(3));
+        assert_eq!(converter.can_draw_text(3), converter.font_for(3).is_some());
     }
 
     #[test]

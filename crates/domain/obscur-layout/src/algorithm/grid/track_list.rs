@@ -137,15 +137,15 @@ impl TrackList {
 }
 
 /// The definite (fixed/percentage) extent a single track contributes when fitting
-/// auto-repeat copies. An `fr` / `auto` track has no definite size — it cannot
-/// bound a repetition count — so it contributes `0` (a documented fallback); a
-/// `minmax` uses its `min` bound as the definite floor.
+/// auto-repeat copies. An `fr` / `auto` / intrinsic-keyword track has no definite
+/// size — it cannot bound a repetition count — so it contributes `0` (a
+/// documented fallback); a `minmax` uses its `min` bound as the definite floor.
 fn definite_extent(track: &TrackSize, content_extent: f32) -> f32 {
     match track {
         TrackSize::Fixed(px) => px.max(0.0),
         TrackSize::Percent(f) => (f * content_extent).max(0.0),
         TrackSize::MinMax(min, _) => definite_extent(min, content_extent),
-        TrackSize::Fr(_) | TrackSize::Auto => 0.0,
+        TrackSize::Fr(_) | TrackSize::Auto | TrackSize::MinContent | TrackSize::MaxContent => 0.0,
     }
 }
 
