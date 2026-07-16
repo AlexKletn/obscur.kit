@@ -4,7 +4,10 @@
 
 pub mod renderer;
 
-pub use renderer::{HeadlessRenderer, Renderer, RendererCapabilities, RendererError, RendererId};
+pub use renderer::{
+    EffectFallbackReporter, HeadlessRenderer, Renderer, RendererCapabilities, RendererError,
+    RendererId, SceneEffect, unsupported_effects,
+};
 
 pub mod extension;
 pub mod frame;

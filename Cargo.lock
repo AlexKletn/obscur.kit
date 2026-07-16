@@ -1617,6 +1617,7 @@ dependencies = [
  "obscur-windowing",
  "pollster",
  "tiny-skia",
+ "vello",
  "wgpu",
  "winit",
 ]
@@ -1721,6 +1722,7 @@ name = "obscur-render"
 version = "0.0.0"
 dependencies = [
  "obscur-capability",
+ "obscur-diagnostics",
  "obscur-geometry",
  "obscur-identity",
  "obscur-scene",
@@ -1731,6 +1733,7 @@ name = "obscur-render-cpu"
 version = "0.0.0"
 dependencies = [
  "obscur-capability",
+ "obscur-diagnostics",
  "obscur-geometry",
  "obscur-headless",
  "obscur-render",
@@ -1744,6 +1747,7 @@ name = "obscur-render-vello"
 version = "0.0.0"
 dependencies = [
  "obscur-capability",
+ "obscur-diagnostics",
  "obscur-geometry",
  "obscur-identity",
  "obscur-render",

@@ -3,7 +3,7 @@
 use obscur_capability::SupportLevel;
 
 use crate::frame::{FrameSubmission, PresentResult};
-use crate::renderer::{RendererCapabilities, RendererError, RendererId};
+use crate::renderer::{RendererCapabilities, RendererError, RendererId, SceneEffect};
 use crate::target::RenderTarget;
 
 /// The narrow renderer port: a replaceable 2D backend (spec §5.2).
@@ -17,11 +17,27 @@ use crate::target::RenderTarget;
 /// The trait is deliberately **object-safe** — no generic or `Self`-returning
 /// methods — so a runtime can hold the chosen backend as `Box<dyn Renderer>`.
 ///
-/// Contract (spec §5.2): backends report unsupported effects and fallbacks as
-/// explicit diagnostics and never panic. An effect the backend cannot reproduce
-/// must surface as [`RendererError::UnsupportedEffect`] or a documented fallback
-/// [`Ok`], and device loss must surface through the typed outcomes rather than a
-/// crash.
+/// Contract (spec §5.2): "Unsupported effects and fallbacks are explicit
+/// diagnostics" — and backends never panic. Concretely:
+///
+/// 1. [`supports_effect`](Self::supports_effect) answers, per [`SceneEffect`], at
+///    what [`SupportLevel`] this backend reproduces it. The answer must describe
+///    what the backend **does**, not what it wishes it did: an effect whose
+///    defining parameter the backend ignores is [`SupportLevel::Unavailable`],
+///    however much of the mark still reaches the frame.
+/// 2. A backend that draws a scene demanding an effect it reports `Unavailable`
+///    emits the explicit diagnostic —
+///    [`EffectFallbackReporter`](crate::renderer::EffectFallbackReporter) over
+///    [`unsupported_effects`](crate::renderer::unsupported_effects) — and then
+///    draws its documented fallback. Silently dropping the effect is the one thing
+///    §5.2 forbids.
+/// 3. An effect for which the backend has no fallback at all yields
+///    `Err(`[`RendererError::UnsupportedEffect`]`)`; device loss surfaces through
+///    the typed outcomes rather than a crash.
+///
+/// Both in-tree backends have a documented fallback for every effect they report
+/// `Unavailable` (the CPU rasterizer approximates by design), so neither *returns*
+/// `UnsupportedEffect` from `render` today — they raise it as a diagnostic instead.
 pub trait Renderer {
     /// The stable identity of this backend instance (spec §5.2).
     #[must_use]
@@ -34,10 +50,11 @@ pub trait Renderer {
     /// Renders and presents `submission` to `target` (spec §5.2).
     ///
     /// On success returns a [`PresentResult`] echoing which scene generation
-    /// reached the screen. An effect the backend cannot reproduce must yield
-    /// `Err(`[`RendererError::UnsupportedEffect`]`)` (the explicit fallback
-    /// diagnostic) or a documented fallback `Ok` — **never a panic**. Device
-    /// loss surfaces as `Err(`[`RendererError::DeviceLost`]`)` or
+    /// reached the screen. An effect the backend cannot reproduce yields a
+    /// documented fallback `Ok` — with the diagnostic of point 2 above raised, so
+    /// the fallback is never silent — or, absent any fallback,
+    /// `Err(`[`RendererError::UnsupportedEffect`]`)`. Never a panic. Device loss
+    /// surfaces as `Err(`[`RendererError::DeviceLost`]`)` or
     /// [`PresentResult::DeviceLost`].
     ///
     /// # Errors
@@ -50,11 +67,28 @@ pub trait Renderer {
         target: &RenderTarget,
     ) -> Result<PresentResult, RendererError>;
 
-    /// The honest [`SupportLevel`] at which this backend offers a named `effect`
-    /// (blur, backdrop, and the like), so callers can choose fallbacks
+    /// The honest [`SupportLevel`] at which this backend reproduces `effect`, so a
+    /// host can find out what it will actually get before it asks for it
     /// (spec §5.2).
+    ///
+    /// The vocabulary is closed ([`SceneEffect`]) precisely so this table can be
+    /// audited: every arm is a claim about what the backend's own paint path does
+    /// with that effect's parameters, and the compiler refuses a table with a gap.
+    /// The levels mean:
+    ///
+    /// - [`Native`](SupportLevel::Native): reproduced by a first-class primitive of
+    ///   the backend.
+    /// - [`Emulated`](SupportLevel::Emulated): reproduced by other means; the
+    ///   effect's parameters are all honored and only rasterization differs
+    ///   (the §5.2 determinism boundary).
+    /// - [`Limited`](SupportLevel::Limited): reproduced under a restriction the
+    ///   backend documents on this method — some input of the effect is not
+    ///   modeled.
+    /// - [`Unavailable`](SupportLevel::Unavailable): **not** reproduced. Whatever
+    ///   the backend draws instead is a fallback, not the effect. Ignoring a
+    ///   parameter entirely is this level, not `Emulated`.
     #[must_use]
-    fn supports_effect(&self, effect: &str) -> SupportLevel;
+    fn supports_effect(&self, effect: SceneEffect) -> SupportLevel;
 }
 
 /// A deterministic, no-GPU reference [`Renderer`] — the software/test backend of
@@ -62,10 +96,15 @@ pub trait Renderer {
 ///
 /// `HeadlessRenderer` presents every submitted frame by echoing its scene
 /// generation, so a test can assert exactly which generation "reached the
-/// screen" without a real device. It counts the frames it has presented and
-/// reports [`SupportLevel::Emulated`] for every effect: a software rasterizer
-/// emulates all effects, honoring the determinism boundary of spec §5.2 even
-/// where a GPU backend would accelerate them. It holds no GPU or OS handle.
+/// screen" without a real device. It counts the frames it has presented and holds
+/// no GPU or OS handle.
+///
+/// It rasterizes **nothing** — there is no pixel buffer here at all — so it
+/// reports [`SupportLevel::Unavailable`] for every effect, the same honest answer
+/// the other null objects in this workspace give. (It previously claimed
+/// `Emulated` for everything on the grounds that "a software rasterizer emulates
+/// all effects"; this one is not a rasterizer.) For a real software backend that
+/// draws pixels, see `obscur-render-cpu`.
 #[derive(Debug, Clone)]
 pub struct HeadlessRenderer {
     id: RendererId,
@@ -120,9 +159,9 @@ impl Renderer for HeadlessRenderer {
         })
     }
 
-    fn supports_effect(&self, _effect: &str) -> SupportLevel {
-        // A software renderer emulates every effect (spec §5.2).
-        SupportLevel::Emulated
+    fn supports_effect(&self, _effect: SceneEffect) -> SupportLevel {
+        // This backend draws no pixels, so it reproduces no effect (spec §5.2).
+        SupportLevel::Unavailable
     }
 }
 
@@ -173,11 +212,15 @@ mod tests {
     }
 
     #[test]
-    fn supports_every_effect_via_emulation() {
+    fn reproduces_no_effect_because_it_rasterizes_nothing() {
         let renderer = HeadlessRenderer::default();
-        assert_eq!(renderer.supports_effect("blur"), SupportLevel::Emulated);
-        assert_eq!(renderer.supports_effect("backdrop"), SupportLevel::Emulated);
-        assert_eq!(renderer.supports_effect("anything"), SupportLevel::Emulated);
+        for effect in SceneEffect::ALL {
+            assert_eq!(
+                renderer.supports_effect(effect),
+                SupportLevel::Unavailable,
+                "{effect} must not be claimed by a backend that draws no pixels"
+            );
+        }
     }
 
     #[test]

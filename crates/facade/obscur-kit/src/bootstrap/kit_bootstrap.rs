@@ -285,7 +285,13 @@ mod tests {
         let boot = KitBootstrap::new().with_renderer_id(3);
         let renderer = boot.default_renderer();
         assert_eq!(renderer.frames_rendered(), 0);
-        let _ = renderer.supports_effect("blur");
+        // The default renderer is the software one: a host that asks is told, before
+        // it renders anything, that the GPU-class effects will not appear (spec
+        // §5.2, and the CPU/GPU effect-split policy).
+        assert_eq!(
+            renderer.supports_effect(crate::render::SceneEffect::Blur),
+            obscur_capability::SupportLevel::Unavailable
+        );
     }
 
     #[cfg(feature = "resource-fs")]

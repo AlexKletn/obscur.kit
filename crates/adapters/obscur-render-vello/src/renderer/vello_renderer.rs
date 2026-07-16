@@ -1,8 +1,14 @@
 //! The Vello/wgpu implementation of the [`Renderer`] port (spec §5.2, §2.7).
 
+use std::sync::Arc;
+
 use obscur_capability::SupportLevel;
+use obscur_diagnostics::{DiagnosticSink, NullDiagnosticSink};
 use obscur_render::frame::{FrameSubmission, PresentResult};
-use obscur_render::renderer::{Renderer, RendererCapabilities, RendererError, RendererId};
+use obscur_render::renderer::{
+    EffectFallbackReporter, Renderer, RendererCapabilities, RendererError, RendererId, SceneEffect,
+    unsupported_effects,
+};
 use obscur_render::target::RenderTarget;
 
 use obscur_scene::command::{DisplayList, PaintCommand};
@@ -56,6 +62,13 @@ pub struct VelloRenderer {
     /// opacity). Built lazily on the first color-filtered frame and reused; a scene
     /// with no color-matrix layer never constructs it (byte-identical to before).
     color_matrix: Option<ColorMatrix>,
+    /// Where the §5.2 explicit fallback diagnostics go; [`NullDiagnosticSink`]
+    /// until a host installs one, so an unreproducible effect follows the same code
+    /// path whether or not anyone is listening.
+    diagnostics: Arc<dyn DiagnosticSink>,
+    /// Which unsupported effects have already been reported, so a standing mask
+    /// clip does not re-raise its diagnostic every frame.
+    fallbacks: EffectFallbackReporter,
 }
 
 impl VelloRenderer {
@@ -80,7 +93,18 @@ impl VelloRenderer {
             blitter: None,
             blur: None,
             color_matrix: None,
+            diagnostics: Arc::new(NullDiagnosticSink),
+            fallbacks: EffectFallbackReporter::new(),
         }
+    }
+
+    /// Installs the [`DiagnosticSink`] the §5.2 explicit fallback diagnostics are
+    /// emitted to: one [`RendererError::UnsupportedEffect`] per effect a rendered
+    /// scene demands that this backend reports
+    /// [`Unavailable`](SupportLevel::Unavailable), raised the first time it is
+    /// demanded. See [`Renderer::supports_effect`] for what that is.
+    pub fn set_diagnostic_sink(&mut self, sink: Arc<dyn DiagnosticSink>) {
+        self.diagnostics = sink;
     }
 
     /// Attaches a host-provided [`VelloDevice`], returning the updated renderer.
@@ -161,6 +185,14 @@ impl VelloRenderer {
         height: u32,
     ) -> Result<VelloFrame, RendererError> {
         let display_list = submission.frame().scene().display_list();
+
+        // Spec §5.2: "Unsupported effects and fallbacks are explicit diagnostics."
+        // Every entry point to this backend funnels through here, so this is where a
+        // host is told which of the effects its scene asked for will not survive the
+        // conversion below.
+        let unsupported = unsupported_effects(&*self, display_list);
+        let sink = Arc::clone(&self.diagnostics);
+        self.fallbacks.report(&unsupported, sink.as_ref());
 
         // `backdrop-filter` frosts the frame accumulated so far, so it cannot be
         // rendered in a single Vello pass: fall to the segmented compositing path.
@@ -860,28 +892,51 @@ impl Renderer for VelloRenderer {
         })
     }
 
-    fn supports_effect(&self, effect: &str) -> SupportLevel {
-        // Honest per-effect support for the Vello GPU backend (spec §5.2).
+    /// The honest [`SupportLevel`] at which this GPU backend reproduces each
+    /// [`SceneEffect`] (spec §5.2).
+    ///
+    /// - [`Gradient`](SceneEffect::Gradient), [`Clip`](SceneEffect::Clip), and
+    ///   [`Image`](SceneEffect::Image) are [`Native`](SupportLevel::Native): a
+    ///   gradient brush becomes a peniko gradient over the same geometry and
+    ///   stops, a clip becomes a bounded `push_layer`, and a `DrawImage` a real
+    ///   sampled `draw_image`.
+    /// - [`BlendMode`](SceneEffect::BlendMode) is [`Limited`](SupportLevel::Limited),
+    ///   because the variant names two inputs and this backend honours one. A
+    ///   layer's `blend_mode()` **field** becomes a peniko `Mix` natively. A
+    ///   [`LayerEffect::Blend`](obscur_scene::layer::LayerEffect::Blend) in the
+    ///   layer's *effects list* is **dropped**: `push_layer` reads the field, and
+    ///   the effects list is scanned only for `Blur` and `ColorMatrix`. Reporting
+    ///   `Native` claimed both. Nothing produces a `LayerEffect::Blend` today — it
+    ///   duplicates the field — so this is latent, not live.
+    /// - [`Shadow`](SceneEffect::Shadow) and
+    ///   [`BackdropFilter`](SceneEffect::BackdropFilter) are
+    ///   [`Emulated`](SupportLevel::Emulated): both are real gaussians — a shadow
+    ///   through `draw_blurred_rounded_rect`, a backdrop through the owned segmented
+    ///   wgpu compositing path — but assembled from primitives rather than a single
+    ///   native op.
+    /// - [`Blur`](SceneEffect::Blur) and [`ColorMatrix`](SceneEffect::ColorMatrix)
+    ///   are [`Limited`](SupportLevel::Limited): a `filter: blur()` / color-op layer
+    ///   runs through our owned wgpu passes (a real gaussian, a real per-pixel
+    ///   affine), but only when the layer is peeled off the main scene — which needs
+    ///   the layer to carry a bounded clip, and does not recurse. **A filter layer
+    ///   nested inside another filter layer is drawn unfiltered**, as is one with no
+    ///   clip bounds. A `DrawShadow`'s own blur radius has no such restriction.
+    /// - [`Text`](SceneEffect::Text) is `Limited`: glyphs draw against the font
+    ///   registered for the run's handle; a run whose font was never registered is
+    ///   **skipped entirely**.
+    /// - [`Mask`](SceneEffect::Mask) is [`Unavailable`](SupportLevel::Unavailable):
+    ///   a mask clip converts to the unbounded outline, so its coverage is never
+    ///   applied — the same as on the CPU backend (spec §5.2: clipping must match
+    ///   across backends).
+    fn supports_effect(&self, effect: SceneEffect) -> SupportLevel {
         match effect {
-            // Vello rasterizes fills/strokes, clips, and images natively — a
-            // `DrawImage` becomes a real `Scene::draw_image` (a sampled bitmap),
-            // not an approximation.
-            "clip" | "gradient" | "image" => SupportLevel::Native,
-            // A `box-shadow` and a `filter: drop-shadow(...)` both render through
-            // `Scene::draw_blurred_rounded_rect` — a real gaussian, but built from
-            // Vello's primitives rather than a single native shadow op.
-            // `backdrop-filter: blur()` frosts the backdrop via the owned segmented
-            // wgpu compositing path (real gaussian, not a native op). The CSS
-            // color-matrix `filter` functions (grayscale/brightness/contrast/
-            // saturate/sepia/invert/hue-rotate/opacity) run through our owned wgpu
-            // color-matrix pass — a real per-pixel affine, emulated (Vello 0.9 has
-            // no native color filter).
-            "blur" | "shadow" | "drop-shadow" | "backdrop-filter" | "color-matrix" | "filter" => {
-                SupportLevel::Emulated
-            }
-            // Anything else has no primitive on Vello 0.9, so it is honestly
-            // unavailable rather than a silent no-op (spec §5.2 explicit diagnostics).
-            _ => SupportLevel::Unavailable,
+            SceneEffect::Gradient | SceneEffect::Clip | SceneEffect::Image => SupportLevel::Native,
+            SceneEffect::Shadow | SceneEffect::BackdropFilter => SupportLevel::Emulated,
+            SceneEffect::Blur
+            | SceneEffect::ColorMatrix
+            | SceneEffect::Text
+            | SceneEffect::BlendMode => SupportLevel::Limited,
+            SceneEffect::Mask => SupportLevel::Unavailable,
         }
     }
 }
@@ -915,6 +970,60 @@ mod tests {
 
     fn a_target() -> RenderTarget {
         RenderTarget::bitmap(BitmapTarget::new(Size::new(64.0, 48.0)))
+    }
+
+    /// A [`DiagnosticSink`] that keeps every message it is handed.
+    #[derive(Default)]
+    struct RecordingSink {
+        messages: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl RecordingSink {
+        fn messages(&self) -> Vec<String> {
+            self.messages.lock().expect("sink not poisoned").clone()
+        }
+    }
+
+    impl DiagnosticSink for RecordingSink {
+        fn emit(&self, diagnostic: &obscur_diagnostics::Diagnostic) {
+            self.messages
+                .lock()
+                .expect("sink not poisoned")
+                .push(diagnostic.message.clone());
+        }
+    }
+
+    #[test]
+    fn rendering_an_unsupported_effect_tells_the_host_which_one() {
+        use obscur_scene::clip::{Clip, Mask};
+        // A mask clip's coverage is applied by neither backend. Spec §5.2 wants the
+        // host told, not left to compare screenshots. The report runs before the GPU
+        // submission, so it is observable without a device.
+        let sink = Arc::new(RecordingSink::default());
+        let mut renderer = VelloRenderer::new(RendererId::from_raw(11));
+        renderer.set_diagnostic_sink(sink.clone());
+        let list = DisplayList::from_commands(vec![
+            PaintCommand::PushClip(Clip::mask(Mask::alpha())),
+            PaintCommand::PopClip,
+        ]);
+        let submission = FrameSubmission::new(RenderFrame::new(
+            SceneSnapshot::new(list, SceneGeneration::from_raw(1)),
+            Size::new(64.0, 48.0),
+        ));
+        let _ = renderer.render(&submission, &a_target());
+        assert_eq!(
+            sink.messages(),
+            vec!["unsupported effect: mask".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_scene_within_the_backends_means_raises_nothing() {
+        let sink = Arc::new(RecordingSink::default());
+        let mut renderer = VelloRenderer::new(RendererId::from_raw(12));
+        renderer.set_diagnostic_sink(sink.clone());
+        let _ = renderer.render(&submission(1), &a_target());
+        assert!(sink.messages().is_empty());
     }
 
     #[test]
@@ -983,32 +1092,51 @@ mod tests {
     #[test]
     fn supports_effect_is_honest_per_effect() {
         let renderer = VelloRenderer::new(RendererId::from_raw(4));
-        assert_eq!(renderer.supports_effect("clip"), SupportLevel::Native);
-        assert_eq!(renderer.supports_effect("gradient"), SupportLevel::Native);
-        // Images draw as a real sampled bitmap, not an approximation.
-        assert_eq!(renderer.supports_effect("image"), SupportLevel::Native);
-        assert_eq!(renderer.supports_effect("blur"), SupportLevel::Emulated);
-        assert_eq!(renderer.supports_effect("shadow"), SupportLevel::Emulated);
-        // `filter: drop-shadow(...)` renders through the real gaussian shadow path.
+        // Real Vello primitives: a bounded push_layer, a peniko gradient, a sampled
+        // draw_image.
+        for effect in [SceneEffect::Clip, SceneEffect::Gradient, SceneEffect::Image] {
+            assert_eq!(renderer.supports_effect(effect), SupportLevel::Native);
+        }
+        // Not Native: the variant names two inputs and `push_layer` honours one.
+        // The layer's `blend_mode()` field becomes a peniko `Mix`; a
+        // `LayerEffect::Blend` in the effects list is dropped, because that list is
+        // scanned only for `Blur` and `ColorMatrix`.
         assert_eq!(
-            renderer.supports_effect("drop-shadow"),
+            renderer.supports_effect(SceneEffect::BlendMode),
+            SupportLevel::Limited
+        );
+        // Real gaussians, assembled from primitives rather than a native op: a
+        // `box-shadow` / `filter: drop-shadow(...)` through
+        // `draw_blurred_rounded_rect`, a `backdrop-filter: blur()` through the owned
+        // segmented wgpu compositing path.
+        assert_eq!(
+            renderer.supports_effect(SceneEffect::Shadow),
             SupportLevel::Emulated
         );
-        // `backdrop-filter: blur()` frosts the backdrop via the owned segmented
-        // wgpu compositing path — emulated (a real gaussian), not a native op.
         assert_eq!(
-            renderer.supports_effect("backdrop-filter"),
+            renderer.supports_effect(SceneEffect::BackdropFilter),
             SupportLevel::Emulated
         );
-        // The CSS color-matrix `filter` functions run through the owned wgpu
-        // color-matrix pass — emulated (a real per-pixel affine), not unavailable.
+        // The owned wgpu blur / color-matrix passes are real, but only reach a
+        // filter layer that the converter peels off the main scene: a nested filter
+        // layer is drawn unfiltered, which is a restriction, not a rasterization
+        // difference.
         assert_eq!(
-            renderer.supports_effect("color-matrix"),
-            SupportLevel::Emulated
+            renderer.supports_effect(SceneEffect::Blur),
+            SupportLevel::Limited
         );
-        assert_eq!(renderer.supports_effect("filter"), SupportLevel::Emulated);
         assert_eq!(
-            renderer.supports_effect("time-travel"),
+            renderer.supports_effect(SceneEffect::ColorMatrix),
+            SupportLevel::Limited
+        );
+        // A run whose font was never registered is skipped entirely.
+        assert_eq!(
+            renderer.supports_effect(SceneEffect::Text),
+            SupportLevel::Limited
+        );
+        // A mask clip's coverage is never applied on either backend.
+        assert_eq!(
+            renderer.supports_effect(SceneEffect::Mask),
             SupportLevel::Unavailable
         );
     }

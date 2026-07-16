@@ -16,9 +16,18 @@ pub enum RendererError {
     /// The GPU device was lost; see [`DeviceLoss`] for the reason and whether
     /// the runtime may rebuild and retry.
     DeviceLost(DeviceLoss),
-    /// The backend cannot reproduce a named effect. This is the explicit
-    /// fallback diagnostic of spec §5.2: the caller is told exactly which effect
-    /// is unsupported so it can substitute an approximation or degrade.
+    /// The backend cannot reproduce the named effect. This is the explicit
+    /// fallback diagnostic of spec §5.2, in the form
+    /// [`SceneEffect::name`](crate::renderer::SceneEffect::name) gives it.
+    ///
+    /// Both in-tree backends **emit** it rather than **return** it: they own a
+    /// documented fallback for every effect they report
+    /// [`Unavailable`](obscur_capability::SupportLevel::Unavailable) (the CPU
+    /// rasterizer approximates by design), so they draw the frame and raise this
+    /// through their diagnostic sink — see
+    /// [`EffectFallbackReporter`](crate::renderer::EffectFallbackReporter). It is
+    /// returned from [`render`](crate::renderer::Renderer::render) only by a backend
+    /// with no fallback at all, and no such backend exists in this workspace today.
     UnsupportedEffect(Box<str>),
     /// The render target was invalid for this backend, with a human-readable
     /// reason.
@@ -41,8 +50,10 @@ impl RendererError {
     /// A [`RendererError::DeviceLost`] is recoverable exactly when its
     /// [`DeviceLoss::is_recoverable`] flag is set (the runtime may rebuild the
     /// device and retry). A [`RendererError::UnsupportedEffect`] is always
-    /// recoverable: it is a fallback signal, so the caller can retry without the
-    /// effect. The remaining variants are terminal for the operation.
+    /// recoverable: it names one effect the backend will not reproduce, never a
+    /// failure of the operation, so a caller may drop that effect and re-render (and
+    /// where a backend raises it as a diagnostic, the frame was drawn regardless).
+    /// The remaining variants are terminal for the operation.
     #[must_use]
     pub const fn is_recoverable(&self) -> bool {
         match self {

@@ -25,11 +25,6 @@ use super::clip_converter::ClipConverter;
 use super::color_converter::ColorConverter;
 use super::path_converter::PathConverter;
 
-/// Half-extent (in logical pixels) of the fallback clip used for a layer with no
-/// geometric clip shape. Large enough to bound any realistic scene while
-/// remaining finite (so it never produces non-finite path coordinates).
-const UNBOUNDED_HALF_EXTENT: f64 = 1.0e9;
-
 /// The synthetic-oblique shear factor: the standard faux-italic skew of `0.25`
 /// (`tan ≈ 14°`) applied as a per-glyph shear so above-baseline points slide
 /// right and the glyph leans forward (spec §5.18). Matches the CPU backend's
@@ -553,18 +548,13 @@ impl SceneConverter {
     fn push_layer(&self, scene: &mut Scene, layer: &SceneLayer, transform: Affine) {
         let blend = peniko::BlendMode::new(mix(layer.blend_mode()), compose(layer.composition()));
         let alpha = layer.opacity();
-        if let Some(clip @ Clip::Shape(_)) = layer.clip() {
-            let shape = self.clip.shape(clip);
-            scene.push_layer(peniko::Fill::NonZero, blend, alpha, transform, &shape);
-        } else {
-            let unbounded = KurboRect::new(
-                -UNBOUNDED_HALF_EXTENT,
-                -UNBOUNDED_HALF_EXTENT,
-                UNBOUNDED_HALF_EXTENT,
-                UNBOUNDED_HALF_EXTENT,
-            );
-            scene.push_layer(peniko::Fill::NonZero, blend, alpha, transform, &unbounded);
-        }
+        // A mask clip resolves to the same unbounded outline as no clip at all, so
+        // both cases go through `ClipConverter` rather than a second, divergent
+        // mask rule here (spec §5.2: clipping must match across backends).
+        let shape = layer
+            .clip()
+            .map_or_else(ClipConverter::unbounded, |clip| self.clip.shape(clip));
+        scene.push_layer(peniko::Fill::NonZero, blend, alpha, transform, &shape);
     }
 }
 

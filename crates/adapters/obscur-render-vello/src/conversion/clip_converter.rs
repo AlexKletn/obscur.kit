@@ -6,9 +6,14 @@
 
 use obscur_scene::clip::{Clip, ClipShape};
 use obscur_scene::path::Path;
-use vello::kurbo::BezPath;
+use vello::kurbo::{BezPath, Rect as KurboRect, Shape};
 
 use super::path_converter::PathConverter;
+
+/// Half-extent of the outline standing in for "no geometric bound". Vello has no
+/// unbounded clip shape, so a clip that confines nothing is expressed as a rect
+/// far larger than any real surface.
+const UNBOUNDED_HALF_EXTENT: f64 = 1.0e9;
 
 /// A converter from an obscur-scene [`Clip`] to a kurbo [`BezPath`] clip shape.
 ///
@@ -22,10 +27,20 @@ use super::path_converter::PathConverter;
 /// - [`ClipShape::RoundedRect`] → the rounded-rectangle outline
 ///   (via [`Path::rounded_rect`]), matching the domain's own rounding.
 /// - [`ClipShape::Path`] → the path converted directly.
-/// - [`Clip::Mask`] → an **empty** `BezPath`: a mask clip derives coverage from
-///   separate source content and has no geometric outline, so it cannot be
-///   expressed as a clip shape here. Mask coverage is handled outside this pure
-///   geometric conversion; an empty shape clips away nothing.
+/// - [`Clip::Mask`] → the [`unbounded`](Self::unbounded) outline, which confines
+///   nothing. A mask carries only *how* to read its coverage, never the source
+///   the coverage comes from ([`Mask`](obscur_scene::clip::Mask)), so a mask clip
+///   in the command stream has no known extent — [`Clip::bounds`] reports `None`
+///   for exactly this reason. An empty `BezPath` would be the opposite claim
+///   (extent known, and empty), and Vello would clip the content away entirely;
+///   inheriting the enclosing clip asserts nothing the domain has not stated, and
+///   matches the CPU backend (spec §5.2 requires clipping to match across
+///   backends).
+///
+///   This is the documented §5.8 fallback, **not** mask support: coverage is not
+///   applied, so a masked region paints as if unmasked on both backends. Neither
+///   backend rasterizes mask coverage today, and neither raises the §5.8
+///   diagnostic that an explicit fallback is supposed to carry.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ClipConverter {
     path: PathConverter,
@@ -47,8 +62,24 @@ impl ClipConverter {
                 self.path.convert(&Path::rounded_rect(*rect, *radii))
             }
             Clip::Shape(ClipShape::Path(path)) => self.path.convert(path),
-            Clip::Mask(_) => BezPath::new(),
+            Clip::Mask(_) => Self::unbounded(),
         }
+    }
+
+    /// The outline standing in for "no geometric bound": a rect far larger than
+    /// any real surface, so drawing through it is confined by nothing.
+    ///
+    /// Used for a [`Clip::Mask`] and for a layer with no clip at all — both cases
+    /// where nothing is known to confine the content.
+    #[must_use]
+    pub fn unbounded() -> BezPath {
+        KurboRect::new(
+            -UNBOUNDED_HALF_EXTENT,
+            -UNBOUNDED_HALF_EXTENT,
+            UNBOUNDED_HALF_EXTENT,
+            UNBOUNDED_HALF_EXTENT,
+        )
+        .to_path(0.1)
     }
 }
 
@@ -57,7 +88,7 @@ mod tests {
     use super::*;
     use obscur_geometry::{CornerRadii, Point, Rect, Size};
     use obscur_scene::clip::Mask;
-    use vello::kurbo::PathEl;
+    use vello::kurbo::{PathEl, Point as KurboPoint};
 
     #[test]
     fn rect_clip_becomes_closed_rectangle() {
@@ -78,9 +109,30 @@ mod tests {
         assert!(!bez.elements().is_empty());
     }
 
+    /// A mask carries no source and no extent, so it must confine nothing. An
+    /// empty shape would clip the content away — the opposite of the CPU backend
+    /// (spec §5.2).
     #[test]
-    fn mask_clip_is_empty_shape() {
-        let bez = ClipConverter::default().shape(&Clip::mask(Mask::luminance()));
-        assert!(bez.elements().is_empty());
+    fn mask_clip_confines_nothing() {
+        for mask in [Mask::luminance(), Mask::alpha()] {
+            let bez = ClipConverter::default().shape(&Clip::mask(mask));
+            assert!(!bez.elements().is_empty(), "{mask:?} produced no outline");
+            assert!(
+                bez.contains(KurboPoint::new(0.0, 0.0)),
+                "{mask:?} clipped away the origin"
+            );
+            assert!(
+                bez.contains(KurboPoint::new(4096.0, 4096.0)),
+                "{mask:?} clipped away a far corner"
+            );
+        }
+    }
+
+    /// A layer with no clip and a mask clip are the same "nothing is known to
+    /// confine this" case, and must resolve identically.
+    #[test]
+    fn mask_clip_matches_the_unbounded_outline() {
+        let bez = ClipConverter::default().shape(&Clip::mask(Mask::alpha()));
+        assert_eq!(bez.elements(), ClipConverter::unbounded().elements());
     }
 }

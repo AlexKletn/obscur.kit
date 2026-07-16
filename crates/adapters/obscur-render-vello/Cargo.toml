@@ -16,5 +16,6 @@ obscur-geometry = { workspace = true }
 obscur-capability = { workspace = true }
 obscur-scene = { workspace = true }
 obscur-render = { workspace = true }
+obscur-diagnostics = { workspace = true }
 vello = "0.9"
 wgpu = "29"

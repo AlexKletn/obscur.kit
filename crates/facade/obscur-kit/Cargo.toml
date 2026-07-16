@@ -110,6 +110,16 @@ obscur-okui-syntax = { workspace = true }
 obscur-okui-compiler = { workspace = true }
 
 [dev-dependencies]
+# Both render backends, UNCONDITIONALLY (they are optional features of the lib,
+# but `render-vello` is not in `default`, so a feature-gated test would be
+# silently skipped by a plain `cargo test --workspace` — which is how the
+# backends' clip semantics drifted apart unnoticed in the first place). Neither
+# crate needs a GPU to build or to convert a scene; see `clip_cross_backend.rs`.
+obscur-render-cpu = { workspace = true }
+obscur-render-vello = { workspace = true }
+# Vello's own kurbo, to probe the clip outline the adapter hands it (the adapter
+# re-exports no vello types). Same pin as `obscur-render-vello`.
+vello = "0.9"
 winit = "0.30"
 wgpu = "29"
 pollster = "0.4"

@@ -12,7 +12,12 @@
 //! This backend reproduces layout, paint order, clipping, and the consumed
 //! Scene/Paint snapshots identically to every other backend; only rasterization,
 //! anti-aliasing, and precision differ. Effects it cannot reproduce degrade to a
-//! documented approximation rather than a panic:
+//! documented approximation rather than a panic — and, per §5.2, that degradation
+//! is an **explicit diagnostic**: [`Renderer::supports_effect`] answers what this
+//! backend will do with an effect before a host asks for it, and
+//! [`Renderer::render`] emits [`RendererError::UnsupportedEffect`] into the
+//! [`CpuRenderer::set_diagnostic_sink`] sink for every effect a scene demands that
+//! the list below drops. The approximations:
 //!
 //! - **Gradient brushes** rasterize as a flat solid of the gradient's first stop
 //!   color (spec §5.2 permits rasterization to differ). A stop-less gradient is
@@ -72,10 +77,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use obscur_capability::SupportLevel;
+use obscur_diagnostics::{DiagnosticSink, NullDiagnosticSink};
 use obscur_geometry::{AffineTransform, CornerRadii, Point, Rect, Size};
 use obscur_render::frame::{FrameSubmission, PresentResult};
 use obscur_render::target::RenderTarget;
-use obscur_render::{Renderer, RendererCapabilities, RendererError, RendererId};
+use obscur_render::{
+    EffectFallbackReporter, Renderer, RendererCapabilities, RendererError, RendererId, SceneEffect,
+    unsupported_effects,
+};
 use obscur_scene::clip::{Clip, ClipShape};
 use obscur_scene::color::{AlphaMode, Color};
 use obscur_scene::command::PaintCommand;
@@ -113,6 +122,15 @@ pub struct CpuRenderer {
     /// box-coverage cells. The bytes are shared (`Arc`) so `clone` is cheap and a
     /// borrowed [`FontRef`] is rebuilt per draw (bytes must outlive the borrow).
     fonts: HashMap<u32, Arc<[u8]>>,
+    /// Where the §5.2 explicit fallback diagnostics go. Defaults to
+    /// [`NullDiagnosticSink`], so an effect this backend will not reproduce follows
+    /// exactly the same code path whether or not a host is listening. Shared
+    /// (`Arc`) because a `CpuRenderer` is [`Clone`] and a clone reports to the same
+    /// host sink.
+    diagnostics: Arc<dyn DiagnosticSink>,
+    /// Which unsupported effects have already been reported to `diagnostics`, so a
+    /// standing gradient does not re-raise its diagnostic every frame.
+    fallbacks: EffectFallbackReporter,
 }
 
 impl CpuRenderer {
@@ -131,7 +149,21 @@ impl CpuRenderer {
             last_pixmap: None,
             frames_rendered: 0,
             fonts: HashMap::new(),
+            diagnostics: Arc::new(NullDiagnosticSink),
+            fallbacks: EffectFallbackReporter::new(),
         }
+    }
+
+    /// Installs the [`DiagnosticSink`] the §5.2 explicit fallback diagnostics are
+    /// emitted to.
+    ///
+    /// This backend approximates the GPU-class effects by design (see
+    /// [`Renderer::supports_effect`]); the sink is how a host is *told* which of the
+    /// effects its scene asked for will not appear, rather than discovering it by
+    /// looking at the pixels. Each such effect is reported once, the first time a
+    /// rendered scene demands it.
+    pub fn set_diagnostic_sink(&mut self, sink: Arc<dyn DiagnosticSink>) {
+        self.diagnostics = sink;
     }
 
     /// Registers (or replaces) the host-provided sfnt `font_bytes` for the run
@@ -177,7 +209,8 @@ impl Default for CpuRenderer {
 
 impl std::fmt::Debug for CpuRenderer {
     /// Hand-written because [`tiny_skia::Pixmap`] is not [`Debug`]; the pixel
-    /// buffer is summarized by its presence rather than dumped.
+    /// buffer is summarized by its presence rather than dumped, and the host's
+    /// diagnostic sink is elided (it is a trait object).
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CpuRenderer")
             .field("id", &self.id)
@@ -185,7 +218,8 @@ impl std::fmt::Debug for CpuRenderer {
             .field("has_pixmap", &self.last_pixmap.is_some())
             .field("frames_rendered", &self.frames_rendered)
             .field("registered_fonts", &self.fonts.len())
-            .finish()
+            .field("reported_fallbacks", &self.fallbacks.reported())
+            .finish_non_exhaustive()
     }
 }
 
@@ -221,6 +255,14 @@ impl Renderer for CpuRenderer {
         if width == 0 || height == 0 {
             return Err(CpuRenderError::EmptyTarget.into_renderer_error());
         }
+
+        // Spec §5.2: "Unsupported effects and fallbacks are explicit diagnostics."
+        // Tell the host, before drawing, every effect this scene asks for that the
+        // rasterization below will not reproduce — then draw the documented
+        // approximation anyway, which is the CPU backend's standing policy.
+        let unsupported = unsupported_effects(&*self, submission.frame().scene().display_list());
+        let sink = Arc::clone(&self.diagnostics);
+        self.fallbacks.report(&unsupported, sink.as_ref());
 
         let root_pixmap = tiny_skia::Pixmap::new(width, height).ok_or_else(|| {
             CpuRenderError::PixmapAllocationFailed { width, height }.into_renderer_error()
@@ -330,14 +372,26 @@ impl Renderer for CpuRenderer {
                                     current,
                                 )
                                 .or_else(|| parent.cloned()),
-                                // A degenerate/empty clip shape cannot be
-                                // rasterized: inherit the current clip.
-                                None => parent.cloned(),
+                                // An empty/degenerate outline encloses no area, so
+                                // the clip admits nothing — an all-zero mask, NOT
+                                // the parent. The extent here is known (it is
+                                // empty); inheriting would paint content the author
+                                // clipped away, and would disagree with Vello,
+                                // whose empty outline already admits nothing
+                                // (spec §5.2: clipping must match across backends).
+                                // Only an allocation failure falls back to parent.
+                                None => empty_clip_mask(width, height).or_else(|| parent.cloned()),
                             }
                         }
-                        // Mask clips derive coverage from separate content that
-                        // this backend does not rasterize: inherit the current
-                        // clip (best-effort, documented).
+                        // A mask carries only *how* to read coverage, never the
+                        // source it comes from, so a mask clip states no extent at
+                        // all (`Clip::bounds()` is `None` for exactly this reason).
+                        // Unknown extent is not empty extent: inherit the enclosing
+                        // clip, which asserts nothing the domain has not stated, and
+                        // matches Vello. This is the §5.8 fallback, not mask
+                        // support — coverage is not applied on either backend, and
+                        // neither raises the diagnostic §5.8 asks an explicit
+                        // fallback to carry.
                         Clip::Mask(_) => parent.cloned(),
                     };
                     clip_stack.push(entry);
@@ -453,28 +507,56 @@ impl Renderer for CpuRenderer {
         })
     }
 
-    /// The honest [`SupportLevel`] at which this software backend offers a named
-    /// `effect` (spec §5.2).
+    /// The honest [`SupportLevel`] at which this software backend reproduces each
+    /// [`SceneEffect`] (spec §5.2).
     ///
-    /// A CPU rasterizer emulates the common 2D effects, so `"blur"`, `"shadow"`,
-    /// `"gradient"`, and `"clip"` report [`SupportLevel::Emulated`]. A
-    /// `filter: drop-shadow(...)` renders through the same `DrawShadow` path as a
-    /// `box-shadow` (a flat offset reduced-alpha rect), so `"drop-shadow"` is also
-    /// [`SupportLevel::Emulated`]. The general `filter` / `backdrop-filter` and the
-    /// `color-matrix` filter functions (content blur, grayscale/brightness/…) are
-    /// GPU-class effects per the effect-split policy: they have no software
-    /// approximation here (the element renders **unfiltered**) and report
-    /// [`SupportLevel::Unavailable`]. Any other name defaults to
-    /// [`SupportLevel::Emulated`]: a software renderer can approximate most 2D
-    /// marks.
-    fn supports_effect(&self, effect: &str) -> SupportLevel {
+    /// Every arm below states what the paint path in [`Renderer::render`] *does*
+    /// with that effect's parameters — not what a software rasterizer could in
+    /// principle do:
+    ///
+    /// - [`Image`](SceneEffect::Image) is [`Native`](SupportLevel::Native): a
+    ///   `DrawImage` blits the real decoded pixels through `draw_pixmap`, honoring
+    ///   the tile, region, and both repeat axes. A genuine sampled bitmap, not an
+    ///   approximation.
+    /// - [`Shadow`](SceneEffect::Shadow) is [`Limited`](SupportLevel::Limited): the
+    ///   shadow is drawn with its color, offset, spread, radii, and inset flag — but
+    ///   its **blur radius is ignored**, so the edge is hard. A
+    ///   `filter: drop-shadow(...)` reaches the same path and is equally limited.
+    /// - [`Text`](SceneEffect::Text) is `Limited`: a run whose font handle was given
+    ///   to [`CpuRenderer::register_font`] rasterizes as real glyph outlines; a run
+    ///   with no registered font falls back to box-coverage cells.
+    /// - [`Clip`](SceneEffect::Clip) is [`Emulated`](SupportLevel::Emulated): a
+    ///   `PushClip` shape becomes a per-pixel coverage mask, honoring the active
+    ///   transform and the enclosing clip. (A shape clip carried on a `PushLayer`
+    ///   would be dropped, but the coordinator only puts one there on filter layers,
+    ///   which are `Unavailable` here anyway.)
+    /// - [`Blur`](SceneEffect::Blur), [`BackdropFilter`](SceneEffect::BackdropFilter),
+    ///   and [`ColorMatrix`](SceneEffect::ColorMatrix) are
+    ///   [`Unavailable`](SupportLevel::Unavailable): these are the GPU-class effects
+    ///   of the effect-split policy and this backend has **no pass** for any of
+    ///   them. There is no gaussian anywhere in it: a blurred `DrawShadow` draws a
+    ///   hard rect, a `filter: blur()` layer draws its subtree sharp, a
+    ///   `BackdropFilter` draws nothing at all, and a color-matrix layer draws
+    ///   unfiltered. Dropping the parameter is not emulation.
+    /// - [`Gradient`](SceneEffect::Gradient) is `Unavailable`: a gradient brush
+    ///   rasterizes as a flat solid of its **first stop**. The stops and the
+    ///   gradient geometry are dropped, so what lands is a solid, not a gradient.
+    /// - [`Mask`](SceneEffect::Mask) is `Unavailable`: a mask clip's coverage is
+    ///   never applied (it inherits the enclosing clip instead), on this backend and
+    ///   on Vello alike.
+    /// - [`BlendMode`](SceneEffect::BlendMode) is `Unavailable`: a layer composites
+    ///   with `SrcOver` only; its blend mode is dropped.
+    fn supports_effect(&self, effect: SceneEffect) -> SupportLevel {
         match effect {
-            "filter" | "backdrop-filter" | "color-matrix" => SupportLevel::Unavailable,
-            // A `DrawImage` blits the real decoded pixels (a genuine sampled
-            // bitmap via `draw_pixmap`), not an approximation, so images are
-            // natively supported here.
-            "image" => SupportLevel::Native,
-            _ => SupportLevel::Emulated,
+            SceneEffect::Image => SupportLevel::Native,
+            SceneEffect::Clip => SupportLevel::Emulated,
+            SceneEffect::Shadow | SceneEffect::Text => SupportLevel::Limited,
+            SceneEffect::Blur
+            | SceneEffect::BackdropFilter
+            | SceneEffect::ColorMatrix
+            | SceneEffect::Gradient
+            | SceneEffect::Mask
+            | SceneEffect::BlendMode => SupportLevel::Unavailable,
         }
     }
 }
@@ -909,6 +991,16 @@ fn clip_shape_to_domain_path(shape: &ClipShape) -> Path {
     }
 }
 
+/// The clip mask that admits nothing: a fresh [`tiny_skia::Mask`] is zero-filled,
+/// and zero coverage draws nothing anywhere.
+///
+/// Used for a clip whose outline encloses no area, where "nothing passes" is the
+/// answer rather than a backend limitation. Returns `None` only if the mask cannot
+/// be allocated.
+fn empty_clip_mask(width: u32, height: u32) -> Option<tiny_skia::Mask> {
+    tiny_skia::Mask::new(width, height)
+}
+
 /// Builds the clip mask in force after pushing `sk_path` onto a `parent` clip.
 ///
 /// With no parent, the mask is the path's coverage over the whole buffer. With a
@@ -1312,6 +1404,28 @@ mod tests {
         FrameSubmission::new(frame)
     }
 
+    /// A [`DiagnosticSink`] that keeps every message it is handed, so a test can
+    /// assert what a host would have been told.
+    #[derive(Default)]
+    struct RecordingSink {
+        messages: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl RecordingSink {
+        fn messages(&self) -> Vec<String> {
+            self.messages.lock().expect("sink not poisoned").clone()
+        }
+    }
+
+    impl DiagnosticSink for RecordingSink {
+        fn emit(&self, diagnostic: &obscur_diagnostics::Diagnostic) {
+            self.messages
+                .lock()
+                .expect("sink not poisoned")
+                .push(diagnostic.message.clone());
+        }
+    }
+
     /// A 16x16 scene with one red rectangle filling the region `(4,4)..(12,12)`.
     fn red_rect_submission() -> FrameSubmission {
         let mut path = Path::new();
@@ -1436,25 +1550,153 @@ mod tests {
     }
 
     #[test]
-    fn supports_effect_emulates_2d_and_rejects_gpu_only() {
+    fn supports_effect_reports_the_gpu_class_effects_unavailable() {
         let renderer = CpuRenderer::default();
-        assert_eq!(renderer.supports_effect("blur"), SupportLevel::Emulated);
-        assert_eq!(renderer.supports_effect("shadow"), SupportLevel::Emulated);
-        assert_eq!(renderer.supports_effect("gradient"), SupportLevel::Emulated);
-        // `filter: drop-shadow(...)` rides the `box-shadow` DrawShadow path.
+        // There is no gaussian pass anywhere in this backend: a blurred shadow
+        // draws hard, a `filter: blur()` layer draws sharp, a backdrop-filter draws
+        // nothing, a color-matrix layer draws unfiltered. Dropping the parameter is
+        // NOT emulation.
+        for effect in [
+            SceneEffect::Blur,
+            SceneEffect::BackdropFilter,
+            SceneEffect::ColorMatrix,
+        ] {
+            assert_eq!(
+                renderer.supports_effect(effect),
+                SupportLevel::Unavailable,
+                "{effect} has no pass in the software rasterizer"
+            );
+        }
+        // A gradient brush lands as a flat solid of its first stop, and a layer's
+        // blend mode and a mask clip's coverage are dropped outright.
+        for effect in [
+            SceneEffect::Gradient,
+            SceneEffect::BlendMode,
+            SceneEffect::Mask,
+        ] {
+            assert_eq!(
+                renderer.supports_effect(effect),
+                SupportLevel::Unavailable,
+                "{effect} is dropped, not approximated"
+            );
+        }
+        // What it does do: shadows without their blur, text against a registered
+        // font, per-pixel clip masks, and real sampled images.
         assert_eq!(
-            renderer.supports_effect("drop-shadow"),
+            renderer.supports_effect(SceneEffect::Shadow),
+            SupportLevel::Limited
+        );
+        assert_eq!(
+            renderer.supports_effect(SceneEffect::Text),
+            SupportLevel::Limited
+        );
+        assert_eq!(
+            renderer.supports_effect(SceneEffect::Clip),
             SupportLevel::Emulated
         );
-        // The general `filter` / `backdrop-filter` have no software approximation.
         assert_eq!(
-            renderer.supports_effect("filter"),
+            renderer.supports_effect(SceneEffect::Image),
+            SupportLevel::Native
+        );
+    }
+
+    #[test]
+    fn blur_is_unavailable_because_a_blurred_shadow_rasterizes_hard_edged() {
+        // The pixels are the authority on the table. A 24x24 box shadow with an
+        // 8px blur radius, no offset and no spread: if this backend blurred, the
+        // shadow would spill well outside the box and fade across its edge.
+        let rect = Rect::new(Point::new(12.0, 12.0), Size::new(24.0, 24.0));
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawShadow {
+            rect,
+            radii: CornerRadii::uniform(0.0),
+            color: Color::BLACK,
+            blur: 8.0,
+            spread: 0.0,
+            offset: (0.0, 0.0),
+            inset: false,
+        }]);
+        let submission = FrameSubmission::new(RenderFrame::new(
+            SceneSnapshot::new(list, SceneGeneration::from_raw(1)),
+            Size::new(48.0, 48.0),
+        ));
+        let mut renderer = CpuRenderer::default();
+        let _ = renderer.render(&submission, &bitmap_target(48.0, 48.0));
+        let pixmap = renderer.pixmap().expect("a frame was rendered");
+
+        // 4px outside the box, well inside an 8px blur's reach: untouched.
+        let outside = pixmap.pixel(8, 24).expect("pixel left of the box");
+        assert_eq!(outside.alpha(), 0, "an 8px blur would have tinted this");
+        // 1px inside the edge vs. the center: identical, so the edge is a step, not
+        // a ramp.
+        let edge = pixmap.pixel(13, 24).expect("pixel inside the left edge");
+        let center = pixmap.pixel(24, 24).expect("center pixel");
+        assert_eq!(
+            edge.alpha(),
+            center.alpha(),
+            "a blurred edge would fade toward the boundary"
+        );
+        assert!(center.alpha() > 0, "the shadow itself is drawn");
+
+        // Which is exactly what the table must say. Should a real gaussian ever
+        // land here, the asserts above fail first and this claim gets revisited.
+        assert_eq!(
+            renderer.supports_effect(SceneEffect::Blur),
             SupportLevel::Unavailable
         );
+        // The shadow is still drawn — offset, spread, radii and color are honored —
+        // so the shadow itself is Limited, not Unavailable.
         assert_eq!(
-            renderer.supports_effect("backdrop-filter"),
-            SupportLevel::Unavailable
+            renderer.supports_effect(SceneEffect::Shadow),
+            SupportLevel::Limited
         );
+    }
+
+    #[test]
+    fn rendering_an_unsupported_effect_tells_the_host_which_one() {
+        // Spec §5.2: unsupported effects are EXPLICIT diagnostics. Rendering a
+        // blurred shadow must name the blur it is about to drop.
+        let sink = Arc::new(RecordingSink::default());
+        let mut renderer = CpuRenderer::default();
+        renderer.set_diagnostic_sink(sink.clone());
+
+        let list = DisplayList::from_commands(vec![PaintCommand::DrawShadow {
+            rect: Rect::new(Point::new(2.0, 2.0), Size::new(8.0, 8.0)),
+            radii: CornerRadii::uniform(0.0),
+            color: Color::BLACK,
+            blur: 4.0,
+            spread: 0.0,
+            offset: (0.0, 0.0),
+            inset: false,
+        }]);
+        let submission = FrameSubmission::new(RenderFrame::new(
+            SceneSnapshot::new(list, SceneGeneration::from_raw(1)),
+            Size::new(16.0, 16.0),
+        ));
+        let result = renderer.render(&submission, &bitmap_target(16.0, 16.0));
+
+        // The frame still presents: the CPU backend approximates by design, and the
+        // diagnostic is how the host learns what the approximation cost.
+        assert!(result.expect("presented").is_presented());
+        assert_eq!(
+            sink.messages(),
+            vec!["unsupported effect: blur".to_string()],
+            "the shadow itself is drawn (Limited); only its blur is unavailable"
+        );
+
+        // A second frame demanding the same effect does not re-raise it: this is a
+        // property of the backend, not of the frame.
+        let _ = renderer.render(&submission, &bitmap_target(16.0, 16.0));
+        assert_eq!(sink.messages().len(), 1);
+    }
+
+    #[test]
+    fn a_scene_within_the_backends_means_raises_nothing() {
+        let sink = Arc::new(RecordingSink::default());
+        let mut renderer = CpuRenderer::default();
+        renderer.set_diagnostic_sink(sink.clone());
+        // A solid fill demands no effect this backend lacks.
+        let _ = renderer.render(&red_rect_submission(), &bitmap_target(16.0, 16.0));
+        assert!(sink.messages().is_empty());
     }
 
     /// A white background rect covering `0..16 × 0..16`, drawn first so images
@@ -1711,7 +1953,10 @@ mod tests {
     #[test]
     fn supports_effect_reports_images_native() {
         let renderer = CpuRenderer::default();
-        assert_eq!(renderer.supports_effect("image"), SupportLevel::Native);
+        assert_eq!(
+            renderer.supports_effect(SceneEffect::Image),
+            SupportLevel::Native
+        );
     }
 
     #[test]
