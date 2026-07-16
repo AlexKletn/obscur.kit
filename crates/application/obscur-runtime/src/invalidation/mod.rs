@@ -7,3 +7,5 @@ mod invalidation_reason;
 pub use invalidation_reason::InvalidationReason;
 mod invalidation_router;
 pub use invalidation_router::InvalidationRouter;
+mod restyle_scope;
+pub use restyle_scope::RestyleScope;

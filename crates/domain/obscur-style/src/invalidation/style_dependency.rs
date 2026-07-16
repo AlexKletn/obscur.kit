@@ -3,8 +3,25 @@
 //! When a node's computed style is resolved it consumes a few typed inputs. This
 //! record captures *which* of those inputs the node actually read, so a later
 //! change to one of them can decide precisely whether the node is affected —
-//! invalidating only affected consumers (§4.14) rather than everything. It is the
-//! dependency edge that replaces scattered ad-hoc dirty flags (§4.3).
+//! invalidating only affected consumers (§4.14) rather than everything.
+//!
+//! # Status: nothing populates this
+//!
+//! No production code constructs a `StyleDependency`, because nothing records what
+//! a node's matching consulted: `StyleMatcher::match_element_in` returns the
+//! cascaded declarations and no dependency trace, so there is no moment at which
+//! the `with_*`/`add_*` builders could be called. Its `affected_by_*` gates
+//! therefore have no production consumer either, and it is not what makes today's
+//! style invalidation per-node.
+//!
+//! What does: the runtime's `RestyleScope` bounds a `:hover`/`:focus` change
+//! *structurally* — a node's state can only be read while matching its own
+//! subtree and its following siblings' subtrees, because those are the only nodes
+//! `MatchElement`'s `parent()`/`previous_sibling_element()` can reach it from. That
+//! is a sound upper bound and needs no per-node record. This type would narrow it
+//! (a node whose matching never mentioned `:hover` need not be restyled at all),
+//! which is the reason to keep it — but narrowing needs the matcher to trace its
+//! reads first.
 
 use crate::computed::StyleDiff;
 use crate::invalidation::StyleInvalidationReason;
@@ -21,11 +38,11 @@ use std::collections::HashSet;
 /// interaction states its matching depends on
 /// ([`pseudo_states`](Self::pseudo_states)). A later change consults this record
 /// via the `affected_by_*` methods to decide whether the node must be restyled;
-/// those methods are the gate that keeps invalidation confined to affected
+/// those methods are the gate that would keep invalidation confined to affected
 /// consumers (§4.14).
 ///
-/// This is the per-node dependency record that replaces ad-hoc dirty flags: the
-/// runtime keeps one alongside each node's cached style, not a bag of booleans.
+/// Would, not does — see the module docs: nothing builds one of these, so the
+/// runtime keeps no such record alongside a node's cached style.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StyleDependency {
     inherits_from_parent: bool,

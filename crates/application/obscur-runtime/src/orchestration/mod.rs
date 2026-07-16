@@ -31,7 +31,7 @@ mod scroll;
 pub(crate) use scroll::{ScrollContainer, overflow_scrolls, scroll_containers};
 mod stacking;
 mod style_coordinator;
-pub use style_coordinator::{ComputedStyles, StyleCoordinator};
+pub use style_coordinator::{ComputedStyles, IncrementalRestyle, StyleCoordinator};
 mod style_inputs;
 pub use style_inputs::StyleInputs;
 mod style_matching_coordinator;

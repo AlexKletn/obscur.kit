@@ -42,6 +42,10 @@
 //! Every node is assigned a stable sequential `u64` id during a single
 //! pre-order walk (root = `0`, incrementing).
 
+use obscur_okui_compiler::compile::ContractRegistry;
+use obscur_okui_compiler::validation::{
+    AttributeUse, ElementUse, MemberArity, MemberUse, SlotUse, ViolationAnchor, check_contract,
+};
 use obscur_ui_ir::document::{
     UiIrDocument, UiIrEvent, UiIrExpression, UiIrNode, UiIrProperty, UiIrValue,
 };
@@ -71,9 +75,11 @@ impl DslMacro {
     /// # Errors
     ///
     /// Returns a [`syn::Error`] on empty input, on malformed element syntax, on
-    /// a mismatched closing tag, or when a braced value is not a [`syn::Expr`].
+    /// a mismatched closing tag, when a braced value is not a [`syn::Expr`], or
+    /// when an element breaks its component's contract (§2.12, §2.13).
     pub(crate) fn to_document(input: TokenStream) -> Result<UiIrDocument, syn::Error> {
         let nodes = parse_nodes(input)?;
+        validate_contracts(&nodes)?;
         let mut counter: u64 = 0;
         let root = if nodes.len() == 1 && matches!(nodes[0], DslNode::Element(_)) {
             build_node(&nodes[0], &mut counter)
@@ -157,19 +163,21 @@ fn build_node(node: &DslNode, counter: &mut u64) -> UiIrNode {
             };
             for attr in &element.attrs {
                 ir = match attr {
-                    DslAttr::Event { event, handler } => {
+                    DslAttr::Event { event, handler, .. } => {
                         ir.with_event(UiIrEvent::new(event.as_str(), handler.as_str()))
                     }
                     // A `<For>`'s mandatory `key` is carried on the Loop node
                     // itself (spec §2.11), not as a property — the same split the
                     // `.okui` file lowering makes. Left as a property it reaches
                     // no consumer, and every item in the list renders unkeyed.
-                    DslAttr::Prop { name, value }
+                    DslAttr::Prop { name, value, .. }
                         if name == "key" && is_loop_tag(element.tag.as_str()) =>
                     {
                         ir.with_key(build_expression(value))
                     }
-                    DslAttr::Prop { name, value } => ir.with_property(build_property(name, value)),
+                    DslAttr::Prop { name, value, .. } => {
+                        ir.with_property(build_property(name, value))
+                    }
                 };
             }
             for child in &element.children {
@@ -223,6 +231,9 @@ struct DslElement {
     is_component: bool,
     /// The tag or component name.
     tag: String,
+    /// The tag identifier's span, so a contract violation about the element as a
+    /// whole lands on the tag the author wrote.
+    span: Span,
     /// The parsed attributes, in source order.
     attrs: Vec<DslAttr>,
     /// The parsed children, in source order.
@@ -235,6 +246,8 @@ enum DslAttr {
     Prop {
         /// The property name.
         name: String,
+        /// The name identifier's span.
+        span: Span,
         /// The resolved property value.
         value: PropValue,
     },
@@ -242,6 +255,8 @@ enum DslAttr {
     Event {
         /// The event name (the part after `on:`).
         event: String,
+        /// The event identifier's span.
+        span: Span,
         /// The handler name, normalised to a string.
         handler: String,
     },
@@ -309,6 +324,7 @@ impl Parse for DslElement {
             return Ok(Self {
                 is_component,
                 tag,
+                span: tag_ident.span(),
                 attrs,
                 children: Vec::new(),
             });
@@ -343,6 +359,7 @@ impl Parse for DslElement {
         Ok(Self {
             is_component,
             tag,
+            span: tag_ident.span(),
             attrs,
             children,
         })
@@ -362,17 +379,20 @@ fn parse_attr(input: ParseStream) -> syn::Result<DslAttr> {
         let handler: Expr = content.parse()?;
         return Ok(DslAttr::Event {
             event: event_ident.to_string(),
+            span: event_ident.span(),
             handler: binding_or_string(&handler),
         });
     }
 
     let name = name_ident.to_string();
+    let span = name_ident.span();
     if input.peek(Token![=]) {
         input.parse::<Token![=]>()?;
         if input.peek(LitStr) {
             let literal: LitStr = input.parse()?;
             Ok(DslAttr::Prop {
                 name,
+                span,
                 value: PropValue::Text(literal.value()),
             })
         } else if input.peek(token::Brace) {
@@ -381,6 +401,7 @@ fn parse_attr(input: ParseStream) -> syn::Result<DslAttr> {
             let expr: Expr = content.parse()?;
             Ok(DslAttr::Prop {
                 name,
+                span,
                 value: classify_prop_value(&expr)?,
             })
         } else {
@@ -389,8 +410,198 @@ fn parse_attr(input: ParseStream) -> syn::Result<DslAttr> {
     } else {
         Ok(DslAttr::Prop {
             name,
+            span,
             value: PropValue::BareTrue,
         })
+    }
+}
+
+/// Checks every element in the parsed tree against its component's contract
+/// (spec §2.12, §2.13), reporting each violation at the token that caused it.
+///
+/// # This front end used to check nothing
+///
+/// `okui!` calls itself the spec's *primary* authoring surface, and it ran **no**
+/// contract validation at all: `okui! { <Button laebl="OK"/> }` compiled clean
+/// while the very same document in a `.okui` file was rejected. §2.13's "unknown
+/// attributes, events and string method names are compile errors" held on the
+/// fallback path only. The rule was never the problem — it was written against
+/// the file parser's AST, which this front end does not have — so it now lives in
+/// [`check_contract`] over plain data and both front ends reach it.
+///
+/// # What a proc-macro can and cannot see
+///
+/// The registry is [`ContractRegistry::builtins`]: the primitives and shipped
+/// widgets, whose surfaces are compiled into this macro. A **user** component's
+/// contract cannot be checked here and no amount of wiring will change that —
+/// `MyProps::contract_surface()` is a function that runs when the built crate
+/// runs, and this code runs while that crate is still being compiled. The file
+/// front end takes its registry as an argument and so can be handed one
+/// ([`ContractRegistry::register_surface`]); a macro has no argument to take it
+/// in. That asymmetry is structural, and it is why the `.okui` path is not
+/// simply redundant.
+fn validate_contracts(nodes: &[DslNode]) -> syn::Result<()> {
+    let registry = ContractRegistry::builtins();
+    let mut error: Option<syn::Error> = None;
+    for node in nodes {
+        if let DslNode::Element(element) = node {
+            validate_element(element, &registry, &mut error);
+        }
+    }
+    error.map_or(Ok(()), Err)
+}
+
+/// Checks `element` and its element descendants, accumulating every violation
+/// into `error` rather than stopping at the first — the same
+/// report-them-all policy `Compiler::compile` follows.
+fn validate_element(
+    element: &DslElement,
+    registry: &ContractRegistry,
+    error: &mut Option<syn::Error>,
+) {
+    if let Some(contract) = registry.get(&element.tag) {
+        let instance = DslInstance::of(element);
+        for violation in check_contract(&instance.as_use(), contract) {
+            let reported = syn::Error::new(
+                instance.span_of(violation.anchor(), element.span),
+                violation.message(contract.component()),
+            );
+            match error {
+                Some(existing) => existing.combine(reported),
+                None => *error = Some(reported),
+            }
+        }
+    }
+    for child in &element.children {
+        if let DslNode::Element(child) = child {
+            validate_element(child, registry, error);
+        }
+    }
+}
+
+/// The strings and spans one [`DslElement`] contributes to an [`ElementUse`].
+///
+/// The mirror of the file front end's `AstInstance`, and for the same two
+/// reasons: the rule borrows `&str` from storage that must outlive it, and a
+/// [`ViolationAnchor`] has to be resolved back to something the author can be
+/// pointed at — a [`Span`] here, a byte offset there.
+struct DslInstance<'a> {
+    tag: &'a str,
+    attributes: Vec<(&'a str, bool)>,
+    attribute_spans: Vec<Span>,
+    members: Vec<(&'a str, Option<SlotUse<'a>>, MemberArity)>,
+    member_spans: Vec<Span>,
+}
+
+impl<'a> DslInstance<'a> {
+    /// Describes `element` for the rule.
+    fn of(element: &'a DslElement) -> Self {
+        let mut instance = Self {
+            tag: element.tag.as_str(),
+            attributes: Vec::new(),
+            attribute_spans: Vec::new(),
+            members: Vec::new(),
+            member_spans: Vec::new(),
+        };
+        for attr in &element.attrs {
+            let (name, event, span) = match attr {
+                DslAttr::Prop { name, span, .. } => (name.as_str(), false, *span),
+                DslAttr::Event { event, span, .. } => (event.as_str(), true, *span),
+            };
+            instance.attributes.push((name, event));
+            instance.attribute_spans.push(span);
+        }
+        instance.collect_members(element, MemberArity::Once);
+        instance
+    }
+
+    /// Appends `element`'s members, looking through the control flow that
+    /// splices into it — the same walk the file front end makes, because the
+    /// emitter makes no distinction between the two front ends' output.
+    fn collect_members(&mut self, element: &'a DslElement, arity: MemberArity) {
+        for child in &element.children {
+            let DslNode::Element(child) = child else {
+                continue;
+            };
+            if is_conditional_tag(&child.tag) {
+                self.collect_members(child, degrade(arity, MemberArity::AtMostOnce));
+                continue;
+            }
+            if is_loop_tag(&child.tag) {
+                self.collect_members(child, MemberArity::Any);
+                continue;
+            }
+            // A `<For>`'s `<Empty>`/`<Separator>` are §2.11 slots whose bodies
+            // reach the loop's parent; the wrappers themselves are never nodes.
+            if arity == MemberArity::Any && matches!(child.tag.as_str(), "Empty" | "Separator") {
+                self.collect_members(child, MemberArity::Any);
+                continue;
+            }
+            self.members
+                .push((child.tag.as_str(), slot_of(child), arity));
+            self.member_spans.push(child.span);
+        }
+    }
+
+    /// Borrows this instance as the plain [`ElementUse`] the rule takes.
+    fn as_use(&self) -> ElementUse<'_> {
+        ElementUse {
+            tag: self.tag,
+            attributes: self
+                .attributes
+                .iter()
+                .map(|(name, event)| AttributeUse {
+                    name,
+                    event: *event,
+                })
+                .collect(),
+            members: self
+                .members
+                .iter()
+                .map(|(tag, slot, arity)| MemberUse {
+                    tag,
+                    slot: *slot,
+                    arity: *arity,
+                })
+                .collect(),
+        }
+    }
+
+    /// Resolves an anchor to the span its error is reported at.
+    fn span_of(&self, anchor: ViolationAnchor, element: Span) -> Span {
+        match anchor {
+            ViolationAnchor::Element => element,
+            ViolationAnchor::Attribute(index) => {
+                self.attribute_spans.get(index).copied().unwrap_or(element)
+            }
+            ViolationAnchor::Member(index) => {
+                self.member_spans.get(index).copied().unwrap_or(element)
+            }
+        }
+    }
+}
+
+/// Returns `element`'s slot assignment, if it carries one.
+///
+/// Only a string literal is a slot *name*; `slot={expr}` is a name that does not
+/// exist until runtime, and the rule says so rather than this front end deciding
+/// it alone.
+fn slot_of(element: &DslElement) -> Option<SlotUse<'_>> {
+    element.attrs.iter().find_map(|attr| match attr {
+        DslAttr::Prop { name, value, .. } if name == "slot" => Some(match value {
+            PropValue::Text(text) => SlotUse::Named(text.as_str()),
+            _ => SlotUse::Dynamic,
+        }),
+        _ => None,
+    })
+}
+
+/// Weakens `arity` to `inner`, keeping the weaker of the two: nesting only ever
+/// loosens the bound.
+const fn degrade(arity: MemberArity, inner: MemberArity) -> MemberArity {
+    match arity {
+        MemberArity::Any => MemberArity::Any,
+        MemberArity::Once | MemberArity::AtMostOnce => inner,
     }
 }
 
@@ -495,11 +706,13 @@ mod tests {
 
     #[test]
     fn uppercase_tag_is_a_component_and_lowercase_is_an_element() {
+        // `label` is not decoration: `<Button/>` is now a contract violation on
+        // this front end too, which is the whole of §2.13's promise.
         assert_eq!(
-            doc(quote! { <Button/> }).root().kind(),
+            doc(quote! { <Button label="OK"/> }).root().kind(),
             UiIrNodeKind::Component
         );
-        assert_eq!(doc(quote! { <Button/> }).root().tag(), "Button");
+        assert_eq!(doc(quote! { <Button label="OK"/> }).root().tag(), "Button");
         assert_eq!(
             doc(quote! { <container/> }).root().kind(),
             UiIrNodeKind::Element
@@ -559,7 +772,7 @@ mod tests {
 
     #[test]
     fn event_handler_lowers_to_an_event_binding() {
-        let document = doc(quote! { <Button on:click={on_ok}/> });
+        let document = doc(quote! { <Button label="OK" on:click={on_ok}/> });
         let events = document.root().events();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event(), "click");
@@ -728,6 +941,82 @@ mod tests {
         ] {
             assert!(!admits(source), "§2.10 forbids `{source}`");
         }
+    }
+
+    /// Every message a rejected document produces, joined. A combined
+    /// `syn::Error` displays only its first, and the checks accumulate.
+    fn rejection(input: TokenStream) -> String {
+        DslMacro::to_document(input)
+            .expect_err("the document breaks its contract")
+            .into_iter()
+            .map(|error| error.to_string())
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+
+    #[test]
+    fn the_primary_authoring_surface_now_enforces_a_contract_at_all() {
+        // §2.13's headline promise, which this front end did not keep: the very
+        // same document was rejected by the `.okui` file path and compiled clean
+        // here.
+        assert!(
+            rejection(quote! { <Button laebl="OK"/> }).contains("unknown attribute 'laebl'"),
+            "a typo'd prop is a compile error on the macro path too"
+        );
+        assert!(
+            rejection(quote! { <Button label="OK" on:hover={f}/> })
+                .contains("unknown event 'hover'"),
+            "and so is an event the widget does not expose"
+        );
+        assert!(
+            rejection(quote! { <Image/> }).contains("requires prop 'src'"),
+            "and so is an omitted required prop"
+        );
+    }
+
+    #[test]
+    fn a_slot_on_a_component_that_declares_none_is_refused() {
+        // No shipped widget declares a §2.12 slot, so every `slot="…"` written
+        // against one names nothing — which is exactly what it now says, rather
+        // than lowering to a property no consumer reads.
+        assert!(
+            rejection(quote! { <Button label="OK"><span slot="icon"/></Button> })
+                .contains("declares no slots"),
+            "a slot assignment must name a declared slot"
+        );
+    }
+
+    #[test]
+    fn a_contract_kept_is_a_contract_that_compiles() {
+        // The other half of the check: the widgets' real surfaces must admit
+        // their real usage, or the enforcement is just breakage.
+        for input in [
+            quote! { <Button label="Save" on:click={submit}/> },
+            quote! { <Image src="logo.png" alt="Logo"/> },
+            quote! { <Input value={text} on:input={edit}/> },
+            quote! { <container class="row"><span id="x"/></container> },
+        ] {
+            assert!(
+                DslMacro::to_document(input.clone()).is_ok(),
+                "`{input}` keeps its contract"
+            );
+        }
+    }
+
+    #[test]
+    fn control_flow_is_looked_through_to_find_the_members_it_splices() {
+        // `<If>` splices its body into the enclosing child list, so a `slot=`
+        // inside one is addressed to `Button`, not to the `If`. Checking direct
+        // children only would let it through.
+        assert!(
+            rejection(quote! {
+                <Button label="OK">
+                    <If cond={open}><span slot="icon"/></If>
+                </Button>
+            })
+            .contains("declares no slots"),
+            "a member behind a conditional is still the component's member"
+        );
     }
 
     #[test]

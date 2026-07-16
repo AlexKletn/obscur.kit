@@ -321,6 +321,135 @@ impl KitBootstrap {
     pub fn text_itemizer(&self) -> Box<dyn crate::text::shaping::TextItemizer> {
         Box::new(crate::text_unicode::UnicodeTextItemizer::new())
     }
+
+    /// Injects the **whole real text stack** into `runtime` over the faces in
+    /// `fonts`, and returns the scene font handle assigned to each (spec §5.10,
+    /// §5.18; §2.7 adapters keep host reach explicit).
+    ///
+    /// This is the one call that replaces all three of the runtime's honest but
+    /// inert text defaults at once, which until now every host re-derived by hand:
+    ///
+    /// * the [`MockTextShaper`](crate::text::shaping::MockTextShaper) → the real
+    ///   [`HarfrustShaper`](crate::text_harfrust::HarfrustShaper), so glyphs carry
+    ///   font-specific indices with kerning/ligatures/GPOS rather than Unicode
+    ///   scalars;
+    /// * the empty [`MockFontResolver`](crate::text::font::MockFontResolver) → a
+    ///   [`FontRegistry`](crate::text_harfrust::FontRegistry) over `fonts`, so a
+    ///   run resolves to a face that actually *covers* it;
+    /// * the [`SingleRunItemizer`](crate::text::shaping::SingleRunItemizer) → the
+    ///   real [`UnicodeTextItemizer`](crate::text_unicode::UnicodeTextItemizer),
+    ///   so text splits into uniform bidi-level + script runs — **the default has
+    ///   no bidi at all**, and this is what gives it any.
+    ///
+    /// It also hands the shaper the registry's
+    /// [`face_metrics`](crate::text_harfrust::FontRegistry::face_metrics) snapshot,
+    /// taken after every face is registered. That is the step easiest to omit and
+    /// hardest to notice: a shaper is asked for line metrics by
+    /// [`FontId`](crate::text::font::FontId) alone, so without the table it shapes
+    /// real glyphs into line boxes sized by idealized 0.8/0.2 ratios — real text in
+    /// fake boxes.
+    ///
+    /// The facade constructs the concrete adapters and hands the runtime domain
+    /// ports, so the application layer depends only on the ports, never on these
+    /// adapter crates.
+    ///
+    /// # The host must still feed the renderer
+    ///
+    /// This installs the resolve/shape half. Rasterization lives in a renderer
+    /// this kit does not own, and it must be given the *same* bytes under the
+    /// *same* handles or it will paint the wrong outlines — see
+    /// [`InstalledFonts`](super::InstalledFonts), which exists to make that
+    /// hand-off one loop.
+    ///
+    /// # An empty `fonts` installs a working stack over nothing
+    ///
+    /// The real adapters go in either way, and then resolve nothing and paint no
+    /// text. That is the deliberate §5.18 deviation, not a bug to route around:
+    /// there is no bundled fallback set to quietly substitute, so a host that
+    /// supplies no bytes gets no text and can tell.
+    #[cfg(all(feature = "text-harfrust", feature = "text-unicode"))]
+    pub fn install_text_stack(
+        &self,
+        runtime: &mut crate::runtime::UiRuntime,
+        fonts: &super::FontSet,
+    ) -> super::InstalledFonts {
+        let mut registry = crate::text_harfrust::FontRegistry::new();
+        let mut handles = Vec::with_capacity(fonts.len());
+        for face in fonts.faces() {
+            let id = registry.register(
+                face.family().clone(),
+                *face.attributes(),
+                std::sync::Arc::clone(face.bytes()),
+            );
+            handles.push((
+                super::text_stack::font_handle(id),
+                std::sync::Arc::clone(face.bytes()),
+            ));
+        }
+        // Taken only now: a snapshot from before the loop would be empty, and the
+        // shaper would silently answer every line-metric query with the ratios.
+        let shaper = crate::text_harfrust::HarfrustShaper::without_font()
+            .with_faces(registry.face_metrics());
+        runtime.set_font_resolver(Box::new(registry));
+        runtime.set_text_itemizer(Box::new(crate::text_unicode::UnicodeTextItemizer::new()));
+        runtime.set_text_shaper(Box::new(shaper));
+        super::InstalledFonts::new(handles)
+    }
+
+    /// Reads the host's own `sans-serif` / `serif` / `monospace` faces off disk via
+    /// fontconfig, as a [`FontSet`](super::FontSet) ready for
+    /// [`install_text_stack`](Self::install_text_stack) (spec §5.18).
+    ///
+    /// This is what "use the system font" has to mean for a toolkit that shapes its
+    /// own text: a CSS family name is not enough — the shaper reads `cmap`/`GSUB`
+    /// itself, so something must find the *file*. Each generic is registered under
+    /// its own [`GenericFamily`](crate::text::font::GenericFamily), so
+    /// `font-family: monospace` resolves to the host's mono face rather than to
+    /// whatever came first.
+    ///
+    /// Returns `None` when fontconfig is unavailable or nominates nothing loadable.
+    /// A caller that needs text regardless must supply bytes itself.
+    ///
+    /// # Scope
+    ///
+    /// **Linux only.** macOS (Core Text) and Windows (DirectWrite) are **not
+    /// implemented** — this returns `None` there, and no text will paint from this
+    /// path. Both want a real platform API rather than a CLI shell-out, and neither
+    /// is built.
+    ///
+    /// # This is not for tests
+    ///
+    /// The faces it returns are whatever the machine happens to have installed, so
+    /// any assertion about a metric drifts per machine. On the authoring machine
+    /// `fc-match sans-serif` resolves into `/usr/share/fonts/WindowsFonts/`. Tests
+    /// build a [`FontSet`](super::FontSet) from the vendored faces in
+    /// `assets/fonts/` instead.
+    #[cfg(feature = "font-fontconfig")]
+    #[must_use]
+    pub fn system_font_set(&self) -> Option<super::FontSet> {
+        use crate::text::font::{FontFamily, GenericFamily};
+
+        let source = crate::font_fontconfig::source::FontconfigSource::new();
+        let mut set = super::FontSet::new();
+        for generic in [
+            GenericFamily::SansSerif,
+            GenericFamily::Serif,
+            GenericFamily::Monospace,
+        ] {
+            let Some(face) = source.match_generic(generic) else {
+                continue;
+            };
+            let Ok(bytes) = std::fs::read(face.path()) else {
+                continue;
+            };
+            set.push(super::FontFaceBytes::new(
+                FontFamily::generic(generic),
+                *face.attributes(),
+                bytes,
+            ));
+        }
+        (!set.is_empty()).then_some(set)
+    }
 }
 
 #[cfg(test)]

@@ -4,13 +4,11 @@
 use obscur_okui_syntax::ast::{Attribute, Element};
 use obscur_okui_syntax::syntax::SyntaxKind;
 
-use crate::validation::ValidationDiagnostic;
-
-/// Attribute names that are always permitted on any element regardless of its
-/// contract's declared prop surface: structural keys (`key`, `class`, `id`) and
-/// the `requires="cap"` capability declaration (spec §2.13). They are never
-/// reported as unknown attributes.
-const RESERVED_ATTRIBUTES: [&str; 4] = ["key", "class", "id", "requires"];
+use crate::validation::contract_rule::{
+    AttributeUse, ElementUse, MemberArity, MemberUse, SlotUse, ViolationAnchor, check_contract,
+    is_reserved_attribute,
+};
+use crate::validation::{SlotRule, ValidationDiagnostic};
 
 /// The usage contract of a component: what an instance of it must and may carry
 /// (spec §2.13).
@@ -21,7 +19,7 @@ const RESERVED_ATTRIBUTES: [&str; 4] = ["key", "class", "id", "requires"];
 /// - `allowed_props` — additional attribute names an instance *may* set. The
 ///   prop surface is **closed** once the contract declares *any* prop — required
 ///   or allowed: an attribute is then permitted only if it is in `allowed_props`
-///   or `required_props`, is a [reserved](RESERVED_ATTRIBUTES) structural
+///   or `required_props`, is a [reserved](is_reserved_attribute) structural
 ///   attribute, or is an `on:*` event (events are governed by `allowed_events`);
 ///   every other attribute is an unknown-attribute violation. A contract that
 ///   declares **no** props at all leaves the surface *open* (any attribute is
@@ -32,7 +30,11 @@ const RESERVED_ATTRIBUTES: [&str; 4] = ["key", "class", "id", "requires"];
 ///   listed;
 /// - `allowed_children` — the child element tags permitted inside an instance;
 ///   an **empty** list means *any* child element is allowed (the contract does
-///   not restrict children).
+///   not restrict children);
+/// - `slots` — the named slots the component declares (§2.12). An **empty** list
+///   closes the slot surface rather than opening it: a `slot="…"` on a child of
+///   a component that declares none names nothing, and there is no permissive
+///   reading of that to fall back to.
 ///
 /// Contracts are built fluently, for example:
 ///
@@ -52,6 +54,7 @@ pub struct ComponentContract {
     allowed_props: Vec<Box<str>>,
     allowed_events: Vec<Box<str>>,
     allowed_children: Vec<Box<str>>,
+    slots: Vec<SlotRule>,
 }
 
 impl ComponentContract {
@@ -65,6 +68,7 @@ impl ComponentContract {
             allowed_props: Vec::new(),
             allowed_events: Vec::new(),
             allowed_children: Vec::new(),
+            slots: Vec::new(),
         }
     }
 
@@ -108,10 +112,33 @@ impl ComponentContract {
         self
     }
 
+    /// Declares a named slot on the contract (fluent; spec §2.12).
+    ///
+    /// Declaring any slot is what *opens* the component's slot surface: until
+    /// one is declared, a child's `slot="…"` has nothing to name.
+    #[must_use]
+    pub fn with_slot(mut self, slot: SlotRule) -> Self {
+        self.slots.push(slot);
+        self
+    }
+
     /// Returns the constrained component's name.
     #[must_use]
     pub fn component(&self) -> &str {
         &self.component
+    }
+
+    /// Returns the declared named slots (spec §2.12); an empty slice means the
+    /// component declares none and accepts no slot assignment at all.
+    #[must_use]
+    pub fn slots(&self) -> &[SlotRule] {
+        &self.slots
+    }
+
+    /// Returns the declared slot called `name`, if any.
+    #[must_use]
+    pub fn slot(&self, name: &str) -> Option<&SlotRule> {
+        self.slots.iter().find(|slot| slot.name() == name)
     }
 
     /// Returns the required prop names.
@@ -145,27 +172,28 @@ impl ComponentContract {
     /// Returns whether `name` is an accepted attribute: a required prop, an
     /// allowed prop, or a reserved structural attribute. Only consulted when the
     /// prop surface is closed (`allowed_props` non-empty).
-    fn permits_prop(&self, name: &str) -> bool {
-        RESERVED_ATTRIBUTES.contains(&name)
+    pub(crate) fn permits_prop(&self, name: &str) -> bool {
+        is_reserved_attribute(name)
             || self.required_props.iter().any(|p| p.as_ref() == name)
             || self.allowed_props.iter().any(|p| p.as_ref() == name)
     }
 
     /// Returns whether `event` is an accepted `on:<event>` name. Only consulted
     /// when the event surface is closed (`allowed_events` non-empty).
-    fn permits_event(&self, event: &str) -> bool {
+    pub(crate) fn permits_event(&self, event: &str) -> bool {
         self.allowed_events.iter().any(|e| e.as_ref() == event)
     }
 }
 
 /// Validates a component instance against its [`ComponentContract`] (spec
-/// §2.13).
+/// §2.12, §2.13).
 ///
-/// The validator checks the obligations a contract expresses: that every
-/// required prop is present as an attribute, that no unknown attribute or
-/// `on:<event>` is used when the contract closes those surfaces, and that every
-/// child element is among the allowed tags when the contract restricts
-/// children.
+/// This is the **file** front end's adapter onto the shared rule in
+/// [`contract_rule`](crate::validation::contract_rule): it describes a parsed
+/// [`Element`] as a plain [`ElementUse`], runs [`check_contract`], and resolves
+/// each violation's [`ViolationAnchor`] to a source byte offset. The rule itself
+/// lives elsewhere precisely so the `okui!` macro — which has no syntax tree —
+/// can reach the same verdict from `syn` tokens.
 #[derive(Debug, Clone, Default)]
 pub struct ContractValidator;
 
@@ -197,11 +225,14 @@ impl ContractValidator {
     /// - **allowed children** — if
     ///   [`allowed_children`](ComponentContract::allowed_children) is non-empty,
     ///   every child *element*'s tag must be listed; a disallowed tag yields
-    ///   `"'<tag>' is not an allowed child of '<c>'"`.
+    ///   `"'<tag>' is not an allowed child of '<c>'"`;
+    /// - **slots** (§2.12) — a child's `slot="…"` must name a slot the contract
+    ///   declares and satisfy that slot's own child rule, and every declared
+    ///   slot's cardinality must hold.
     ///
-    /// Attribute- and event-level diagnostics are anchored at the offending
-    /// attribute's byte offset; the required-prop diagnostic is anchored at the
-    /// element's byte offset.
+    /// Attribute-, event-, child- and slot-assignment diagnostics are anchored at
+    /// the offending attribute's or child's byte offset; the required-prop and
+    /// cardinality diagnostics are anchored at the element's own.
     ///
     /// String-named method/command references (§2.13) are not modelled by the
     /// `.okui` AST — attribute values are string literals or `{expr}` text with
@@ -213,72 +244,162 @@ impl ContractValidator {
         element: &Element,
         contract: &ComponentContract,
     ) -> Vec<ValidationDiagnostic> {
-        let mut diagnostics = Vec::new();
         let offset = element.syntax().offset().unwrap_or(0);
-        let component = contract.component();
+        let instance = AstInstance::of(element, offset);
+        check_contract(&instance.as_use(), contract)
+            .into_iter()
+            .map(|violation| {
+                ValidationDiagnostic::new(
+                    violation.message(contract.component()),
+                    instance.offset_of(violation.anchor(), offset),
+                )
+            })
+            .collect()
+    }
+}
 
-        for prop in contract.required_props() {
-            if element.attribute(prop).is_none() {
-                diagnostics.push(ValidationDiagnostic::new(
-                    format!("component '{component}' requires prop '{prop}'"),
-                    offset,
-                ));
+/// The owned strings one parsed [`Element`] contributes to an [`ElementUse`],
+/// plus the byte offset each part is reported at.
+///
+/// It exists because the rule borrows `&str` while the AST hands out `String`:
+/// the storage must outlive the borrow, and the offsets must travel with it so a
+/// [`ViolationAnchor`] can be resolved back to a source position.
+struct AstInstance {
+    tag: String,
+    attributes: Vec<(String, bool)>,
+    attribute_offsets: Vec<u32>,
+    members: Vec<(String, Option<Slot>, MemberArity)>,
+    member_offsets: Vec<u32>,
+}
+
+/// A member's slot assignment, owned. The borrowed
+/// [`SlotUse`](crate::validation::contract_rule::SlotUse) the rule takes cannot
+/// hold a `String` the AST just minted.
+enum Slot {
+    /// `slot="header"`.
+    Named(String),
+    /// `slot={expr}`.
+    Dynamic,
+}
+
+impl AstInstance {
+    /// Describes `element`, defaulting any part with no recorded position to
+    /// `offset` (the element's own).
+    fn of(element: &Element, offset: u32) -> Self {
+        let mut instance = Self {
+            tag: element.tag_name().unwrap_or_default(),
+            attributes: Vec::new(),
+            attribute_offsets: Vec::new(),
+            members: Vec::new(),
+            member_offsets: Vec::new(),
+        };
+        for attribute in element.attributes() {
+            let event = attribute.is_event();
+            let name = if event {
+                event_name(&attribute)
+            } else {
+                attribute.name().unwrap_or_default()
+            };
+            instance.attributes.push((name, event));
+            instance
+                .attribute_offsets
+                .push(attribute.syntax().offset().unwrap_or(offset));
+        }
+        instance.collect_members(element, MemberArity::Once, offset);
+        instance
+    }
+
+    /// Appends `element`'s members, looking through the control flow that
+    /// splices into it (see the [`contract_rule`](crate::validation::contract_rule)
+    /// module docs).
+    ///
+    /// `<Empty>` / `<Separator>` inside a `<For>` are looked through for the same
+    /// reason: they are §2.11 slots whose *bodies* reach the loop's parent, not
+    /// nodes of their own.
+    fn collect_members(&mut self, element: &Element, arity: MemberArity, offset: u32) {
+        for child in element.children() {
+            let Some(child) = Element::cast(child) else {
+                continue;
+            };
+            let Some(tag) = child.tag_name() else {
+                continue;
+            };
+            let child_offset = child.syntax().offset().unwrap_or(offset);
+            if child.is_conditional() {
+                self.collect_members(
+                    &child,
+                    degrade(arity, MemberArity::AtMostOnce),
+                    child_offset,
+                );
+                continue;
+            }
+            if child.is_loop() {
+                self.collect_members(&child, MemberArity::Any, child_offset);
+                continue;
+            }
+            if arity == MemberArity::Any && matches!(tag.as_str(), "Empty" | "Separator") {
+                self.collect_members(&child, MemberArity::Any, child_offset);
+                continue;
+            }
+            let slot = child
+                .attribute("slot")
+                .map(|attribute| attribute.string_value().map_or(Slot::Dynamic, Slot::Named));
+            self.members.push((tag, slot, arity));
+            self.member_offsets.push(child_offset);
+        }
+    }
+
+    /// Borrows this instance as the plain [`ElementUse`] the rule takes.
+    fn as_use(&self) -> ElementUse<'_> {
+        ElementUse {
+            tag: &self.tag,
+            attributes: self
+                .attributes
+                .iter()
+                .map(|(name, event)| AttributeUse {
+                    name,
+                    event: *event,
+                })
+                .collect(),
+            members: self
+                .members
+                .iter()
+                .map(|(tag, slot, arity)| MemberUse {
+                    tag,
+                    slot: slot.as_ref().map(|slot| match slot {
+                        Slot::Named(name) => SlotUse::Named(name),
+                        Slot::Dynamic => SlotUse::Dynamic,
+                    }),
+                    arity: *arity,
+                })
+                .collect(),
+        }
+    }
+
+    /// Resolves an anchor to the byte offset its diagnostic is reported at.
+    fn offset_of(&self, anchor: ViolationAnchor, element: u32) -> u32 {
+        match anchor {
+            ViolationAnchor::Element => element,
+            ViolationAnchor::Attribute(index) => self
+                .attribute_offsets
+                .get(index)
+                .copied()
+                .unwrap_or(element),
+            ViolationAnchor::Member(index) => {
+                self.member_offsets.get(index).copied().unwrap_or(element)
             }
         }
+    }
+}
 
-        let restrict_props =
-            !contract.required_props().is_empty() || !contract.allowed_props().is_empty();
-        let restrict_events = !contract.allowed_events().is_empty();
-        if restrict_props || restrict_events {
-            for attribute in element.attributes() {
-                let attr_offset = attribute.syntax().offset().unwrap_or(offset);
-                if attribute.is_event() {
-                    if restrict_events {
-                        let event = event_name(&attribute);
-                        if !contract.permits_event(&event) {
-                            diagnostics.push(ValidationDiagnostic::new(
-                                format!("unknown event '{event}' on component '{component}'"),
-                                attr_offset,
-                            ));
-                        }
-                    }
-                    continue;
-                }
-                if restrict_props
-                    && let Some(name) = attribute.name()
-                    && !contract.permits_prop(&name)
-                {
-                    diagnostics.push(ValidationDiagnostic::new(
-                        format!("unknown attribute '{name}' on component '{component}'"),
-                        attr_offset,
-                    ));
-                }
-            }
-        }
-
-        if !contract.allowed_children().is_empty() {
-            for child in element.children() {
-                let Some(child_element) = Element::cast(child) else {
-                    continue;
-                };
-                let Some(tag) = child_element.tag_name() else {
-                    continue;
-                };
-                let child_offset = child_element.syntax().offset().unwrap_or(offset);
-                if !contract
-                    .allowed_children()
-                    .iter()
-                    .any(|allowed| allowed.as_ref() == tag)
-                {
-                    diagnostics.push(ValidationDiagnostic::new(
-                        format!("'{tag}' is not an allowed child of '{component}'"),
-                        child_offset,
-                    ));
-                }
-            }
-        }
-
-        diagnostics
+/// Weakens `arity` to `inner`, keeping the weaker of the two.
+///
+/// Nesting only ever loosens the bound: a member already inside a `<For>` stays
+/// unbounded when an `<If>` wraps it.
+const fn degrade(arity: MemberArity, inner: MemberArity) -> MemberArity {
+    match arity {
+        MemberArity::Any => MemberArity::Any,
+        MemberArity::Once | MemberArity::AtMostOnce => inner,
     }
 }
 

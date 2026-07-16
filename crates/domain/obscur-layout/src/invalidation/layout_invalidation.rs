@@ -9,12 +9,27 @@ use std::collections::HashMap;
 /// with the typed [`LayoutInvalidationReason`] that first invalidated it
 /// (spec §4.3).
 ///
-/// This is the structured replacement for scattered ad-hoc dirty flags. It is
-/// **decoupled from the tree**: it neither stores nor walks parent/child links.
-/// The runtime performs the actual tree walk — finding parents, children, and
-/// their [`LayoutContext`]s — and feeds the observed changes here. This type
-/// only records and merges pending work and, through its `note_*` methods,
-/// applies the §4.3 gate decisions:
+/// # Status: the layout phase does not consume this
+///
+/// This type is what §4.3's "typed invalidation reasons" *should* be, and it is
+/// not yet what the runtime runs on. `UiRuntime::layout_is_needed` populates one
+/// of these from real per-node style deltas and then reads **nothing** off it: it
+/// takes the accompanying `InvalidationRouter`'s `needs_layout()` boolean and
+/// throws the accumulator away. Layout is still all-or-nothing per frame —
+/// `LayoutCoordinator::layout_editing` takes no dirty set and arranges the whole
+/// tree.
+///
+/// So the per-node half of §4.3 is real on the **style** phase only
+/// (`StyleCoordinator::resolve_incremental` consumes a `StyleInvalidation`), and
+/// the equivalent for layout is unbuilt. Do not read the rest of this doc as a
+/// description of shipped behaviour; it describes the contract this type offers to
+/// a consumer that does not exist yet.
+///
+/// It is **decoupled from the tree**: it neither stores nor walks parent/child
+/// links. The runtime performs the actual tree walk — finding parents, children,
+/// and their [`LayoutContext`]s — and feeds the observed changes here. This type
+/// only records and merges pending work and, through its `note_*` methods, offers
+/// the §4.3 gate decisions:
 ///
 /// - **propagate down only on constraint change** — [`note_constraints_changed`](Self::note_constraints_changed),
 /// - **propagate up only on geometry change** (and stop at containment) —

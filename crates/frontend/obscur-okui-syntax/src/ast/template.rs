@@ -10,9 +10,19 @@ use crate::syntax::{SyntaxKind, SyntaxNode};
 /// emits `Template` nodes only rarely, an entire document can be treated as a
 /// template body. Its top-level [`Element`]s are its [`roots`](Self::roots).
 ///
-/// Named slots (§2.12) are marked with a `slot="name"` attribute on an element;
-/// [`slot_names`](Self::slot_names) scans all descendants and collects those
-/// names.
+/// # This type is dead, and its slot model was the wrong way round
+///
+/// The parser never emits a [`Template`](SyntaxKind::Template) node, and nothing
+/// casts one; the `.okui` front end has no component-authoring surface for a
+/// template to be the body *of*. That is why §2.12's slots are a *consumer*-side
+/// construct here — see `obscur_okui_compiler::validation::contract_rule`.
+///
+/// [`slot_names`](Self::slot_names) collects the `slot="name"` attributes on the
+/// subtree's descendants. Those are slot **assignments** — each says which of its
+/// *parent component's* declared slots that child goes in — not slots the subtree
+/// declares, which is what this type's name suggests and what it does not do. A
+/// declaration lives on a component's contract
+/// (`obscur_view::contract::SlotSurface`), which is string data, not syntax.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Template(SyntaxNode);
 
@@ -39,11 +49,11 @@ impl Template {
         self.0.child_nodes().cloned().filter_map(Element::cast)
     }
 
-    /// Collects the names of all named slots in the template.
+    /// Collects the slot **assignments** in the subtree: the `slot="name"`
+    /// attribute value of every descendant element, in document order.
     ///
-    /// A named slot is any descendant element carrying a `slot="name"`
-    /// attribute; this recursively scans the subtree and gathers each such name
-    /// in document order.
+    /// See the type docs: these are not names the subtree declares. Nothing
+    /// calls this.
     #[must_use]
     pub fn slot_names(&self) -> Vec<String> {
         let mut names = Vec::new();

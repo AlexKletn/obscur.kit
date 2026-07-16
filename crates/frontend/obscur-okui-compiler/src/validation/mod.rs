@@ -9,16 +9,28 @@
 //! - [`CapabilityValidator`] checks that each element's declared required
 //!   capability is granted (§2.13).
 //! - [`ContractValidator`] checks a component instance against a
-//!   [`ComponentContract`] — required props and allowed children (§2.13).
+//!   [`ComponentContract`] — required props, allowed children and the §2.12
+//!   slots — on the **file** front end.
+//! - [`check_contract`] is that same rule, stated over plain data, so the
+//!   `okui!` macro reaches the same verdict from `syn` tokens; see the
+//!   [`contract_rule`] module docs for why the rule is not written against
+//!   either front end's input.
 
 mod builtin_contracts;
 pub use builtin_contracts::{builtin_contracts, widget_contracts};
 mod capability_validator;
 pub use capability_validator::CapabilityValidator;
+pub mod contract_rule;
+pub use contract_rule::{
+    AttributeUse, ContractViolation, ElementUse, MemberArity, MemberUse, SlotUse, ViolationAnchor,
+    check_contract, is_reserved_attribute,
+};
 mod contract_validator;
 pub use contract_validator::{ComponentContract, ContractValidator};
 mod expression_validator;
 pub use expression_validator::{
     ExpressionValidator, FORBIDDEN_MESSAGE, ValidationDiagnostic, check_expression,
 };
+mod slot_rule;
+pub use slot_rule::SlotRule;
 mod surface_bridge;

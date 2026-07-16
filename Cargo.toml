@@ -105,6 +105,7 @@ obscur-system-web = { path = "crates/adapters/obscur-system-web" }
 obscur-text-harfrust = { path = "crates/adapters/obscur-text-harfrust" }
 obscur-text-unicode = { path = "crates/adapters/obscur-text-unicode" }
 obscur-text-hyphenation = { path = "crates/adapters/obscur-text-hyphenation" }
+obscur-font-fontconfig = { path = "crates/adapters/obscur-font-fontconfig" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

@@ -1534,6 +1534,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "obscur-font-fontconfig"
+version = "0.0.0"
+dependencies = [
+ "obscur-text",
+]
+
+[[package]]
 name = "obscur-geometry"
 version = "0.0.0"
 
@@ -1582,6 +1589,7 @@ dependencies = [
  "obscur-devtools-protocol",
  "obscur-devtools-server",
  "obscur-diagnostics",
+ "obscur-font-fontconfig",
  "obscur-geometry",
  "obscur-headless",
  "obscur-identity",

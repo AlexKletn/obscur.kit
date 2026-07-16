@@ -1,6 +1,8 @@
 //! `ComponentSurface`: the string-keyed *tooling* view of a component's usage
 //! contract (spec §2.13).
 
+use crate::contract::SlotSurface;
+
 /// Which children a [`ComponentSurface`] permits, named by string tag.
 ///
 /// This mirrors [`ChildContract`](crate::contract::ChildContract) in the string
@@ -51,7 +53,10 @@ pub enum ChildrenSurface {
 ///   prop surface is closed once any prop, required or allowed, is declared);
 /// - `allowed_events` — the `on:<event>` names an instance may bind (an empty
 ///   list leaves the event surface open);
-/// - `children` — which child tags are permitted (see [`ChildrenSurface`]).
+/// - `children` — which child tags are permitted (see [`ChildrenSurface`]);
+/// - `slots` — the named slots the component declares (see [`SlotSurface`]).
+///   Declaring none closes the slot surface: a child of an instance may then
+///   carry no `slot="…"` at all.
 ///
 /// It is built fluently, for example:
 ///
@@ -73,6 +78,7 @@ pub struct ComponentSurface {
     allowed_props: Vec<&'static str>,
     allowed_events: Vec<&'static str>,
     children: ChildrenSurface,
+    slots: Vec<SlotSurface>,
 }
 
 impl ComponentSurface {
@@ -86,6 +92,7 @@ impl ComponentSurface {
             allowed_props: Vec::new(),
             allowed_events: Vec::new(),
             children: ChildrenSurface::Any,
+            slots: Vec::new(),
         }
     }
 
@@ -135,6 +142,13 @@ impl ComponentSurface {
         self
     }
 
+    /// Declares a named slot on the surface (fluent; spec §2.12).
+    #[must_use]
+    pub fn with_slot(mut self, slot: SlotSurface) -> Self {
+        self.slots.push(slot);
+        self
+    }
+
     /// Returns the described component's name.
     #[must_use]
     pub fn component(&self) -> &str {
@@ -163,6 +177,15 @@ impl ComponentSurface {
     #[must_use]
     pub fn children(&self) -> &ChildrenSurface {
         &self.children
+    }
+
+    /// Returns the declared named slots (spec §2.12); an empty slice means the
+    /// component declares none, which *closes* the slot surface rather than
+    /// leaving it open — the asymmetry with props/children is deliberate, since
+    /// a `slot="…"` naming nothing has no meaning to fall back to.
+    #[must_use]
+    pub fn slots(&self) -> &[SlotSurface] {
+        &self.slots
     }
 }
 
@@ -217,6 +240,18 @@ mod tests {
                 .children(),
             &ChildrenSurface::Any
         );
+    }
+
+    #[test]
+    fn declared_slots_are_kept_in_order() {
+        use crate::contract::{SlotCardinality, SlotSurface};
+
+        let surface = ComponentSurface::new("Card")
+            .with_slot(SlotSurface::new("header", SlotCardinality::ExactlyOne))
+            .with_slot(SlotSurface::new("body", SlotCardinality::Many));
+        let names: Vec<&str> = surface.slots().iter().map(SlotSurface::name).collect();
+        assert_eq!(names, vec!["header", "body"]);
+        assert!(ComponentSurface::new("Box").slots().is_empty());
     }
 
     #[test]

@@ -15,5 +15,7 @@ mod slot_cardinality;
 pub use slot_cardinality::SlotCardinality;
 mod slot_contract;
 pub use slot_contract::SlotContract;
+mod slot_surface;
+pub use slot_surface::SlotSurface;
 mod style_part_contract;
 pub use style_part_contract::StylePartContract;

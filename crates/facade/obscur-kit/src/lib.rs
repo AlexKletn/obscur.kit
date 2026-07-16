@@ -78,6 +78,8 @@ pub mod perf;
 pub use obscur_accessibility_accesskit as accesskit_bridge;
 #[cfg(feature = "cache-fs")]
 pub use obscur_cache_fs as cache_fs;
+#[cfg(feature = "font-fontconfig")]
+pub use obscur_font_fontconfig as font_fontconfig;
 #[cfg(feature = "render-cpu")]
 pub use obscur_render_cpu as render_cpu;
 #[cfg(feature = "render-vello")]

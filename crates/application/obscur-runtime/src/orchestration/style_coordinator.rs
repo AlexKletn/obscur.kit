@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use obscur_geometry::Size;
 use obscur_identity::NodeId;
 use obscur_style::computed::{ComputedStyle, ResolutionContext, StyleResolver};
+use obscur_style::invalidation::StyleInvalidation;
 use obscur_tree::tree::RetainedTree;
 
 use super::StyleInputs;
@@ -12,6 +13,31 @@ use super::StyleInputs;
 /// The computed style for every node the coordinator resolved, keyed by
 /// [`NodeId`].
 pub type ComputedStyles = HashMap<NodeId, ComputedStyle>;
+
+/// What [`StyleCoordinator::resolve_incremental`] did, so the frame pipeline can
+/// classify the phases downstream of it (spec §3.4 phase 5, §4.3).
+#[derive(Debug, Clone, Default)]
+pub struct IncrementalRestyle {
+    /// How many nodes were re-resolved — the frame's real style cost, and the
+    /// number the `style.resolved` counter reports. Not the size of the resulting
+    /// map, and not `previous.len()` either.
+    pub resolved: usize,
+    /// The style each re-resolved node had **before**, for those that had one.
+    ///
+    /// Together with [`introduced`](Self::introduced) this is the complete answer to
+    /// "where can the map have changed?": a node absent from both was not
+    /// re-resolved, so it provably still holds the style it did last frame.
+    pub previous: ComputedStyles,
+    /// Whether any re-resolved node had **no** retained style, i.e. the walk added
+    /// an entry rather than replacing one.
+    ///
+    /// Such a node has no "before" to compare against, so it is not in `previous`
+    /// and a consumer must not conclude anything from its absence there. Always
+    /// `false` when the caller's precondition holds (the retained map covers the
+    /// tree); it exists so that a caller which is wrong about that degrades to
+    /// conservative rather than to silently skipping work.
+    pub introduced: bool,
+}
 
 /// Orchestrates computed-style resolution over a [`RetainedTree`].
 ///
@@ -74,6 +100,86 @@ impl StyleCoordinator {
             .map(|&(node, _)| node)
             .find(|&node| tree.get(node).is_some_and(|n| n.kind().is_element()));
         self.resolve_in_order(&order, inputs, viewport, root_element)
+    }
+
+    /// Re-resolves **only** the nodes `dirty` records, updating `styles` in place
+    /// (spec §3.4 phase 5, §4.3).
+    ///
+    /// This is the same walk as [`resolve`](Self::resolve) — the same parent-first
+    /// order, the same threaded parent style, the same `rem` base read off the root
+    /// element — with the resolve step gated on the dirty set: a node the set does
+    /// not record keeps the style it already had instead of recomputing an identical
+    /// one. Sharing the walk is what makes the two paths agree by construction rather
+    /// than by coincidence.
+    ///
+    /// # What the caller owes
+    ///
+    /// `styles` must be what this same walk produced over this same tree, and
+    /// `dirty` must record **every** node whose resolved style can differ — see
+    /// [`RestyleScope`](crate::invalidation::RestyleScope), which derives that set
+    /// from the selector engine's navigation surface. A node missing from `dirty`
+    /// is not checked; it is *assumed* unchanged. Since the marked set is
+    /// downward-closed, inheritance needs no separate pass: a node whose parent
+    /// changed is in the set with it.
+    #[must_use]
+    pub fn resolve_incremental(
+        &self,
+        tree: &RetainedTree,
+        inputs: &StyleInputs,
+        viewport: Size,
+        dirty: &StyleInvalidation,
+        styles: &mut ComputedStyles,
+    ) -> IncrementalRestyle {
+        let mut out = IncrementalRestyle::default();
+        let Some(root) = tree.root() else {
+            return out;
+        };
+        let order = Self::preorder(root, |id| {
+            tree.get(id)
+                .map_or_else(Vec::new, |node| node.children().to_vec())
+        });
+        let root_element = order
+            .iter()
+            .map(|&(node, _)| node)
+            .find(|&node| tree.get(node).is_some_and(|n| n.kind().is_element()));
+
+        let mut ctx = ResolutionContext::for_root(viewport.width, viewport.height);
+        for &(node, parent) in &order {
+            // The `contains_key` arm is a hole guard, not part of the model: the
+            // caller's precondition says the retained map covers this tree, and if it
+            // somehow does not, resolving the node is better than leaving it styleless
+            // — but the caller must then not treat unlisted nodes as unchanged, which
+            // is what `introduced` tells it.
+            if dirty.is_invalidated(node) || !styles.contains_key(&node) {
+                let parent_style = parent.and_then(|p| styles.get(&p));
+                let computed = self.resolver.resolve(
+                    inputs.cascaded_for(node),
+                    inputs.custom_for(node),
+                    parent_style,
+                    ctx,
+                );
+                out.resolved += 1;
+                match styles.insert(node, computed) {
+                    Some(previous) => {
+                        out.previous.insert(node, previous);
+                    }
+                    None => out.introduced = true,
+                }
+            }
+            // Read the `rem` base back off whatever style the root element ended
+            // with — freshly resolved or retained — so it is the font-size the root
+            // actually paints at either way, exactly as in `resolve_in_order`.
+            if Some(node) == root_element
+                && let Some(style) = styles.get(&node)
+            {
+                ctx = ResolutionContext::new(
+                    StyleResolver::font_size_of(style),
+                    viewport.width,
+                    viewport.height,
+                );
+            }
+        }
+        out
     }
 
     /// Computes a parent-first (pre-order) traversal from `root`, pairing each

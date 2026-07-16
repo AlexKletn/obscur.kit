@@ -65,7 +65,7 @@ use super::{
     FrameBudget, FramePlan, KeyDispatch, PointerDispatch, SemanticTreeBuilder, TextEditSession,
 };
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
-use crate::invalidation::{Invalidation, InvalidationReason, InvalidationRouter};
+use crate::invalidation::{Invalidation, InvalidationReason, InvalidationRouter, RestyleScope};
 use std::collections::VecDeque;
 
 use crate::component::{ComponentStore, GuardedRender};
@@ -194,6 +194,29 @@ pub struct UiRuntime {
     /// future paint-only class) can reuse them instead of re-resolving (§3.4
     /// phase 5 incremental recalculation).
     computed: ComputedStyles,
+    /// The settled cascade value of every node the motion overlay has written
+    /// into `computed`, keyed by node.
+    ///
+    /// [`apply_motion_overlay`](Self::apply_motion_overlay) samples *after*
+    /// inheritance, so a node it touches no longer holds the value the resolver
+    /// produced. Two readers need that value back: this frame's transition
+    /// change-detection, which must compare settled targets rather than
+    /// mid-animation samples, and an incremental restyle, which treats a retained
+    /// style as the resolver's own output. So the overlay stashes the pure style
+    /// here before overwriting it, and the style phase puts it back.
+    ///
+    /// The invariant, maintained by every path through
+    /// [`run_frame`](Self::run_frame): `computed[n]` is a pure cascade value
+    /// exactly when `n` is absent here, and the entry here is that pure value.
+    /// Empty whenever nothing is animating.
+    overlaid: ComputedStyles,
+    /// The style-phase inputs the retained `inputs`/`computed` were produced from,
+    /// or `None` until the first style phase runs.
+    ///
+    /// An incremental restyle reuses those retained outputs for every node it does
+    /// not re-resolve, which is sound only while everything they were computed
+    /// from is unchanged. This is that "everything": see [`StyleKey`].
+    last_style: Option<StyleKey>,
     /// The z-order-aware hit-test index, rebuilt from `boxes` after each frame.
     spatial: SpatialIndex,
     /// The nodes currently under the pointer, topmost-first (hover target at
@@ -588,6 +611,8 @@ impl UiRuntime {
             boxes: LayoutBoxes::new(),
             inputs: StyleInputs::new(),
             computed: ComputedStyles::new(),
+            overlaid: ComputedStyles::new(),
+            last_style: None,
             spatial: SpatialIndex::new(),
             hover: HoverChain::new(),
             last_layout_inputs: None,
@@ -2068,7 +2093,7 @@ impl UiRuntime {
         // 2-3. Match + style: rebuild cascade inputs and resolve computed styles.
         //    When the style phase is skipped, reuse the retained computed styles
         //    so a downstream layout/compose still has values to work from.
-        let (computed, restyled) = if plan.style() {
+        let (computed, restyled, delta) = if plan.style() {
             // Match authored sheets against the tree, honouring live interaction
             // state so `:hover`/`:focus` participate and gating `@media`/
             // `@container` rules by this frame's viewport (§4.13).
@@ -2079,23 +2104,29 @@ impl UiRuntime {
             // (`SystemDefault`), so any author declaration overrides it (§4.14).
             // When absent, the author slice is passed through untouched, keeping
             // matching byte-identical to before.
-            let matched_sheets: Vec<Stylesheet>;
-            let sheets: &[Stylesheet] = match &self.default_stylesheet {
-                Some(default) => {
-                    matched_sheets = std::iter::once(default.clone())
-                        .chain(sheets.iter().cloned())
-                        .collect();
-                    &matched_sheets
-                }
-                None => sheets,
+            let sheets: Vec<Stylesheet> = match &self.default_stylesheet {
+                Some(default) => std::iter::once(default.clone())
+                    .chain(sheets.iter().cloned())
+                    .collect(),
+                None => sheets.to_vec(),
             };
-            let inputs = self.matcher.build_inputs_with_pseudo_env(
-                &self.tree,
+            // Phase 5 (§3.4), per node: does this frame have to restyle everything,
+            // or does it know exactly which nodes can differ? `None` means it does
+            // not know and must run the whole pass.
+            let scope = self.restyle_scope(&sheets, ctx.viewport(), reconciled);
+            let (mut computed, resolved_count, delta) = match scope {
+                Some(dirty) => {
+                    self.restyle_invalidated(&sheets, &environment, ctx.viewport(), &dirty)
+                }
+                None => self.restyle_everything(&sheets, &environment, ctx.viewport()),
+            };
+            // Remember what these inputs/styles were produced from, so the next
+            // frame can tell whether interaction state is all that moved.
+            self.last_style = Some(StyleKey {
+                viewport: ctx.viewport(),
                 sheets,
-                &self.pseudo,
-                &environment,
-            );
-            let mut computed = self.style.resolve(&self.tree, &inputs, ctx.viewport());
+                pseudo: self.pseudo.clone(),
+            });
             // 3a. CSS motion: match selector-bound `transition`/`@keyframes`
             //     rules against the tree over the *resolved* (pre-overlay) values,
             //     starting a timeline for any transitioned property that changed
@@ -2106,9 +2137,10 @@ impl UiRuntime {
             //     motion → paint). This now includes the CSS-started timelines.
             self.apply_motion_overlay(&mut computed);
             let restyled = !computed.is_empty();
-            self.inputs = inputs;
-            // Telemetry: mark the style phase and count resolved styles (§7.9).
-            let count = computed.len() as u64;
+            // Telemetry: mark the style phase and count the styles this frame
+            // actually resolved — NOT the size of the resulting map (§7.9). On the
+            // incremental path those differ, and the whole point is which one.
+            let count = resolved_count as u64;
             record_phase(
                 &mut *self.telemetry,
                 "style",
@@ -2118,13 +2150,13 @@ impl UiRuntime {
                 self.budget.check_style(count),
                 ctx.id(),
             );
-            (computed, restyled)
+            (computed, restyled, delta)
         } else {
             // Reuse the retained computed styles; re-apply the motion overlay so
             // a motion-only frame still advances its animated values.
             let mut computed = self.computed.clone();
             self.apply_motion_overlay(&mut computed);
-            (computed, false)
+            (computed, false, StyleDelta::Full)
         };
 
         // 4. Layout: map to layout styles, arrange, and retain the boxes.
@@ -2137,7 +2169,8 @@ impl UiRuntime {
         //    exist, refine it with what ACTUALLY changed (spec §3.4 phase 5, §4.3)
         //    — a hover that only shifts a fill reuses every retained box, even on
         //    the reactive path where every frame is classified structural.
-        let layout_needed = self.layout_is_needed(plan, &ctx, first_frame, reconciled, &computed);
+        let layout_needed =
+            self.layout_is_needed(plan, &ctx, first_frame, reconciled, &computed, &delta);
         let relaid_out = if layout_needed {
             let root_font = root_font_size(&computed, self.tree.root());
             // `ch` is the one unit that cannot be folded from numbers the
@@ -2480,6 +2513,9 @@ impl UiRuntime {
     /// [`PropertyValue`]: obscur_style::property::PropertyValue
     /// [`ComputedStyle`]: obscur_style::computed::ComputedStyle
     fn apply_motion_overlay(&mut self, computed: &mut ComputedStyles) {
+        // Moved out so the loop can borrow `self.animations` and still record into
+        // it; put back before returning.
+        let mut overlaid = std::mem::take(&mut self.overlaid);
         for binding in &self.animations {
             // Read progress from the scheduler; a finished (pruned) timeline holds
             // its endpoint at t == 1.0.
@@ -2501,9 +2537,18 @@ impl UiRuntime {
                 continue;
             };
             if let Some(style) = computed.get_mut(&binding.node()) {
+                // Stash the settled cascade value the first time this node is
+                // overlaid since the last restyle, so the style phase can put it
+                // back — see the `overlaid` field. `or_insert_with` is what makes
+                // it the *first*: on a later frame `style` already carries a sample,
+                // and snapshotting that would lose the cascade for good.
+                overlaid
+                    .entry(binding.node())
+                    .or_insert_with(|| style.clone());
                 style.set(binding.property(), value);
             }
         }
+        self.overlaid = overlaid;
     }
 
     /// Drives the installed CSS `transition`/`@keyframes` rules against the tree,
@@ -4562,6 +4607,157 @@ impl UiRuntime {
         }
     }
 
+    /// Classifies this frame's style phase into a per-node dirty set, or `None`
+    /// when the frame cannot prove which nodes a full pass would change (§3.4
+    /// phase 5, §4.3).
+    ///
+    /// §4.3 asks that recalculation start "at the nearest affected context" and
+    /// that ad-hoc dirty flags not be the model. This is where a frame stops
+    /// asking *whether* to restyle and starts asking *what*: it returns the typed
+    /// [`StyleInvalidation`] accumulator that
+    /// [`StyleMatchingCoordinator::rematch_into`] and
+    /// [`StyleCoordinator::resolve_incremental`] then consume.
+    ///
+    /// # The one case it narrows, and why only that one
+    ///
+    /// The retained inputs and styles can be reused only for nodes a full pass
+    /// would recompute identically, which needs every input of the match + style
+    /// phase to be unchanged bar one whose blast radius is known. Those inputs are
+    /// the tree, the sheets, the media environment and the interaction state; this
+    /// requires the first three to be unchanged ([`StyleKey`], plus the frame's own
+    /// `reconciled` result for the tree) and derives the dirty set from the fourth
+    /// via [`RestyleScope`]. Every other cause of a restyle — a new stylesheet, a
+    /// resize, a tree edit — answers `None` and restyles in full, which is what the
+    /// runtime did for all of them before.
+    ///
+    /// # Why `reconciled` and not `plan.reconcile()`
+    ///
+    /// Identical to the reasoning in [`layout_is_needed`](Self::layout_is_needed):
+    /// the reactive path classifies every frame as structural, so gating on the
+    /// plan would never take this path from a real windowed host. Reconcile reports
+    /// whether it actually changed anything, and an empty commit proves the tree is
+    /// byte-identical to the one the retained styles were resolved over.
+    fn restyle_scope(
+        &self,
+        sheets: &[Stylesheet],
+        viewport: Size,
+        reconciled: bool,
+    ) -> Option<StyleInvalidation> {
+        if reconciled {
+            return None;
+        }
+        let last = self.last_style.as_ref()?;
+        if last.viewport != viewport || last.sheets != sheets {
+            return None;
+        }
+        // Nothing retained to reuse (no style phase has produced a map yet, or the
+        // tree is empty): the full pass is the cheap one anyway.
+        if self.computed.is_empty() {
+            return None;
+        }
+
+        let mut dirty = StyleInvalidation::new();
+        for root in RestyleScope::changed_states(&last.pseudo, &self.pseudo) {
+            if !RestyleScope::expand(&self.tree, root, &mut dirty) {
+                // The scope could not be bounded; a partial set would be a wrong
+                // one, so widen to everything.
+                return None;
+            }
+        }
+        Some(dirty)
+    }
+
+    /// Runs the whole match + style pass: every element is re-matched and every
+    /// node re-resolved.
+    ///
+    /// Returns the fresh styles, how many nodes were resolved (all of them), and a
+    /// [`StyleDelta::Full`] — `self.computed` is untouched, so it is still the
+    /// previous frame's map for the layout classifier to diff against.
+    fn restyle_everything(
+        &mut self,
+        sheets: &[Stylesheet],
+        environment: &MediaEnvironment,
+        viewport: Size,
+    ) -> (ComputedStyles, usize, StyleDelta) {
+        let inputs = self.matcher.build_inputs_with_pseudo_env(
+            &self.tree,
+            sheets,
+            &self.pseudo,
+            environment,
+        );
+        let computed = self.style.resolve(&self.tree, &inputs, viewport);
+        self.inputs = inputs;
+        // Every node's style is freshly resolved, so nothing in the new map carries
+        // a motion sample and the stash of pre-overlay values describes a map that
+        // no longer exists.
+        self.overlaid.clear();
+        let resolved = computed.len();
+        (computed, resolved, StyleDelta::Full)
+    }
+
+    /// Runs the match + style pass over **only** the nodes `dirty` records,
+    /// mutating the retained inputs and styles in place (§3.4 phase 5, §4.3).
+    ///
+    /// The retained map is moved out and handed back as this frame's styles, so a
+    /// node outside `dirty` costs nothing at all — not a re-match, not a re-resolve,
+    /// not even a copy. What the phase pays is proportional to the dirty set, plus
+    /// the one pre-order walk `resolve_incremental` needs to visit the tree in
+    /// parent-first order.
+    ///
+    /// Returns the styles, how many nodes were actually resolved, and the styles
+    /// they had before.
+    fn restyle_invalidated(
+        &mut self,
+        sheets: &[Stylesheet],
+        environment: &MediaEnvironment,
+        viewport: Size,
+        dirty: &StyleInvalidation,
+    ) -> (ComputedStyles, usize, StyleDelta) {
+        let mut computed = std::mem::take(&mut self.computed);
+
+        // Undo the motion overlay first: the retained map is about to be treated as
+        // the resolver's own output — by the incremental walk, whose non-dirty
+        // entries stand in for values it did not recompute, and by the transition
+        // change-detection, which must compare settled cascade targets. `replaced`
+        // starts from what the overlay had put there, because that is what the
+        // previous frame's LAYOUT ran on, and the layout classifier compares
+        // against that.
+        let mut replaced = ComputedStyles::new();
+        for (node, pure) in self.overlaid.drain() {
+            if let Some(slot) = computed.get_mut(&node) {
+                replaced.insert(node, std::mem::replace(slot, pure));
+            }
+        }
+
+        self.matcher.rematch_into(
+            &mut self.inputs,
+            &self.tree,
+            sheets,
+            &self.pseudo,
+            environment,
+            dirty,
+        );
+        let restyle = self.style.resolve_incremental(
+            &self.tree,
+            &self.inputs,
+            viewport,
+            dirty,
+            &mut computed,
+        );
+        for (node, previous) in restyle.previous {
+            // The overlay snapshot above is the older of the two, so it wins.
+            replaced.entry(node).or_insert(previous);
+        }
+        (
+            computed,
+            restyle.resolved,
+            StyleDelta::Incremental {
+                replaced,
+                introduced: restyle.introduced,
+            },
+        )
+    }
+
     /// Refines the plan's conservative layout flag with the **actual** per-node
     /// changes (spec §3.4 phase 5 "classify invalidation", §4.3).
     ///
@@ -4604,6 +4800,16 @@ impl UiRuntime {
     /// font or image that finished loading changes text metrics / intrinsic sizes,
     /// and neither is a computed style nor a tracked layout input, so its deltas are
     /// invisible here and it must keep laying out.
+    /// # Which nodes it has to ask about
+    ///
+    /// That depends on how the style phase produced `computed`, which is what
+    /// `delta` carries. A [`Full`](StyleDelta::Full) pass re-resolved everything, so
+    /// every node is a candidate and the previous styles are still in
+    /// `self.computed`. An [`Incremental`](StyleDelta::Incremental) pass re-resolved
+    /// only the invalidated nodes, so those are the only candidates — every other
+    /// node's style was not recomputed and therefore cannot have changed — and it
+    /// hands over exactly their previous styles. A hover on one node then costs one
+    /// property comparison here, not one per node in the tree.
     fn layout_is_needed(
         &self,
         plan: FramePlan,
@@ -4611,6 +4817,7 @@ impl UiRuntime {
         first_frame: bool,
         reconciled: bool,
         computed: &ComputedStyles,
+        delta: &StyleDelta,
     ) -> bool {
         if !plan.layout() {
             return false;
@@ -4631,24 +4838,62 @@ impl UiRuntime {
         if self.last_layout_inputs.as_ref() != Some(&self.current_layout_inputs(ctx)) {
             return true;
         }
-        // A node cannot appear/disappear without a reconcile, but if the styled
-        // set differs at all the retained boxes cannot be proven valid.
-        if computed.len() != self.computed.len() {
-            return true;
-        }
 
         // Route the REAL per-node deltas: only a node whose layout-affecting
         // properties changed dirties the layout phase.
         let mut router = InvalidationRouter::new();
         let mut style_invalidation = StyleInvalidation::new();
         let mut layout_invalidation = LayoutInvalidation::new();
-        for (node, style) in computed {
-            if layout_affecting_changed(self.computed.get(node), style) {
+        let mut route = |node: NodeId, previous: Option<&ComputedStyle>| {
+            if computed
+                .get(&node)
+                .is_some_and(|style| layout_affecting_changed(previous, style))
+            {
                 router.route(
-                    Invalidation::new(Some(*node), InvalidationReason::StyleChanged),
+                    Invalidation::new(Some(node), InvalidationReason::StyleChanged),
                     &mut style_invalidation,
                     &mut layout_invalidation,
                 );
+            }
+        };
+        match delta {
+            StyleDelta::Full => {
+                // A node cannot appear/disappear without a reconcile, but if the
+                // styled set differs at all the retained boxes cannot be proven
+                // valid.
+                if computed.len() != self.computed.len() {
+                    return true;
+                }
+                for &node in computed.keys() {
+                    route(node, self.computed.get(&node));
+                }
+            }
+            StyleDelta::Incremental {
+                replaced,
+                introduced,
+            } => {
+                // A node the retained map was missing has no "before", so absence
+                // from `replaced` proves nothing about it. Cannot happen while the
+                // retained map covers the tree; if it ever does, lay out.
+                if *introduced {
+                    return true;
+                }
+                // The candidates are every node this frame's style phase wrote:
+                // the ones it re-resolved, plus the ones the motion overlay
+                // sampled onto *after* it returned. A node in neither kept a
+                // style nothing touched, so its box cannot have moved.
+                //
+                // For an overlay-only node the stash IS its previous style: it
+                // held a pure cascade value entering the frame (or the restore in
+                // `restyle_invalidated` would have listed it in `replaced`), and
+                // nothing re-resolved it, so that value is what the last frame's
+                // layout ran on.
+                for &node in replaced.keys().chain(self.overlaid.keys()) {
+                    route(
+                        node,
+                        replaced.get(&node).or_else(|| self.overlaid.get(&node)),
+                    );
+                }
             }
         }
         router.needs_layout()
@@ -5492,6 +5737,63 @@ struct LayoutInputs {
     /// The focused editable's `(node, text, preedit)` — the string the text leaf
     /// was measured from; `None` when no editing session is active.
     editing: Option<(NodeId, String, Option<String>)>,
+}
+
+/// Everything the style phase reads **apart from** the retained tree and the
+/// per-node interaction state (spec §3.4 phase 5, §4.3).
+///
+/// The match + style phase's inputs are exactly: the tree, the authored sheets,
+/// the media environment (which here is a function of the viewport), and the
+/// [`PseudoStates`] map. An incremental restyle is the claim that the *only* one
+/// of those that moved is the interaction state — the tree is covered by the
+/// frame's `reconciled` result, and this covers the rest. Any mismatch means the
+/// frame cannot know which nodes a full pass would have changed, and must run one.
+///
+/// The sheets are held **by value** and compared structurally: a host is free to
+/// hand `run_frame` a freshly built `Vec<Stylesheet>` each frame, so identity
+/// would report a change that isn't one, and a stale-sheet restyle is silently
+/// wrong rather than merely slow.
+#[derive(Debug, Clone)]
+struct StyleKey {
+    /// The viewport the media environment and every `vw`/`vh` were resolved
+    /// against.
+    viewport: Size,
+    /// The sheets that were matched, UA default first — the exact slice
+    /// `build_inputs_with_pseudo_env` saw.
+    sheets: Vec<Stylesheet>,
+    /// The interaction state the retained inputs/styles were matched under. The
+    /// baseline this frame's map is diffed against to find the restyle roots.
+    pseudo: PseudoStates,
+}
+
+/// What the style phase left for the layout classifier to compare against
+/// (spec §3.4 phase 5, §4.3).
+///
+/// [`UiRuntime::layout_is_needed`] answers "could any box have moved?" by diffing
+/// each node's layout-affecting properties against what it had before. Which nodes
+/// it must ask about depends on how the styles were produced, and so does where
+/// the "before" lives — hence this enum rather than an unconditional whole-map
+/// diff.
+enum StyleDelta {
+    /// Every node was re-resolved from scratch. The previous styles are still in
+    /// `UiRuntime::computed` (the fresh map is a separate allocation), and any node
+    /// may have changed.
+    Full,
+    /// Only the invalidated nodes were re-resolved, in place. Every node absent
+    /// from `replaced` kept a style this frame did not recompute and therefore
+    /// provably did not change, so those are the only candidates — and `replaced`
+    /// holds the style each of them had before.
+    Incremental {
+        /// The styles the re-resolved nodes had before, as
+        /// [`IncrementalRestyle::previous`] returned them, plus the pre-overlay
+        /// restorations the phase made first.
+        replaced: ComputedStyles,
+        /// Whether the walk styled a node that had no retained style, in which case
+        /// `replaced` is *not* the complete list of candidates and nothing may be
+        /// concluded from a node's absence. See
+        /// [`IncrementalRestyle::introduced`].
+        introduced: bool,
+    },
 }
 
 /// Whether any **layout-affecting** computed property differs between the

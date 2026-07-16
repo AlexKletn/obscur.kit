@@ -25,11 +25,28 @@
 //!   `fnv32` — which this derive used to emit — agrees with that only by luck,
 //!   whenever the hash happens to already carry the top bit.
 //! - **Names that exist only inside the contract model** — the component name
-//!   symbol, the component id, and each field's normalized *type* string — have
-//!   no view-tree counterpart to agree with, so they stay plain FNV-1a
-//!   ([`fnv32`] / [`fnv64`]).
+//!   symbol, the component id, each field's normalized *type* string, and a
+//!   §2.12 slot's name — have no view-tree counterpart to agree with, so they
+//!   stay plain FNV-1a ([`fnv32`] / [`fnv64`]). A slot name is one of these
+//!   because a `slot="header"` reaches the tree as the *value* of a property,
+//!   never as a symbol.
+//!
+//! # Slots (§2.12)
+//!
+//! A struct-level `#[contract(slot(name = "header", cardinality = one))]`
+//! declares one named slot; `cardinality` is `one`/`optional`/`many` (default
+//! `many`) and a repeatable `child = "Tag"` restricts what the slot admits.
+//!
+//! Both views are emitted from the one declaration, and only one of them is read
+//! today: [`contract_surface`] is what the `.okui` compiler and the `okui!` macro
+//! check a document against, while the typed `contract()`'s `slots` field has no
+//! production reader — as is true of its props and events. Emitting it anyway is
+//! not decoration: a component that declares a slot and whose typed contract
+//! reports `slots: []` would be *wrong*, and an unread field beats a lying one.
+//!
+//! [`contract_surface`]: ::obscur_view::contract::ComponentSurface
 
-use proc_macro2::{Literal, TokenStream};
+use proc_macro2::{Literal, Span, TokenStream};
 use quote::{ToTokens, quote};
 use syn::{Data, DeriveInput, Fields, LitStr, Type, spanned::Spanned};
 
@@ -113,6 +130,18 @@ impl ContractDerive {
             ChildrenKind::None => quote!(.no_children()),
         });
 
+        // The §2.12 slots, emitted onto both views from the one declaration.
+        let slot_tokens: TokenStream = struct_attrs
+            .slots
+            .iter()
+            .map(SlotModel::contract_tokens)
+            .collect();
+        let surface_slot_tokens: TokenStream = struct_attrs
+            .slots
+            .iter()
+            .map(SlotModel::surface_tokens)
+            .collect();
+
         Ok(quote! {
             impl #impl_generics #struct_ident #ty_generics #where_clause {
                 /// Returns the typed component contract for this props struct,
@@ -125,6 +154,7 @@ impl ContractDerive {
                     .with_name(::obscur_identity::InternedSymbol::from_raw(#name_sym))
                     #entries
                     #children_tokens
+                    #slot_tokens
                 }
 
                 /// Returns the string-keyed tooling surface for this props
@@ -140,6 +170,7 @@ impl ContractDerive {
                     ::obscur_view::contract::ComponentSurface::new(#component_name_literal)
                     #surface_entries
                     #surface_children_tokens
+                    #surface_slot_tokens
                 }
             }
 
@@ -165,6 +196,134 @@ enum ChildrenKind {
     None,
 }
 
+/// One `#[contract(slot(name = "…", cardinality = …, child = "…"))]` declaration
+/// (spec §2.12).
+#[derive(Debug)]
+struct SlotModel {
+    /// The slot's name — the value a child's `slot="…"` must match.
+    name: String,
+    /// How many children the slot accepts; `many` when unstated, the only
+    /// default that adds no obligation the author did not ask for.
+    cardinality: SlotCardinality,
+    /// The child tags the slot admits; empty means any.
+    children: Vec<String>,
+}
+
+/// Which `SlotCardinality` variant a `#[contract(slot(cardinality = ...))]`
+/// selects.
+#[derive(Debug, Clone, Copy)]
+enum SlotCardinality {
+    /// Exactly one child.
+    One,
+    /// Zero or one child.
+    Optional,
+    /// Any number of children.
+    Many,
+}
+
+impl SlotCardinality {
+    /// The `obscur_view::contract::SlotCardinality` variant this spells.
+    fn variant(self) -> TokenStream {
+        match self {
+            Self::One => quote!(ExactlyOne),
+            Self::Optional => quote!(Optional),
+            Self::Many => quote!(Many),
+        }
+    }
+}
+
+impl SlotModel {
+    /// Parses one `slot(...)` list from a struct-level `#[contract(...)]`.
+    fn parse(meta: &syn::meta::ParseNestedMeta<'_>) -> Result<Self, syn::Error> {
+        let mut name: Option<String> = None;
+        let mut cardinality = SlotCardinality::Many;
+        let mut children: Vec<String> = Vec::new();
+        meta.parse_nested_meta(|inner| {
+            if inner.path.is_ident("name") {
+                name = Some(inner.value()?.parse::<LitStr>()?.value());
+            } else if inner.path.is_ident("cardinality") {
+                let word: syn::Ident = inner.value()?.parse()?;
+                cardinality = match word.to_string().as_str() {
+                    "one" => SlotCardinality::One,
+                    "optional" => SlotCardinality::Optional,
+                    "many" => SlotCardinality::Many,
+                    other => {
+                        return Err(inner.error(format!(
+                            "unknown `cardinality` value `{other}` (expected `one`, `optional` or `many`)"
+                        )));
+                    }
+                };
+            } else if inner.path.is_ident("child") {
+                children.push(inner.value()?.parse::<LitStr>()?.value());
+            } else {
+                return Err(inner.error("unknown `slot` key (expected `name`, `cardinality` or `child`)"));
+            }
+            Ok(())
+        })?;
+        let Some(name) = name else {
+            return Err(meta.error("a `slot(...)` must give a `name = \"…\"`"));
+        };
+        Ok(Self {
+            name,
+            cardinality,
+            children,
+        })
+    }
+
+    /// Lowers the slot into its `.with_slot(...)` entry on the **typed**
+    /// contract.
+    ///
+    /// Child tags are named by `fnv64`, the derive's own component-id scheme, so
+    /// this agrees with `OtherProps::contract().id` — the typed model's internal
+    /// spelling of the same tag. It does **not** agree with the `ComponentId` a
+    /// front end emits for that tag (`name_binding::component_id_for` resolves
+    /// every unregistered tag to `Container`); that disagreement predates slots
+    /// and is not made worse here.
+    fn contract_tokens(&self) -> TokenStream {
+        let name_sym = Literal::u32_unsuffixed(fnv32(&self.name));
+        let cardinality = self.cardinality.variant();
+        let children = if self.children.is_empty() {
+            quote!(::obscur_view::contract::ChildContract::Any)
+        } else {
+            let ids = self.children.iter().map(|tag| {
+                let id = Literal::u64_unsuffixed(fnv64(tag));
+                quote!(::obscur_identity::ComponentId::from_raw(#id))
+            });
+            quote!(::obscur_view::contract::ChildContract::Only(
+                ::std::vec![#(#ids),*]
+            ))
+        };
+        quote! {
+            .with_slot(::obscur_view::contract::SlotContract::new(
+                ::obscur_identity::InternedSymbol::from_raw(#name_sym),
+                ::obscur_view::contract::SlotCardinality::#cardinality,
+                #children,
+            ))
+        }
+    }
+
+    /// Lowers the slot into its `.with_slot(...)` entry on the **string**
+    /// surface, which is the one the `.okui` compiler and the `okui!` macro
+    /// actually check a document against.
+    fn surface_tokens(&self) -> TokenStream {
+        let name = LitStr::new(&self.name, Span::call_site());
+        let cardinality = self.cardinality.variant();
+        let children = self.children.iter().map(|tag| {
+            let tag = LitStr::new(tag, Span::call_site());
+            quote!(.allowing_child(#tag))
+        });
+        quote! {
+            .with_slot(
+                ::obscur_view::contract::SlotSurface::new(
+                    #name,
+                    ::obscur_view::contract::SlotCardinality::#cardinality,
+                )
+                #(#children)*
+            )
+        }
+    }
+}
+
 /// Parsed struct-level `#[contract(...)]` configuration.
 #[derive(Debug, Default)]
 struct StructAttrs {
@@ -172,6 +331,8 @@ struct StructAttrs {
     name: Option<String>,
     /// Allowed-children rule, if any was specified.
     children: Option<ChildrenKind>,
+    /// The declared named slots, in declaration order (spec §2.12).
+    slots: Vec<SlotModel>,
 }
 
 impl StructAttrs {
@@ -200,6 +361,9 @@ impl StructAttrs {
                             )));
                         }
                     });
+                    Ok(())
+                } else if meta.path.is_ident("slot") {
+                    out.slots.push(SlotModel::parse(&meta)?);
                     Ok(())
                 } else {
                     Err(meta.error("unknown `contract` attribute on struct"))
@@ -698,6 +862,77 @@ mod tests {
     fn no_children_attr_omits_allowing_children() {
         let generated = expand_to_string(quote! { struct MyProps {} });
         assert!(!generated.contains("allowing_children"));
+    }
+
+    #[test]
+    fn a_declared_slot_reaches_both_views_from_one_declaration() {
+        let generated = expand_to_string(quote! {
+            #[contract(slot(name = "header", cardinality = one))]
+            #[contract(slot(name = "actions", cardinality = optional, child = "Button"))]
+            struct CardProps {}
+        });
+        // The string surface — the one the two front ends actually check.
+        assert!(
+            generated.contains(r#"SlotSurface :: new ("header""#),
+            "{generated}"
+        );
+        assert!(
+            generated.contains("SlotCardinality :: ExactlyOne"),
+            "{generated}"
+        );
+        assert!(
+            generated.contains(r#"allowing_child ("Button")"#),
+            "{generated}"
+        );
+        // The typed contract, so its `slots` is not a lie.
+        assert!(generated.contains("SlotContract :: new"), "{generated}");
+        assert!(
+            generated.contains("SlotCardinality :: Optional"),
+            "{generated}"
+        );
+        assert!(generated.contains("ChildContract :: Only"), "{generated}");
+    }
+
+    #[test]
+    fn an_undeclared_cardinality_is_many() {
+        let generated = expand_to_string(quote! {
+            #[contract(slot(name = "body"))]
+            struct CardProps {}
+        });
+        assert!(generated.contains("SlotCardinality :: Many"), "{generated}");
+    }
+
+    #[test]
+    fn a_slot_with_no_name_and_an_unknown_key_are_compile_errors() {
+        let nameless = ContractDerive::expand(quote! {
+            #[contract(slot(cardinality = one))]
+            struct CardProps {}
+        })
+        .expect_err("a slot must be named");
+        assert!(nameless.to_string().contains("name"), "{nameless}");
+
+        let unknown = ContractDerive::expand(quote! {
+            #[contract(slot(name = "x", cardinaliti = one))]
+            struct CardProps {}
+        })
+        .expect_err("an unknown slot key is a compile error");
+        assert!(
+            unknown.to_string().contains("unknown `slot` key"),
+            "{unknown}"
+        );
+
+        let bad_value = ContractDerive::expand(quote! {
+            #[contract(slot(name = "x", cardinality = two))]
+            struct CardProps {}
+        })
+        .expect_err("an unknown cardinality is a compile error");
+        assert!(bad_value.to_string().contains("two"), "{bad_value}");
+    }
+
+    #[test]
+    fn a_struct_declaring_no_slots_emits_none() {
+        let generated = expand_to_string(quote! { struct MyProps {} });
+        assert!(!generated.contains("with_slot"), "{generated}");
     }
 
     #[test]

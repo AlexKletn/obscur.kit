@@ -12,8 +12,35 @@ workspace = true
 
 [features]
 # The portable default adapter set: works on any target with no display/GPU
-# (software renderer + smol executor + filesystem resources + image decode).
-default = ["resource-fs", "resource-decode", "cache-fs", "task-smol", "render-cpu"]
+# (software renderer + smol executor + filesystem resources + image decode + the
+# real text shaping stack).
+#
+# `text-harfrust`/`text-unicode` are in `default` because the alternative is what
+# the §5.18 audit charged: the toolkit's out-of-the-box shaper was the MOCK, and
+# the real one sat behind a feature nothing turned on, so every host hand-wired it.
+# Both adapters are pure Rust with no display, GPU, or IO reach, so they meet this
+# set's bar. They do not *by themselves* make text appear — a host must still hand
+# over font bytes (see `KitBootstrap::install_text_stack`); they make it possible
+# to, without opting into a feature first.
+#
+# `font-fontconfig` is here for the same reason plus one more: CI's test job is a
+# plain `cargo test --workspace` (default features), so a feature-gated test of the
+# system-font path would be SILENTLY SKIPPED — the same trap this manifest already
+# calls out for the render backends below. The feature only makes the code
+# reachable; nothing shells out to `fc-match` until a host calls `system_font_set`,
+# exactly as `resource-fs` touches no disk until asked. It compiles on every target
+# (verified against wasm32-unknown-unknown) and answers `None` where fontconfig is
+# absent.
+default = [
+    "resource-fs",
+    "resource-decode",
+    "cache-fs",
+    "task-smol",
+    "render-cpu",
+    "text-harfrust",
+    "text-unicode",
+    "font-fontconfig",
+]
 # Convenience: every optional adapter (needs a display/GPU/AT at runtime).
 full = [
     "resource-fs",
@@ -27,6 +54,7 @@ full = [
     "accesskit",
     "text-harfrust",
     "text-unicode",
+    "font-fontconfig",
 ]
 resource-decode = ["dep:obscur-resource-decode"]
 resource-fs = ["dep:obscur-resource-fs"]
@@ -39,6 +67,10 @@ window-winit = ["dep:obscur-window-winit"]
 accesskit = ["dep:obscur-accessibility-accesskit"]
 text-harfrust = ["dep:obscur-text-harfrust"]
 text-unicode = ["dep:obscur-text-unicode"]
+# System font enumeration via fontconfig (`fc-match`/`fc-list`). Linux only in
+# practice — macOS/Windows have no fontconfig and `system_font_set` returns `None`
+# there. See `KitBootstrap::system_font_set`.
+font-fontconfig = ["dep:obscur-font-fontconfig"]
 
 [dependencies]
 # foundation
@@ -91,6 +123,7 @@ obscur-window-winit = { workspace = true, optional = true }
 obscur-accessibility-accesskit = { workspace = true, optional = true }
 obscur-text-harfrust = { workspace = true, optional = true }
 obscur-text-unicode = { workspace = true, optional = true }
+obscur-font-fontconfig = { workspace = true, optional = true }
 
 # The platform system provider is selected automatically by target.
 [target.'cfg(target_os = "linux")'.dependencies]

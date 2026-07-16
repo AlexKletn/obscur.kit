@@ -1,0 +1,14 @@
+[package]
+name = "obscur-font-fontconfig"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+obscur-text = { workspace = true }
+
+[lints]
+workspace = true

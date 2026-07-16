@@ -116,12 +116,19 @@ impl FramePlan {
     /// desired [`View`]. So this narrows a frame from four phases to fewer; it does
     /// not narrow any phase to a subtree.
     ///
-    /// That is not a detail to fix here. The phases themselves take no dirty set —
-    /// `StyleCoordinator::resolve` and the layout pass each walk the entire tree —
-    /// so a per-node plan would have nobody to tell. Incremental *within* a phase is
-    /// a change to those passes, and until it happens the node payloads that flow
-    /// through [`Invalidation`] and into `StyleInvalidation`/`LayoutInvalidation` are
-    /// written and never read.
+    /// That is not a detail to fix here — narrowing a phase to a subtree is a change
+    /// to the phase, not to its classification. Where that has happened, it is driven
+    /// from the change itself rather than from this plan: the style phase now takes a
+    /// dirty set (`StyleCoordinator::resolve_incremental` consumes a
+    /// `StyleInvalidation` that `RestyleScope` derives from the per-node interaction
+    /// state), but it derives that set in `UiRuntime::restyle_scope`, which reads the
+    /// live [`PseudoStates`](crate::orchestration::PseudoStates) map — not the `node`
+    /// payloads here. Layout takes no dirty set at all.
+    ///
+    /// So these payloads remain written and never read. Routing them into the dirty
+    /// set an incremental pass consumes would mean an
+    /// [`InvalidateStyle`](UiOperation::InvalidateStyle) restyling one subtree instead
+    /// of the tree; that is the natural next step and is not taken here.
     ///
     /// An **empty** transaction yields an [idle](Self::is_idle) plan: nothing was
     /// asked for, so nothing runs. That is what makes a cancelled provisional

@@ -21,8 +21,8 @@ use crate::invalidation::{Invalidation, InvalidationReason};
 ///
 /// A `None` result means the change dirties the style phase (when its kind
 /// [`needs_restyle`](crate::invalidation::InvalidationKind::needs_restyle)) but
-/// does not correspond to a single-node style edit; the frame pipeline restyles
-/// the affected subtree from the domains' dependency records.
+/// does not correspond to a single-node style edit, so no per-node reason is
+/// recorded for it.
 fn style_reason(reason: InvalidationReason) -> Option<StyleInvalidationReason> {
     match reason {
         InvalidationReason::StyleChanged => Some(StyleInvalidationReason::DeclarationsChanged),
@@ -72,9 +72,20 @@ fn layout_reason(reason: InvalidationReason) -> LayoutInvalidationReason {
 ///
 /// The router does **not** walk the tree. It records node-level invalidations in
 /// the [`StyleInvalidation`] and [`LayoutInvalidation`] accumulators and flags
-/// which phases the frame pipeline must run. The spec's "recalculation starts at
-/// the nearest affected context" is realised by the domains' own dependency
-/// records, not by this router.
+/// which phases the frame pipeline must run.
+///
+/// # What its callers actually use
+///
+/// The dirty-phase **booleans**, and only those. `FramePlan::for_frame` /
+/// `for_transaction` read `needs_style()`/`needs_layout()`/`needs_scene()`;
+/// `UiRuntime::layout_is_needed` routes this frame's real per-node style deltas
+/// through it and then reads `needs_layout()`. In every case the accumulators it
+/// filled are dropped unread — nothing consults them for *which* nodes.
+///
+/// So the spec's "recalculation starts at the nearest affected context" is not
+/// realised here. Where it is realised — the style phase's per-node restyle — the
+/// set comes from `RestyleScope` reading the live interaction state, on a path that
+/// does not involve this router at all.
 ///
 /// The dirty-phase flags accumulate across calls to [`route`](Self::route) within
 /// a frame and are cleared by [`reset`](Self::reset); the domain accumulators are
