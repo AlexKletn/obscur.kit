@@ -32,6 +32,19 @@ fn main() {
     let parsed = Parser::new().parse(&source);
     let document = Document::cast(parsed.tree().root().clone()).expect("root casts to a Document");
     let result = Compiler::new("showcase.okui").compile(&document);
+
+    // Lowering does not stop at a diagnostic — a rejected document still produces
+    // IR — so a build that reads `document()` without asking `has_errors()` first
+    // runs every check and then acts on none of them. That is how §2.10's
+    // expression allow-list came to refuse `{std::fs::read(p)}` while the one
+    // production build path emitted it as real Rust regardless.
+    if result.has_errors() {
+        for diagnostic in result.diagnostics() {
+            println!("cargo:warning=showcase.okui: {diagnostic:?}");
+        }
+        panic!("showcase.okui failed validation; see the warnings above");
+    }
+
     let ir = result.document().expect("a lowered UI IR document");
 
     // Emit ordinary Rust building the identical `View`.
