@@ -139,13 +139,7 @@ fn outline_path(bounds: Rect, radii: CornerRadii, has_radius: bool) -> Path {
         ),
     );
     if has_radius {
-        let r = CornerRadii {
-            top_left: (radii.top_left + d).max(0.0),
-            top_right: (radii.top_right + d).max(0.0),
-            bottom_right: (radii.bottom_right + d).max(0.0),
-            bottom_left: (radii.bottom_left + d).max(0.0),
-        };
-        Path::rounded_rect(rect, r)
+        Path::rounded_rect(rect, radii.offset(d))
     } else {
         Path::rect(rect)
     }

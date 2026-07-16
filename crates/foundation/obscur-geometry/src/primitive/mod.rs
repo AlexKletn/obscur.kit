@@ -5,7 +5,7 @@ mod point;
 mod rect;
 mod size;
 
-pub use corner_radii::CornerRadii;
+pub use corner_radii::{CornerRadii, CornerRadius};
 pub use insets::Insets;
 pub use point::Point;
 pub use rect::Rect;

@@ -119,12 +119,20 @@ impl Path {
 
     /// Builds a closed rounded-rectangle path.
     ///
-    /// Each corner is drawn with a single cubic Bézier segment whose control
-    /// points use the [`KAPPA`] constant; this is a close but not exact
-    /// approximation of a quarter-circle, which is standard for vector
-    /// rounded rectangles. Each radius is clamped to at most half the shorter
-    /// side of `rect` (and to be non-negative) so that adjacent corners never
-    /// overlap.
+    /// Each corner is a **quarter ellipse** (CSS Backgrounds 3 §4.1) drawn with a
+    /// single cubic Bézier whose control points use the [`KAPPA`] constant — a
+    /// close but not exact approximation, which is standard for vector rounded
+    /// rectangles. The corner's horizontal radius governs the control points'
+    /// horizontal reach and its vertical radius the vertical one, so a
+    /// `border-radius: 50%` on a 2:1 box draws the ellipse the spec asks for
+    /// rather than a circle.
+    ///
+    /// `radii` are floored at zero and put through the §4.5 overlapping-curves
+    /// correction ([`CornerRadii::normalized`]) for `rect`, so adjacent corners
+    /// can never overlap however the caller built them. That correction is
+    /// idempotent for radii that already fit, so a caller that has already
+    /// normalized (the scene coordinator does, once, for the whole node) pays
+    /// nothing and gets the same path.
     #[must_use]
     pub fn rounded_rect(rect: Rect, radii: CornerRadii) -> Path {
         let x0 = rect.origin.x;
@@ -132,45 +140,50 @@ impl Path {
         let x1 = rect.right();
         let y1 = rect.bottom();
 
-        let max_r = (rect.size.width.min(rect.size.height) / 2.0).max(0.0);
-        let tl = radii.top_left.clamp(0.0, max_r);
-        let tr = radii.top_right.clamp(0.0, max_r);
-        let br = radii.bottom_right.clamp(0.0, max_r);
-        let bl = radii.bottom_left.clamp(0.0, max_r);
+        let radii = radii.non_negative().normalized(rect);
+        let (tl, tr, br, bl) = (
+            radii.top_left,
+            radii.top_right,
+            radii.bottom_right,
+            radii.bottom_left,
+        );
+        // The Bézier handle length along each axis: the distance from the corner
+        // point back towards the edge tangent.
+        let k = |r: f32| r * (1.0 - KAPPA);
 
         let mut path = Path::new();
         // Top edge, starting after the top-left corner.
-        path.move_to(Point::new(x0 + tl, y0))
-            .line_to(Point::new(x1 - tr, y0));
+        path.move_to(Point::new(x0 + tl.x, y0))
+            .line_to(Point::new(x1 - tr.x, y0));
         // Top-right corner.
         path.cubic_to(
-            Point::new(x1 - tr * (1.0 - KAPPA), y0),
-            Point::new(x1, y0 + tr * (1.0 - KAPPA)),
-            Point::new(x1, y0 + tr),
+            Point::new(x1 - k(tr.x), y0),
+            Point::new(x1, y0 + k(tr.y)),
+            Point::new(x1, y0 + tr.y),
         );
         // Right edge.
-        path.line_to(Point::new(x1, y1 - br));
+        path.line_to(Point::new(x1, y1 - br.y));
         // Bottom-right corner.
         path.cubic_to(
-            Point::new(x1, y1 - br * (1.0 - KAPPA)),
-            Point::new(x1 - br * (1.0 - KAPPA), y1),
-            Point::new(x1 - br, y1),
+            Point::new(x1, y1 - k(br.y)),
+            Point::new(x1 - k(br.x), y1),
+            Point::new(x1 - br.x, y1),
         );
         // Bottom edge.
-        path.line_to(Point::new(x0 + bl, y1));
+        path.line_to(Point::new(x0 + bl.x, y1));
         // Bottom-left corner.
         path.cubic_to(
-            Point::new(x0 + bl * (1.0 - KAPPA), y1),
-            Point::new(x0, y1 - bl * (1.0 - KAPPA)),
-            Point::new(x0, y1 - bl),
+            Point::new(x0 + k(bl.x), y1),
+            Point::new(x0, y1 - k(bl.y)),
+            Point::new(x0, y1 - bl.y),
         );
         // Left edge.
-        path.line_to(Point::new(x0, y0 + tl));
+        path.line_to(Point::new(x0, y0 + tl.y));
         // Top-left corner.
         path.cubic_to(
-            Point::new(x0, y0 + tl * (1.0 - KAPPA)),
-            Point::new(x0 + tl * (1.0 - KAPPA), y0),
-            Point::new(x0 + tl, y0),
+            Point::new(x0, y0 + k(tl.y)),
+            Point::new(x0 + k(tl.x), y0),
+            Point::new(x0 + tl.x, y0),
         );
         path.close();
         path

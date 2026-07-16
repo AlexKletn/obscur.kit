@@ -704,24 +704,52 @@ fn draw_shadow(
         return;
     }
     let kurbo_rect = KurboRect::new(x0, y0, x1, y1);
-    // Spec §7.1.1: an outset shadow's corner radii are the box radii grown by
+    // Spec §6.1.1: an outset shadow's corner radii are the box radii grown by
     // `+spread` (a sharp corner stays sharp) so the rounded corners stay
-    // concentric with the box. Collapse the grown radii to a single corner
-    // radius — the max of the four (documented approximation for non-uniform
-    // corners).
-    let grown = radii.offset(spread);
-    let radius = f64::from(
-        grown
-            .top_left
-            .max(grown.top_right)
-            .max(grown.bottom_right)
-            .max(grown.bottom_left)
-            .max(0.0),
-    );
+    // concentric with the box.
+    let radius = blurred_shadow_radius(radii.offset(spread));
     // Map the CSS blur radius to a gaussian standard deviation.
     let std_dev = f64::from(blur.max(0.0)) / 2.0;
     let peniko_color = ColorConverter::new().convert(color);
     scene.draw_blurred_rounded_rect(transform, kurbo_rect, peniko_color, radius, std_dev);
+}
+
+/// Collapses a shadow's eight radii into the one scalar Vello's blur can take.
+///
+/// **This is a Vello backend limitation, and it is lossy.** `vello 0.9`'s
+/// `Scene::draw_blurred_rounded_rect(.., radius: f64, std_dev: f64)` — and its
+/// `_in` variant — accept a *single* `f64` radius for the whole rect. There is no
+/// per-corner form and no elliptical form (kurbo's `RoundedRectRadii`, which the
+/// inset path's `to_rounded_rect` could take, is four **scalars** — per-corner but
+/// still circular, so it does not rescue the elliptical case either). So a shadow
+/// whose box has elliptical corners (`border-radius: 50%` on a non-square box) or
+/// unequal corners cannot be reproduced exactly on Vello, and this function picks
+/// the closest circle rather than a silent axis.
+///
+/// Two losses, in order:
+///
+/// 1. **Per corner**, [`CornerRadius::circular_approximation`] takes the mean of the
+///    two axes — exact when the corner is already circular, unbiased when not.
+/// 2. **Across corners**, the max wins, which over-rounds a box whose corners
+///    differ. This is the pre-existing convention and is exact for the overwhelmingly
+///    common case of four equal corners.
+///
+/// Both losses vanish for a uniform circular `border-radius`, which is why the
+/// normal path is exact. This divergence is confined to the **blurred shadow**
+/// effect and does not touch clip or scene geometry, which spec §5.2 requires to
+/// match across backends: those go through [`obscur_scene::path::Path`], which draws
+/// true quarter ellipses on both backends. The CPU backend builds its shadow from
+/// that same `Path` and so keeps the ellipse; Vello's blurred shadow rounds it. See
+/// `docs/conformance-audit.md` finding 4-A.
+fn blurred_shadow_radius(radii: obscur_geometry::CornerRadii) -> f64 {
+    f64::from(
+        radii
+            .corners()
+            .iter()
+            .map(|c| c.circular_approximation())
+            .fold(0.0_f32, f32::max)
+            .max(0.0),
+    )
 }
 
 /// Rasterizes an **inset** `box-shadow` as an inner shadow confined to the box.
@@ -758,16 +786,9 @@ fn draw_inset_shadow(
     if bx1 <= bx0 || by1 <= by0 {
         return;
     }
-    // A single corner radius: the max of the four (documented approximation),
-    // matching the drop-shadow path.
-    let radius = f64::from(
-        radii
-            .top_left
-            .max(radii.top_right)
-            .max(radii.bottom_right)
-            .max(radii.bottom_left)
-            .max(0.0),
-    );
+    // A single corner radius, matching the drop-shadow path — see
+    // [`blurred_shadow_radius`] for why a shadow may collapse the four corners.
+    let radius = blurred_shadow_radius(*radii);
     let box_shape = KurboRect::new(bx0, by0, bx1, by1).to_rounded_rect(radius);
     let peniko_color = ColorConverter::new().convert(color);
 

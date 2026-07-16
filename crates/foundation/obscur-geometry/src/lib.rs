@@ -9,7 +9,7 @@ mod transform;
 mod unit;
 
 pub use constraint::BoxConstraints;
-pub use primitive::{CornerRadii, Insets, Point, Rect, Size};
+pub use primitive::{CornerRadii, CornerRadius, Insets, Point, Rect, Size};
 pub use snapping::PixelSnapMode;
 pub use transform::AffineTransform;
 pub use unit::{LogicalPx, PhysicalPx, ScaleFactor};

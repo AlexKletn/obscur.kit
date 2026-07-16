@@ -3,14 +3,14 @@
 //! Renders two panels that exercise the two fixes and writes
 //! `target/radii_geometry_proof.png`:
 //!
-//! - **Left — border-radius overlapping-radius clamp (css-backgrounds §5.5).** A
+//! - **Left — border-radius overlapping-radius clamp (css-backgrounds §4.5).** A
 //!   wide-short `200×40` box with `border-radius: 30px` on all four corners. Each
 //!   corner (30) is below `min(w,h)/2 = 20`? No — the LEFT/RIGHT sides sum to
 //!   `30+30 = 60 > 40` (the height), so the spec's single uniform scale
 //!   `f = 40/60` shrinks ALL four corners to `20px`, preserving proportions. The
-//!   panel fills the box with the §5.5-normalized radii; the corners fit and never
+//!   panel fills the box with the §4.5-normalized radii; the corners fit and never
 //!   overflow the box.
-//! - **Right — box-shadow spread → radii (css-backgrounds §7.1.1).** A rounded
+//! - **Right — box-shadow spread → radii (css-backgrounds §6.1.1).** A rounded
 //!   `border-radius: 10px` box with an outset `box-shadow` of `spread: 8px`. The
 //!   shadow's corner radii are the box radii grown by `+spread` → `18px`, so the
 //!   shadow's rounded corners are visibly LARGER than the box's and stay
@@ -27,7 +27,7 @@
 
 use std::path::PathBuf;
 
-use obscur_kit::geometry::{CornerRadii, Point, Rect, Size};
+use obscur_kit::geometry::{CornerRadii, CornerRadius, Point, Rect, Size};
 use obscur_kit::render::frame::{FrameSubmission, RenderFrame};
 use obscur_kit::render::target::{BitmapTarget, RenderTarget};
 use obscur_kit::render::{Renderer, RendererId};
@@ -48,21 +48,21 @@ fn main() {
     let card = Color::rgba(0.20, 0.45, 0.95, 1.0); // blue box
     let shadow = Color::rgba(0.10, 0.10, 0.10, 0.9); // dark shadow
 
-    // --- Left panel: §5.5 overlapping-radius normalization. ---
+    // --- Left panel: §4.5 overlapping-radius normalization. ---
     let wide_box = Rect::new(Point::new(30.0, 40.0), Size::new(200.0, 40.0));
     let authored = CornerRadii::uniform(30.0);
     let normalized = authored.normalized(wide_box);
     println!(
-        "[left]  200x40 box, border-radius 30 → normalized {:.3} (f = 40/60)",
+        "[left]  200x40 box, border-radius 30 → normalized {:?} (f = 40/60)",
         normalized.top_left
     );
 
-    // --- Right panel: §7.1.1 spread → radii. ---
+    // --- Right panel: §6.1.1 spread → radii. ---
     let shadow_box = Rect::new(Point::new(150.0, 150.0), Size::new(140.0, 60.0));
     let box_radii = CornerRadii::uniform(10.0);
     let spread = 8.0_f32;
     println!(
-        "[right] rounded box radius 10 + outset shadow spread 8 → shadow radii {:.1}",
+        "[right] rounded box radius 10 + outset shadow spread 8 → shadow radii {:?}",
         box_radii.offset(spread).top_left
     );
 
@@ -72,12 +72,12 @@ fn main() {
         Brush::solid(page),
     );
 
-    // Left: the §5.5-normalized rounded box.
+    // Left: the §4.5-normalized rounded box.
     builder.fill(Path::rounded_rect(wide_box, normalized), Brush::solid(card));
 
     // Right: outset drop shadow behind, then the rounded box over it. The
     // coordinator emits the box radii + spread; the CPU backend grows the shadow
-    // radii by +spread on the spread-inflated rect (§7.1.1).
+    // radii by +spread on the spread-inflated rect (§6.1.1).
     builder.draw_shadow(
         shadow_box,
         box_radii,
@@ -131,10 +131,10 @@ fn render(list: DisplayList) -> tiny_skia::Pixmap {
 /// corner is rounded away (page grey, not box blue), and the mid-height left edge
 /// reaches the box bound (box blue).
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn verify_left(pixmap: &tiny_skia::Pixmap, box_rect: Rect, radius: f32) {
+fn verify_left(pixmap: &tiny_skia::Pixmap, box_rect: Rect, radius: CornerRadius) {
     assert!(
-        (radius - 20.0).abs() < 1e-3,
-        "§5.5 uniform scale must give 20px (f = 40/60 · 30), got {radius}"
+        (radius.x - 20.0).abs() < 1e-3 && (radius.y - 20.0).abs() < 1e-3,
+        "§4.5 uniform scale must give 20px on BOTH axes (f = 40/60 · 30), got {radius:?}"
     );
 
     let is_box = |x: u32, y: u32| {

@@ -594,11 +594,21 @@ impl VelloRenderer {
                             bounds.origin.x + bounds.size.width,
                             bounds.origin.y + bounds.size.height,
                         ],
+                        // The backdrop mask's WGSL SDF (`rounded_rect_coverage` in
+                        // `gaussian_blur.wgsl`) is a per-corner *circular* rounded
+                        // box: it selects one corner radius by quadrant and does
+                        // `length(q) - r`, which has no elliptical form. So a panel
+                        // with elliptical corners (`border-radius: 50%` on a
+                        // non-square box) frosts to the closest circle per corner —
+                        // the mean of its two axes, exact whenever the corner is
+                        // already circular. Confined to the backdrop-filter effect;
+                        // the panel's own clip and fill keep the true ellipse via
+                        // `Path`. See `docs/conformance-audit.md` finding 4-A.
                         [
-                            radii.top_left,
-                            radii.top_right,
-                            radii.bottom_right,
-                            radii.bottom_left,
+                            radii.top_left.circular_approximation(),
+                            radii.top_right.circular_approximation(),
+                            radii.bottom_right.circular_approximation(),
+                            radii.bottom_left.circular_approximation(),
                         ],
                         blur,
                     );

@@ -41,6 +41,15 @@
 //!   ignore it is what this test pins; it is not evidence that masks work.
 //! - Antialiased clip edges are avoided by probing well inside/outside a clip
 //!   rather than on its boundary, since §5.2 lets AA differ.
+//! - **Agreement cannot catch a shared bug.** Both backends resolve a
+//!   `ClipShape::RoundedRect` through the *same* `Path::rounded_rect`, so a defect
+//!   in that one builder makes both backends wrong *together* and the
+//!   backends-agree assertion still passes. This was measured, not assumed:
+//!   replacing the elliptical radii below with a single scalar leaves every
+//!   `cpu == vello` assertion green. Only the `expected` column catches it, which
+//!   is why the ellipse cases' expected values are chosen to sit in the region
+//!   where a scalar radius and a true ellipse actually disagree. Treat `expected`
+//!   as the real oracle here and agreement as the weaker, secondary claim.
 
 use obscur_geometry::{CornerRadii, Point, Rect, Size};
 use obscur_render::frame::{FrameSubmission, RenderFrame};
@@ -59,6 +68,10 @@ use vello::kurbo::{Point as KurboPoint, Shape};
 
 /// The surface both backends are asked about.
 const SURFACE: f32 = 64.0;
+
+/// A deliberately NON-SQUARE box, for the `border-radius: 50%` ellipse cases: 2:1,
+/// so the horizontal radius (w/2 = 32) and the vertical (h/2 = 16) differ.
+const ELLIPSE_BOX: Rect = Rect::new(Point::new(0.0, 0.0), Size::new(64.0, 32.0));
 
 /// A closed rectangular outline.
 fn rect_path(rect: Rect) -> Path {
@@ -174,6 +187,53 @@ fn cases() -> Vec<(&'static str, Clip, (u32, u32), bool)> {
         ),
         ("path: inside", Clip::path(rect_path(inner)), (32, 32), true),
         ("path: outside", Clip::path(rect_path(inner)), (4, 4), false),
+        // `border-radius: 50%` on a NON-SQUARE box — the circle idiom (audit 4-A).
+        // A 64×32 box with radii (32, 16) per corner is a true ellipse, and it is a
+        // shape no single scalar radius can express, so the two backends can only
+        // agree here by both honoring the two axes. They route through the same
+        // `Path::rounded_rect`, which is exactly why they do; this pins that they
+        // keep doing so, since §5.2 puts scene geometry under "must match".
+        //
+        // Probes sit well clear of the outline (AA is an allowed difference): the
+        // centre is deep inside, and (3, 3) is outside the ellipse — but INSIDE the
+        // 64×32 bounding box, so it is only excluded by the curve itself.
+        (
+            "50% ellipse: center is inside",
+            Clip::rounded_rect(ELLIPSE_BOX, CornerRadii::elliptical(32.0, 16.0)),
+            (32, 16),
+            true,
+        ),
+        (
+            "50% ellipse: corner of the box is outside the curve",
+            Clip::rounded_rect(ELLIPSE_BOX, CornerRadii::elliptical(32.0, 16.0)),
+            (3, 3),
+            false,
+        ),
+        // The scalar discriminators, and the reason these two points and not a
+        // prettier pair. EVERY plausible scalar implementation of `50%` on this box
+        // collapses to the SAME shape — a stadium with r = 16:
+        //
+        //   * circular `50%` → uniform(32) → §4.5 gives f = 32/64 → uniform(16);
+        //   * both axes against the WIDTH → (32, 32) → f = 1/2 → uniform(16);
+        //   * both axes against the HEIGHT → (16, 16) → f = 1 → uniform(16).
+        //
+        // The true ellipse is strictly *contained* in that stadium, so no point can
+        // discriminate by being admitted. These two are the other direction: inside
+        // the stadium, outside the ellipse. A circular backend admits them; the
+        // ellipse must reject them. Both sit >3px clear of the ellipse's outline,
+        // so no rasterizer's AA can decide the verdict (§5.2 lets AA differ).
+        (
+            "50% ellipse: rejects a point a scalar radius would admit (near-corner)",
+            Clip::rounded_rect(ELLIPSE_BOX, CornerRadii::elliptical(32.0, 16.0)),
+            (11, 1),
+            false,
+        ),
+        (
+            "50% ellipse: rejects a point a scalar radius would admit (diagonal)",
+            Clip::rounded_rect(ELLIPSE_BOX, CornerRadii::elliptical(32.0, 16.0)),
+            (7, 3),
+            false,
+        ),
         // A mask states no extent, so it confines nothing and the fill survives.
         (
             "luminance mask admits content",

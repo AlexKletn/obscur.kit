@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use obscur_geometry::{AffineTransform, CornerRadii, Point, Rect, Size};
+use obscur_geometry::{AffineTransform, CornerRadii, CornerRadius, Point, Rect, Size};
 use obscur_identity::NodeId;
 use obscur_scene::clip::Clip;
 use obscur_scene::color::Color;
@@ -1266,20 +1266,25 @@ impl SceneCoordinator {
             preorder.push(node);
 
             // A node's per-corner `border-radius` (all four corners), read off its
-            // computed style. Non-zero radii round its background fill and clip its
-            // subtree to the rounded border box. The authored radii are put through
-            // the CSS Backgrounds §5.5 overlapping-curves correction ONCE here (a
-            // single uniform scale over the box), so the SAME normalized radii feed
-            // every consumer — background fill, subtree clip, border ring, box-shadow
-            // and outline. Radii that already fit are returned unchanged
-            // (byte-identical); a node without an arranged box keeps its raw radii.
-            let radii = {
-                let raw = corner_radii_of(computed, node);
-                boxes
-                    .get(&node)
-                    .map_or(raw, |layout_box| raw.normalized(layout_box.bounds))
-            };
-            let has_radius = corner_radii_present(radii);
+            // computed style and resolved against its arranged border box. The box is
+            // needed twice over, which is why this is the one place the radii are
+            // derived: a `%` corner resolves against it per axis (CSS Backgrounds 3
+            // §4.1 — width for the horizontal radius, height for the vertical, so
+            // `50%` is a circle only on a square box), and the §4.5
+            // overlapping-curves correction then measures the radii against it. Both
+            // run ONCE here, so the SAME resolved, normalized radii feed every
+            // consumer — background fill, subtree clip, border ring, box-shadow and
+            // outline. Radii that already fit are returned unchanged
+            // (byte-identical); a node without an arranged box has no basis for a `%`
+            // and no box to correct against, so it keeps its absolute radii.
+            let radii = boxes.get(&node).map_or_else(
+                || corner_radii_of(computed, node, None),
+                |layout_box| {
+                    corner_radii_of(computed, node, Some(layout_box.bounds))
+                        .normalized(layout_box.bounds)
+                },
+            );
+            let has_radius = radii.any_positive();
             // A node with `overflow` other than `visible` clips its subtree to its
             // box (`hidden` / `clip` / `scroll` / `auto`; scroll/auto clip like
             // hidden — no scrollbars yet). `visible` / absent adds no clip.
@@ -3384,9 +3389,20 @@ fn uniform_border(computed: &ComputedStyles, node: NodeId) -> Option<(f32, Style
 ///
 /// The ring's outer outline is the border-box rounded rect; its inner outline is
 /// the padding box — `bounds` inset by `width` on every side (clamped to a
-/// non-negative size) — with each corner radius reduced to `max(0, r − width)`,
-/// the concentric inner radius. Filled even-odd, the inner rounded rect becomes a
-/// hole so the border's inner corners are rounded (spec CSS Backgrounds §4).
+/// non-negative size) — carrying the §4.2 inner radius. Filled even-odd, the inner
+/// rounded rect becomes a hole so the border's inner corners are rounded.
+///
+/// CSS Backgrounds 3 §4.2: "The padding edge (inner border) radius is the outer
+/// border radius minus the corresponding border thickness. In the case where this
+/// results in a negative value, the inner radius is zero." *Corresponding* is the
+/// load-bearing word, and it is per axis: a corner's horizontal radius is offset by
+/// the thickness of the border it meets horizontally (left/right) and its vertical
+/// radius by the one it meets vertically (top/bottom). This function is the
+/// **uniform**-border path — its caller has already established that all four
+/// border widths are equal (see the `ct == cr && ct == cb && ct == cl` guard), so
+/// every corresponding thickness is the same `width` and both axes reduce by it.
+/// That is [`CornerRadii::offset`] with a negative delta, which floors at zero for
+/// §4.2's negative case and keeps a sharp corner sharp.
 fn uniform_border_ring(bounds: Rect, radii: CornerRadii, width: f32) -> Path {
     let inner = Rect::new(
         Point::new(bounds.origin.x + width, bounds.origin.y + width),
@@ -3395,13 +3411,7 @@ fn uniform_border_ring(bounds: Rect, radii: CornerRadii, width: f32) -> Path {
             (bounds.size.height - 2.0 * width).max(0.0),
         ),
     );
-    let inner_radii = CornerRadii {
-        top_left: (radii.top_left - width).max(0.0),
-        top_right: (radii.top_right - width).max(0.0),
-        bottom_right: (radii.bottom_right - width).max(0.0),
-        bottom_left: (radii.bottom_left - width).max(0.0),
-    };
-    Path::rounded_rect_ring(bounds, radii, inner, inner_radii)
+    Path::rounded_rect_ring(bounds, radii, inner, radii.offset(-width))
 }
 
 /// Reads a node's computed `border-*-width` (`id`) in logical pixels, defaulting
@@ -3417,7 +3427,8 @@ fn uniform_border_ring(bounds: Rect, radii: CornerRadii, width: f32) -> Path {
 /// painted edge:
 ///
 /// * a **percentage** (`border-width` takes none, so this is unreachable for this
-///   property; it is reachable for the radius corners — see [`corner_radii_of`]);
+///   property; the radius corners take one and resolve it themselves — see
+///   [`corner_radius_of`]);
 /// * a **`ch`**, which the resolver cannot fold without a shaper.
 fn border_width_of(computed: &ComputedStyles, node: NodeId, id: PropertyId) -> f32 {
     computed
@@ -3428,38 +3439,57 @@ fn border_width_of(computed: &ComputedStyles, node: NodeId, id: PropertyId) -> f
         .map_or(0.0, |px| px.0)
 }
 
-/// Reads a node's four computed `border-*-radius` corner lengths into a
-/// [`CornerRadii`], in top-left / top-right / bottom-right / bottom-left order.
+/// Resolves one computed `border-*-radius` corner (`id`) into its two radii
+/// against the node's `bounds` (its border box).
 ///
-/// Relative units are already folded by the resolver (see [`border_width_of`]), so
-/// `border-radius: .5em` rounds correctly. An absent radius contributes `0` (a
-/// square corner), so a node with no authored radius yields all-zero radii — the
-/// pre-radius behaviour.
+/// A corner radius is the one place a `<length-percentage>` needs the box on BOTH
+/// axes at once. CSS Backgrounds 3 §4.1: "Percentages for the horizontal radius
+/// refer to the width of the border box, whereas percentages for the vertical
+/// radius refer to the height of the border box." So one authored `50%` becomes
+/// two different numbers — `(w/2, h/2)` — and `border-radius: 50%` is a circle
+/// only on a square box; on a 2:1 box it is an ellipse. That is why this resolves
+/// **here**, in paint, rather than in the resolver's absolutize pass: computed-value
+/// time does not have the box (see [`border_width_of`]).
 ///
-/// **`border-radius: 50%` does not work.** A percentage radius resolves against
-/// the box itself (width for the horizontal radius, height for the vertical), so
-/// it cannot be absolutized at computed-value time — and this function reads the
-/// computed length without the `bounds` it would need to resolve it, yielding `0`
-/// (a square corner). The circle idiom therefore remains dead; closing it needs
-/// percentage resolution *here*, and a [`CornerRadii`] that can carry the two
-/// different radii per corner that a `%` on a non-square box produces.
-fn corner_radii_of(computed: &ComputedStyles, node: NodeId) -> CornerRadii {
-    CornerRadii {
-        top_left: border_width_of(computed, node, PropertyId::BorderTopLeftRadius),
-        top_right: border_width_of(computed, node, PropertyId::BorderTopRightRadius),
-        bottom_right: border_width_of(computed, node, PropertyId::BorderBottomRightRadius),
-        bottom_left: border_width_of(computed, node, PropertyId::BorderBottomLeftRadius),
+/// * `Px` (what every `em` / `rem` / `vw` / `vh` has already folded to) is the same
+///   radius on both axes — a circular corner.
+/// * `Percent` resolves per axis against `bounds`. Without a `bounds` — a node the
+///   layout never arranged — a `%` has no basis and yields a square corner.
+/// * Anything else (`auto`, an unmeasured `ch`) yields a square corner, as before.
+fn corner_radius_of(
+    computed: &ComputedStyles,
+    node: NodeId,
+    id: PropertyId,
+    bounds: Option<Rect>,
+) -> CornerRadius {
+    let length = computed
+        .get(&node)
+        .and_then(|style| style.get(id))
+        .and_then(ComputedValue::as_length);
+    match length {
+        Some(Length::Px(px)) => CornerRadius::circular(px.0),
+        Some(Length::Percent(pct)) => bounds.map_or_else(CornerRadius::default, |b| {
+            CornerRadius::new(pct / 100.0 * b.size.width, pct / 100.0 * b.size.height)
+        }),
+        _ => CornerRadius::default(),
     }
 }
 
-/// Whether any of `radii`'s four corners is a positive radius, i.e. the element
-/// actually rounds (and therefore needs a rounded fill + subtree clip). All-zero
-/// radii (the common, unauthored case) return `false` for a byte-identical path.
-fn corner_radii_present(radii: CornerRadii) -> bool {
-    radii.top_left > 0.0
-        || radii.top_right > 0.0
-        || radii.bottom_right > 0.0
-        || radii.bottom_left > 0.0
+/// Reads a node's four computed `border-*-radius` corners into a [`CornerRadii`],
+/// in top-left / top-right / bottom-right / bottom-left order, resolved against
+/// `bounds` (the node's border box, absent for a node layout never arranged).
+///
+/// Relative units are already folded by the resolver (see [`border_width_of`]), so
+/// `border-radius: .5em` rounds correctly; percentages resolve here, per axis (see
+/// [`corner_radius_of`]). An absent radius contributes a square corner, so a node
+/// with no authored radius yields all-zero radii — the pre-radius behaviour.
+fn corner_radii_of(computed: &ComputedStyles, node: NodeId, bounds: Option<Rect>) -> CornerRadii {
+    CornerRadii {
+        top_left: corner_radius_of(computed, node, PropertyId::BorderTopLeftRadius, bounds),
+        top_right: corner_radius_of(computed, node, PropertyId::BorderTopRightRadius, bounds),
+        bottom_right: corner_radius_of(computed, node, PropertyId::BorderBottomRightRadius, bounds),
+        bottom_left: corner_radius_of(computed, node, PropertyId::BorderBottomLeftRadius, bounds),
+    }
 }
 
 /// Whether a node's computed `overflow` clips its subtree to its box.
@@ -3609,13 +3639,10 @@ fn dashed_border_path(bounds: Rect, radii: CornerRadii, width: f32, has_radius: 
         ),
     );
     if has_radius {
-        let center_radii = CornerRadii {
-            top_left: (radii.top_left - half).max(0.0),
-            top_right: (radii.top_right - half).max(0.0),
-            bottom_right: (radii.bottom_right - half).max(0.0),
-            bottom_left: (radii.bottom_left - half).max(0.0),
-        };
-        Path::rounded_rect(center, center_radii)
+        // The centerline runs half a border-width inside the border box, so its
+        // radii are the box radii pulled in by `half` on each axis — the §4.2
+        // shaping rule applied at the stroke's centre rather than its inner edge.
+        Path::rounded_rect(center, radii.offset(-half))
     } else {
         Path::rect(center)
     }
@@ -3666,14 +3693,11 @@ fn outline_paint(
         ),
     );
     let path = if has_radius {
-        // Concentric outer rounding: each corner radius grows by `d`.
-        let outline_radii = CornerRadii {
-            top_left: (radii.top_left + d).max(0.0),
-            top_right: (radii.top_right + d).max(0.0),
-            bottom_right: (radii.bottom_right + d).max(0.0),
-            bottom_left: (radii.bottom_left + d).max(0.0),
-        };
-        Path::rounded_rect(rect, outline_radii)
+        // Concentric outer rounding: each corner grows by `d` on each axis, so the
+        // outline stays parallel to the box's own curve. A corner the box leaves
+        // square stays square — growing it would round an outline around a sharp
+        // corner (see [`CornerRadii::offset`]).
+        Path::rounded_rect(rect, radii.offset(d))
     } else {
         Path::rect(rect)
     };
@@ -7133,6 +7157,134 @@ mod tests {
         path.segments()
             .iter()
             .any(|s| matches!(s, obscur_scene::path::PathSegment::CubicTo { .. }))
+    }
+
+    /// A `ComputedStyle` with a background and the same **percentage** radius on
+    /// every corner — the `border-radius: 50%` circle idiom.
+    fn with_background_and_percent_radius(color: StyleColor, percent: f32) -> ComputedStyle {
+        let mut style = with_background(color);
+        for id in [
+            PropertyId::BorderTopLeftRadius,
+            PropertyId::BorderTopRightRadius,
+            PropertyId::BorderBottomRightRadius,
+            PropertyId::BorderBottomLeftRadius,
+        ] {
+            style.set(id, ComputedValue::length(Length::Percent(percent)));
+        }
+        style
+    }
+
+    /// The on-curve (anchor) points of a path, in order — `MoveTo` / `LineTo` /
+    /// `CubicTo::end`. Control points are excluded: the anchors are where the
+    /// corner curves meet the edges, so they carry the radii exactly.
+    fn anchor_points(path: &obscur_scene::path::Path) -> Vec<Point> {
+        use obscur_scene::path::PathSegment;
+        path.segments()
+            .iter()
+            .filter_map(|s| match *s {
+                PathSegment::MoveTo(p) | PathSegment::LineTo(p) => Some(p),
+                PathSegment::CubicTo { end, .. } | PathSegment::QuadTo { end, .. } => Some(end),
+                PathSegment::Close => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn border_radius_fifty_percent_paints_an_ellipse_on_a_nonsquare_box() {
+        // Audit finding 4-A, the circle idiom. `border-radius: 50%` on a 200×100 box
+        // must paint the ellipse CSS Backgrounds 3 §4.1 asks for: the horizontal
+        // radius resolves against the WIDTH (→ 100) and the vertical against the
+        // HEIGHT (→ 50). Two different numbers from one authored value.
+        //
+        // This is deliberately a case NO scalar radius can express, so it cannot pass
+        // by accident: any implementation carrying one radius per corner must report
+        // rx == ry and fail here, whichever axis (or min/max/mean) it picked. It also
+        // pins the whole production chain — the percentage must survive the style
+        // resolver to computed-value time, be resolved against the arranged box here
+        // in paint, and reach the path builder's two axes.
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+
+        let mut computed = ComputedStyles::new();
+        computed.insert(
+            root,
+            with_background_and_percent_radius(StyleColor::rgba(1.0, 0.0, 0.0, 1.0), 50.0),
+        );
+
+        let mut boxes = LayoutBoxes::new();
+        boxes.insert(root, box_at(0.0, 0.0, 200.0, 100.0));
+
+        let list = SceneCoordinator::new().compose(&tree, &computed, &boxes, None);
+        let fill = list
+            .commands()
+            .iter()
+            .find_map(|c| match c {
+                PaintCommand::DrawPath { path, .. } => Some(path),
+                _ => None,
+            })
+            .expect("the rounded background fill");
+
+        assert!(path_has_curve(fill), "a 50% radius must round the corners");
+
+        // Read the radii straight off the anchors. `Path::rounded_rect` starts the
+        // top edge at `(x0 + tl.x, y0)` and each corner curve ends where the next
+        // edge begins, so on a 200×100 box at the origin the ellipse's four extreme
+        // points are exactly the edge midpoints: (100,0) top, (200,50) right,
+        // (100,100) bottom, (0,50) left. A circle of ANY radius r would instead put
+        // them at (r,0), (200, r), … with the same r on both axes.
+        let anchors = anchor_points(fill);
+        let near = |p: Point, x: f32, y: f32| (p.x - x).abs() < 1e-3 && (p.y - y).abs() < 1e-3;
+        for (x, y) in [(100.0, 0.0), (200.0, 50.0), (100.0, 100.0), (0.0, 50.0)] {
+            assert!(
+                anchors.iter().any(|&p| near(p, x, y)),
+                "50% on a 200×100 box must put an on-curve point at ({x}, {y}) — \
+                 rx = w/2 = 100, ry = h/2 = 50. Anchors: {anchors:?}"
+            );
+        }
+
+        // The corner points themselves are NOT on the path: the ellipse rounds them
+        // fully away. This is what makes it an ellipse rather than a rounded rect.
+        for (x, y) in [(0.0, 0.0), (200.0, 0.0), (200.0, 100.0), (0.0, 100.0)] {
+            assert!(
+                !anchors.iter().any(|&p| near(p, x, y)),
+                "the box corner ({x}, {y}) must be rounded away by a 50% radius"
+            );
+        }
+
+        // The ellipse still exactly inscribes the border box.
+        assert_eq!(
+            fill.bounds(),
+            Some(Rect::new(Point::new(0.0, 0.0), Size::new(200.0, 100.0)))
+        );
+    }
+
+    #[test]
+    fn percent_radius_resolves_per_axis_against_the_border_box() {
+        // The resolution half of the rule above, isolated from the path builder:
+        // `50%` on a 200×100 box is (100, 50) per corner — width for x, height for y
+        // — and NOT the same number twice.
+        let mut computed = ComputedStyles::new();
+        let node = NodeId::from_raw(1);
+        computed.insert(
+            node,
+            with_background_and_percent_radius(StyleColor::rgba(0.0, 0.0, 0.0, 1.0), 50.0),
+        );
+        let bounds = Rect::new(Point::new(0.0, 0.0), Size::new(200.0, 100.0));
+        let radii = corner_radii_of(&computed, node, Some(bounds));
+        for c in radii.corners() {
+            assert_eq!(c, CornerRadius::new(100.0, 50.0));
+        }
+        // §4.5 must leave the idiom alone: every side sum equals that side's length
+        // exactly, so f == 1 and the ellipse survives normalization untouched.
+        assert_eq!(radii.normalized(bounds), radii, "50% is §4.5's fixed point");
+
+        // Without an arranged box a percentage has no basis and yields a square
+        // corner — it must never silently resolve against zero or a stale box.
+        assert_eq!(
+            corner_radii_of(&computed, node, None),
+            CornerRadii::default()
+        );
     }
 
     #[test]

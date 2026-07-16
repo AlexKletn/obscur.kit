@@ -103,13 +103,7 @@ fn dashed_border_path(bounds: Rect, radii: CornerRadii, width: f32, has_radius: 
         ),
     );
     if has_radius {
-        let r = CornerRadii {
-            top_left: (radii.top_left - half).max(0.0),
-            top_right: (radii.top_right - half).max(0.0),
-            bottom_right: (radii.bottom_right - half).max(0.0),
-            bottom_left: (radii.bottom_left - half).max(0.0),
-        };
-        Path::rounded_rect(center, r)
+        Path::rounded_rect(center, radii.offset(-half))
     } else {
         Path::rect(center)
     }
