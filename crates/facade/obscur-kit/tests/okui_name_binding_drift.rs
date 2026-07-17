@@ -41,6 +41,36 @@ fn reserved_attribute_symbols_match_obscur_view() {
 }
 
 #[test]
+fn the_slot_outlet_id_matches_obscur_view() {
+    // §2.12: the front ends bind `<slot>` to this id and `project_slots` — which
+    // lives below them and cannot call `name_binding` — is what recognises it.
+    // Drift here makes every authored outlet an unregistered component that
+    // mounts nothing, and the only symptom is a slot that never fills.
+    assert_eq!(name_binding::SLOT_OUTLET, view::SLOT_OUTLET);
+}
+
+#[test]
+fn the_authored_outlet_tag_binds_to_the_id_the_runtime_projects() {
+    // The full authored spelling, pinned end to end across the two crates: the
+    // tag resolves to the id `project_slots` substitutes, and `name` on that tag
+    // resolves to the symbol it reads the outlet's slot from. Either half alone
+    // is an outlet that never fills.
+    assert_eq!(
+        name_binding::component_id_for(name_binding::OUTLET_TAG, TagPosition::Element),
+        view::SLOT_OUTLET
+    );
+    assert_eq!(
+        name_binding::attr_symbol_on(name_binding::OUTLET_TAG, "name"),
+        view::SLOT
+    );
+    // And the outlet a component builds by hand is the same node the tag lowers
+    // to — one outlet, two spellings, not two outlets.
+    assert!(view::is_outlet(&view::ViewNode::element(
+        name_binding::component_id_for(name_binding::OUTLET_TAG, TagPosition::Element)
+    )));
+}
+
+#[test]
 fn reserved_event_symbols_match_obscur_view() {
     assert_eq!(name_binding::EVENT_CLICK, view::EVENT_CLICK);
     assert_eq!(name_binding::EVENT_INPUT, view::EVENT_INPUT);

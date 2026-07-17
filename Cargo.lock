@@ -1691,6 +1691,7 @@ version = "0.0.0"
 dependencies = [
  "obscur-okui-compiler",
  "obscur-okui-syntax",
+ "obscur-view",
 ]
 
 [[package]]

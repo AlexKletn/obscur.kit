@@ -19,6 +19,11 @@
 //!   `okui!` macro reaches the same verdict from `syn` tokens; see the
 //!   [`contract_rule`] module docs for why the rule is not written against
 //!   either front end's input.
+//! - [`OutletValidator`] checks an authored `<slot name="…"/>` — the §2.12 outlet
+//!   — against [`check_outlet`], which both front ends share. `check_contract`
+//!   polices the *assignment* side of the slot join (`<h1 slot="header"/>`); this
+//!   polices the *declaration* side, which has a spelling of its own and a
+//!   surface of exactly one attribute.
 
 mod builtin_contracts;
 pub use builtin_contracts::{builtin_contracts, widget_contracts};
@@ -39,6 +44,13 @@ mod expression_validator;
 pub use expression_validator::{
     ExpressionValidator, FORBIDDEN_MESSAGE, ValidationDiagnostic, check_expression,
 };
+pub mod outlet_rule;
+pub use outlet_rule::{
+    DYNAMIC_NAME_MESSAGE, MISSING_NAME_MESSAGE, OUTLET_CHILDREN_MESSAGE, OutletName, OutletUse,
+    check_outlet, extra_attribute_message, is_outlet_tag,
+};
+mod outlet_validator;
+pub use outlet_validator::OutletValidator;
 mod slot_rule;
 pub use slot_rule::SlotRule;
 mod surface_bridge;

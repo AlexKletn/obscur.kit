@@ -102,7 +102,11 @@ fn lower_element(node: &UiIrNode, position: TagPosition) -> ViewNode {
     let mut view = ViewNode::element(name_binding::component_id_for(node.tag(), position));
     for property in node.properties() {
         view = view.with_prop(ViewProperty::new(
-            name_binding::attr_symbol(property.name()),
+            // Through the *tag-aware* binding, so `<slot name="header"/>` lowers to
+            // the §2.12 outlet rather than to a box with a hashed `name` prop. The
+            // tag was always here: this loop has `node.tag()` in scope and is
+            // already threading the node's position from it.
+            name_binding::attr_symbol_on(node.tag(), property.name()),
             lower_value(property.value()),
         ));
     }

@@ -40,13 +40,16 @@ pub struct Server {
 }
 
 impl Server {
-    /// Creates a server with an empty document store and no contract registry.
+    /// Creates a server with an empty document store and the built-in
+    /// primitive/widget contracts registered (whatever [`Analyzer::new`] seeds).
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Sets the contract registry the analyzer's compiler consults (fluent).
+    /// Sets the contract registry the analyzer's compiler consults (fluent),
+    /// **replacing** the built-in set [`new`](Self::new) seeded — see
+    /// [`Analyzer::with_registry`].
     #[must_use]
     pub fn with_registry(mut self, registry: ContractRegistry) -> Self {
         self.analyzer = Analyzer::new().with_registry(registry);

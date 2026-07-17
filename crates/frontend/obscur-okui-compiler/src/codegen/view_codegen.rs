@@ -474,7 +474,11 @@ fn emit_element(
     );
 
     for property in node.properties() {
-        let symbol = name_binding::attr_symbol(property.name()).raw();
+        // Tag-aware, so `<slot name="header"/>` emits the reserved SLOT symbol the
+        // runtime's `project_slots` reads rather than a hashed `name` prop. The
+        // runtime bridge makes the identical call, which is what keeps an
+        // interpreted document and a compiled one the same outlet.
+        let symbol = name_binding::attr_symbol_on(node.tag(), property.name()).raw();
         let value = emit_value(property.value());
         let _ = writeln!(
             out,

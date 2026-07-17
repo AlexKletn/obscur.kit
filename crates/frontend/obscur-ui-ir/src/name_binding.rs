@@ -26,7 +26,9 @@
 //!   (`class`, `id`, `type`, `src`, `disabled`, `checked`) map to the reserved
 //!   `obscur-view` symbols the reconciler and matcher read; any other name is
 //!   deterministically hashed into a high symbol namespace (top bit set) that
-//!   never collides with the reserved low range.
+//!   never collides with the reserved low range. Exactly one binding depends on
+//!   the tag the attribute sits on — `name` on a [`OUTLET_TAG`] — which is why
+//!   [`attr_symbol_on`] exists alongside [`attr_symbol`].
 //! - **Event names → [`InternedSymbol`]**: `click`/`input`/`change` map to the
 //!   reserved `EVENT_*` symbols the runtime's dispatcher resolves; any other name
 //!   is hashed like an attribute.
@@ -129,6 +131,35 @@ pub const AUTOMATION_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0202);
 /// matching or specificity. It has a namespace of its own (`0x0000_03xx`).
 pub const SLOT: InternedSymbol = InternedSymbol::from_raw(0x0000_0301);
 
+/// Mirror of `obscur_view::view::SLOT_OUTLET` — the [`ComponentId`] of a §2.12
+/// **slot outlet**, the position a component's render names for its authored
+/// children to be projected into.
+///
+/// This is what [`OUTLET_TAG`] binds to, and it is the reason the outlet needed no
+/// new syntax on either front end: `<slot name="header"/>` is an ordinary element
+/// tag with an ordinary attribute, and the two [`name_binding`](self) rules
+/// (`slot` → this id, and `name` → [`SLOT`] *on this tag*) are the whole feature.
+///
+/// It sits in a reserved range of its own (`0x00B0_xxxx`), below the primitive
+/// (`0x00C0_xxxx`) and widget (`0x00D0_xxxx`) ranges and clear of the top-bit
+/// namespace [`user_component_id`] hashes into.
+pub const SLOT_OUTLET: ComponentId = ComponentId::from_raw(0x00B0_0001);
+
+/// The tag that spells a §2.12 slot outlet: `<slot name="header"/>`.
+///
+/// A `&str` constant rather than a bare literal because three places must agree on
+/// it and cannot be allowed to drift: [`builtin_component_id`] binds the tag,
+/// [`attr_symbol_on`] rebinds `name` on it, and the frontend's `check_outlet`
+/// rule decides what is legal to write on it.
+///
+/// Lowercase only, and deliberately: an outlet is a *position marker*, not a
+/// component, and both front ends classify a lowercase tag as an element (see
+/// [`TagPosition`]). A `<Slot/>` in component position stays what any unrecognised
+/// component tag is — [`user_component_id("Slot")`](user_component_id), mounting
+/// nothing — because giving the outlet two spellings would mean the front ends'
+/// element/component classification no longer decided anything about it.
+pub const OUTLET_TAG: &str = "slot";
+
 // --- Reserved event symbols (mirror `obscur_view::view::event_name`). ---
 
 /// Reserved `click` event symbol (`obscur_view::view::EVENT_CLICK`).
@@ -208,9 +239,18 @@ pub enum TagPosition {
 /// Built-in widgets and non-container primitives resolve to their stable
 /// `COMPONENT_ID`; the lowercase `img`/`canvas`/… element spellings resolve to
 /// the same primitive as their PascalCase component spelling.
+///
+/// [`OUTLET_TAG`] is the one entry here that is not a component at all: nothing is
+/// ever registered under [`SLOT_OUTLET`], and no node ever retains it — projection
+/// substitutes it away inside a component's render, and the reconciler refuses it
+/// anywhere else. It is a built-in because it is a *reserved tag*: `<slot>` must
+/// mean the outlet rather than a `div` named `slot`, and this function is where
+/// every reserved tag is stated.
 #[must_use]
 pub fn builtin_component_id(tag: &str) -> Option<ComponentId> {
     let id = match tag {
+        // The §2.12 slot outlet — a position, not a component (see above).
+        OUTLET_TAG => SLOT_OUTLET,
         // Widgets (PascalCase component spelling).
         "Button" => BUTTON,
         "Input" => INPUT,
@@ -279,11 +319,52 @@ pub fn user_component_id(tag: &str) -> ComponentId {
     ComponentId::from_raw(hash_name_64(tag) | 0x8000_0000_0000_0000)
 }
 
-/// Resolves an attribute name to the [`InternedSymbol`] it binds to.
+/// Resolves an attribute name written **on `tag`** to the [`InternedSymbol`] it
+/// binds to.
+///
+/// This is [`attr_symbol`] plus the one binding that depends on the tag the
+/// attribute sits on: on [`OUTLET_TAG`], `name` is the *slot the outlet stands
+/// for*, so it binds to the reserved [`SLOT`] symbol that `project_slots` reads —
+/// exactly as a child's `slot="…"` does, because the two are the two halves of one
+/// join and must be the same symbol or they never meet. On every other tag `name`
+/// is an ordinary hashed prop, and `<slot class="x">` is an ordinary hashed prop
+/// too: only the pair (`slot`, `name`) is special.
+///
+/// # The obstacle that was not one
+///
+/// The audit recorded that an outlet "cannot cheaply become" a tag because
+/// "`attr_symbol` binds an attribute by its own spelling with no idea which tag it
+/// sits on, so `name` cannot mean the slot's name on one tag and a hashed prop
+/// elsewhere". The first clause is true of the *function*; the conclusion does not
+/// follow. Of [`attr_symbol`]'s three production callers, the two that lower a
+/// **document** — `UiIrViewBridge::lower_element` and `ViewCodegen::emit_element` —
+/// hold `node.tag()` in the same scope in which they call it, and each is already
+/// threading `TagPosition` out of that same node. The tag was not absent; it was
+/// one argument away. That is a much cheaper finding than the one the audit wrote,
+/// and the difference between the two is the whole cost of this feature.
+///
+/// The third caller is the one the audit's claim is true of, and it is why
+/// [`attr_symbol`] is still here rather than replaced: `#[derive(Contract)]` hashes
+/// a prop name out of a struct field, where there is no tag by construction. It
+/// keeps the tagless function, which is exactly this one's non-outlet branch, so
+/// the two cannot disagree.
+#[must_use]
+pub fn attr_symbol_on(tag: &str, name: &str) -> InternedSymbol {
+    if tag == OUTLET_TAG && name == "name" {
+        return SLOT;
+    }
+    attr_symbol(name)
+}
+
+/// Resolves an attribute name to the [`InternedSymbol`] it binds to, with no tag
+/// context.
 ///
 /// The reserved CSS/state attributes map to the `obscur-view` symbols the
 /// reconciler and matcher read; any other name is hashed into the high symbol
 /// namespace (see [`fallback_symbol`]).
+///
+/// Prefer [`attr_symbol_on`] when the tag is known: one binding (`name` on a
+/// `<slot>`) depends on it, and this function cannot see it.
 #[must_use]
 pub fn attr_symbol(name: &str) -> InternedSymbol {
     match name {
@@ -451,6 +532,64 @@ mod tests {
         assert_eq!(attr_symbol("test-id"), TEST_ID);
         assert_eq!(attr_symbol("automation-id"), AUTOMATION_ID);
         assert_eq!(attr_symbol("slot"), SLOT);
+    }
+
+    #[test]
+    fn the_outlet_tag_binds_to_the_reserved_outlet_id() {
+        // `<slot/>` used to be an unknown element tag — the generic CONTAINER box,
+        // indistinguishable from a `<div>`. It is now the §2.12 outlet.
+        assert_eq!(builtin_component_id(OUTLET_TAG), Some(SLOT_OUTLET));
+        assert_eq!(component_id_for("slot", TagPosition::Element), SLOT_OUTLET);
+        assert_ne!(component_id_for("slot", TagPosition::Element), CONTAINER);
+    }
+
+    #[test]
+    fn the_outlet_id_aliases_no_other_namespace() {
+        // Disjoint by construction: every primitive is `0x00C0_xxxx`, every widget
+        // `0x00D0_xxxx`, and every user component carries the top bit. Mirrors
+        // `obscur_view::view::slot`'s own assertion; the facade's drift guard is
+        // what proves the two constants are the same value.
+        assert_eq!(SLOT_OUTLET.raw() & 0x8000_0000_0000_0000, 0);
+        assert!(SLOT_OUTLET.raw() < 0x00C0_0000);
+        assert_ne!(SLOT_OUTLET, CONTAINER);
+    }
+
+    #[test]
+    fn name_binds_to_the_slot_symbol_only_on_the_outlet_tag() {
+        // THE binding the audit called impossible. `name` is the outlet's slot on
+        // `<slot>`, and an ordinary hashed prop everywhere else — the two meanings
+        // the tag-blind `attr_symbol` was said to be unable to hold apart.
+        assert_eq!(attr_symbol_on("slot", "name"), SLOT);
+        assert_eq!(attr_symbol_on("div", "name"), fallback_symbol("name"));
+        assert_eq!(attr_symbol_on("Card", "name"), fallback_symbol("name"));
+        assert_ne!(attr_symbol_on("div", "name"), SLOT);
+    }
+
+    #[test]
+    fn an_outlets_slot_and_a_childs_slot_are_the_same_symbol() {
+        // They are the two halves of one join: `project_slots` reads an outlet's
+        // name and a child's assignment through the same `slot_assignment`. Two
+        // symbols here would be two names that never meet.
+        assert_eq!(attr_symbol_on("slot", "name"), attr_symbol("slot"));
+    }
+
+    #[test]
+    fn only_the_name_attribute_is_special_on_the_outlet_tag() {
+        // The disjoint half: the rebinding is the pair (`slot`, `name`), not the
+        // tag. Everything else on a `<slot>` binds exactly as it would anywhere.
+        assert_eq!(attr_symbol_on("slot", "class"), CLASS);
+        assert_eq!(attr_symbol_on("slot", "data-x"), fallback_symbol("data-x"));
+        assert_eq!(attr_symbol_on("slot", "slot"), SLOT);
+    }
+
+    #[test]
+    fn attr_symbol_on_is_attr_symbol_off_the_outlet_tag() {
+        // The tagless entry point is this one's non-outlet branch, so no caller can
+        // be reached by only one of them and get a different answer.
+        for name in ["class", "id", "type", "src", "disabled", "checked", "zzz"] {
+            assert_eq!(attr_symbol_on("div", name), attr_symbol(name), "{name}");
+            assert_eq!(attr_symbol_on("slot", name), attr_symbol(name), "{name}");
+        }
     }
 
     #[test]

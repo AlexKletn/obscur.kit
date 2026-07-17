@@ -13,8 +13,9 @@ use obscur_accessibility::port::AccessibilityBridge;
 use obscur_accessibility::tree::{SemanticSnapshot, SemanticTree};
 use obscur_diagnostics::SpanAttribution;
 use obscur_diagnostics::{
-    BudgetViolation, Diagnostic, DiagnosticSink, DiagnosticSubsystem, NullDiagnosticSink,
-    NullTelemetrySink, PerformanceCounter, PerformanceSpan, RecoveryAction, TelemetrySink,
+    BudgetViolation, Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSink,
+    DiagnosticSubsystem, NullDiagnosticSink, NullTelemetrySink, PerformanceCounter,
+    PerformanceSpan, RecoveryAction, TelemetrySink,
 };
 use obscur_geometry::{AffineTransform, Point, Rect, Size};
 use obscur_identity::SignalId;
@@ -62,7 +63,7 @@ use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::boundary::ComponentFailure;
 use obscur_view::component::{ComponentRegistration, RegistryError};
-use obscur_view::view::{EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, View, project_slots};
+use obscur_view::view::{EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, View, has_outlet, project_slots};
 
 use super::{
     AppCommands, CommandTarget, FrameBudget, FramePlan, KeyDispatch, PointerDispatch,
@@ -74,11 +75,12 @@ use std::collections::VecDeque;
 
 use crate::component::{ComponentStore, GuardedRender};
 use crate::orchestration::{
-    AnimatedKind, AnimationBinding, ComputedStyles, CssMotionRules, DragCoordinator, DragOutcome,
-    EditingView, InspectInfo, LayoutBoxes, LayoutCoordinator, MeasureCache, MotionCoordinator,
-    NodeInspection, PreeditView, PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint,
-    ShapedChMetrics, StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement,
-    TreeInspection, overflow_scrolls, overlay_commands, root_font_size, scroll_containers,
+    AnimatedKind, AnimationBinding, ArrangeCache, ComputedStyles, CssMotionRules, DragCoordinator,
+    DragOutcome, EditingView, InspectInfo, LayoutBoxes, LayoutCoordinator, MeasureCache,
+    MotionCoordinator, NodeInspection, PreeditView, PseudoStates, SceneCoordinator,
+    ScrollContainer, ScrollPaint, ShapedChMetrics, StyleCoordinator, StyleInputs,
+    StyleMatchingCoordinator, TreeElement, TreeInspection, overflow_scrolls, overlay_commands,
+    root_font_size, scroll_containers,
 };
 use crate::orchestration::{alignment_for, direction_for, white_space_for};
 use crate::recovery::RecoveryResult;
@@ -193,6 +195,17 @@ pub struct UiRuntime {
     /// changes a layout input **outside** the computed styles the classifier diffs
     /// must clear it — see the shaping-port setters, which do.
     measure_cache: MeasureCache,
+    /// The `arrange` results retained across frames — the other half of §4.2's
+    /// "may cache measure/layout results", and what makes step 8's *arrange*
+    /// incremental rather than only its measure: a subtree the frame's
+    /// [`LayoutInvalidation`] cannot have touched, and whose parent put back at the
+    /// same origin under the same constraints, is served from its retained absolute
+    /// boxes instead of re-running its layout algorithms.
+    ///
+    /// It is a matched pair with [`measure_cache`](Self::measure_cache) under the
+    /// same preconditions: every site that clears one clears this too, because a
+    /// changed size is a changed position.
+    arrange_cache: ArrangeCache,
     /// Composes the paint-ordered display list.
     scene_composer: SceneCoordinator,
     /// The application's current locale (spec §7.2), `und` until a host calls
@@ -681,6 +694,7 @@ impl UiRuntime {
             style: StyleCoordinator::new(),
             layout: LayoutCoordinator::new(),
             measure_cache: MeasureCache::new(),
+            arrange_cache: ArrangeCache::new(),
             scene_composer: SceneCoordinator::new(),
             // `und`, not `en`: an unset locale is unknown, not English. Nothing
             // changes until a host says otherwise (spec §7.2).
@@ -1340,10 +1354,12 @@ impl UiRuntime {
     /// determinism, so all default-path tests are unchanged.
     pub fn set_text_shaper(&mut self, shaper: Box<dyn TextShaper>) {
         self.scene_composer.set_text_shaper(shaper);
-        // The measure cache's retained sizes were produced by the OUTGOING port:
-        // a different one shapes/wraps to different sizes, and that is a layout
+        // Both caches' retained results were produced by the OUTGOING port: a
+        // different one shapes/wraps to different sizes — and a different size is a
+        // different position, so the arranged boxes go with them. That is a layout
         // input no computed-style diff can see. Drop them (spec §4.3).
         self.measure_cache.clear();
+        self.arrange_cache.clear();
     }
 
     /// Installs a text `itemizer` on the owned scene coordinator, replacing the
@@ -1357,10 +1373,12 @@ impl UiRuntime {
     /// unset keeps the single-run default, preserving headless determinism.
     pub fn set_text_itemizer(&mut self, itemizer: Box<dyn TextItemizer>) {
         self.scene_composer.set_itemizer(itemizer);
-        // The measure cache's retained sizes were produced by the OUTGOING port:
-        // a different one shapes/wraps to different sizes, and that is a layout
+        // Both caches' retained results were produced by the OUTGOING port: a
+        // different one shapes/wraps to different sizes — and a different size is a
+        // different position, so the arranged boxes go with them. That is a layout
         // input no computed-style diff can see. Drop them (spec §4.3).
         self.measure_cache.clear();
+        self.arrange_cache.clear();
     }
 
     /// Installs a font `resolver` on the owned scene coordinator, replacing the
@@ -1373,10 +1391,12 @@ impl UiRuntime {
     /// it unset falls every run back to the primary face (font `0`).
     pub fn set_font_resolver(&mut self, resolver: Box<dyn FontResolver>) {
         self.scene_composer.set_font_resolver(resolver);
-        // The measure cache's retained sizes were produced by the OUTGOING port:
-        // a different one shapes/wraps to different sizes, and that is a layout
+        // Both caches' retained results were produced by the OUTGOING port: a
+        // different one shapes/wraps to different sizes — and a different size is a
+        // different position, so the arranged boxes go with them. That is a layout
         // input no computed-style diff can see. Drop them (spec §4.3).
         self.measure_cache.clear();
+        self.arrange_cache.clear();
     }
 
     /// Sets the application's current locale (spec §7.2).
@@ -1451,10 +1471,12 @@ impl UiRuntime {
     /// preserves headless determinism, so all default-path tests are unchanged.
     pub fn set_hyphenator(&mut self, hyphenator: Box<dyn Hyphenator>) {
         self.scene_composer.set_hyphenator(hyphenator);
-        // The measure cache's retained sizes were produced by the OUTGOING port:
-        // a different one shapes/wraps to different sizes, and that is a layout
+        // Both caches' retained results were produced by the OUTGOING port: a
+        // different one shapes/wraps to different sizes — and a different size is a
+        // different position, so the arranged boxes go with them. That is a layout
         // input no computed-style diff can see. Drop them (spec §4.3).
         self.measure_cache.clear();
+        self.arrange_cache.clear();
     }
 
     /// Requests a frame for `reason`, returning the scheduler's admission
@@ -1895,6 +1917,46 @@ impl UiRuntime {
         self.diagnostics.emit(&diagnostic);
     }
 
+    /// Reports a **stray §2.12 slot outlet** in `desired` on the diagnostics
+    /// channel (spec §1.6, §2.12).
+    ///
+    /// An outlet is a position inside a *component's* output: `render_components`
+    /// runs `project_slots` over that output and substitutes every one of them
+    /// away before it is committed. `desired` is the application's own view — it
+    /// is nobody's render output, nothing will ever project it, and an outlet in
+    /// it therefore names a slot that will never be filled.
+    ///
+    /// The tree refuses it either way (the reconciler will not materialize an
+    /// outlet), so this is the half that makes the refusal *loud* rather than
+    /// silent — the same treatment `float`, `@container` and `::before` get, moved
+    /// to the only place that can decide it. The front ends cannot: a component's
+    /// render returns a `View` and `okui!` produces a `View`, so
+    /// `okui! { <slot name="header"/> }` is legal inside `Component::render` and
+    /// illegal one function away, and no proc-macro can tell those two call sites
+    /// apart. Whether an outlet is stray is a fact about *who is projecting the
+    /// view*, which is knowable here and nowhere earlier.
+    ///
+    /// One walk of the desired tree, on structural frames only, and only when the
+    /// frame reconciles at all. It is not free — it is a second visit to nodes the
+    /// reconcile that follows visits anyway — and there is no cheaper signal: a
+    /// document that authors no outlet cannot be recognised without looking.
+    fn report_stray_outlets(&self, desired: &View) {
+        if !has_outlet(desired.root().nodes()) {
+            return;
+        }
+        self.diagnostics.emit(&Diagnostic::new(
+            DiagnosticCode::new("view.stray_slot_outlet"),
+            DiagnosticSeverity::Error,
+            DiagnosticSubsystem::Tree,
+            "a `<slot>` outlet was authored outside a component's render output \
+             (spec §2.12): an outlet marks where a component's authored children \
+             are projected, and only a component's own render is projected, so \
+             this one names a slot nothing will ever fill. It is dropped rather \
+             than rendered as an empty box. Author the outlet in the `render` of \
+             the component that declares the slot",
+        ));
+    }
+
     /// Hands a failure that escaped `node`'s disabled boundary to the nearest
     /// enclosing enabled one (spec §1.7), returning that boundary's node and the
     /// fallback UI to commit over its subtree.
@@ -2270,6 +2332,13 @@ impl UiRuntime {
         //    whether the commit carried any operation — identical to the previous
         //    `!plan.is_empty()`.
         let reconciled = if plan.reconcile() {
+            // §2.12: `desired` is the application's own view, so it is nobody's
+            // render output and no `project_slots` will ever run over it. An
+            // outlet in it — at the root or anywhere in a component host's
+            // authored children, which are cloned into a component's output
+            // un-projected — is a stray. The reconcile below refuses to
+            // materialize it; this is what says so out loud.
+            self.report_stray_outlets(desired);
             let (commit, reconcile_plan) = self
                 .enactor
                 .commit_root(&self.reconciler, &mut self.tree, desired)
@@ -2457,15 +2526,17 @@ impl UiRuntime {
             // `tree` and `scene_composer` are disjoint fields, so this is a legal
             // split borrow.
             let editing = self.editing_view();
-            // §3.4 step 8: **incremental** layout. The classifier above named the
-            // contexts whose inputs moved; hand that set — and the measure cache
-            // carried over from the last laid-out frame — to the coordinator, which
-            // drops exactly the entries the set can have invalidated and serves the
-            // rest without re-measuring. `Full` passes `None`, which drops the whole
-            // cache and reproduces the historical all-or-nothing pass byte-for-byte.
+            // §3.4 step 8: **incremental** layout, on both halves. The classifier
+            // above named the contexts whose inputs moved; hand that set — and the
+            // two caches carried over from the last laid-out frame — to the
+            // coordinator, which drops exactly the entries the set can have
+            // invalidated, serves every other node's size without re-measuring, and
+            // serves every unchanged subtree's absolute boxes without re-running its
+            // layout algorithms. `Full` passes `None`, which drops both caches whole
+            // and reproduces the historical all-or-nothing pass byte-for-byte.
             //
-            // `layout`, `tree`, `measure_cache` and `scene_composer` are disjoint
-            // fields: a legal split borrow.
+            // `layout`, `tree`, `measure_cache`, `arrange_cache` and
+            // `scene_composer` are disjoint fields: a legal split borrow.
             let dirty = match &layout_phase {
                 LayoutPhase::Invalidated(dirty) => Some(dirty),
                 LayoutPhase::Skip | LayoutPhase::Full => None,
@@ -2483,6 +2554,7 @@ impl UiRuntime {
                 self.scene_composer.hyphenator(),
                 editing,
                 &self.measure_cache,
+                &self.arrange_cache,
                 dirty,
             );
             let relaid_out = !boxes.is_empty();
@@ -9026,6 +9098,73 @@ mod tests {
                 "a cache-served sibling keeps its box",
             );
         }
+    }
+
+    #[test]
+    fn a_layout_affecting_hover_rearranges_only_the_hovered_node() {
+        // The arrange twin of the test above, and the half it left open: that one
+        // proves the frame does not re-MEASURE the whole tree, this one proves it
+        // does not re-ARRANGE it either. Both run on the real frame path — this is
+        // `UiRuntime::run_due_frame`, not the coordinator in isolation.
+        //
+        // The hover changes the LAST sibling's WIDTH, so in a vertical flow nothing
+        // above it moves: the two clean siblings keep both their origin and their
+        // constraints, which is exactly the case a served subtree must cover.
+        let view = three_box_view();
+        let sheet = box_hover_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.render_now(&view, sheets);
+
+        let root = runtime.tree().root().expect("a root");
+        let boxes = runtime.tree().get(root).expect("root").children().to_vec();
+        let [first, second, last] = <[NodeId; 3]>::try_from(boxes).expect("three siblings");
+
+        // The cold frame arranged all three, or there is nothing to skip below.
+        for node in [first, second, last] {
+            assert!(
+                runtime.arrange_cache.arranged(node),
+                "the cold frame must arrange {node:?}",
+            );
+        }
+        let before = runtime.layout_boxes()[&first];
+
+        runtime.set_pseudo_state(last, PseudoState::HOVER);
+        runtime.request_frame(FrameReason::Input);
+        let hot = runtime
+            .run_due_frame(&view, sheets)
+            .expect("the input frame is due");
+
+        assert!(hot.relaid_out(), "a width change must relayout");
+        assert!(
+            runtime.arrange_cache.arranged(last),
+            "the hovered node's width changed, so it must re-arrange",
+        );
+        // The claim. Without it, "incremental layout" is incremental on one half.
+        assert!(
+            !runtime.arrange_cache.arranged(first),
+            "an unhovered sibling must not re-arrange",
+        );
+        assert!(
+            !runtime.arrange_cache.arranged(second),
+            "an unhovered sibling must not re-arrange",
+        );
+        assert_eq!(
+            runtime.arrange_cache.arranged_count(),
+            2,
+            "exactly the hovered node and the root above it re-arranged",
+        );
+        // And it is still CORRECT: served is not the same as forgotten.
+        assert_eq!(
+            runtime.layout_boxes()[&last].size().width,
+            200.0,
+            "the hover rule applied",
+        );
+        assert_eq!(
+            runtime.layout_boxes()[&first],
+            before,
+            "a served sibling keeps the exact box a full pass gives it",
+        );
     }
 
     #[test]

@@ -19,7 +19,7 @@ mod inspect;
 pub use inspect::{InspectInfo, NodeInspection, TreeInspection, overlay_commands};
 mod layout_coordinator;
 pub use layout_coordinator::{
-    LayoutBoxes, LayoutCoordinator, LayoutStyles, MeasureCache, root_font_size,
+    ArrangeCache, LayoutBoxes, LayoutCoordinator, LayoutStyles, MeasureCache, root_font_size,
 };
 mod motion_coordinator;
 pub use motion_coordinator::MotionCoordinator;

@@ -44,25 +44,52 @@
 //!   are toolkit API for a host's own components, exercised here exactly as a host
 //!   would. `Dialog` still takes one anonymous child list and is a view-builder,
 //!   not a component; giving it slots means making it a component first.
-//! * **A `.okui`/`okui!` document cannot write an outlet.** `<slot name="header"/>`
-//!   is not a tag either front end knows: `name_binding::attr_symbol` binds an
-//!   attribute by its own spelling with no idea which tag it sits on, so `name`
-//!   cannot mean the slot's name on one tag and a hashed prop everywhere else. A
-//!   component's body is hand-written Rust today regardless — §2.12's `Template`
-//!   is still a node the parser never emits — so the outlet is authored where the
-//!   body is. `an_outlet_has_no_authored_spelling_yet` pins it.
-//! * **An outlet outside a component's output is an inert box.** Nothing projects
-//!   a view that is not some component's render, so a stray outlet there is not
-//!   substituted away. `a_stray_outlet_outside_a_component_is_inert` pins it.
+//! * **The outlet's name is not checked against the component's declaration.**
+//!   A component that renders `<slot name="hedaer"/>` silently receives nothing.
+//!   The declaration is on the contract, which `ComponentStore` holds at runtime;
+//!   no front end can reach it (see below) and nothing at runtime checks it.
+//! * **The outlet is not checked for being inside a component at all,
+//!   at compile time.** It cannot be: `render` returns a `View` and `okui!`
+//!   produces a `View`, so the same expansion is correct in one function and stray
+//!   in the next, and no proc-macro can tell those apart. The stray case is caught
+//!   at runtime instead, where the answer is knowable — see the fail-closed tests
+//!   below.
+//!
+//! # The authored spelling, and the obstacle that was not one
+//!
+//! `<slot name="header"/>` used to be an unknown element tag on both front ends —
+//! a generic box with a hashed `name` prop — and the audit recorded why it could
+//! not cheaply become one: "`name_binding::attr_symbol` binds an attribute by its
+//! own spelling with no idea which tag it sits on". True of the function; false as
+//! a conclusion. Of its three production callers, the two that lower a *document*
+//! hold `node.tag()` in the scope they call it from, and both were already
+//! threading that node's `TagPosition` out of it. The tag was one argument away,
+//! not absent. (The third — `#[derive(Contract)]`, hashing a struct field — really
+//! has no tag, which is why the tagless `attr_symbol` survives alongside the new
+//! `attr_symbol_on`.)
+//!
+//! So the spelling is two `name_binding` rules and no new syntax in either
+//! parser: `slot` binds to `SLOT_OUTLET`, and `name` binds to `SLOT` *on that tag
+//! only*. Both front ends gain it together because both reach `ViewNode` through
+//! those two callers — which is the `<VirtualFor>` house rule holding by
+//! construction rather than by discipline.
 #![forbid(unsafe_code)]
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use obscur_kit::diagnostics::{Diagnostic, DiagnosticSeverity, DiagnosticSink};
 use obscur_kit::geometry::Size;
-use obscur_kit::identity::{ComponentId, RuntimeId};
+use obscur_kit::identity::{ComponentId, FrameId, RuntimeId};
 use obscur_kit::okui_compiler::bridge::UiIrViewBridge;
 use obscur_kit::okui_compiler::compile::Compiler;
 use obscur_kit::okui_syntax::ast::Document;
 use obscur_kit::okui_syntax::parser::Parser;
 use obscur_kit::runtime::UiRuntime;
+use obscur_kit::runtime::frame::{FrameContext, FramePipeline, FrameReason};
+use obscur_kit::runtime::orchestration::StyleInputs;
+use obscur_kit::scene::scene::Scene;
+use obscur_kit::tree::tree::RetainedTree;
 use obscur_kit::ui_macros::{Contract, okui};
 use obscur_kit::view::component::{
     Component, ComponentContext, ComponentContract, ComponentFactory, ComponentInstance,
@@ -136,6 +163,57 @@ impl ComponentFactory for CardFactory {
     }
     fn create_component(&self) -> Box<dyn ErasedComponent> {
         Box::new(Card)
+    }
+}
+
+/// The same component as [`Card`], with its render **authored** rather than
+/// hand-built — the point of the `<slot>` spelling.
+///
+/// Deliberately a second component rather than a change to `Card`: the two must
+/// be able to disagree for either test to mean anything, and `Card` is what pins
+/// that a hand-built outlet still works.
+#[derive(Contract)]
+#[contract(name = "AuthoredCard")]
+#[contract(slot(name = "header", cardinality = one))]
+#[contract(slot(name = "body", cardinality = many))]
+struct AuthoredCardProps {
+    /// A required prop, so props and slots are exercised together.
+    title: String,
+}
+
+struct AuthoredCard;
+
+impl Component for AuthoredCard {
+    /// Every node of this is the macro's — no `ViewNode::slot` in sight.
+    fn render(&mut self, _ctx: &mut ComponentContext<'_>, props: &Self::Props) -> View {
+        let title = &props.title;
+        okui! {
+            <div>
+                {title}
+                <div class="region-header"><slot name="header"/></div>
+                <div class="region-body"><slot name="body"/></div>
+            </div>
+        }
+    }
+
+    type Props = AuthoredCardProps;
+}
+
+#[derive(Debug)]
+struct AuthoredCardFactory;
+
+impl ComponentFactory for AuthoredCardFactory {
+    fn component_id(&self) -> ComponentId {
+        AuthoredCardProps::contract().id
+    }
+    fn contract(&self) -> ComponentContract {
+        AuthoredCardProps::contract()
+    }
+    fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
+        ComponentInstance::new(instance, AuthoredCardProps::contract().id)
+    }
+    fn create_component(&self) -> Box<dyn ErasedComponent> {
+        Box::new(AuthoredCard)
     }
 }
 
@@ -349,40 +427,229 @@ fn a_document_authoring_no_slot_stores_no_slot_content() {
     );
 }
 
-// --- The residue, pinned rather than hidden. -----------------------------
+// --- The authored spelling. ----------------------------------------------
 
 #[test]
-fn an_outlet_has_no_authored_spelling_yet() {
-    // `<slot name="header"/>` is not a tag either front end knows: it binds like
-    // any other unknown element tag — a generic box — and `name` hashes to an
-    // ordinary prop. A component's body is hand-written Rust regardless (§2.12's
-    // `Template` is a node the parser never emits), so this is a gap in the
-    // authoring surface for component bodies, not in the routing.
+fn an_authored_slot_tag_is_the_outlet_on_the_macro_front_end() {
+    // The residue this file used to pin, closed. `<slot name="header"/>` was an
+    // unknown element tag — a generic box with a hashed `name` prop, identical to
+    // a `<div>`. It is now the same node `ViewNode::slot("header")` builds.
     let view: View = okui! { <slot name="header"/> };
+    assert_eq!(view.root().nodes(), [ViewNode::slot("header")]);
     let ViewNode::Element { component, .. } = &view.root().nodes()[0] else {
         panic!("a tag lowers to an element");
     };
-    assert_eq!(
-        *component,
-        container(),
-        "`<slot>` is still just an unknown element tag — the outlet is Rust-only"
-    );
-    assert_ne!(*component, obscur_kit::view::view::SLOT_OUTLET);
+    assert_eq!(*component, obscur_kit::view::view::SLOT_OUTLET);
+    assert_ne!(*component, container(), "an outlet is not a box");
 }
 
 #[test]
-fn a_stray_outlet_outside_a_component_is_inert() {
-    // Projection runs over a component's render output. A view that is nobody's
-    // render output is never projected, so an outlet in one is not substituted
-    // away — it lands as an ordinary empty element. Not fail-closed, and said out
-    // loud rather than left for someone to discover.
+fn an_authored_slot_tag_is_the_outlet_on_the_file_front_end_too() {
+    // Both front ends gain it together — the house rule the
+    // `<VirtualFor>`-was-`<For>` drift was written to enforce. They gain it from
+    // the same two `name_binding` rules, which is *why* neither could have got it
+    // alone: the file path's `UiIrViewBridge` and the macro's `ViewCodegen` are
+    // the only two callers of `attr_symbol_on`.
+    let ir = compile(r#"<slot name="header"/>"#);
+    let view = UiIrViewBridge::document_to_view(&ir);
+    assert_eq!(view.root().nodes(), [ViewNode::slot("header")]);
+}
+
+#[test]
+fn a_component_can_author_its_own_render_with_the_slot_tag() {
+    // What the spelling is *for*, driven end to end. `AuthoredCard::render`
+    // returns the `okui!` expansion verbatim — no hand-built `ViewNode::slot`
+    // anywhere — and the authored `<h1 slot="header"/>` reaches the header region
+    // and not the body one.
+    //
+    // This is the whole §2.12 loop closed on one authoring surface: a component
+    // declares its slots in its contract, spells the outlets in `okui!`, and a
+    // caller assigns to them in `okui!`.
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(3), Size::new(200.0, 200.0));
+    runtime
+        .register_component(ComponentRegistration::new(
+            Box::new(AuthoredCardFactory),
+            ComponentVersion::INITIAL,
+        ))
+        .expect("AuthoredCard registers");
+    runtime.render_now(
+        &okui! {
+            <AuthoredCard title="Hi">
+                <h1 slot="header">"Title"</h1>
+                <p slot="body">"Body"</p>
+            </AuthoredCard>
+        },
+        &[],
+    );
+
+    assert_eq!(texts_in_region(&runtime, "region-header"), ["Title"]);
+    assert_eq!(texts_in_region(&runtime, "region-body"), ["Body"]);
+    assert!(
+        !texts_in_region(&runtime, "region-header").contains(&"Body".to_string()),
+        "an authored outlet routes by name, like a hand-built one"
+    );
+}
+
+// --- Fail-closed: a stray outlet. ----------------------------------------
+
+/// A [`DiagnosticSink`] collecting into a shared buffer: `set_diagnostic_sink`
+/// takes the sink by value, so a test that wants to read it needs a handle.
+#[derive(Debug, Default, Clone)]
+struct Collected(Rc<RefCell<Vec<Diagnostic>>>);
+
+impl DiagnosticSink for Collected {
+    fn emit(&self, diagnostic: &Diagnostic) {
+        self.0.borrow_mut().push(diagnostic.clone());
+    }
+}
+
+impl Collected {
+    /// Whether a stray-outlet diagnostic was reported.
+    fn saw_stray_outlet(&self) -> bool {
+        self.0
+            .borrow()
+            .iter()
+            .any(|d| d.code.as_str() == "view.stray_slot_outlet")
+    }
+}
+
+#[test]
+fn a_stray_outlet_outside_a_component_never_becomes_a_node() {
+    // The residue this file used to pin, closed. Projection runs over a
+    // component's render output; a view that is nobody's render is never
+    // projected, so a stray outlet used to land as an ordinary empty element that
+    // laid out and painted. The reconciler now refuses to materialize one.
     let mut runtime = runtime_with_card();
     runtime.render_now(&View::single(ViewNode::slot("header")), &[]);
 
     let root = runtime.tree().root().expect("a root");
-    assert_eq!(
-        runtime.tree().get(root).expect("live").children().len(),
-        1,
-        "the stray outlet became a real node"
+    assert!(
+        runtime
+            .tree()
+            .get(root)
+            .expect("live")
+            .children()
+            .is_empty(),
+        "a stray outlet must not become a real node"
+    );
+}
+
+#[test]
+fn a_stray_outlet_is_reported_on_the_diagnostics_channel() {
+    // Dropping it silently is the state this campaign keeps finding and removing:
+    // the author's outlet vanishes and nothing says why. `float`, `@container` and
+    // `::before` are refused *with a diagnostic*; so is this.
+    //
+    // It cannot be refused at compile time, and that is not a shortcut: a
+    // component's `render` returns a `View` and `okui!` produces a `View`, so the
+    // identical `okui! { <slot name="header"/> }` is correct in `render` and stray
+    // one function away. Only the runtime knows who is projecting the view.
+    let collected = Collected::default();
+    let mut runtime = runtime_with_card();
+    runtime.set_diagnostic_sink(Box::new(collected.clone()));
+    runtime.render_now(&View::single(ViewNode::slot("header")), &[]);
+
+    let reported = collected.0.borrow();
+    let stray = reported
+        .iter()
+        .find(|d| d.code.as_str() == "view.stray_slot_outlet")
+        .expect("a stray outlet is reported");
+    assert_eq!(stray.severity, DiagnosticSeverity::Error);
+    assert!(
+        stray
+            .message
+            .contains("outside a component's render output"),
+        "the message must say what is wrong: {}",
+        stray.message
+    );
+}
+
+#[test]
+fn an_outlet_inside_a_components_render_is_not_reported_as_stray() {
+    // The disjoint half, and the one that makes the check worth having rather than
+    // a blanket refusal of the tag: the outlets `Card::render` declares are the
+    // legitimate ones. A rule that fired on those would refuse §2.12 itself.
+    let collected = Collected::default();
+    let mut runtime = runtime_with_card();
+    runtime.set_diagnostic_sink(Box::new(collected.clone()));
+    runtime.render_now(
+        &okui! { <Card title="Hi"><h1 slot="header">"T"</h1></Card> },
+        &[],
+    );
+
+    assert!(
+        !collected.saw_stray_outlet(),
+        "a component's own outlets are not strays"
+    );
+    // And they still project, so this is not "quiet because nothing ran".
+    assert_eq!(texts_in_region(&runtime, "region-header"), ["T"]);
+}
+
+#[test]
+fn an_outlet_in_a_hosts_authored_children_is_a_stray_too() {
+    // The case the root-only check must not miss. A component host's children are
+    // cloned into the component's output by `project_slots` *un-projected* — that
+    // is what makes them content rather than output — so an outlet nested in them
+    // is one nothing will ever fill. It is in the desired view, so the root check
+    // sees it, and the reconciler refuses it wherever it lands.
+    let collected = Collected::default();
+    let mut runtime = runtime_with_card();
+    runtime.set_diagnostic_sink(Box::new(collected.clone()));
+    runtime.render_now(
+        &okui! { <Card title="Hi"><div slot="header"><slot name="inner"/></div></Card> },
+        &[],
+    );
+
+    assert!(
+        collected.saw_stray_outlet(),
+        "an outlet inside a host's authored children is a stray"
+    );
+    let region = find_by_class(
+        &runtime,
+        runtime.tree().root().expect("a root"),
+        "region-header",
+    )
+    .expect("the region is the component's own markup");
+    let projected = runtime.tree().get(region).expect("live").children();
+    assert_eq!(projected.len(), 1, "the assigned div still projects");
+    assert!(
+        runtime
+            .tree()
+            .get(projected[0])
+            .expect("live")
+            .children()
+            .is_empty(),
+        "the nested stray outlet is not under it"
+    );
+}
+
+// --- The residue, pinned rather than hidden. -----------------------------
+
+#[test]
+fn a_stray_outlet_is_refused_silently_where_there_is_no_diagnostics_channel() {
+    // The honest limit of the report. `FramePipeline` — public, in the prelude —
+    // is the bare deterministic core: it holds no diagnostics sink and drives no
+    // components, so *every* outlet reaching it is a stray and none of them is
+    // reported. The refusal still holds, because it lives in the reconciler that
+    // both paths share; only the telling is `UiRuntime`'s.
+    let mut tree = RetainedTree::new();
+    let mut scene = Scene::new();
+    let ctx = FrameContext::new(
+        FrameId::from_raw(1),
+        FrameReason::UiCommit,
+        Size::new(100.0, 100.0),
+    );
+    let _ = FramePipeline::new().run(
+        &mut tree,
+        &mut scene,
+        ctx,
+        &View::single(ViewNode::slot("header")),
+        &StyleInputs::default(),
+    );
+
+    let root = tree.root().expect("a root");
+    assert!(
+        tree.get(root).expect("live").children().is_empty(),
+        "the refusal is the reconciler's, so it holds without a runtime"
     );
 }

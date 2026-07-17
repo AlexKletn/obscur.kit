@@ -19,5 +19,12 @@ path = "src/main.rs"
 obscur-okui-syntax.workspace = true
 obscur-okui-compiler.workspace = true
 
+[dev-dependencies]
+# For the §2.14 static-registration test only: a `ComponentSurface` is what
+# `#[derive(Contract)]` emits for a user component, and it is what a host hands
+# this server through `Analyzer::with_registry`. The library itself needs no
+# view types — it takes an already-built `ContractRegistry`.
+obscur-view.workspace = true
+
 [lints]
 workspace = true

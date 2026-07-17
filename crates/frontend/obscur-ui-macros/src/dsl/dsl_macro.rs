@@ -44,8 +44,8 @@
 
 use obscur_okui_compiler::compile::ContractRegistry;
 use obscur_okui_compiler::validation::{
-    AttributeUse, ElementUse, MemberArity, MemberUse, SlotUse, ViolationAnchor, check_collection,
-    check_contract,
+    AttributeUse, ElementUse, MemberArity, MemberUse, OutletName, OutletUse, SlotUse,
+    ViolationAnchor, check_collection, check_contract, check_outlet, is_outlet_tag,
 };
 use obscur_ui_ir::document::{
     UiIrDocument, UiIrEvent, UiIrExpression, UiIrNode, UiIrProperty, UiIrValue,
@@ -439,13 +439,29 @@ fn parse_attr(input: ParseStream) -> syn::Result<DslAttr> {
 ///
 /// The registry is [`ContractRegistry::builtins`]: the primitives and shipped
 /// widgets, whose surfaces are compiled into this macro. A **user** component's
-/// contract cannot be checked here and no amount of wiring will change that —
+/// contract cannot be *seen* here and no amount of wiring will change that —
 /// `MyProps::contract_surface()` is a function that runs when the built crate
-/// runs, and this code runs while that crate is still being compiled. The file
-/// front end takes its registry as an argument and so can be handed one
-/// ([`ContractRegistry::register_surface`]); a macro has no argument to take it
-/// in. That asymmetry is structural, and it is why the `.okui` path is not
-/// simply redundant.
+/// runs, and this code runs while that crate is still being compiled.
+///
+/// The asymmetry with the file front end is **narrower than this doc used to
+/// claim**. It said the file front end "takes its registry as an argument and so
+/// can be handed one; a macro has no argument to take it in", which is true about
+/// the argument and misleading about the reachability: on the `.okui` **build**
+/// path there is nothing in scope to pass. `build.rs` of crate X cannot call
+/// `X::CardProps::contract_surface()` either, and the edge that would let it —
+/// `[build-dependencies] X` inside X — is rejected by cargo as a `cyclic package
+/// dependency`. For a component defined in the same crate as the document that
+/// uses it, both front ends are equally blind. The file path wins only when the
+/// component lives in a *different* crate, or when the consumer is a running
+/// binary rather than a compiler (the `.okui` language server, which is where
+/// [`ContractRegistry::register_surface`] is actually reachable).
+///
+/// None of that means a user contract is unenforceable here — only unreadable.
+/// A macro can *emit* a check the host crate's own `rustc` resolves (a
+/// field-access probe against the props type yields a real `E0609` at the
+/// author's typo, in the same crate). That is deferral rather than
+/// introspection; it needs a tag→type mapping this repo does not have, and it is
+/// noted in the audit's §2-A rather than attempted here.
 fn validate_contracts(nodes: &[DslNode]) -> syn::Result<()> {
     let registry = ContractRegistry::builtins();
     let mut error: Option<syn::Error> = None;
@@ -461,11 +477,12 @@ fn validate_contracts(nodes: &[DslNode]) -> syn::Result<()> {
 /// into `error` rather than stopping at the first — the same
 /// report-them-all policy `Compiler::compile` follows.
 ///
-/// Two rules run here, and both are the compiler's own: the §2.12/§2.13 contract
-/// ([`check_contract`]) and the §2.11 collection rule ([`check_collection`]),
-/// which refuses a `<VirtualFor>`. The macro adds the [`Span`], which is the
-/// whole reason this front end reports better than the file one — the author's
-/// build stops on the tag they wrote.
+/// Three rules run here, and all three are the compiler's own: the §2.12/§2.13
+/// contract ([`check_contract`]), the §2.11 collection rule
+/// ([`check_collection`]), which refuses a `<VirtualFor>`, and the §2.12 outlet
+/// rule ([`check_outlet`]), which polices an authored `<slot name="…"/>`. The
+/// macro adds the [`Span`], which is the whole reason this front end reports
+/// better than the file one — the author's build stops on the tag they wrote.
 fn validate_element(
     element: &DslElement,
     registry: &ContractRegistry,
@@ -473,6 +490,18 @@ fn validate_element(
 ) {
     if let Err(message) = check_collection(&element.tag) {
         push_error(error, syn::Error::new(element.span, message));
+    }
+    if is_outlet_tag(&element.tag) {
+        // Owned first, borrowed second: the rule takes `&str`, and an event's
+        // authored spelling (`on:click`) has to be rebuilt from its two halves.
+        let extra = outlet_extras(element);
+        let outlet = OutletUse {
+            extra_attributes: extra.iter().map(String::as_str).collect(),
+            has_children: !element.children.is_empty(),
+        };
+        for message in check_outlet(&element.tag, outlet_name_of(element), &outlet) {
+            push_error(error, syn::Error::new(element.span, message));
+        }
     }
     if let Some(contract) = registry.get(&element.tag) {
         let instance = DslInstance::of(element);
@@ -617,6 +646,46 @@ fn slot_of(element: &DslElement) -> Option<SlotUse<'_>> {
         }),
         _ => None,
     })
+}
+
+/// Every attribute on an authored `<slot …/>` that is not its `name`, spelled as
+/// the author wrote it.
+///
+/// An `on:` binding is spelled back whole (`on:click`) rather than as the bare
+/// event: the message quotes the attribute, and an author looking for `on:click`
+/// must find `on:click`. `DslAttr::Event` keeps only the part after the colon, so
+/// the prefix is put back here — the same repair the file front end's
+/// `authored_spelling` makes.
+fn outlet_extras(element: &DslElement) -> Vec<String> {
+    element
+        .attrs
+        .iter()
+        .filter_map(|attr| match attr {
+            DslAttr::Prop { name, .. } if name == "name" => None,
+            DslAttr::Prop { name, .. } => Some(name.clone()),
+            DslAttr::Event { event, .. } => Some(format!("on:{event}")),
+        })
+        .collect()
+}
+
+/// Classifies an authored `<slot …/>`'s `name` for the §2.12 outlet rule.
+///
+/// Only a string literal is an outlet *name*; `name={expr}` is a name that does
+/// not exist until runtime, and the rule says so rather than this front end
+/// deciding it alone. The mirror of [`slot_of`] on the other side of the same
+/// join.
+fn outlet_name_of(element: &DslElement) -> OutletName<'_> {
+    element
+        .attrs
+        .iter()
+        .find_map(|attr| match attr {
+            DslAttr::Prop { name, value, .. } if name == "name" => Some(match value {
+                PropValue::Text(text) => OutletName::Literal(text.as_str()),
+                _ => OutletName::Dynamic,
+            }),
+            _ => None,
+        })
+        .unwrap_or(OutletName::Missing)
 }
 
 /// Weakens `arity` to `inner`, keeping the weaker of the two: nesting only ever
@@ -1025,6 +1094,90 @@ mod tests {
             message.contains("Use `<For>`"),
             "and what to write instead, got: {message}"
         );
+    }
+
+    #[test]
+    fn an_authored_outlet_lowers_to_the_reserved_outlet_tag() {
+        // §2.12's outlet has a spelling on this front end. The IR keeps the tag
+        // verbatim; `ViewCodegen` is what binds it (and `name` on it) — pinned end
+        // to end in `okui_slot_projection.rs`.
+        let document = doc(quote! { <slot name="header"/> });
+        assert_eq!(document.root().tag(), "slot");
+        assert_eq!(document.root().kind(), UiIrNodeKind::Element);
+        assert_eq!(
+            prop(&document.root(), "name"),
+            &UiIrExpression::literal(UiIrValue::Text("header".into()))
+        );
+    }
+
+    #[test]
+    fn an_unnamed_outlet_is_refused() {
+        // An outlet naming no slot is filled by nothing and deleted: a §2.12
+        // declaration that can never be satisfied. Refused at the tag rather than
+        // vanishing at the frame.
+        let message = rejection(quote! { <div><slot/></div> });
+        assert!(
+            message.contains("`<slot>` requires a `name`"),
+            "got: {message}"
+        );
+    }
+
+    #[test]
+    fn a_dynamic_outlet_name_is_refused() {
+        // The mirror of the `slot={…}` refusal on the other side of the same
+        // join: a slot is matched against a declaration at compile time.
+        let message = rejection(quote! { <slot name={which}/> });
+        assert!(message.contains("`<slot name={…}>`"), "got: {message}");
+    }
+
+    #[test]
+    fn anything_but_a_name_on_an_outlet_is_refused() {
+        // An outlet is substituted away, so everything else on it is *deleted*,
+        // not ignored — including an event binding, whose authored spelling the
+        // message has to quote back whole.
+        let message = rejection(quote! { <slot name="header" class="banner" on:click={go}/> });
+        assert!(message.contains("'class'"), "got: {message}");
+        assert!(
+            message.contains("'on:click'"),
+            "the message names the attribute as authored, got: {message}"
+        );
+    }
+
+    #[test]
+    fn children_under_an_outlet_are_refused() {
+        // HTML renders them as fallback content; §2.12 describes none and
+        // `project_slots` implements none, so accepting them would drop them.
+        let message = rejection(quote! { <slot name="header"><b>"fallback"</b></slot> });
+        assert!(
+            message.contains("`<slot>` takes no children"),
+            "got: {message}"
+        );
+    }
+
+    #[test]
+    fn the_outlet_rule_reaches_a_nested_outlet_too() {
+        // The walk recurses, so an outlet is checked wherever it is written —
+        // which is the only place it is ever written, inside a component's markup.
+        let message = rejection(quote! { <div><span><slot/></span></div> });
+        assert!(message.contains("requires a `name`"), "got: {message}");
+    }
+
+    #[test]
+    fn a_well_formed_outlet_and_an_ordinary_name_both_compile() {
+        // The disjoint half. The rule must bite on `<slot>` and on nothing else:
+        // `name` is an ordinary prop on any other tag, and a named outlet is the
+        // whole point of the spelling.
+        for input in [
+            quote! { <slot name="header"/> },
+            quote! { <div class="region"><slot name="body"/></div> },
+            quote! { <div name="x" class="y"><b>"hi"</b></div> },
+            quote! { <Input value={text} on:input={edit}/> },
+        ] {
+            assert!(
+                DslMacro::to_document(input.clone()).is_ok(),
+                "`{input}` is legal"
+            );
+        }
     }
 
     #[test]

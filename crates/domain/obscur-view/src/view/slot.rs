@@ -32,23 +32,36 @@
 //! box. Declaration order is not a destination — inventing one is what
 //! `5e8e7fe` refused for `<Loading>`.
 //!
+//! # The authored spelling
+//!
+//! `<slot name="header"/>` is the outlet, on both front ends. It needs no node of
+//! its own in either parser: it is an ordinary element tag carrying an ordinary
+//! attribute, and the whole of it is two rules in the frontend crate's
+//! `name_binding` — the tag binds to [`SLOT_OUTLET`] and, *on that tag only*,
+//! `name` binds to [`SLOT`]. A component's render is a `View`, and `okui!`
+//! produces a `View`, so `okui! { <slot name="header"/> }` inside
+//! `Component::render` is the same outlet
+//! [`ViewNode::slot`](super::ViewNode::slot) builds by hand.
+//!
 //! # Why an outlet is a reserved `ComponentId` and not a `ViewNode` variant
 //!
-//! Because an outlet in a **component's render output** never becomes a retained
-//! node. Projection runs over that output *before* it is reconciled, so the outlet
-//! is substituted away exactly like an `<If>` is at lowering — "these constructs
-//! do not create real retained nodes unless their rendered output requires them"
-//! (§2.11). A third [`ViewNode`] variant would put a case in all sixty-odd
-//! exhaustive matches over the enum to describe a node that, on that path, no
-//! consumer of the retained tree can ever see.
+//! Because an outlet never becomes a retained node. Projection runs over a
+//! component's output *before* it is reconciled, so the outlet is substituted away
+//! exactly like an `<If>` is at lowering — "these constructs do not create real
+//! retained nodes unless their rendered output requires them" (§2.11). A third
+//! [`ViewNode`] variant would put a case in all sixty-odd exhaustive matches over
+//! the enum to describe a node no consumer of the retained tree can ever see.
 //!
-//! **Not an absolute, and the difference matters.** An outlet authored *outside* a
-//! component — a stray `<slot/>` in a plain view — meets no projection pass and is
-//! retained, as an ordinary `Element` carrying the reserved id. It renders as an
-//! empty box rather than being rejected. The argument above still carries the
-//! design decision (sixty matches against a node one path can produce), but it
-//! carries it as a trade, not as a guarantee: this said "never" until a verifier
-//! built one and found it in the tree.
+//! **A stray outlet is refused, not retained.** An outlet authored *outside* a
+//! component — one in a view that is nobody's render output — meets no projection
+//! pass, and used to land in the tree as an ordinary `Element` carrying the
+//! reserved id, rendering as an empty box. The reconciler now refuses to
+//! materialize any node [`is_outlet`] answers `true` for, so the sentence above is
+//! unconditional on every path that builds a tree; `UiRuntime`, which has a §1.6
+//! diagnostics channel, also *reports* the stray rather than dropping it quietly.
+//! This paragraph said "never" once before, as a claim rather than a mechanism,
+//! and a verifier built a stray and found it in the tree. What changed is the
+//! mechanism, not the prose.
 
 use obscur_identity::{ComponentId, InternedSymbol};
 
@@ -121,13 +134,25 @@ fn outlet_name(node: &ViewNode) -> Option<&str> {
     }
 }
 
-/// Whether this node is a slot outlet, named or not.
-fn is_outlet(node: &ViewNode) -> bool {
+/// Whether this node is a slot outlet, named or not (spec §2.12).
+///
+/// The single predicate for "this node is an outlet". [`project_slots`]
+/// substitutes every node it answers `true` for; the reconciler refuses to
+/// materialize one, so a node it answers `true` for never becomes retained.
+/// Both must mean the same thing by construction, which is why there is one of
+/// these rather than a `component == SLOT_OUTLET` test in each.
+#[must_use]
+pub fn is_outlet(node: &ViewNode) -> bool {
     matches!(node, ViewNode::Element { component, .. } if *component == SLOT_OUTLET)
 }
 
-/// Whether `nodes`, or anything beneath them, contains an outlet.
-fn has_outlet(nodes: &[ViewNode]) -> bool {
+/// Whether `nodes`, or anything beneath them, contains an outlet (spec §2.12).
+///
+/// [`project_slots`]'s early-out, and the runtime's stray-outlet check: an
+/// outlet in a view that is nobody's render output will never be projected, and
+/// the runtime reports one rather than letting it pass silently.
+#[must_use]
+pub fn has_outlet(nodes: &[ViewNode]) -> bool {
     nodes.iter().any(|node| match node {
         ViewNode::Element { children, .. } => is_outlet(node) || has_outlet(children.nodes()),
         ViewNode::Text { .. } => false,

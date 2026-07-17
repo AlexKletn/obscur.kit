@@ -33,20 +33,55 @@ fn to_u32(value: usize) -> u32 {
 /// cast to a [`Document`] and run through the okui [`Compiler`]; every
 /// [`CompileDiagnostic`] is likewise mapped from its byte offset to an
 /// [`LspDiagnostic`].
-#[derive(Debug, Clone, Default)]
+///
+/// # Why the default registry is [`ContractRegistry::builtins`]
+///
+/// It used to be `ContractRegistry::default()` — **empty** — and that made this
+/// server, the one tool an author actually points at a `.okui` file, enforce
+/// §2.13 for *nothing*. `Compiler::new` seeds the built-in primitive and widget
+/// contracts precisely so a default compile rejects `<Button laebl="Save"/>`;
+/// [`analyze`](Self::analyze) then called `.with_registry(…)`, which **replaces**
+/// that seed wholesale, and handed it the empty default straight back. So
+/// `obscur-okui-lsp --check` reported `diagnostics: none` and exited zero on a
+/// document the very same `Compiler` rejects in `obscur-kit`'s `build.rs` and the
+/// `okui!` macro rejects at the author's own token.
+///
+/// Seeding the same registry `Compiler::new` does makes the editor and the build
+/// agree by construction. [`with_registry`](Self::with_registry) still replaces
+/// it wholesale — a host wiring its own components in wants
+/// `ContractRegistry::builtins().with_surface(&MyProps::contract_surface())`, not
+/// `ContractRegistry::new()`, or it will silently drop the built-ins exactly as
+/// this did.
+#[derive(Debug, Clone)]
 pub struct Analyzer {
     store: DocumentStore,
     registry: ContractRegistry,
 }
 
+impl Default for Analyzer {
+    fn default() -> Self {
+        Self {
+            store: DocumentStore::default(),
+            registry: ContractRegistry::builtins(),
+        }
+    }
+}
+
 impl Analyzer {
-    /// Creates an analyzer with an empty document store and no contracts.
+    /// Creates an analyzer with an empty document store and the built-in
+    /// primitive/widget contracts registered — the same set `Compiler::new`
+    /// seeds, so the editor's verdict matches the build's.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Sets the contract registry the compiler consults (fluent).
+    /// Sets the contract registry the compiler consults (fluent), **replacing**
+    /// the built-in set [`new`](Self::new) seeded.
+    ///
+    /// Pass `ContractRegistry::builtins().with_surface(&MyProps::contract_surface())`
+    /// to add a user component's §2.13 surface while keeping the built-ins;
+    /// `ContractRegistry::new()` drops them.
     #[must_use]
     pub fn with_registry(mut self, registry: ContractRegistry) -> Self {
         self.registry = registry;
@@ -140,8 +175,24 @@ impl Analyzer {
 
 /// Maps a [`CompileDiagnostic`] to its byte offset, message and LSP severity.
 ///
-/// Validation diagnostics (unknown attribute/event, missing prop — §2.13) are
-/// surfaced as warnings; resolution, type and lowering failures are errors.
+/// Resolution, type and validation failures are errors; a missing `<For>` key is
+/// the one deliberate warning (see below).
+///
+/// # Why a validation failure is an error
+///
+/// It was a warning, and `--check`'s gate only reads error severity, so the
+/// check ran every rule, printed every verdict, and exited **zero** on all of
+/// them. `<Button laebl="Save"/>` (§2.13), `<VirtualFor>` (§2.11), a malformed
+/// `<slot>` (§2.12) and `{std::fs::read(p)}` (§2.10) each printed a warning and
+/// passed CI. The two front ends that are not this one both treat exactly these
+/// as fatal — the `okui!` macro raises a `syn::Error` at the author's token, and
+/// `obscur-kit`'s `build.rs` panics on `CompileResult::has_errors()`, which
+/// counts every diagnostic irrespective of the severity this function invents.
+/// So the editor was the only place where a document that cannot build was green.
+///
+/// §2.13 settles it in its own words: "Unknown attributes, events and string
+/// method names are **compile errors**." Warning was not a lenient reading of
+/// the spec, it was a different one.
 fn map_compile_diagnostic(diagnostic: &CompileDiagnostic) -> (u32, String, LspSeverity) {
     match diagnostic {
         CompileDiagnostic::Resolution(error) => {
@@ -151,7 +202,7 @@ fn map_compile_diagnostic(diagnostic: &CompileDiagnostic) -> (u32, String, LspSe
         CompileDiagnostic::Validation(validation) => (
             validation.offset(),
             validation.message().to_owned(),
-            LspSeverity::Warning,
+            LspSeverity::Error,
         ),
         CompileDiagnostic::Lowering(error) => {
             // A missing `<For>` key is non-fatal (spec §2.11) — report it as a
@@ -212,6 +263,7 @@ fn deepest_containing(symbols: &[DocumentSymbol], position: Position) -> Option<
 mod tests {
     use super::*;
     use obscur_okui_compiler::validation::ComponentContract;
+    use obscur_view::contract::ComponentSurface;
 
     const URI: &str = "file:///app.okui";
 
@@ -239,6 +291,129 @@ mod tests {
         );
     }
 
+    /// Parses `source` into the AST the compiler takes.
+    fn ast(source: &str) -> Document {
+        Document::cast(Parser::new().parse(source).tree().root().clone()).expect("a document")
+    }
+
+    #[test]
+    fn a_default_analyzer_enforces_the_builtin_contracts() {
+        // The registry was `ContractRegistry::default()` — EMPTY — so this
+        // server, and its `--check` CI mode, enforced §2.13 for NOTHING: not one
+        // user component, and not one of the built-in tags either.
+        // `echo '<Button laebl="Save"/>' | obscur-okui-lsp --check` printed
+        // `diagnostics: none` and exited zero on a document `Compiler::new()`
+        // rejects and the `okui!` macro refuses at the author's own token.
+        for (source, expected) in [
+            (
+                r#"<Button label="Save" laebl="Save"/>"#,
+                "unknown attribute 'laebl' on component 'Button'",
+            ),
+            (
+                r#"<Image src="logo.png" widht="10"/>"#,
+                "unknown attribute 'widht' on component 'Image'",
+            ),
+            (
+                r#"<Image alt="logo"/>"#,
+                "component 'Image' requires prop 'src'",
+            ),
+        ] {
+            // The premise, asserted rather than assumed: the build path really
+            // does reject this document. If `Compiler::new` ever stops seeding
+            // the built-ins, the agreement below would hold vacuously — both
+            // sides silent — and this test would pass while enforcing nothing.
+            assert!(
+                Compiler::new(URI.to_owned())
+                    .compile(&ast(source))
+                    .has_errors(),
+                "`{source}`: a default compile must reject this, or this test is vacuous"
+            );
+
+            let mut analyzer = Analyzer::new();
+            analyzer.store_mut().open(URI, 1, source);
+            let diagnostics = analyzer.analyze(URI);
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|d| d.source == "okui-compile" && &*d.message == expected),
+                "`{source}`: the editor must report what the build rejects; got {diagnostics:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_default_analyzer_leaves_correct_documents_clean() {
+        // The disjoint half. Seeding the built-ins must make the WRONG document
+        // loud and change nothing else — a correct `<Button>`/`<Image>` stays
+        // silent, and an unregistered tag stays permissive, which is the
+        // deliberate §2.13 policy (`Compiler` does not refuse a tag whose
+        // contract it cannot see; see `builtin_contracts`). If this file had
+        // instead made unknown tags an error, the test above would still pass
+        // and this one would fail.
+        for source in [
+            r#"<Button label="Save" disabled="true"/>"#,
+            r#"<Image src="logo.png" alt="logo"/>"#,
+            r#"<CustomThing whatever="1"/>"#,
+        ] {
+            let mut analyzer = Analyzer::new();
+            analyzer.store_mut().open(URI, 1, source);
+            let diagnostics = analyzer.analyze(URI);
+            assert!(
+                diagnostics.is_empty(),
+                "`{source}` must analyze clean; got {diagnostics:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_user_components_registered_surface_is_enforced_by_the_editor() {
+        // §2.14's "static registration is the default", on the only front end
+        // that can honour it for a USER component. `CardProps::contract_surface()`
+        // is a function that runs when the built crate runs — a proc-macro
+        // expanding inside that crate cannot call it, and neither can that
+        // crate's own `build.rs` (cargo rejects a self build-dependency as a
+        // cyclic package dependency). A language server is an ordinary binary
+        // that links the component crate and runs after it, so it is the one
+        // place `register_surface` is reachable. This is that wire, and the
+        // built-ins survive it.
+        let surface = ComponentSurface::new("Card")
+            .requiring_prop("title")
+            .allowing_event("open");
+        let mut analyzer =
+            Analyzer::new().with_registry(ContractRegistry::builtins().with_surface(&surface));
+        analyzer
+            .store_mut()
+            .open(URI, 1, r#"<div><Card titel="Hi"/><Image alt="x"/></div>"#);
+        let messages: Vec<_> = analyzer
+            .analyze(URI)
+            .into_iter()
+            .map(|d| d.message)
+            .collect();
+
+        assert!(
+            messages
+                .iter()
+                .any(|m| &**m == "unknown attribute 'titel' on component 'Card'"),
+            "the user component's registered surface must bite: {messages:?}"
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| &**m == "component 'Card' requires prop 'title'"),
+            "and its required prop: {messages:?}"
+        );
+        // `with_surface` on top of `builtins()` must ADD, not replace: the
+        // built-in `Image` contract still bites in the same document. Registering
+        // a user component by handing over `ContractRegistry::new()` is what
+        // silently drops these.
+        assert!(
+            messages
+                .iter()
+                .any(|m| &**m == "component 'Image' requires prop 'src'"),
+            "the built-ins must survive a user registration: {messages:?}"
+        );
+    }
+
     #[test]
     fn missing_document_analyzes_to_nothing() {
         let analyzer = Analyzer::new();
@@ -263,15 +438,21 @@ mod tests {
     }
 
     #[test]
-    fn semantic_error_yields_a_warning_at_the_attribute() {
+    fn semantic_error_yields_an_error_at_the_attribute() {
         // Parses cleanly but violates the Button contract (unknown attribute).
+        //
+        // This test asserted `LspSeverity::Warning`, and it is inverted here
+        // rather than deleted. That assertion was the bug in a stable form:
+        // `--check`'s gate reads error severity only, so a §2.13 violation
+        // printed and then exited zero, while the same document is a hard
+        // `syn::Error` in `okui!` and a `build.rs` panic on the file path.
         let analyzer = analyzer_with("<Button label=\"Save\" colr=\"red\"/>");
         let diagnostics = analyzer.analyze(URI);
         let semantic = diagnostics
             .iter()
             .find(|d| d.source == "okui-compile")
             .expect("a compile diagnostic");
-        assert_eq!(semantic.severity, LspSeverity::Warning);
+        assert_eq!(semantic.severity, LspSeverity::Error);
         assert!(
             semantic.message.contains("unknown attribute 'colr'"),
             "message: {}",
@@ -279,6 +460,36 @@ mod tests {
         );
         // `colr` starts at byte 21 on line 0.
         assert_eq!(semantic.range.start, Position::new(0, 21));
+    }
+
+    #[test]
+    fn the_check_gate_fails_on_a_contract_violation_alone() {
+        // Rule: a check whose verdict nothing reads is not a check. `--check`
+        // exits non-zero only on an ERROR-severity diagnostic, so this is the
+        // property that makes the §2.13 enforcement above worth anything in CI.
+        //
+        // The source is chosen to isolate it: `<Button laebl="Save"/>` raises
+        // contract diagnostics and NOTHING else — no parse error, no unresolved
+        // name. Probing with `<VirtualFor each={items}>` instead would have been
+        // useless, because its undeclared `{items}` raises a resolution error
+        // that has always been fatal, and the test would pass with this whole
+        // mapping reverted.
+        let mut analyzer = Analyzer::new();
+        analyzer
+            .store_mut()
+            .open(URI, 1, r#"<Button laebl="Save"/>"#);
+        let diagnostics = analyzer.analyze(URI);
+
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| d.source == "okui-compile" && !d.message.contains("unknown name")),
+            "the probe must isolate the contract rule; got {diagnostics:?}"
+        );
+        assert!(
+            diagnostics.iter().any(|d| d.severity == LspSeverity::Error),
+            "a §2.13 violation must reach the `--check` gate; got {diagnostics:?}"
+        );
     }
 
     #[test]

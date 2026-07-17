@@ -9,20 +9,29 @@ use std::collections::HashMap;
 /// with the typed [`LayoutInvalidationReason`] that first invalidated it
 /// (spec §4.3).
 ///
-/// # Status: the layout phase consumes this, for measure only
+/// # Status: the layout phase consumes this, on both halves
 ///
 /// `UiRuntime::layout_phase` populates one of these from real per-node style
-/// deltas and hands it to `LayoutCoordinator::layout_invalidated`, which drops
-/// exactly the `MeasureCache` entries it can have invalidated and serves every
-/// other node's size without re-measuring. So a hover that changes one node's
-/// width re-measures that node and its ancestor chain, not the tree.
+/// deltas and hands it to `LayoutCoordinator::layout_invalidated`, which
+/// classifies it once into the two sets its two caches need. **Measure**: it drops
+/// exactly the `MeasureCache` entries this set can have invalidated and serves
+/// every other node's size without re-measuring. **Arrange**: it drops the
+/// `ArrangeCache` keys of the upward closure of that set, and a node whose key
+/// survives *and* whose recomputed origin/constraints still match is served from
+/// its retained absolute boxes instead of re-running its subtree's algorithms. So
+/// a hover that changes one node's width re-measures and re-arranges that node and
+/// its ancestor chain, not the tree.
 ///
 /// What that does **not** yet cover, stated plainly:
 ///
-/// * **Arrange is not incremental.** The walk still visits every node and re-runs
-///   every container's algorithm; only `measure` is gated on this set. That is
-///   deliberate — it is what makes the reuse safe, since all of §4.3's
-///   propagation is still performed — but the phase remains O(nodes) per frame.
+/// * **This set alone never decides that a node may be skipped, and must not.**
+///   `arrange` writes *absolute* positions, so a node the set does not mention
+///   still moves when an earlier sibling grows. The retained-box path is gated on
+///   this set **and** on the node's freshly recomputed arrange key; §4.3's
+///   propagation is still performed rather than inferred from this accumulator.
+/// * **The walk is still O(nodes).** A served subtree is still traversed to copy
+///   its retained boxes into the frame's map. Layout-algorithm runs and text
+///   shaping are the costs this set removes, not the traversal.
 /// * **The `note_*` gates below are not what the runtime calls.** It records
 ///   through [`invalidate`](Self::invalidate) /
 ///   [`note_style_changed`](Self::note_style_changed) only. The downward gate is

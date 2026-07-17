@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use obscur_identity::{NodeId, StableKey};
 use obscur_view::view::{
     StyleAttributes, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, assigns_slots,
+    is_outlet,
 };
 
 use crate::node::{LogicalParent, NodeFlags, NodeKind, VisualParent};
@@ -32,6 +33,14 @@ use super::{ChildMatcher, IdentityMatch, ReconciliationOp, ReconciliationPlan};
 /// exactly as a fired event finds its command in the retained bindings. The
 /// change check compares the whole list, so a change to *any* authored prop — not
 /// just a CSS-relevant one — yields an `Update`.
+///
+/// **A §2.12 slot outlet is refused**, never materialized: `project_slots` has
+/// already substituted away every outlet in a component's output, so one reaching
+/// this engine belongs to a view no projection will run over and could only become
+/// an empty box nothing can fill. That refusal is what makes "an outlet never
+/// becomes a retained node" true of the tree rather than of one code path; it is
+/// silent here, because this engine has no diagnostics channel —
+/// `UiRuntime::report_stray_outlets` is what tells the author.
 ///
 /// Every pass returns a [`ReconciliationPlan`] describing what it did. The engine
 /// is deterministic and panic-free, and is defensive about stale ids.
@@ -105,6 +114,28 @@ impl Reconciler {
         // Read the parent's current children; bail out defensively if stale.
         let Some(existing) = tree.get(parent).map(|node| node.children().to_vec()) else {
             return;
+        };
+
+        // §2.12: an outlet is a *position* inside a component's output, and
+        // `project_slots` substitutes every one of them away before that output
+        // ever reaches here. So an outlet arriving at this pass is one no
+        // projection will ever run over — a stray, in a view that is nobody's
+        // render. It is refused rather than materialized: it would otherwise
+        // become an ordinary element carrying the reserved id, laying out and
+        // painting as an empty box that nothing can ever fill.
+        //
+        // This is the whole reason "an outlet never becomes a retained node" is a
+        // property of the tree rather than a claim about one code path — every
+        // production caller of `reconcile_root`/`reconcile` goes through here.
+        // The filter is one `ComponentId` compare per desired child, on the walk
+        // that was happening anyway, and it clones only the level that actually
+        // holds a stray.
+        let stripped: Vec<ViewNode>;
+        let desired = if desired.iter().any(is_outlet) {
+            stripped = desired.iter().filter(|n| !is_outlet(n)).cloned().collect();
+            &stripped
+        } else {
+            desired
         };
 
         let matching = self.matcher.match_children(tree, &existing, desired);

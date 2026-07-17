@@ -20,7 +20,8 @@ use crate::symbol::{Symbol, SymbolTable};
 use crate::typing::TypeError;
 use crate::validation::{
     CapabilityValidator, CollectionValidator, ComponentContract, ContractValidator,
-    ExpressionValidator, ValidationDiagnostic, builtin_contracts, widget_contracts,
+    ExpressionValidator, OutletValidator, ValidationDiagnostic, builtin_contracts,
+    widget_contracts,
 };
 
 /// A lookup from component/tag name to its [`ComponentContract`], so the
@@ -79,13 +80,48 @@ impl ContractRegistry {
     /// string [`ComponentContract`]), so the `.okui` compiler enforces §2.13 for
     /// that component just as it does for the built-ins.
     ///
-    /// A real build wires user components in explicitly, e.g.
-    /// `registry.register_surface(&MyProps::contract_surface())`, where
-    /// `contract_surface()` is emitted by `#[derive(Contract)]`. Automatic,
-    /// inventory-style collection of every derived surface is a possible future
-    /// follow-up; there is no auto-discovery today.
+    /// A caller wires user components in explicitly, e.g.
+    /// `ContractRegistry::builtins().with_surface(&MyProps::contract_surface())`,
+    /// where `contract_surface()` is emitted by `#[derive(Contract)]`. Start from
+    /// [`builtins`](Self::builtins), not [`new`](Self::new): `Compiler::with_registry`
+    /// **replaces** its registry wholesale, so seeding from an empty one silently
+    /// drops every built-in primitive/widget contract.
     ///
     /// Returns the contract it displaced for the same component name, if any.
+    ///
+    /// # Where this is callable, and where it is not
+    ///
+    /// This crate has no in-repo production caller and cannot have one: a caller
+    /// needs a *user* component, and this repo ships none — every component it
+    /// ships is a built-in whose surface is already mirrored into
+    /// [`builtin_contracts`]/[`widget_contracts`] and registered by
+    /// [`Compiler::new`] unconditionally. The other end of this seam lives in a
+    /// downstream crate.
+    ///
+    /// Which downstream callers can reach it is **not** a free choice, and the
+    /// constraint is easy to state backwards. `contract_surface()` is a function
+    /// that runs when the crate defining it runs, so nothing that *compiles* that
+    /// crate can call it:
+    ///
+    /// - A `build.rs` compiling a `.okui` file **cannot** see a component defined
+    ///   in its own crate — `[build-dependencies] X` inside `X` is rejected by
+    ///   cargo as a `cyclic package dependency`. It *can* see one from any other
+    ///   crate, and that is the build-path wire.
+    /// - The `okui!` proc-macro cannot see one at all, and has no argument to be
+    ///   handed one through. See `obscur_ui_macros`'s `validate_contracts`.
+    /// - A **running binary** that links the component crate — the `.okui`
+    ///   language server is the one in this repo — can call it freely. That is
+    ///   the least constrained consumer of this function, and §2.14's "static
+    ///   registration is the default" is reachable there in full.
+    ///
+    /// There is no auto-discovery, and inventory/link-time collection cannot
+    /// supply one on the build path (it collects when the *built* binary runs,
+    /// which is after the build script it would have to serve). A build-time
+    /// registry would have to re-parse the crate's own Rust source — the surface
+    /// is a pure function of the derive's tokens — which nothing here proposes.
+    ///
+    /// [`builtin_contracts`]: crate::validation::builtin_contracts
+    /// [`widget_contracts`]: crate::validation::widget_contracts
     pub fn register_surface(&mut self, surface: &ComponentSurface) -> Option<ComponentContract> {
         self.register(surface.into())
     }
@@ -295,8 +331,10 @@ impl Compiler {
     ///    diagnostic sum for when that pass lands.
     /// 3. **Validation** — expression restrictions (§2.10), capability grants
     ///    (§2.13), the §2.11 collection rule (a `<VirtualFor>` is refused, see
-    ///    [`CollectionValidator`]) and, for every element whose tag has a
-    ///    registered contract, the contract surface (required props, unknown
+    ///    [`CollectionValidator`]), the §2.12 outlet rule (an authored
+    ///    `<slot name="…"/>` carries a literal name and nothing else, see
+    ///    [`OutletValidator`]) and, for every element whose tag has a registered
+    ///    contract, the contract surface (required props, unknown
     ///    attributes/events, allowed children — §2.13).
     /// 4. **Lowering** — the document is lowered to a [`UiIrDocument`]; on a hard
     ///    lowering error the document is `None` but all earlier diagnostics are
@@ -325,6 +363,9 @@ impl Compiler {
             diagnostics.push(CompileDiagnostic::Validation(diagnostic));
         }
         for diagnostic in CollectionValidator::new().validate(document) {
+            diagnostics.push(CompileDiagnostic::Validation(diagnostic));
+        }
+        for diagnostic in OutletValidator::new().validate(document) {
             diagnostics.push(CompileDiagnostic::Validation(diagnostic));
         }
         let contract_validator = ContractValidator::new();
@@ -622,6 +663,51 @@ mod tests {
             "diagnostics: {:?}",
             result.diagnostics()
         );
+    }
+
+    #[test]
+    fn a_malformed_outlet_makes_the_compile_report_errors() {
+        // §2.12: `has_errors()` is the gate the one production consumer of this
+        // pipeline reads (`obscur-kit`'s build.rs panics on it), so the outlet
+        // rule is only real if it lands there — the same standard `<VirtualFor>`
+        // is held to.
+        for (source, expected) in [
+            ("<div><slot/></div>", "requires a `name`"),
+            ("<div><slot name={which}/></div>", "`<slot name={…}>`"),
+            (r#"<slot name="h" class="x"/>"#, "'class'"),
+            (r#"<slot name="h"><b>f</b></slot>"#, "takes no children"),
+        ] {
+            let result = Compiler::new("app.okui")
+                .defining(Symbol::prop("which"))
+                .compile(&document(source));
+            assert!(result.has_errors(), "`{source}` must not compile clean");
+            assert!(
+                result
+                    .diagnostics()
+                    .iter()
+                    .any(|d| matches!(d, CompileDiagnostic::Validation(v)
+                        if v.message().contains(expected))),
+                "`{source}` diagnostics: {:?}",
+                result.diagnostics()
+            );
+        }
+    }
+
+    #[test]
+    fn a_well_formed_outlet_compiles_clean() {
+        // The disjoint half: the outlet rule must refuse a malformed `<slot>` and
+        // nothing else. A named outlet is what the spelling is *for*, and it also
+        // must not trip the contract registry — `slot` is a reserved tag with no
+        // contract, so `check_contract` leaves it alone and `check_outlet` owns it.
+        let result = Compiler::new("app.okui").compile(&document(
+            r#"<div class="region"><slot name="header"/></div>"#,
+        ));
+        assert!(
+            !result.has_errors(),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
+        assert!(result.document().is_some());
     }
 
     #[test]
