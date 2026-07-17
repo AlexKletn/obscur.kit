@@ -291,6 +291,17 @@ impl SceneCoordinator {
         self.paragraph.set_resolver(resolver);
     }
 
+    /// Installs the BCP-47 `language` hint carried by every shaping request the
+    /// paragraph orchestrator issues (spec §7.2 text shaping integration).
+    ///
+    /// This is the seam the runtime's
+    /// [`set_locale`](crate::runtime::UiRuntime::set_locale) drives with the
+    /// locale's language subtag. It reaches both the measure and the compose pass
+    /// because both shape through this one orchestrator.
+    pub fn set_language(&mut self, language: Option<Box<str>>) {
+        self.paragraph.set_language(language);
+    }
+
     /// Returns the paragraph orchestrator as a shared borrow.
     ///
     /// This is the seam the layout phase measures text through: `SceneCoordinator`
@@ -2424,8 +2435,10 @@ fn background_image_geometry(
     image: &SceneImage,
     region: Rect,
 ) -> (Rect, bool, bool) {
-    #[allow(clippy::cast_precision_loss)]
-    let (iw, ih) = (image.width() as f32, image.height() as f32);
+    // The *logical* size, not the raw pixel count: a `@2x` DPI variant carries
+    // twice the pixels of the box it stands in for, and tiling it at its pixel
+    // count would draw it at double size (spec §5.16).
+    let (iw, ih) = image.logical_size();
     let bw = region.size.width;
     let bh = region.size.height;
     let size = background_size_of(computed, node);
@@ -2508,18 +2521,23 @@ fn object_fit_of(computed: &ComputedStyles, node: NodeId) -> ObjectFit {
 /// `region`, per `object-fit`, centered (the `object-position: 50% 50%` default).
 ///
 /// The tile size comes from [`resolve_object_fit_size`] against the image's
-/// intrinsic pixel size and the box size; the tile is then centered within the
+/// intrinsic logical size and the box size; the tile is then centered within the
 /// region so `contain` letterboxes and `cover` overflows symmetrically (the
 /// `region` passed to `DrawImage` clips the overflow).
-#[allow(clippy::cast_precision_loss)]
+///
+/// The intrinsic size is the image's [`logical_size`](SceneImage::logical_size),
+/// not its pixel count: an `@2x` DPI variant stands in for a box half its pixel
+/// dimensions, so `object-fit: none` must place it at that logical size and let
+/// the root device-scale transform map it back to 1:1 physical pixels — not draw
+/// it at double size (spec §5.16).
 fn object_fit_tile(
     computed: &ComputedStyles,
     node: NodeId,
     image: &SceneImage,
     region: Rect,
 ) -> Rect {
-    let intrinsic = Size::new(image.width() as f32, image.height() as f32);
-    object_fit_tile_sized(computed, node, intrinsic, region)
+    let (iw, ih) = image.logical_size();
+    object_fit_tile_sized(computed, node, Size::new(iw, ih), region)
 }
 
 /// [`object_fit_tile`] against a bare intrinsic size, so a replaced element whose

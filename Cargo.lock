@@ -1595,6 +1595,7 @@ dependencies = [
  "obscur-identity",
  "obscur-interaction",
  "obscur-layout",
+ "obscur-localization",
  "obscur-motion",
  "obscur-okui-compiler",
  "obscur-okui-syntax",
@@ -1640,6 +1641,14 @@ dependencies = [
  "obscur-geometry",
  "obscur-identity",
  "taffy",
+]
+
+[[package]]
+name = "obscur-localization"
+version = "0.0.0"
+dependencies = [
+ "obscur-capability",
+ "obscur-text",
 ]
 
 [[package]]
@@ -1810,6 +1819,7 @@ dependencies = [
  "obscur-identity",
  "obscur-interaction",
  "obscur-layout",
+ "obscur-localization",
  "obscur-motion",
  "obscur-resources",
  "obscur-scene",

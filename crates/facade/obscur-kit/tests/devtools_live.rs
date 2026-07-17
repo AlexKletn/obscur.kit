@@ -280,13 +280,93 @@ fn external_client_injects_a_click_that_drives_the_runtime() {
         2,
         "both injected events reached the host's queue"
     );
+    let mut dispatches = Vec::new();
     for event in drained {
-        apply_injected(&mut runtime, event);
+        dispatches.push(apply_injected(&mut runtime, event).expect("a pointer inject dispatches"));
     }
 
     assert!(
         clicked.get(),
         "the externally injected click dispatched the button command"
+    );
+
+    // §2.3: the click worked — and every event that drove it is marked as what it
+    // is. An agent holding an Inject token can drive this button, but it cannot
+    // make the runtime call the result a user gesture.
+    assert!(
+        dispatches.iter().all(|d| !d.is_trusted()),
+        "an event injected over the DevTools socket is NOT a user gesture"
+    );
+}
+
+/// The security property §2.3's trusted flag exists for, asserted against the
+/// real inject path rather than a mock: `apply_injected` — the function §7.6's
+/// agent loop reaches — must produce untrusted input, while the same click made
+/// the way a platform adapter makes it is trusted.
+///
+/// This is deliberately a *contrast*, not an existence check: asserting only that
+/// the field is readable would pass with `trust` wired to a constant. Here the
+/// two events differ in exactly one respect — who built them — and the runtime
+/// must report a different verdict for each.
+///
+/// The trusted half of the pair against the *real* producer (the winit converter,
+/// which is not reachable from this crate) is
+/// `a_converted_os_event_is_trusted` in `obscur-window-winit`'s
+/// `conversion::pointer_converter`. The two fail disjointly: adding
+/// `.as_trusted()` to `apply_injected` fails only this test; deleting it from the
+/// converter fails only that one.
+#[test]
+fn injected_pointer_is_not_trusted_but_a_platform_event_is() {
+    use obscur_kit::devtools::apply_injected;
+    use obscur_kit::devtools_protocol::message::InjectedEvent;
+    use obscur_kit::geometry::Point;
+    use obscur_kit::interaction::event::EventTrust;
+    use obscur_kit::interaction::pointer::{
+        PointerDevice, PointerEvent, PointerEventKind, PointerId,
+    };
+
+    let sheet = compile(".btn { width: 100px; height: 40px }");
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 100.0));
+    let btn = View::from_fragment(ViewFragment::from_nodes(vec![
+        ViewNode::element(ComponentId::from_raw(0x00C0_0002))
+            .with_prop(ViewProperty::new(CLASS, ViewValue::Text("btn".into()))),
+    ]));
+    runtime.render_now(&btn, std::slice::from_ref(&sheet));
+
+    // The injected press — the path an Inject-scoped DevTools client drives.
+    let injected = apply_injected(&mut runtime, InjectedEvent::PointerDown { x: 50, y: 20 })
+        .expect("a pointer inject dispatches");
+    assert!(
+        !injected.is_trusted(),
+        "a DevTools-injected press must not pass for a user gesture"
+    );
+    assert_eq!(injected.trust(), EventTrust::Untrusted);
+
+    // The same press, built the way a platform adapter builds one from a real OS
+    // event. Identical coordinates, identical hit — different origin.
+    let real = runtime.handle_pointer(
+        PointerEvent::new(
+            PointerId::MOUSE,
+            PointerDevice::Mouse,
+            PointerEventKind::Down,
+            Point::new(50.0, 20.0),
+        )
+        .as_trusted(),
+    );
+    assert!(real.is_trusted(), "a platform-conferred press IS a gesture");
+    assert_eq!(real.trust(), EventTrust::Trusted);
+
+    // The load-bearing line: the two are distinguishable. Before this flag they
+    // were byte-identical at the runtime's door.
+    assert_ne!(
+        injected.trust(),
+        real.trust(),
+        "an injected event MUST be distinguishable from a real one"
+    );
+    assert_eq!(
+        injected.target(),
+        real.target(),
+        "and they differ ONLY in trust — same node, same hit"
     );
 }
 

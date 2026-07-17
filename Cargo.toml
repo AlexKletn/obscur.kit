@@ -38,6 +38,7 @@ obscur-scene = { path = "crates/domain/obscur-scene" }
 obscur-render = { path = "crates/domain/obscur-render" }
 obscur-windowing = { path = "crates/domain/obscur-windowing" }
 obscur-text = { path = "crates/domain/obscur-text" }
+obscur-localization = { path = "crates/domain/obscur-localization" }
 obscur-motion = { path = "crates/domain/obscur-motion" }
 obscur-interaction = { path = "crates/domain/obscur-interaction" }
 obscur-routing = { path = "crates/domain/obscur-routing" }

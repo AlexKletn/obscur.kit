@@ -19,6 +19,16 @@ use crate::color::AlphaMode;
 /// happens every time a display list is cloned — only bumps a refcount rather than
 /// copying the (potentially large) pixel data.
 ///
+/// # Pixels versus logical size
+///
+/// [`width`](Self::width) / [`height`](Self::height) are **pixel** counts. An
+/// image loaded from a DPI variant (spec §5.16) carries more pixels than the
+/// logical box it fills, so it is tagged with a [`scale`](Self::scale) and its
+/// intrinsic size for layout/`object-fit` purposes is
+/// [`logical_size`](Self::logical_size) — the pixel count divided by that
+/// density. Sizing code must read `logical_size`; a renderer blitting the buffer
+/// wants the raw pixel dimensions.
+///
 /// # Not yet modeled
 ///
 /// A `SceneImage` describes a whole decoded bitmap drawn at a destination rect
@@ -26,7 +36,7 @@ use crate::color::AlphaMode;
 /// source sub-rectangle, tiling/`repeat`, nine-slice, and CSS `background-size`
 /// keywords are future additions; today an image is stretched to fill its
 /// destination rect.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SceneImage {
     /// The image width in pixels (its intrinsic width).
     width: u32,
@@ -37,6 +47,11 @@ pub struct SceneImage {
     pixels: Arc<[u8]>,
     /// Whether the RGBA channels are premultiplied by alpha.
     alpha: AlphaMode,
+    /// The asset's device-pixel density (spec §5.16 DPI variants): how many of
+    /// this image's pixels span one logical CSS pixel. `1.0` for a plain asset;
+    /// `2.0` for an `@2x` variant, whose pixel dimensions are twice its logical
+    /// size.
+    scale: f32,
 }
 
 impl SceneImage {
@@ -59,7 +74,25 @@ impl SceneImage {
             height,
             pixels,
             alpha,
+            scale: 1.0,
         })
+    }
+
+    /// Returns this image tagged with the asset density `scale` — how many of its
+    /// pixels span one logical CSS pixel (spec §5.16 DPI variants).
+    ///
+    /// An `@2x` variant decodes to twice the pixel dimensions of the logical box
+    /// it stands in for, so tagging it `2.0` is what lets
+    /// [`logical_size`](Self::logical_size) report the size it should *lay out*
+    /// at rather than its raw pixel count. A non-finite or non-positive `scale`
+    /// is ignored in favour of the base `1.0`, since it could only produce a
+    /// degenerate logical size.
+    #[must_use]
+    pub fn with_scale(mut self, scale: f32) -> Self {
+        if scale.is_finite() && scale > 0.0 {
+            self.scale = scale;
+        }
+        self
     }
 
     /// The image's intrinsic width in pixels.
@@ -91,6 +124,31 @@ impl SceneImage {
     #[must_use]
     pub const fn alpha_mode(&self) -> AlphaMode {
         self.alpha
+    }
+
+    /// The asset's device-pixel density: how many of this image's pixels span one
+    /// logical CSS pixel (spec §5.16 DPI variants). `1.0` unless
+    /// [`with_scale`](Self::with_scale) tagged it.
+    #[must_use]
+    pub const fn scale(&self) -> f32 {
+        self.scale
+    }
+
+    /// The image's intrinsic size in **logical** CSS pixels — its pixel
+    /// dimensions divided by its [`scale`](Self::scale) (spec §5.16).
+    ///
+    /// This, not the raw pixel count, is the intrinsic size CSS sizing and
+    /// `object-fit` are resolved against: a 200×200 `@2x` asset stands in for a
+    /// 100×100 logical box and must lay out at that size, so that the device-scale
+    /// root transform then maps it back to 200×200 physical pixels — a crisp 1:1
+    /// mapping. At the base density this is exactly the pixel size.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
+    pub fn logical_size(&self) -> (f32, f32) {
+        (
+            self.width as f32 / self.scale,
+            self.height as f32 / self.scale,
+        )
     }
 }
 
@@ -142,6 +200,40 @@ mod tests {
         let handle = img.pixels_arc();
         assert!(Arc::ptr_eq(&handle, &img.pixels_arc()));
         assert_eq!(img.alpha_mode(), AlphaMode::Premultiplied);
+    }
+
+    #[test]
+    fn a_plain_image_is_base_density_and_logical_size_is_the_pixel_size() {
+        let img =
+            SceneImage::new(2, 2, Arc::from(rgba_2x2()), AlphaMode::Straight).expect("valid image");
+        assert_eq!(img.scale(), 1.0);
+        assert_eq!(img.logical_size(), (2.0, 2.0));
+    }
+
+    #[test]
+    fn a_2x_variant_lays_out_at_half_its_pixel_size() {
+        let img = SceneImage::new(2, 2, Arc::from(rgba_2x2()), AlphaMode::Straight)
+            .expect("valid image")
+            .with_scale(2.0);
+        // The pixel dimensions are untouched — the renderer still blits 2×2 …
+        assert_eq!((img.width(), img.height()), (2, 2));
+        assert_eq!(img.scale(), 2.0);
+        // … but it stands in for a 1×1 logical box.
+        assert_eq!(img.logical_size(), (1.0, 1.0));
+    }
+
+    #[test]
+    fn a_degenerate_scale_falls_back_to_the_base_density() {
+        let base = || {
+            SceneImage::new(2, 2, Arc::from(rgba_2x2()), AlphaMode::Straight).expect("valid image")
+        };
+        // Each of these could only produce a degenerate (infinite/NaN) logical
+        // size, so the tag is refused rather than honored.
+        assert_eq!(base().with_scale(0.0).scale(), 1.0);
+        assert_eq!(base().with_scale(-2.0).scale(), 1.0);
+        assert_eq!(base().with_scale(f32::NAN).scale(), 1.0);
+        assert_eq!(base().with_scale(f32::INFINITY).scale(), 1.0);
+        assert_eq!(base().with_scale(0.0).logical_size(), (2.0, 2.0));
     }
 
     #[test]

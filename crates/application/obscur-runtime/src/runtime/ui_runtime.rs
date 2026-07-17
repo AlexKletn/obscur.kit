@@ -23,10 +23,12 @@ use obscur_interaction::command::{
     Command, CommandRegistry, CommandRouter, CommandState, KeyEvent, LogicalKey, Modifier,
     Modifiers, NamedKey, Shortcut,
 };
+use obscur_interaction::focus::{FocusScope, FocusScopeId};
 use obscur_interaction::hover::{HoverChain, HoverTransition};
 use obscur_interaction::pointer::{PointerEvent, PointerEventKind};
 use obscur_interaction::spatial::{HitTest, SpatialIndex};
 use obscur_layout::invalidation::LayoutInvalidation;
+use obscur_localization::locale::LanguageTag;
 use obscur_motion::scheduler::MotionScheduler;
 use obscur_motion::timeline::{Timeline, TimelineId};
 use obscur_motion::track::{Keyframe, KeyframeTrack};
@@ -38,7 +40,7 @@ use obscur_resources::cache::{
 use obscur_resources::handle::{ResourceHandle, ResourceKind};
 use obscur_resources::hub::{ResourceHub, ResourceRequest};
 use obscur_resources::port::{ResourceDecoder, ResourceLoader, VectorDecoder};
-use obscur_resources::source::ResourceSource;
+use obscur_resources::source::{ResourceSource, dpi_variants, requested_density};
 use obscur_resources::state::{ResourceError, ResourceMetadata, ResourceVersion};
 use obscur_scene::color::AlphaMode;
 use obscur_scene::command::{DisplayList, PaintCommand};
@@ -63,7 +65,8 @@ use obscur_view::component::{ComponentRegistration, RegistryError};
 use obscur_view::view::{EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, View};
 
 use super::{
-    FrameBudget, FramePlan, KeyDispatch, PointerDispatch, SemanticTreeBuilder, TextEditSession,
+    AppCommands, CommandTarget, FrameBudget, FramePlan, KeyDispatch, PointerDispatch,
+    SemanticTreeBuilder, TextEditSession,
 };
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::invalidation::{Invalidation, InvalidationReason, InvalidationRouter, RestyleScope};
@@ -192,6 +195,13 @@ pub struct UiRuntime {
     measure_cache: MeasureCache,
     /// Composes the paint-ordered display list.
     scene_composer: SceneCoordinator,
+    /// The application's current locale (spec §7.2), `und` until a host calls
+    /// [`set_locale`](Self::set_locale).
+    ///
+    /// Retained so [`locale`](Self::locale) can answer it; the value that *acts*
+    /// is the language hint `set_locale` pushes into the paragraph orchestrator,
+    /// which is where shaping reads it from.
+    locale: LanguageTag,
     /// The event-driven scheduler gating [`run_due_frame`](Self::run_due_frame).
     scheduler: FrameScheduler,
     /// The runtime-owned per-node interaction state feeding the matcher.
@@ -273,9 +283,17 @@ pub struct UiRuntime {
     /// per press in [`handle_pointer`](Self::handle_pointer) and consumed by
     /// [`begin_text_pointer`](Self::begin_text_pointer).
     click_count: u32,
-    /// The command-handler registry: application logic to run when a dispatched
-    /// command fires, keyed by the command's [`InternedSymbol`] (spec §2.3,
-    /// §3.1 — events flow up to a command, the command runs a handler).
+    /// The **window**-level command-handler registry — link 4 of §2.6's routing
+    /// chain: application logic to run when a dispatched command reaches this
+    /// window unclaimed by anything positional, keyed by the command's
+    /// [`InternedSymbol`] (spec §2.3, §3.1 — events flow up to a command, the
+    /// command runs a handler).
+    ///
+    /// This runtime *is* one window surface — it owns one tree, one viewport and
+    /// one focus — so a handler registered on the runtime itself is a
+    /// window-level handler by construction. The *application* fallback, link 5,
+    /// spans windows and therefore lives in the shared
+    /// [`app_commands`](Self::app_commands) handle instead.
     ///
     /// The app owns its command symbols: it binds `on-click → command` in the
     /// View (via [`ViewEventBinding`](obscur_view::view::ViewEventBinding)) and
@@ -284,8 +302,47 @@ pub struct UiRuntime {
     /// no interner coherence is needed. A handler is a `FnMut()` that typically
     /// captures app state through an `Rc<RefCell<_>>`/`Rc<Cell<_>>`. Exactly one
     /// handler per command (a later registration replaces an earlier one), so
-    /// dispatch is a deterministic single lookup — no iteration order observed.
+    /// this link is a deterministic single lookup — no iteration order observed.
     handlers: HashMap<InternedSymbol, Box<dyn FnMut()>>,
+    /// The **per-node** command-handler registry — links 1 and 3 of §2.6's
+    /// routing chain: the focused node's own handlers and its ancestors'.
+    ///
+    /// Keyed by `(node, command)` so the *same* command symbol can run different
+    /// logic depending on where focus sits — which is the entire point of a
+    /// positional chain. Populated by
+    /// [`on_command_at`](Self::on_command_at); consulted by
+    /// [`route_command`](Self::route_command) at each `Node` link of
+    /// [`command_route`](Self::command_route).
+    ///
+    /// A [`NodeId`] is stable exactly as long as the node survives reconcile —
+    /// the same guarantee [`focused`](Self::focused) already relies on to keep
+    /// focus across a structural frame — so a registration outlives every frame
+    /// that keeps its node. A registration whose node is gone is unreachable
+    /// (the route can never name it) but is not automatically reaped; see
+    /// [`clear_node_commands`](Self::clear_node_commands).
+    node_handlers: HashMap<(NodeId, InternedSymbol), Box<dyn FnMut()>>,
+    /// The open [`FocusScope`]s, outermost first — a stack, since dialogs and
+    /// menus nest (spec §7.1). Pushed by
+    /// [`open_focus_scope`](Self::open_focus_scope), popped by
+    /// [`close_focus_scope`](Self::close_focus_scope).
+    ///
+    /// Consulted by [`command_route`](Self::command_route) to build link 2:
+    /// every open scope whose members contain the focused node, **innermost
+    /// first**.
+    scopes: Vec<FocusScope>,
+    /// The **per-scope** command-handler registry — link 2 of §2.6's routing
+    /// chain, keyed by `(scope, command)`. Populated by
+    /// [`on_scope_command`](Self::on_scope_command).
+    ///
+    /// §2.6 places the focus scope *before* the ancestors, so a scope's handler
+    /// beats that of any container between the focused node and the scope — an
+    /// open dialog's Escape/Save wins over an intervening layout wrapper's.
+    scope_handlers: HashMap<(FocusScopeId, InternedSymbol), Box<dyn FnMut()>>,
+    /// The **application** fallback — link 5, the chain's last: a shared handle,
+    /// so every window's runtime can be given the *same* registry (spec §2.6).
+    /// Empty by default; installed with
+    /// [`set_app_commands`](Self::set_app_commands).
+    app_commands: AppCommands,
     /// The text-input handler registry: application logic to run when a focused
     /// editable receives a per-keystroke [`TextEdit`] (spec §6.7). Keyed, like
     /// [`handlers`](Self::handlers), by the command symbol the app binds
@@ -625,6 +682,9 @@ impl UiRuntime {
             layout: LayoutCoordinator::new(),
             measure_cache: MeasureCache::new(),
             scene_composer: SceneCoordinator::new(),
+            // `und`, not `en`: an unset locale is unknown, not English. Nothing
+            // changes until a host says otherwise (spec §7.2).
+            locale: LanguageTag::root(),
             scheduler: FrameScheduler::new(),
             pseudo: PseudoStates::new(),
             boxes: LayoutBoxes::new(),
@@ -642,6 +702,10 @@ impl UiRuntime {
             last_click: None,
             click_count: 1,
             handlers: HashMap::new(),
+            node_handlers: HashMap::new(),
+            scopes: Vec::new(),
+            scope_handlers: HashMap::new(),
+            app_commands: AppCommands::new(),
             text_input_handlers: HashMap::new(),
             change_handlers: HashMap::new(),
             editing: None,
@@ -783,8 +847,12 @@ impl UiRuntime {
                 result,
             } => match result {
                 Ok(image) => {
-                    let metadata =
-                        ResourceMetadata::new().with_intrinsic_size(intrinsic_of(&image));
+                    // `intrinsic_size` is the pixel count and `scale` the density
+                    // of *this* representation, so a consumer derives the logical
+                    // size as one over the other (spec §5.16 DPI variants).
+                    let metadata = ResourceMetadata::new()
+                        .with_intrinsic_size(intrinsic_of(&image))
+                        .with_scale(image.scale());
                     // The hub owns the staleness verdict; `false` means this job
                     // was superseded, so its pixels must not reach the cache.
                     if !self.resource_hub.complete(handle, version, metadata) {
@@ -1011,7 +1079,7 @@ impl UiRuntime {
             };
             // Load → decode → build the SceneImage; any failure fails the handle
             // and caches nothing (the image is not painted).
-            self.load_image(key, source, handle, version);
+            self.load_image(key, handle, version);
         }
     }
 
@@ -1021,23 +1089,24 @@ impl UiRuntime {
     /// Both paths end in the same place: `apply_resource_outcome`, which lets the
     /// hub rule on staleness. The only difference is *when* — so an app without the
     /// capability behaves exactly as before rather than losing the feature.
-    fn load_image(
-        &mut self,
-        key: Box<str>,
-        source: ResourceSource,
-        handle: ResourceHandle,
-        version: ResourceVersion,
-    ) {
+    ///
+    /// The DPI-variant ladder (spec §5.16) is built **here**, on the frame thread,
+    /// because it is where the device scale is known; the load job then only walks
+    /// a list of candidate paths and needs no access back to the runtime.
+    fn load_image(&mut self, key: Box<str>, handle: ResourceHandle, version: ResourceVersion) {
         let (Some(loader), Some(decoder)) =
             (self.resource_loader.clone(), self.resource_decoder.clone())
         else {
             return;
         };
+        // The surface's density decides which variants are worth asking for: at
+        // `1.0` this is just the authored path, so the common case is unchanged.
+        let candidates = dpi_variants(&key, self.device_scale);
         let outcome = move || ResourceOutcome::Image {
             key,
             handle,
             version,
-            result: load_and_decode_image(&*loader, &*decoder, &source),
+            result: load_and_decode_image(&*loader, &*decoder, &candidates),
         };
         if let Some(executor) = self.blocking_executor.clone() {
             let tx = self.resource_tx.clone();
@@ -1160,7 +1229,7 @@ impl UiRuntime {
             let Some(version) = self.resource_hub.begin_load(handle) else {
                 continue;
             };
-            self.load_image(key, source, handle, version);
+            self.load_image(key, handle, version);
         }
     }
 
@@ -1283,6 +1352,65 @@ impl UiRuntime {
         // a different one shapes/wraps to different sizes, and that is a layout
         // input no computed-style diff can see. Drop them (spec §4.3).
         self.measure_cache.clear();
+    }
+
+    /// Sets the application's current locale (spec §7.2).
+    ///
+    /// This is how a host tells the runtime what language its content is in.
+    /// Nothing reads the operating system here — §1.1 puts anything that touches
+    /// the environment in an adapter, and no adapter ships a locale reader yet, so
+    /// the host is the source of truth.
+    ///
+    /// # What it actually changes
+    ///
+    /// The locale's **language subtag** becomes the BCP-47 hint on every
+    /// [`ShapingRequest`](obscur_text::shaping::ShapingRequest) the paragraph
+    /// orchestrator issues, in both the measure and the compose pass (they share
+    /// the orchestrator, so they cannot disagree). That field has existed since
+    /// shaping was written and nothing has ever set it: the HarfRust adapter reads
+    /// it into `buffer.set_language`, which drives `locl` — the OpenType feature
+    /// that gives Serbian Cyrillic its own italic **б** where Russian Cyrillic
+    /// keeps the Russian one, from the same face and the same code points. Without
+    /// a language the shaper guesses from the text, and for Cyrillic it guesses
+    /// Russian.
+    ///
+    /// # What it does not change
+    ///
+    /// The base **direction**. `direction` still comes from computed CSS alone and
+    /// still defaults to left-to-right for an `ar` locale whose stylesheet is
+    /// silent — see
+    /// [`direction_for`](crate::orchestration::direction_for) for why that is not
+    /// wired here and what wiring it would cost. Message formatting is likewise
+    /// not the runtime's: a [`Localizer`](obscur_localization::catalog::Localizer)
+    /// is held by the application, which calls it before handing text to a widget.
+    ///
+    /// # Why this does not touch the measure cache
+    ///
+    /// The sibling shaping-port setters each drop
+    /// [`measure_cache`](Self::set_text_shaper) by hand, because a port swap
+    /// changes measured sizes and nothing else would notice. A locale switch does
+    /// too — a language-sensitive substitution can be a different width — but the
+    /// language is a member of [`LayoutInputs`], so the next frame's classifier
+    /// sees the mismatch, runs a **full** layout, and a full layout clears the
+    /// measure cache itself. Clearing it here as well would be a second mechanism
+    /// for one guarantee, and the one that carries it is the one the boxes depend
+    /// on: without the `LayoutInputs` member the retained *boxes* would be reused
+    /// whatever the cache did, and the frame would paint newly-shaped glyphs into
+    /// sizes measured under the outgoing language.
+    pub fn set_locale(&mut self, locale: &LanguageTag) {
+        // The shaper wants the language, not the tag: `ru-RU` and `ru-UA` shape
+        // identically, and a region subtag is not something OpenType has an
+        // opinion about.
+        self.scene_composer
+            .set_language(Some(locale.language().into()));
+        self.locale = locale.clone();
+    }
+
+    /// Returns the application's current locale (spec §7.2); `und` until
+    /// [`set_locale`](Self::set_locale) is called.
+    #[must_use]
+    pub fn locale(&self) -> &LanguageTag {
+        &self.locale
     }
 
     /// Installs a `hyphenator` on the owned scene coordinator, replacing the
@@ -2836,6 +2964,17 @@ impl UiRuntime {
     ///
     /// It never itself renders; it only mutates interaction state and requests a
     /// frame. Returns a [`PointerDispatch`] describing the target and what moved.
+    ///
+    /// # §2.3 `current_target` and trust
+    ///
+    /// The returned dispatch reports `current_target` — the node whose binding
+    /// resolved the command, which is an *ancestor* of `target` whenever the
+    /// click bubbled — and `trust`, carried through unchanged from `event`.
+    ///
+    /// Trust is **reported, not enforced**: this method treats an untrusted event
+    /// exactly as it treats a trusted one, because §7.6's DevTools agent loop
+    /// exists precisely to drive real clicks. The application decides whether a
+    /// given action deserves a real gesture.
     pub fn handle_pointer(&mut self, mut event: PointerEvent) -> PointerDispatch {
         // 0. Device-scale + content scroll: incoming coordinates are in the host's
         //    physical (device) space, but layout runs in logical CSS px scrolled by
@@ -2950,7 +3089,7 @@ impl UiRuntime {
                 }
                 PointerEventKind::Down | PointerEventKind::Enter => {}
             }
-            return PointerDispatch::new(target, false, false, None);
+            return PointerDispatch::new(target, false, false, None, None, event.trust());
         }
 
         // 3b. Click: a release on the *same* node the press landed on is a click
@@ -2961,11 +3100,17 @@ impl UiRuntime {
         //    just as a button bound to `on-click` does. The resolved command is
         //    reported back; the press anchor is cleared on every release.
         let mut command = None;
+        // §2.3's `current_target`: the node whose binding resolved `command` —
+        // an ancestor of `target` whenever the click bubbled to find one.
+        let mut current_target = None;
         if event.kind() == PointerEventKind::Up {
             if let Some(pressed) = self.press_target
                 && Some(pressed) == target
             {
-                command = self.activation_command_for(pressed);
+                if let Some((bound, resolved)) = self.activation_command_for(pressed) {
+                    command = Some(resolved);
+                    current_target = Some(bound);
+                }
                 self.activate(pressed);
             }
             if self.press_target.is_some() {
@@ -2984,7 +3129,14 @@ impl UiRuntime {
             self.request_frame(FrameReason::Input);
         }
 
-        PointerDispatch::new(target, hover_changed, focus_changed, command)
+        PointerDispatch::new(
+            target,
+            hover_changed,
+            focus_changed,
+            command,
+            current_target,
+            event.trust(),
+        )
     }
 
     /// Registers `target` as a drop site for data drags (spec §6.21).
@@ -3088,14 +3240,28 @@ impl UiRuntime {
     ///
     /// Reuses [`hover_chain_for`](Self::hover_chain_for) for the ancestor walk,
     /// which is the same target-plus-ancestors sequence hover already computes.
+    ///
+    /// # Why the node comes back too
+    ///
+    /// The node whose binding matched **is** §2.3's `current_target`: the element
+    /// the handler is attached to, as against `target`, the element the event hit.
+    /// This walk has always known it — it is the node `find_map` stopped on — and
+    /// used to drop it on the floor, returning the bare symbol. Reporting the pair
+    /// is what lets [`PointerDispatch::current_target`] be a fact rather than a
+    /// second guess at a walk the runtime already did.
     fn command_for_event_bubbling(
         &self,
         target: NodeId,
         event: InternedSymbol,
-    ) -> Option<InternedSymbol> {
+    ) -> Option<(NodeId, InternedSymbol)> {
         self.hover_chain_for(Some(target))
             .into_iter()
-            .find_map(|node| self.tree.get(node).and_then(|n| n.command_for_event(event)))
+            .find_map(|node| {
+                self.tree
+                    .get(node)
+                    .and_then(|n| n.command_for_event(event))
+                    .map(|command| (node, command))
+            })
     }
 
     /// Whether `node` lies within a **disabled** control — the node itself or any
@@ -3162,7 +3328,11 @@ impl UiRuntime {
     /// likewise not activation. Returns `None` when neither event applies.
     ///
     /// [`EVENT_INPUT`]: obscur_view::view::EVENT_INPUT
-    fn activation_command_for(&self, target: NodeId) -> Option<InternedSymbol> {
+    ///
+    /// Returns the pair `(current_target, command)`: the node whose binding
+    /// resolved — §2.3's `current_target` — and the command it bound. See
+    /// [`command_for_event_bubbling`](Self::command_for_event_bubbling).
+    fn activation_command_for(&self, target: NodeId) -> Option<(NodeId, InternedSymbol)> {
         if let Some(click) = self.command_for_event_bubbling(target, EVENT_CLICK) {
             return Some(click);
         }
@@ -3192,14 +3362,27 @@ impl UiRuntime {
             return false;
         }
         match self.activation_command_for(node) {
-            Some(command) => self.dispatch_command(command),
+            // The command originates at the ACTIVATED node, not at whatever is
+            // focused: a pointer click on a non-focusable control must route from
+            // the control the user hit (§2.6's chain, rooted at the origin). For
+            // an Enter/Space activation `node` *is* the focused node, so both
+            // callers get the spec's route.
+            Some((_current_target, command)) => self.dispatch_command_from(Some(node), command),
             None => false,
         }
     }
 
-    /// Registers `handler` as the application logic to run when `command` is
-    /// dispatched, replacing any handler previously registered for that command
-    /// (spec §2.3, §3.1 — a resolved command runs a handler).
+    /// Registers `handler` as the **window**-level logic to run when `command`
+    /// is dispatched, replacing any handler previously registered for that
+    /// command (spec §2.3, §3.1 — a resolved command runs a handler).
+    ///
+    /// This is link 4 of §2.6's routing chain: the handler runs when the command
+    /// reaches this window surface unclaimed — no handler at the focused node
+    /// ([`on_command_at`](Self::on_command_at)), none on an enclosing focus scope
+    /// ([`on_scope_command`](Self::on_scope_command)), none on any ancestor. It
+    /// is the right level for a command that means the same thing anywhere in
+    /// this window, which is most of them; only a command whose meaning *depends
+    /// on where focus is* needs a positional registration.
     ///
     /// The `command` symbol is app-owned and must be the **same** symbol the
     /// application binds its `on-click` event to in the View (via
@@ -3218,36 +3401,271 @@ impl UiRuntime {
         self.handlers.contains_key(&command)
     }
 
-    /// Runs the handler registered for `command` (if any) and, when one ran,
-    /// requests a [`FrameReason::Input`] frame — a handler likely mutated app
-    /// state, so the next `run_due_frame`/`render_now` rebuilds from it. Returns
-    /// whether a handler actually ran.
+    /// Routes `command` down §2.6's chain from the **focused** node and, when a
+    /// link claimed it, requests a [`FrameReason::Input`] frame — a handler
+    /// likely mutated app state, so the next `run_due_frame`/`render_now`
+    /// rebuilds from it. Returns whether a handler actually ran.
     ///
-    /// With no handler registered this is a no-op that returns `false` and
-    /// schedules no frame, so an unbound command (or one whose handler the app
-    /// never registered) can never panic or perturb runtime state.
+    /// This is the chain's keyboard/semantic-command entry point: the origin is
+    /// [`focused`](Self::focused), exactly as §2.6 specifies. A *pointer*
+    /// activation instead originates at the node the user clicked, so
+    /// [`activate`](Self::activate) calls
+    /// [`dispatch_command_from`](Self::dispatch_command_from) with that node —
+    /// routing a click from wherever focus happened to be would be wrong.
+    ///
+    /// With no link claiming the command this is a no-op that returns `false`
+    /// and schedules no frame, so an unbound command (or one whose handler the
+    /// app never registered) can never panic or perturb runtime state.
     ///
     /// A command **registered** in the [`command_registry`](Self::command_registry)
     /// whose [`CommandState`] is not actionable (disabled or hidden) is inert:
-    /// its handler does not run and no frame is requested, whichever surface
+    /// no link is offered it and no frame is requested, whichever surface
     /// asked — a keyboard shortcut, a menu item, or a pointer click all funnel
     /// through here, so one state governs every surface (spec §6.7). A symbol
     /// with no registered command is unconstrained, so applications routing raw
     /// symbols without a descriptor are unaffected.
     fn dispatch_command(&mut self, command: InternedSymbol) -> bool {
+        self.dispatch_command_from(self.focused, command)
+    }
+
+    /// Routes `command` down §2.6's chain starting at `origin`, gated by the
+    /// command's registered [`CommandState`], requesting an input frame when a
+    /// link claimed it. Returns whether a handler ran.
+    ///
+    /// `origin` is the node the command *came from*: the focused node for a
+    /// keyboard shortcut, the clicked node for a pointer activation. `None`
+    /// leaves only the non-positional links (window, application) — which is the
+    /// honest route when nothing is focused and nothing was clicked.
+    fn dispatch_command_from(&mut self, origin: Option<NodeId>, command: InternedSymbol) -> bool {
         if !self.command_registry.permits_dispatch(command) {
             return false;
         }
-        let ran = if let Some(handler) = self.handlers.get_mut(&command) {
-            handler();
-            true
-        } else {
-            false
-        };
+        let ran = self.route_command(origin, command);
         if ran {
             self.request_frame(FrameReason::Input);
         }
         ran
+    }
+
+    /// Offers `command` to each link of the route from `origin` in §2.6 order
+    /// and stops at the first link with a handler registered for it. Returns
+    /// whether a link claimed the command.
+    ///
+    /// Ungated and frame-free — [`dispatch_command_from`](Self::dispatch_command_from)
+    /// owns the [`CommandState`] gate and the frame request.
+    fn route_command(&mut self, origin: Option<NodeId>, command: InternedSymbol) -> bool {
+        // The route is materialised first: building it borrows the tree and the
+        // scope stack immutably, while running a handler needs a mutable borrow
+        // of one handler table.
+        for target in self.command_route(origin) {
+            let claimed = match target {
+                CommandTarget::Node(node) => match self.node_handlers.get_mut(&(node, command)) {
+                    Some(handler) => {
+                        handler();
+                        true
+                    }
+                    None => false,
+                },
+                CommandTarget::Scope(scope) => {
+                    match self.scope_handlers.get_mut(&(scope, command)) {
+                        Some(handler) => {
+                            handler();
+                            true
+                        }
+                        None => false,
+                    }
+                }
+                CommandTarget::Window => match self.handlers.get_mut(&command) {
+                    Some(handler) => {
+                        handler();
+                        true
+                    }
+                    None => false,
+                },
+                CommandTarget::App => self.app_commands.dispatch(command),
+            };
+            if claimed {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Returns §2.6's command routing chain for a command originating at
+    /// `origin`, in the spec's order: **focused node; focus scope; ancestors;
+    /// window; application fallback**.
+    ///
+    /// Concretely, for `origin = Some(node)`:
+    ///
+    /// 1. [`CommandTarget::Node`]`(origin)` — the focused node itself;
+    /// 2. one [`CommandTarget::Scope`] per open [`FocusScope`] containing
+    ///    `origin`, **innermost first** (a nested dialog's scope precedes the
+    ///    dialog's own);
+    /// 3. one [`CommandTarget::Node`] per ancestor of `origin`, nearest first,
+    ///    up to the root;
+    /// 4. [`CommandTarget::Window`] — this runtime's own handlers;
+    /// 5. [`CommandTarget::App`] — the shared [`AppCommands`] fallback.
+    ///
+    /// With `origin = None` the positional links have no anchor, so the route is
+    /// just window then application. The two non-positional links are *always*
+    /// present, so a route is never empty.
+    ///
+    /// Note that the scope links precede the ancestors even though a scope's
+    /// members sit *inside* those ancestors: that inversion is §2.6's own
+    /// ordering, not an accident of this implementation.
+    #[must_use]
+    pub fn command_route(&self, origin: Option<NodeId>) -> Vec<CommandTarget> {
+        let mut route = Vec::new();
+        if let Some(origin) = origin {
+            // 1. the focused node, and 3. its ancestors — `hover_chain_for`
+            //    yields the node itself first, then each logical parent.
+            let chain = self.hover_chain_for(Some(origin));
+            route.push(CommandTarget::Node(origin));
+            // 2. every open scope containing the origin, innermost (last opened)
+            //    first — `scopes` is a stack, so reverse iteration is inside-out.
+            route.extend(
+                self.scopes
+                    .iter()
+                    .rev()
+                    .filter(|scope| scope.contains(origin))
+                    .map(|scope| CommandTarget::Scope(scope.id())),
+            );
+            route.extend(chain.into_iter().skip(1).map(CommandTarget::Node));
+        }
+        // 4. this window surface, then 5. the application fallback.
+        route.push(CommandTarget::Window);
+        route.push(CommandTarget::App);
+        route
+    }
+
+    /// Registers `handler` to run when `command` reaches `node` on §2.6's
+    /// routing chain — links 1 and 3 — replacing any handler previously
+    /// registered for that `(node, command)` pair.
+    ///
+    /// This is what makes routing *positional*: the same command symbol can run
+    /// different logic depending on where focus sits. A handler here claims the
+    /// command and stops the chain, so nothing further up — no ancestor, not the
+    /// window, not the application fallback — sees it.
+    ///
+    /// `node` must be a live [`NodeId`], which the app reads back from
+    /// [`tree`](Self::tree) after a frame has built it (the same way a node is
+    /// resolved from a stable id). A registration survives every frame that
+    /// keeps its node, and becomes unreachable if the node is removed.
+    pub fn on_command_at(
+        &mut self,
+        node: NodeId,
+        command: InternedSymbol,
+        handler: impl FnMut() + 'static,
+    ) {
+        self.node_handlers
+            .insert((node, command), Box::new(handler));
+    }
+
+    /// Returns whether a handler is registered for `command` at `node`.
+    #[must_use]
+    pub fn has_node_command_handler(&self, node: NodeId, command: InternedSymbol) -> bool {
+        self.node_handlers.contains_key(&(node, command))
+    }
+
+    /// Removes every per-node handler registered at `node`, returning how many
+    /// were removed.
+    ///
+    /// A node's registrations are not reaped automatically when it leaves the
+    /// tree — the runtime does not know whether the app means to re-register on
+    /// the node's replacement — so an app that registers per-node handlers on a
+    /// churning subtree calls this when it tears the subtree down. Leaving them
+    /// is safe but unbounded: an unreachable entry can never fire, because the
+    /// route can only name nodes reachable from the origin.
+    pub fn clear_node_commands(&mut self, node: NodeId) -> usize {
+        let before = self.node_handlers.len();
+        self.node_handlers.retain(|(at, _), _| *at != node);
+        before - self.node_handlers.len()
+    }
+
+    /// Opens `scope` as a focus-containment scope (spec §7.1), pushing it as the
+    /// innermost open scope.
+    ///
+    /// While open, the scope forms link 2 of §2.6's routing chain for any
+    /// command originating at one of its [`members`](FocusScope::members): its
+    /// [`on_scope_command`](Self::on_scope_command) handlers are offered the
+    /// command after the focused node itself but *before* any ancestor. Scopes
+    /// nest — a menu opened from a dialog pushes a second scope — and the
+    /// innermost is consulted first.
+    ///
+    /// Opening the same [`FocusScopeId`] twice replaces the earlier scope's
+    /// membership rather than stacking a duplicate, so a scope whose members
+    /// changed across a structural frame is re-opened with the new node ids.
+    /// The scope's [`traps`](FocusScope::traps) flag is *not* consulted by
+    /// command routing: trapping governs tab navigation, and a scope routes
+    /// commands whether or not it traps.
+    pub fn open_focus_scope(&mut self, scope: FocusScope) {
+        let id = scope.id();
+        self.scopes.retain(|open| open.id() != id);
+        self.scopes.push(scope);
+    }
+
+    /// Closes the scope with this `id`, returning whether one was open.
+    ///
+    /// Its [`on_scope_command`](Self::on_scope_command) handlers are dropped
+    /// with it, so a closed dialog's commands stop routing.
+    pub fn close_focus_scope(&mut self, id: FocusScopeId) -> bool {
+        let before = self.scopes.len();
+        self.scopes.retain(|scope| scope.id() != id);
+        let closed = self.scopes.len() != before;
+        if closed {
+            self.scope_handlers.retain(|(at, _), _| *at != id);
+        }
+        closed
+    }
+
+    /// Returns the open focus scopes, outermost first.
+    #[must_use]
+    pub fn focus_scopes(&self) -> &[FocusScope] {
+        &self.scopes
+    }
+
+    /// Registers `handler` to run when `command` reaches the scope `id` on
+    /// §2.6's routing chain — link 2 — replacing any handler previously
+    /// registered for that `(scope, command)` pair.
+    ///
+    /// The handler is dropped when the scope is closed
+    /// ([`close_focus_scope`](Self::close_focus_scope)). Registering for a scope
+    /// that is not open is harmless: the route can never name it, so the handler
+    /// simply never fires until that scope opens.
+    pub fn on_scope_command(
+        &mut self,
+        id: FocusScopeId,
+        command: InternedSymbol,
+        handler: impl FnMut() + 'static,
+    ) {
+        self.scope_handlers.insert((id, command), Box::new(handler));
+    }
+
+    /// Returns whether a handler is registered for `command` on scope `id`.
+    #[must_use]
+    pub fn has_scope_command_handler(&self, id: FocusScopeId, command: InternedSymbol) -> bool {
+        self.scope_handlers.contains_key(&(id, command))
+    }
+
+    /// Installs `commands` as this runtime's **application** fallback — link 5,
+    /// the last of §2.6's chain (spec §2.6).
+    ///
+    /// [`AppCommands`] is a shared handle: giving the *same* one (or a clone of
+    /// it, which shares the registry) to every window's runtime is what makes
+    /// the application level span windows, rather than being a second per-window
+    /// table. A runtime with no `AppCommands` installed has an empty fallback,
+    /// so the chain simply ends at the window level.
+    pub fn set_app_commands(&mut self, commands: AppCommands) {
+        self.app_commands = commands;
+    }
+
+    /// Returns a handle to this runtime's application fallback registry.
+    ///
+    /// The returned handle *shares* the registry, so registering through it
+    /// reaches this runtime — and every other runtime given the same handle.
+    #[must_use]
+    pub fn app_commands(&self) -> AppCommands {
+        self.app_commands.clone()
     }
 
     /// Registers `handler` as the application logic to run when the focused
@@ -4712,6 +5130,7 @@ impl UiRuntime {
                     view.preedit.map(|preedit| preedit.text.to_owned()),
                 )
             }),
+            language: self.locale.language().into(),
         }
     }
 
@@ -5376,15 +5795,46 @@ impl UiRuntime {
     /// [`handle_pointer`](Self::handle_pointer) so hit-testing stays in logical
     /// space. Setting `1.0` restores the byte-identical (untransformed) path.
     ///
+    /// Moving to a display of a different density re-resolves images against the
+    /// new [DPI-variant](obscur_resources::source::dpi_variants) ladder: an app
+    /// dragged from a 1x to a 2x screen picks up its `@2x` assets rather than
+    /// keeping the ones it happened to load first (spec §5.16). Only a change that
+    /// selects *different files* does this — see
+    /// [`invalidate_dpi_variants`](Self::invalidate_dpi_variants).
+    ///
     /// Does not itself schedule a frame; a host typically pairs this with
     /// [`set_viewport`](Self::set_viewport) and
     /// [`request_frame`](Self::request_frame)`(`[`FrameReason::WindowChange`]`)`.
     pub fn set_device_scale(&mut self, scale: f32) {
+        let previous = self.device_scale;
         self.device_scale = if scale.is_finite() {
             scale.max(0.1)
         } else {
             0.1
         };
+        if requested_density(previous) != requested_density(self.device_scale) {
+            self.invalidate_dpi_variants();
+        }
+    }
+
+    /// Drops every resident decoded image so the next frame's resolve pass loads it
+    /// again against the current device scale's DPI-variant ladder (spec §5.16).
+    ///
+    /// Called only when the scale change actually selects different asset files —
+    /// `requested_density` is what decides that, so a `2.5` → `3.0` nudge (both
+    /// `@3x`) costs nothing while a `1.0` → `2.0` display change reloads. The
+    /// resident URLs go through
+    /// [`release_evicted`](Self::release_evicted) so their hub bookkeeping is
+    /// dropped too: a URL left in `image_handles` reads as "already attempted" and
+    /// would never load again.
+    ///
+    /// A load already in flight at the old density is not cancelled — it does not
+    /// need to be. Releasing its handle makes the hub reject its completion as
+    /// stale, so its pixels never reach the cache.
+    fn invalidate_dpi_variants(&mut self) {
+        let resident: Vec<Box<str>> = self.image_cache.images().keys().cloned().collect();
+        self.image_cache.clear();
+        self.release_evicted(resident);
     }
 
     /// Returns the current content scroll offset `(x, y)` in logical CSS pixels.
@@ -5738,7 +6188,41 @@ fn is_vector_source(src: &str) -> bool {
     lower.ends_with(".svg") || lower.ends_with(".svgz")
 }
 
+/// Loads and decodes the **densest** DPI variant in `candidates` that resolves,
+/// tagging the resulting [`SceneImage`] with that variant's density (spec §5.16
+/// DPI variants).
+///
+/// `candidates` is the ladder from
+/// [`dpi_variants`](obscur_resources::source::dpi_variants): densest first,
+/// always ending at the authored path. Each is tried in order and the first that
+/// loads *and* decodes wins, so a project shipping no `@2x` asset transparently
+/// falls back to the base one — a missing variant is the normal case, not an
+/// error. The returned image carries the winner's density, which is what makes it
+/// lay out at its logical (rather than pixel) size downstream.
+///
+/// # Errors
+///
+/// When no candidate resolves, this reports the **last** candidate's error — the
+/// authored path's. That is the honest diagnostic: "`logo@2x.png` not found" would
+/// name a file the author never wrote.
 fn load_and_decode_image(
+    loader: &dyn ResourceLoader,
+    decoder: &dyn ResourceDecoder,
+    candidates: &[(Box<str>, f32)],
+) -> Result<SceneImage, ResourceError> {
+    let mut last_error = ResourceError::NotFound;
+    for (path, density) in candidates {
+        match decode_one_image(loader, decoder, &ResourceSource::file(path.clone())) {
+            Ok(image) => return Ok(image.with_scale(*density)),
+            Err(error) => last_error = error,
+        }
+    }
+    Err(last_error)
+}
+
+/// Loads and decodes exactly one image source — one rung of the
+/// [`load_and_decode_image`] ladder.
+fn decode_one_image(
     loader: &dyn ResourceLoader,
     decoder: &dyn ResourceDecoder,
     source: &ResourceSource,
@@ -5878,6 +6362,16 @@ struct LayoutInputs {
     /// The focused editable's `(node, text, preedit)` — the string the text leaf
     /// was measured from; `None` when no editing session is active.
     editing: Option<(NodeId, String, Option<String>)>,
+    /// The locale's language subtag, which every text leaf was shaped — and
+    /// therefore measured — under (spec §7.2).
+    ///
+    /// A layout input and not a computed style: a shaper may substitute
+    /// language-sensitively (`locl`), and a substituted glyph may be a different
+    /// width, so the same string under `ru` and `sr` can measure to different
+    /// sizes. Nothing in the per-node style diff can see that, which is exactly
+    /// why it belongs here — a locale switch must fall through to a full layout
+    /// rather than reuse boxes measured under the outgoing language.
+    language: Box<str>,
 }
 
 /// Everything the style phase reads **apart from** the retained tree and the
@@ -6068,6 +6562,7 @@ impl fmt::Debug for UiRuntime {
 mod tests {
     use super::*;
     use obscur_identity::ComponentId;
+    use obscur_resources::state::ResourceState;
     use obscur_scene::command::DisplayList;
     use obscur_style::cascade::CascadeOrigin;
     use obscur_style::matching::{BlockDeclaration, StyleRule};
@@ -6078,6 +6573,7 @@ mod tests {
         ViewProperty, ViewValue,
     };
     use std::cell::Cell;
+    use std::sync::Mutex;
 
     /// App-owned command symbols the click tests bind and register against.
     const CMD_PANEL: InternedSymbol = InternedSymbol::from_raw(0xC0DE);
@@ -7082,6 +7578,272 @@ mod tests {
             .iter()
             .filter(|c| matches!(c, obscur_scene::command::PaintCommand::DrawImage { .. }))
             .count()
+    }
+
+    /// A [`ResourceLoader`] over a fake filesystem of `path -> pixel dimension`,
+    /// recording every path it is asked for (spec §5.16 DPI variants).
+    ///
+    /// The "encoded bytes" of an asset are a single byte holding its square pixel
+    /// dimension, which [`VariantDecoder`] turns back into an image of that size —
+    /// so a test can tell *which file* was loaded by looking at the decoded
+    /// image's pixel width. A path not in the map is [`ResourceError::NotFound`],
+    /// exactly as a project that ships no `@2x` asset behaves.
+    #[derive(Debug, Clone)]
+    struct VariantLoader {
+        /// The fake filesystem: authored path -> the asset's square pixel size.
+        files: HashMap<Box<str>, u8>,
+        /// Every path `load` was called with, in order.
+        asked: Arc<Mutex<Vec<Box<str>>>>,
+    }
+
+    impl VariantLoader {
+        fn new(files: &[(&str, u8)]) -> Self {
+            Self {
+                files: files.iter().map(|(p, n)| ((*p).into(), *n)).collect(),
+                asked: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        /// The paths the runtime asked for, in order.
+        fn asked(&self) -> Vec<Box<str>> {
+            self.asked.lock().expect("uncontended").clone()
+        }
+    }
+
+    impl ResourceLoader for VariantLoader {
+        fn can_load(&self, source: &ResourceSource) -> bool {
+            source.is_file()
+        }
+
+        fn load(
+            &self,
+            source: &ResourceSource,
+        ) -> Result<obscur_resources::port::LoadedBytes, ResourceError> {
+            let ResourceSource::File(path) = source else {
+                return Err(ResourceError::Unsupported("not a file".into()));
+            };
+            self.asked.lock().expect("uncontended").push(path.clone());
+            let dimension = self
+                .files
+                .get(path)
+                .copied()
+                .ok_or(ResourceError::NotFound)?;
+            let bytes: Arc<[u8]> = Arc::from(vec![dimension]);
+            Ok(obscur_resources::port::LoadedBytes::new(
+                bytes,
+                ResourceMetadata::new().with_byte_size(1),
+            ))
+        }
+    }
+
+    /// The [`VariantLoader`]'s counterpart: decodes the one-byte "asset" into an
+    /// `N×N` opaque RGBA image, so the decoded pixel size names the file it came
+    /// from.
+    #[derive(Debug, Clone)]
+    struct VariantDecoder;
+
+    impl ResourceDecoder for VariantDecoder {
+        fn supports(&self, kind: ResourceKind) -> bool {
+            kind == ResourceKind::Image
+        }
+
+        fn decode(
+            &self,
+            _kind: ResourceKind,
+            bytes: &[u8],
+        ) -> Result<obscur_resources::port::DecodedResource, ResourceError> {
+            let n = u32::from(*bytes.first().ok_or(ResourceError::NotFound)?);
+            let rgba: Arc<[u8]> = Arc::from(vec![255u8; (n * n * 4) as usize]);
+            Ok(obscur_resources::port::DecodedResource::new(
+                rgba,
+                #[allow(clippy::cast_precision_loss)]
+                ResourceMetadata::new().with_intrinsic_size(Size::new(n as f32, n as f32)),
+            ))
+        }
+    }
+
+    /// A runtime over a fake filesystem holding a 2×2 `x` and a 4×4 `x@2x`, at
+    /// device scale `scale`. `x` is the url `img_stylesheet` references.
+    fn variant_runtime(scale: f32, files: &[(&str, u8)]) -> (UiRuntime, VariantLoader) {
+        let loader = VariantLoader::new(files);
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_resource_providers(Arc::new(loader.clone()), Arc::new(VariantDecoder));
+        runtime.set_device_scale(scale);
+        (runtime, loader)
+    }
+
+    /// The `1x`/`2x` filesystem: the authored `x` is 2×2, its `@2x` variant 4×4.
+    const BOTH_VARIANTS: &[(&str, u8)] = &[("x", 2), ("x@2x", 4)];
+
+    /// The single resident decoded image, after a frame.
+    fn resident_image(runtime: &UiRuntime) -> SceneImage {
+        runtime
+            .image_cache
+            .images()
+            .get("x")
+            .expect("the url() image resolved")
+            .clone()
+    }
+
+    /// The `tile` rect of the single `DrawImage` in a display list.
+    fn draw_image_tile(list: &DisplayList) -> Rect {
+        list.commands()
+            .iter()
+            .find_map(|c| match c {
+                obscur_scene::command::PaintCommand::DrawImage { tile, .. } => Some(*tile),
+                _ => None,
+            })
+            .expect("one DrawImage was painted")
+    }
+
+    #[test]
+    fn a_1x_surface_loads_the_authored_asset_and_never_asks_for_a_variant() {
+        let (mut runtime, loader) = variant_runtime(1.0, BOTH_VARIANTS);
+        let sheet = img_stylesheet();
+        runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+
+        // At base density the ladder is one rung: the `@2x` file is not even asked
+        // for, so a 1x app pays nothing for the feature.
+        assert_eq!(loader.asked(), vec!["x".into()]);
+        let image = resident_image(&runtime);
+        assert_eq!(image.width(), 2, "the 2x2 authored asset");
+        assert_eq!(image.scale(), 1.0);
+    }
+
+    #[test]
+    fn a_2x_surface_picks_the_2x_asset() {
+        let (mut runtime, loader) = variant_runtime(2.0, BOTH_VARIANTS);
+        let sheet = img_stylesheet();
+        runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+
+        // The densest rung is asked for first — and it exists, so the ladder stops
+        // there and the authored path is never read.
+        assert_eq!(loader.asked(), vec!["x@2x".into()]);
+
+        // The decoded pixels are the 4×4 ones, which only `x@2x` could have
+        // produced: the 2x surface really selected the 2x file.
+        let image = resident_image(&runtime);
+        assert_eq!(
+            image.width(),
+            4,
+            "the 4x4 @2x asset, not the 2x2 authored one"
+        );
+        assert_eq!(image.height(), 4);
+        assert_eq!(image.scale(), 2.0);
+    }
+
+    #[test]
+    fn a_2x_surface_falls_back_to_the_authored_asset_when_no_variant_ships() {
+        // The same 2x surface, but the project ships no `@2x` file.
+        let (mut runtime, loader) = variant_runtime(2.0, &[("x", 2)]);
+        let sheet = img_stylesheet();
+        let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+
+        // It asks for the variant, misses, and walks down to the authored path.
+        assert_eq!(loader.asked(), vec!["x@2x".into(), "x".into()]);
+        let image = resident_image(&runtime);
+        assert_eq!(image.width(), 2, "the authored asset");
+        assert_eq!(image.scale(), 1.0, "which is base density, not 2x");
+        // A missing variant is not an error: the image still paints.
+        assert_eq!(draw_image_count(result.snapshot().display_list()), 1);
+    }
+
+    #[test]
+    fn a_2x_asset_paints_at_the_same_logical_size_as_the_1x_one() {
+        // THE read-side proof. `background-size: auto` resolves the tile straight
+        // to the image's intrinsic size, so the tile *is* the logical size the
+        // rest of CSS sizes against.
+        let sheet = img_stylesheet();
+
+        let (mut base, _) = variant_runtime(1.0, BOTH_VARIANTS);
+        let base_tile = draw_image_tile(
+            base.render_now(&img_view(), std::slice::from_ref(&sheet))
+                .snapshot()
+                .display_list(),
+        );
+
+        let (mut hidpi, _) = variant_runtime(2.0, BOTH_VARIANTS);
+        let hidpi_tile = draw_image_tile(
+            hidpi
+                .render_now(&img_view(), std::slice::from_ref(&sheet))
+                .snapshot()
+                .display_list(),
+        );
+
+        // The @2x asset carries twice the pixels (4×4 vs 2×2) …
+        assert_eq!(resident_image(&base).width(), 2);
+        assert_eq!(resident_image(&hidpi).width(), 4);
+        // … yet occupies the SAME 2×2 logical box. Reading the density is what
+        // makes that true: at the raw pixel count the @2x tile would be 4×4 and
+        // the layout would silently double.
+        assert_eq!(base_tile.size, Size::new(2.0, 2.0));
+        assert_eq!(
+            hidpi_tile.size,
+            Size::new(2.0, 2.0),
+            "the @2x asset must not paint at double size"
+        );
+        assert_eq!(base_tile.size, hidpi_tile.size);
+    }
+
+    #[test]
+    fn the_hub_records_the_loaded_variants_density_and_pixel_size() {
+        let (mut runtime, _) = variant_runtime(2.0, BOTH_VARIANTS);
+        let sheet = img_stylesheet();
+        runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+
+        let handle = *runtime.image_handles.get("x").expect("requested");
+        let metadata = runtime
+            .resource_hub
+            .state(handle)
+            .and_then(ResourceState::metadata)
+            .expect("the load completed");
+        // `intrinsic_size` is the representation's pixel count and `scale` its
+        // density; the logical size is one over the other.
+        assert_eq!(metadata.intrinsic_size(), Some(Size::new(4.0, 4.0)));
+        assert_eq!(metadata.scale(), 2.0);
+    }
+
+    #[test]
+    fn moving_to_a_denser_display_re_resolves_to_the_2x_asset() {
+        let (mut runtime, _) = variant_runtime(1.0, BOTH_VARIANTS);
+        let sheet = img_stylesheet();
+        runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        assert_eq!(
+            resident_image(&runtime).width(),
+            2,
+            "starts on the 1x asset"
+        );
+
+        // The window is dragged to a 2x display.
+        runtime.set_device_scale(2.0);
+        runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+
+        let image = resident_image(&runtime);
+        assert_eq!(
+            image.width(),
+            4,
+            "picks up the @2x asset rather than keeping the 1x one"
+        );
+        assert_eq!(image.scale(), 2.0);
+    }
+
+    #[test]
+    fn a_scale_change_within_one_density_keeps_the_resident_image() {
+        let (mut runtime, loader) = variant_runtime(2.0, BOTH_VARIANTS);
+        let sheet = img_stylesheet();
+        runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        let asked_once = loader.asked().len();
+
+        // 2.0 -> 1.5 still selects `@2x`, so there is nothing to reload.
+        runtime.set_device_scale(1.5);
+        runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+
+        assert_eq!(
+            loader.asked().len(),
+            asked_once,
+            "a scale change that selects the same files must not re-load"
+        );
+        assert_eq!(resident_image(&runtime).width(), 4);
     }
 
     #[test]
@@ -9651,6 +10413,88 @@ mod tests {
         assert_eq!(counter.get(), 1, "the ancestor's handler ran");
     }
 
+    /// §2.3's `current_target` is the node the handler is *attached to*; `target`
+    /// is the node the event *hit*. The whole point of the field is that those
+    /// two are not the same node, so this asserts they differ on the bubbled
+    /// click — a test that only checked the field exists would pass with
+    /// `current_target` hard-wired to `target`, and this one does not.
+    #[test]
+    fn current_target_is_the_bound_ancestor_not_the_hit_node() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&bound_view(), sheets);
+        let (panel, a, b) = panel_nodes(&runtime);
+
+        // `a` (50, 25) is unbound: the click HITS `a` and bubbles to the panel,
+        // which is where the handler lives.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let bubbled = runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 25.0));
+
+        assert_eq!(bubbled.target(), Some(a), "the pointer hit `a`");
+        assert_eq!(
+            bubbled.current_target(),
+            Some(panel),
+            "but the handler is attached to the panel"
+        );
+        assert_ne!(
+            bubbled.current_target(),
+            bubbled.target(),
+            "current_target MUST differ from target on a bubbled event — equal \
+             here would mean the field is just target under another name"
+        );
+        assert_ne!(panel, a, "the fixture's two nodes are genuinely distinct");
+
+        // `b` (50, 75) binds `on-click` itself: hit node and handler node coincide.
+        // This is the other half — the field is not simply "always the ancestor".
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0));
+        let direct = runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 75.0));
+
+        assert_eq!(direct.target(), Some(b));
+        assert_eq!(
+            direct.current_target(),
+            Some(b),
+            "a node carrying its own binding IS its own current_target"
+        );
+    }
+
+    /// No binding resolved → no handler ran → nothing is a current target.
+    /// `current_target` tracks `command`, so it must be absent exactly when the
+    /// command is.
+    #[test]
+    fn current_target_is_absent_when_no_command_resolves() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        // `panel_view` binds nothing at all.
+        let _ = runtime.render_now(&panel_view(), sheets);
+
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let up = runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 25.0));
+
+        assert!(up.target().is_some(), "the pointer still hit a node");
+        assert_eq!(up.command(), None, "nothing in the chain binds on-click");
+        assert_eq!(
+            up.current_target(),
+            None,
+            "no handler ran, so there is no current target"
+        );
+    }
+
+    /// A `Move` is not a click: it resolves no command, so it has no
+    /// `current_target` even over a node whose ancestor is bound.
+    #[test]
+    fn a_move_over_a_bound_subtree_has_no_current_target() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&bound_view(), sheets);
+
+        let moved = runtime.handle_pointer(mouse(PointerEventKind::Move, 50.0, 25.0));
+        assert_eq!(moved.command(), None);
+        assert_eq!(moved.current_target(), None);
+    }
+
     #[test]
     fn click_with_no_registered_handler_is_a_harmless_noop() {
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
@@ -10086,6 +10930,278 @@ mod tests {
         assert!(runtime.command_registry().permits_dispatch(CMD_SAVE));
         assert!(runtime.dispatch_command(CMD_SAVE));
         assert_eq!(ran.get(), 1);
+    }
+
+    // ---- §2.6 command routing chain -------------------------------------
+    //
+    // "Command routing: 1. focused node; 2. focus scope; 3. ancestors;
+    //  4. window; 5. application fallback."
+
+    /// A runtime with `panel_view` rendered and focus seated on child `a`.
+    /// Returns `(runtime, panel, a)` — `panel` is `a`'s parent, i.e. the
+    /// nearest ancestor link of the chain.
+    fn focused_on_a(sheets: &[Stylesheet]) -> (UiRuntime, NodeId, NodeId) {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let _ = runtime.render_now(&panel_view(), sheets);
+        let (panel, a, _b) = panel_nodes(&runtime);
+        // A press on `a`'s box seats focus there.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let _ = runtime.run_due_frame(&panel_view(), sheets);
+        assert_eq!(
+            runtime.focused,
+            Some(a),
+            "fixture precondition: the press must seat focus on `a`"
+        );
+        (runtime, panel, a)
+    }
+
+    /// A counter and a handler that bumps it.
+    fn counting_handler() -> (Rc<Cell<u32>>, impl FnMut() + 'static) {
+        let count = Rc::new(Cell::new(0_u32));
+        let counter = Rc::clone(&count);
+        (count, move || counter.set(counter.get() + 1))
+    }
+
+    /// §2.6 link 3: a command the focused node does not handle must reach an
+    /// **ancestor's** handler.
+    ///
+    /// Before the routing chain existed this could not happen at all: dispatch
+    /// was one flat `HashMap<InternedSymbol, handler>` lookup with no per-node
+    /// registration, so there was nothing for an ancestor to register *as*.
+    #[test]
+    fn a_command_reaches_an_ancestors_handler_when_the_focused_node_has_none() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let (mut runtime, panel, a) = focused_on_a(sheets);
+
+        // The ONLY handler is on the ancestor. Nothing at the focused node,
+        // nothing at the window, no application fallback.
+        let (ran, handler) = counting_handler();
+        runtime.on_command_at(panel, CMD_SAVE, handler);
+        assert!(
+            !runtime.has_node_command_handler(a, CMD_SAVE),
+            "the focused node must have no handler — that is the premise"
+        );
+        assert!(!runtime.has_command_handler(CMD_SAVE));
+
+        assert!(
+            runtime.dispatch_command(CMD_SAVE),
+            "the chain must walk from the focused node up to its ancestor"
+        );
+        assert_eq!(ran.get(), 1);
+    }
+
+    /// §2.6 link 5: a command nothing else claims must reach the **application
+    /// fallback**.
+    #[test]
+    fn a_command_reaches_the_app_fallback_when_nothing_else_claims_it() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let (mut runtime, panel, a) = focused_on_a(sheets);
+
+        let app = AppCommands::new();
+        let (ran, handler) = counting_handler();
+        app.on_command(CMD_SAVE, handler);
+        runtime.set_app_commands(app);
+
+        // Every earlier link is empty: focused node, scope, ancestor, window.
+        assert!(!runtime.has_node_command_handler(a, CMD_SAVE));
+        assert!(!runtime.has_node_command_handler(panel, CMD_SAVE));
+        assert!(runtime.focus_scopes().is_empty());
+        assert!(!runtime.has_command_handler(CMD_SAVE));
+
+        assert!(
+            runtime.dispatch_command(CMD_SAVE),
+            "an unclaimed command must fall through to the application fallback"
+        );
+        assert_eq!(ran.get(), 1);
+    }
+
+    /// §2.6's chain **in order**, and that it is a chain: with one handler at
+    /// every one of the five links, the innermost claims the command and no
+    /// other runs. Removing that link hands the command to exactly the next one
+    /// — five times, down to the application fallback.
+    ///
+    /// This is the property that distinguishes a chain from a set of registries:
+    /// each link is reached *only* when every inner link declined.
+    #[test]
+    fn the_five_links_are_tried_in_the_specs_order_and_the_first_claim_stops_the_chain() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let (mut runtime, panel, a) = focused_on_a(sheets);
+
+        let scope_id = FocusScopeId::from_raw(7);
+        runtime.open_focus_scope(FocusScope::new(scope_id).with_member(a).trapping(true));
+
+        // The route itself is the spec's order: focused node, scope, ancestors
+        // (panel, then root), window, application.
+        let root = runtime.tree().root().expect("root after a frame");
+        assert_eq!(
+            runtime.command_route(Some(a)),
+            vec![
+                CommandTarget::Node(a),         // 1. focused node
+                CommandTarget::Scope(scope_id), // 2. focus scope
+                CommandTarget::Node(panel),     // 3. ancestors, nearest first
+                CommandTarget::Node(root),
+                CommandTarget::Window, // 4. window
+                CommandTarget::App,    // 5. application fallback
+            ],
+            "the route must be §2.6's chain, in §2.6's order"
+        );
+
+        // One handler at each link, all for the SAME symbol.
+        let (node_ran, node_handler) = counting_handler();
+        let (scope_ran, scope_handler) = counting_handler();
+        let (anc_ran, anc_handler) = counting_handler();
+        let (win_ran, win_handler) = counting_handler();
+        let (app_ran, app_handler) = counting_handler();
+
+        runtime.on_command_at(a, CMD_SAVE, node_handler);
+        runtime.on_scope_command(scope_id, CMD_SAVE, scope_handler);
+        runtime.on_command_at(panel, CMD_SAVE, anc_handler);
+        runtime.on_command(CMD_SAVE, win_handler);
+        let app = AppCommands::new();
+        app.on_command(CMD_SAVE, app_handler);
+        runtime.set_app_commands(app.clone());
+
+        // (node, scope, ancestor, window, app) run-counts so far.
+        let fired = || {
+            (
+                node_ran.get(),
+                scope_ran.get(),
+                anc_ran.get(),
+                win_ran.get(),
+                app_ran.get(),
+            )
+        };
+
+        // 1. The focused node claims it; nothing else sees it.
+        assert!(runtime.dispatch_command(CMD_SAVE));
+        assert_eq!(fired(), (1, 0, 0, 0, 0), "link 1: the focused node");
+
+        // 2. Without a handler at the focused node, the focus SCOPE claims it —
+        //    before the ancestors, which is §2.6's ordering.
+        assert_eq!(runtime.clear_node_commands(a), 1);
+        assert!(runtime.dispatch_command(CMD_SAVE));
+        assert_eq!(fired(), (1, 1, 0, 0, 0), "link 2: the focus scope");
+
+        // 3. With the scope closed, the ancestor claims it.
+        assert!(runtime.close_focus_scope(scope_id));
+        assert!(runtime.dispatch_command(CMD_SAVE));
+        assert_eq!(fired(), (1, 1, 1, 0, 0), "link 3: the ancestor");
+
+        // 4. With no ancestor handler, the window claims it.
+        assert_eq!(runtime.clear_node_commands(panel), 1);
+        assert!(runtime.dispatch_command(CMD_SAVE));
+        assert_eq!(fired(), (1, 1, 1, 1, 0), "link 4: the window");
+
+        // 5. With no window handler, the application fallback claims it — the
+        //    chain's last link.
+        assert!(runtime.handlers.remove(&CMD_SAVE).is_some());
+        assert!(runtime.dispatch_command(CMD_SAVE));
+        assert_eq!(fired(), (1, 1, 1, 1, 1), "link 5: the application fallback");
+
+        // Nothing left: the command is unclaimed and dispatch says so.
+        assert!(app.remove(CMD_SAVE));
+        assert!(!runtime.dispatch_command(CMD_SAVE));
+        assert_eq!(
+            fired(),
+            (1, 1, 1, 1, 1),
+            "an unclaimed command runs nothing"
+        );
+    }
+
+    /// The window link is **per window**; the application link **spans** them.
+    ///
+    /// This is what makes links 4 and 5 two links rather than one map consulted
+    /// twice: a `UiRuntime` is one window surface, so its own handlers are that
+    /// window's alone, while a shared `AppCommands` registered ONCE serves every
+    /// window that has it installed.
+    #[test]
+    fn the_window_link_is_per_window_and_the_app_link_is_shared_across_them() {
+        let app = AppCommands::new();
+        let mut first = UiRuntime::new(RuntimeId::from_raw(1), viewport());
+        let mut second = UiRuntime::new(RuntimeId::from_raw(2), viewport());
+        first.set_app_commands(app.clone());
+        second.set_app_commands(app.clone());
+        assert!(
+            first
+                .app_commands()
+                .shares_registry_with(&second.app_commands())
+        );
+
+        // A window handler on the FIRST window only, and one shared fallback.
+        let (win_ran, win_handler) = counting_handler();
+        first.on_command(CMD_SAVE, win_handler);
+        let (app_ran, app_handler) = counting_handler();
+        app.on_command(CMD_SAVE, app_handler);
+
+        // First window: its own handler claims the command; the fallback is
+        // never reached.
+        assert!(first.dispatch_command(CMD_SAVE));
+        assert_eq!((win_ran.get(), app_ran.get()), (1, 0));
+
+        // Second window: the SAME symbol has no handler here, so it falls
+        // through to the fallback — which was registered once, on neither
+        // runtime.
+        assert!(second.dispatch_command(CMD_SAVE));
+        assert_eq!(
+            (win_ran.get(), app_ran.get()),
+            (1, 1),
+            "the window link must not leak between windows, and the app link must span them"
+        );
+
+        // A runtime with a *separate* registry does not see that fallback.
+        let mut third = UiRuntime::new(RuntimeId::from_raw(3), viewport());
+        third.set_app_commands(AppCommands::new());
+        assert!(!third.dispatch_command(CMD_SAVE));
+        assert_eq!((win_ran.get(), app_ran.get()), (1, 1));
+    }
+
+    /// A focus scope routes a command only for a node it actually contains: an
+    /// open scope is not a global level.
+    #[test]
+    fn a_focus_scope_link_appears_only_for_its_own_members() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let (mut runtime, _panel, a) = focused_on_a(sheets);
+        let (_p, _a, b) = panel_nodes(&runtime);
+
+        let scope_id = FocusScopeId::from_raw(3);
+        runtime.open_focus_scope(FocusScope::new(scope_id).with_member(a));
+
+        assert!(
+            runtime
+                .command_route(Some(a))
+                .contains(&CommandTarget::Scope(scope_id)),
+            "the scope must be a link for its member"
+        );
+        assert!(
+            !runtime
+                .command_route(Some(b))
+                .contains(&CommandTarget::Scope(scope_id)),
+            "the scope must NOT be a link for a non-member"
+        );
+
+        // A command from a non-member never reaches the scope's handler.
+        let (ran, handler) = counting_handler();
+        runtime.on_scope_command(scope_id, CMD_SAVE, handler);
+        assert!(!runtime.dispatch_command_from(Some(b), CMD_SAVE));
+        assert_eq!(ran.get(), 0);
+        // ...but a command from the member does.
+        assert!(runtime.dispatch_command_from(Some(a), CMD_SAVE));
+        assert_eq!(ran.get(), 1);
+    }
+
+    /// With nothing focused the positional links have no anchor, so the route is
+    /// just the two non-positional ones. A route is never empty.
+    #[test]
+    fn a_route_without_an_origin_is_window_then_application() {
+        let runtime = UiRuntime::new(runtime_id(), viewport());
+        assert_eq!(
+            runtime.command_route(None),
+            vec![CommandTarget::Window, CommandTarget::App]
+        );
     }
 
     #[test]
@@ -13497,5 +14613,211 @@ mod tests {
             .display_list()
             .clone();
         assert_eq!(draw_image_count(&list), 0, "a failed load paints nothing");
+    }
+
+    /// The application's current locale, and what it changes (spec §7.2).
+    mod locale_wiring {
+        use super::*;
+        use obscur_localization::locale::LanguageTag;
+        use obscur_text::font::FontFace;
+        use obscur_text::shaping::{
+            GlyphRun, MockTextShaper, ShapedGlyph, ShapingRequest, TextShaper,
+        };
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        /// The language hint of every shaping request the runtime issued.
+        type Recorded = Rc<RefCell<Vec<Option<String>>>>;
+
+        /// A shaper recording what actually reached the port. The assertion has to
+        /// be made here: `set_locale` configures the orchestrator, and only the
+        /// request the shaper is handed proves the configuration survived the
+        /// measure and compose passes and the shaping caches between them.
+        struct RecordingShaper(Recorded);
+
+        impl TextShaper for RecordingShaper {
+            fn shape(&self, request: &ShapingRequest) -> GlyphRun {
+                self.0
+                    .borrow_mut()
+                    .push(request.language().map(ToOwned::to_owned));
+                MockTextShaper::new().shape(request)
+            }
+
+            fn can_shape(&self, face: &FontFace) -> bool {
+                MockTextShaper::new().can_shape(face)
+            }
+        }
+
+        /// A runtime whose text shaper records language hints.
+        fn recording_runtime() -> (UiRuntime, Recorded) {
+            let mut runtime = UiRuntime::new(runtime_id(), viewport());
+            let recorded = Recorded::default();
+            runtime.set_text_shaper(Box::new(RecordingShaper(Rc::clone(&recorded))));
+            (runtime, recorded)
+        }
+
+        /// A view holding one Russian text node.
+        fn russian_text() -> View {
+            View::from_fragment(ViewFragment::from_nodes(vec![ViewNode::text("файлы")]))
+        }
+
+        fn tag(s: &str) -> LanguageTag {
+            LanguageTag::parse(s).expect("valid tag")
+        }
+
+        #[test]
+        fn the_default_locale_is_und_not_en() {
+            // The Anglocentric default §7.2 exists to refuse.
+            let runtime = UiRuntime::new(runtime_id(), viewport());
+            assert!(runtime.locale().is_root());
+            assert_eq!(runtime.locale().to_string(), "und");
+        }
+
+        #[test]
+        fn without_set_locale_no_shaping_request_carries_a_language() {
+            // The state this change found: `ShapingRequest::language` exists, the
+            // HarfRust adapter reads it, and no production path had ever set it.
+            let (mut runtime, recorded) = recording_runtime();
+            runtime.render_now(&russian_text(), &[]);
+            assert!(
+                !recorded.borrow().is_empty(),
+                "the frame must have shaped something for this test to mean anything"
+            );
+            assert!(
+                recorded.borrow().iter().all(Option::is_none),
+                "expected no language hints, got {:?}",
+                recorded.borrow()
+            );
+        }
+
+        #[test]
+        fn set_locale_puts_the_language_on_every_shaping_request() {
+            let (mut runtime, recorded) = recording_runtime();
+            runtime.set_locale(&tag("ru-RU"));
+            runtime.render_now(&russian_text(), &[]);
+
+            assert!(!recorded.borrow().is_empty(), "nothing was shaped");
+            assert!(
+                recorded
+                    .borrow()
+                    .iter()
+                    .all(|language| language.as_deref() == Some("ru")),
+                "expected every request to carry `ru`, got {:?}",
+                recorded.borrow()
+            );
+        }
+
+        #[test]
+        fn the_shaper_gets_the_language_subtag_not_the_whole_tag() {
+            // `ru-RU` shapes as `ru`: OpenType has no opinion about a region, and
+            // handing HarfRust `ru-RU` would be a different (and wrong) hint.
+            let (mut runtime, recorded) = recording_runtime();
+            runtime.set_locale(&tag("ru-RU"));
+            runtime.render_now(&russian_text(), &[]);
+            assert_eq!(recorded.borrow().first(), Some(&Some("ru".to_owned())));
+            assert_eq!(runtime.locale().to_string(), "ru-RU");
+        }
+
+        /// A shaper whose advances depend on the language hint, standing in for the
+        /// language-sensitive substitution a real shaper performs (`locl` can swap
+        /// a glyph for one of a different width). The mock is language-blind, so
+        /// without this no test in this workspace could tell whether a stale
+        /// *measured size* survived a locale switch.
+        struct LanguageWidthShaper;
+
+        impl LanguageWidthShaper {
+            /// Serbian glyphs are twice as wide as anyone else's, here.
+            fn scale(language: Option<&str>) -> f32 {
+                if language == Some("sr") { 2.0 } else { 1.0 }
+            }
+        }
+
+        impl TextShaper for LanguageWidthShaper {
+            fn shape(&self, request: &ShapingRequest) -> GlyphRun {
+                let run = MockTextShaper::new().shape(request);
+                let scale = Self::scale(request.language());
+                let glyphs: Vec<_> = run
+                    .glyphs()
+                    .iter()
+                    .map(|glyph| {
+                        ShapedGlyph::new(
+                            glyph.glyph_id(),
+                            glyph.cluster(),
+                            glyph.x_advance() * scale,
+                        )
+                        .with_offset(glyph.x_offset(), glyph.y_offset())
+                    })
+                    .collect();
+                GlyphRun::new(glyphs, run.direction(), run.font_size(), run.source())
+            }
+
+            fn can_shape(&self, face: &FontFace) -> bool {
+                MockTextShaper::new().can_shape(face)
+            }
+        }
+
+        /// The width of the frame's only text box.
+        fn text_box_width(runtime: &UiRuntime) -> f32 {
+            let root = runtime.tree().root().expect("a root");
+            let text = runtime.tree().get(root).expect("live").children()[0];
+            runtime
+                .layout_boxes()
+                .get(&text)
+                .expect("the text node was laid out")
+                .size()
+                .width
+        }
+
+        #[test]
+        fn a_locale_switch_remeasures_rather_than_serving_a_stale_measured_size() {
+            // `set_language` flushes the *paragraph* cache, but the runtime's
+            // measure cache retains `measure(node, constraints) -> Size` across
+            // frames independently. A language that changes advances therefore
+            // changes measured sizes, and that is a layout input no computed-style
+            // diff can see — so `set_locale` must drop it too.
+            let mut runtime = UiRuntime::new(runtime_id(), viewport());
+            runtime.set_text_shaper(Box::new(LanguageWidthShaper));
+
+            runtime.set_locale(&tag("ru"));
+            runtime.render_now(&russian_text(), &[]);
+            let ru_width = text_box_width(&runtime);
+
+            runtime.set_locale(&tag("sr"));
+            runtime.render_now(&russian_text(), &[]);
+            let sr_width = text_box_width(&runtime);
+
+            assert!(ru_width > 0.0, "the text measured to nothing");
+            assert!(
+                (sr_width - ru_width * 2.0).abs() < 0.01,
+                "expected the `sr` box to be twice the `ru` box, got {ru_width} then {sr_width}"
+            );
+        }
+
+        #[test]
+        fn switching_locale_reshapes_rather_than_serving_the_cached_runs() {
+            // Two caches sit between `set_locale` and the shaper — the paragraph
+            // cache and the measure cache — and either would happily serve the
+            // previous language's runs. This is the assertion that they do not.
+            let (mut runtime, recorded) = recording_runtime();
+            runtime.set_locale(&tag("ru"));
+            runtime.render_now(&russian_text(), &[]);
+            recorded.borrow_mut().clear();
+
+            runtime.set_locale(&tag("sr"));
+            runtime.render_now(&russian_text(), &[]);
+
+            assert!(
+                !recorded.borrow().is_empty(),
+                "the swap served a stale cache"
+            );
+            assert!(
+                recorded
+                    .borrow()
+                    .iter()
+                    .all(|language| language.as_deref() == Some("sr")),
+                "expected `sr` after the switch, got {:?}",
+                recorded.borrow()
+            );
+        }
     }
 }

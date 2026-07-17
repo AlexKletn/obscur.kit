@@ -7,6 +7,14 @@ mod image_cache;
 
 pub use image_cache::ImageCache;
 
+mod app_commands;
+
+pub use app_commands::AppCommands;
+
+mod command_target;
+
+pub use command_target::CommandTarget;
+
 mod text_edit_session;
 
 pub(crate) use text_edit_session::TextEditSession;

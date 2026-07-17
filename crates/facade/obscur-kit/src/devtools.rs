@@ -37,7 +37,7 @@ use crate::geometry::Point;
 use crate::identity::{NodeId, VersionStamp};
 use crate::interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind, PointerId};
 use crate::perf::FrameStats;
-use crate::runtime::UiRuntime;
+use crate::runtime::{PointerDispatch, UiRuntime};
 
 /// Builds a [`SnapshotInspectSource`] populated from `runtime`'s current live
 /// state: the full annotated tree (Tree), per-node geometry (Layout), per-node
@@ -209,7 +209,33 @@ fn node_label(raw: Option<u64>) -> String {
 /// hit-tests exactly like real input, so an external agent can drive clicks and
 /// focus. Key injection is not yet mapped (a stable keycode → the runtime's
 /// structured `KeyEvent` needs a keymap — a follow-up); such events are ignored.
-pub fn apply_injected(runtime: &mut UiRuntime, event: InjectedEvent) {
+///
+/// # These events are untrusted, and must stay that way
+///
+/// Whoever holds an `Inject`-scoped token reaches this function, so nothing it
+/// builds is a user gesture. Each event is left at
+/// [`EventTrust::Untrusted`](obscur_interaction::event::EventTrust::Untrusted) —
+/// [`PointerEvent::new`]'s default — and the runtime reports that out through
+/// [`PointerDispatch::trust`](obscur_runtime::runtime::PointerDispatch::trust),
+/// which is what lets an application distinguish a driven click from a real one.
+///
+/// **Never call `PointerEvent::as_trusted` here.** That method exists for a
+/// platform adapter holding an actual OS event; calling it on this path would
+/// make injected input indistinguishable from a real gesture, which is the exact
+/// condition this flag exists to rule out. `injected_pointer_is_not_trusted` in
+/// `tests/devtools_live.rs` fails if it is ever added.
+///
+/// # Returns
+///
+/// The [`PointerDispatch`] the runtime produced, or [`None`] for an event this
+/// path does not map (the key variants). Returning it is what makes the
+/// untrusted mark *actionable*: `handle_pointer` reports trust only in its
+/// return value — a direct call records nothing in
+/// [`UiRuntime::take_input_dispatches`], which the queued path fills — so a
+/// function that swallowed the dispatch would leave a host no way to tell that
+/// the click it just applied came from an agent rather than a person.
+pub fn apply_injected(runtime: &mut UiRuntime, event: InjectedEvent) -> Option<PointerDispatch> {
+    // Deliberately NOT `.as_trusted()` — see the note above.
     let pointer = |kind, x: i32, y: i32| {
         PointerEvent::new(
             PointerId::MOUSE,
@@ -220,13 +246,13 @@ pub fn apply_injected(runtime: &mut UiRuntime, event: InjectedEvent) {
     };
     match event {
         InjectedEvent::PointerDown { x, y } => {
-            runtime.handle_pointer(pointer(PointerEventKind::Down, x, y));
+            Some(runtime.handle_pointer(pointer(PointerEventKind::Down, x, y)))
         }
         InjectedEvent::PointerUp { x, y } => {
-            runtime.handle_pointer(pointer(PointerEventKind::Up, x, y));
+            Some(runtime.handle_pointer(pointer(PointerEventKind::Up, x, y)))
         }
         // Key injection needs a keycode→KeyEvent map; not wired yet.
-        InjectedEvent::KeyDown { .. } | InjectedEvent::KeyUp { .. } => {}
+        InjectedEvent::KeyDown { .. } | InjectedEvent::KeyUp { .. } => None,
     }
 }
 

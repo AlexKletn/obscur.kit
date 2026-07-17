@@ -18,6 +18,10 @@ pub use crate::scene::Color;
 pub use crate::scene::scene::{Scene, SceneSnapshot};
 // text
 pub use crate::text::span::TextStyle;
+// localization
+pub use crate::localization::catalog::{Localizer, MessageCatalog};
+pub use crate::localization::locale::LanguageTag;
+pub use crate::localization::message::MessageArgs;
 // windowing
 pub use crate::windowing::window::{Window, WindowProperties};
 // interaction

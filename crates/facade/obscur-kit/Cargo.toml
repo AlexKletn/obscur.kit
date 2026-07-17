@@ -84,6 +84,7 @@ obscur-view = { workspace = true }
 obscur-tree = { workspace = true }
 obscur-style = { workspace = true }
 obscur-layout = { workspace = true }
+obscur-localization = { workspace = true }
 obscur-scene = { workspace = true }
 obscur-text = { workspace = true }
 obscur-motion = { workspace = true }

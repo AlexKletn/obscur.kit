@@ -39,6 +39,7 @@ pub use obscur_accessibility as accessibility;
 pub use obscur_data_transfer as data_transfer;
 pub use obscur_interaction as interaction;
 pub use obscur_layout as layout;
+pub use obscur_localization as localization;
 pub use obscur_motion as motion;
 pub use obscur_render as render;
 pub use obscur_resources as resources;

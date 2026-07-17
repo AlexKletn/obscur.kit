@@ -4,6 +4,7 @@
 use obscur_geometry::Point;
 
 use super::{PointerButtons, PointerDevice, PointerId};
+use crate::event::EventTrust;
 
 /// The lifecycle kind of a [`PointerEvent`] (spec §4.7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,6 +42,11 @@ impl PointerEventKind {
 /// event, the contact [`pressure`](Self::pressure) (`0.0` for hover or a
 /// device without pressure), and a logical [`timestamp`](Self::timestamp)
 /// supplied by the caller — this crate never reads a clock.
+///
+/// It also carries §2.3's trusted/untrusted origin ([`trust`](Self::trust)).
+/// [`new`](Self::new) produces an [`Untrusted`](EventTrust::Untrusted) event:
+/// trust is conferred at the platform boundary by [`as_trusted`](Self::as_trusted)
+/// and is never assumed. See [`EventTrust`] for why that direction.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PointerEvent {
     /// The pointer that produced this event.
@@ -57,11 +63,19 @@ pub struct PointerEvent {
     pub pressure: f32,
     /// A logical timestamp in microseconds, supplied by the caller.
     pub timestamp_micros: u64,
+    /// Whether this came from a real user gesture (§2.3 trusted/untrusted
+    /// origin). Untrusted unless a platform adapter vouched for it.
+    pub trust: EventTrust,
 }
 
 impl PointerEvent {
-    /// Creates a pointer event with no buttons held, zero pressure, and a zero
-    /// timestamp.
+    /// Creates a pointer event with no buttons held, zero pressure, a zero
+    /// timestamp, and an [`Untrusted`](EventTrust::Untrusted) origin.
+    ///
+    /// Untrusted is deliberate, not a placeholder: a synthetic event that forgets
+    /// to say what it is must not pass for a real gesture. The one producer of
+    /// real input — the platform adapter holding the OS event — opts in with
+    /// [`as_trusted`](Self::as_trusted).
     #[must_use]
     pub const fn new(
         pointer: PointerId,
@@ -77,7 +91,32 @@ impl PointerEvent {
             buttons: PointerButtons::new(),
             pressure: 0.0,
             timestamp_micros: 0,
+            trust: EventTrust::Untrusted,
         }
+    }
+
+    /// Returns this event marked as a real user gesture (fluent).
+    ///
+    /// **Only a platform adapter converting an actual OS input event may call
+    /// this.** It is the single point at which trust enters the runtime; every
+    /// other producer (DevTools `Inject` per §7.6, the §7.4 headless harness)
+    /// must leave the event untrusted.
+    #[must_use]
+    pub const fn as_trusted(mut self) -> Self {
+        self.trust = EventTrust::Trusted;
+        self
+    }
+
+    /// Returns this event's trusted/untrusted origin (§2.3).
+    #[must_use]
+    pub const fn trust(&self) -> EventTrust {
+        self.trust
+    }
+
+    /// Returns whether this event came from a real user gesture (§2.3).
+    #[must_use]
+    pub const fn is_trusted(&self) -> bool {
+        self.trust.is_trusted()
     }
 
     /// Returns this event with its held buttons set (fluent).
@@ -176,6 +215,31 @@ mod tests {
         assert_eq!(e.pressure(), 0.0);
         assert_eq!(e.timestamp(), 0);
         assert!(!e.is_pressed());
+        // §2.3: a bare event is NOT a user gesture. This default is the whole
+        // security argument — see `EventTrust`.
+        assert_eq!(e.trust(), EventTrust::Untrusted);
+        assert!(!e.is_trusted());
+    }
+
+    /// §2.3: trust is conferred, and conferring it changes nothing else — a
+    /// trusted event is the same event, differently labelled.
+    #[test]
+    fn as_trusted_marks_the_event_and_touches_nothing_else() {
+        let plain = base();
+        let trusted = base().as_trusted();
+
+        assert!(!plain.is_trusted());
+        assert!(trusted.is_trusted());
+        assert_eq!(trusted.trust(), EventTrust::Trusted);
+        assert_ne!(
+            plain.trust(),
+            trusted.trust(),
+            "the two must be distinguishable"
+        );
+
+        assert_eq!(trusted.position(), plain.position());
+        assert_eq!(trusted.kind(), plain.kind());
+        assert_eq!(trusted.pointer(), plain.pointer());
     }
 
     #[test]

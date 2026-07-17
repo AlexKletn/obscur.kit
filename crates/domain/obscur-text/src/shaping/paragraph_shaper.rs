@@ -53,6 +53,12 @@ pub struct ParagraphShaper {
     itemizer: Box<dyn TextItemizer>,
     resolver: Box<dyn FontResolver>,
     shaper: Box<dyn TextShaper>,
+    /// The content locale's BCP-47 language hint, passed to every shaping
+    /// request (spec §7.2). Configuration, like the ports beside it — not a
+    /// per-call input — so it is *not* in [`ParagraphKey`];
+    /// [`set_language`](Self::set_language) flushes the cache instead, exactly as
+    /// a port swap does.
+    language: Option<Box<str>>,
     /// Memoized paragraph runs, keyed by every input that affects the output.
     cache: RefCell<HashMap<ParagraphKey, Vec<ShapedRun>>>,
     /// The maximum number of cached paragraphs before a flush.
@@ -90,6 +96,7 @@ impl ParagraphShaper {
             itemizer,
             resolver,
             shaper,
+            language: None,
             cache: RefCell::new(HashMap::new()),
             capacity: capacity.max(1),
         }
@@ -120,6 +127,37 @@ impl ParagraphShaper {
     pub fn set_resolver(&mut self, resolver: Box<dyn FontResolver>) {
         self.resolver = resolver;
         self.clear_cache();
+    }
+
+    /// Installs the BCP-47 `language` hint every [`ShapingRequest`] this
+    /// orchestrator issues will carry (spec §5.10, §7.2 text shaping
+    /// integration).
+    ///
+    /// The language is a property of the *content's locale*, not of a run: it is
+    /// uniform across a paragraph and constant until the application changes
+    /// locale, so it is installed here alongside the ports rather than threaded
+    /// through [`shape_paragraph`](Self::shape_paragraph)'s signature. `None` —
+    /// the default — leaves the hint unset, and a shaper then guesses from the
+    /// text.
+    ///
+    /// It matters because a shaper cannot infer it. Serbian and Russian are both
+    /// `Cyrl`, and their italic б differ; `locl` is the OpenType feature that
+    /// picks, and it is driven by the language tag alone. The
+    /// [`ShapingRequest::language`](crate::shaping::ShapingRequest::language)
+    /// field has existed all along and nothing ever set it — this is the setter
+    /// that gives it a value.
+    ///
+    /// The paragraph cache is flushed, for the same reason a port swap flushes
+    /// it: the memoized runs were shaped under the outgoing hint.
+    pub fn set_language(&mut self, language: Option<Box<str>>) {
+        self.language = language;
+        self.clear_cache();
+    }
+
+    /// Returns the installed BCP-47 language hint, if any.
+    #[must_use]
+    pub fn language(&self) -> Option<&str> {
+        self.language.as_deref()
     }
 
     /// Empties the paragraph cache. Called on any port swap so stale runs never
@@ -254,8 +292,11 @@ impl ParagraphShaper {
                 None => (FontId::PRIMARY, default_face.clone(), false, false),
             };
 
-            let shape_request =
+            let mut shape_request =
                 ShapingRequest::new(sub, face, font_size).with_direction(item.direction());
+            if let Some(language) = &self.language {
+                shape_request = shape_request.with_language(language.clone());
+            }
             let run = self.shaper.shape(&shape_request);
 
             runs.push(
@@ -337,6 +378,42 @@ mod tests {
                 1,
             )]
         }
+    }
+
+    /// The language hint of every request a [`RecordingShaper`] was handed, kept
+    /// outside it because the orchestrator owns the shaper once installed.
+    type Recorded = std::rc::Rc<RefCell<Vec<Option<String>>>>;
+
+    /// A shaper that records the language hint of every request it is handed, so
+    /// a test can assert what actually reached the port rather than what was
+    /// configured.
+    struct RecordingShaper(Recorded);
+
+    impl TextShaper for RecordingShaper {
+        fn shape(&self, request: &ShapingRequest) -> GlyphRun {
+            self.0
+                .borrow_mut()
+                .push(request.language().map(ToOwned::to_owned));
+            MockTextShaper::new().shape(request)
+        }
+
+        fn can_shape(&self, face: &FontFace) -> bool {
+            MockTextShaper::new().can_shape(face)
+        }
+    }
+
+    /// A two-run (`abВГ`) paragraph shaper over a [`RecordingShaper`].
+    fn recording_shaper() -> (ParagraphShaper, Recorded) {
+        let mut resolver = MockFontResolver::new();
+        resolver.register(ScriptTag::LATIN, FontId::new(0), face("Latin"));
+        resolver.register(ScriptTag::CYRILLIC, FontId::new(1), face("Cyrillic"));
+        let recorded = Recorded::default();
+        let shaper = ParagraphShaper::new(
+            Box::new(TwoScriptItemizer),
+            Box::new(resolver),
+            Box::new(RecordingShaper(Recorded::clone(&recorded))),
+        );
+        (shaper, recorded)
     }
 
     fn attrs() -> FontAttributes {
@@ -914,5 +991,102 @@ mod tests {
         resolver.register(ScriptTag::LATIN, FontId::new(0), face("Latin"));
         resolver.register(ScriptTag::CYRILLIC, FontId::new(1), face("Cyrillic"));
         resolver
+    }
+
+    // ---- the language hint (spec §5.10, §7.2 text shaping integration) ----
+
+    #[test]
+    fn without_a_language_no_request_carries_one() {
+        // The state of the world before `set_language` existed: `ShapingRequest`
+        // has always had the field and nothing ever filled it.
+        let (shaper, recorded) = recording_shaper();
+        assert_eq!(shaper.language(), None);
+        let _ = shaper.shape_paragraph(
+            "abВГ",
+            &chain(),
+            &attrs(),
+            &face("Fallback"),
+            16.0,
+            TextDirection::LeftToRight,
+        );
+        assert_eq!(&*recorded.borrow(), &[None, None]);
+    }
+
+    #[test]
+    fn the_installed_language_reaches_every_shaping_request() {
+        let (mut shaper, recorded) = recording_shaper();
+        shaper.set_language(Some("ru".into()));
+        assert_eq!(shaper.language(), Some("ru"));
+        let _ = shaper.shape_paragraph(
+            "abВГ",
+            &chain(),
+            &attrs(),
+            &face("Fallback"),
+            16.0,
+            TextDirection::LeftToRight,
+        );
+        // Both itemized runs, not just the first: the hint is the paragraph's.
+        assert_eq!(
+            &*recorded.borrow(),
+            &[Some("ru".to_owned()), Some("ru".to_owned())]
+        );
+    }
+
+    #[test]
+    fn changing_the_language_flushes_the_cache_and_reshapes() {
+        // Without the flush the second call would hit the memoized runs and the
+        // new hint would never reach the shaper — the language would appear to be
+        // installed and be silently inert.
+        let (mut shaper, recorded) = recording_shaper();
+        let default = face("Fallback");
+        let shape = |shaper: &ParagraphShaper| {
+            let _ = shaper.shape_paragraph(
+                "abВГ",
+                &chain(),
+                &attrs(),
+                &default,
+                16.0,
+                TextDirection::LeftToRight,
+            );
+        };
+
+        shaper.set_language(Some("ru".into()));
+        shape(&shaper);
+        assert_eq!(shaper.cache_len(), 1);
+
+        shaper.set_language(Some("sr".into()));
+        assert_eq!(
+            shaper.cache_len(),
+            0,
+            "a language swap must flush the cache"
+        );
+        shape(&shaper);
+
+        assert_eq!(
+            &*recorded.borrow(),
+            &[
+                Some("ru".to_owned()),
+                Some("ru".to_owned()),
+                Some("sr".to_owned()),
+                Some("sr".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn clearing_the_language_unsets_the_hint() {
+        let (mut shaper, recorded) = recording_shaper();
+        shaper.set_language(Some("ru".into()));
+        shaper.set_language(None);
+        assert_eq!(shaper.language(), None);
+        let _ = shaper.shape_paragraph(
+            "abВГ",
+            &chain(),
+            &attrs(),
+            &face("Fallback"),
+            16.0,
+            TextDirection::LeftToRight,
+        );
+        assert_eq!(&*recorded.borrow(), &[None, None]);
     }
 }

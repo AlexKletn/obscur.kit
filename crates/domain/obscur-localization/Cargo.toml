@@ -1,0 +1,21 @@
+[package]
+name = "obscur-localization"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# `LanguageTag::direction` answers in the text layer's own `TextDirection` rather
+# than inventing a second direction enum: spec §7.2 requires localization to
+# integrate with RTL and with text shaping, so the edge to the text domain is the
+# integration, not a leak.
+obscur-text = { workspace = true }
+# Honest capability reporting for the plural rules and message providers, in the
+# same `SupportLevel` vocabulary every other port in this workspace uses.
+obscur-capability = { workspace = true }
