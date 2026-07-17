@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use obscur_identity::{NodeId, StableKey};
 use obscur_view::view::{
-    StyleAttributes, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
+    StyleAttributes, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, assigns_slots,
 };
 
 use crate::node::{LogicalParent, NodeFlags, NodeKind, VisualParent};
@@ -133,14 +133,25 @@ impl Reconciler {
                                 plan.push(ReconciliationOp::Update { id });
                             }
                         }
-                        ViewNode::Element { props, events, .. } => {
+                        ViewNode::Element {
+                            props,
+                            events,
+                            children,
+                            ..
+                        } => {
                             // Refresh the authored properties (and the attributes
-                            // derived from them) and the event bindings from the
-                            // latest desired node. Combine into a single Update op
-                            // so a node yields at most one.
+                            // derived from them), the event bindings, and the §2.12
+                            // slot content from the latest desired node. Combine
+                            // into a single Update op so a node yields at most one.
                             let props_changed = apply_props(tree, id, props);
                             let events_changed = apply_events(tree, id, events);
-                            if props_changed || events_changed {
+                            // Slot content is diffed too, and for a reason of its
+                            // own: an `Update` is what marks a mounted component
+                            // stale, and content that changed while the props did
+                            // not (`<h1 slot="header">A</h1>` → `…B…`) must still
+                            // re-render the host, or the projection stays stale.
+                            let slots_changed = apply_slot_content(tree, id, children);
+                            if props_changed || events_changed || slots_changed {
                                 plan.push(ReconciliationOp::Update { id });
                             }
                         }
@@ -151,10 +162,24 @@ impl Reconciler {
                 IdentityMatch::Create => {
                     let id = tree.alloc(node_kind_of(node));
                     // Newly created element nodes carry their authored properties
-                    // (and the attributes derived from them) and event bindings.
-                    if let ViewNode::Element { props, events, .. } = node {
+                    // (and the attributes derived from them), event bindings, and
+                    // §2.12 slot content.
+                    //
+                    // Slot content is captured on the node's FIRST pass, not once
+                    // it is known to host a component: a component is mounted from
+                    // this plan, so the flag `hosts_component` reads is set after
+                    // this runs, and waiting for it would drop the authored content
+                    // of every component's opening frame.
+                    if let ViewNode::Element {
+                        props,
+                        events,
+                        children,
+                        ..
+                    } = node
+                    {
                         apply_props(tree, id, props);
                         apply_events(tree, id, events);
+                        apply_slot_content(tree, id, children);
                     }
                     plan.push(ReconciliationOp::Insert { id, parent, index });
                     id
@@ -172,8 +197,10 @@ impl Reconciler {
             // about its output, so recursing here would delete that output every
             // frame — and take any nested component instance (and its local
             // state) with it. Authored children under a component are §2.12 slot
-            // content, which is not lowered yet; they are ignored rather than
-            // mistaken for the component's own output.
+            // content: they are not the component's output, and are never
+            // reconciled *as* it. `apply_slot_content` above has already kept
+            // them, and the runtime projects them into the outlets the
+            // component's own render declares before committing that render here.
             if let ViewNode::Element { children, .. } = node
                 && !hosts_component(tree, id)
             {
@@ -292,6 +319,44 @@ fn apply_props(tree: &mut RetainedTree, id: NodeId, props: &[ViewProperty]) -> b
     // Attributes are derived from the props, so they are re-extracted together
     // and can never drift out of step with them.
     node.set_attributes(StyleAttributes::extract(props));
+    true
+}
+
+/// Refreshes a node's §2.12 slot content — the authored children a mounted
+/// component projects into the outlets its own render declares — returning `true`
+/// if it actually changed. A no-op (returning `false`) if `id` is stale.
+///
+/// The children are kept **only** when one of them carries a `slot="…"`
+/// assignment. That gate is what makes retaining them affordable: an element's
+/// children include its whole subtree, so keeping every element's would clone the
+/// desired tree once per level of depth. A document that authors no slot stores
+/// nothing and pays one `assigns_slots` scan of each child list.
+///
+/// This is deliberately *not* gated on [`hosts_component`]. Whether a node hosts
+/// a component is only known after the plan this pass produces has been synced
+/// against a registry, and the reconciler — a domain-tier engine — can see no
+/// registry at all. Gating on the authored data instead keeps the decision where
+/// the data is, and keeps the content available on the very first frame.
+fn apply_slot_content(tree: &mut RetainedTree, id: NodeId, children: &ViewFragment) -> bool {
+    let Some(node) = tree.get_mut(id) else {
+        return false;
+    };
+    // Diff before cloning, in both directions: a component host is re-reconciled
+    // every structural frame, and the overwhelmingly common outcome is that its
+    // authored children are byte-for-byte what they already were. Cloning first
+    // and comparing after would deep-copy the content's whole subtree on every one
+    // of those frames to discover it had nothing to do.
+    if !assigns_slots(children.nodes()) {
+        if node.slot_content().is_empty() {
+            return false;
+        }
+        node.set_slot_content(ViewFragment::new());
+        return true;
+    }
+    if node.slot_content() == children {
+        return false;
+    }
+    node.set_slot_content(children.clone());
     true
 }
 

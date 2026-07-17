@@ -9,18 +9,19 @@
 //! to those slots is checked against it — through the **real** `Compiler` for the
 //! `.okui` file path, and through the **real** `okui!` macro for the inline one.
 //!
-//! # What is checked, and what is not
+//! # What is checked here, and what is checked elsewhere
 //!
-//! What is checked is the *assignment*: a `slot="…"` must name a declared slot,
-//! satisfy that slot's own child rule, and the slot's cardinality must hold.
+//! What is checked *here* is the **assignment**: a `slot="…"` must name a
+//! declared slot, satisfy that slot's own child rule, and the slot's cardinality
+//! must hold. All of it is a compile-time verdict, reached before a runtime
+//! exists.
 //!
-//! What does **not** happen is *projection*. §2.12's slots have no template to be
-//! projected into: a component's `render(ctx, props)` never receives children, and
-//! a component tag lowers to a `ViewNode::element(COMPONENT_ID)` rather than to a
-//! call of anything, so there is no "where the slot is" for content to move to.
-//! The assignment is therefore a compile-time construct — like a binding being a
-//! Rust path — and `a_slot_assignment_is_not_a_prop_the_tree_carries` below pins
-//! what does reach the tree.
+//! **Projection** — the content actually reaching the outlet — is real, and is
+//! tested in `okui_slot_projection.rs` rather than here, because it needs a
+//! runtime and a registered component. The two halves meet at the reserved
+//! `slot` symbol these front ends lower to: this file pins that the assignment
+//! reaches the tree (`a_slot_assignment_is_the_reserved_property_the_tree_carries`),
+//! and that file pins that the runtime routes on it.
 
 #![forbid(unsafe_code)]
 
@@ -209,12 +210,14 @@ fn the_macro_front_end_reaches_the_same_verdict_it_can_reach() {
 }
 
 #[test]
-fn a_slot_assignment_is_not_a_prop_the_tree_carries() {
-    // What reaches the runtime, pinned. `slot` is consumed by the contract check
-    // and lowers to an ordinary property, because nothing downstream routes it:
-    // the tree has one anonymous child list and no component reads it. Anything
-    // stronger here — a `ViewNode::slot` field, say — would be written by codegen
-    // and read by nobody.
+fn a_slot_assignment_is_the_reserved_property_the_tree_carries() {
+    // What reaches the runtime, pinned. The assignment survives lowering as a
+    // property under the **reserved** `slot` symbol — reserved, not hashed,
+    // because the tier that routes on it (the reconciler, which keeps a host's
+    // authored children, and `project_slots`, which matches them to the outlets a
+    // component's render declares) sits below these front ends and cannot call
+    // `attr_symbol`. A hashed name would be an agreement between the two front
+    // ends and nobody else.
     let view: View = okui! { <container><span slot="header"/></container> };
     let ViewNode::Element { children, .. } = &view.root().nodes()[0] else {
         panic!("a container lowers to an element");
@@ -222,11 +225,20 @@ fn a_slot_assignment_is_not_a_prop_the_tree_carries() {
     let ViewNode::Element { props, .. } = &children.nodes()[0] else {
         panic!("its child lowers to an element");
     };
-    let slot = obscur_kit::identity::InternedSymbol::from_raw(
-        obscur_kit::ui_ir::name_binding::attr_symbol("slot").raw(),
+    assert_eq!(
+        obscur_kit::view::view::slot_assignment(props),
+        Some("header"),
+        "the assignment reaches the tree under the symbol the runtime reads"
     );
+
+    // A `<container>` is not a component, so nothing here mounts and nothing
+    // projects: the assignment is inert on a plain box, exactly as it was. What
+    // changed is that it is inert for want of a *component*, not for want of a
+    // destination.
     assert!(
-        props.iter().any(|p| p.name() == slot),
-        "the assignment reaches the tree as an ordinary property, and no further"
+        props
+            .iter()
+            .any(|p| p.name() == obscur_kit::view::view::SLOT),
+        "and it is the reserved symbol, not a hash of the name"
     );
 }

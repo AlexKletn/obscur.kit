@@ -433,7 +433,7 @@ mod tests {
         assert!(snapshot.image().is_none());
 
         let image = ImageSnapshot::from_rgba(4, 4, &[0u8; 64]);
-        let with = snapshot.with_image(image);
+        let with = snapshot.with_image(image.clone());
         assert_eq!(with.image(), Some(&image));
     }
 }

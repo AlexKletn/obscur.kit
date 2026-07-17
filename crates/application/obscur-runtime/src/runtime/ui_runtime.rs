@@ -62,7 +62,7 @@ use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::boundary::ComponentFailure;
 use obscur_view::component::{ComponentRegistration, RegistryError};
-use obscur_view::view::{EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, View};
+use obscur_view::view::{EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, View, project_slots};
 
 use super::{
     AppCommands, CommandTarget, FrameBudget, FramePlan, KeyDispatch, PointerDispatch,
@@ -822,16 +822,41 @@ impl UiRuntime {
     ///
     /// Returns `0` — and requests nothing — when no task has finished, so calling
     /// it every loop iteration is free.
+    ///
+    /// Calling it is nonetheless **optional**: [`run_frame`](Self::run_frame)
+    /// commits finished results itself, at the top of the frame, so a host that
+    /// only ever renders still sees its loads land (§1.5 "cross-thread results …
+    /// are committed at deterministic synchronization points"). This method is
+    /// what lets a load land while the UI is otherwise *idle* — it is the only
+    /// path that asks for a frame.
     pub fn poll_resource_tasks(&mut self) -> usize {
+        let applied = self.commit_resource_results();
+        if applied > 0 {
+            self.scheduler
+                .request_reason(FrameReason::ResourceCompletion);
+        }
+        applied
+    }
+
+    /// Applies every finished resource-load result waiting on the channel and
+    /// returns how many were accepted, **without** asking for a frame.
+    ///
+    /// This is the §1.5 synchronization point itself, factored out of
+    /// [`poll_resource_tasks`](Self::poll_resource_tasks) because the frame path
+    /// needs the commit but not the request: a frame is already running, and
+    /// requesting a `ResourceCompletion` from inside one would leave a pending
+    /// reason behind and cost a redundant frame after every load.
+    /// `poll_resource_tasks` adds the request because *it* may be called with no
+    /// frame coming.
+    ///
+    /// A **stale** result is dropped here rather than applied — the hub rules on
+    /// the version, not arrival order — and so is not counted.
+    fn commit_resource_results(&mut self) -> usize {
         let mut applied = 0usize;
         while let Ok(message) = self.resource_rx.try_recv() {
             if self.apply_resource_outcome(message.into_payload()) {
                 applied += 1;
             }
-        }
-        if applied > 0 {
-            self.scheduler
-                .request_reason(FrameReason::ResourceCompletion);
         }
         applied
     }
@@ -1813,6 +1838,21 @@ impl UiRuntime {
                     continue;
                 };
 
+                // §2.12: the component said *where* its authored children go by
+                // rendering a `ViewNode::slot("…")` outlet; the reconciler kept
+                // *what* goes there on the host node. Join them before the output
+                // becomes tree, so an outlet is substituted away rather than
+                // retained, and the projected content reconciles as ordinary
+                // structure (and mounts, if it names a component of its own).
+                //
+                // Free for the components that declare no outlet, which is all of
+                // them until one takes children: `project_slots` scans for an
+                // outlet and returns the view untouched when there is none.
+                let view = match self.tree.get(host) {
+                    Some(retained) => project_slots(view, retained.slot_content()),
+                    None => view,
+                };
+
                 let (_commit, plan) = self
                     .enactor
                     .commit_subtree(&self.reconciler, &mut self.tree, host, view.root())
@@ -2158,6 +2198,16 @@ impl UiRuntime {
         // changes is what this frame renders rather than what the next one does.
         let dispatched = self.dispatch_queued_input();
 
+        // §1.5: this is the deterministic synchronization point at which results
+        // that came back from another thread are committed. Every off-thread load
+        // returns as a typed message on `resource_rx`; draining here — before the
+        // plan is chosen, so a landed image can dirty this frame rather than the
+        // next — is what makes an installed `BlockingExecutor` self-servicing: a
+        // host that renders frames needs no `poll_resource_tasks` discipline to
+        // see its loads. With no executor installed nothing is ever sent, so this
+        // is an empty `try_recv` and the frame is unchanged.
+        let landed = self.commit_resource_results() > 0;
+
         let first_frame = self.tree.root().is_none();
         // A plan staged by `apply_transaction` wins over the reason-derived one:
         // it was classified from the committed operations themselves, which is
@@ -2177,6 +2227,18 @@ impl UiRuntime {
             plan = plan.merged_with(from_dispatch);
         }
         let _ = dispatched;
+        // A result committed above changed what this frame would paint, so it is
+        // merged in for the same reason a dispatch plan is: the reason the caller
+        // asked for the frame does not know a load landed. Without this an
+        // `is_idle` frame (a diagnostics capture) would swallow the completion —
+        // the result is consumed off the channel, and the retained scene it
+        // re-presents was composed before the image existed.
+        if landed {
+            plan = plan.merged_with(FramePlan::for_frame(
+                FrameReason::ResourceCompletion,
+                first_frame,
+            ));
+        }
 
         // Open the frame telemetry span (spec §7.9). A `NullTelemetrySink`
         // (the default) makes this and every per-phase record below a no-op, so
@@ -14577,6 +14639,40 @@ mod tests {
             .run_due_frame(&img_view(), std::slice::from_ref(&sheet))
             .expect("the ResourceCompletion frame is due");
         assert_eq!(draw_image_count(second.snapshot().display_list()), 1);
+    }
+
+    /// A completion the frame commits must also DIRTY that frame, or committing
+    /// it would destroy it.
+    ///
+    /// The trap this pins: an idle frame (a diagnostics capture recalculates
+    /// nothing and re-presents the retained scene) still drains the channel, so
+    /// without the plan merge the result is consumed and thrown away — the image
+    /// would never paint, because nothing would ever request a frame for it
+    /// again. `DiagnosticsCapture` is the only reason that maps to an idle plan,
+    /// which is why it is the reason used here.
+    #[test]
+    fn a_completion_committed_on_an_idle_frame_still_paints() {
+        let executor = Arc::new(QueuedExecutor::default());
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime
+            .set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
+        runtime.set_blocking_executor(executor.clone());
+
+        let sheet = img_stylesheet();
+        // First frame builds the tree and hands the load off.
+        runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        executor.run_all();
+
+        // An idle frame, and nothing polled: the result is waiting on the channel.
+        runtime.request_frame(FrameReason::DiagnosticsCapture);
+        let idle = runtime
+            .run_due_frame(&img_view(), std::slice::from_ref(&sheet))
+            .expect("the capture frame is due");
+        assert_eq!(
+            draw_image_count(idle.snapshot().display_list()),
+            1,
+            "the frame that consumed the completion must be dirtied by it"
+        );
     }
 
     #[test]

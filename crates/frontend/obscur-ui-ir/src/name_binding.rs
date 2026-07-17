@@ -116,6 +116,19 @@ pub const TEST_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0201);
 /// software that cannot be updated in the same commit.
 pub const AUTOMATION_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0202);
 
+/// Mirror of `obscur_view::view::SLOT` — a child's `slot="…"` assignment, naming
+/// the slot of the enclosing component it is projected into (spec §2.12).
+///
+/// Reserved rather than hashed because the runtime reads it: the reconciler keeps
+/// the authored children of a node that carries one, and `project_slots` matches
+/// them against the outlets the component's own render declares. A hashed symbol
+/// would have made this a name only the front ends agreed on, and the tier that
+/// has to act on it lives below them and cannot call this function.
+///
+/// Not a style attribute: a slot assignment is structure, so it must not affect
+/// matching or specificity. It has a namespace of its own (`0x0000_03xx`).
+pub const SLOT: InternedSymbol = InternedSymbol::from_raw(0x0000_0301);
+
 // --- Reserved event symbols (mirror `obscur_view::view::event_name`). ---
 
 /// Reserved `click` event symbol (`obscur_view::view::EVENT_CLICK`).
@@ -283,6 +296,9 @@ pub fn attr_symbol(name: &str) -> InternedSymbol {
         // A stable testing identifier, not a style attribute (spec §7.5).
         "test-id" => TEST_ID,
         "automation-id" => AUTOMATION_ID,
+        // A §2.12 slot assignment — structure the runtime routes on, not a
+        // selector input.
+        "slot" => SLOT,
         other => fallback_symbol(other),
     }
 }
@@ -432,6 +448,19 @@ mod tests {
         assert_eq!(attr_symbol("src"), SRC);
         assert_eq!(attr_symbol("disabled"), DISABLED);
         assert_eq!(attr_symbol("checked"), CHECKED);
+        assert_eq!(attr_symbol("test-id"), TEST_ID);
+        assert_eq!(attr_symbol("automation-id"), AUTOMATION_ID);
+        assert_eq!(attr_symbol("slot"), SLOT);
+    }
+
+    #[test]
+    fn the_slot_assignment_is_reserved_rather_than_hashed() {
+        // It has to be: the runtime reads it (to keep a component host's authored
+        // children and match them to the outlets its render declares), and the
+        // runtime cannot call this function. A hashed value would agree only
+        // between the two front ends.
+        assert_ne!(attr_symbol("slot"), fallback_symbol("slot"));
+        assert_eq!(SLOT.raw() & 0x8000_0000, 0);
     }
 
     #[test]
@@ -470,6 +499,9 @@ mod tests {
             EVENT_CLICK,
             EVENT_INPUT,
             EVENT_CHANGE,
+            TEST_ID,
+            AUTOMATION_ID,
+            SLOT,
         ] {
             assert_eq!(symbol.raw() & 0x8000_0000, 0);
         }

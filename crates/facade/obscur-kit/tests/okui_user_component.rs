@@ -53,11 +53,14 @@
 //!   compiled), so the rule cannot be shared and is not added to one front end
 //!   alone. See `an_unregistered_component_tag_mounts_nothing`, which pins the
 //!   residue rather than hiding it.
-//! * **Slot content is still not projected.** `<Card><h1 slot="header"/></Card>`
-//!   renders Card's output and drops the `h1`: `Component::render(&mut self, ctx,
-//!   props)` takes props only, so a component never receives children. The
-//!   reconciler documents this at `hosts_component`. `authored_children_under_a_
-//!   component_are_not_its_output` pins it.
+//! * **A component that declares no outlet still drops its authored children**,
+//!   and this file's `Card` is one: it declares no slot and renders no
+//!   `ViewNode::slot(…)`, so the `<span slot="header"/>` beneath it reaches no
+//!   position and does not appear. That is §2.12 working, not §2.12 missing — a
+//!   slot is a declaration, and Card declares none.
+//!   `authored_children_under_a_component_that_declares_no_slot_are_dropped` pins
+//!   it; `okui_slot_projection.rs` is where a component that *does* declare one
+//!   receives its content.
 #![forbid(unsafe_code)]
 
 use obscur_kit::geometry::Size;
@@ -361,9 +364,16 @@ fn an_unregistered_component_tag_mounts_nothing() {
 }
 
 #[test]
-fn authored_children_under_a_component_are_not_its_output() {
-    // §2.12's projection gap, pinned. The component's own render wins; the
-    // authored child is dropped, because `render(ctx, props)` never receives it.
+fn authored_children_under_a_component_that_declares_no_slot_are_dropped() {
+    // The other side of §2.12, pinned. This `Card` declares no slot and renders no
+    // outlet, so there is no position for the `<span slot="header"/>` to reach and
+    // it does not appear. The component's own output is all that lands.
+    //
+    // This is not the old projection gap left standing: a Card that declares
+    // `header` and renders `ViewNode::slot("header")` receives the span, which is
+    // what `okui_slot_projection.rs` drives. Content goes where a component says
+    // it goes, and nowhere by default — §2.12 declares *named* slots and says
+    // nothing about an unnamed one.
     let mut runtime = runtime_with_card();
     let view: View = okui! { <Card title="Hi"><span slot="header"/></Card> };
     runtime.render_now(&view, &[]);
@@ -378,6 +388,6 @@ fn authored_children_under_a_component_are_not_its_output() {
     assert_eq!(
         runtime.tree().get(card).expect("live").children().len(),
         1,
-        "the authored `<span slot=header>` is not projected — §2.12 is still open"
+        "a component declaring no slot has nowhere to put an authored child"
     );
 }

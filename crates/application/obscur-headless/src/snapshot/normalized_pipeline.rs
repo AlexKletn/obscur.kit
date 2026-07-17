@@ -133,9 +133,12 @@ impl NormalizedPipeline {
     }
 
     /// Returns the rendered image, if a backend attached one (spec §7.4).
+    ///
+    /// Borrowed rather than copied: an [`ImageSnapshot`] retains its raster for
+    /// the §7.14 tolerant comparison, so it is not [`Copy`].
     #[must_use]
-    pub fn image(&self) -> Option<ImageSnapshot> {
-        self.image
+    pub fn image(&self) -> Option<&ImageSnapshot> {
+        self.image.as_ref()
     }
 }
 
@@ -161,7 +164,7 @@ mod tests {
     #[test]
     fn accessors_read_fields() {
         let image = ImageSnapshot::from_parts(4, 4, 42);
-        let normalized = sample(Some(NodeId::from_raw(0)), Some(image));
+        let normalized = sample(Some(NodeId::from_raw(0)), Some(image.clone()));
         assert_eq!(normalized.root(), Some(NodeId::from_raw(0)));
         assert_eq!(normalized.node_count(), 3);
         assert_eq!(normalized.nodes().len(), 1);
@@ -171,7 +174,7 @@ mod tests {
         assert_eq!(normalized.accessibility_node_count(), 3);
         assert_eq!(normalized.accessibility_root(), Some(NodeId::from_raw(0)));
         assert_eq!(normalized.render_pass_count(), 1);
-        assert_eq!(normalized.image(), Some(image));
+        assert_eq!(normalized.image(), Some(&image));
     }
 
     #[test]

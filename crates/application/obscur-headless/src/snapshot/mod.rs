@@ -14,4 +14,4 @@ pub use render_pass::RenderPass;
 mod render_graph_summary;
 pub use render_graph_summary::RenderGraphSummary;
 mod image_snapshot;
-pub use image_snapshot::ImageSnapshot;
+pub use image_snapshot::{GoldenMismatch, ImageDiff, ImageSnapshot, ImageTolerance};

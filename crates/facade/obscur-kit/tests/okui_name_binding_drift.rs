@@ -33,6 +33,11 @@ fn reserved_attribute_symbols_match_obscur_view() {
     assert_eq!(name_binding::SRC, view::SRC);
     assert_eq!(name_binding::DISABLED, view::DISABLED);
     assert_eq!(name_binding::CHECKED, view::CHECKED);
+    assert_eq!(name_binding::TEST_ID, view::TEST_ID);
+    assert_eq!(name_binding::AUTOMATION_ID, view::AUTOMATION_ID);
+    // §2.12: the front ends lower `slot="…"` under this symbol and the runtime
+    // routes on it. Drift here silently un-routes every slot in the toolkit.
+    assert_eq!(name_binding::SLOT, view::SLOT);
 }
 
 #[test]

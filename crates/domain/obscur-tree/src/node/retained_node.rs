@@ -1,7 +1,7 @@
 //! A retained tree node — the anchor of UI identity.
 
 use obscur_identity::{InternedSymbol, NodeId, StableKey};
-use obscur_view::view::{StyleAttributes, ViewEventBinding, ViewProperty};
+use obscur_view::view::{StyleAttributes, ViewEventBinding, ViewFragment, ViewProperty};
 
 use super::{LogicalParent, NodeFlags, NodeGeneration, NodeKind, VisualParent};
 
@@ -58,6 +58,19 @@ pub struct RetainedNode {
     ///
     /// Empty for non-element nodes and elements that carry no properties.
     pub props: Box<[ViewProperty]>,
+    /// The desired node's authored children, kept for §2.12 slot projection.
+    ///
+    /// Retained for the same reason [`props`](Self::props) is — the desired tree
+    /// is gone by the time a component renders, and a component's output declares
+    /// *where* its authored children go (see
+    /// [`ViewNode::slot`](obscur_view::view::ViewNode::slot)), so the runtime must
+    /// be able to look the content up again after the frame's reconcile.
+    ///
+    /// Populated **only** when at least one authored child carries a `slot="…"`
+    /// assignment: keeping every element's children would clone the desired
+    /// subtree once per level of depth, which is a cost a document that authors no
+    /// slot must not pay. Empty for every other node, which is nearly all of them.
+    pub slot_content: ViewFragment,
 }
 
 impl RetainedNode {
@@ -77,6 +90,7 @@ impl RetainedNode {
             attributes: StyleAttributes::new(),
             event_bindings: Box::default(),
             props: Box::default(),
+            slot_content: ViewFragment::new(),
         }
     }
 
@@ -134,6 +148,20 @@ impl RetainedNode {
     #[must_use]
     pub fn event_bindings(&self) -> &[ViewEventBinding] {
         &self.event_bindings
+    }
+
+    /// Returns the authored children kept for §2.12 slot projection — see
+    /// [`slot_content`](Self::slot_content). Empty unless an authored child of
+    /// this node carried a `slot="…"` assignment.
+    #[must_use]
+    pub const fn slot_content(&self) -> &ViewFragment {
+        &self.slot_content
+    }
+
+    /// Sets the authored children kept for §2.12 slot projection, replacing any
+    /// previous value.
+    pub fn set_slot_content(&mut self, slot_content: ViewFragment) {
+        self.slot_content = slot_content;
     }
 
     /// Returns the command bound to `event` on this node, if any — the first

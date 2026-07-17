@@ -73,7 +73,7 @@ impl SnapshotNormalizer {
             snapshot.accessibility().len(),
             snapshot.accessibility().root(),
             snapshot.render_graph().pass_count(),
-            snapshot.image().copied(),
+            snapshot.image().cloned(),
         )
     }
 }
