@@ -47,31 +47,38 @@ and they are a consequence of the isolation, not a failure of it: the deriver ne
 the API, and the translator was forbidden from changing an expected value, so a wrong
 fixture got translated faithfully.
 
-## The red list (75)
+## The red list (88)
 
 These are the implementation's to answer. **Anything red that is not on this list is a
 regression.** Run with `--no-fail-fast` or cargo stops at the first red target.
 
-State: **5,463 passing, 75 failing.**
+State: **5,477 passing, 88 failing. Coverage: 99 of 110 spec sections (90%),
+excluding §8.**
 
-Two of them were weakened by the correction pass and **restored by decision**, and the
-reasoning matters more than the tests:
+### The 10 sections with no tests are a gap in the SPEC, not in the suite
 
-- `an_ungranted_required_capability_refuses_instantiation`
-- `a_synthetic_event_is_untrusted_and_a_gated_default_action_does_not_run`
+§4.11, §5.5, §5.9, §5.13, §6.8, §6.9, §6.12, §6.14, §6.18, §6.19 have no cases because
+the spec requires nothing there. The derivers' own words: those sections are "bare
+bullet lists framed with hedged verbs — *Optional status item*, *Capabilities **may**
+include*, *Normalized hooks **may** include*, *Potential optional services*, *Potential
+optional playback support*. They name a vocabulary; they do not state a requirement."
+§5.5 opens "**Optional** `ForeignSurface`", §5.9 says shaders "**may** be used", §5.13
+ends "not required in the core package". §4.11 defines neither a threshold nor what a
+simplified representation is, so any number would be invented.
 
-The literal reading that weakened them is defensible — §2.13/§2.14 say a contract
-*exports* and a registry *stores* capability requirements, never that they are checked;
-§2.3's whole text is "- trusted/untrusted origin.", which requires the origin to be
-*reported*. But neither enforcement exists, so weakening would have turned a known
-access-control gap from visibly red into silently green. That is the exact defect this
-suite was built to remove. The general ruling that the spec outranks a test was given
-on examples about version-query APIs and template tags; it was not extended to a trust
-boundary or a capability check.
+**A requirement that cannot be violated cannot be tested.** These belong on the
+additive-amendment list, not on a coverage backlog. §9.3 is excluded separately: it is
+a list of documents still to be written.
 
-Their shape is itself the finding: `ComponentRegistry::create_instance` takes **no grant
-set at all**, so there is no seam through which a capability could be checked. The
-requirement is stored and never read.
+### Two restored by decision
+
+`an_ungranted_required_capability_refuses_instantiation` and
+`a_synthetic_event_is_untrusted_and_a_gated_default_action_does_not_run` were weakened
+by a correction pass on the literal reading that §2.13/§2.14 say a registry *stores*
+capability requirements and §2.3 says an origin is *reported* — neither says enforced.
+Defensible, and overridden: neither enforcement exists, so weakening would have turned
+known access-control gaps from visibly red into silently green. `create_instance` takes
+no grant set at all, so there is no seam a check could occupy.
 
 - `a_click_handlers_commit_is_painted_by_the_frame_that_dispatched_it`
 - `a_custom_loader_is_never_invoked_inside_the_frame_phase`
@@ -84,6 +91,7 @@ requirement is stored and never read.
 - `a_reversed_transition_is_shortened_by_its_progress`
 - `a_string_named_handler_is_refused_even_when_the_method_exists`
 - `a_synthetic_event_is_untrusted_and_a_gated_default_action_does_not_run`
+- `a_system_gesture_wins_the_arena_by_default`
 - `a_touch_leaves_no_persistent_hover_after_release`
 - `a_transform_animation_moves_paint_without_re_running_layout`
 - `a_transform_establishes_the_containing_block_for_fixed_descendants`
@@ -105,13 +113,24 @@ requirement is stored and never read.
 - `arch_28_a_missing_resource_does_not_trip_the_component_boundary`
 - `backwards_fill_uses_the_to_keyframe_when_the_direction_is_reversed`
 - `border_inline_start_width_maps_to_the_right_edge_in_rtl`
+- `ch4_16_a_generated_content_paints_without_becoming_a_node`
+- `ch4_16_b_scrollbar_parts_are_hidden_from_the_component_tree_but_in_devtools`
+- `ch4_16_c_the_placeholder_is_an_exported_part_not_a_child`
+- `ch4_4_d_visibility_and_intersection_observers_track_the_scroll_chain`
+- `ch4_7_c_a_clipped_out_child_is_not_hit`
+- `ch4_7_e_border_radius_shapes_the_hit_region`
+- `ch4_7_f_scrolled_content_hits_and_pointer_events_none_is_transparent`
+- `ch4_9_b_scroll_anchoring_compensates_growth_above_the_viewport`
 - `clamp_lets_the_minimum_win_over_an_inverted_maximum`
 - `color_interpolation_is_premultiplied`
 - `container_query_units_fall_back_to_the_small_viewport`
+- `d_an_absent_power_provider_reports_typed_absence_without_fabricating`
 - `destroying_an_owner_destroys_the_windows_it_owns`
 - `display_contents_affects_the_box_tree_only`
 - `ed_01_backspace_deletes_one_grapheme_cluster`
 - `ed_02_home_and_end_are_visual_line_not_paragraph`
+- `env_safe_area_inset_bottom_resolves_to_the_host_inset`
+- `env_safe_area_inset_top_resolves_to_the_host_inset`
 - `fm_01_a_controlled_value_does_not_drift`
 - `fm_03_readonly_is_not_disabled`
 - `forwards_fill_uses_the_end_of_the_last_completed_iteration`
@@ -140,6 +159,7 @@ requirement is stored and never read.
 - `sc_05_conic_gradient_is_a_scene_brush_and_rasterizes`
 - `sc_06_mix_blend_mode_multiply_exists`
 - `space_between_falls_back_to_start_on_negative_free_space`
+- `the_application_pan_is_cancelled_when_the_system_gesture_takes_the_sequence`
 - `the_automatic_minimum_size_depends_on_overflow`
 - `the_same_fault_carries_one_stable_code_across_two_contexts`
 - `three_pending_reasons_produce_exactly_one_frame`
