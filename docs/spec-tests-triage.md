@@ -47,85 +47,88 @@ and they are a consequence of the isolation, not a failure of it: the deriver ne
 the API, and the translator was forbidden from changing an expected value, so a wrong
 fixture got translated faithfully.
 
-## The red list (75)
+## The red list (60)
 
-These are the implementation's to answer. **Anything red that is not on this list is a
-regression.** Run with `--no-fail-fast`.
+**Anything red that is not on this list is a regression.**
 
-State: **5,542 passing, 75 failing.** Down from 88 as implementation closes them.
+State: **5,570 passing, 60 failing.** Was 88 before implementation began.
 
-- `a_click_handlers_commit_is_painted_by_the_frame_that_dispatched_it`
-- `a_custom_loader_is_never_invoked_inside_the_frame_phase`
-- `a_mutating_method_call_is_rejected_as_mutation`
-- `a_newer_ir_version_is_refused_with_a_precise_diagnostic`
-- `a_prop_type_mismatch_is_reported_per_attribute_at_its_own_span`
-- `a_reversed_transition_is_shortened_by_its_progress`
-- `a_string_named_handler_is_refused_even_when_the_method_exists`
-- `a_synthetic_event_is_untrusted_and_a_gated_default_action_does_not_run`
-- `a_system_gesture_wins_the_arena_by_default`
-- `a_touch_leaves_no_persistent_hover_after_release`
-- `a_transform_animation_moves_paint_without_re_running_layout`
-- `a_transform_establishes_the_containing_block_for_fixed_descendants`
-- `a_url_background_without_a_host_loader_fails_terminally_and_still_paints`
-- `align_content_stretch_grows_lines_by_equal_amounts`
-- `an_animated_opacity_never_reaches_computed_style`
-- `an_exported_style_part_crosses_the_scope_boundary_and_an_unexported_one_does_not`
-- `an_fr_track_blown_by_content_restarts_the_fr_algorithm`
-- `an_infinitely_growable_track_absorbs_the_whole_max_content_remainder`
-- `an_unexported_function_call_is_rejected_and_an_exported_one_is_not`
-- `an_ungranted_required_capability_refuses_instantiation`
-- `arch_16_a_malformed_declaration_kills_neither_its_rule_nor_the_sheet`
-- `arch_17_a_missing_resource_diagnostic_carries_all_five_required_fields`
-- `arch_18_the_stable_code_survives_locale_and_call_site`
-- `arch_20_a_missing_image_falls_back_without_disturbing_the_column`
-- `arch_28_a_missing_resource_does_not_trip_the_component_boundary`
-- `border_inline_start_width_maps_to_the_right_edge_in_rtl`
-- `ch4_16_a_generated_content_paints_without_becoming_a_node`
-- `ch4_16_b_scrollbar_parts_are_hidden_from_the_component_tree_but_in_devtools`
-- `ch4_16_c_the_placeholder_is_an_exported_part_not_a_child`
-- `ch4_4_d_visibility_and_intersection_observers_track_the_scroll_chain`
-- `ch4_7_c_a_clipped_out_child_is_not_hit`
-- `ch4_7_e_border_radius_shapes_the_hit_region`
-- `ch4_7_f_scrolled_content_hits_and_pointer_events_none_is_transparent`
-- `ch4_9_b_scroll_anchoring_compensates_growth_above_the_viewport`
-- `color_interpolation_is_premultiplied`
-- `d_an_absent_power_provider_reports_typed_absence_without_fabricating`
-- `destroying_an_owner_destroys_the_windows_it_owns`
-- `display_contents_affects_the_box_tree_only`
-- `ed_01_backspace_deletes_one_grapheme_cluster`
-- `ed_02_home_and_end_are_visual_line_not_paragraph`
-- `env_safe_area_inset_bottom_resolves_to_the_host_inset`
-- `env_safe_area_inset_top_resolves_to_the_host_inset`
-- `fm_01_a_controlled_value_does_not_drift`
-- `fm_03_readonly_is_not_disabled`
-- `ft_01_the_default_provider_renders_in_an_isolated_environment`
-- `headless_reports_always_on_top_unsupported_but_size_native_or_emulated`
-- `im_02_object_fit_contain_geometry_and_position`
-- `im_03_a_2x_asset_has_a_halved_logical_intrinsic_size`
-- `ime_01_a_preedit_is_never_in_the_value`
-- `input_is_serviced_before_resource_completion_in_one_frame`
-- `inset_inline_start_maps_to_the_right_edge_in_rtl`
-- `inspect_picking_honours_stacking_order`
-- `io_and_direct_service_access_are_each_rejected_by_name`
-- `io_async_and_direct_service_access_are_each_refused_by_category`
-- `logical_block_start_maps_by_writing_mode`
-- `margin_inline_start_maps_to_the_right_edge_in_rtl`
-- `motion_runs_without_any_stylesheet`
-- `only_explicitly_exported_pure_functions_may_be_called`
-- `overflow_clip_is_not_a_scroll_container_but_hidden_is`
-- `padding_inline_start_maps_to_the_right_edge_in_rtl`
-- `rs_02_no_loader_means_no_implicit_network_access`
-- `rs_03_a_failed_load_is_a_state_not_a_panic_and_not_a_retry_loop`
-- `sc_02_outer_shadow_is_clipped_out_of_the_border_box`
-- `sc_04_gradient_stops_interpolate_premultiplied`
-- `sc_05_conic_gradient_is_a_scene_brush_and_rasterizes`
-- `sc_06_mix_blend_mode_multiply_exists`
-- `the_application_pan_is_cancelled_when_the_system_gesture_takes_the_sequence`
-- `the_automatic_minimum_size_depends_on_overflow`
-- `the_same_fault_carries_one_stable_code_across_two_contexts`
-- `three_pending_reasons_produce_exactly_one_frame`
-- `three_requests_and_two_commits_coalesce_into_one_frame`
-- `tx_02_a_canonically_equivalent_cluster_becomes_one_glyph`
-- `tx_03_collapsed_spaces_have_zero_advance_and_keep_their_offsets`
-- `tx_05_bidi_selection_is_disjoint_and_runs_reorder`
-- `virtualfor_realizes_a_count_independent_of_the_item_count`
+### How to count them, because I got this wrong
+
+Three grep pipelines over the same tree gave 64, 107 and 130. Parallel test binaries
+write to one stream and their lines interleave, so counting through a pipe is
+unreliable. Capture one run to a file first, then parse:
+
+    cargo test --workspace --no-fail-fast -j6 > run.txt 2>&1 || true
+
+and count unique `^test NAME ... FAILED$` lines. That agrees with the summed
+`test result` totals; the pipeline method does not.
+
+### Never build in the scratchpad
+
+`/tmp` here is **tmpfs — it lives in RAM**. An agent created a git worktree under the
+scratchpad and built the workspace inside it: 13 GB of `target/` in memory, on a 30 GB
+machine that had already been OOM-killed once. Writes then failed with `EDQUOT` and
+every command producing output died. Use Рабочий каталог и состояние индекса сохранены WIP on master: db1352f feat(css): the flex shorthand, physical units, selector functions, animation longhands for a baseline, or a worktree
+somewhere on disk — never under .
+
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
