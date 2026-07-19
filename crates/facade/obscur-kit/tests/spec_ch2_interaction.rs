@@ -24,7 +24,7 @@ use obscur_kit::interaction::event::{
 use obscur_kit::interaction::pointer::{
     PointerCaptureRegistry, PointerDevice, PointerEvent, PointerEventKind, PointerId,
 };
-use obscur_kit::interaction::selection::{Selection, SelectionPolicy};
+use obscur_kit::interaction::selection::{Selection, SelectionMode, SelectionPolicy};
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::selector::PseudoState;
 use obscur_kit::view::view::{
@@ -140,6 +140,26 @@ fn target_and_current_target_differ_when_the_event_bubbles() {
 }
 
 /// §2.3: "- trusted/untrusted origin."
+///
+/// WEAKENED then RESTORED 2026-07-19, by the owner's decision. A correction pass
+/// dropped the gating assertion on the literal reading that §2.3's one bullet
+/// requires the origin to be *reported* and says nothing about acting on it.
+/// That reading is defensible and the assertion is restored anyway: the gate
+/// genuinely does not exist, so weakening the test would turn a known
+/// security-relevant gap from visibly red into silently green — which is the
+/// exact defect the spec-derived suite was built to remove. A red test is the
+/// honest state.
+///
+/// The general ruling ("where a test demands more than the spec's text says, the
+/// spec wins") was given on examples about version-query APIs and template tags.
+/// It was not given on a trust boundary, and is not extended to one here.
+///
+/// Candidate spec amendment, and it is now load-bearing rather than optional:
+/// state whether any default action is gated on trust, and whether the gate
+/// belongs to the runtime or the component. §9 protects "host control over
+/// plugin capabilities" as a non-goal to weaken, and §1.8 names capability-based
+/// services as a condition of running untrusted code — so the value this guards
+/// is in the spec even though §2.3's enforcement sentence is not.
 #[test]
 fn a_synthetic_event_is_untrusted_and_a_gated_default_action_does_not_run() {
     let mut rt = small_runtime();
@@ -171,8 +191,8 @@ fn a_synthetic_event_is_untrusted_and_a_gated_default_action_does_not_run() {
     );
     assert_eq!(
         synthetic.command, None,
-        "a gated default action that requires trusted activation does not run \
-         for a synthetic press"
+        "and its gated default action does NOT run — nothing consults the trust \
+         flag today, so this is the assertion that keeps a real gap visible"
     );
 }
 
@@ -352,9 +372,17 @@ fn an_ime_composition_delivers_its_text_once_and_not_through_keydown() {
 // ------------------------------------------------------------------- §2.7
 
 /// §2.7: "- anchor and active item;" and "- range selection;"
+///
+/// SETUP REPAIRED 2026-07-19: this drove `SelectionPolicy::default()`, which is
+/// `SelectionMode::Single` — and for Single, collapsing a range to its last item
+/// is the documented, correct behaviour, so the case asserted multi-selection
+/// against a policy that forbids it. §2.7 lists "- single selection;" and
+/// "- multi-selection;" as separate capabilities, and a range gesture is only
+/// meaningful under the latter, so the policy is now explicitly Multiple. The
+/// assertions are unchanged.
 #[test]
 fn the_selection_anchor_persists_across_successive_shift_clicks() {
-    let policy = SelectionPolicy::default();
+    let policy = SelectionPolicy::new(SelectionMode::Multiple);
     let mut selection = Selection::new();
     let item = |i: u64| node(500 + i);
 

@@ -48,6 +48,25 @@ impl DiagnosticSink for CollectingSink {
 
 /// §2.1: "- default error-boundary behavior." (with §1.7 "is contained within
 /// the component subtree;" "replaces the subtree with fallback UI;")
+///
+/// SAMPLE POINT MOVED + WEAKENED 2026-07-19. Two things were wrong.
+///
+/// (a) The case read the tree one frame too early. §1.7's fourth consequence —
+/// which the case itself cites — is "- may be retried according to component or
+/// host policy.", and this runtime does retry: the failing frame is reported
+/// with `recovery: Retried` and the subtree is not replaced until the attempt
+/// after it. A second commit is now made before observing. The fallback
+/// assertion is unchanged.
+///
+/// (b) It originally demanded EXACTLY ONE diagnostic. §1.7 says a failure "is
+/// reported to diagnostics and DevTools" and separately that it "may be
+/// retried"; nothing says a retried failure is reported once rather than once
+/// per attempt, and §1.6 requires each diagnostic to carry a "recovery action"
+/// — which is precisely what distinguishes the two here (`Retried`, then
+/// `BoundaryReplaced`). The count is replaced by what the spec does require:
+/// every report is attributed to the failing component's node and none to its
+/// siblings. Candidate spec amendment: state whether a retried failure is
+/// reported per attempt or coalesced, since DevTools noise depends on it.
 #[test]
 fn an_error_boundary_isolates_the_failing_sibling_only() {
     let mut rt = small_runtime();
@@ -78,6 +97,7 @@ fn an_error_boundary_isolates_the_failing_sibling_only() {
 
     // Frame 2: S2's view generation fails; S1 and S3 are unchanged.
     commit(&mut rt, &siblings(true));
+    commit(&mut rt, &siblings(true));
 
     let text = all_text(&rt);
     assert!(
@@ -88,11 +108,27 @@ fn an_error_boundary_isolates_the_failing_sibling_only() {
         text.contains(&"S2:fallback".to_owned()),
         "S2's subtree is replaced by fallback UI; got {text:?}"
     );
-    assert_eq!(
-        reported.borrow().len(),
-        1,
-        "exactly one diagnostic is reported, carrying S2's node context; got {:?}",
-        reported.borrow()
+    let messages = reported.borrow().clone();
+    assert!(
+        !messages.is_empty(),
+        "the failure is reported to diagnostics"
+    );
+    let first = messages.first().expect("at least one report");
+    let node_context = first
+        .find("node: Some(")
+        .map(|start| first[start..].split(')').next().unwrap_or("").to_owned())
+        .expect("the report carries a node context (§1.6)");
+    assert!(
+        messages.iter().all(|m| m.contains(&node_context)),
+        "every report names the SAME node — the one failing component — so the \
+         fault is not attributed to S1 or S3; got {messages:?}"
+    );
+    assert!(
+        messages
+            .last()
+            .is_some_and(|m| m.contains("BoundaryReplaced")),
+        "the last report records the recovery action that actually happened; \
+         got {messages:?}"
     );
 }
 
@@ -186,37 +222,68 @@ fn a_duplicate_component_id_is_refused_and_the_first_registration_wins() {
 }
 
 /// §2.14: "- capability requirements;" (with §2.13 "- required capabilities;")
+///
+/// WEAKENED 2026-07-19: this originally asserted that instantiating a component
+/// whose required capability has not been granted is REFUSED — factory not
+/// invoked, no node created, and a diagnostic emitted. §2.14 says
+/// "`ComponentRegistry` stores: … - capability requirements;" — *stores* — and
+/// §2.13 likewise only lists "- required capabilities;" among what a contract
+/// exports. Neither sentence says a requirement is enforced at instantiation.
+///
+/// RESTORED 2026-07-19 by the owner's decision, and the reasoning is worth
+/// keeping. The literal reading above is defensible; the enforcement assertion
+/// comes back anyway, because there IS no enforcement — the audit records that
+/// `obscur-capability` is 189 lines and nothing consults a capability before
+/// acting. Weakening this test would convert a known access-control gap from
+/// visibly red to silently green, which is precisely what this suite exists to
+/// prevent. The general ruling that the spec outranks a test was given on
+/// examples about version-query APIs and template tags; it is not extended to a
+/// capability boundary.
+///
+/// Candidate spec amendment, now load-bearing: state whether an ungranted
+/// required capability blocks instantiation, which subsystem holds the grant
+/// set, and what is emitted. §9 lists "weaken host control over plugin
+/// capabilities" among the things the kit must not do, and §1.8 names
+/// capability-based services as a condition of running untrusted code, so the
+/// value is in the spec even where §2.13's enforcement sentence is not.
+///
+/// The observation moved to a bare `ComponentRegistry` — the subject §2.14 names
+/// — because `UiRuntime` exposes no accessor for a registered component's
+/// contract. Recorded as a finding; not fixed here, since implementation files
+/// are out of scope for this pass.
 #[test]
 fn an_ungranted_required_capability_refuses_instantiation() {
     let clipboard = CapabilityId::new("clipboard");
-    let mut rt = small_runtime();
-    rt.register_component(ComponentRegistration::new(
-        Sibling::factory_requiring("Clip", clipboard.clone()),
-        ComponentVersion::INITIAL,
-    ))
-    .expect("the component registers");
+    let mut registry = ComponentRegistry::new();
+    registry
+        .register(ComponentRegistration::new(
+            Sibling::factory_requiring("Clip", clipboard.clone()),
+            ComponentVersion::INITIAL,
+        ))
+        .expect("the component registers");
 
-    let reported = Rc::new(RefCell::new(Vec::<String>::new()));
-    rt.set_diagnostic_sink(Box::new(CollectingSink(Rc::clone(&reported))));
-
-    // Instantiate it in a runtime that has not granted the capability.
-    let usage = View::from_fragment(ViewFragment::from_nodes(vec![ViewNode::element(
-        Sibling::id("Clip"),
-    )]));
-    commit(&mut rt, &usage);
-
-    assert_eq!(
-        all_text(&rt),
-        Vec::<String>::new(),
-        "the component's factory is not invoked and no node is created"
-    );
-    let messages = reported.borrow().clone();
+    // The requirement survives registration and is readable off the contract.
+    let contract = registry
+        .contract(Sibling::id("Clip"))
+        .expect("the registered component's contract is retrievable");
     assert!(
-        messages
+        contract
+            .capabilities
             .iter()
-            .any(|m| m.contains("clipboard") || m.contains("capabilit")),
-        "a diagnostic naming the component ID and the missing capability; got \
-         {messages:?}"
+            .any(|c| c.capability == clipboard && c.requirement == CapabilityRequirement::Required),
+        "the registry stores the component's required capability; got {:?}",
+        contract.capabilities
+    );
+
+    // And the requirement is ENFORCED: nothing has granted `clipboard`, so the
+    // component must not instantiate. It does — `create_instance` takes no grant
+    // set at all, which is the shape of the gap: there is no seam through which a
+    // capability could be checked, so the requirement is stored and never read.
+    assert!(
+        registry
+            .create_instance(Sibling::id("Clip"), InstanceId::from_raw(1))
+            .is_none(),
+        "a component whose required capability is ungranted must not instantiate"
     );
 }
 
@@ -257,6 +324,18 @@ fn a_newer_ir_version_is_refused_with_a_precise_diagnostic() {
 }
 
 /// §2.15: "- versioned;" and "- validated;"
+///
+/// WEAKENED 2026-07-19: this originally required the rejection's message to
+/// contain the word "version". §2.15 says only "- versioned;" and "- validated;"
+/// and does not describe a document that omits its version — nor is such a
+/// document constructible in this codec, whose header is magic(4), format u16(2)
+/// and IR version(4) at fixed positions, so deleting the version bytes truncates
+/// the stream rather than producing a version-less one. The load correctly fails
+/// ("unexpected end of input"). What is kept is the assertion that carries the
+/// requirement: the decoder does not assume a version and load anyway. Candidate
+/// spec amendment: state whether a version is structurally mandatory in the IR
+/// encoding (making this case unconstructible by design) and, if a version-less
+/// document is representable at all, what diagnostic it must produce.
 #[test]
 fn an_ir_document_with_no_version_field_is_rejected() {
     // A stream that is structurally valid up to the point the version would be
@@ -271,12 +350,7 @@ fn an_ir_document_with_no_version_field_is_rejected() {
     let error = UiIrDecoder::new()
         .decode(&headless)
         .expect_err("a document declaring no IR version must fail to load");
-    let message = format!("{error}");
-    assert!(
-        message.contains("version"),
-        "a validation diagnostic naming the missing version — it is not assumed \
-         to be the current version and loaded; got {message}"
-    );
+    let _ = format!("{error}");
 }
 
 /// §2.15: "- independent of direct Rust type names;" and "- based on stable

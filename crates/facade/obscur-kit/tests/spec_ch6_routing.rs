@@ -68,8 +68,25 @@ fn path_query_and_fragment_are_split_from_one_another() {
 
 /// §6.13: "- path;" (URL-like) with "- typed params;"
 ///
-/// Percent-decoding happens **after** segmentation and exactly once, so an
-/// encoded slash stays inside one segment.
+/// An encoded slash stays inside one segment: it does not become a segment
+/// break, and it does not shift the following segments.
+///
+/// WEAKENED 2026-07-19: this originally asserted that `%2F` is DECODED —
+/// `params.get("name") == Some("a/b")`, and that `%252F` decodes exactly once to
+/// `a%2F`. §6.13's complete text is "Basic URL-like router:" followed by
+/// the eleven bullets "path", "query", "fragment", "route patterns", "typed
+/// params", "nested routes", "history", "back/forward", "deep-link mapping",
+/// "typed route state" and "route-to-screen/component mapping". It never
+/// mentions percent-encoding,
+/// decoding, or encoding, so both the decode and the exactly-once ordering were
+/// derived from URL conventions rather than from this spec. What is kept is the
+/// half that a router must get right whatever its decoding policy, and that
+/// still discriminates: an implementation that decodes BEFORE segmenting splits
+/// `a%2Fb` into two segments, the pattern stops matching, and `:action` binds
+/// `b` instead of `edit`. Candidate spec amendment: state whether the router
+/// percent-decodes path segments and query values at all, and if so that it
+/// decodes after segmentation and exactly once — the two failure modes are a
+/// silently truncated param and a double-decode injection.
 #[test]
 fn percent_encoding_is_decoded_after_segmentation_and_only_once() {
     let route = Route::parse("/files/a%2Fb/edit");
@@ -78,24 +95,17 @@ fn percent_encoding_is_decoded_after_segmentation_and_only_once() {
         .expect("§6.13: `/files/a%2Fb/edit` matches `/files/:name/:action`");
 
     assert_eq!(
-        params.get("name"),
-        Some("a/b"),
-        "§6.13: `%2F` is decoded once, after segmentation — not into a segment break"
-    );
-    assert_eq!(
         params.get("action"),
         Some("edit"),
-        "§6.13: the trailing segment is `edit`, not `b`"
+        "§6.13: the encoded slash did not open a new segment — the trailing \
+         segment is `edit`, not `b`"
     );
-
-    let double = Route::parse("/files/a%252Fb/edit");
-    let double_params = RoutePattern::parse("/files/:name/:action")
-        .match_path(double.path())
-        .expect("§6.13: the double-encoded path matches too");
-    assert_eq!(
-        double_params.get("name"),
-        Some("a%2Fb"),
-        "§6.13: decoding happens exactly once, never twice"
+    assert!(
+        params
+            .get("name")
+            .is_some_and(|name| matches!(name, "a/b" | "a%2Fb")),
+        "§6.13: the whole first segment binds to `:name`, decoded or not; got {:?}",
+        params.get("name")
     );
 }
 

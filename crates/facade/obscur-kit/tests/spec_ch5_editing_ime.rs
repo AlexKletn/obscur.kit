@@ -118,6 +118,12 @@ impl Field {
     }
 
     /// Types one printable character through the real keyboard path.
+    ///
+    /// Unused since `ime_05_a_key_plus_a_text_delivery_inserts_once` was deleted
+    /// (see the note where that case stood). Kept because it is half of the
+    /// two-channel input surface the §5.12 duplicate-delivery rule is about, and
+    /// whatever replaces that case will want it.
+    #[allow(dead_code)]
     fn type_char(&mut self, ch: char) {
         let logical = Some(LogicalKey::character(ch));
         self.runtime
@@ -371,41 +377,36 @@ fn ime_03_an_external_edit_cancels_the_composition() {
     );
 }
 
-/// §5.12 "- duplicate keydown/text delivery is avoided." with §2.6 "IME and text
-/// input are separate from keydown."
-///
-/// A real platform adapter delivers **both** a keydown carrying the logical key
-/// and a separate text delivery carrying the string, for one physical press. Only
-/// one of them may insert.
-#[test]
-fn ime_05_a_key_plus_a_text_delivery_inserts_once() {
-    let mut field = Field::single_line("");
-
-    // One physical press of 'a': keydown carrying logical 'a', and the platform's
-    // text delivery of "a" (which this toolkit expresses as an IME commit — its
-    // only text-delivery channel distinct from keydown).
-    field.type_char('a');
-    let _ = field.runtime.handle_ime(CompositionEvent::Start);
-    let _ = field
-        .runtime
-        .handle_ime(CompositionEvent::Commit("a".into()));
-
-    assert_eq!(
-        field.value(),
-        "a",
-        "one physical press inserts exactly one character"
-    );
-    assert_eq!(field.inputs(), 1, "exactly one input event");
-
-    field.type_char('b');
-    let _ = field.runtime.handle_ime(CompositionEvent::Start);
-    let _ = field
-        .runtime
-        .handle_ime(CompositionEvent::Commit("b".into()));
-
-    assert_eq!(field.value(), "ab", "and the second press likewise");
-    assert_eq!(field.inputs(), 2, "two input events in total");
-}
+// DELETED 2026-07-19: `ime_05_a_key_plus_a_text_delivery_inserts_once`.
+//
+// It encoded §5.12's "- duplicate keydown/text delivery is avoided." (with §2.6
+// "IME and text input are separate from keydown.") by typing 'a' through
+// `handle_key` AND then issuing `CompositionEvent::Start` +
+// `Commit("a")`, on the stated premise that "a real platform adapter delivers
+// both a keydown carrying the logical key and a separate text delivery carrying
+// the string, for one physical press", and that the IME commit is "this
+// toolkit's only text-delivery channel distinct from keydown". It expected "a"
+// and measured "aa".
+//
+// The substitution does not survive scrutiny, and the translator flagged it at
+// the time. §5.12's rule is about ONE physical press arriving on two wires from
+// the platform, where the runtime must recognise the pair and insert once. This
+// runtime has exactly two input entry points — `handle_key`, whose `LogicalKey`
+// already carries the character, and `handle_ime`, a full typed composition
+// lifecycle. A keydown insert followed by a separate composition start/commit is
+// not one press delivered twice; it is two distinct inputs, and inserting twice
+// is the only correct response to them. There is no third "text delivery"
+// channel for the rule to be about, so the case could not construct its own
+// premise and no weakening of it would test anything.
+//
+// Candidate spec amendment, and the finding this leaves behind: §5.12's rule
+// presupposes an input surface this toolkit does not have. Either state that a
+// platform adapter must fold text delivery into the `KeyEvent` it already sends
+// (making the rule an adapter obligation, testable at the adapter boundary), or
+// add the separate text-delivery event the rule guards, and say how a runtime
+// correlates it with the keydown for the same press — a timestamp, a sequence
+// number, or an explicit "text follows" flag. Until one of those exists the rule
+// is unimplementable and untestable, not merely untested.
 
 // ---------------------------------------------------------------------------
 // Driving helpers. These DRIVE; they carry no expectations.

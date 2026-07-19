@@ -32,13 +32,19 @@ fn child_left(direction: &str, container_decl: &str, child_decl: &str) -> f32 {
     geom(&rt, at(&rt, &[0, 0])).0
 }
 
-/// Asserts the RTL-01 pair: `180` under `direction: rtl`, `20` under
+/// Asserts the RTL-01 pair: `rtl_expected` under `direction: rtl`, `20` under
 /// `direction: ltr`.
-fn assert_inline_start_pair(what: &str, container_decl: &str, child_decl: &str) {
+fn assert_inline_start_pair(
+    what: &str,
+    container_decl: &str,
+    child_decl: &str,
+    rtl_expected: f32,
+    rtl_why: &str,
+) {
     approx(
         child_left("rtl", container_decl, child_decl),
-        180.0,
-        &format!("{what}, rtl: the child's left edge is at 300 - 20 - 100 = 180"),
+        rtl_expected,
+        &format!("{what}, rtl: the child's left edge is at {rtl_why}"),
     );
     approx(
         child_left("ltr", container_decl, child_decl),
@@ -55,17 +61,37 @@ fn margin_inline_start_maps_to_the_right_edge_in_rtl() {
         "margin-inline-start",
         "",
         "margin-inline-start: 20px; margin-inline-end: 0",
+        180.0,
+        "300 - 20 - 100 = 180",
     );
 }
 
 /// §7.3: "- logical CSS properties;" — the same mapping for
 /// `padding-inline-start`.
+///
+/// EXPECTED VALUE REPAIRED 2026-07-19: this asserted `180` in rtl, copied from
+/// the sibling margin case, and 180 is arithmetically impossible here. The
+/// padding is declared on the CONTAINER, which is `box-sizing: content-box;
+/// width: 300px` — padding sits OUTSIDE that 300px content box and does not
+/// shrink it. In rtl, `padding-inline-start` maps to `padding-right`
+/// (css-writing-modes-4.txt:1510-1513), so the content box is still x ∈ [0, 300]
+/// and a 100px child flush against its line-right edge has its left edge at
+/// **200**, not 180. The ltr half (20) was and is correct: `padding-left: 20px`
+/// starts the content box at 20.
+///
+/// The case is expected to keep failing, but now for one honest reason instead
+/// of two: measured 0, i.e. ltr placement. That is the same defect the register
+/// already carries as `margin_inline_start_maps_to_the_right_edge_in_rtl` —
+/// block-level over-constrained resolution ignores `direction` — and this case
+/// is a second symptom of it, not a second gap.
 #[test]
 fn padding_inline_start_maps_to_the_right_edge_in_rtl() {
     assert_inline_start_pair(
         "padding-inline-start",
         "padding-inline-start: 20px; padding-inline-end: 0",
         "",
+        200.0,
+        "the line-right edge of the unshrunk 300px content box, 300 - 100 = 200",
     );
 }
 
@@ -78,16 +104,41 @@ fn border_inline_start_width_maps_to_the_right_edge_in_rtl() {
         "border-inline-start-style: solid; border-inline-start-width: 20px; \
          border-inline-end-width: 0",
         "",
+        180.0,
+        "300 - 20 - 100 = 180",
     );
 }
 
 /// §7.3: "- logical CSS properties;" — the same mapping for
 /// `inset-inline-start`.
+///
+/// TRIAGE OVERRULED 2026-07-19, and left failing. Triage held that the measured
+/// `-20` is the correct answer and the expected `180` wrong. It is not. Two
+/// steps compose here and only the second is right.
+///
+/// Step 1, the static position: a 100px block child in a 300px `direction: rtl`
+/// content box sits flush against the line-right edge, at x = 200. This runtime
+/// puts it at 0.
+///
+/// Step 2, the relative shift: in rtl `inset-inline-start` maps to `right`, and
+/// `left` is auto, so by css-position-3.txt:792-795 ("If only one is auto, its
+/// used value becomes the negation of the other, and the box is shifted by the
+/// specified amount") the used `left` is -20 — the box moves 20px left of its
+/// static position. That step is implemented correctly, which is what triage
+/// observed.
+///
+/// 200 - 20 = **180**, exactly the expected value. The measured -20 is
+/// 0 - 20: correct relative positioning applied to a wrong static position. The
+/// case is a second symptom of the same registered defect as
+/// `margin_inline_start_maps_to_the_right_edge_in_rtl`, not a bad test, so
+/// nothing here is weakened.
 #[test]
 fn inset_inline_start_maps_to_the_right_edge_in_rtl() {
     assert_inline_start_pair(
         "inset-inline-start",
         "",
         "position: relative; inset-inline-start: 20px",
+        180.0,
+        "the static 200 shifted 20px line-inward: 200 - 20 = 180",
     );
 }

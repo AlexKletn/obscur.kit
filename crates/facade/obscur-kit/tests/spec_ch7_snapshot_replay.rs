@@ -77,9 +77,21 @@ fn snapshots_are_deterministic_and_carry_no_run_varying_values() {
 
 /// §7.12, verbatim: "Development/diagnostic mode may serialize snapshots of:" /
 /// "- focus;" / "- selection;" / "- scroll;" / "- animation;".
+///
+/// FIXTURE REPAIRED 2026-07-19: nothing here is weakened. The case set a scroll
+/// offset of 120 on `.panel` and read back 0, and the shared `CSS` above styles
+/// `.panel` as `width: 400px; height: 300px` with no `overflow` declaration — so
+/// it is not a scroll container, `set_scroll_top` is correctly a no-op on it,
+/// and there was no scroll state for any snapshot to record. The case now uses
+/// its own stylesheet in which the panel actually scrolls (49 rows of 20px
+/// against a 300px viewport, so 120 is well inside range). The assertion is
+/// unchanged.
 #[test]
 fn a_snapshot_records_focus_selection_and_scroll() {
-    let mut rt = drive(VW, VW, CSS, &tree());
+    const SCROLLING_CSS: &str = ".panel { width: 400px; height: 300px; overflow: auto } \
+                                 .item { width: 380px; height: 20px; background-color: #445566 } \
+                                 .label { width: 100px; height: 12px; color: #101010 }";
+    let mut rt = drive(VW, VW, SCROLLING_CSS, &tree());
     let third = at(&rt, &[0, 2]);
 
     rt.set_scroll_top(at(&rt, &[0]), 120.0);

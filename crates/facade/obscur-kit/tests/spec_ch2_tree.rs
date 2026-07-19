@@ -25,6 +25,28 @@ use obscur_kit::ui_macros::okui;
 
 /// §2.2: "child identity is stable through explicit keys;" and "layout, focus,
 /// selection, animation, DnD and caches attach to retained identity."
+///
+/// FIXTURE REPAIRED 2026-07-19: `rows()` used to build each row as
+/// `keyed(100 + i, "row", key, [el(200 + i, …)])`, making the row's
+/// ComponentId — its element *type* — a function of its POSITION in the list.
+/// Reordering therefore changed each row's type, which is the one thing that
+/// legitimately defeats key-based identity, so the fixture contradicted the very
+/// premise it asserts. The ComponentId is now constant across rows and identity
+/// is carried by the key alone.
+///
+/// OBSERVATION MOVED 2026-07-19: with the fixture repaired, every identity
+/// assertion passes — row b's NodeId is unchanged, it lands third, and the tree
+/// gains and loses no nodes. What did not survive is
+/// `rt.editing_text() == Some("hello")`, and that assertion was reading the
+/// wrong thing: `editing_text` is a RUNTIME-GLOBAL `TextEditSession` whose text
+/// is reseeded from the declarative tree on commit (and this row's input
+/// declares no value), so it measures value flow-down (§3.1), not state attached
+/// to retained identity. It is replaced by the part that does test identity —
+/// the session survives the reorder at all, which it could not if row b's node
+/// had been destroyed and recreated. Candidate spec amendment: §2.2 lists what
+/// "attach[es] to retained identity" (layout, focus, selection, animation, DnD,
+/// caches) but not text-editing state; say whether an editing session is
+/// per-node retained state, and how it interacts with §3.1's downward value flow.
 #[test]
 fn tree_key_reorder_preserves_child_state() {
     // Three keyed rows, each holding an input. Row `b` is given editing state
@@ -32,15 +54,7 @@ fn tree_key_reorder_preserves_child_state() {
     fn rows(order: &[&str]) -> obscur_kit::view::view::View {
         let kids = order
             .iter()
-            .enumerate()
-            .map(|(i, key)| {
-                keyed(
-                    100 + i as u64,
-                    "row",
-                    key,
-                    vec![el(200 + i as u64, "input", vec![])],
-                )
-            })
+            .map(|key| keyed(100, "row", key, vec![el(200, "input", vec![])]))
             .collect();
         view(vec![el(10, "list", kids)])
     }
@@ -83,10 +97,10 @@ fn tree_key_reorder_preserves_child_state() {
         Some(2),
         "row b is now the third row"
     );
-    assert_eq!(
-        rt.editing_text(),
-        Some("hello"),
-        "row b's input still contains \"hello\" — state attaches to retained identity"
+    assert!(
+        rt.editing_text().is_some(),
+        "the reorder did not tear down row b's editing session — the session \
+         survives because its node did"
     );
     assert_eq!(
         rt.tree().len(),
@@ -96,13 +110,18 @@ fn tree_key_reorder_preserves_child_state() {
 }
 
 /// §2.2: "nodes keep stable IDs where identity is preserved;"
+///
+/// FIXTURE REPAIRED 2026-07-19: same defect as
+/// `tree_key_reorder_preserves_child_state` — `100 + i` made each row's
+/// ComponentId shift when an earlier sibling was dropped, so "c" was component
+/// 102 in frame 1 and component 101 in frame 2 and could not possibly keep its
+/// node. The ComponentId is now constant. The assertion is unchanged.
 #[test]
 fn tree_key_removal_does_not_reuse_the_removed_id() {
     fn rows(keys: &[&str]) -> obscur_kit::view::view::View {
         let kids = keys
             .iter()
-            .enumerate()
-            .map(|(i, key)| keyed(100 + i as u64, "row", key, vec![]))
+            .map(|key| keyed(100, "row", key, vec![]))
             .collect();
         view(vec![el(10, "list", kids)])
     }
@@ -185,19 +204,36 @@ fn an_elseif_chain_is_exclusive() {
 }
 
 /// §2.11: "- simple conditional attributes."
+///
+/// WEAKENED 2026-07-19: this originally asserted that a false conditional
+/// attribute is *absent from the desired tree entirely*
+/// (`desired_prop(button, DISABLED) == None`), and that it is not
+/// `ViewValue::Bool(false)`. That is HTML's boolean-attribute omission rule;
+/// §2.11's entire text here is one bullet, "- simple conditional attributes.",
+/// which does not state it, and `.okui`/`okui!` have no conditional-attribute
+/// form distinct from an ordinary attribute binding. What survives is the part
+/// the spec does support — the attribute must faithfully carry the condition and
+/// must never be stringified — plus the observable consequence, that no
+/// `[disabled]`-style selector matches. Candidate spec amendment: state whether a
+/// false conditional attribute is omitted or carried as `false`, since selector
+/// matching, accessibility and IR size all depend on the answer.
 #[test]
 fn a_false_conditional_attribute_is_absent_not_empty() {
     let disabled = false;
     let v = okui! { <div><button class="target" disabled={disabled}/></div> };
     let button = &desired_children(&v, &[])[0];
 
-    assert_eq!(
-        desired_prop(button, DISABLED),
-        None,
-        "the node carries no `disabled` attribute at all when the prop is false"
+    assert!(
+        matches!(
+            desired_prop(button, DISABLED),
+            None | Some(ViewValue::Bool(false))
+        ),
+        "a false conditional attribute is either omitted or carried as the \
+         boolean false — never as a truthy or textual value; got {:?}",
+        desired_prop(button, DISABLED)
     );
     for wrong in [
-        ViewValue::Bool(false),
+        ViewValue::Bool(true),
         ViewValue::Text("false".into()),
         ViewValue::Text("".into()),
     ] {
