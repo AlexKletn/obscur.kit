@@ -3,7 +3,7 @@
 use super::complex_selector::{Combinator, ComplexSelector};
 use super::compound_selector::CompoundSelector;
 use super::match_element::MatchElement;
-use super::pseudo_class_selector::PseudoClassSelector;
+use super::pseudo_class_selector::{AnB, PseudoClassSelector};
 use super::pseudo_state::PseudoState;
 use super::selector_list::SelectorList;
 use super::selector_specificity::SelectorSpecificity;
@@ -200,8 +200,53 @@ fn matches_pseudo_class<E: MatchElement>(pseudo: &PseudoClassSelector, element: 
         PseudoClassSelector::NthLastOfType(anb) => {
             anb.matches_index(one_based(element.nth_last_of_type_index()))
         }
-        PseudoClassSelector::Other(_) => false,
+        PseudoClassSelector::NthChildOf(anb, list) => matches_nth_child_of(*anb, list, element),
+        // `:is()` and `:where()` match identically; they differ only in
+        // specificity (selectors-4 §4.4: `:where()` has "the same syntax and
+        // functionality as :is()").
+        PseudoClassSelector::Is(list) | PseudoClassSelector::Where(list) => {
+            matches_any(list, element)
+        }
+        PseudoClassSelector::Not(list) => !matches_any(list, element),
+        // `:has()` is decided by looking *forward* from the subject — into its
+        // descendants and following siblings — and `MatchElement` exposes no
+        // such navigation (only `parent` and `previous_sibling_element`). Adding
+        // it is not a local change: `obscur-runtime`'s `RestyleScope` derives its
+        // invalidation bound *from* that navigation surface, so a downward-
+        // reaching selector would silently under-invalidate. Until both move
+        // together this fails closed, exactly as an unmodelled pseudo-class
+        // does, and `obscur-css` reports it as unsupported.
+        PseudoClassSelector::Has(_) | PseudoClassSelector::Other(_) => false,
     }
+}
+
+/// Returns `true` if `element` matches at least one complex selector in `list`.
+fn matches_any<E: MatchElement>(list: &SelectorList, element: &E) -> bool {
+    list.selectors()
+        .iter()
+        .any(|selector| SelectorMatcher::matches_complex(selector, element))
+}
+
+/// Decides `:nth-child(An+B of S)` (selectors-4 §13.3.1): the element must match
+/// `S`, and its index is taken over the sibling list **filtered by `S` first**.
+///
+/// The filtered index is computed by walking preceding element siblings — the
+/// only backward navigation `MatchElement` offers — and counting those that
+/// match `S`; the element's own 1-based position in the filtered list is that
+/// count plus one.
+fn matches_nth_child_of<E: MatchElement>(anb: AnB, list: &SelectorList, element: &E) -> bool {
+    if !matches_any(list, element) {
+        return false;
+    }
+    let mut index: usize = 1;
+    let mut sibling = element.previous_sibling_element();
+    while let Some(current) = sibling {
+        if matches_any(list, &current) {
+            index += 1;
+        }
+        sibling = current.previous_sibling_element();
+    }
+    anb.matches_index(one_based(index))
 }
 
 /// Converts a bounded 1-based `usize` index into the `i32` domain [`AnB`] uses,
@@ -212,7 +257,6 @@ fn one_based(index: usize) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::super::pseudo_class_selector::AnB;
     use super::*;
 
     /// A single node in the test arena.
@@ -966,5 +1010,145 @@ mod tests {
         ]);
         let spec = SelectorMatcher::matches_list(&list, &arena.get(idx)).unwrap();
         assert_eq!(spec, SelectorSpecificity::new(1, 0, 0));
+    }
+
+    // ---- selector-list pseudo-classes --------------------------------------
+
+    /// `ul` with five children: `p`, then four `li.important`.
+    fn nth_of_fixture() -> (Arena, Vec<usize>) {
+        let mut arena = Arena::default();
+        let parent = arena.add(Node::new("ul"), None);
+        let mut kids = vec![arena.add(Node::new("p"), Some(parent))];
+        for _ in 0..4 {
+            let mut node = Node::new("li");
+            node.classes = vec!["important".to_owned()];
+            kids.push(arena.add(node, Some(parent)));
+        }
+        (arena, kids)
+    }
+
+    #[test]
+    fn is_matches_any_argument_and_where_matches_identically() {
+        let mut arena = Arena::default();
+        let mut node = Node::new("em");
+        node.classes = vec!["c".to_owned()];
+        let idx = arena.add(node, None);
+        let list = SelectorList::new(vec![
+            simple_complex(vec![type_sel("em")]),
+            simple_complex(vec![id_sel("foo")]),
+        ]);
+        let el = arena.get(idx);
+        assert!(SelectorMatcher::matches_compound(
+            &compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::Is(
+                list.clone()
+            ))]),
+            &el
+        ));
+        assert!(SelectorMatcher::matches_compound(
+            &compound(vec![SimpleSelector::PseudoClass(
+                PseudoClassSelector::Where(list.clone())
+            )]),
+            &el
+        ));
+        // Nothing in the list matches: neither form does either.
+        let miss = SelectorList::new(vec![simple_complex(vec![type_sel("span")])]);
+        assert!(!SelectorMatcher::matches_compound(
+            &compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::Is(
+                miss
+            ))]),
+            &el
+        ));
+    }
+
+    #[test]
+    fn not_is_the_negation_of_the_whole_list() {
+        let mut arena = Arena::default();
+        let idx = arena.add(Node::new("div"), None);
+        let el = arena.get(idx);
+        let hits = SelectorList::new(vec![
+            simple_complex(vec![type_sel("em")]),
+            simple_complex(vec![type_sel("div")]),
+        ]);
+        let misses = SelectorList::new(vec![
+            simple_complex(vec![type_sel("em")]),
+            simple_complex(vec![type_sel("strong")]),
+        ]);
+        assert!(!SelectorMatcher::matches_compound(
+            &compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::Not(
+                hits
+            ))]),
+            &el
+        ));
+        assert!(SelectorMatcher::matches_compound(
+            &compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::Not(
+                misses
+            ))]),
+            &el
+        ));
+    }
+
+    #[test]
+    fn has_never_matches_because_the_seam_cannot_look_forward() {
+        let mut arena = Arena::default();
+        let parent = arena.add(Node::new("ul"), None);
+        let _child = arena.add(Node::new("li"), Some(parent));
+        let list = SelectorList::new(vec![simple_complex(vec![type_sel("li")])]);
+        assert!(!SelectorMatcher::matches_compound(
+            &compound(vec![SimpleSelector::PseudoClass(PseudoClassSelector::Has(
+                list
+            ))]),
+            &arena.get(parent)
+        ));
+    }
+
+    #[test]
+    fn nth_child_of_s_indexes_the_filtered_sibling_list() {
+        let (arena, kids) = nth_of_fixture();
+        // :nth-child(-n+3 of li.important) — the first three *matching* siblings,
+        // which are children 2, 3 and 4 of the parent.
+        let s = SelectorList::new(vec![simple_complex(vec![
+            type_sel("li"),
+            class_sel("important"),
+        ])]);
+        let sel = compound(vec![SimpleSelector::PseudoClass(
+            PseudoClassSelector::NthChildOf(AnB::new(-1, 3), s),
+        )]);
+        let hits: Vec<bool> = kids
+            .iter()
+            .map(|&k| SelectorMatcher::matches_compound(&sel, &arena.get(k)))
+            .collect();
+        assert_eq!(hits, vec![false, true, true, true, false]);
+    }
+
+    #[test]
+    fn nth_child_of_s_differs_from_the_compound_form() {
+        let (arena, kids) = nth_of_fixture();
+        // li.important:nth-child(-n+3) indexes over *all* siblings, so it stops
+        // at child 3 where the `of S` form reaches child 4.
+        let sel = compound(vec![
+            type_sel("li"),
+            class_sel("important"),
+            SimpleSelector::PseudoClass(PseudoClassSelector::NthChild(AnB::new(-1, 3))),
+        ]);
+        let hits: Vec<bool> = kids
+            .iter()
+            .map(|&k| SelectorMatcher::matches_compound(&sel, &arena.get(k)))
+            .collect();
+        assert_eq!(hits, vec![false, true, true, false, false]);
+    }
+
+    #[test]
+    fn nth_child_of_s_requires_the_element_itself_to_match_s() {
+        let (arena, kids) = nth_of_fixture();
+        // The `p` first child is never selected, whatever its index would be.
+        let s = SelectorList::new(vec![simple_complex(vec![class_sel("important")])]);
+        let sel = compound(vec![SimpleSelector::PseudoClass(
+            PseudoClassSelector::NthChildOf(AnB::new(0, 1), s),
+        )]);
+        assert!(!SelectorMatcher::matches_compound(
+            &sel,
+            &arena.get(kids[0])
+        ));
+        assert!(SelectorMatcher::matches_compound(&sel, &arena.get(kids[1])));
     }
 }

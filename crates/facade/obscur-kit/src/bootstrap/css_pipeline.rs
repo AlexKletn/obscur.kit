@@ -160,19 +160,31 @@ fn collect_motion(
 ) {
     for rule in &compiled.motion_rules {
         for transition in &rule.transitions {
-            transitions.push(CssTransitionRule::new(
-                rule.selectors.clone(),
-                transition.property,
-                transition.duration_secs,
-                transition.easing,
-            ));
+            transitions.push(
+                CssTransitionRule::new(
+                    rule.selectors.clone(),
+                    transition.property,
+                    transition.duration_secs,
+                    transition.easing,
+                )
+                .with_delay(transition.delay_secs),
+            );
         }
         for animation in &rule.animations {
-            keyframes.push(CssKeyframeRule::new(
-                rule.selectors.clone(),
-                animation.tracks.clone(),
-                animation.duration_secs,
-            ));
+            keyframes.push(
+                CssKeyframeRule::new(
+                    rule.selectors.clone(),
+                    animation.tracks.clone(),
+                    animation.duration_secs,
+                )
+                .with_playback(
+                    animation.delay_secs,
+                    animation.repeat,
+                    animation.direction,
+                    animation.alternates,
+                    animation.fill,
+                ),
+            );
         }
     }
 }

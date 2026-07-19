@@ -72,6 +72,13 @@ pub struct Timeline {
     repeat: RepeatCount,
     /// Whether each iteration flips [`direction`](Self::direction) (ping-pong).
     alternates: bool,
+    /// The authored start delay, in logical seconds. Positive delays the first
+    /// iteration; negative seeks that far into the playback at
+    /// [`start`](Self::start).
+    delay: f32,
+    /// Logical seconds of the (positive) delay still to elapse before the first
+    /// iteration advances. Always `0` once the delay is spent.
+    delay_remaining: f32,
 }
 
 impl Timeline {
@@ -100,7 +107,22 @@ impl Timeline {
             direction: PlaybackDirection::Forward,
             repeat: RepeatCount::Finite(1),
             alternates: false,
+            delay: 0.0,
+            delay_remaining: 0.0,
         }
+    }
+
+    /// Sets the start delay in logical seconds, returning the updated timeline.
+    ///
+    /// A positive `delay` holds the timeline at the start of its first iteration
+    /// for that long before it advances; a negative one makes
+    /// [`start`](Self::start) seek `-delay` seconds into the playback, so the
+    /// timeline appears to have begun part-way through (css-transitions-1 §2.4,
+    /// css-animations-1 §3.8). A `NaN` delay is treated as `0`.
+    #[must_use]
+    pub fn with_delay(mut self, delay: f32) -> Self {
+        self.delay = if delay.is_nan() { 0.0 } else { delay };
+        self
     }
 
     /// Sets the repeat count, returning the updated timeline.
@@ -135,13 +157,23 @@ impl Timeline {
     ///
     /// A timeline whose repeat is `Finite(0)` plays no iterations and is set
     /// straight to [`Finished`](TimelineState::Finished).
+    ///
+    /// A [`with_delay`](Self::with_delay) delay is armed here: a positive delay
+    /// arms the countdown [`advance`](Self::advance) spends before the first
+    /// iteration moves, while a negative one is applied immediately as an
+    /// advance of `-delay` seconds, so the timeline starts part-way through its
+    /// play cycle (and may even start already finished).
     pub fn start(&mut self) {
         self.position = self.iteration_start_position();
+        self.delay_remaining = self.delay.max(0.0);
         self.state = if matches!(self.repeat, RepeatCount::Finite(0)) {
             TimelineState::Finished
         } else {
             TimelineState::Running
         };
+        if self.delay < 0.0 {
+            self.advance(-self.delay);
+        }
     }
 
     /// Pauses a running timeline. Has no effect unless the timeline is
@@ -191,6 +223,18 @@ impl Timeline {
             // A zero/negative delta does not move a forward-integrating timeline;
             // reversal is expressed via `reverse`, not a negative advance.
             return;
+        }
+
+        // A pending start delay is spent first: the timeline is running (and so
+        // keeps demanding frames) but holds at the start of its first iteration
+        // until the delay is exhausted. Any surplus flows into the iteration.
+        if self.delay_remaining > 0.0 {
+            if remaining <= self.delay_remaining {
+                self.delay_remaining -= remaining;
+                return;
+            }
+            remaining -= self.delay_remaining;
+            self.delay_remaining = 0.0;
         }
 
         loop {
@@ -338,6 +382,23 @@ impl Timeline {
     #[must_use]
     pub const fn alternates(&self) -> bool {
         self.alternates
+    }
+
+    /// Returns the authored start delay in logical seconds (negative means the
+    /// timeline seeks into its playback at [`start`](Self::start)).
+    #[must_use]
+    pub const fn delay(&self) -> f32 {
+        self.delay
+    }
+
+    /// Returns whether the timeline is still inside its start delay — running,
+    /// but holding at the start of its first iteration.
+    ///
+    /// This is the phase css-animations-1 §3.9 fills when `animation-fill-mode`
+    /// is `backwards` or `both`.
+    #[must_use]
+    pub fn is_delayed(&self) -> bool {
+        self.delay_remaining > 0.0
     }
 }
 
@@ -539,5 +600,60 @@ mod tests {
             assert_eq!(a.state(), b.state());
             assert_eq!(a.direction(), b.direction());
         }
+    }
+
+    #[test]
+    fn a_positive_delay_holds_the_first_iteration() {
+        let mut t = timeline().with_delay(0.5);
+        t.start();
+        assert!(t.is_delayed());
+        t.advance(0.25);
+        assert!(t.is_delayed(), "still inside the delay");
+        assert_eq!(t.progress(), 0.0, "held at the start of iteration 1");
+        // The surplus past the delay flows into the iteration.
+        t.advance(0.75);
+        assert!(!t.is_delayed());
+        assert_eq!(t.progress(), 0.5);
+    }
+
+    #[test]
+    fn a_reverse_timeline_holds_the_iteration_end_during_the_delay() {
+        let mut t = timeline()
+            .with_delay(1.0)
+            .with_direction(PlaybackDirection::Reverse);
+        t.start();
+        t.advance(0.5);
+        assert!(t.is_delayed());
+        assert_eq!(
+            t.progress(),
+            1.0,
+            "a reversed iteration starts at progress 1"
+        );
+    }
+
+    #[test]
+    fn a_negative_delay_seeks_into_the_play_cycle() {
+        let mut t = Timeline::new(TimelineId::from_raw(1), 2.0).with_delay(-0.5);
+        t.start();
+        assert!(!t.is_delayed());
+        assert_eq!(t.progress(), 0.25, "already 0.5s into a 2s cycle");
+        t.advance(1.0);
+        assert_eq!(t.progress(), 0.75);
+    }
+
+    #[test]
+    fn a_negative_delay_past_the_active_duration_starts_finished() {
+        let mut t = timeline().with_delay(-3.0);
+        t.start();
+        assert!(t.is_finished());
+        assert_eq!(t.progress(), 1.0);
+    }
+
+    #[test]
+    fn a_delayed_timeline_is_still_running() {
+        let mut t = timeline().with_delay(5.0);
+        t.start();
+        assert_eq!(t.state(), TimelineState::Running);
+        assert!(!t.is_finished());
     }
 }

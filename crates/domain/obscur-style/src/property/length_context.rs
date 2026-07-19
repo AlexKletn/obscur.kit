@@ -134,6 +134,78 @@ impl LengthContext {
     pub fn viewport_max(&self) -> f32 {
         self.viewport_width.max(self.viewport_height)
     }
+
+    /// The base a `cqw` resolves against, in logical pixels.
+    ///
+    /// css-contain-3 §6: *"The query container for each axis is the nearest
+    /// ancestor container that accepts container size queries on that axis. If
+    /// no eligible query container is available, then use the small viewport
+    /// size for that axis."*
+    ///
+    /// # What this engine can and cannot answer
+    ///
+    /// **No element here ever accepts container size queries.** There is no
+    /// `container-type` property (see `docs/conformance-audit.md`, item 4-B:
+    /// `@container` is parsed, fails closed, and is inert, because a container's
+    /// size is a layout *output* while style matching runs strictly before
+    /// layout). So the "no eligible query container" branch is not an edge case
+    /// here — it is the **only** branch, and every container unit resolves
+    /// against the viewport. The *resolved-against-a-real-container* half of
+    /// css-contain-3 §6 is not implemented and is not reachable; only the
+    /// fallback is.
+    ///
+    /// The fallback base is [`viewport_width`](Self::viewport_width). This
+    /// engine models a single viewport size rather than css-values-4's separate
+    /// small/large/dynamic viewport sizes, so that one size stands in for the
+    /// small viewport.
+    #[must_use]
+    pub const fn container_width(&self) -> f32 {
+        self.viewport_width
+    }
+
+    /// The base a `cqh` resolves against, in logical pixels — the small viewport
+    /// height. See [`container_width`](Self::container_width) for why the
+    /// fallback is always taken.
+    #[must_use]
+    pub const fn container_height(&self) -> f32 {
+        self.viewport_height
+    }
+
+    /// The base a `cqi` resolves against, in logical pixels — the small viewport
+    /// **inline** size.
+    ///
+    /// The inline axis is horizontal here: this context carries no writing mode,
+    /// as `vw`/`vh` do not need one, so `cqi` maps to the width. In a
+    /// `vertical-rl` / `vertical-lr` writing mode that is wrong; the axis
+    /// mapping is not implemented. See
+    /// [`container_width`](Self::container_width) for why the fallback is
+    /// always taken.
+    #[must_use]
+    pub const fn container_inline(&self) -> f32 {
+        self.viewport_width
+    }
+
+    /// The base a `cqb` resolves against, in logical pixels — the small viewport
+    /// **block** size, taken as the height (see
+    /// [`container_inline`](Self::container_inline) on the axis mapping).
+    #[must_use]
+    pub const fn container_block(&self) -> f32 {
+        self.viewport_height
+    }
+
+    /// The base a `cqmin` resolves against: the smaller of the `cqi` and `cqb`
+    /// bases (css-contain-3 §6).
+    #[must_use]
+    pub fn container_min(&self) -> f32 {
+        self.container_inline().min(self.container_block())
+    }
+
+    /// The base a `cqmax` resolves against: the larger of the `cqi` and `cqb`
+    /// bases (css-contain-3 §6).
+    #[must_use]
+    pub fn container_max(&self) -> f32 {
+        self.container_inline().max(self.container_block())
+    }
 }
 
 #[cfg(test)]

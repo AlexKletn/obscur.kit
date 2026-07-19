@@ -34,10 +34,17 @@ use crate::orchestration::PseudoStates;
 /// what [`expand`](Self::expand) marks. The trait bound is what makes this a proof
 /// rather than an enumeration of today's combinators: no implementation of the
 /// matcher can consult a node outside that closure, because it has no method with
-/// which to reach one. `:has()` — the one selector that would reach *upward* — is
-/// not modelled; it parses to
-/// [`PseudoClassSelector::Other`](obscur_style::selector::PseudoClassSelector::Other),
-/// which the matcher answers `false` for unconditionally.
+/// which to reach one. The selector-list pseudo-classes `:is()`, `:where()`,
+/// `:not()` and `:nth-child(An+B of S)` are inside the closure too — each
+/// evaluates its argument through the *same* seam, against the subject itself or
+/// against a preceding sibling. `:has()` — the one selector that would reach
+/// *downward*, and so let a node's state be read from outside the closure — is
+/// modelled only for specificity:
+/// [`PseudoClassSelector::Has`](obscur_style::selector::PseudoClassSelector::Has)
+/// is answered `false` by the matcher unconditionally, as is the `of S` form of
+/// `:nth-last-child()`, which would reach forward across siblings. **Wiring
+/// either of them up invalidates the bound above and must widen this scope in
+/// the same change.**
 ///
 /// # Inheritance is covered by construction
 ///

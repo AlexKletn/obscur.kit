@@ -77,7 +77,7 @@ use crate::component::{ComponentStore, GuardedRender};
 use crate::orchestration::{
     AnimatedKind, AnimationBinding, ArrangeCache, ComputedStyles, CssMotionRules, DragCoordinator,
     DragOutcome, EditingView, InspectInfo, LayoutBoxes, LayoutCoordinator, MeasureCache,
-    MotionCoordinator, NodeInspection, PreeditView, PseudoStates, SceneCoordinator,
+    MotionCoordinator, MotionPlayback, NodeInspection, PreeditView, PseudoStates, SceneCoordinator,
     ScrollContainer, ScrollPaint, ShapedChMetrics, StyleCoordinator, StyleInputs,
     StyleMatchingCoordinator, TreeElement, TreeInspection, overflow_scrolls, overlay_commands,
     root_font_size, scroll_containers,
@@ -510,6 +510,15 @@ pub struct UiRuntime {
     /// The id minted for the next timeline started by
     /// [`animate`](Self::animate); monotonically increasing so ids are unique.
     next_timeline: TimelineId,
+    /// The progress each finished timeline settled at, kept after the scheduler
+    /// pruned it so the overlay can keep applying the value the animation
+    /// *ended on*.
+    ///
+    /// This cannot be assumed to be `1.0`: an `alternate` animation whose last
+    /// iteration ran in reverse settles at progress `0` — css-animations-1 §3.9
+    /// "the values applied will be those for the end of the last completed
+    /// iteration". Entries are dropped with their binding.
+    settled_progress: HashMap<TimelineId, f32>,
     /// The CSS-authored transitions and `@keyframes` animations, keyed by
     /// selector, that the runtime drives through the [`MotionScheduler`] each
     /// style frame (spec §4.17). Empty until a host installs a compiled
@@ -742,6 +751,7 @@ impl UiRuntime {
             motion: MotionScheduler::new(),
             animations: Vec::new(),
             next_timeline: TimelineId::from_raw(0),
+            settled_progress: HashMap::new(),
             css_motion: CssMotionRules::new(),
             transition_targets: HashMap::new(),
             css_animations_started: HashSet::new(),
@@ -2720,6 +2730,38 @@ impl UiRuntime {
         kind: AnimatedKind,
         interruption: TransitionInterruption,
     ) -> TimelineId {
+        self.animate_with(
+            node,
+            property,
+            track,
+            duration,
+            kind,
+            interruption,
+            MotionPlayback::default(),
+        )
+    }
+
+    /// [`animate`](Self::animate), plus the playback controls CSS's
+    /// `animation-delay`, `animation-iteration-count`, `animation-direction`,
+    /// `animation-fill-mode` and `transition-delay` set (§4.17).
+    ///
+    /// The `playback` is lowered onto the [`Timeline`] this starts: the delay
+    /// arms [`Timeline::with_delay`] (a **negative** delay makes the timeline
+    /// seek that far into its play cycle at `start`, so it "appears to begin
+    /// part-way through" — css-transitions-1 §2.4), the repeat/direction/
+    /// alternation drive iteration parity, and the fill mode decides whether the
+    /// track's value is overlaid *during* the delay (css-animations-1 §3.9).
+    #[allow(clippy::too_many_arguments)]
+    pub fn animate_with(
+        &mut self,
+        node: NodeId,
+        property: PropertyId,
+        track: KeyframeTrack,
+        duration: f32,
+        kind: AnimatedKind,
+        interruption: TransitionInterruption,
+        playback: MotionPlayback,
+    ) -> TimelineId {
         // Resolve the track to actually run against any animation already in
         // flight for this exact target (spec §4.17 interruption).
         let existing = self
@@ -2730,12 +2772,9 @@ impl UiRuntime {
         let resolved_track = if let Some(index) = existing {
             let prior = &self.animations[index];
             // The current on-screen value: the prior track sampled at its
-            // timeline's progress (a finished/pruned timeline holds t == 1.0).
-            let progress = self
-                .motion
-                .active()
-                .get(prior.timeline())
-                .map_or(1.0, Timeline::progress);
+            // timeline's progress (a finished/pruned timeline holds the progress
+            // it settled at).
+            let progress = self.timeline_progress(prior.timeline());
             let current = MotionCoordinator::sample_keyframes(prior.track(), progress);
             let origin = MotionCoordinator::sample_keyframes(prior.track(), 0.0);
             match (current, origin) {
@@ -2764,21 +2803,30 @@ impl UiRuntime {
         {
             let stale = self.animations.remove(index);
             self.motion.remove(stale.timeline());
+            self.settled_progress.remove(&stale.timeline());
         }
 
         let id = self.next_timeline;
         self.next_timeline = TimelineId::from_raw(id.raw().saturating_add(1));
 
-        let mut timeline = Timeline::new(id, duration);
+        let mut timeline = Timeline::new(id, duration)
+            .with_delay(playback.delay_secs)
+            .with_repeat(playback.repeat)
+            .with_direction(playback.direction)
+            .alternating(playback.alternates);
+        // `start` arms a positive delay and applies a negative one, so a timeline
+        // with `-0.5s` of delay is already 0.5s in before the first advance.
         timeline.start();
+        // A timeline that a negative delay ran straight past its end never enters
+        // the scheduler, so record where it settled before registering.
+        if timeline.is_finished() {
+            self.settled_progress.insert(id, timeline.progress());
+        }
         self.motion.register(timeline);
-        self.animations.push(AnimationBinding::new(
-            id,
-            node,
-            property,
-            resolved_track,
-            kind,
-        ));
+        self.animations.push(
+            AnimationBinding::new(id, node, property, resolved_track, kind)
+                .with_fill(playback.fill),
+        );
 
         self.request_frame(FrameReason::Animation);
         id
@@ -2795,10 +2843,27 @@ impl UiRuntime {
     /// overlay keeps applying the settled endpoint value (the animation *holds*
     /// its final value) until superseded.
     pub fn advance_motion(&mut self, delta: f32) {
-        self.motion.advance(delta);
+        // Remember where each timeline that finished on this tick settled: the
+        // scheduler prunes it, and the overlay still has to apply the value the
+        // animation ended on, which for a reversed final iteration is progress
+        // `0` and not `1` (css-animations-1 §3.9 `forwards`).
+        for finished in self.motion.advance(delta) {
+            self.settled_progress
+                .insert(finished.id(), finished.progress());
+        }
         if self.motion.needs_frame() {
             self.request_frame(FrameReason::Animation);
         }
+    }
+
+    /// Returns the progress to sample a binding's track at: the live timeline's
+    /// progress while it is in the scheduler, otherwise the progress it settled
+    /// at when it finished (falling back to the track's end).
+    fn timeline_progress(&self, id: TimelineId) -> f32 {
+        self.motion.active().get(id).map_or_else(
+            || self.settled_progress.get(&id).copied().unwrap_or(1.0),
+            Timeline::progress,
+        )
     }
 
     /// Returns the number of **running** animations — the count of active
@@ -2832,13 +2897,21 @@ impl UiRuntime {
         // it; put back before returning.
         let mut overlaid = std::mem::take(&mut self.overlaid);
         for binding in &self.animations {
-            // Read progress from the scheduler; a finished (pruned) timeline holds
-            // its endpoint at t == 1.0.
-            let progress = self
+            // Inside the start delay the animation is not yet running: it applies
+            // its first-iteration start value only under a `backwards`/`both`
+            // fill, and nothing at all otherwise (css-animations-1 §3.9).
+            if self
                 .motion
                 .active()
                 .get(binding.timeline())
-                .map_or(1.0, Timeline::progress);
+                .is_some_and(Timeline::is_delayed)
+                && !binding.fill().fills_backwards()
+            {
+                continue;
+            }
+            // Read progress from the scheduler; a finished (pruned) timeline holds
+            // the progress it settled at.
+            let progress = self.timeline_progress(binding.timeline());
 
             let Some(sampled) = MotionCoordinator::sample_keyframes(binding.track(), progress)
             else {
@@ -2922,6 +2995,7 @@ impl UiRuntime {
                                 from: previous,
                                 to: new_scalar,
                                 duration: rule.duration_secs(),
+                                delay: rule.delay_secs(),
                                 easing: rule.easing(),
                                 kind,
                             });
@@ -2957,6 +3031,13 @@ impl UiRuntime {
                         track: track.clone(),
                         duration: rule.duration_secs(),
                         kind,
+                        playback: MotionPlayback {
+                            delay_secs: rule.delay_secs(),
+                            repeat: rule.repeat(),
+                            direction: rule.direction(),
+                            alternates: rule.alternates(),
+                            fill: rule.fill(),
+                        },
                     });
                 }
             }
@@ -2971,25 +3052,27 @@ impl UiRuntime {
                 Keyframe::new(0.0, MotionValue::scalar(start.from)).with_easing(start.easing),
                 Keyframe::new(1.0, MotionValue::scalar(start.to)),
             ]);
-            self.animate(
+            self.animate_with(
                 start.node,
                 start.property,
                 track,
                 start.duration,
                 start.kind,
                 TransitionInterruption::Blend,
+                MotionPlayback::delayed(start.delay),
             );
         }
         for start in animations_to_start {
             self.css_animations_started
                 .insert((start.node, start.property));
-            self.animate(
+            self.animate_with(
                 start.node,
                 start.property,
                 start.track,
                 start.duration,
                 start.kind,
                 TransitionInterruption::Restart,
+                start.playback,
             );
         }
     }
@@ -6224,6 +6307,8 @@ struct TransitionStart {
     from: f32,
     to: f32,
     duration: f32,
+    /// `transition-delay`, in seconds (negative starts part-way through).
+    delay: f32,
     easing: obscur_motion::track::Easing,
     kind: AnimatedKind,
 }
@@ -6236,6 +6321,8 @@ struct AnimationStart {
     track: KeyframeTrack,
     duration: f32,
     kind: AnimatedKind,
+    /// The `animation-*` playback controls this animation runs under.
+    playback: MotionPlayback,
 }
 
 /// Returns whether `key` is an **activation** key — Enter or Space — the two
@@ -9440,6 +9527,75 @@ mod tests {
             1,
             "registered once, not per frame"
         );
+    }
+
+    /// css-animations-1 §3.9: `backwards` fill applies, during the delay, "the
+    /// property values defined in the keyframe that will start the first
+    /// iteration"; `none` applies nothing until the animation runs.
+    #[test]
+    fn a_delayed_animation_paints_only_under_a_backwards_fill() {
+        use obscur_motion::timeline::{FillMode, PlaybackDirection, RepeatCount};
+
+        // `.box` cascades to width 100; the animation would drive it 0 -> 50.
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![class_rule("box", size(100.0, 50.0))],
+        );
+        let sheets = std::slice::from_ref(&sheet);
+        let track = || {
+            KeyframeTrack::from_keyframes(vec![
+                Keyframe::new(0.0, MotionValue::scalar(0.0)),
+                Keyframe::new(1.0, MotionValue::scalar(50.0)),
+            ])
+        };
+        let rule = |fill| {
+            CssKeyframeRule::new(box_selectors(), vec![(PropertyId::Width, track())], 1.0)
+                .with_playback(
+                    1.0,
+                    RepeatCount::Finite(1),
+                    PlaybackDirection::Forward,
+                    false,
+                    fill,
+                )
+        };
+
+        // Fill `none`: inside the delay the cascade value stands.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let view = box_view();
+        runtime.set_css_motion(CssMotionRules::from_parts(
+            Vec::new(),
+            vec![rule(FillMode::None)],
+        ));
+        let _ = runtime.render_now(&view, sheets);
+        runtime.advance_motion(0.5);
+        let _ = runtime.render_now(&view, sheets);
+        let child = counter_child(&runtime);
+        assert_eq!(
+            box_width(&runtime, child),
+            100.0,
+            "no fill: the delay leaves the cascade value alone"
+        );
+
+        // Fill `backwards`: the first iteration's start keyframe is applied.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_css_motion(CssMotionRules::from_parts(
+            Vec::new(),
+            vec![rule(FillMode::Backwards)],
+        ));
+        let _ = runtime.render_now(&view, sheets);
+        runtime.advance_motion(0.5);
+        let _ = runtime.render_now(&view, sheets);
+        let child = counter_child(&runtime);
+        assert_eq!(
+            box_width(&runtime, child),
+            0.0,
+            "backwards fill: the from keyframe applies during the delay"
+        );
+
+        // Past the delay the animation runs normally: 0.5s into a 1s cycle.
+        runtime.advance_motion(1.0);
+        let _ = runtime.render_now(&view, sheets);
+        assert_eq!(box_width(&runtime, child), 25.0, "halfway once running");
     }
 
     #[test]

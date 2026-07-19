@@ -13,14 +13,16 @@
 //! animations that rule declares, so the runtime can match the selector against
 //! the retained tree and drive the motion on exactly the matched nodes (§4.17).
 
+use obscur_motion::timeline::{FillMode, PlaybackDirection, RepeatCount};
 use obscur_motion::track::KeyframeTrack;
 use obscur_style::property::PropertyId;
 use obscur_style::selector::SelectorList;
 
 use super::transition_compiler::CompiledTransition;
 
-/// A resolved `animation` on a rule: the `@keyframes` tracks to play and the
-/// duration to play them over.
+/// A resolved `animation` on a rule: the `@keyframes` tracks to play, the
+/// duration to play them over, and the playback controls the `animation-*`
+/// longhands set.
 ///
 /// Produced by resolving an `animation-name` reference against the stylesheet's
 /// compiled `@keyframes`; an unknown name contributes no [`CompiledAnimation`].
@@ -31,6 +33,16 @@ pub struct CompiledAnimation {
     pub tracks: Vec<(PropertyId, KeyframeTrack)>,
     /// The duration to play the tracks over, in seconds.
     pub duration_secs: f32,
+    /// `animation-delay`, in seconds (negative seeks into the playback).
+    pub delay_secs: f32,
+    /// `animation-iteration-count`.
+    pub repeat: RepeatCount,
+    /// The direction iteration 1 plays in.
+    pub direction: PlaybackDirection,
+    /// Whether iterations alternate direction.
+    pub alternates: bool,
+    /// `animation-fill-mode`.
+    pub fill: FillMode,
 }
 
 /// A style rule's motion, keyed by the selector list the rule matched.

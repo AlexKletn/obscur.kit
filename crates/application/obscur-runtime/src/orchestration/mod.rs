@@ -23,6 +23,8 @@ pub use layout_coordinator::{
 };
 mod motion_coordinator;
 pub use motion_coordinator::MotionCoordinator;
+mod motion_playback;
+pub use motion_playback::MotionPlayback;
 mod pseudo_states;
 pub use pseudo_states::PseudoStates;
 mod render_coordinator;

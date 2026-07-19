@@ -47,45 +47,16 @@ and they are a consequence of the isolation, not a failure of it: the deriver ne
 the API, and the translator was forbidden from changing an expected value, so a wrong
 fixture got translated faithfully.
 
-## The red list (88)
+## The red list (75)
 
 These are the implementation's to answer. **Anything red that is not on this list is a
-regression.** Run with `--no-fail-fast` or cargo stops at the first red target.
+regression.** Run with `--no-fail-fast`.
 
-State: **5,477 passing, 88 failing. Coverage: 99 of 110 spec sections (90%),
-excluding §8.**
-
-### The 10 sections with no tests are a gap in the SPEC, not in the suite
-
-§4.11, §5.5, §5.9, §5.13, §6.8, §6.9, §6.12, §6.14, §6.18, §6.19 have no cases because
-the spec requires nothing there. The derivers' own words: those sections are "bare
-bullet lists framed with hedged verbs — *Optional status item*, *Capabilities **may**
-include*, *Normalized hooks **may** include*, *Potential optional services*, *Potential
-optional playback support*. They name a vocabulary; they do not state a requirement."
-§5.5 opens "**Optional** `ForeignSurface`", §5.9 says shaders "**may** be used", §5.13
-ends "not required in the core package". §4.11 defines neither a threshold nor what a
-simplified representation is, so any number would be invented.
-
-**A requirement that cannot be violated cannot be tested.** These belong on the
-additive-amendment list, not on a coverage backlog. §9.3 is excluded separately: it is
-a list of documents still to be written.
-
-### Two restored by decision
-
-`an_ungranted_required_capability_refuses_instantiation` and
-`a_synthetic_event_is_untrusted_and_a_gated_default_action_does_not_run` were weakened
-by a correction pass on the literal reading that §2.13/§2.14 say a registry *stores*
-capability requirements and §2.3 says an origin is *reported* — neither says enforced.
-Defensible, and overridden: neither enforcement exists, so weakening would have turned
-known access-control gaps from visibly red into silently green. `create_instance` takes
-no grant set at all, so there is no seam a check could occupy.
+State: **5,542 passing, 75 failing.** Down from 88 as implementation closes them.
 
 - `a_click_handlers_commit_is_painted_by_the_frame_that_dispatched_it`
 - `a_custom_loader_is_never_invoked_inside_the_frame_phase`
-- `a_flex_grow_factor_sum_below_one_leaves_space_unfilled`
-- `a_max_width_violation_refreezes_and_redistributes`
 - `a_mutating_method_call_is_rejected_as_mutation`
-- `a_negative_transition_delay_starts_part_way_through`
 - `a_newer_ir_version_is_refused_with_a_precise_diagnostic`
 - `a_prop_type_mismatch_is_reported_per_attribute_at_its_own_span`
 - `a_reversed_transition_is_shortened_by_its_progress`
@@ -96,14 +67,11 @@ no grant set at all, so there is no seam a check could occupy.
 - `a_transform_animation_moves_paint_without_re_running_layout`
 - `a_transform_establishes_the_containing_block_for_fixed_descendants`
 - `a_url_background_without_a_host_loader_fails_terminally_and_still_paints`
-- `absolute_length_units_are_anchored_to_the_css_pixel`
 - `align_content_stretch_grows_lines_by_equal_amounts`
-- `alternate_iteration_parity_counts_from_one`
 - `an_animated_opacity_never_reaches_computed_style`
 - `an_exported_style_part_crosses_the_scope_boundary_and_an_unexported_one_does_not`
 - `an_fr_track_blown_by_content_restarts_the_fr_algorithm`
 - `an_infinitely_growable_track_absorbs_the_whole_max_content_remainder`
-- `an_overflowing_item_ignores_its_auto_margins`
 - `an_unexported_function_call_is_rejected_and_an_exported_one_is_not`
 - `an_ungranted_required_capability_refuses_instantiation`
 - `arch_16_a_malformed_declaration_kills_neither_its_rule_nor_the_sheet`
@@ -111,7 +79,6 @@ no grant set at all, so there is no seam a check could occupy.
 - `arch_18_the_stable_code_survives_locale_and_call_site`
 - `arch_20_a_missing_image_falls_back_without_disturbing_the_column`
 - `arch_28_a_missing_resource_does_not_trip_the_component_boundary`
-- `backwards_fill_uses_the_to_keyframe_when_the_direction_is_reversed`
 - `border_inline_start_width_maps_to_the_right_edge_in_rtl`
 - `ch4_16_a_generated_content_paints_without_becoming_a_node`
 - `ch4_16_b_scrollbar_parts_are_hidden_from_the_component_tree_but_in_devtools`
@@ -121,9 +88,7 @@ no grant set at all, so there is no seam a check could occupy.
 - `ch4_7_e_border_radius_shapes_the_hit_region`
 - `ch4_7_f_scrolled_content_hits_and_pointer_events_none_is_transparent`
 - `ch4_9_b_scroll_anchoring_compensates_growth_above_the_viewport`
-- `clamp_lets_the_minimum_win_over_an_inverted_maximum`
 - `color_interpolation_is_premultiplied`
-- `container_query_units_fall_back_to_the_small_viewport`
 - `d_an_absent_power_provider_reports_typed_absence_without_fabricating`
 - `destroying_an_owner_destroys_the_windows_it_owns`
 - `display_contents_affects_the_box_tree_only`
@@ -133,7 +98,6 @@ no grant set at all, so there is no seam a check could occupy.
 - `env_safe_area_inset_top_resolves_to_the_host_inset`
 - `fm_01_a_controlled_value_does_not_drift`
 - `fm_03_readonly_is_not_disabled`
-- `forwards_fill_uses_the_end_of_the_last_completed_iteration`
 - `ft_01_the_default_provider_renders_in_an_isolated_environment`
 - `headless_reports_always_on_top_unsupported_but_size_native_or_emulated`
 - `im_02_object_fit_contain_geometry_and_position`
@@ -144,11 +108,9 @@ no grant set at all, so there is no seam a check could occupy.
 - `inspect_picking_honours_stacking_order`
 - `io_and_direct_service_access_are_each_rejected_by_name`
 - `io_async_and_direct_service_access_are_each_refused_by_category`
-- `is_and_not_take_the_specificity_of_their_most_specific_argument`
 - `logical_block_start_maps_by_writing_mode`
 - `margin_inline_start_maps_to_the_right_edge_in_rtl`
 - `motion_runs_without_any_stylesheet`
-- `nth_child_of_s_filters_before_counting`
 - `only_explicitly_exported_pure_functions_may_be_called`
 - `overflow_clip_is_not_a_scroll_container_but_hidden_is`
 - `padding_inline_start_maps_to_the_right_edge_in_rtl`
@@ -158,7 +120,6 @@ no grant set at all, so there is no seam a check could occupy.
 - `sc_04_gradient_stops_interpolate_premultiplied`
 - `sc_05_conic_gradient_is_a_scene_brush_and_rasterizes`
 - `sc_06_mix_blend_mode_multiply_exists`
-- `space_between_falls_back_to_start_on_negative_free_space`
 - `the_application_pan_is_cancelled_when_the_system_gesture_takes_the_sequence`
 - `the_automatic_minimum_size_depends_on_overflow`
 - `the_same_fault_carries_one_stable_code_across_two_contexts`

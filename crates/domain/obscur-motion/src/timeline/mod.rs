@@ -1,4 +1,6 @@
 //! Timeline module.
+mod fill_mode;
+pub use fill_mode::FillMode;
 mod timeline;
 pub use timeline::{PlaybackDirection, RepeatCount, Timeline};
 mod timeline_id;

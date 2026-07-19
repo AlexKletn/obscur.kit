@@ -52,6 +52,9 @@ impl Operand {
 /// not a well-formed length expression (a stray operator, a `*`/`/` with no
 /// numeric operand, an empty `min()`/`max()`, or a `clamp()` without exactly
 /// three arguments).
+///
+/// A `clamp()` bound may also be the keyword `none` — see
+/// [`parse_clamp_bound`].
 pub(crate) fn lower_math_function(name: &str, args: &[ParsedValue]) -> Option<LengthExpr> {
     if name.eq_ignore_ascii_case("calc") || name.is_empty() {
         parse_full(args)
@@ -64,17 +67,49 @@ pub(crate) fn lower_math_function(name: &str, args: &[ParsedValue]) -> Option<Le
         if parts.len() != 3 {
             return None;
         }
-        let min = parse_full(parts[0])?;
+        let min = parse_clamp_bound(parts[0])?;
         let val = parse_full(parts[1])?;
-        let max = parse_full(parts[2])?;
-        Some(LengthExpr::Clamp(
-            Box::new(min),
-            Box::new(val),
-            Box::new(max),
-        ))
+        let max = parse_clamp_bound(parts[2])?;
+        Some(match (min, max) {
+            (ClampBound::Bounded(min), ClampBound::Bounded(max)) => {
+                LengthExpr::Clamp(Box::new(min), Box::new(val), Box::new(max))
+            }
+            (ClampBound::Bounded(min), ClampBound::None) => LengthExpr::Max(vec![min, val]),
+            (ClampBound::None, ClampBound::Bounded(max)) => LengthExpr::Min(vec![val, max]),
+            (ClampBound::None, ClampBound::None) => val,
+        })
     } else {
         None
     }
+}
+
+/// One of `clamp()`'s two **bound** arguments, once parsed.
+enum ClampBound {
+    /// A bound: the side is clamped by this expression.
+    Bounded(LengthExpr),
+    /// The keyword `none`: the side is not clamped.
+    None,
+}
+
+/// Parses one **bound** argument of `clamp()`: either a length expression, or
+/// the keyword `none`. Returns [`None`] when the argument is neither.
+///
+/// css-values-4 §10.2: *"Either the min or max calculations (or even both) can
+/// instead be the keyword `none`, which indicates the value is not clamped from
+/// that side. (That is, `clamp(MIN, VAL, none)` is equivalent to
+/// `max(MIN, VAL)`, `clamp(none, VAL, MAX)` is equivalent to `min(VAL, MAX)`,
+/// and `clamp(none, VAL, none)` is equivalent to just `calc(VAL)`.)"* — so an
+/// unclamped side is lowered to exactly the equivalent the spec names, and
+/// [`LengthExpr::Clamp`] keeps meaning "both sides bounded". `none` is a keyword
+/// in its own right, not an infinity: it is legal **only** as a whole bound
+/// argument, so `clamp(none + 1px, …)` stays invalid.
+fn parse_clamp_bound(tokens: &[ParsedValue]) -> Option<ClampBound> {
+    if let [ParsedValue::Keyword(keyword)] = tokens
+        && keyword.eq_ignore_ascii_case("none")
+    {
+        return Some(ClampBound::None);
+    }
+    parse_full(tokens).map(ClampBound::Bounded)
 }
 
 /// Parses a comma-separated argument list into one expression per argument,

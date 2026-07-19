@@ -446,6 +446,11 @@ fn resolve_motion_rule(
                 .map(|compiled| CompiledAnimation {
                     tracks: compiled.tracks.clone(),
                     duration_secs: reference.duration_secs,
+                    delay_secs: reference.delay_secs,
+                    repeat: reference.repeat,
+                    direction: reference.direction,
+                    alternates: reference.alternates,
+                    fill: reference.fill,
                 })
         })
         .collect();

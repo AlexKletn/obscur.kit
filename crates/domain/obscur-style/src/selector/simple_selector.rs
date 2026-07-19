@@ -41,13 +41,17 @@ impl SimpleSelector {
     /// Per CSS: id → `(1, 0, 0)`; class, attribute, and pseudo-class →
     /// `(0, 1, 0)`; type and pseudo-element → `(0, 0, 1)`; the universal
     /// selector contributes nothing.
+    ///
+    /// Pseudo-classes delegate to
+    /// [`PseudoClassSelector::specificity_contribution`], because the four
+    /// selectors-4 §15 "evaluation context" forms — `:is()`, `:not()`,
+    /// `:where()`, `:has()` — do **not** contribute a flat `(0, 1, 0)`.
     #[must_use]
-    pub const fn specificity_contribution(&self) -> SelectorSpecificity {
+    pub fn specificity_contribution(&self) -> SelectorSpecificity {
         match self {
             Self::Id(_) => SelectorSpecificity::new(1, 0, 0),
-            Self::Class(_) | Self::Attribute(_) | Self::PseudoClass(_) => {
-                SelectorSpecificity::new(0, 1, 0)
-            }
+            Self::PseudoClass(pseudo) => pseudo.specificity_contribution(),
+            Self::Class(_) | Self::Attribute(_) => SelectorSpecificity::new(0, 1, 0),
             Self::Type(_) | Self::PseudoElement(_) => SelectorSpecificity::new(0, 0, 1),
             Self::Universal => SelectorSpecificity::ZERO,
         }

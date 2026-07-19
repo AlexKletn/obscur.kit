@@ -202,6 +202,16 @@ impl PropertyCompiler {
                 selector,
             );
         }
+        if decl.name.eq_ignore_ascii_case("flex") {
+            return expand_flex_shorthand(
+                decl,
+                specificity,
+                origin,
+                source_order,
+                selector,
+                interner,
+            );
+        }
         if decl.name.eq_ignore_ascii_case("grid-area") {
             return expand_grid_area_shorthand(decl, specificity, origin, source_order, selector);
         }
@@ -826,6 +836,142 @@ fn expand_pair_shorthand(
         ImportantFlag::Normal
     };
     [(align, align_value), (justify, justify_value)]
+        .into_iter()
+        .map(|(property, value)| {
+            CompiledDeclaration::Standard(Declaration::new(
+                property,
+                value,
+                important,
+                origin,
+                specificity,
+                source_order,
+                selector,
+            ))
+        })
+        .collect()
+}
+
+/// Expands the `flex` shorthand into `flex-grow` / `flex-shrink` / `flex-basis`
+/// (CSS Flexible Box Layout Level 1 §7.1).
+///
+/// The grammar is `none | [ <'flex-grow'> <'flex-shrink'>? || <'flex-basis'> ]`.
+/// The defaults for an OMITTED component are deliberately not the longhands'
+/// initial values — the spec's own note reads "The initial values of the flex
+/// longhands are equivalent to `flex: 0 1 auto`. This differs from their defaults
+/// when omitted in the flex shorthand (effectively `1 1 0px`)". So:
+///
+/// * an omitted `<'flex-grow'>` is `1`, and an omitted `<'flex-shrink'>` is `1`;
+/// * an omitted `<'flex-basis'>` has "its specified value is 0" — `0px`, NOT
+///   `auto`;
+/// * `flex: none` "expands to `0 0 auto`";
+/// * `flex: <number>` is therefore `<number> 1 0px` — `flex: 1` is NOT
+///   `flex: 1 1 auto`;
+/// * `flex: auto` is `1 1 auto` (a lone `<'flex-basis'>` component).
+///
+/// `initial` / `inherit` / `unset` are CSS-wide keywords rather than shorthand
+/// components, so they are handed to each longhand unchanged (`flex: initial`
+/// thereby lands on the longhand initial values, `0 1 auto`).
+///
+/// Because "a unitless zero that is not already preceded by two flex factors must
+/// be interpreted as a flex factor", a bare `<number>` is read as a flex factor in
+/// every position except the third component of a three-value form, where the only
+/// number a `<'flex-basis'>` accepts is `0`. A negative factor is outside the
+/// `<number [0,∞]>` range. Any value this grammar rejects degrades the whole
+/// shorthand to a single [`CompiledDeclaration::Unsupported`] rather than being
+/// dropped silently (§4.13).
+fn expand_flex_shorthand(
+    decl: &ParsedDeclaration,
+    specificity: SelectorSpecificity,
+    origin: CascadeOrigin,
+    source_order: u32,
+    selector: Option<SelectorId>,
+    interner: &mut CssSymbolInterner,
+) -> Vec<CompiledDeclaration> {
+    let unsupported = || {
+        vec![CompiledDeclaration::Unsupported(
+            UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
+        )]
+    };
+    // A component that is a `<number [0,∞]>`, i.e. a flex-factor candidate.
+    let factor = |value: &ParsedValue| match value {
+        ParsedValue::Number(n) if *n >= 0.0 => Some(*n),
+        _ => None,
+    };
+    let number = |n: f64| vec![ParsedValue::Number(n)];
+    let zero_basis = || {
+        vec![ParsedValue::Dimension {
+            value: 0.0,
+            unit: "px".into(),
+        }]
+    };
+    let one = || number(1.0);
+
+    // The three longhands' component slices, defaults already filled in.
+    let (grow, shrink, basis): (Vec<ParsedValue>, Vec<ParsedValue>, Vec<ParsedValue>) = match &*decl
+        .value
+    {
+        // `none` → `0 0 auto`; a CSS-wide keyword goes to all three longhands.
+        [ParsedValue::Keyword(keyword)] if keyword.eq_ignore_ascii_case("none") => (
+            number(0.0),
+            number(0.0),
+            vec![ParsedValue::Keyword("auto".into())],
+        ),
+        [value @ ParsedValue::Keyword(keyword)] if css_wide_keyword(keyword).is_some() => {
+            let wide = vec![value.clone()];
+            (wide.clone(), wide.clone(), wide)
+        }
+        // One value: a lone factor (basis `0px`) or a lone basis (factors `1`).
+        [value] => match factor(value) {
+            Some(grow) => (number(grow), one(), zero_basis()),
+            None => (one(), one(), vec![value.clone()]),
+        },
+        // Two values, in either `||` order.
+        [first, second] => match (factor(first), factor(second)) {
+            (Some(grow), Some(shrink)) => (number(grow), number(shrink), zero_basis()),
+            (Some(grow), None) => (number(grow), one(), vec![second.clone()]),
+            (None, Some(grow)) => (number(grow), one(), vec![first.clone()]),
+            (None, None) => return unsupported(),
+        },
+        // Three values: the two factors adjacent, the basis on either end.
+        [first, second, third] => match (factor(first), factor(second), factor(third)) {
+            // `<grow> <shrink> <basis>`; as a basis the only number is `0`.
+            (Some(grow), Some(shrink), _) => {
+                if matches!(third, ParsedValue::Number(n) if *n != 0.0) {
+                    return unsupported();
+                }
+                let basis = if matches!(third, ParsedValue::Number(_)) {
+                    zero_basis()
+                } else {
+                    vec![third.clone()]
+                };
+                (number(grow), number(shrink), basis)
+            }
+            // `<basis> <grow> <shrink>`.
+            (None, Some(grow), Some(shrink)) => (number(grow), number(shrink), vec![first.clone()]),
+            _ => return unsupported(),
+        },
+        _ => return unsupported(),
+    };
+
+    let lowered = [
+        (PropertyId::FlexGrow, grow),
+        (PropertyId::FlexShrink, shrink),
+        (PropertyId::FlexBasis, basis),
+    ]
+    .into_iter()
+    .map(|(property, values)| {
+        lower_for_property(property, &values, interner).map(|value| (property, value))
+    })
+    .collect::<Option<Vec<_>>>();
+    let Some(lowered) = lowered else {
+        return unsupported();
+    };
+    let important = if decl.important {
+        ImportantFlag::Important
+    } else {
+        ImportantFlag::Normal
+    };
+    lowered
         .into_iter()
         .map(|(property, value)| {
             CompiledDeclaration::Standard(Declaration::new(
@@ -2057,14 +2203,17 @@ fn named_color(keyword: &str) -> Option<StyleColor> {
     }
 }
 
-/// Lowers a dimension into a [`Length`] term, accepting `px` (absolute), `%`
-/// (percentage), the font-relative units (`em` / `rem` / `ch`) and the viewport
-/// units (`vw` / `vh` / `vmin` / `vmax`). Any other unit is outside the domain's
-/// [`Length`] model and yields [`None`].
+/// Lowers a dimension into a [`Length`] term, accepting `%` (percentage), the
+/// absolute units (`px` / `cm` / `mm` / `Q` / `in` / `pt` / `pc`), the
+/// font-relative units (`em` / `rem` / `ch`), the viewport units (`vw` / `vh` /
+/// `vmin` / `vmax`) and the container units (`cqw` / `cqh` / `cqi` / `cqb` /
+/// `cqmin` / `cqmax`). Any other unit is outside the domain's [`Length`] model
+/// and yields [`None`].
 ///
-/// The relative units carry their coefficient symbolically; they resolve to
-/// concrete pixels at the layout/compute step against a `LengthContext`
-/// (spec §4.5).
+/// The absolute units fold to `px` immediately, at their fixed css-values-4 §6.2
+/// ratios (see [`absolute_px_per_unit`]). The relative units carry their
+/// coefficient symbolically; they resolve to concrete pixels at the
+/// layout/compute step against a `LengthContext` (spec §4.5).
 pub(crate) fn dimension_length(value: f64, unit: &str) -> Option<Length> {
     let n = narrow_f32(value);
     if unit.eq_ignore_ascii_case("px") {
@@ -2085,6 +2234,62 @@ pub(crate) fn dimension_length(value: f64, unit: &str) -> Option<Length> {
         Some(Length::Vmin(n))
     } else if unit.eq_ignore_ascii_case("vmax") {
         Some(Length::Vmax(n))
+    } else if let Some(per_unit) = absolute_px_per_unit(unit) {
+        Some(Length::px(n * per_unit))
+    } else if unit.eq_ignore_ascii_case("cqw") {
+        Some(Length::Cqw(n))
+    } else if unit.eq_ignore_ascii_case("cqh") {
+        Some(Length::Cqh(n))
+    } else if unit.eq_ignore_ascii_case("cqi") {
+        Some(Length::Cqi(n))
+    } else if unit.eq_ignore_ascii_case("cqb") {
+        Some(Length::Cqb(n))
+    } else if unit.eq_ignore_ascii_case("cqmin") {
+        Some(Length::Cqmin(n))
+    } else if unit.eq_ignore_ascii_case("cqmax") {
+        Some(Length::Cqmax(n))
+    } else {
+        None
+    }
+}
+
+/// The number of CSS pixels in one unit of an absolute (physical) length unit,
+/// or [`None`] if `unit` is not one.
+///
+/// css-values-4 §6.2 fixes these ratios *definitionally* — "the absolute length
+/// units are fixed in relation to each other and anchored to some physical
+/// measurement", with `px` as their canonical unit:
+///
+/// * `1cm = 96px/2.54`
+/// * `1mm = 1/10th of 1cm`
+/// * `1Q = 1/40th of 1cm`
+/// * `1in = 2.54cm = 96px`
+/// * `1pc = 1/6th of 1in`
+/// * `1pt = 1/72nd of 1in`
+///
+/// Because the ratios are fixed, an absolute unit carries no context-dependent
+/// base and there is nothing to defer: it lowers straight to [`Length::Px`],
+/// which is also what §6.2's "px is their canonical unit" asks a computed value
+/// to serialize as. Unit names are ASCII case-insensitive (§6.2, note), so `1Q`
+/// and `1q` are the same length.
+fn absolute_px_per_unit(unit: &str) -> Option<f32> {
+    /// `1in = 96px`.
+    const PX_PER_IN: f32 = 96.0;
+    /// `1cm = 96px/2.54`.
+    const PX_PER_CM: f32 = PX_PER_IN / 2.54;
+
+    if unit.eq_ignore_ascii_case("cm") {
+        Some(PX_PER_CM)
+    } else if unit.eq_ignore_ascii_case("mm") {
+        Some(PX_PER_CM / 10.0)
+    } else if unit.eq_ignore_ascii_case("q") {
+        Some(PX_PER_CM / 40.0)
+    } else if unit.eq_ignore_ascii_case("in") {
+        Some(PX_PER_IN)
+    } else if unit.eq_ignore_ascii_case("pc") {
+        Some(PX_PER_IN / 6.0)
+    } else if unit.eq_ignore_ascii_case("pt") {
+        Some(PX_PER_IN / 72.0)
     } else {
         None
     }
@@ -5667,6 +5872,71 @@ mod tests {
         assert_eq!(expr.resolve(&ctx), Some(40.0));
     }
 
+    /// css-values-4 §10.2: `clamp(none, VAL, MAX)` is `min(VAL, MAX)`,
+    /// `clamp(MIN, VAL, none)` is `max(MIN, VAL)`, and `clamp(none, VAL, none)`
+    /// is just `VAL`. The third case is what makes `none` a keyword rather than
+    /// an infinity worth pattern-matching on downstream.
+    #[test]
+    fn clamp_accepts_none_as_either_bound() {
+        use obscur_style::property::LengthContext;
+        let ctx = LengthContext::new(16.0, 20.0, 800.0, 600.0);
+        let resolved = |text: &str| {
+            let PropertyValue::Calc(expr) = value_of(text) else {
+                panic!("expected calc for {text}");
+            };
+            expr.resolve(&ctx)
+        };
+        assert_eq!(resolved("width: clamp(none, 30px, 20px)"), Some(20.0));
+        assert_eq!(resolved("width: clamp(40px, 30px, none)"), Some(40.0));
+        assert_eq!(resolved("width: clamp(none, 30px, none)"), Some(30.0));
+        // `none` is a whole-argument keyword, not a term inside an expression.
+        assert!(matches!(
+            compile("width: clamp(none + 1px, 30px, 20px)").0,
+            CompiledDeclaration::Unsupported(_)
+        ));
+    }
+
+    /// css-values-4 §6.2 fixes every absolute unit against the CSS pixel:
+    /// `1cm = 96px/2.54`, `1mm = 1/10th of 1cm`, `1Q = 1/40th of 1cm`,
+    /// `1in = 96px`, `1pc = 1/6th of 1in`, `1pt = 1/72nd of 1in`. Unit names are
+    /// ASCII case-insensitive.
+    #[test]
+    fn absolute_units_lower_to_their_fixed_pixel_ratios() {
+        let cm = 96.0 / 2.54;
+        for (text, expected) in [
+            ("width: 1cm", cm),
+            ("width: 1mm", cm / 10.0),
+            ("width: 1Q", cm / 40.0),
+            ("width: 1q", cm / 40.0),
+            ("width: 1in", 96.0),
+            ("width: 1IN", 96.0),
+            ("width: 1pc", 16.0),
+            ("width: 12pt", 16.0),
+        ] {
+            let PropertyValue::Length(Length::Px(px)) = value_of(text) else {
+                panic!("expected an absolute px length for {text}");
+            };
+            assert!(
+                (px.0 - expected).abs() < 1e-3,
+                "{text} lowered to {px:?}, expected {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn container_units_lower_to_their_own_terms() {
+        for (text, expected) in [
+            ("width: 5cqw", Length::Cqw(5.0)),
+            ("width: 5cqh", Length::Cqh(5.0)),
+            ("width: 5cqi", Length::Cqi(5.0)),
+            ("width: 5cqb", Length::Cqb(5.0)),
+            ("width: 5cqmin", Length::Cqmin(5.0)),
+            ("width: 5CQMAX", Length::Cqmax(5.0)),
+        ] {
+            assert_eq!(value_of(text), PropertyValue::Length(expected), "{text}");
+        }
+    }
+
     #[test]
     fn math_functions_and_relative_units_are_not_unsupported() {
         // The regression guard for audit V4: none of these fire an
@@ -7407,5 +7677,131 @@ mod tests {
             value_of("grid-template-areas: initial"),
             PropertyValue::Initial
         );
+    }
+
+    // ---- the `flex` shorthand (CSS Flexbox 1 §7.1) ----
+
+    /// `(grow, shrink, basis)` for a `flex` shorthand, as the three longhands.
+    fn flex_triple(text: &str) -> Vec<(PropertyId, PropertyValue)> {
+        pairs(&compile_all(text))
+    }
+
+    fn flex_expected(
+        grow: f32,
+        shrink: f32,
+        basis: PropertyValue,
+    ) -> Vec<(PropertyId, PropertyValue)> {
+        vec![
+            (PropertyId::FlexGrow, PropertyValue::Number(grow)),
+            (PropertyId::FlexShrink, PropertyValue::Number(shrink)),
+            (PropertyId::FlexBasis, basis),
+        ]
+    }
+
+    #[test]
+    fn flex_shorthand_three_value_form_maps_positionally() {
+        let basis = PropertyValue::Length(Length::px(100.0));
+        assert_eq!(
+            flex_triple("flex: 2 3 100px"),
+            flex_expected(2.0, 3.0, basis)
+        );
+        assert_eq!(
+            flex_triple("flex: 0 1 auto"),
+            flex_expected(0.0, 1.0, value_of("flex-basis: auto"))
+        );
+        // A unitless zero preceded by two flex factors is a `0px` basis.
+        assert_eq!(
+            flex_triple("flex: 1 1 0"),
+            flex_expected(1.0, 1.0, PropertyValue::Length(Length::px(0.0)))
+        );
+    }
+
+    #[test]
+    fn flex_shorthand_omitted_components_default_to_one_one_zero() {
+        let zero = PropertyValue::Length(Length::px(0.0));
+        // A lone factor: `flex: 1` is `1 1 0px`, NOT `1 1 auto` (§7.1 note).
+        assert_eq!(
+            flex_triple("flex: 1"),
+            flex_expected(1.0, 1.0, zero.clone())
+        );
+        assert_eq!(
+            flex_triple("flex: 0"),
+            flex_expected(0.0, 1.0, zero.clone())
+        );
+        // Two factors: the basis still defaults to `0px`.
+        assert_eq!(flex_triple("flex: 2 0"), flex_expected(2.0, 0.0, zero));
+        // A lone basis: both factors default to `1` (`flex: auto` is `1 1 auto`).
+        assert_eq!(
+            flex_triple("flex: auto"),
+            flex_expected(1.0, 1.0, value_of("flex-basis: auto"))
+        );
+        assert_eq!(
+            flex_triple("flex: 30%"),
+            flex_expected(1.0, 1.0, value_of("flex-basis: 30%"))
+        );
+        // `<grow> <basis>` and `<basis> <grow>` are both valid (`||` is unordered).
+        let hundred = PropertyValue::Length(Length::px(100.0));
+        assert_eq!(
+            flex_triple("flex: 2 100px"),
+            flex_expected(2.0, 1.0, hundred.clone())
+        );
+        assert_eq!(
+            flex_triple("flex: 100px 2"),
+            flex_expected(2.0, 1.0, hundred)
+        );
+    }
+
+    #[test]
+    fn flex_none_and_css_wide_keywords() {
+        // `none` expands to `0 0 auto`.
+        assert_eq!(
+            flex_triple("flex: none"),
+            flex_expected(0.0, 0.0, value_of("flex-basis: auto"))
+        );
+        // A CSS-wide keyword reaches every longhand unchanged; `initial` therefore
+        // lands on the longhand initial values (`0 1 auto`), not on `1 1 0px`.
+        assert_eq!(
+            flex_triple("flex: initial"),
+            vec![
+                (PropertyId::FlexGrow, PropertyValue::Initial),
+                (PropertyId::FlexShrink, PropertyValue::Initial),
+                (PropertyId::FlexBasis, PropertyValue::Initial),
+            ]
+        );
+        assert_eq!(
+            flex_triple("flex: inherit"),
+            vec![
+                (PropertyId::FlexGrow, PropertyValue::Inherit),
+                (PropertyId::FlexShrink, PropertyValue::Inherit),
+                (PropertyId::FlexBasis, PropertyValue::Inherit),
+            ]
+        );
+    }
+
+    #[test]
+    fn invalid_flex_shorthand_degrades_to_unsupported() {
+        for text in [
+            // A non-zero unitless number cannot be a `<'flex-basis'>`.
+            "flex: 1 1 2",
+            // Negative flex factors are outside `<number [0,∞]>`.
+            "flex: -1 1 0px",
+            // Two basis components, no factor.
+            "flex: auto 100px",
+            // More components than the grammar allows.
+            "flex: 1 1 1 1px",
+        ] {
+            assert!(
+                matches!(
+                    compile_all(text).as_slice(),
+                    [CompiledDeclaration::Unsupported(_)]
+                ),
+                "expected `{text}` to degrade to unsupported"
+            );
+        }
+    }
+
+    #[test]
+    fn flex_is_a_shorthand_not_a_longhand_id() {
+        assert_eq!(property_id_from_name("flex"), None);
     }
 }

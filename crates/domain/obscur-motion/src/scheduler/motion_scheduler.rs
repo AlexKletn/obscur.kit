@@ -47,25 +47,37 @@ impl MotionScheduler {
     }
 
     /// Advances every active timeline by `delta` logical seconds, then drops the
-    /// finished ones.
+    /// finished ones and **returns** them.
     ///
     /// Each timeline is advanced via [`Timeline::advance`] in deterministic order
-    /// (ascending by [`TimelineId`], from the backing `BTreeMap`), after which
-    /// [`ActiveMotionSet::retain_active`] prunes any that finished. A large
-    /// `delta` — e.g. spanning several skipped frames — is handled by the
-    /// timeline's own multi-iteration overshoot, so scheduling stays smooth
-    /// regardless of frame cadence.
-    pub fn advance(&mut self, delta: f32) {
+    /// (ascending by [`TimelineId`], from the backing `BTreeMap`), after which any
+    /// that finished is pulled out of the active set. A large `delta` — e.g.
+    /// spanning several skipped frames — is handled by the timeline's own
+    /// multi-iteration overshoot, so scheduling stays smooth regardless of frame
+    /// cadence.
+    ///
+    /// The returned timelines are the ones that finished **on this call**, in
+    /// ascending id order. A caller that has to keep applying a finished
+    /// animation's last value needs the position it settled at, and pruning would
+    /// otherwise destroy it — a reversed final iteration settles at progress `0`,
+    /// not `1`, so "it finished, assume the end" is wrong.
+    pub fn advance(&mut self, delta: f32) -> Vec<Timeline> {
         // Collect ids first (deterministic ascending order) so each timeline can
         // be advanced through the set's `get_mut`; the borrow of `iter` ends
         // before the mutation begins.
         let ids: Vec<TimelineId> = self.active.iter().map(|(id, _)| *id).collect();
+        let mut finished = Vec::new();
         for id in ids {
             if let Some(timeline) = self.active.get_mut(id) {
                 timeline.advance(delta);
+                if timeline.is_finished()
+                    && let Some(done) = self.active.remove(id)
+                {
+                    finished.push(done);
+                }
             }
         }
-        self.active.retain_active();
+        finished
     }
 
     /// Returns whether another frame is needed — `true` while any motion is still
@@ -144,6 +156,19 @@ mod tests {
         scheduler.advance(1.0);
         assert_eq!(scheduler.active_count(), 0);
         assert!(!scheduler.needs_frame());
+    }
+
+    #[test]
+    fn advance_returns_the_timelines_it_pruned() {
+        let mut scheduler = MotionScheduler::new();
+        scheduler.register(running(1, 1.0));
+        scheduler.register(running(2, 2.0));
+        let finished = scheduler.advance(1.0);
+        assert_eq!(finished.len(), 1);
+        assert_eq!(finished[0].id(), TimelineId::from_raw(1));
+        assert_eq!(finished[0].progress(), 1.0);
+        // Already pruned: a second advance does not report it again.
+        assert!(scheduler.advance(0.1).is_empty());
     }
 
     #[test]

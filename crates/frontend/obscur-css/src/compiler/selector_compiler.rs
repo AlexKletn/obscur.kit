@@ -13,9 +13,9 @@
 use crate::error::{UnsupportedCssFeature, UnsupportedFeatureKind};
 use crate::parser::{
     AttrOp, Combinator, ParsedComplexSelector, ParsedCompoundSelector, ParsedSelectorList,
-    SimpleSelector,
+    SelectorParser, SimpleSelector,
 };
-use crate::source::SourceSpan;
+use crate::source::{CssSource, SourceSpan};
 
 use obscur_style::selector as style;
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
@@ -54,13 +54,17 @@ impl SelectorCompiler {
     /// selectors, and `c` counts type/pseudo-element selectors; the universal
     /// selector contributes nothing. Components are summed (saturating) across
     /// every compound in the complex selector.
+    ///
+    /// This delegates to the lowered `obscur-style` model rather than counting
+    /// the parsed AST a second time, so the flat-cascade path and the
+    /// runtime-matcher path cannot disagree. That matters for the selectors-4
+    /// §15 "evaluation context" pseudo-classes (`:is()`, `:not()`, `:where()`,
+    /// `:has()`, `:nth-child(… of S)`), whose specificity is a function of their
+    /// *argument* — which only exists once the raw argument text has been
+    /// re-parsed by [`lower_complex`](Self::lower_complex).
     #[must_use]
     pub fn specificity(selector: &ParsedComplexSelector) -> SelectorSpecificity {
-        let mut total = compound_specificity(&selector.head);
-        for (_, compound) in &selector.tail {
-            total = total.add(compound_specificity(compound));
-        }
-        total
+        Self::lower_complex(selector).specificity()
     }
 
     /// Compiles one complex selector, minting its id and reporting any excluded
@@ -186,11 +190,48 @@ fn lower_attr_op(op: AttrOp, operand: &str) -> style::AttrMatch {
 /// `obscur-style` [`style::PseudoClassSelector`].
 ///
 /// The name is matched case-insensitively. Functional `:nth-*` forms parse their
-/// argument via [`parse_anb`]; any name the model does not know is preserved as
-/// [`style::PseudoClassSelector::Other`] (which matches nothing).
+/// argument via [`parse_anb`]; the selector-list forms (`:is()`, `:where()`,
+/// `:not()`, `:has()`, and the `of S` tail of `:nth-child()`) re-parse their raw
+/// argument text via [`parse_nested_list`]; any name the model does not know is
+/// preserved as [`style::PseudoClassSelector::Other`] (which matches nothing).
+///
+/// `:nth-last-child(An+B of S)` is deliberately **not** lowered to a modelled
+/// form: deciding it means testing `S` against *following* siblings, which
+/// `MatchElement` cannot navigate to (see
+/// [`style::PseudoClassSelector::Has`] for the same blocker). It falls through
+/// to `Other`, matching nothing, and is reported as unsupported.
 fn lower_pseudo_class(name: &str, arg: Option<&str>) -> style::PseudoClassSelector {
     use style::PseudoClassSelector as P;
-    match name.to_ascii_lowercase().as_str() {
+    let lowered_name = name.to_ascii_lowercase();
+    match lowered_name.as_str() {
+        // `:is()` and `:where()` take a `<forgiving-selector-list>`; `:not()` and
+        // `:has()` take an ordinary one. selectors-4 §16.1 is explicit that the
+        // forgiving production "is used in :is() and :where() only", so an
+        // unparsable branch invalidates the whole of `:not()`/`:has()` rather than
+        // being dropped from it.
+        "is" => return P::Is(parse_forgiving_list(arg.unwrap_or_default())),
+        "where" => return P::Where(parse_forgiving_list(arg.unwrap_or_default())),
+        "not" => {
+            return parse_strict_list(arg.unwrap_or_default())
+                .map_or_else(|| P::Other(lowered_name.clone().into()), P::Not);
+        }
+        "has" => {
+            return parse_strict_list(arg.unwrap_or_default())
+                .map_or_else(|| P::Other(lowered_name.clone().into()), P::Has);
+        }
+        "nth-child" => {
+            let (anb, of) = split_anb_of(arg.unwrap_or_default());
+            return match of {
+                Some(list) => P::NthChildOf(parse_anb(anb), parse_nested_list(list)),
+                None => P::NthChild(parse_anb(anb)),
+            };
+        }
+        "nth-last-child" if split_anb_of(arg.unwrap_or_default()).1.is_some() => {
+            return P::Other(name.into());
+        }
+        _ => {}
+    }
+    match lowered_name.as_str() {
         "hover" => P::Hover,
         "focus" => P::Focus,
         "focus-visible" => P::FocusVisible,
@@ -204,12 +245,120 @@ fn lower_pseudo_class(name: &str, arg: Option<&str>) -> style::PseudoClassSelect
         "only-child" => P::OnlyChild,
         "root" => P::Root,
         "empty" => P::Empty,
-        "nth-child" => P::NthChild(parse_anb(arg.unwrap_or_default())),
         "nth-last-child" => P::NthLastChild(parse_anb(arg.unwrap_or_default())),
         "nth-of-type" => P::NthOfType(parse_anb(arg.unwrap_or_default())),
         "nth-last-of-type" => P::NthLastOfType(parse_anb(arg.unwrap_or_default())),
         _ => P::Other(name.into()),
     }
+}
+
+/// Re-parses the raw argument text of a selector-list pseudo-class into the
+/// lowered `obscur-style` [`style::SelectorList`].
+///
+/// The selector parser captures a functional pseudo-class's argument as raw
+/// source text (it is grammar-dependent), so the nested list is parsed here, on
+/// demand. Argument text that does not parse — and the empty argument — yields
+/// an **empty** list, which matches nothing and contributes zero specificity:
+/// that is what selectors-4 §4.2 prescribes for an empty `:is()` list ("the
+/// pseudo-class is valid but matches nothing"), and it is the fail-closed answer
+/// for the malformed case. Note this is *not* the full `<forgiving-selector-list>`
+/// behaviour: one invalid selector discards the whole list rather than only
+/// itself.
+fn parse_nested_list(arg: &str) -> style::SelectorList {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return style::SelectorList::default();
+    }
+    let source = CssSource::anonymous(trimmed);
+    SelectorParser::new()
+        .parse(&source)
+        .map(|list| SelectorCompiler::lower_list(&list))
+        .unwrap_or_default()
+}
+
+/// The `<forgiving-selector-list>` of selectors-4 §16.1, for `:is()` and
+/// `:where()` — "parses each selector in the list individually, simply ignoring
+/// ones that fail to parse, so the remaining selectors can still be used."
+fn parse_forgiving_list(arg: &str) -> style::SelectorList {
+    parse_nested_list(arg)
+}
+
+/// The ordinary, **unforgiving** selector list `:not()` and `:has()` take, and
+/// the reason they cannot share the forgiving path.
+///
+/// Returning [`None`] for an unparsable argument is not a stylistic choice: an
+/// empty `:not()` list matches *every element*, because `!any([])` is `!false`.
+/// So the tolerant reading fails **open** — `:not(em, %%%)` would silently drop
+/// the valid `em` branch and turn "everything except em" into "everything,
+/// unconditionally", which is the opposite of what the author wrote. The caller
+/// maps [`None`] to an unrecognised pseudo-class, which matches nothing.
+fn parse_strict_list(arg: &str) -> Option<style::SelectorList> {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let source = CssSource::anonymous(trimmed);
+    let parsed = SelectorParser::new().parse(&source).ok()?;
+    let lowered = SelectorCompiler::lower_list(&parsed);
+    // A list that lowered to nothing had no usable branch at all.
+    (!lowered.selectors().is_empty()).then_some(lowered)
+}
+
+/// Splits a `:nth-child()` / `:nth-last-child()` argument into its `An+B` part
+/// and the optional `of S` selector list (selectors-4 §13.3.1:
+/// `:nth-child( <an+b> [of <complex-real-selector-list>]? )`).
+///
+/// The split is made at the first `of` **keyword** — an `of` that stands alone as
+/// an identifier at bracket depth zero — so the `of` inside `-n+3 of .of-item`
+/// or inside `[data-of]` is not mistaken for the separator. Returns the whole
+/// argument and [`None`] when there is no such keyword.
+fn split_anb_of(arg: &str) -> (&str, Option<&str>) {
+    let bytes = arg.as_bytes();
+    let mut depth: i32 = 0;
+    let mut quote: Option<u8> = None;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if let Some(q) = quote {
+            if b == b'\\' {
+                i += 2;
+                continue;
+            }
+            if b == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        match b {
+            b'"' | b'\'' => quote = Some(b),
+            b'(' | b'[' => depth += 1,
+            b')' | b']' => depth -= 1,
+            b'o' | b'O'
+                if depth == 0
+                    && i + 1 < bytes.len()
+                    && bytes[i + 1].eq_ignore_ascii_case(&b'f')
+                    && !is_ident_byte(if i == 0 {
+                        None
+                    } else {
+                        bytes.get(i - 1).copied()
+                    })
+                    && !is_ident_byte(bytes.get(i + 2).copied()) =>
+            {
+                return (&arg[..i], Some(&arg[i + 2..]));
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    (arg, None)
+}
+
+/// Returns whether `byte` would continue a CSS identifier, so that an `of` with
+/// such a neighbour is part of a longer name rather than the `of` keyword. A
+/// missing byte — the start or the end of the argument — is not one.
+fn is_ident_byte(byte: Option<u8>) -> bool {
+    byte.is_some_and(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// Parses an `An+B` micro-syntax argument into an [`style::AnB`].
@@ -247,24 +396,6 @@ fn parse_anb(arg: &str) -> style::AnB {
     style::AnB::new(0, lower.parse::<i32>().unwrap_or(0))
 }
 
-/// Sums the specificity contributions of one compound selector's parts.
-fn compound_specificity(compound: &ParsedCompoundSelector) -> SelectorSpecificity {
-    let mut a: u16 = 0;
-    let mut b: u16 = 0;
-    let mut c: u16 = 0;
-    for part in &compound.parts {
-        match part {
-            SimpleSelector::Id(_) => a = a.saturating_add(1),
-            SimpleSelector::Class(_)
-            | SimpleSelector::Attribute { .. }
-            | SimpleSelector::PseudoClass { .. } => b = b.saturating_add(1),
-            SimpleSelector::Type(_) | SimpleSelector::PseudoElement(_) => c = c.saturating_add(1),
-            SimpleSelector::Universal => {}
-        }
-    }
-    SelectorSpecificity::new(a, b, c)
-}
-
 /// Records the constructs the kit recognises but cannot honour, found anywhere
 /// in the complex selector (§4.13): the excluded dynamic-state pseudo-classes
 /// (`:link`, `:visited`, `:target`) and every pseudo-element.
@@ -279,7 +410,9 @@ fn collect_unsupported(
     for compound in compounds {
         for part in &compound.parts {
             match part {
-                SimpleSelector::PseudoClass { name, .. } if is_excluded_pseudo(name) => {
+                SimpleSelector::PseudoClass { name, arg }
+                    if is_excluded_pseudo(name, arg.as_deref()) =>
+                {
                     unsupported.push(UnsupportedCssFeature::new(
                         UnsupportedFeatureKind::Selector,
                         format!(":{name}"),
@@ -302,11 +435,22 @@ fn collect_unsupported(
     }
 }
 
-/// Returns whether a pseudo-class name is one the kit excludes (§4.13).
-fn is_excluded_pseudo(name: &str) -> bool {
+/// Returns whether a pseudo-class is one the kit excludes (§4.13).
+///
+/// Three are excluded by policy — the dynamic-state `:link`, `:visited` and
+/// `:target`. Two more are excluded because deciding them requires navigating
+/// *forward* from the subject, which the matcher's `MatchElement` seam cannot
+/// do: `:has()`, and `:nth-last-child()` **only in its `of S` form** (the plain
+/// `:nth-last-child(An+B)` is decided from the sibling count and is fully
+/// supported). All five lower to something that matches nothing, so the
+/// diagnostic is what keeps the rule from being a silent drop.
+fn is_excluded_pseudo(name: &str, arg: Option<&str>) -> bool {
     name.eq_ignore_ascii_case("link")
         || name.eq_ignore_ascii_case("visited")
         || name.eq_ignore_ascii_case("target")
+        || name.eq_ignore_ascii_case("has")
+        || (name.eq_ignore_ascii_case("nth-last-child")
+            && split_anb_of(arg.unwrap_or_default()).1.is_some())
 }
 
 #[cfg(test)]
@@ -583,6 +727,143 @@ mod tests {
             lowered.selectors()[0].subject().simples(),
             &[style::SimpleSelector::Class("a".into())]
         );
+    }
+
+    // ---- selector-list pseudo-classes --------------------------------------
+
+    /// selectors-4 §15: ":is(em, #foo) has a specificity of (1,0,0)"; and
+    /// ":not(em, strong#foo)" is (1,0,1).
+    #[test]
+    fn is_and_not_take_their_most_specific_argument() {
+        assert_eq!(
+            specificity(":is(em, #foo)"),
+            SelectorSpecificity::new(1, 0, 0)
+        );
+        assert_eq!(
+            specificity(":not(em, strong#foo)"),
+            SelectorSpecificity::new(1, 0, 1)
+        );
+        // The replacement is per-pseudo-class, so the rest of the compound still
+        // counts: `.qux:is(#foo)` is (1,1,0).
+        assert_eq!(
+            specificity(".qux:is(#foo)"),
+            SelectorSpecificity::new(1, 1, 0)
+        );
+    }
+
+    /// selectors-4 §15: ".qux:where(em, #foo#bar#baz) has a specificity of
+    /// (0,1,0): only the .qux outside the :where() contributes."
+    #[test]
+    fn where_contributes_zero_specificity() {
+        assert_eq!(
+            specificity(".qux:where(em, #foo#bar#baz)"),
+            SelectorSpecificity::new(0, 1, 0)
+        );
+    }
+
+    /// selectors-4 §13.3.1: "S:nth-child(An+B) and :nth-child(An+B of S) have
+    /// the exact same specificity".
+    #[test]
+    fn nth_child_of_s_ties_with_the_compound_form() {
+        assert_eq!(
+            specificity(":nth-child(-n+3 of li.important)"),
+            specificity("li.important:nth-child(-n+3)")
+        );
+        assert_eq!(
+            specificity(":nth-child(-n+3 of li.important)"),
+            SelectorSpecificity::new(0, 2, 1)
+        );
+    }
+
+    #[test]
+    fn lowers_is_where_not_and_has_to_their_selector_lists() {
+        use style::PseudoClassSelector as P;
+        let arg = |text: &str| match &lower_subject_simples(text)[0] {
+            style::SimpleSelector::PseudoClass(
+                P::Is(list) | P::Where(list) | P::Not(list) | P::Has(list),
+            ) => list.clone(),
+            other => panic!("expected a selector-list pseudo-class, got {other:?}"),
+        };
+        for text in [
+            ":is(.a, #b)",
+            ":where(.a, #b)",
+            ":not(.a, #b)",
+            ":has(.a, #b)",
+        ] {
+            let list = arg(text);
+            assert_eq!(list.selectors().len(), 2, "for {text}");
+            assert_eq!(
+                list.selectors()[0].subject().simples(),
+                &[style::SimpleSelector::Class("a".into())],
+                "for {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn lowers_nth_child_of_s_and_keeps_the_bare_form_allocation_free() {
+        use style::PseudoClassSelector as P;
+        match &lower_subject_simples(":nth-child(-n+3 of .li.important)")[0] {
+            style::SimpleSelector::PseudoClass(P::NthChildOf(anb, list)) => {
+                assert_eq!(*anb, style::AnB::new(-1, 3));
+                assert_eq!(list.selectors().len(), 1);
+            }
+            other => panic!("expected nth-child-of, got {other:?}"),
+        }
+        assert!(matches!(
+            &lower_subject_simples(":nth-child(-n+3)")[0],
+            style::SimpleSelector::PseudoClass(P::NthChild(_))
+        ));
+    }
+
+    /// A malformed or empty argument list matches nothing and scores zero,
+    /// rather than being silently treated as "everything".
+    #[test]
+    fn unparseable_or_empty_argument_yields_an_empty_list() {
+        use style::PseudoClassSelector as P;
+        for text in [":is()", ":is(> )"] {
+            match &lower_subject_simples(text)[0] {
+                style::SimpleSelector::PseudoClass(P::Is(list)) => {
+                    assert!(list.is_empty(), "for {text}");
+                }
+                other => panic!("expected :is, got {other:?}"),
+            }
+            assert_eq!(specificity(text), SelectorSpecificity::ZERO, "for {text}");
+        }
+    }
+
+    #[test]
+    fn has_and_nth_last_child_of_s_are_reported_unsupported() {
+        let mut compiler = SelectorCompiler::new();
+        let mut unsupported = Vec::new();
+        let _ = compiler.compile(&selector(".card:has(.badge)"), &mut unsupported);
+        let _ = compiler.compile(&selector(":nth-last-child(-n+3 of .li)"), &mut unsupported);
+        assert_eq!(unsupported.len(), 2);
+        assert_eq!(unsupported[0].name(), ":has");
+        assert_eq!(unsupported[1].name(), ":nth-last-child");
+        // The plain form stays supported and modelled.
+        let mut plain = Vec::new();
+        let _ = compiler.compile(&selector(":nth-last-child(2)"), &mut plain);
+        assert!(plain.is_empty());
+        assert!(matches!(
+            &lower_subject_simples(":nth-last-child(2)")[0],
+            style::SimpleSelector::PseudoClass(style::PseudoClassSelector::NthLastChild(_))
+        ));
+    }
+
+    #[test]
+    fn split_anb_of_finds_only_the_standalone_keyword() {
+        assert_eq!(split_anb_of("2n+1"), ("2n+1", None));
+        assert_eq!(
+            split_anb_of("-n+3 of .li.important"),
+            ("-n+3 ", Some(" .li.important"))
+        );
+        // `of` inside a class name is not the separator.
+        assert_eq!(split_anb_of("2 of .of-item"), ("2 ", Some(" .of-item")));
+        assert_eq!(split_anb_of("2n"), ("2n", None));
+        // Nor is one nested inside brackets or a string.
+        assert_eq!(split_anb_of("2n+1 [data-of]"), ("2n+1 [data-of]", None));
+        assert_eq!(split_anb_of("2n+1 [x=\"of\"]"), ("2n+1 [x=\"of\"]", None));
     }
 
     #[test]

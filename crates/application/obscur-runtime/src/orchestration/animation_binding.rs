@@ -2,7 +2,7 @@
 //! [`AnimationBinding`] and its [`AnimatedKind`].
 
 use obscur_identity::NodeId;
-use obscur_motion::timeline::TimelineId;
+use obscur_motion::timeline::{FillMode, TimelineId};
 use obscur_motion::track::KeyframeTrack;
 use obscur_style::property::{Length, PropertyId, PropertyValue};
 
@@ -56,6 +56,9 @@ pub struct AnimationBinding {
     track: KeyframeTrack,
     /// How a sampled scalar becomes a [`PropertyValue`].
     kind: AnimatedKind,
+    /// Whether the value applies during the timeline's start delay
+    /// (css-animations-1 §3.9 `animation-fill-mode`).
+    fill: FillMode,
 }
 
 impl AnimationBinding {
@@ -75,7 +78,21 @@ impl AnimationBinding {
             property,
             track,
             kind,
+            fill: FillMode::None,
         }
+    }
+
+    /// Sets the fill mode, returning the updated binding.
+    #[must_use]
+    pub fn with_fill(mut self, fill: FillMode) -> Self {
+        self.fill = fill;
+        self
+    }
+
+    /// Returns the fill mode.
+    #[must_use]
+    pub fn fill(&self) -> FillMode {
+        self.fill
     }
 
     /// Returns the driving timeline's id.

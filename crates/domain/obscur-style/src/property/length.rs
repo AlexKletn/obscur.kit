@@ -68,6 +68,27 @@ pub enum Length {
     /// A viewport-relative `vmax` length: this many percent of the larger
     /// viewport dimension.
     Vmax(f32),
+    /// A container-relative `cqw` length: this many percent of the query
+    /// container's width. See [`LengthContext::container_width`] for what it
+    /// resolves against here.
+    ///
+    /// [`LengthContext::container_width`]: crate::property::LengthContext::container_width
+    Cqw(f32),
+    /// A container-relative `cqh` length: this many percent of the query
+    /// container's height.
+    Cqh(f32),
+    /// A container-relative `cqi` length: this many percent of the query
+    /// container's inline size.
+    Cqi(f32),
+    /// A container-relative `cqb` length: this many percent of the query
+    /// container's block size.
+    Cqb(f32),
+    /// A container-relative `cqmin` length: this many percent of the smaller of
+    /// the `cqi` and `cqb` bases.
+    Cqmin(f32),
+    /// A container-relative `cqmax` length: this many percent of the larger of
+    /// the `cqi` and `cqb` bases.
+    Cqmax(f32),
 }
 
 impl Length {
@@ -152,6 +173,12 @@ impl Length {
             Self::Vh(pct) => Some(pct / 100.0 * ctx.viewport_height),
             Self::Vmin(pct) => Some(pct / 100.0 * ctx.viewport_min()),
             Self::Vmax(pct) => Some(pct / 100.0 * ctx.viewport_max()),
+            Self::Cqw(pct) => Some(pct / 100.0 * ctx.container_width()),
+            Self::Cqh(pct) => Some(pct / 100.0 * ctx.container_height()),
+            Self::Cqi(pct) => Some(pct / 100.0 * ctx.container_inline()),
+            Self::Cqb(pct) => Some(pct / 100.0 * ctx.container_block()),
+            Self::Cqmin(pct) => Some(pct / 100.0 * ctx.container_min()),
+            Self::Cqmax(pct) => Some(pct / 100.0 * ctx.container_max()),
             Self::Percent(pct) => ctx.percent_basis.map(|basis| pct / 100.0 * basis),
             Self::Auto => None,
         }
@@ -285,6 +312,31 @@ mod tests {
         assert_eq!(Length::Vh(10.0).resolve_px(&ctx()), Some(60.0)); // 10% of 600
         assert_eq!(Length::Vmin(10.0).resolve_px(&ctx()), Some(60.0)); // 10% of 600
         assert_eq!(Length::Vmax(10.0).resolve_px(&ctx()), Some(80.0)); // 10% of 800
+    }
+
+    /// css-contain-3 §6: with no eligible query container, each container unit
+    /// falls back to the small viewport size *for that axis* — so `cqw`/`cqi`
+    /// track the width and `cqh`/`cqb` the height, and `cqmin`/`cqmax` are the
+    /// smaller/larger of the inline and block bases.
+    #[test]
+    fn container_units_fall_back_to_the_viewport_per_axis() {
+        // ctx() is 800x600.
+        assert_eq!(Length::Cqw(50.0).resolve_px(&ctx()), Some(400.0));
+        assert_eq!(Length::Cqh(50.0).resolve_px(&ctx()), Some(300.0));
+        assert_eq!(Length::Cqi(50.0).resolve_px(&ctx()), Some(400.0));
+        assert_eq!(Length::Cqb(50.0).resolve_px(&ctx()), Some(300.0));
+        assert_eq!(Length::Cqmin(10.0).resolve_px(&ctx()), Some(60.0));
+        assert_eq!(Length::Cqmax(10.0).resolve_px(&ctx()), Some(80.0));
+    }
+
+    /// Container units carry no basis a later pass could improve on (no element
+    /// in this engine accepts container size queries — see
+    /// `LengthContext::container_width`), so they retire at the computed-value
+    /// step like the viewport units rather than staying symbolic.
+    #[test]
+    fn container_units_absolutize_at_the_computed_value_step() {
+        assert_eq!(Length::Cqi(50.0).absolutize(&ctx()), Length::px(400.0));
+        assert_eq!(Length::Cqb(50.0).absolutize(&ctx()), Length::px(300.0));
     }
 
     #[test]
