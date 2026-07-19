@@ -1,0 +1,265 @@
+//! **SPECIFICATION-DERIVED** headless-mode cases for obscur.kit §7.4.
+//!
+//! Every expected value below was produced by an agent reading obscur.kit §7.4
+//! (with §3.5's "animation progress is sampled from time/value, never slowed to
+//! match missed frames") with **no access to this repository's source**. A
+//! failure here is a defect report about the engine.
+#![forbid(unsafe_code)]
+
+#[path = "spec_ch7_support/mod.rs"]
+mod support;
+
+use obscur_kit::bootstrap::CssPipeline;
+use obscur_kit::css::source::CssSource;
+use obscur_kit::geometry::Point;
+use obscur_kit::headless::input::{
+    PointerButton, SelectorTarget, SyntheticDispatcher, SyntheticInput,
+};
+use obscur_kit::identity::ComponentId;
+use obscur_kit::runtime::UiRuntime;
+use obscur_kit::scene::command::PaintCommand;
+use obscur_kit::style::selector::PseudoState;
+use obscur_kit::view::view::{CLASS, TYPE, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
+use support::{at, drive, el, geom, runtime, txt, view};
+
+const VW: f32 = 1000.0;
+
+/// A `.b` box under a `.c` container, wired to a `width` transition that a
+/// `:hover` on the box starts.
+struct Animated {
+    rt: UiRuntime,
+    css: CssPipeline,
+    v: View,
+}
+
+impl Animated {
+    fn new() -> Self {
+        let mut rt = runtime(VW, VW);
+        let mut css = CssPipeline::new();
+        css.install(
+            &mut rt,
+            &[CssSource::anonymous(
+                ".c { width: 400px; height: 40px } \
+                 .b { width: 0px; height: 10px; transition: width 300ms linear } \
+                 .b:hover { width: 300px }",
+            )],
+        );
+        let v = view(vec![el(1, "c", vec![el(2, "b", vec![])])]);
+        let mut host = Self { rt, css, v };
+        host.frame();
+        host
+    }
+
+    fn frame(&mut self) {
+        let sheets = self.css.sheets().to_vec();
+        let _ = self.rt.render_now(&self.v, &sheets);
+    }
+
+    fn start(&mut self) {
+        let node = at(&self.rt, &[0, 0]);
+        self.rt.set_pseudo_state(node, PseudoState::HOVER);
+        self.frame();
+    }
+
+    /// Advances the deterministic clock by `ms` milliseconds and produces a frame.
+    fn advance_ms(&mut self, ms: u32) {
+        self.rt.advance_motion(f64::from(ms) as f32 / 1000.0);
+        self.frame();
+    }
+
+    fn width(&self) -> f32 {
+        geom(&self.rt, at(&self.rt, &[0, 0])).2
+    }
+}
+
+/// §7.4: "Testing facilities:" / "- deterministic clock;" with §3.5 "animation
+/// progress is sampled from time/value, never slowed to match missed frames."
+#[test]
+fn the_clock_is_sampled_not_accumulated() {
+    let mut a = Animated::new();
+    a.start();
+    a.advance_ms(150);
+    let run_a = a.width();
+
+    let mut b = Animated::new();
+    b.start();
+    for _ in 0..15 {
+        b.advance_ms(10);
+    }
+    let run_b = b.width();
+
+    let mut c = Animated::new();
+    c.start();
+    c.advance_ms(7);
+    c.advance_ms(143);
+    let run_c = c.width();
+
+    assert_eq!(run_a, 150.0_f32, "one 150ms step samples the track at 150");
+    assert_eq!(
+        run_b, 150.0_f32,
+        "fifteen 10ms steps sample the track at 150 — no per-frame drift"
+    );
+    assert_eq!(
+        run_c, 150.0_f32,
+        "a 7ms then a 143ms step sample the track at 150"
+    );
+    assert_eq!(run_a, run_b, "run A and run B agree bit-for-bit");
+    assert_eq!(run_b, run_c, "run B and run C agree bit-for-bit");
+}
+
+/// §7.4: "Testing facilities:" / "- deterministic clock;" / "- deterministic
+/// executor;".
+#[test]
+fn real_time_does_not_leak_into_the_deterministic_clock() {
+    let mut a = Animated::new();
+    a.start();
+    let at_zero = a.width();
+
+    // Two real seconds pass without the deterministic clock being advanced.
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    a.frame();
+
+    assert_eq!(
+        a.width(),
+        at_zero,
+        "blocking the thread for two real seconds must not advance the animation"
+    );
+
+    a.advance_ms(300);
+    assert_eq!(
+        a.width(),
+        300.0_f32,
+        "advancing the deterministic clock by 300ms reaches the end exactly once"
+    );
+}
+
+/// §7.4, verbatim: "Official headless mode operates without window or GPU." and
+/// "It can output:" / "- scene;" / "- paint;" / "- render graph;" /
+/// "- rendered image;".
+#[test]
+fn scene_paint_and_accessibility_are_produced_without_a_renderer() {
+    let v = view(vec![el(1, "box", vec![txt("hello")])]);
+    let rt = drive(
+        VW,
+        VW,
+        ".box { width: 100px; height: 40px; background-color: #ff0000; color: #000000 }",
+        &v,
+    );
+
+    let snapshot = rt.snapshot();
+    let commands = snapshot.display_list().commands();
+
+    let fills = commands
+        .iter()
+        .filter(|c| matches!(c, PaintCommand::DrawPath { .. }))
+        .count();
+    assert!(
+        fills >= 1,
+        "the scene carries the fill command with its geometry, got {commands:?}"
+    );
+
+    let texts = commands
+        .iter()
+        .filter(|c| matches!(c, PaintCommand::DrawText { .. }))
+        .count();
+    assert!(
+        texts >= 1,
+        "the scene carries the text draw, got {commands:?}"
+    );
+
+    let a11y = rt.semantic_snapshot();
+    assert!(
+        !a11y.is_empty(),
+        "the accessibility tree is produced with no renderer registered"
+    );
+}
+
+/// A button-typed element with `class`, sized by the stylesheet.
+fn button(id: u64, class: &str) -> ViewNode {
+    ViewNode::element(ComponentId::from_raw(id))
+        .with_prop(ViewProperty::new(TYPE, ViewValue::Text("button".into())))
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
+        .with_children(ViewFragment::from_nodes(vec![ViewNode::text(class)]))
+}
+
+/// §7.4: "Dispatch results may include:" / "- target;" / "- propagation path;" /
+/// "- default action;" / "- focus changes;" / "- state changes;" /
+/// "- layout changes;".
+#[test]
+fn a_dispatch_result_reports_a_focus_change_only_when_focus_moved() {
+    let css = ".panel { width: 400px; height: 200px } \
+               .a { width: 100px; height: 40px } \
+               .b { width: 100px; height: 40px } \
+               .bg { width: 400px; height: 100px }";
+
+    let v = view(vec![
+        ViewNode::element(ComponentId::from_raw(1))
+            .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+            .with_children(ViewFragment::from_nodes(vec![
+                button(2, "a"),
+                button(3, "b"),
+                ViewNode::element(ComponentId::from_raw(4))
+                    .with_prop(ViewProperty::new(CLASS, ViewValue::Text("bg".into()))),
+            ])),
+    ]);
+
+    let mut rt = drive(VW, VW, css, &v);
+    let a = at(&rt, &[0, 0]);
+    let b = at(&rt, &[0, 1]);
+    let background = at(&rt, &[0, 2]);
+
+    let a_box = geom(&rt, a);
+    let b_box = geom(&rt, b);
+    let bg_box = geom(&rt, background);
+
+    let centre = |g: (f32, f32, f32, f32)| Point::new(g.0 + g.2 / 2.0, g.1 + g.3 / 2.0);
+    let dispatcher = SyntheticDispatcher::new();
+    let click = |rt: &mut UiRuntime, p: Point| {
+        dispatcher.dispatch(
+            rt,
+            &SyntheticInput::pointer_down(SelectorTarget::coordinate(p), PointerButton::Primary),
+        );
+        dispatcher.dispatch(
+            rt,
+            &SyntheticInput::pointer_up(SelectorTarget::coordinate(p), PointerButton::Primary),
+        )
+    };
+
+    // Seat focus on A first, so the click on B is a genuine A -> B move.
+    let _ = click(&mut rt, centre(a_box));
+    assert_eq!(rt.focused(), Some(a), "clicking A focuses A");
+
+    // (i) A synthetic click at B's centre.
+    let on_b = click(&mut rt, centre(b_box));
+    assert_eq!(on_b.target, Some(b), "(i) target = B");
+    assert!(
+        on_b.propagates_through(b) && on_b.propagates_through(at(&rt, &[0])),
+        "(i) the propagation path lists Root..Panel..B, got {:?}",
+        on_b.propagation_path
+    );
+    assert!(
+        on_b.focus_changed,
+        "(i) focus changes report exactly the move from A to B"
+    );
+    assert_eq!(rt.focused(), Some(b), "(i) focus is now on B");
+
+    // (ii) A synthetic click on a non-interactive background node.
+    let on_bg = click(&mut rt, centre(bg_box));
+    assert_eq!(
+        on_bg.target,
+        Some(background),
+        "(ii) target = the background node"
+    );
+    assert!(
+        !on_bg.propagation_path.is_empty(),
+        "(ii) the propagation path is non-empty"
+    );
+    assert!(
+        !on_bg.focus_changed,
+        "(ii) focus changes are EMPTY for a no-op dispatch"
+    );
+    assert_eq!(
+        on_bg.command, None,
+        "(ii) state changes are EMPTY: no default action fired"
+    );
+}

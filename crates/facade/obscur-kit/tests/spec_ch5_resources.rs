@@ -1,0 +1,321 @@
+//! **SPECIFICATION-DERIVED** Resource-Hub and startup cases for obscur.kit §5.15
+//! ("Resource Hub") and §5.21 ("Startup").
+//!
+//! Every expected value below was produced by an agent reading obscur.kit §5 with
+//! **no access to this repository's source**.
+#![forbid(unsafe_code)]
+#![cfg(all(feature = "resource-decode", feature = "render-cpu"))]
+
+#[path = "spec_ch5_support/mod.rs"]
+mod support;
+
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use obscur_kit::diagnostics::{Diagnostic, DiagnosticSink};
+use obscur_kit::geometry::Size;
+use obscur_kit::identity::RuntimeId;
+use obscur_kit::primitives::Image;
+use obscur_kit::resources::hub::{ResourceHub, ResourceRequest};
+use obscur_kit::resources::port::{DecodedResource, LoadedBytes, ResourceDecoder, ResourceLoader};
+use obscur_kit::resources::source::{MemorySource, ResourceSource};
+use obscur_kit::resources::state::{ResourceError, ResourceMetadata};
+use obscur_kit::resources::{ResourceHandle, ResourceKind};
+use obscur_kit::runtime::UiRuntime;
+use obscur_kit::scene::command::PaintCommand;
+use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewProperty, ViewValue};
+
+use support::{at, compile, geom};
+
+/// The viewport every case renders under.
+const VW: f32 = 200.0;
+
+/// A diagnostic sink that records every diagnostic the runtime emits.
+struct Recorder {
+    seen: Rc<RefCell<Vec<Diagnostic>>>,
+}
+
+impl DiagnosticSink for Recorder {
+    fn emit(&self, diagnostic: &Diagnostic) {
+        self.seen.borrow_mut().push(diagnostic.clone());
+    }
+}
+
+/// A loader that counts its invocations and hands back fixed bytes.
+struct CountingLoader {
+    calls: Arc<AtomicUsize>,
+    bytes: Arc<[u8]>,
+}
+
+impl ResourceLoader for CountingLoader {
+    fn can_load(&self, _source: &ResourceSource) -> bool {
+        true
+    }
+
+    fn load(&self, _source: &ResourceSource) -> Result<LoadedBytes, ResourceError> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        Ok(LoadedBytes::new(
+            Arc::clone(&self.bytes),
+            ResourceMetadata::new(),
+        ))
+    }
+}
+
+/// A loader that never yields bytes — the "loader that never completes" of §5.21.
+struct NeverLoader {
+    calls: Arc<AtomicUsize>,
+}
+
+impl ResourceLoader for NeverLoader {
+    fn can_load(&self, _source: &ResourceSource) -> bool {
+        true
+    }
+
+    fn load(&self, _source: &ResourceSource) -> Result<LoadedBytes, ResourceError> {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        Err(ResourceError::Cancelled)
+    }
+}
+
+/// A decoder that refuses everything, so a failure is a *state*, not a panic.
+struct GarbageDecoder;
+
+impl ResourceDecoder for GarbageDecoder {
+    fn supports(&self, _kind: ResourceKind) -> bool {
+        true
+    }
+
+    fn decode(&self, _kind: ResourceKind, _bytes: &[u8]) -> Result<DecodedResource, ResourceError> {
+        Err(ResourceError::DecodeFailed("not an image".into()))
+    }
+}
+
+/// §5.15 "Features: … - versioning; - stale-job rejection; - development hot
+/// reload;".
+///
+/// A job that started under version 1 and finishes *after* a hot reload to
+/// version 2 must be discarded — last-writer-wins is correct in almost every
+/// ordering, which is exactly why the inverted order has to be driven explicitly.
+#[test]
+fn rs_01_a_stale_decode_job_is_rejected() {
+    let mut hub = ResourceHub::new();
+    let handle: ResourceHandle = hub.request(ResourceRequest::new(
+        ResourceSource::memory(MemorySource::new(vec![1_u8, 2, 3])),
+        ResourceKind::Image,
+    ));
+
+    // Version 1's job starts but does not complete.
+    let v1 = hub.begin_load(handle).expect("v1 begins");
+
+    // A hot reload supersedes it; version 2's job completes first.
+    let v2 = hub.reload(handle).expect("v2 supersedes v1");
+    assert!(v2.is_newer_than(v1), "the reload advanced the version");
+    let v2_metadata = ResourceMetadata::new().with_byte_size(2);
+    assert!(
+        hub.complete(handle, v2, v2_metadata.clone()),
+        "v2's completion is accepted"
+    );
+    assert_eq!(
+        hub.state(handle).and_then(|s| s.version()),
+        Some(v2),
+        "the handle is at version 2"
+    );
+
+    // Now version 1's job finishes — late. It must be discarded.
+    let v1_metadata = ResourceMetadata::new().with_byte_size(1);
+    assert!(
+        !hub.complete(handle, v1, v1_metadata),
+        "the stale v1 completion is REJECTED"
+    );
+    assert_eq!(
+        hub.state(handle).and_then(|s| s.version()),
+        Some(v2),
+        "the handle's version stays 2"
+    );
+    assert_eq!(
+        hub.state(handle)
+            .and_then(|s| s.metadata())
+            .and_then(obscur_kit::resources::state::ResourceMetadata::byte_size),
+        Some(2),
+        "v2's result survives; the v1 result did not overwrite it"
+    );
+}
+
+/// §5.15 "The kit does not perform arbitrary network access by itself." With §4.13
+/// "Excluded or restricted: … - arbitrary network loading via `url()` and
+/// `@import`;".
+#[test]
+fn rs_02_no_loader_means_no_implicit_network_access() {
+    let seen: Rc<RefCell<Vec<Diagnostic>>> = Rc::default();
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VW, VW));
+    runtime.set_diagnostic_sink(Box::new(Recorder {
+        seen: Rc::clone(&seen),
+    }));
+    // NO loader and NO decoder are installed.
+
+    let sheet = compile(
+        ".a{position:absolute;left:0;top:0;width:50px;height:50px;\
+            background-image:url(\"https://example.com/a.png\")}\
+         .b{position:absolute;left:60px;top:0;width:50px;height:50px}",
+    );
+    let remote = Image::new("https://example.com/b.png")
+        .into_view_node()
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("b".into())));
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![
+        support::el(10, "a", vec![]),
+        remote,
+    ]));
+
+    // Render until both handles settle. No panic at any point.
+    for _ in 0..5 {
+        let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+    }
+
+    assert_eq!(
+        seen.borrow().len(),
+        2,
+        "two diagnostics, one per unreachable URL, naming their sources; got {:?}",
+        seen.borrow()
+            .iter()
+            .map(|d| (d.code.as_str(), d.message.clone()))
+            .collect::<Vec<_>>()
+    );
+
+    // Both nodes still lay out and the frame still presents.
+    let (_, _, w, h) = geom(&runtime, at(&runtime, &[0]));
+    assert_eq!((w, h), (50.0, 50.0), "the url() node still lays out");
+
+    // With a loader registered the kit routes through it — and only through it.
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut wired = UiRuntime::new(RuntimeId::from_raw(2), Size::new(VW, VW));
+    wired.set_resource_providers(
+        Arc::new(CountingLoader {
+            calls: Arc::clone(&calls),
+            bytes: Arc::from(vec![0_u8; 4]),
+        }),
+        Arc::new(GarbageDecoder),
+    );
+    for _ in 0..5 {
+        let _ = wired.render_now(&view, std::slice::from_ref(&sheet));
+    }
+    assert_eq!(
+        calls.load(Ordering::Relaxed),
+        2,
+        "the host loader is invoked exactly twice — once per URL — however many \
+         frames run"
+    );
+}
+
+/// §5.15 "- loading/ready/failed states;" with §1.6 "panic is not normal control
+/// flow;" and "failures should be localized to the smallest safe scope".
+#[test]
+fn rs_03_a_failed_load_is_a_state_not_a_panic_and_not_a_retry_loop() {
+    let seen: Rc<RefCell<Vec<Diagnostic>>> = Rc::default();
+    let calls = Arc::new(AtomicUsize::new(0));
+
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VW, VW));
+    runtime.set_diagnostic_sink(Box::new(Recorder {
+        seen: Rc::clone(&seen),
+    }));
+    runtime.set_resource_providers(
+        Arc::new(CountingLoader {
+            calls: Arc::clone(&calls),
+            // 12 bytes of non-image garbage.
+            bytes: Arc::from(b"not an image".to_vec()),
+        }),
+        Arc::new(GarbageDecoder),
+    );
+
+    let sheet = compile(".pic{position:absolute;left:0;top:0;width:40px;height:30px}");
+    let node = Image::new("garbage.png")
+        .into_view_node()
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("pic".into())));
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![node]));
+
+    for _ in 0..5 {
+        let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+    }
+
+    assert_eq!(
+        calls.load(Ordering::Relaxed),
+        1,
+        "the loader is invoked exactly once over five frames — no retry loop"
+    );
+    assert_eq!(
+        seen.borrow().len(),
+        1,
+        "exactly one diagnostic, with a stable code and the resource context; \
+         got {:?}",
+        seen.borrow()
+            .iter()
+            .map(|d| (d.code.as_str(), d.context.resource))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        seen.borrow()[0].context.resource.is_some(),
+        "the diagnostic carries the resource context (§1.6)"
+    );
+
+    // The node still participates in layout at its specified size.
+    let (_, _, w, h) = geom(&runtime, at(&runtime, &[0]));
+    assert_eq!(
+        (w, h),
+        (40.0, 30.0),
+        "the failed image node still lays out at its specified size"
+    );
+}
+
+/// §5.21 "Progressive startup targets: - minimal path to first interactive frame;
+/// … - no wait for all resources; - placeholders and fallback first; - later
+/// visual improvement."
+#[test]
+fn st_01_the_first_frame_does_not_wait_on_resources() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VW, VW));
+    runtime.set_resource_providers(
+        Arc::new(NeverLoader {
+            calls: Arc::clone(&calls),
+        }),
+        Arc::new(GarbageDecoder),
+    );
+
+    let sheet = compile(
+        ".pic{position:absolute;left:0;top:0;width:40px;height:30px}\
+         .label{position:absolute;left:0;top:40px;font-size:16px}",
+    );
+    let picture = Image::new("pending.png")
+        .into_view_node()
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("pic".into())));
+    let label = support::el(11, "label", vec![support::txt("Hello")]);
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![picture, label]));
+
+    // The very first frame is produced, with the resource still unresolved.
+    let result = runtime.render_now(&view, std::slice::from_ref(&sheet));
+    let list = result.snapshot().display_list().commands().to_vec();
+
+    // The image node lays out at its placeholder box.
+    let (_, _, w, h) = geom(&runtime, at(&runtime, &[0]));
+    assert_eq!(
+        (w, h),
+        (40.0, 30.0),
+        "the pending image node still occupies its box on the FIRST frame"
+    );
+
+    // The text paints with a fallback face and has non-zero advance — it is not
+    // invisible while a webfont is pending.
+    let advance: f32 = list
+        .iter()
+        .filter_map(|c| match c {
+            PaintCommand::DrawText { run, .. } => Some(run.advance()),
+            _ => None,
+        })
+        .sum();
+    assert!(
+        advance > 0.0,
+        "the label paints with a fallback face and non-zero advance on the \
+         first frame; the display list is {:?}",
+        list.iter().map(support::describe).collect::<Vec<_>>()
+    );
+}
