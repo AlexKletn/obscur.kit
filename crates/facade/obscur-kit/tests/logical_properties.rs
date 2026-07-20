@@ -48,8 +48,8 @@ fn item_origin(css: &str) -> (f32, f32) {
     runtime.render_now(&view(), std::slice::from_ref(&sheet));
 
     let root = runtime.tree().root().expect("a root");
-    let page = runtime.tree().get(root).expect("live").children()[0];
-    let item: NodeId = runtime.tree().get(page).expect("live").children()[0];
+    let page = runtime.tree().get(root).expect("live").child_nodes()[0];
+    let item: NodeId = runtime.tree().get(page).expect("live").child_nodes()[0];
     let layout = runtime
         .layout_boxes()
         .get(&item)

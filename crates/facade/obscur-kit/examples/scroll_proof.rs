@@ -183,9 +183,9 @@ fn scroller_view() -> View {
 /// Returns `(scroller node, [row nodes])` after a frame has populated the tree.
 fn scroll_nodes(runtime: &UiRuntime) -> (NodeId, Vec<NodeId>) {
     let root = runtime.tree().root().expect("root after a frame");
-    let page = runtime.tree().get(root).unwrap().children()[0];
-    let scroller = runtime.tree().get(page).unwrap().children()[0];
-    let rows = runtime.tree().get(scroller).unwrap().children().to_vec();
+    let page = runtime.tree().get(root).unwrap().child_nodes()[0];
+    let scroller = runtime.tree().get(page).unwrap().child_nodes()[0];
+    let rows = runtime.tree().get(scroller).unwrap().child_nodes().to_vec();
     (scroller, rows)
 }
 

@@ -46,7 +46,7 @@ fn one_box_view() -> View {
 /// The `.box` element [`NodeId`] after a frame.
 fn box_node(rt: &UiRuntime) -> NodeId {
     let root = rt.tree().root().expect("root after a frame");
-    rt.tree().get(root).unwrap().children().to_vec()[0]
+    rt.tree().get(root).unwrap().child_nodes().to_vec()[0]
 }
 
 /// The solid-fill `DrawPath` rectangles of `rt`'s last frame whose color equals
@@ -878,8 +878,8 @@ fn collapsed_content_box_occupies_its_border_widths() {
     let host = rt
         .tree()
         .root()
-        .and_then(|r| rt.tree().get(r).unwrap().children().first().copied());
-    let tri = host.and_then(|h| rt.tree().get(h).unwrap().children().first().copied());
+        .and_then(|r| rt.tree().get(r).unwrap().child_nodes().first().copied());
+    let tri = host.and_then(|h| rt.tree().get(h).unwrap().child_nodes().first().copied());
     let bounds = rt
         .layout_boxes()
         .get(&tri.unwrap())

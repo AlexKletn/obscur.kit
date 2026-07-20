@@ -73,7 +73,7 @@ fn view(count: usize) -> View {
 
 fn children(runtime: &UiRuntime) -> Vec<NodeId> {
     let root = runtime.tree().root().expect("a root after the first frame");
-    runtime.tree().get(root).unwrap().children().to_vec()
+    runtime.tree().get(root).unwrap().child_nodes().to_vec()
 }
 
 fn background(runtime: &UiRuntime, node: NodeId) -> Option<(f32, f32, f32)> {
@@ -260,8 +260,8 @@ fn hovering_an_ancestor_resolves_its_subtree_and_nothing_before_it() {
     let _ = runtime.render_now(&view, &sheets);
     let tops = children(&runtime);
     let (a, b) = (tops[0], tops[1]);
-    let a_leaf = runtime.tree().get(a).unwrap().children()[0];
-    let b_leaf = runtime.tree().get(b).unwrap().children()[0];
+    let a_leaf = runtime.tree().get(a).unwrap().child_nodes()[0];
+    let b_leaf = runtime.tree().get(b).unwrap().child_nodes()[0];
 
     // Hover `.a`. Its reach is `.a` + `.a`'s leaf, plus the following sibling
     // `.b` and its leaf (a `.a:hover + .b` rule would be legal). That is 4 of the

@@ -144,9 +144,9 @@ fn runtime_with_card() -> UiRuntime {
 fn rendered_text_at(runtime: &UiRuntime, path: &[usize]) -> Option<String> {
     let mut node = runtime.tree().root()?;
     for &index in path {
-        node = *runtime.tree().get(node)?.children().get(index)?;
+        node = *runtime.tree().get(node)?.child_nodes().get(index)?;
     }
-    let child = *runtime.tree().get(node)?.children().first()?;
+    let child = *runtime.tree().get(node)?.child_nodes().first()?;
     match runtime.tree().get(child)?.kind() {
         obscur_kit::tree::node::NodeKind::Text { content } => Some(content.to_string()),
         _ => None,
@@ -384,9 +384,9 @@ fn authored_children_under_a_component_that_declares_no_slot_are_dropped() {
         "the component's own output is what lands under its node"
     );
     let root = runtime.tree().root().expect("a root");
-    let card = runtime.tree().get(root).expect("live").children()[0];
+    let card = runtime.tree().get(root).expect("live").child_nodes()[0];
     assert_eq!(
-        runtime.tree().get(card).expect("live").children().len(),
+        runtime.tree().get(card).expect("live").child_nodes().len(),
         1,
         "a component declaring no slot has nowhere to put an authored child"
     );

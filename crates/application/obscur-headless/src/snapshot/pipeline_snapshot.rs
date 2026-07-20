@@ -355,7 +355,7 @@ mod tests {
         let child = {
             let tree = host.tree();
             let root = tree.root().expect("root");
-            tree.get(root).unwrap().children().first().copied()
+            tree.get(root).unwrap().child_nodes().first().copied()
         };
 
         let mut inputs = StyleInputs::new();

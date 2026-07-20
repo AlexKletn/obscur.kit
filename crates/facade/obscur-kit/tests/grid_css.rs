@@ -91,15 +91,15 @@ fn drive(css: &str, n: usize, width: f32, height: f32) -> (UiRuntime, Vec<NodeId
     );
     assert!(result.relaid_out(), "the styled tree arranged layout boxes");
     let root = rt.tree().root().expect("root after a frame");
-    let container = rt.tree().get(root).unwrap().children().to_vec()[0];
-    let kids = rt.tree().get(container).unwrap().children().to_vec();
+    let container = rt.tree().get(root).unwrap().child_nodes().to_vec()[0];
+    let kids = rt.tree().get(container).unwrap().child_nodes().to_vec();
     (rt, kids)
 }
 
 /// The single `.grid` container [`NodeId`].
 fn container(rt: &UiRuntime) -> NodeId {
     let root = rt.tree().root().expect("root after a frame");
-    rt.tree().get(root).unwrap().children().to_vec()[0]
+    rt.tree().get(root).unwrap().child_nodes().to_vec()[0]
 }
 
 /// The absolute origin `(x, y)` and size `(w, h)` of a node's layout box.

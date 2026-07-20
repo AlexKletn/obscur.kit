@@ -75,7 +75,7 @@ pub fn commit(rt: &mut UiRuntime, v: &View) {
 pub fn children(rt: &UiRuntime, node: NodeId) -> Vec<NodeId> {
     rt.tree()
         .get(node)
-        .map(|n| n.children().to_vec())
+        .map(|n| n.child_nodes().to_vec())
         .unwrap_or_default()
 }
 

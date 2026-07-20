@@ -262,6 +262,7 @@ impl TreeTransaction {
                             let at = index.min(parent_node.children.len());
                             parent_node.children.insert(at, id);
                         }
+                        tree.sync_element_children(parent_id);
                     }
                     created.push(id);
                 }
@@ -269,9 +270,11 @@ impl TreeTransaction {
                     // Detach from the current parent so no dangling link remains.
                     if let Some(node) = tree.get(target)
                         && let Some(parent_id) = node.logical_parent().parent()
-                        && let Some(parent_node) = tree.get_mut(parent_id)
                     {
-                        parent_node.remove_child(target);
+                        if let Some(parent_node) = tree.get_mut(parent_id) {
+                            parent_node.remove_child(target);
+                        }
+                        tree.sync_element_children(parent_id);
                     }
                     // Remove leaves first (reverse of pre-order).
                     let ids = Subtree::new(target).descendants(tree);
@@ -290,12 +293,19 @@ impl TreeTransaction {
                         let at = index.min(parent_node.children.len());
                         parent_node.children.insert(at, target);
                         moved.push(target);
+                        tree.sync_element_children(parent_id);
                     }
                 }
                 TreeChange::SetText { target, content } => {
+                    let parent_id = tree.get(target).and_then(|n| n.logical_parent().parent());
                     if let Some(node) = tree.get_mut(target) {
                         node.kind = NodeKind::Text { content };
                         updated.push(target);
+                    }
+                    // A node that becomes text is no longer a component-tree child
+                    // of its parent; refresh the parent's element-only projection.
+                    if let Some(parent_id) = parent_id {
+                        tree.sync_element_children(parent_id);
                     }
                 }
                 TreeChange::SetRoot { target } => {
@@ -355,7 +365,7 @@ impl TreeTransaction {
             return *count;
         }
         let base = match r {
-            StagedRef::Existing(id) => tree.get(id).map_or(0, |n| n.children().len()),
+            StagedRef::Existing(id) => tree.get(id).map_or(0, |n| n.child_nodes().len()),
             StagedRef::New(_) => 0,
         };
         projected.insert(r, base);
@@ -366,7 +376,7 @@ impl TreeTransaction {
     /// parent is live; `None` when `target` has no live parent.
     fn live_parent_child_count(tree: &RetainedTree, target: NodeId) -> Option<usize> {
         let parent_id = tree.get(target)?.logical_parent().parent()?;
-        Some(tree.get(parent_id)?.children().len())
+        Some(tree.get(parent_id)?.child_nodes().len())
     }
 
     /// Resolves a [`StagedRef`] to a concrete id at apply time.
@@ -451,7 +461,7 @@ mod tests {
         let len_before = tree.len();
         let root_children_before: Vec<NodeId> = tree
             .get(root)
-            .map(|n| n.children().to_vec())
+            .map(|n| n.child_nodes().to_vec())
             .unwrap_or_default();
 
         let mut tx = TreeTransaction::new();
@@ -468,7 +478,7 @@ mod tests {
         assert_eq!(tree.version(), version_before);
         assert_eq!(tree.len(), len_before);
         assert_eq!(
-            tree.get(root).map(|n| n.children().to_vec()),
+            tree.get(root).map(|n| n.child_nodes().to_vec()),
             Some(root_children_before)
         );
     }
@@ -492,11 +502,11 @@ mod tests {
 
         // Parent is under root; its children are [a, b] in staged order.
         assert_eq!(
-            tree.get(root).map(|n| n.children().to_vec()),
+            tree.get(root).map(|n| n.child_nodes().to_vec()),
             Some(vec![parent_id])
         );
         assert_eq!(
-            tree.get(parent_id).map(|n| n.children().to_vec()),
+            tree.get(parent_id).map(|n| n.child_nodes().to_vec()),
             Some(vec![child_a_id, child_b_id])
         );
         // Parents were wired on the created nodes.
@@ -526,7 +536,10 @@ mod tests {
         assert_eq!(commit2.removed().len(), 2);
         assert!(!tree.contains(a_id));
         // Root no longer links the removed child.
-        assert_eq!(tree.get(root).map(|n| n.children().to_vec()), Some(vec![]));
+        assert_eq!(
+            tree.get(root).map(|n| n.child_nodes().to_vec()),
+            Some(vec![])
+        );
     }
 
     #[test]
@@ -556,7 +569,7 @@ mod tests {
         assert_eq!(commit2.moved(), &[a_id]);
         assert_eq!(commit2.updated(), &[t_id]);
         assert_eq!(
-            tree.get(root).map(|n| n.children().to_vec()),
+            tree.get(root).map(|n| n.child_nodes().to_vec()),
             Some(vec![b_id, a_id, t_id])
         );
         assert_eq!(tree.get(t_id).and_then(|n| n.kind().text()), Some("new"));

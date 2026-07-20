@@ -173,7 +173,7 @@ fn text_of(rt: &UiRuntime) -> String {
         if let Some(text) = entry.kind().text() {
             return text.to_string();
         }
-        stack.extend(entry.children().iter().copied());
+        stack.extend(entry.child_nodes().iter().copied());
     }
     String::new()
 }

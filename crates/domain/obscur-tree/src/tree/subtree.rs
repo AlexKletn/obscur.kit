@@ -53,7 +53,7 @@ impl Subtree {
             };
             order.push(id);
             // Push children reversed so they pop in link order (pre-order DFS).
-            for &child in node.children().iter().rev() {
+            for &child in node.child_nodes().iter().rev() {
                 if !visited.contains(&child) {
                     stack.push(child);
                 }

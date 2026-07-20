@@ -164,7 +164,7 @@ fn arch_22_the_failed_slot_holds_fallback_ui_that_lays_out_and_hit_tests() {
             || rt
                 .tree()
                 .get(c2)
-                .is_some_and(|n| n.children().contains(&hit)),
+                .is_some_and(|n| n.child_nodes().contains(&hit)),
         "the hit is the fallback in C2's slot, got {hit:?}"
     );
 }

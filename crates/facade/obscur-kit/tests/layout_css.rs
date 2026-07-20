@@ -70,13 +70,13 @@ fn drive(css: &str, view: &View) -> UiRuntime {
 /// The single `.row` container [`NodeId`].
 fn container_node(rt: &UiRuntime) -> NodeId {
     let root = rt.tree().root().expect("root after a frame");
-    rt.tree().get(root).unwrap().children().to_vec()[0]
+    rt.tree().get(root).unwrap().child_nodes().to_vec()[0]
 }
 
 /// The `.a` / `.b` child [`NodeId`]s of the single `.row` container, in order.
 fn children(rt: &UiRuntime) -> (NodeId, NodeId) {
     let container = container_node(rt);
-    let kids = rt.tree().get(container).unwrap().children().to_vec();
+    let kids = rt.tree().get(container).unwrap().child_nodes().to_vec();
     (kids[0], kids[1])
 }
 

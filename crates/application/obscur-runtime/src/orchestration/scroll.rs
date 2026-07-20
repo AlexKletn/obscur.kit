@@ -110,7 +110,7 @@ fn scrollable_content_height(
     let mut max_bottom = scrollport.bottom();
     let mut stack: Vec<NodeId> = tree
         .get(node)
-        .map_or_else(Vec::new, |n| n.children().to_vec());
+        .map_or_else(Vec::new, |n| n.child_nodes().to_vec());
     let mut visited: HashSet<NodeId> = HashSet::new();
     while let Some(child) = stack.pop() {
         if !visited.insert(child) {
@@ -123,7 +123,7 @@ fn scrollable_content_height(
         if !establishes_scroll_container(computed, child)
             && let Some(n) = tree.get(child)
         {
-            stack.extend(n.children().iter().copied());
+            stack.extend(n.child_nodes().iter().copied());
         }
     }
     max_bottom - top
@@ -167,7 +167,7 @@ pub(crate) fn scroll_containers(
             }
         }
         if let Some(n) = tree.get(node) {
-            for &child in n.children() {
+            for &child in n.child_nodes() {
                 stack.push((child, depth.saturating_add(1)));
             }
         }

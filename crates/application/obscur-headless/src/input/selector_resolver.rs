@@ -169,7 +169,7 @@ mod tests {
         // It is the SECOND child — proving the match is by test-id, not position.
         let root = runtime.tree().root().expect("a root");
         assert_eq!(
-            runtime.tree().get(root).expect("live").children()[1],
+            runtime.tree().get(root).expect("live").child_nodes()[1],
             resolved
         );
     }
@@ -181,7 +181,12 @@ mod tests {
         // resolver that read one symbol for both would silently cross the wires.
         let runtime = runtime_with(&tagged_view());
         let root = runtime.tree().root().expect("a root");
-        let children = runtime.tree().get(root).expect("live").children().to_vec();
+        let children = runtime
+            .tree()
+            .get(root)
+            .expect("live")
+            .child_nodes()
+            .to_vec();
 
         assert_eq!(
             SelectorResolver::new().resolve(&runtime, &SelectorTarget::test_id("submit")),
@@ -216,7 +221,7 @@ mod tests {
     fn a_node_target_resolves_only_while_it_is_live() {
         let runtime = runtime_with(&tagged_view());
         let root = runtime.tree().root().expect("a root");
-        let live = runtime.tree().get(root).expect("live").children()[0];
+        let live = runtime.tree().get(root).expect("live").child_nodes()[0];
         assert_eq!(
             SelectorResolver::new().resolve(&runtime, &SelectorTarget::node(live)),
             Some(live)

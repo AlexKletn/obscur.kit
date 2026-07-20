@@ -194,7 +194,7 @@ impl SemanticTreeBuilder {
         // the runtime's `is_within_disabled` gate walks upwards.
         let inherited = inherited.extend(node);
         semantic.insert(Self::map_node(tree, id, node, focused, inherited), parent);
-        for &child in node.children() {
+        for &child in node.child_nodes() {
             Self::walk(tree, child, Some(id), focused, inherited, visited, semantic);
         }
     }
@@ -340,7 +340,7 @@ impl SemanticTreeBuilder {
     /// the element has no text children with content.
     fn element_name(tree: &RetainedTree, node: &RetainedNode) -> Option<String> {
         let parts: Vec<String> = node
-            .children()
+            .child_nodes()
             .iter()
             .filter_map(|&child| tree.get(child).and_then(|c| c.kind().text()).map(str::trim))
             .filter(|text| !text.is_empty())

@@ -59,8 +59,8 @@ fn item_size(css: &str) -> (f32, f32) {
     runtime.render_now(&view(), std::slice::from_ref(&sheet));
 
     let root = runtime.tree().root().expect("a root");
-    let page = runtime.tree().get(root).expect("live").children()[0];
-    let item: NodeId = runtime.tree().get(page).expect("live").children()[0];
+    let page = runtime.tree().get(root).expect("live").child_nodes()[0];
+    let item: NodeId = runtime.tree().get(page).expect("live").child_nodes()[0];
     let layout = runtime
         .layout_boxes()
         .get(&item)
@@ -133,9 +133,9 @@ fn a_ch_box_actually_fits_that_many_characters() {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(600.0, 600.0));
     runtime.render_now(&view, std::slice::from_ref(&sheet));
     let root = runtime.tree().root().expect("a root");
-    let page_id = runtime.tree().get(root).expect("live").children()[0];
-    let item_id = runtime.tree().get(page_id).expect("live").children()[0];
-    let text_id: NodeId = runtime.tree().get(item_id).expect("live").children()[0];
+    let page_id = runtime.tree().get(root).expect("live").child_nodes()[0];
+    let item_id = runtime.tree().get(page_id).expect("live").child_nodes()[0];
+    let text_id: NodeId = runtime.tree().get(item_id).expect("live").child_nodes()[0];
     let text_width = runtime
         .layout_boxes()
         .get(&text_id)
@@ -200,8 +200,8 @@ fn ch_sizes_a_grid_track() {
     runtime.render_now(&view(), std::slice::from_ref(&sheet));
 
     let root = runtime.tree().root().expect("a root");
-    let page = runtime.tree().get(root).expect("live").children()[0];
-    let item: NodeId = runtime.tree().get(page).expect("live").children()[0];
+    let page = runtime.tree().get(root).expect("live").child_nodes()[0];
+    let item: NodeId = runtime.tree().get(page).expect("live").child_nodes()[0];
     let width = runtime
         .layout_boxes()
         .get(&item)

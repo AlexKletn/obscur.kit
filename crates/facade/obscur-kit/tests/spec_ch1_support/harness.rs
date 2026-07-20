@@ -90,7 +90,7 @@ pub fn at(rt: &UiRuntime, path: &[usize]) -> NodeId {
             .tree()
             .get(node)
             .expect("a live node")
-            .children()
+            .child_nodes()
             .to_vec();
         assert!(
             i < kids.len(),
@@ -135,7 +135,7 @@ pub fn all_text(rt: &UiRuntime) -> Vec<String> {
 /// The text content of `node`'s single text child, if it has one.
 #[must_use]
 pub fn child_text(rt: &UiRuntime, node: NodeId) -> Option<String> {
-    let child = *rt.tree().get(node)?.children().first()?;
+    let child = *rt.tree().get(node)?.child_nodes().first()?;
     rt.tree().get(child)?.kind().text().map(str::to_owned)
 }
 

@@ -71,7 +71,7 @@ pub fn at(rt: &UiRuntime, path: &[usize]) -> NodeId {
             .tree()
             .get(node)
             .expect("a live node")
-            .children()
+            .child_nodes()
             .to_vec();
         assert!(
             i < kids.len(),

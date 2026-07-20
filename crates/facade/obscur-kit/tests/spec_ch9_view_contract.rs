@@ -53,7 +53,7 @@ fn typing_into_a_bound_input_does_not_mutate_its_source() {
     let node = rt
         .tree()
         .root()
-        .and_then(|root| rt.tree().get(root).map(|n| n.children().to_vec()))
+        .and_then(|root| rt.tree().get(root).map(|n| n.child_nodes().to_vec()))
         .and_then(|kids| kids.first().copied())
         .expect("the input node");
 

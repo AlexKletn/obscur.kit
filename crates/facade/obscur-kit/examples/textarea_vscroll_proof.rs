@@ -210,8 +210,8 @@ fn field_view(text: &str) -> View {
 /// The `field` node id (root → stage → field).
 fn field_node(runtime: &UiRuntime) -> NodeId {
     let root = runtime.tree().root().expect("root after a frame");
-    let stage = runtime.tree().get(root).unwrap().children()[0];
-    runtime.tree().get(stage).unwrap().children()[0]
+    let stage = runtime.tree().get(root).unwrap().child_nodes()[0];
+    runtime.tree().get(stage).unwrap().child_nodes()[0]
 }
 
 /// The painted caret's `(top, bottom)` y: the thin (width-1) fill whose height is

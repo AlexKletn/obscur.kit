@@ -270,7 +270,7 @@ pub(super) fn effective_paint_layer(
         let layer = own_paint_layer(computed, node).unwrap_or(inherited);
         map.insert(node, layer);
         if let Some(retained) = tree.get(node) {
-            for &child in retained.children().iter().rev() {
+            for &child in retained.child_nodes().iter().rev() {
                 if !visited.contains(&child) {
                     stack.push((child, layer));
                 }
@@ -333,7 +333,7 @@ pub(super) fn effective_stacking_z(
         if let Some(retained) = tree.get(node) {
             // Children inherit this node's effective z (reversed push keeps the
             // left-to-right pre-order the emission walk relies on).
-            for &child in retained.children().iter().rev() {
+            for &child in retained.child_nodes().iter().rev() {
                 if !visited.contains(&child) {
                     stack.push((child, z));
                 }

@@ -32,8 +32,18 @@ pub struct RetainedNode {
     pub logical_parent: LogicalParent,
     /// Visual parent (paint location in the stacking tree).
     pub visual_parent: VisualParent,
-    /// Ordered child links, by `NodeId`.
+    /// Ordered child links, by `NodeId` — **every** child node in document
+    /// order, text and synthetic parts included. This is the all-nodes list
+    /// internal traversals (layout, paint, hit-test, semantics, reconcile) walk;
+    /// read it through [`child_nodes`](Self::child_nodes).
     pub children: Vec<NodeId>,
+    /// The element-only projection of [`children`](Self::children), in document
+    /// order — the **component tree** a host observes through
+    /// [`children`](Self::children) (the accessor). Text and synthetic parts are
+    /// content, not component-tree children (spec §4.16), so they are excluded
+    /// here. Kept in step with `children` by the arena, which is the only thing
+    /// that knows each child's [`NodeKind`]; a bare node cannot derive it alone.
+    pub element_children: Vec<NodeId>,
     /// Explicit reconciliation key, if the desired node carried one.
     pub key: Option<StableKey>,
     /// CSS-relevant identity (local name, id, class list) for element nodes,
@@ -86,6 +96,7 @@ impl RetainedNode {
             logical_parent: LogicalParent::root(),
             visual_parent: VisualParent::root(),
             children: Vec::new(),
+            element_children: Vec::new(),
             key: None,
             attributes: StyleAttributes::new(),
             event_bindings: Box::default(),
@@ -222,9 +233,22 @@ impl RetainedNode {
         self.props = props;
     }
 
-    /// Returns the ordered child links.
+    /// Returns the element-only child links — the **component tree** a host
+    /// observes (spec §4.16). Text runs and synthetic parts are content, not
+    /// component-tree children, so they are excluded; a `.badge` holding only the
+    /// text "New" reports **zero** children here. Internal traversals that must
+    /// see every child node (layout, paint, hit-test, semantics, reconcile) use
+    /// [`child_nodes`](Self::child_nodes) instead.
     #[must_use]
     pub fn children(&self) -> &[NodeId] {
+        &self.element_children
+    }
+
+    /// Returns **every** ordered child link — text and synthetic parts included.
+    /// This is the all-nodes view the tree machinery walks; the element-only
+    /// component-tree projection a host sees is [`children`](Self::children).
+    #[must_use]
+    pub fn child_nodes(&self) -> &[NodeId] {
         &self.children
     }
 
@@ -318,10 +342,10 @@ mod tests {
         n.push_child(a);
         n.push_child(b);
         n.push_child(c);
-        assert_eq!(n.children(), &[a, b, c]);
+        assert_eq!(n.child_nodes(), &[a, b, c]);
 
         assert!(n.remove_child(b));
-        assert_eq!(n.children(), &[a, c]);
+        assert_eq!(n.child_nodes(), &[a, c]);
         assert!(!n.remove_child(b));
     }
 

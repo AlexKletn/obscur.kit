@@ -260,7 +260,7 @@ fn find_by_class(
         return Some(node);
     }
     retained
-        .children()
+        .child_nodes()
         .iter()
         .find_map(|&child| find_by_class(runtime, child, class_name))
 }
@@ -272,7 +272,7 @@ fn collect_text(runtime: &UiRuntime, node: obscur_kit::identity::NodeId, out: &m
     if let obscur_kit::tree::node::NodeKind::Text { content } = retained.kind() {
         out.push(content.to_string());
     }
-    for &child in retained.children() {
+    for &child in retained.child_nodes() {
         collect_text(runtime, child, out);
     }
 }
@@ -399,7 +399,7 @@ fn an_unfilled_outlet_leaves_no_node_behind() {
             .tree()
             .get(region)
             .expect("live")
-            .children()
+            .child_nodes()
             .is_empty(),
         "the outlet is gone, not standing empty"
     );
@@ -415,7 +415,7 @@ fn a_document_authoring_no_slot_stores_no_slot_content() {
     runtime.render_now(&okui! { <div><span>"x"</span></div> }, &[]);
 
     let root = runtime.tree().root().expect("a root");
-    let div = runtime.tree().get(root).expect("live").children()[0];
+    let div = runtime.tree().get(root).expect("live").child_nodes()[0];
     assert!(
         runtime
             .tree()
@@ -528,7 +528,7 @@ fn a_stray_outlet_outside_a_component_never_becomes_a_node() {
             .tree()
             .get(root)
             .expect("live")
-            .children()
+            .child_nodes()
             .is_empty(),
         "a stray outlet must not become a real node"
     );
@@ -610,14 +610,14 @@ fn an_outlet_in_a_hosts_authored_children_is_a_stray_too() {
         "region-header",
     )
     .expect("the region is the component's own markup");
-    let projected = runtime.tree().get(region).expect("live").children();
+    let projected = runtime.tree().get(region).expect("live").child_nodes();
     assert_eq!(projected.len(), 1, "the assigned div still projects");
     assert!(
         runtime
             .tree()
             .get(projected[0])
             .expect("live")
-            .children()
+            .child_nodes()
             .is_empty(),
         "the nested stray outlet is not under it"
     );
@@ -649,7 +649,7 @@ fn a_stray_outlet_is_refused_silently_where_there_is_no_diagnostics_channel() {
 
     let root = tree.root().expect("a root");
     assert!(
-        tree.get(root).expect("live").children().is_empty(),
+        tree.get(root).expect("live").child_nodes().is_empty(),
         "the refusal is the reconciler's, so it holds without a runtime"
     );
 }

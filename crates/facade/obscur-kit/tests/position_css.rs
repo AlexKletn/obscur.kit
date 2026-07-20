@@ -78,19 +78,19 @@ fn box_size(rt: &UiRuntime, node: NodeId) -> (f32, f32) {
 /// The `.row` container [`NodeId`].
 fn container_node(rt: &UiRuntime) -> NodeId {
     let root = rt.tree().root().expect("root after a frame");
-    rt.tree().get(root).unwrap().children().to_vec()[0]
+    rt.tree().get(root).unwrap().child_nodes().to_vec()[0]
 }
 
 /// The `.a` and `.b` child [`NodeId`]s of the container, in order.
 fn children(rt: &UiRuntime) -> (NodeId, NodeId) {
     let container = container_node(rt);
-    let kids = rt.tree().get(container).unwrap().children().to_vec();
+    let kids = rt.tree().get(container).unwrap().child_nodes().to_vec();
     (kids[0], kids[1])
 }
 
 /// The `.leaf` grandchild [`NodeId`] under `.a`.
 fn leaf_node(rt: &UiRuntime, a: NodeId) -> NodeId {
-    rt.tree().get(a).unwrap().children().to_vec()[0]
+    rt.tree().get(a).unwrap().child_nodes().to_vec()[0]
 }
 
 /// The absolute origin `(x, y)` of a node's layout box.
@@ -226,8 +226,8 @@ fn absolute_resolves_against_positioned_ancestor() {
     );
 
     let outer = container_node(&rt);
-    let rel = rt.tree().get(outer).unwrap().children().to_vec()[0];
-    let abs = rt.tree().get(rel).unwrap().children().to_vec()[0];
+    let rel = rt.tree().get(outer).unwrap().child_nodes().to_vec()[0];
+    let abs = rt.tree().get(rel).unwrap().child_nodes().to_vec()[0];
 
     // `.rel` is offset into the flow by its insets (100, 100).
     approx(origin(&rt, rel).0, 100.0, "rel.x from left:100");
@@ -269,7 +269,7 @@ fn sticky_child_clamps_on_scroll_leaving_sibling_in_flow() {
 
     let kids = |rt: &UiRuntime| {
         let c = container_node(rt);
-        rt.tree().get(c).unwrap().children().to_vec()
+        rt.tree().get(c).unwrap().child_nodes().to_vec()
     };
 
     // Frame 1: no scroll — the sticky child lays out at its static flow position.
@@ -277,7 +277,7 @@ fn sticky_child_clamps_on_scroll_leaving_sibling_in_flow() {
     assert!(r1.relaid_out(), "first frame arranged boxes");
     let k = kids(&rt);
     let (a_node, b_node) = (k[1], k[2]);
-    let leaf_node = rt.tree().get(a_node).unwrap().children().to_vec()[0];
+    let leaf_node = rt.tree().get(a_node).unwrap().child_nodes().to_vec()[0];
     approx(
         origin(&rt, a_node).1,
         50.0,
@@ -344,7 +344,7 @@ fn z_index_orders_overlapping_absolute_fills_by_stacking() {
     );
 
     let wrap = container_node(&rt);
-    let kids = rt.tree().get(wrap).unwrap().children().to_vec();
+    let kids = rt.tree().get(wrap).unwrap().child_nodes().to_vec();
     let (node_a, node_b) = (kids[0], kids[1]);
     let bounds_a = rt
         .layout_boxes()

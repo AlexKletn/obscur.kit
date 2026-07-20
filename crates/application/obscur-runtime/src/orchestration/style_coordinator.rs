@@ -116,7 +116,7 @@ impl StyleCoordinator {
         };
         let order = Self::preorder(root, |id| {
             tree.get(id)
-                .map_or_else(Vec::new, |node| node.children().to_vec())
+                .map_or_else(Vec::new, |node| node.child_nodes().to_vec())
         });
         let root_element = order
             .iter()
@@ -160,7 +160,7 @@ impl StyleCoordinator {
         };
         let order = Self::preorder(root, |id| {
             tree.get(id)
-                .map_or_else(Vec::new, |node| node.children().to_vec())
+                .map_or_else(Vec::new, |node| node.child_nodes().to_vec())
         });
         let root_element = order
             .iter()

@@ -78,7 +78,7 @@ pub fn at(rt: &UiRuntime, path: &[usize]) -> NodeId {
             .tree()
             .get(node)
             .expect("a live node")
-            .children()
+            .child_nodes()
             .to_vec();
         assert!(
             i < kids.len(),
@@ -114,7 +114,7 @@ pub fn all_geom(rt: &UiRuntime) -> Vec<(f32, f32, f32, f32)> {
             out.push((b.origin().x, b.origin().y, b.size().width, b.size().height));
         }
         if let Some(n) = rt.tree().get(node) {
-            for &child in n.children().iter().rev() {
+            for &child in n.child_nodes().iter().rev() {
                 stack.push(child);
             }
         }
@@ -133,7 +133,7 @@ pub fn all_nodes(rt: &UiRuntime) -> Vec<NodeId> {
     while let Some(node) = stack.pop() {
         out.push(node);
         if let Some(n) = rt.tree().get(node) {
-            for &child in n.children().iter().rev() {
+            for &child in n.child_nodes().iter().rev() {
                 stack.push(child);
             }
         }

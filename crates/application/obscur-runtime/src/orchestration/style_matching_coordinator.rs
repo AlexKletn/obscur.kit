@@ -309,7 +309,11 @@ mod tests {
                 .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into()))),
         ]));
         let tree = reconcile(&view);
-        let child = tree.get(tree.root().unwrap()).unwrap().children().to_vec()[0];
+        let child = tree
+            .get(tree.root().unwrap())
+            .unwrap()
+            .child_nodes()
+            .to_vec()[0];
 
         let inputs = StyleMatchingCoordinator::new().match_single(&tree, &counter_sheet());
 
@@ -328,7 +332,11 @@ mod tests {
                 .with_prop(ViewProperty::new(CLASS, ViewValue::Text("other".into()))),
         ]));
         let tree = reconcile(&view);
-        let child = tree.get(tree.root().unwrap()).unwrap().children().to_vec()[0];
+        let child = tree
+            .get(tree.root().unwrap())
+            .unwrap()
+            .child_nodes()
+            .to_vec()[0];
 
         let inputs = StyleMatchingCoordinator::new().match_single(&tree, &counter_sheet());
         assert!(
@@ -366,7 +374,11 @@ mod tests {
                 .with_prop(ViewProperty::new(CLASS, ViewValue::Text("btn".into()))),
         ]));
         let tree = reconcile(&view);
-        let child = tree.get(tree.root().unwrap()).unwrap().children().to_vec()[0];
+        let child = tree
+            .get(tree.root().unwrap())
+            .unwrap()
+            .child_nodes()
+            .to_vec()[0];
         let coordinator = StyleMatchingCoordinator::new();
         let sheet = hover_sheet();
 
@@ -405,7 +417,11 @@ mod tests {
                 .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into()))),
         ]));
         let tree = reconcile(&view);
-        let child = tree.get(tree.root().unwrap()).unwrap().children().to_vec()[0];
+        let child = tree
+            .get(tree.root().unwrap())
+            .unwrap()
+            .child_nodes()
+            .to_vec()[0];
 
         let inputs = StyleMatchingCoordinator::new().build_inputs(&tree, &[]);
         assert!(inputs.cascaded_for(child).is_empty());

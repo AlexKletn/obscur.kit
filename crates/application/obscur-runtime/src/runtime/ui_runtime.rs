@@ -3642,7 +3642,7 @@ impl UiRuntime {
             out.insert(node, next);
             next += 1;
             if let Some(n) = self.tree.get(node) {
-                for &child in n.children().iter().rev() {
+                for &child in n.child_nodes().iter().rev() {
                     stack.push(child);
                 }
             }
@@ -4875,7 +4875,7 @@ impl UiRuntime {
         if let Some(text) = n.kind().text() {
             out.push_str(text);
         }
-        for &child in n.children() {
+        for &child in n.child_nodes() {
             self.collect_text_into(child, out);
         }
     }
@@ -5223,7 +5223,7 @@ impl UiRuntime {
         if n.kind().text().is_some() {
             return Some(node);
         }
-        for &child in n.children() {
+        for &child in n.child_nodes() {
             if let Some(found) = self.first_text_descendant(child) {
                 return Some(found);
             }
@@ -6563,7 +6563,7 @@ impl UiRuntime {
         });
         // Clone the child ids so the immutable borrow of `record` ends before the
         // recursive calls re-borrow `self`.
-        let children = record.children().to_vec();
+        let children = record.child_nodes().to_vec();
         for child in children {
             self.collect_inspection(child, Some(node), depth + 1, out);
         }
@@ -7841,7 +7841,7 @@ mod tests {
             .tree()
             .root()
             .expect("tree has a root after a frame");
-        runtime.tree().get(root).unwrap().children().to_vec()[0]
+        runtime.tree().get(root).unwrap().child_nodes().to_vec()[0]
     }
 
     // ---- runtime-driven components (§2.1, §2.14, §3.1) ----------------------
@@ -7979,8 +7979,8 @@ mod tests {
         /// The text the component rendered underneath its own node.
         fn rendered_text(runtime: &UiRuntime) -> String {
             let root = runtime.tree().root().expect("a root");
-            let node = runtime.tree().get(root).expect("live").children()[0];
-            let child = runtime.tree().get(node).expect("live").children()[0];
+            let node = runtime.tree().get(root).expect("live").child_nodes()[0];
+            let child = runtime.tree().get(node).expect("live").child_nodes()[0];
             match runtime.tree().get(child).expect("live").kind() {
                 obscur_tree::node::NodeKind::Text { content } => content.to_string(),
                 other => panic!("expected the component's text output, got {other:?}"),
@@ -7990,7 +7990,7 @@ mod tests {
         /// The node the component instance is mounted on.
         fn component_node(runtime: &UiRuntime) -> NodeId {
             let root = runtime.tree().root().expect("a root");
-            runtime.tree().get(root).expect("live").children()[0]
+            runtime.tree().get(root).expect("live").child_nodes()[0]
         }
 
         #[test]
@@ -8144,8 +8144,8 @@ mod tests {
             };
             let text_at = |runtime: &UiRuntime, index: usize| {
                 let root = runtime.tree().root().expect("a root");
-                let host = runtime.tree().get(root).expect("live").children()[index];
-                let child = runtime.tree().get(host).expect("live").children()[0];
+                let host = runtime.tree().get(root).expect("live").child_nodes()[index];
+                let child = runtime.tree().get(host).expect("live").child_nodes()[0];
                 match runtime.tree().get(child).expect("live").kind() {
                     obscur_tree::node::NodeKind::Text { content } => content.to_string(),
                     other => panic!("expected text, got {other:?}"),
@@ -8204,11 +8204,11 @@ mod tests {
                     .contains(obscur_tree::node::NodeFlags::COMPONENT_HOST),
                 "mounting flags the node as a component host"
             );
-            let output = runtime.tree().get(host).expect("live").children()[0];
+            let output = runtime.tree().get(host).expect("live").child_nodes()[0];
 
             runtime.render_now(&counter_view(3), &[]);
             assert_eq!(
-                runtime.tree().get(host).expect("live").children()[0],
+                runtime.tree().get(host).expect("live").child_nodes()[0],
                 output,
                 "the component's output node survived the root reconcile"
             );
@@ -8252,7 +8252,7 @@ mod tests {
                     .tree()
                     .get(node)
                     .expect("live")
-                    .children()
+                    .child_nodes()
                     .is_empty(),
                 "an unregistered element gets no component output"
             );
@@ -8285,7 +8285,7 @@ mod tests {
                     .tree()
                     .get(component_node(&runtime))
                     .expect("live")
-                    .children(),
+                    .child_nodes(),
                 &[],
                 "the boundary replaced the subtree (this counter has no fallback)"
             );
@@ -8434,7 +8434,7 @@ mod tests {
 
         /// The text `node`'s only child holds, or `None` when it has no children.
         fn child_text(runtime: &UiRuntime, node: NodeId) -> Option<String> {
-            let child = *runtime.tree().get(node)?.children().first()?;
+            let child = *runtime.tree().get(node)?.child_nodes().first()?;
             match runtime.tree().get(child).expect("live").kind() {
                 obscur_tree::node::NodeKind::Text { content } => Some(content.to_string()),
                 other => panic!("expected a text node, got {other:?}"),
@@ -9598,13 +9598,13 @@ mod tests {
         let root = runtime.tree().root().expect("root after a frame");
         assert_eq!(snapshot.root(), Some(root));
 
-        let button = runtime.tree().get(root).unwrap().children()[0];
+        let button = runtime.tree().get(root).unwrap().child_nodes()[0];
         let button_node = snapshot.get(button).expect("button in the snapshot");
         assert_eq!(button_node.role(), SemanticRole::Button);
         assert_eq!(button_node.name(), Some("Save"));
 
         // The text child maps to a static-text node named by its content.
-        let text_child = runtime.tree().get(button).unwrap().children()[0];
+        let text_child = runtime.tree().get(button).unwrap().child_nodes()[0];
         let text_node = snapshot.get(text_child).expect("text in the snapshot");
         assert_eq!(text_node.role(), SemanticRole::Text);
         assert_eq!(text_node.name(), Some("Save"));
@@ -9640,7 +9640,7 @@ mod tests {
     /// Returns the `button` node id after a frame has populated the tree.
     fn button_node(runtime: &UiRuntime) -> NodeId {
         let root = runtime.tree().root().expect("root after a frame");
-        runtime.tree().get(root).unwrap().children()[0]
+        runtime.tree().get(root).unwrap().child_nodes()[0]
     }
 
     /// The UA background fill the default sheet applies (a neutral `#f4f2ee`).
@@ -10128,7 +10128,12 @@ mod tests {
         runtime.render_now(&view, sheets);
 
         let root = runtime.tree().root().expect("a root");
-        let boxes = runtime.tree().get(root).expect("root").children().to_vec();
+        let boxes = runtime
+            .tree()
+            .get(root)
+            .expect("root")
+            .child_nodes()
+            .to_vec();
         let [first, second, last] = <[NodeId; 3]>::try_from(boxes).expect("three siblings");
 
         // The cold frame measured all three.
@@ -10192,7 +10197,12 @@ mod tests {
         runtime.render_now(&view, sheets);
 
         let root = runtime.tree().root().expect("a root");
-        let boxes = runtime.tree().get(root).expect("root").children().to_vec();
+        let boxes = runtime
+            .tree()
+            .get(root)
+            .expect("root")
+            .child_nodes()
+            .to_vec();
         let [first, second, last] = <[NodeId; 3]>::try_from(boxes).expect("three siblings");
 
         // The cold frame arranged all three, or there is nothing to skip below.
@@ -10937,8 +10947,8 @@ mod tests {
     /// Returns `(panel, a, b)` node ids after a frame has populated the tree.
     fn panel_nodes(runtime: &UiRuntime) -> (NodeId, NodeId, NodeId) {
         let root = runtime.tree().root().expect("root after a frame");
-        let panel = runtime.tree().get(root).unwrap().children()[0];
-        let kids = runtime.tree().get(panel).unwrap().children().to_vec();
+        let panel = runtime.tree().get(root).unwrap().child_nodes()[0];
+        let kids = runtime.tree().get(panel).unwrap().child_nodes().to_vec();
         (panel, kids[0], kids[1])
     }
 
@@ -11051,7 +11061,7 @@ mod tests {
     /// The lone child node of the root after a frame (for single-element views).
     fn panel_single_child(runtime: &UiRuntime) -> NodeId {
         let root = runtime.tree().root().expect("root after a frame");
-        runtime.tree().get(root).unwrap().children()[0]
+        runtime.tree().get(root).unwrap().child_nodes()[0]
     }
 
     // ---- Per-element vertical scroll containers (CSS Overflow 3) ----------------
@@ -11095,8 +11105,8 @@ mod tests {
     /// Returns `(scroller, [rows])` after a frame.
     fn scroller_nodes(runtime: &UiRuntime) -> (NodeId, Vec<NodeId>) {
         let root = runtime.tree().root().expect("root after a frame");
-        let scroller = runtime.tree().get(root).unwrap().children()[0];
-        let rows = runtime.tree().get(scroller).unwrap().children().to_vec();
+        let scroller = runtime.tree().get(root).unwrap().child_nodes()[0];
+        let rows = runtime.tree().get(scroller).unwrap().child_nodes().to_vec();
         (scroller, rows)
     }
 
@@ -13586,8 +13596,8 @@ mod tests {
     /// The `field` node id (root → panel → field) after a frame populated the tree.
     fn scroll_field_node(runtime: &UiRuntime) -> NodeId {
         let root = runtime.tree().root().expect("root after a frame");
-        let panel = runtime.tree().get(root).unwrap().children()[0];
-        runtime.tree().get(panel).unwrap().children()[0]
+        let panel = runtime.tree().get(root).unwrap().child_nodes()[0];
+        runtime.tree().get(panel).unwrap().child_nodes()[0]
     }
 
     /// The field's current horizontal scroll offset (reads the private session).
@@ -13821,9 +13831,9 @@ mod tests {
     /// The `wrapfield`'s text-leaf node id (root → panel → field → text).
     fn wrap_text_node(runtime: &UiRuntime) -> NodeId {
         let root = runtime.tree().root().expect("root after a frame");
-        let panel = runtime.tree().get(root).unwrap().children()[0];
-        let field = runtime.tree().get(panel).unwrap().children()[0];
-        runtime.tree().get(field).unwrap().children()[0]
+        let panel = runtime.tree().get(root).unwrap().child_nodes()[0];
+        let field = runtime.tree().get(panel).unwrap().child_nodes()[0];
+        runtime.tree().get(field).unwrap().child_nodes()[0]
     }
 
     /// Re-renders the seed view (retained text `""`) and returns the display list;
@@ -14282,9 +14292,9 @@ mod tests {
     /// The textarea's editable node id (root → panel → area) and its text-leaf id.
     fn textarea_nodes(runtime: &UiRuntime) -> (NodeId, NodeId) {
         let root = runtime.tree().root().expect("root after a frame");
-        let panel = runtime.tree().get(root).unwrap().children()[0];
-        let field = runtime.tree().get(panel).unwrap().children()[0];
-        let text = runtime.tree().get(field).unwrap().children()[0];
+        let panel = runtime.tree().get(root).unwrap().child_nodes()[0];
+        let field = runtime.tree().get(panel).unwrap().child_nodes()[0];
+        let text = runtime.tree().get(field).unwrap().child_nodes()[0];
         (field, text)
     }
 
@@ -15888,7 +15898,7 @@ mod tests {
         /// The width of the frame's only text box.
         fn text_box_width(runtime: &UiRuntime) -> f32 {
             let root = runtime.tree().root().expect("a root");
-            let text = runtime.tree().get(root).expect("live").children()[0];
+            let text = runtime.tree().get(root).expect("live").child_nodes()[0];
             runtime
                 .layout_boxes()
                 .get(&text)

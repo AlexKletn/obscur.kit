@@ -223,7 +223,7 @@ mod tests {
         let root = tree
             .root()
             .expect("root exists after the committed reconcile");
-        assert_eq!(tree.get(root).unwrap().children().len(), 2);
+        assert_eq!(tree.get(root).unwrap().child_nodes().len(), 2);
     }
 
     #[test]
@@ -267,8 +267,8 @@ mod tests {
         let direct_root = direct.root().unwrap();
         let enacted_root = enacted.root().unwrap();
         assert_eq!(
-            direct.get(direct_root).unwrap().children().len(),
-            enacted.get(enacted_root).unwrap().children().len(),
+            direct.get(direct_root).unwrap().child_nodes().len(),
+            enacted.get(enacted_root).unwrap().child_nodes().len(),
         );
     }
 }

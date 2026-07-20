@@ -50,8 +50,8 @@ fn item_box(item_css: &str) -> (f32, f32) {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(PAGE, PAGE));
     runtime.render_now(&view, std::slice::from_ref(&sheet));
     let root = runtime.tree().root().expect("a root");
-    let page_id = runtime.tree().get(root).expect("live").children()[0];
-    let item_id: NodeId = runtime.tree().get(page_id).expect("live").children()[0];
+    let page_id = runtime.tree().get(root).expect("live").child_nodes()[0];
+    let item_id: NodeId = runtime.tree().get(page_id).expect("live").child_nodes()[0];
     let layout = runtime.layout_boxes().get(&item_id).expect("laid out");
     (layout.origin().x, layout.size().width)
 }
@@ -181,8 +181,8 @@ fn padding_block_shorthand_insets_both_block_edges() {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 300.0));
     runtime.render_now(&view, std::slice::from_ref(&sheet));
     let root = runtime.tree().root().expect("a root");
-    let page_id = runtime.tree().get(root).expect("live").children()[0];
-    let item_id: NodeId = runtime.tree().get(page_id).expect("live").children()[0];
+    let page_id = runtime.tree().get(root).expect("live").child_nodes()[0];
+    let item_id: NodeId = runtime.tree().get(page_id).expect("live").child_nodes()[0];
     let origin = runtime
         .layout_boxes()
         .get(&item_id)
@@ -223,8 +223,8 @@ fn fit_content_with_auto_margins_centres_a_shrink_wrapped_box() {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 300.0));
     runtime.render_now(&view, std::slice::from_ref(&sheet));
     let root = runtime.tree().root().expect("a root");
-    let page_id = runtime.tree().get(root).expect("live").children()[0];
-    let item_id: NodeId = runtime.tree().get(page_id).expect("live").children()[0];
+    let page_id = runtime.tree().get(root).expect("live").child_nodes()[0];
+    let item_id: NodeId = runtime.tree().get(page_id).expect("live").child_nodes()[0];
     let layout = runtime.layout_boxes().get(&item_id).expect("laid out");
     let (x, width) = (layout.origin().x, layout.size().width);
 

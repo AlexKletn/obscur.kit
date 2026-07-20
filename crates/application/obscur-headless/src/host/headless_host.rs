@@ -433,7 +433,7 @@ mod tests {
         *tree
             .get(root)
             .expect("root node")
-            .children()
+            .child_nodes()
             .first()
             .expect("a child")
     }

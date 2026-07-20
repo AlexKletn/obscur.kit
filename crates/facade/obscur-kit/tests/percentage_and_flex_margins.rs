@@ -41,8 +41,8 @@ fn item_box(page_css: &str, item_css: &str) -> (f32, f32, f32) {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(600.0, 600.0));
     runtime.render_now(&view, std::slice::from_ref(&sheet));
     let root = runtime.tree().root().expect("a root");
-    let page_id = runtime.tree().get(root).expect("live").children()[0];
-    let item_id: NodeId = runtime.tree().get(page_id).expect("live").children()[0];
+    let page_id = runtime.tree().get(root).expect("live").child_nodes()[0];
+    let item_id: NodeId = runtime.tree().get(page_id).expect("live").child_nodes()[0];
     let layout = runtime.layout_boxes().get(&item_id).expect("laid out");
     (layout.origin().x, layout.origin().y, layout.size().width)
 }

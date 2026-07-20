@@ -2002,7 +2002,7 @@ impl SceneCoordinator {
                     }
                 }
 
-                for &child in retained.children().iter().rev() {
+                for &child in retained.child_nodes().iter().rev() {
                     if !visited.contains(&child) {
                         stack.push((child, Some(node), depth.saturating_add(1)));
                     }

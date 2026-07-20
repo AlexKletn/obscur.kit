@@ -76,13 +76,13 @@ fn painted_font_size(commands: &[PaintCommand]) -> f32 {
 
 fn box_node(rt: &UiRuntime) -> NodeId {
     let root = rt.tree().root().expect("root after a frame");
-    rt.tree().get(root).expect("live").children()[0]
+    rt.tree().get(root).expect("live").child_nodes()[0]
 }
 
 /// The `.box` under the `.page` root of [`text_view`].
 fn nested_box_node(rt: &UiRuntime) -> NodeId {
     let page = box_node(rt);
-    rt.tree().get(page).expect("live").children()[0]
+    rt.tree().get(page).expect("live").child_nodes()[0]
 }
 
 /// The `.box`'s arranged border box after one frame under `css`.

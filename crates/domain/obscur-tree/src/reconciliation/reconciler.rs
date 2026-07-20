@@ -112,7 +112,7 @@ impl Reconciler {
         plan: &mut ReconciliationPlan,
     ) {
         // Read the parent's current children; bail out defensively if stale.
-        let Some(existing) = tree.get(parent).map(|node| node.children().to_vec()) else {
+        let Some(existing) = tree.get(parent).map(|node| node.child_nodes().to_vec()) else {
             return;
         };
 
@@ -257,10 +257,12 @@ impl Reconciler {
             }
         }
 
-        // Commit the parent's child order to the desired order.
+        // Commit the parent's child order to the desired order, then refresh the
+        // element-only projection the component tree exposes.
         if let Some(parent_node) = tree.get_mut(parent) {
             parent_node.children = new_children;
         }
+        tree.sync_element_children(parent);
 
         // Remove every unmatched existing child together with its subtree,
         // leaves before parents so a parent is never removed before its children.
@@ -421,7 +423,7 @@ mod tests {
 
     fn child_ids(tree: &RetainedTree, parent: NodeId) -> Vec<NodeId> {
         tree.get(parent)
-            .map(|n| n.children().to_vec())
+            .map(|n| n.child_nodes().to_vec())
             .unwrap_or_default()
     }
 

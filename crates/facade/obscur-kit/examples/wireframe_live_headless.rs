@@ -296,7 +296,7 @@ fn verify_demo_scrolls() {
     // `#app` is the root's single child (the page). With a 720-px viewport and a
     // ~1560-px sheet it overflows → a scroll container starting at scroll_top 0.
     let root = runtime.tree().root().expect("root after a frame");
-    let app = runtime.tree().get(root).unwrap().children()[0];
+    let app = runtime.tree().get(root).unwrap().child_nodes()[0];
     assert_eq!(runtime.scroll_top(app), 0.0, "the page starts unscrolled");
     let idle = capture_at(&mut runtime, &mut renderer, SCROLL_VIEWPORT);
 
@@ -526,7 +526,7 @@ fn box_of(runtime: &UiRuntime, id: &str) -> Option<(Point, Size)> {
 fn text_child_box(runtime: &UiRuntime, id: &str) -> Option<(Point, Size)> {
     let parent = node_by_id(runtime, id)?;
     let node = runtime.tree().get(parent)?;
-    for &child in node.children() {
+    for &child in node.child_nodes() {
         let c = runtime.tree().get(child)?;
         if c.kind().text().is_some() {
             let lb = runtime.layout_boxes().get(&child)?;

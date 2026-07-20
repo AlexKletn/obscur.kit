@@ -112,8 +112,8 @@ fn render(css: &str, text: &str, install: bool) -> (UiRuntime, NodeId) {
     runtime.render_now(&view, std::slice::from_ref(&sheet));
 
     let root = runtime.tree().root().expect("a root");
-    let page_id = runtime.tree().get(root).expect("live").children()[0];
-    let item_id = runtime.tree().get(page_id).expect("live").children()[0];
+    let page_id = runtime.tree().get(root).expect("live").child_nodes()[0];
+    let item_id = runtime.tree().get(page_id).expect("live").child_nodes()[0];
     (runtime, item_id)
 }
 

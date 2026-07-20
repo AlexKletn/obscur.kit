@@ -190,12 +190,16 @@ fn view() -> View {
 /// child and the `.bar` is the stage's.
 fn bar_node(runtime: &UiRuntime) -> NodeId {
     let root = runtime.tree().root().expect("a root after the first frame");
-    let stage = runtime.tree().get(root).expect("the root node").children()[0];
+    let stage = runtime
+        .tree()
+        .get(root)
+        .expect("the root node")
+        .child_nodes()[0];
     runtime
         .tree()
         .get(stage)
         .expect("the stage node")
-        .children()[0]
+        .child_nodes()[0]
 }
 
 /// The laid-out width of `node`, read back from the runtime's own layout boxes.

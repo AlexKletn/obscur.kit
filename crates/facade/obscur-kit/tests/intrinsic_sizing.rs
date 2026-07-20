@@ -94,8 +94,8 @@ fn item_size(css: &str) -> (f32, f32) {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(400.0, 400.0));
     runtime.render_now(&view, std::slice::from_ref(&sheet));
     let root = runtime.tree().root().expect("a root");
-    let page_id = runtime.tree().get(root).expect("live").children()[0];
-    let item_id: NodeId = runtime.tree().get(page_id).expect("live").children()[0];
+    let page_id = runtime.tree().get(root).expect("live").child_nodes()[0];
+    let item_id: NodeId = runtime.tree().get(page_id).expect("live").child_nodes()[0];
     let layout = runtime
         .layout_boxes()
         .get(&item_id)
@@ -313,12 +313,12 @@ fn grid_items(css: &str) -> [(f32, f32, f32); 2] {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(600.0, 400.0));
     runtime.render_now(&view, std::slice::from_ref(&sheet));
     let root = runtime.tree().root().expect("a root");
-    let page_id = runtime.tree().get(root).expect("live").children()[0];
+    let page_id = runtime.tree().get(root).expect("live").child_nodes()[0];
     let kids = runtime
         .tree()
         .get(page_id)
         .expect("live")
-        .children()
+        .child_nodes()
         .to_vec();
     std::array::from_fn(|i| {
         let b = runtime.layout_boxes().get(&kids[i]).expect("laid out");
@@ -431,8 +431,8 @@ fn a_percentage_child_does_not_poison_a_max_content_box() {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(400.0, 400.0));
     runtime.render_now(&view, std::slice::from_ref(&sheet));
     let root = runtime.tree().root().expect("a root");
-    let page_id = runtime.tree().get(root).expect("live").children()[0];
-    let item_id: NodeId = runtime.tree().get(page_id).expect("live").children()[0];
+    let page_id = runtime.tree().get(root).expect("live").child_nodes()[0];
+    let item_id: NodeId = runtime.tree().get(page_id).expect("live").child_nodes()[0];
     let width = runtime
         .layout_boxes()
         .get(&item_id)

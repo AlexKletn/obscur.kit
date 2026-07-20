@@ -123,11 +123,11 @@ impl RestyleScope {
         let Some(parent_node) = tree.get(parent) else {
             return false;
         };
-        let Some(index) = parent_node.children().iter().position(|&c| c == root) else {
+        let Some(index) = parent_node.child_nodes().iter().position(|&c| c == root) else {
             return false;
         };
         // `+` and `~` read backwards, so only what follows `root` can see it.
-        for &sibling in &parent_node.children()[index + 1..] {
+        for &sibling in &parent_node.child_nodes()[index + 1..] {
             Self::mark_subtree(tree, sibling, out);
         }
         true
@@ -147,7 +147,7 @@ impl RestyleScope {
             }
             out.invalidate(id, StyleInvalidationReason::PseudoStateChanged);
             if let Some(node) = tree.get(id) {
-                stack.extend(node.children().iter().copied());
+                stack.extend(node.child_nodes().iter().copied());
             }
         }
     }

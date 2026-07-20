@@ -130,7 +130,7 @@ impl<'a> TreeElement<'a> {
         };
         match parent.node() {
             Some(parent_node) => parent_node
-                .children()
+                .child_nodes()
                 .iter()
                 .copied()
                 .filter(|cid| self.tree.get(*cid).is_some_and(|c| c.kind().is_element()))
@@ -232,7 +232,7 @@ impl MatchElement for TreeElement<'_> {
     /// Reports whether the node has any child node at all. Text children are
     /// real nodes here, so an element containing only text is *not* `:empty`.
     fn has_children(&self) -> bool {
-        self.node().is_some_and(|n| !n.children().is_empty())
+        self.node().is_some_and(|n| !n.child_nodes().is_empty())
     }
 }
 
@@ -260,7 +260,7 @@ mod tests {
     fn root_children(tree: &RetainedTree) -> Vec<NodeId> {
         let root = tree.root().expect("tree has a root after reconcile");
         tree.get(root)
-            .map(|n| n.children().to_vec())
+            .map(|n| n.child_nodes().to_vec())
             .unwrap_or_default()
     }
 
@@ -335,7 +335,7 @@ mod tests {
 
         let container_id = root_children(&tree)[0];
         let container_node = tree.get(container_id).expect("container exists");
-        let kids: Vec<NodeId> = container_node.children().to_vec();
+        let kids: Vec<NodeId> = container_node.child_nodes().to_vec();
         assert_eq!(kids.len(), 3, "container reconciled three element children");
 
         let first = TreeElement::new(&tree, kids[0]);
@@ -365,7 +365,7 @@ mod tests {
 
         assert!(
             container_node
-                .children()
+                .child_nodes()
                 .iter()
                 .all(|c| tree.get(*c).is_some())
         );
@@ -466,7 +466,7 @@ mod tests {
         let view = View::from_fragment(ViewFragment::from_nodes(vec![container]));
         let tree = reconcile(&view);
         let container_id = root_children(&tree)[0];
-        let child_id = tree.get(container_id).unwrap().children().to_vec()[0];
+        let child_id = tree.get(container_id).unwrap().child_nodes().to_vec()[0];
 
         let mut states = crate::orchestration::PseudoStates::new();
         states.set(container_id, PseudoState::HOVER);

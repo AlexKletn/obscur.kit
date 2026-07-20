@@ -38,7 +38,7 @@ fn view() -> View {
 
 fn box_node(runtime: &UiRuntime) -> NodeId {
     let root = runtime.tree().root().expect("a root after the first frame");
-    runtime.tree().get(root).unwrap().children()[0]
+    runtime.tree().get(root).unwrap().child_nodes()[0]
 }
 
 fn box_width(runtime: &UiRuntime, node: NodeId) -> f32 {

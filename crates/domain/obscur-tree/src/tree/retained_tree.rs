@@ -178,6 +178,27 @@ impl RetainedTree {
         Some(node)
     }
 
+    /// Recomputes `parent`'s element-only child projection
+    /// ([`RetainedNode::children`]) from its all-nodes child list, keeping the
+    /// two in step. The arena is the only place that knows every child's
+    /// [`NodeKind`], so it — not a bare node — owns this derivation. Callers must
+    /// invoke it after any change to `parent.children` (link, unlink, reorder) or
+    /// after a child's kind changes. A no-op if `parent` is stale.
+    ///
+    /// [`RetainedNode::children`]: crate::node::RetainedNode::children
+    pub fn sync_element_children(&mut self, parent: NodeId) {
+        let Some(child_ids) = self.get(parent).map(|node| node.children.clone()) else {
+            return;
+        };
+        let elements: Vec<NodeId> = child_ids
+            .into_iter()
+            .filter(|&child| self.get(child).is_some_and(|n| n.kind().is_element()))
+            .collect();
+        if let Some(node) = self.get_mut(parent) {
+            node.element_children = elements;
+        }
+    }
+
     /// Returns `true` if `id` currently resolves to a live node.
     #[must_use]
     pub fn contains(&self, id: NodeId) -> bool {
@@ -309,7 +330,7 @@ mod tests {
         node.push_child(NodeId::from_raw(999));
         assert_eq!(tree.version(), v);
         assert_eq!(
-            tree.get(id).expect("live").children(),
+            tree.get(id).expect("live").child_nodes(),
             &[NodeId::from_raw(999)]
         );
     }

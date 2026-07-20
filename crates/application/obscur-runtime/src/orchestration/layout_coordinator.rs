@@ -1552,7 +1552,7 @@ fn children_of(tree: &RetainedTree, styles: &LayoutStyles, node: NodeId) -> Vec<
         return Vec::new();
     };
     let mut out = Vec::new();
-    for &child in n.children() {
+    for &child in n.child_nodes() {
         let style = style_of(styles, child);
         // `display: contents` (css-display-3 §2.5): the element generates no box.
         // It contributes no [`LayoutChild`] of its own; instead its own children
@@ -1912,7 +1912,7 @@ impl ArrangeCache {
                 boxes.insert(current, retained_box);
             }
             if let Some(record) = tree.get(current) {
-                stack.extend(record.children().iter().copied());
+                stack.extend(record.child_nodes().iter().copied());
             }
         }
         true
@@ -2039,7 +2039,7 @@ fn invalidated_layout(tree: &RetainedTree, dirty: &LayoutInvalidation) -> Option
         let Some(record) = tree.get(node) else {
             continue;
         };
-        for &child in record.children() {
+        for &child in record.child_nodes() {
             if !visited.contains(&child) {
                 parent_of.insert(child, node);
                 stack.push(child);

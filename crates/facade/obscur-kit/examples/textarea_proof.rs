@@ -210,9 +210,9 @@ fn field_view(text: &str) -> View {
 /// The `field`'s text-leaf node id (root → stage → field → text).
 fn text_leaf(runtime: &UiRuntime) -> NodeId {
     let root = runtime.tree().root().expect("root after a frame");
-    let stage = runtime.tree().get(root).unwrap().children()[0];
-    let field = runtime.tree().get(stage).unwrap().children()[0];
-    runtime.tree().get(field).unwrap().children()[0]
+    let stage = runtime.tree().get(root).unwrap().child_nodes()[0];
+    let field = runtime.tree().get(stage).unwrap().child_nodes()[0];
+    runtime.tree().get(field).unwrap().child_nodes()[0]
 }
 
 /// The `(origin, advance-width)` of every painted `DrawText` run — one per wrapped

@@ -60,8 +60,13 @@ fn rendered() -> (UiRuntime, NodeId, NodeId) {
     runtime.render_now(&view(), std::slice::from_ref(&sheet));
 
     let root = runtime.tree().root().expect("a root");
-    let page = runtime.tree().get(root).expect("live").children()[0];
-    let children = runtime.tree().get(page).expect("live").children().to_vec();
+    let page = runtime.tree().get(root).expect("live").child_nodes()[0];
+    let children = runtime
+        .tree()
+        .get(page)
+        .expect("live")
+        .child_nodes()
+        .to_vec();
     (runtime, children[0], children[1])
 }
 

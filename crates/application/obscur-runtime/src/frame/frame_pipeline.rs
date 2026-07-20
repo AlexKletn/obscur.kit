@@ -328,7 +328,7 @@ mod tests {
         let root = tree.root().expect("tree has a root after reconcile");
         let children = tree
             .get(root)
-            .map(|node| node.children().to_vec())
+            .map(|node| node.child_nodes().to_vec())
             .unwrap_or_default();
         (root, children)
     }

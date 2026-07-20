@@ -18,7 +18,7 @@ fn parse(src: &str) -> Document {
 
 fn child_ids(tree: &RetainedTree, parent: obscur_identity::NodeId) -> Vec<obscur_identity::NodeId> {
     tree.get(parent)
-        .map(|node| node.children().to_vec())
+        .map(|node| node.child_nodes().to_vec())
         .unwrap_or_default()
 }
 

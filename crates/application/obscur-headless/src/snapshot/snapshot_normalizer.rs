@@ -126,7 +126,7 @@ mod tests {
     fn first_child(host: &HeadlessHost) -> Option<NodeId> {
         let tree = host.tree();
         let root = tree.root()?;
-        tree.get(root)?.children().first().copied()
+        tree.get(root)?.child_nodes().first().copied()
     }
 
     #[test]

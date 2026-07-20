@@ -72,7 +72,7 @@ pub fn at(rt: &UiRuntime, path: &[usize]) -> NodeId {
             .tree()
             .get(node)
             .expect("a live node")
-            .children()
+            .child_nodes()
             .to_vec();
         assert!(
             i < kids.len(),
@@ -123,7 +123,7 @@ pub fn hit(rt: &mut UiRuntime, x: f32, y: f32) -> Option<NodeId> {
 pub fn parent_of(rt: &UiRuntime, node: NodeId) -> Option<NodeId> {
     rt.tree()
         .iter()
-        .find(|(_, n)| n.children().contains(&node))
+        .find(|(_, n)| n.child_nodes().contains(&node))
         .map(|(id, _)| id)
 }
 
