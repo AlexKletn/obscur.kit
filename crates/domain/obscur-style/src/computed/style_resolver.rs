@@ -60,7 +60,8 @@ use crate::cascade::ResolvedDeclarations;
 use crate::computed::absolutize::{absolute_font_size, absolutize_value};
 use crate::computed::{ChMetrics, ComputedStyle, ComputedValue};
 use crate::property::{
-    InheritedProperty, Length, LengthContext, PropertyId, PropertyValue, StyleColor, layout_keyword,
+    InheritedProperty, Length, LengthContext, PropertyId, PropertyValue, StyleColor, WritingMode,
+    layout_keyword,
 };
 use obscur_identity::InternedSymbol;
 use std::collections::{HashMap, HashSet};
@@ -188,6 +189,7 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::FontStyle,
     PropertyId::LineHeight,
     PropertyId::Direction,
+    PropertyId::WritingMode,
     PropertyId::TextAlign,
     PropertyId::TextOverflow,
     // Inherited text spacing/casing (CSS Text 3 §8.1 / §8.2 / §2.1).
@@ -560,11 +562,14 @@ impl StyleResolver {
             | PropertyId::JustifyItems
             | PropertyId::AlignSelf
             | PropertyId::JustifySelf
-            // `direction` (`ltr`) / `font-style` (`normal`) keyword initials are
-            // likewise deferred, and `font-weight`'s initial (`normal` = 400) is
-            // left unresolved so an absent value falls back to the shaping default
-            // (also 400) — byte-for-byte identical to today's behaviour.
+            // `direction` (`ltr`) / `writing-mode` (`horizontal-tb`) / `font-style`
+            // (`normal`) keyword initials are likewise deferred, and `font-weight`'s
+            // initial (`normal` = 400) is left unresolved so an absent value falls
+            // back to the shaping default (also 400) — byte-for-byte identical to
+            // today's behaviour. `writing-mode`'s absent value maps to
+            // `horizontal-tb` in `resolves_writing_mode` / the layout bridge.
             | PropertyId::Direction
+            | PropertyId::WritingMode
             | PropertyId::FontWeight
             | PropertyId::FontStyle
             // `grid-template-columns` / `grid-template-rows` initial is `none`
@@ -705,6 +710,13 @@ impl StyleResolver {
         // part of the loop below would make the answer depend on iteration order.
         let rtl = Self::resolves_rtl(cascaded, parent);
 
+        // Step 1a′: `writing-mode`, for the same reason as `direction` — it is the
+        // second input the logical→physical box-model mapping consults (the block
+        // axis rotates around it, css-writing-modes-4 §6.2), so it must be known
+        // before any box-model property is resolved. It inherits, and defaults to
+        // `horizontal-tb`, under which every mapping is byte-for-byte unchanged.
+        let wm = Self::resolves_writing_mode(cascaded, parent);
+
         // Step 1b: the face-selecting `font-*` properties, so the `ch` measurement
         // in step 1d has a face to select. None of them can carry a `<length>` (a
         // family list, a number, a keyword — all three land in `absolutize_value`'s
@@ -719,7 +731,8 @@ impl StyleResolver {
         // property that silently bypasses it is the exact defect that match exists
         // to prevent. The early set feeds the port; the loop remains the authority.
         for &property in FACE_PROPERTIES {
-            if let Some(value) = self.resolve_property(property, cascaded, &effective, parent, rtl)
+            if let Some(value) =
+                self.resolve_property(property, cascaded, &effective, parent, rtl, wm)
             {
                 style.set(property, value);
             }
@@ -730,7 +743,7 @@ impl StyleResolver {
         // loop below would make the answer depend on iteration order (§4.14). Its
         // own relative units resolve against the PARENT's size — including `ch`,
         // which is why the parent's metrics are measured here and not the node's.
-        let font_size = self.resolve_font_size(cascaded, &effective, parent, rtl, ctx);
+        let font_size = self.resolve_font_size(cascaded, &effective, parent, rtl, wm, ctx);
         style.set(
             PropertyId::FontSize,
             ComputedValue::length(Length::px(font_size)),
@@ -758,7 +771,8 @@ impl StyleResolver {
             if property == PropertyId::FontSize {
                 continue;
             }
-            if let Some(value) = self.resolve_property(property, cascaded, &effective, parent, rtl)
+            if let Some(value) =
+                self.resolve_property(property, cascaded, &effective, parent, rtl, wm)
             {
                 if value.value().uses_ch() {
                     deferred.push((property, value));
@@ -805,13 +819,14 @@ impl StyleResolver {
         custom: &HashMap<InternedSymbol, PropertyValue>,
         parent: Option<&ComputedStyle>,
         rtl: bool,
+        wm: WritingMode,
         ctx: ResolutionContext,
     ) -> f32 {
         // No parent = the root, whose implicit parent `font-size` is the initial
         // `medium` — the same value `rem` means there.
         let parent_font_size = parent.map_or(INITIAL_FONT_SIZE, Self::font_size_of);
         let specified = self
-            .resolve_property(PropertyId::FontSize, cascaded, custom, parent, rtl)
+            .resolve_property(PropertyId::FontSize, cascaded, custom, parent, rtl, wm)
             .and_then(|value| value.as_length());
         // `font-size: 2ch` needs the PARENT's `0` advance, not this node's — see
         // `absolute_font_size`. Measured only when the declaration is actually a
@@ -873,6 +888,40 @@ impl StyleResolver {
             .is_some_and(|symbol| symbol == layout_keyword::DIRECTION_RTL)
     }
 
+    /// This element's computed `writing-mode`.
+    ///
+    /// Cascaded value first, then the parent's computed one (`writing-mode`
+    /// inherits — css-writing-modes-4 §3), then the CSS initial `horizontal-tb`.
+    /// Resolved early, next to [`resolves_rtl`](Self::resolves_rtl), because the
+    /// logical→physical box-model mapping ([`PropertyId::physical_under`]) depends
+    /// on it. An absent value is `horizontal-tb`, under which every mapping is
+    /// byte-for-byte the pre-`writing-mode` behaviour.
+    fn resolves_writing_mode(
+        cascaded: &ResolvedDeclarations,
+        parent: Option<&ComputedStyle>,
+    ) -> WritingMode {
+        let symbol =
+            if let Some(PropertyValue::Keyword(symbol)) = cascaded.get(PropertyId::WritingMode) {
+                Some(*symbol)
+            } else {
+                parent
+                    .and_then(|style| style.get(PropertyId::WritingMode))
+                    .and_then(|value| match value.value() {
+                        PropertyValue::Keyword(symbol) => Some(*symbol),
+                        _ => None,
+                    })
+            };
+        match symbol {
+            Some(symbol) if symbol == layout_keyword::WRITING_MODE_VERTICAL_RL => {
+                WritingMode::VerticalRl
+            }
+            Some(symbol) if symbol == layout_keyword::WRITING_MODE_VERTICAL_LR => {
+                WritingMode::VerticalLr
+            }
+            _ => WritingMode::HorizontalTb,
+        }
+    }
+
     /// The cascaded value for `property`, honouring any **logical** declaration
     /// that maps onto it (spec §4.13).
     ///
@@ -890,6 +939,7 @@ impl StyleResolver {
         cascaded: &'a ResolvedDeclarations,
         property: PropertyId,
         rtl: bool,
+        wm: WritingMode,
     ) -> Option<&'a PropertyValue> {
         let physical = cascaded.get(property);
         // Only a physical box-model property can have a logical counterpart, so
@@ -897,7 +947,7 @@ impl StyleResolver {
         let logical = PropertyId::LOGICAL
             .iter()
             .copied()
-            .filter(|candidate| candidate.physical_under(rtl) == Some(property))
+            .filter(|candidate| candidate.physical_under(rtl, wm) == Some(property))
             .filter_map(|candidate| Some((candidate, cascaded.get(candidate)?)))
             .max_by_key(|(candidate, _)| cascaded.priority_of(*candidate));
         let Some((candidate, logical_value)) = logical else {
@@ -928,8 +978,9 @@ impl StyleResolver {
         custom: &HashMap<InternedSymbol, PropertyValue>,
         parent: Option<&ComputedStyle>,
         rtl: bool,
+        wm: WritingMode,
     ) -> Option<ComputedValue> {
-        match Self::cascaded_for(cascaded, property, rtl) {
+        match Self::cascaded_for(cascaded, property, rtl, wm) {
             Some(raw) => {
                 // Step 2: substitute var() (unresolved -> Unset).
                 let value = Self::substitute(raw, custom);
@@ -1616,6 +1667,7 @@ mod tests {
                 | PropertyId::FontSize
                 | PropertyId::FontFamily
                 | PropertyId::Direction
+                | PropertyId::WritingMode
                 | PropertyId::FontWeight
                 | PropertyId::FontStyle
                 | PropertyId::LineHeight
@@ -1746,6 +1798,7 @@ mod tests {
             PropertyId::FontSize,
             PropertyId::FontFamily,
             PropertyId::Direction,
+            PropertyId::WritingMode,
             PropertyId::FontWeight,
             PropertyId::FontStyle,
             PropertyId::LineHeight,
@@ -2139,8 +2192,10 @@ mod tests {
 
         #[test]
         fn the_block_axis_is_unmoved_by_direction() {
-            // No `writing-mode` is modelled, so the block axis is always vertical:
-            // `block-start` is `top` in either direction.
+            // Under the default `horizontal-tb` writing mode the block axis is
+            // vertical and `direction` never touches it: `block-start` is `top` in
+            // either direction. (A vertical writing mode would rotate it; that is
+            // covered by the `physical_under` mapping and the flow-layout tests.)
             let mut cascaded = ResolvedDeclarations::new();
             cascaded.insert_with_priority(PropertyId::PaddingBlockStart, px(8.0), at(0));
 

@@ -1293,7 +1293,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 117] = [
+    const ALL: [PropertyId; 118] = [
         // Logical box-model longhands (spec §4.13). They parse exactly like their
         // physical counterparts — a length — and resolve onto them at
         // computed-value time via `PropertyId::physical_under`.
@@ -1400,6 +1400,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::FontSize,
         PropertyId::FontFamily,
         PropertyId::Direction,
+        PropertyId::WritingMode,
         PropertyId::FontWeight,
         PropertyId::FontStyle,
         PropertyId::LineHeight,
@@ -1785,6 +1786,7 @@ fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<Inte
         // `outline-style` shares the same closed line-style keyword set.
         | PropertyId::OutlineStyle => Some(layout_keyword::border_style_from_name),
         PropertyId::Direction => Some(layout_keyword::direction_from_name),
+        PropertyId::WritingMode => Some(layout_keyword::writing_mode_from_name),
         PropertyId::FontStyle => Some(layout_keyword::font_style_from_name),
         PropertyId::TextAlign => Some(layout_keyword::text_align_from_name),
         PropertyId::TextOverflow => Some(layout_keyword::text_overflow_from_name),

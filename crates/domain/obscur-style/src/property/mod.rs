@@ -43,7 +43,7 @@ pub use linear_gradient::{Corner, LinearGradient};
 mod object_fit;
 pub use object_fit::ObjectFit;
 mod property_id;
-pub use property_id::PropertyId;
+pub use property_id::{PropertyId, WritingMode};
 mod property_value;
 pub use property_value::PropertyValue;
 mod radial_gradient;

@@ -35,3 +35,5 @@ mod margin_edges;
 pub use margin_edges::MarginEdges;
 mod position;
 pub use position::Position;
+mod writing_mode;
+pub use writing_mode::WritingMode;

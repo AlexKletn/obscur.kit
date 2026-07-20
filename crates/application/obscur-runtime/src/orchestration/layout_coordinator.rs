@@ -12,6 +12,7 @@ use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_layout::model::{
     AlignItems, AlignSelf, BoxSizing, Dimension, Direction, FlexDirection, FlexWrap, Inset,
     JustifyContent, LayoutBox, LayoutDisplay, LayoutStyle, Margin, MarginEdges, Position,
+    WritingMode,
 };
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{
@@ -966,6 +967,12 @@ fn layout_style_from(
         // this carries only the geometry that mapping cannot express. An
         // unauthored value stays `Ltr`, byte-for-byte identical to before.
         direction: direction_of(computed),
+        // The box's `writing-mode`, so flow layout can stack its in-flow children
+        // along the correct physical axis and origin. An unauthored value stays
+        // `horizontal-tb`, byte-for-byte identical to before. Logical box-model
+        // longhands were already folded to physical ones under this same value by
+        // the style crate.
+        writing_mode: writing_mode_of(computed),
         // Positioning scheme + insets. An unauthored `position` stays `Static`
         // and unauthored insets stay `Auto`, so a default node contributes no
         // offset — byte-for-byte identical to before positioning was wired.
@@ -1377,6 +1384,24 @@ fn direction_of(computed: &ComputedStyle) -> Direction {
     match keyword_sym(computed, PropertyId::Direction) {
         Some(sym) if sym == layout_keyword::DIRECTION_RTL => Direction::Rtl,
         _ => Direction::Ltr,
+    }
+}
+
+/// Resolves the computed `writing-mode` keyword to a [`WritingMode`], defaulting to
+/// [`WritingMode::HorizontalTb`] (the CSS initial).
+///
+/// Compares the interned symbol against the reserved [`layout_keyword`]
+/// `WRITING_MODE_*` handles; an absent or unrecognized value maps to
+/// [`WritingMode::HorizontalTb`] (which also covers `WRITING_MODE_HORIZONTAL_TB`),
+/// so a box that never sets `writing-mode` is byte-for-byte identical to before.
+/// This is the same value the style crate resolved to fold logical box-model
+/// longhands onto physical ones; flow layout re-reads it because it also needs the
+/// geometric half (which physical axis and origin it stacks children along).
+fn writing_mode_of(computed: &ComputedStyle) -> WritingMode {
+    match keyword_sym(computed, PropertyId::WritingMode) {
+        Some(sym) if sym == layout_keyword::WRITING_MODE_VERTICAL_RL => WritingMode::VerticalRl,
+        Some(sym) if sym == layout_keyword::WRITING_MODE_VERTICAL_LR => WritingMode::VerticalLr,
+        _ => WritingMode::HorizontalTb,
     }
 }
 

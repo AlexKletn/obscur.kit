@@ -98,6 +98,15 @@ pub const DIRECTION_LTR: InternedSymbol = InternedSymbol::from_raw(0x0000_1401);
 /// The `direction: rtl` (right-to-left) keyword.
 pub const DIRECTION_RTL: InternedSymbol = InternedSymbol::from_raw(0x0000_1402);
 
+// ---- `writing-mode` keyword values ----
+
+/// The `writing-mode: horizontal-tb` keyword (the CSS initial).
+pub const WRITING_MODE_HORIZONTAL_TB: InternedSymbol = InternedSymbol::from_raw(0x0000_2601);
+/// The `writing-mode: vertical-rl` keyword.
+pub const WRITING_MODE_VERTICAL_RL: InternedSymbol = InternedSymbol::from_raw(0x0000_2602);
+/// The `writing-mode: vertical-lr` keyword.
+pub const WRITING_MODE_VERTICAL_LR: InternedSymbol = InternedSymbol::from_raw(0x0000_2603);
+
 // ---- `font-style` keyword values ----
 
 /// The `font-style: normal` keyword.
@@ -494,6 +503,20 @@ pub fn direction_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
+/// Maps a `writing-mode` keyword string to its reserved [`InternedSymbol`].
+///
+/// The input is ASCII-lowercased before matching. Returns [`None`] for any
+/// keyword outside the closed `horizontal-tb` / `vertical-rl` / `vertical-lr` set.
+#[must_use]
+pub fn writing_mode_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "horizontal-tb" => Some(WRITING_MODE_HORIZONTAL_TB),
+        "vertical-rl" => Some(WRITING_MODE_VERTICAL_RL),
+        "vertical-lr" => Some(WRITING_MODE_VERTICAL_LR),
+        _ => None,
+    }
+}
+
 /// Maps a `font-style` keyword string to its reserved [`InternedSymbol`].
 ///
 /// The input is ASCII-lowercased before matching. Returns [`None`] for any
@@ -791,6 +814,9 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         ALIGN_AUTO => Some("auto"),
         DIRECTION_LTR => Some("ltr"),
         DIRECTION_RTL => Some("rtl"),
+        WRITING_MODE_HORIZONTAL_TB => Some("horizontal-tb"),
+        WRITING_MODE_VERTICAL_RL => Some("vertical-rl"),
+        WRITING_MODE_VERTICAL_LR => Some("vertical-lr"),
         FONT_STYLE_NORMAL => Some("normal"),
         FONT_STYLE_ITALIC => Some("italic"),
         FONT_STYLE_OBLIQUE => Some("oblique"),
@@ -864,6 +890,9 @@ mod tests {
         ALIGN_AUTO,
         DIRECTION_LTR,
         DIRECTION_RTL,
+        WRITING_MODE_HORIZONTAL_TB,
+        WRITING_MODE_VERTICAL_RL,
+        WRITING_MODE_VERTICAL_LR,
         FONT_STYLE_NORMAL,
         FONT_STYLE_ITALIC,
         FONT_STYLE_OBLIQUE,

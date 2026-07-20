@@ -2,11 +2,11 @@
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
-use crate::model::{Dimension, LayoutBox, LayoutStyle};
+use crate::model::{Dimension, LayoutBox, LayoutStyle, WritingMode};
 
 use super::{
-    ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput, clamp_content_measured,
-    intrinsic_inline_size,
+    ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput, clamp_content,
+    clamp_content_measured, intrinsic_inline_size,
 };
 
 /// Normal-flow / block layout (spec §4.1, §4.2).
@@ -87,9 +87,10 @@ use super::{
 /// a protocol change touching every algorithm. For now the first child's top
 /// margin and the last child's bottom margin are **contained** within this box's
 /// content (no protrusion). Also out of scope: BFC-root collapse suppression
-/// nuances and clearance. Floats, inline formatting / line boxes, and
-/// writing-mode-aware block direction are likewise not modelled; block flow is
-/// strictly vertical.
+/// nuances and clearance. Floats and inline formatting / line boxes are likewise
+/// not modelled. A **vertical** `writing-mode` rotates the block axis to
+/// horizontal — that path is [`layout_vertical`], and the rules above describe the
+/// default `horizontal-tb` mode.
 ///
 /// # Percentage margins resolve against the *width*, on every edge
 ///
@@ -164,6 +165,12 @@ impl LayoutAlgorithm for FlowLayout {
         constraints: BoxConstraints,
         measurer: &mut dyn ChildMeasurer,
     ) -> LayoutOutput {
+        // A vertical writing mode rotates the block axis to horizontal; its
+        // placement is a separate path so this — the default `horizontal-tb` — is
+        // left byte-for-byte unchanged (css-writing-modes-4 §6.2).
+        if style.writing_mode.is_vertical() {
+            return layout_vertical(style, children, constraints, measurer);
+        }
         let border = style.border;
         let padding = style.padding;
         let bp_left = border.left + padding.left;
@@ -444,11 +451,218 @@ impl LayoutAlgorithm for FlowLayout {
     }
 }
 
+/// A child placed in the block-axis coordinate system of a vertical writing mode,
+/// before it is mapped to a physical origin.
+struct VerticalPlacement {
+    /// Distance from the container's block-start content edge to this child's own
+    /// block-start edge, along the (horizontal) block axis.
+    block_start_offset: f32,
+    /// Distance from the container's inline-start content edge (the top) to this
+    /// child's top edge, along the (vertical) inline axis.
+    inline_offset: f32,
+    /// The child's physical size (width along the block axis, height along inline).
+    size: Size,
+}
+
+/// Normal-flow block layout for a **vertical** writing mode (css-writing-modes-4
+/// §6.2): the block axis is horizontal, so in-flow children stack left/right
+/// instead of top/bottom.
+///
+/// The block axis is physical **width**; the inline axis is physical **height**.
+/// `vertical-lr` progresses left-to-right from the left content edge;
+/// `vertical-rl` progresses right-to-left from the right content edge. Children's
+/// logical block-start / block-end margins are read from the physical edges the
+/// mode maps them to (already folded from `margin-block-*` upstream by the style
+/// crate): for `vertical-rl` block-start is the right edge (`margin.right`), for
+/// `vertical-lr` it is the left edge (`margin.left`). Block-axis margin collapsing
+/// (CSS 2.1 §8.3.1) and the non-collapsing `gap` work exactly as in the horizontal
+/// path, only along the rotated axis.
+///
+/// The inline (vertical) axis carries each child's used height and its top/bottom
+/// margins, resolved as the §10.3.3 inline solve on the vertical axis.
+///
+/// # Modelled to the point the block-progression is correct
+///
+/// Intrinsic inline sizing along the vertical axis (`height: max-content` on a
+/// vertical container) is not probed — a vertical `auto` inline size stretches to
+/// the offer, and an intrinsic min/max-height bound degrades to `auto` — mirroring
+/// the deliberate one-axis limit of [`intrinsic_inline_size`]. The block axis
+/// (width) shrink-wraps its children when `width: auto`.
+fn layout_vertical(
+    style: &LayoutStyle,
+    children: &[LayoutChild],
+    constraints: BoxConstraints,
+    measurer: &mut dyn ChildMeasurer,
+) -> LayoutOutput {
+    let border = style.border;
+    let padding = style.padding;
+    let bp_left = border.left + padding.left;
+    let bp_top = border.top + padding.top;
+    let bp_x = bp_left + border.right + padding.right;
+    let bp_y = bp_top + border.bottom + padding.bottom;
+
+    let rl = matches!(style.writing_mode, WritingMode::VerticalRl);
+
+    // Inline extent = physical height: an explicit height (through `box-sizing`)
+    // else a stretch to the inline space offered (the vertical analogue of a
+    // `width: auto` block stretching), clamped into min/max-height. Intrinsic
+    // bounds degrade to `auto` (no vertical-axis probe).
+    let inline_avail = (constraints.max.height - bp_y).max(0.0);
+    let content_inline = style
+        .height
+        .resolve(constraints.max.height)
+        .map_or(inline_avail, |h| style.box_sizing.content_extent(h, bp_y))
+        .max(0.0);
+    let content_inline = clamp_content(
+        content_inline,
+        style.min_height,
+        style.max_height,
+        constraints.max.height,
+        bp_y,
+        style.box_sizing,
+    );
+
+    // Block extent = physical width: an explicit width resolves now; an `auto`
+    // width shrink-wraps the children and is decided after they are placed.
+    let block_avail = (constraints.max.width - bp_x).max(0.0);
+    let explicit_block = style
+        .width
+        .resolve(constraints.max.width)
+        .map(|w| style.box_sizing.content_extent(w, bp_x).max(0.0));
+
+    // Which physical edges the block-start / block-end sides map to under this
+    // mode (§6.2): `vertical-rl` block-start = right, `vertical-lr` = left.
+    let block_start_border = if rl { border.right } else { border.left };
+    let block_end_border = if rl { border.left } else { border.right };
+    let block_start_padding = if rl { padding.right } else { padding.left };
+    let block_end_padding = if rl { padding.left } else { padding.right };
+
+    let mut placed: Vec<VerticalPlacement> = Vec::with_capacity(children.len());
+    // `b` is the block-end of the last placed real child (distance from the
+    // block-start content edge); `pending` is the open block-axis collapsing set;
+    // `gap_acc` is the additive `gap` accrued across the current boundary.
+    let mut b = 0.0_f32;
+    let mut pending = CollapsingMargins::EMPTY;
+    let mut gap_acc = 0.0_f32;
+    for (index, child) in children.iter().enumerate() {
+        let cs = child.style();
+        if index > 0 {
+            gap_acc += style.gap;
+        }
+        // Block-start (leading) and block-end (trailing) margins, from the physical
+        // edges the mode maps them to. Percentage margins resolve against the
+        // containing block's inline size (CSS 2.1 §8.3) — the container's height.
+        let (lead_margin, trail_margin) = if rl {
+            (cs.margin.right, cs.margin.left)
+        } else {
+            (cs.margin.left, cs.margin.right)
+        };
+        pending = pending.adjoin(lead_margin.resolve(content_inline));
+
+        let separation = gap_acc + pending.solve();
+        let remaining_block = (block_avail - (b + separation)).max(0.0);
+
+        // Inline (vertical) margins take from the child's offered inline space;
+        // inline-start is the top, inline-end the bottom.
+        let fixed_inline =
+            cs.margin.top.resolve(content_inline) + cs.margin.bottom.resolve(content_inline);
+        let child_inline = (content_inline - fixed_inline).max(0.0);
+        // Physical constraint: width = block offer, height = inline offer.
+        let size = measurer.measure_child(
+            index,
+            BoxConstraints::loose(Size::new(remaining_block, child_inline)),
+        );
+
+        // Inline placement (the top offset) — §10.3.3's inline solve on the
+        // vertical axis, using the top/bottom margins. An over-constrained box
+        // drops its inline-*end* margin per the containing block's `direction`
+        // (`rtl` moves the top edge inward by the whole leftover).
+        let leftover = (content_inline - fixed_inline - size.height).max(0.0);
+        let inline_offset = match (cs.margin.top.is_auto(), cs.margin.bottom.is_auto()) {
+            (true, true) => leftover / 2.0,
+            (true, false) => leftover,
+            (false, true) => cs.margin.top.resolve(content_inline),
+            (false, false) => {
+                let top = cs.margin.top.resolve(content_inline);
+                if style.direction.is_rtl() {
+                    top + leftover
+                } else {
+                    top
+                }
+            }
+        };
+
+        let block_size = size.width;
+
+        // A zero-block-extent child with no block-axis border or padding has
+        // adjoining block-start/end margins: it collapses through, exactly as a
+        // zero-height child does in the horizontal path.
+        let collapses_through = block_size == 0.0
+            && block_start_border == 0.0
+            && block_end_border == 0.0
+            && block_start_padding == 0.0
+            && block_end_padding == 0.0;
+
+        if collapses_through {
+            pending = pending.adjoin(trail_margin.resolve(content_inline));
+            let block_start_offset = b + gap_acc + pending.solve();
+            placed.push(VerticalPlacement {
+                block_start_offset,
+                inline_offset,
+                size,
+            });
+            continue;
+        }
+
+        let block_start_offset = b + separation;
+        placed.push(VerticalPlacement {
+            block_start_offset,
+            inline_offset,
+            size,
+        });
+        b = block_start_offset + block_size;
+        pending = CollapsingMargins::EMPTY.adjoin(trail_margin.resolve(content_inline));
+        gap_acc = 0.0;
+    }
+    let children_block = b + pending.solve();
+
+    let content_block = explicit_block.unwrap_or(children_block).max(0.0);
+    let content_block = clamp_content(
+        content_block,
+        style.min_width,
+        style.max_width,
+        constraints.max.width,
+        bp_x,
+        style.box_sizing,
+    );
+
+    // Map each child's block-start offset to a physical origin. `vertical-lr`
+    // grows +x from the left content edge; `vertical-rl` grows −x from the right
+    // content edge, so the child's left edge sits its block-start offset (plus its
+    // own block size) in from the right.
+    let child_boxes = placed
+        .into_iter()
+        .map(|p| {
+            let x = if rl {
+                bp_left + content_block - p.block_start_offset - p.size.width
+            } else {
+                bp_left + p.block_start_offset
+            };
+            let y = bp_top + p.inline_offset;
+            LayoutBox::new(Rect::new(Point::new(x, y), p.size))
+        })
+        .collect();
+
+    let border_box = Size::new(content_block + bp_x, content_inline + bp_y);
+    let size = constraints.constrain_allowing_overflow(border_box);
+    LayoutOutput::new(size, child_boxes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::FlowLayout;
     use crate::algorithm::{FixedChildMeasurer, LayoutAlgorithm, LayoutChild};
-    use crate::model::{Dimension, LayoutStyle, MarginEdges};
+    use crate::model::{Dimension, LayoutStyle, MarginEdges, WritingMode};
     use obscur_geometry::{BoxConstraints, Insets, Point, Size};
     use obscur_identity::NodeId;
 
@@ -895,5 +1109,102 @@ mod tests {
         // container exactly as it always has.
         assert_eq!(paragraph_box_width(150.0), 150.0);
         assert_eq!(paragraph_box_width(300.0), 300.0);
+    }
+
+    // ---- vertical writing modes (css-writing-modes-4 §6.2) -----------------
+
+    /// A fixed-size container in the given writing mode.
+    fn vertical_container(mode: WritingMode) -> LayoutStyle {
+        LayoutStyle {
+            writing_mode: mode,
+            width: Dimension::Px(300.0),
+            height: Dimension::Px(300.0),
+            ..LayoutStyle::default()
+        }
+    }
+
+    #[test]
+    fn vertical_lr_stacks_children_left_to_right_from_the_left_edge() {
+        // Block axis is horizontal, block-start = left. Children advance +x by
+        // their widths; inline (vertical) offset stays at the top.
+        let style = vertical_container(WritingMode::VerticalLr);
+        let children = [child(1), child(2)];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(40.0, 100.0), Size::new(60.0, 120.0)]);
+        let out = FlowLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(300.0, 300.0)),
+            &mut measurer,
+        );
+        let boxes = out.child_boxes();
+        assert_eq!(boxes[0].origin(), Point::new(0.0, 0.0));
+        // Second child sits directly right of the first (block advance = its width).
+        assert_eq!(boxes[1].origin(), Point::new(40.0, 0.0));
+    }
+
+    #[test]
+    fn vertical_rl_stacks_children_right_to_left_from_the_right_edge() {
+        // Block axis is horizontal, block-start = right. The first child's RIGHT
+        // edge hugs the content's right edge (300); each subsequent child sits to
+        // its left.
+        let style = vertical_container(WritingMode::VerticalRl);
+        let children = [child(1), child(2)];
+        let mut measurer =
+            FixedChildMeasurer::new(vec![Size::new(40.0, 100.0), Size::new(60.0, 120.0)]);
+        let out = FlowLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(300.0, 300.0)),
+            &mut measurer,
+        );
+        let boxes = out.child_boxes();
+        // First child: right edge at 300 → left edge at 300 − 40 = 260.
+        assert_eq!(boxes[0].origin(), Point::new(260.0, 0.0));
+        // Second: block offset 40 from the right, width 60 → 300 − 40 − 60 = 200.
+        assert_eq!(boxes[1].origin(), Point::new(200.0, 0.0));
+    }
+
+    #[test]
+    fn vertical_rl_block_start_margin_is_the_gap_from_the_right_edge() {
+        // `margin-block-start` folds to `margin-right` under vertical-rl, and here
+        // it is the leading gap from the block-start (right) edge: a 20px margin
+        // puts the child's right edge 20px in from the content's right edge.
+        let style = vertical_container(WritingMode::VerticalRl);
+        let child_style = LayoutStyle {
+            margin: MarginEdges::px(0.0, 20.0, 0.0, 0.0), // margin-right = 20
+            ..LayoutStyle::default()
+        };
+        let children = [LayoutChild::new(NodeId::from_raw(1), child_style)];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(100.0, 100.0)]);
+        let out = FlowLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(300.0, 300.0)),
+            &mut measurer,
+        );
+        // right edge at 300 − 20 = 280 → left edge at 280 − 100 = 180.
+        assert_eq!(out.child_boxes()[0].origin(), Point::new(180.0, 0.0));
+    }
+
+    #[test]
+    fn vertical_lr_inline_top_margin_offsets_along_the_vertical_inline_axis() {
+        // In a vertical mode the inline axis is vertical: a `margin-top` is an
+        // inline-start margin and offsets the child downward, not along the block.
+        let style = vertical_container(WritingMode::VerticalLr);
+        let child_style = LayoutStyle {
+            margin: MarginEdges::px(30.0, 0.0, 0.0, 0.0), // margin-top = 30
+            ..LayoutStyle::default()
+        };
+        let children = [LayoutChild::new(NodeId::from_raw(1), child_style)];
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(50.0, 50.0)]);
+        let out = FlowLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::loose(Size::new(300.0, 300.0)),
+            &mut measurer,
+        );
+        // block-start (left) offset 0, inline (top) offset 30.
+        assert_eq!(out.child_boxes()[0].origin(), Point::new(0.0, 30.0));
     }
 }

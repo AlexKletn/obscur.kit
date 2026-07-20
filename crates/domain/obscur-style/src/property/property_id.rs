@@ -11,6 +11,42 @@
 
 use crate::property::Inheritance;
 
+/// The block-flow / line orientation a box lays its content out under
+/// (`writing-mode`, css-writing-modes-4 §3).
+///
+/// This is the piece the block axis and the inline axis rotate around: it decides
+/// which physical edge `block-start` names (the input [`PropertyId::physical_under`]
+/// needs beyond `direction`), and which physical axis normal flow stacks its
+/// children along.
+///
+/// Only the three modelled values are represented; the sideways / `-rl` line
+/// orientations are out of scope. The default is [`HorizontalTb`](Self::HorizontalTb),
+/// the CSS initial, under which every mapping is byte-for-byte what it was before
+/// `writing-mode` existed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum WritingMode {
+    /// `horizontal-tb` — the CSS initial. Block flow is top-to-bottom (the block
+    /// axis is vertical), inline text runs horizontally.
+    #[default]
+    HorizontalTb,
+    /// `vertical-rl` — block flow is right-to-left (the block axis is horizontal,
+    /// `block-start` is the physical right edge), inline text runs top-to-bottom.
+    VerticalRl,
+    /// `vertical-lr` — block flow is left-to-right (the block axis is horizontal,
+    /// `block-start` is the physical left edge), inline text runs top-to-bottom.
+    VerticalLr,
+}
+
+impl WritingMode {
+    /// Whether the **block** axis is horizontal — i.e. this is one of the two
+    /// vertical writing modes, so normal flow stacks its children left/right rather
+    /// than top/bottom and the inline axis is the vertical one.
+    #[must_use]
+    pub const fn is_vertical(self) -> bool {
+        matches!(self, Self::VerticalRl | Self::VerticalLr)
+    }
+}
+
 /// A typed identifier for a known longhand CSS property.
 ///
 /// Only longhands are represented; shorthands expand to longhands before the
@@ -360,6 +396,14 @@ pub enum PropertyId {
     /// The `direction` property (Keyword-valued: `ltr` / `rtl`; inherited). See
     /// the reserved `DIRECTION_*` handles in [`crate::property::layout_keyword`].
     Direction,
+    /// The `writing-mode` property (Keyword-valued: `horizontal-tb` (initial) /
+    /// `vertical-rl` / `vertical-lr`; INHERITED — css-writing-modes-4 §3). See the
+    /// reserved `WRITING_MODE_*` handles in [`crate::property::layout_keyword`].
+    /// The block axis and the inline axis rotate around it: it is the second input
+    /// (beyond `direction`) to [`physical_under`](Self::physical_under), which maps
+    /// `block-start` to the physical top / right / left per §6.2, and it selects
+    /// the physical axis normal flow stacks children along.
+    WritingMode,
     /// The `font-weight` property (Number-valued on the `1..=1000` axis;
     /// inherited).
     FontWeight,
@@ -437,101 +481,143 @@ pub enum PropertyId {
 
 impl PropertyId {
     /// The physical property this logical one resolves into, or [`None`] when
-    /// `self` is not a logical property (spec §4.13).
+    /// `self` is not a logical property (spec §4.13, css-writing-modes-4 §6.2).
     ///
-    /// `rtl` is the element's computed `direction`. Only `direction` is consulted
-    /// because only `direction` is modelled: there is no `writing-mode`, so the
-    /// block axis is always vertical and `block-start`/`block-end` map to
-    /// `top`/`bottom` regardless. The moment a `writing-mode` exists this is the
-    /// one place that has to learn about it.
+    /// `rtl` is the element's computed `direction`; `wm` is its computed
+    /// `writing-mode`. Both axes rotate around `wm`:
     ///
-    /// The inline axis is the one that flips: under `rtl`, `inline-start` is the
-    /// RIGHT edge.
+    /// * The **block** axis is vertical under `horizontal-tb` (`block-start` → top),
+    ///   and horizontal under the two vertical modes: `block-start` → the physical
+    ///   RIGHT under `vertical-rl` and the physical LEFT under `vertical-lr` (§6.2).
+    ///   `direction` never touches the block axis.
+    /// * The **inline** axis is horizontal under `horizontal-tb` and vertical under
+    ///   the two vertical modes, and it is `direction` that flips it: `inline-start`
+    ///   is the line-left side under `ltr` and the line-right side under `rtl`. In a
+    ///   vertical mode "line-left" is the physical top (inline text runs
+    ///   top-to-bottom), so `inline-start` → top under `ltr`, bottom under `rtl`.
+    ///
+    /// Under the default `horizontal-tb` this is byte-for-byte the pre-`writing-mode`
+    /// mapping.
     #[must_use]
-    pub const fn physical_under(self, rtl: bool) -> Option<Self> {
+    pub const fn physical_under(self, rtl: bool, wm: WritingMode) -> Option<Self> {
+        let vertical = wm.is_vertical();
         Some(match self {
-            // Inline axis: flipped by `direction`.
-            Self::MarginInlineStart => {
-                if rtl {
-                    Self::MarginRight
-                } else {
-                    Self::MarginLeft
-                }
-            }
-            Self::MarginInlineEnd => {
-                if rtl {
-                    Self::MarginLeft
-                } else {
-                    Self::MarginRight
-                }
-            }
-            Self::PaddingInlineStart => {
-                if rtl {
-                    Self::PaddingRight
-                } else {
-                    Self::PaddingLeft
-                }
-            }
-            Self::PaddingInlineEnd => {
-                if rtl {
-                    Self::PaddingLeft
-                } else {
-                    Self::PaddingRight
-                }
-            }
-            Self::InsetInlineStart => {
-                if rtl {
-                    Self::Right
-                } else {
-                    Self::Left
-                }
-            }
-            Self::InsetInlineEnd => {
-                if rtl {
-                    Self::Left
-                } else {
-                    Self::Right
-                }
-            }
-            Self::BorderInlineStartWidth => {
-                if rtl {
-                    Self::BorderRightWidth
-                } else {
-                    Self::BorderLeftWidth
-                }
-            }
-            Self::BorderInlineEndWidth => {
-                if rtl {
-                    Self::BorderLeftWidth
-                } else {
-                    Self::BorderRightWidth
-                }
-            }
-            Self::BorderInlineStartStyle => {
-                if rtl {
-                    Self::BorderRightStyle
-                } else {
-                    Self::BorderLeftStyle
-                }
-            }
-            Self::BorderInlineEndStyle => {
-                if rtl {
-                    Self::BorderLeftStyle
-                } else {
-                    Self::BorderRightStyle
-                }
-            }
-            // Block axis: vertical, and `direction` does not touch it.
-            Self::MarginBlockStart => Self::MarginTop,
-            Self::MarginBlockEnd => Self::MarginBottom,
-            Self::PaddingBlockStart => Self::PaddingTop,
-            Self::PaddingBlockEnd => Self::PaddingBottom,
-            Self::InsetBlockStart => Self::Top,
-            Self::InsetBlockEnd => Self::Bottom,
-            Self::BorderBlockStartWidth => Self::BorderTopWidth,
-            Self::BorderBlockEndWidth => Self::BorderBottomWidth,
-            Self::BorderBlockStartStyle => Self::BorderTopStyle,
-            Self::BorderBlockEndStyle => Self::BorderBottomStyle,
+            // Inline axis: flipped by `direction`, and rotated to vertical by a
+            // vertical `writing-mode` (line-left = physical top).
+            Self::MarginInlineStart => match (vertical, rtl) {
+                (false, false) => Self::MarginLeft,
+                (false, true) => Self::MarginRight,
+                (true, false) => Self::MarginTop,
+                (true, true) => Self::MarginBottom,
+            },
+            Self::MarginInlineEnd => match (vertical, rtl) {
+                (false, false) => Self::MarginRight,
+                (false, true) => Self::MarginLeft,
+                (true, false) => Self::MarginBottom,
+                (true, true) => Self::MarginTop,
+            },
+            Self::PaddingInlineStart => match (vertical, rtl) {
+                (false, false) => Self::PaddingLeft,
+                (false, true) => Self::PaddingRight,
+                (true, false) => Self::PaddingTop,
+                (true, true) => Self::PaddingBottom,
+            },
+            Self::PaddingInlineEnd => match (vertical, rtl) {
+                (false, false) => Self::PaddingRight,
+                (false, true) => Self::PaddingLeft,
+                (true, false) => Self::PaddingBottom,
+                (true, true) => Self::PaddingTop,
+            },
+            Self::InsetInlineStart => match (vertical, rtl) {
+                (false, false) => Self::Left,
+                (false, true) => Self::Right,
+                (true, false) => Self::Top,
+                (true, true) => Self::Bottom,
+            },
+            Self::InsetInlineEnd => match (vertical, rtl) {
+                (false, false) => Self::Right,
+                (false, true) => Self::Left,
+                (true, false) => Self::Bottom,
+                (true, true) => Self::Top,
+            },
+            Self::BorderInlineStartWidth => match (vertical, rtl) {
+                (false, false) => Self::BorderLeftWidth,
+                (false, true) => Self::BorderRightWidth,
+                (true, false) => Self::BorderTopWidth,
+                (true, true) => Self::BorderBottomWidth,
+            },
+            Self::BorderInlineEndWidth => match (vertical, rtl) {
+                (false, false) => Self::BorderRightWidth,
+                (false, true) => Self::BorderLeftWidth,
+                (true, false) => Self::BorderBottomWidth,
+                (true, true) => Self::BorderTopWidth,
+            },
+            Self::BorderInlineStartStyle => match (vertical, rtl) {
+                (false, false) => Self::BorderLeftStyle,
+                (false, true) => Self::BorderRightStyle,
+                (true, false) => Self::BorderTopStyle,
+                (true, true) => Self::BorderBottomStyle,
+            },
+            Self::BorderInlineEndStyle => match (vertical, rtl) {
+                (false, false) => Self::BorderRightStyle,
+                (false, true) => Self::BorderLeftStyle,
+                (true, false) => Self::BorderBottomStyle,
+                (true, true) => Self::BorderTopStyle,
+            },
+            // Block axis: vertical under `horizontal-tb` (top/bottom), horizontal
+            // under the vertical modes — `block-start` is the right under
+            // `vertical-rl`, the left under `vertical-lr` (§6.2). `direction` does
+            // not touch it.
+            Self::MarginBlockStart => match wm {
+                WritingMode::HorizontalTb => Self::MarginTop,
+                WritingMode::VerticalRl => Self::MarginRight,
+                WritingMode::VerticalLr => Self::MarginLeft,
+            },
+            Self::MarginBlockEnd => match wm {
+                WritingMode::HorizontalTb => Self::MarginBottom,
+                WritingMode::VerticalRl => Self::MarginLeft,
+                WritingMode::VerticalLr => Self::MarginRight,
+            },
+            Self::PaddingBlockStart => match wm {
+                WritingMode::HorizontalTb => Self::PaddingTop,
+                WritingMode::VerticalRl => Self::PaddingRight,
+                WritingMode::VerticalLr => Self::PaddingLeft,
+            },
+            Self::PaddingBlockEnd => match wm {
+                WritingMode::HorizontalTb => Self::PaddingBottom,
+                WritingMode::VerticalRl => Self::PaddingLeft,
+                WritingMode::VerticalLr => Self::PaddingRight,
+            },
+            Self::InsetBlockStart => match wm {
+                WritingMode::HorizontalTb => Self::Top,
+                WritingMode::VerticalRl => Self::Right,
+                WritingMode::VerticalLr => Self::Left,
+            },
+            Self::InsetBlockEnd => match wm {
+                WritingMode::HorizontalTb => Self::Bottom,
+                WritingMode::VerticalRl => Self::Left,
+                WritingMode::VerticalLr => Self::Right,
+            },
+            Self::BorderBlockStartWidth => match wm {
+                WritingMode::HorizontalTb => Self::BorderTopWidth,
+                WritingMode::VerticalRl => Self::BorderRightWidth,
+                WritingMode::VerticalLr => Self::BorderLeftWidth,
+            },
+            Self::BorderBlockEndWidth => match wm {
+                WritingMode::HorizontalTb => Self::BorderBottomWidth,
+                WritingMode::VerticalRl => Self::BorderLeftWidth,
+                WritingMode::VerticalLr => Self::BorderRightWidth,
+            },
+            Self::BorderBlockStartStyle => match wm {
+                WritingMode::HorizontalTb => Self::BorderTopStyle,
+                WritingMode::VerticalRl => Self::BorderRightStyle,
+                WritingMode::VerticalLr => Self::BorderLeftStyle,
+            },
+            Self::BorderBlockEndStyle => match wm {
+                WritingMode::HorizontalTb => Self::BorderBottomStyle,
+                WritingMode::VerticalRl => Self::BorderLeftStyle,
+                WritingMode::VerticalLr => Self::BorderRightStyle,
+            },
             _ => return None,
         })
     }
@@ -540,8 +626,10 @@ impl PropertyId {
     /// counterpart rather than being computed itself.
     #[must_use]
     pub const fn is_logical(self) -> bool {
-        // `ltr` is arbitrary here: a logical property maps under either direction.
-        self.physical_under(false).is_some()
+        // The direction / writing-mode are arbitrary here: a logical property maps
+        // under any of them, so membership is what this asks.
+        self.physical_under(false, WritingMode::HorizontalTb)
+            .is_some()
     }
 
     /// Every logical property, in a stable order.
@@ -682,6 +770,7 @@ impl PropertyId {
             Self::FontSize => "font-size",
             Self::FontFamily => "font-family",
             Self::Direction => "direction",
+            Self::WritingMode => "writing-mode",
             Self::FontWeight => "font-weight",
             Self::FontStyle => "font-style",
             Self::LineHeight => "line-height",
@@ -712,6 +801,8 @@ impl PropertyId {
             | Self::FontSize
             | Self::FontFamily
             | Self::Direction
+            // `writing-mode` inherits (css-writing-modes-4 §3).
+            | Self::WritingMode
             | Self::FontWeight
             | Self::FontStyle
             | Self::LineHeight
