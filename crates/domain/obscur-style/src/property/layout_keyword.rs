@@ -35,6 +35,8 @@ pub const DISPLAY_FLEX: InternedSymbol = InternedSymbol::from_raw(0x0000_1002);
 pub const DISPLAY_GRID: InternedSymbol = InternedSymbol::from_raw(0x0000_1003);
 /// The `display: none` keyword.
 pub const DISPLAY_NONE: InternedSymbol = InternedSymbol::from_raw(0x0000_1004);
+/// The `display: contents` keyword.
+pub const DISPLAY_CONTENTS: InternedSymbol = InternedSymbol::from_raw(0x0000_1005);
 
 // ---- `flex-direction` keyword values ----
 
@@ -70,6 +72,9 @@ pub const JUSTIFY_SPACE_BETWEEN: InternedSymbol = InternedSymbol::from_raw(0x000
 pub const JUSTIFY_SPACE_AROUND: InternedSymbol = InternedSymbol::from_raw(0x0000_1205);
 /// The `justify-content` / `align-content: space-evenly` keyword.
 pub const JUSTIFY_SPACE_EVENLY: InternedSymbol = InternedSymbol::from_raw(0x0000_1206);
+/// The `align-content: stretch` keyword (grow lines/tracks to fill leftover
+/// space). Distinct from [`ALIGN_STRETCH`] (the `align-items` per-item stretch).
+pub const JUSTIFY_STRETCH: InternedSymbol = InternedSymbol::from_raw(0x0000_1207);
 
 // ---- `align-items` keyword values ----
 
@@ -310,6 +315,7 @@ pub fn display_from_name(name: &str) -> Option<InternedSymbol> {
         "flex" => Some(DISPLAY_FLEX),
         "grid" => Some(DISPLAY_GRID),
         "none" => Some(DISPLAY_NONE),
+        "contents" => Some(DISPLAY_CONTENTS),
         _ => None,
     }
 }
@@ -434,6 +440,11 @@ pub fn justify_content_from_name(name: &str) -> Option<InternedSymbol> {
 /// closed set.
 #[must_use]
 pub fn align_content_from_name(name: &str) -> Option<InternedSymbol> {
+    // `align-content` shares `justify-content`'s distribution grammar but adds
+    // `stretch` (grow lines/tracks to fill leftover cross space).
+    if name.eq_ignore_ascii_case("stretch") {
+        return Some(JUSTIFY_STRETCH);
+    }
     justify_content_from_name(name)
 }
 
@@ -742,6 +753,7 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         DISPLAY_FLEX => Some("flex"),
         DISPLAY_GRID => Some("grid"),
         DISPLAY_NONE => Some("none"),
+        DISPLAY_CONTENTS => Some("contents"),
         POSITION_STATIC => Some("static"),
         POSITION_RELATIVE => Some("relative"),
         POSITION_ABSOLUTE => Some("absolute"),
@@ -771,6 +783,7 @@ pub fn name_of(symbol: InternedSymbol) -> Option<&'static str> {
         JUSTIFY_SPACE_BETWEEN => Some("space-between"),
         JUSTIFY_SPACE_AROUND => Some("space-around"),
         JUSTIFY_SPACE_EVENLY => Some("space-evenly"),
+        JUSTIFY_STRETCH => Some("stretch"),
         ALIGN_START => Some("flex-start"),
         ALIGN_CENTER => Some("center"),
         ALIGN_END => Some("flex-end"),
@@ -813,6 +826,7 @@ mod tests {
         DISPLAY_FLEX,
         DISPLAY_GRID,
         DISPLAY_NONE,
+        DISPLAY_CONTENTS,
         POSITION_STATIC,
         POSITION_RELATIVE,
         POSITION_ABSOLUTE,
@@ -842,6 +856,7 @@ mod tests {
         JUSTIFY_SPACE_BETWEEN,
         JUSTIFY_SPACE_AROUND,
         JUSTIFY_SPACE_EVENLY,
+        JUSTIFY_STRETCH,
         ALIGN_START,
         ALIGN_CENTER,
         ALIGN_END,
@@ -977,7 +992,10 @@ mod tests {
             align_content_from_name("space-evenly"),
             Some(JUSTIFY_SPACE_EVENLY)
         );
-        assert_eq!(align_content_from_name("stretch"), None);
+        // (An earlier `assert_eq!(align_content_from_name("stretch"), None)` was
+        // removed 2026-07-20: `align-content: stretch` is now recognised and routes
+        // to line-cross growth, per spec_ch4_flex::align_content_stretch_grows_lines.
+        // It contradicted that oracle; the rest of this grammar check stands.)
         // Round-trips through `name_of`.
         assert_eq!(name_of(JUSTIFY_SPACE_EVENLY), Some("space-evenly"));
     }

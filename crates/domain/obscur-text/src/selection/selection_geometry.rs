@@ -3,7 +3,6 @@
 use obscur_geometry::{Point, Rect, Size};
 
 use crate::layout::{ParagraphLayout, ParagraphLine};
-use crate::shaping::ShapedGlyph;
 
 /// The visual highlight of a [`TextSelection`](super::TextSelection) as a set of
 /// rectangles (spec §5.11 editing engine).
@@ -117,60 +116,53 @@ impl SelectionGeometry {
     #[must_use]
     pub fn from_paragraph(layout: &ParagraphLayout, start: usize, end: usize) -> Self {
         let (lo, hi) = (start.min(end), start.max(end));
-        let lines = layout.lines();
-        if lo == hi || lines.is_empty() {
+        if lo == hi {
             return Self::new();
         }
-        let start_line = Self::line_of_byte(lines, lo);
-        let end_line = Self::line_of_byte(lines, hi);
-        let mut rects = Vec::with_capacity(end_line.saturating_sub(start_line) + 1);
-        for (li, line) in lines.iter().enumerate().take(end_line + 1).skip(start_line) {
-            // Leading line: from the start pen x; interior/trailing: from x = 0.
-            let x_from = if li == start_line {
-                Self::line_pen_x(line, lo)
-            } else {
-                0.0
-            };
-            // Trailing line: to the end pen x; leading/interior: to the line width.
-            let x_to = if li == end_line {
-                Self::line_pen_x(line, hi)
-            } else {
-                line.width()
-            };
-            let width = x_to - x_from;
-            // Drop a zero/negative-width extent (a boundary sliver or empty line):
-            // it paints nothing, keeping a one-line span byte-identical.
-            if width > 0.0 {
-                rects.push(Rect::new(
-                    Point::new(line.x_offset() + x_from, line.top()),
-                    Size::new(width, line.height()),
-                ));
+        // Walk each line's glyphs in **visual** (paint) order, accumulating the pen
+        // x the segments paint from, and emit one rectangle per maximal run of
+        // *visually adjacent* selected glyphs. A logically contiguous selection over
+        // bidi-reordered text is therefore drawn as several DISJOINT rectangles —
+        // the UAX#9 highlight — one for each visual piece, and a purely left-to-right
+        // line yields the single contiguous rectangle it did before. A glyph is
+        // selected when its source cluster (a byte offset) lies in `[lo, hi)`; the
+        // per-line pen naturally splits the paragraph across wrapped lines.
+        let mut rects = Vec::new();
+        for line in layout.lines() {
+            let mut pen = 0.0_f32;
+            let mut run_start: Option<f32> = None;
+            for glyph in line
+                .segments()
+                .iter()
+                .flat_map(|segment| segment.run().glyphs())
+            {
+                let selected = lo <= glyph.cluster() && glyph.cluster() < hi;
+                if selected {
+                    run_start.get_or_insert(pen);
+                } else if let Some(x_from) = run_start.take() {
+                    Self::push_extent(&mut rects, line, x_from, pen);
+                }
+                pen += glyph.x_advance();
+            }
+            if let Some(x_from) = run_start.take() {
+                Self::push_extent(&mut rects, line, x_from, pen);
             }
         }
         Self { rects }
     }
 
-    /// The line index a caret byte `index` sits on: the first line whose byte range
-    /// **ends past** `index`, else the last line — the same downstream resolution
-    /// the caret hit-test uses, so a selection edge lands on the line its glyphs
-    /// paint on.
-    fn line_of_byte(lines: &[ParagraphLine], index: usize) -> usize {
-        lines
-            .iter()
-            .position(|line| index < line.range().end)
-            .unwrap_or_else(|| lines.len().saturating_sub(1))
-    }
-
-    /// The within-line pen x of `index`: the sum of this `line`'s spaced/tabbed
-    /// glyph advances whose source cluster falls before `index`, measured from the
-    /// line's content start (the same advances the segments paint from).
-    fn line_pen_x(line: &ParagraphLine, index: usize) -> f32 {
-        line.segments()
-            .iter()
-            .flat_map(|segment| segment.run().glyphs())
-            .filter(|glyph| glyph.cluster() < index)
-            .map(ShapedGlyph::x_advance)
-            .sum()
+    /// Pushes one within-line highlight rectangle spanning pen x `[x_from, x_to)`
+    /// onto `rects`, translated by the line's alignment offset and boxed at the
+    /// line's top/height. A zero/negative extent (a boundary sliver) paints nothing
+    /// and is dropped.
+    fn push_extent(rects: &mut Vec<Rect>, line: &ParagraphLine, x_from: f32, x_to: f32) {
+        let width = x_to - x_from;
+        if width > 0.0 {
+            rects.push(Rect::new(
+                Point::new(line.x_offset() + x_from, line.top()),
+                Size::new(width, line.height()),
+            ));
+        }
     }
 }
 

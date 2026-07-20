@@ -120,6 +120,15 @@ impl UpdateWindow {
         self
     }
 
+    /// Returns the requested always-on-top change, if any.
+    ///
+    /// A backend inspects this to decide whether the delta touches a property it
+    /// cannot service (§6.2): keeping a window above others needs a compositor.
+    #[must_use]
+    pub const fn always_on_top(&self) -> Option<bool> {
+        self.always_on_top
+    }
+
     /// Sets a new transparent flag, returning the updated delta.
     #[must_use]
     pub fn set_transparent(mut self, transparent: bool) -> Self {

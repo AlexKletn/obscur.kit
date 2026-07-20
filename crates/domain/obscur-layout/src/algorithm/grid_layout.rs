@@ -318,28 +318,63 @@ struct Track {
     /// Whether this track's growth limit turned finite in the current
     /// growth-limit round (§11.5.1 "infinitely growable" flag).
     infinitely_growable: bool,
+    /// Scratch: whether an item's growth-limit (max) distribution targeted this
+    /// track in the current batch. A content-sized track that is targeted but
+    /// receives no increase (its contribution is already covered by its base) must
+    /// still have its infinite growth limit committed to a finite value — the §12.5
+    /// span-1 "set the growth limit to the maximum of the items' max-content
+    /// contributions" simplification — so a later spanning item sees it as a hard
+    /// cap rather than as still-infinitely-growable (the Peter Salas example).
+    max_touched: bool,
+    /// Whether this track's *max* sizing function is literally `auto` (as opposed
+    /// to `max-content`, which shares the same [`Kind::Max`] content contribution).
+    /// §11.8 *Stretch auto Tracks* grows only `auto`-max tracks, so this preserves
+    /// the distinction the growth-limit [`Kind`] no longer carries.
+    auto_max: bool,
+}
+
+/// Whether a track's *max* sizing function is `auto` (§11.8's stretch target).
+/// A `max-content` max is content-sized but is **not** stretched.
+fn max_is_auto(ts: &TrackSize) -> bool {
+    match ts {
+        TrackSize::Auto => true,
+        // `minmax(_, auto)`, and an invalid nested `minmax` max (treated as `auto`
+        // by [`max_fn_of`]), both stretch.
+        TrackSize::MinMax(_, max) => {
+            matches!(max.as_ref(), TrackSize::Auto | TrackSize::MinMax(..))
+        }
+        _ => false,
+    }
 }
 
 /// The `min` sizing function of a track (§11.4). `axis` is the content extent a
 /// `Percent` bound resolves against.
 ///
-/// Per §7.2.3 a standalone `fr` is formally `minmax(auto, fr)` — an intrinsic
-/// (content) minimum. We instead floor it at `0`: our single-measure content
-/// approximation supplies a max-content value in place of a true min-content
-/// one, and using that as an `auto` minimum would wrongly inflate flexible
-/// tracks to their items' preferred size. Flooring at `0` keeps a plain `1fr`
-/// split identical to the previous model; a real `auto` fr-minimum awaits a
-/// genuine min-content contribution (documented, same caveat as the pair
-/// approximation above). An `fr` used as a `minmax` *min* is likewise invalid
-/// and acts as `0`.
+/// Per §7.2.3 a standalone `fr` is formally `minmax(auto, fr)` — an `auto`
+/// (content-based) minimum. Its base therefore grows to the items' **minimum
+/// contribution**, which §12.5 accommodates with the min-content contribution
+/// (measured under an offer of no space, [`Kind::Min`]) — not the loose/max-content
+/// measure, so a reflowable item still shrinks to its longest word rather than
+/// inflating the flexible track to its preferred size. This is what makes an `fr`
+/// track blown past its fair share by content restart the fr algorithm (§12.7.1);
+/// a track with no content min keeps a base of `0` and a plain `1fr` split. An
+/// `fr` used as a `minmax` *min* is invalid and acts as `0`.
+// `auto` / `min-content` / `fr` deliberately share the `Kind::Min` body but are
+// kept as separate, self-documenting arms.
+#[allow(clippy::match_same_arms)]
 fn min_fn_of(track: &TrackSize, axis: f32) -> MinFn {
     match track {
         TrackSize::Fixed(px) => MinFn::Fixed(px.max(0.0)),
         TrackSize::Percent(f) => MinFn::Fixed((f * axis).max(0.0)),
-        TrackSize::Auto => MinFn::Intrinsic(Kind::Auto),
+        // `auto` as a MINIMUM is the item's automatic minimum size — accommodated
+        // by the min-content contribution (§12.5 "intrinsic minimums"), NOT a
+        // fill-available measure. Measuring it as min-content is what stops a block
+        // item (whose `width: auto` would otherwise fill the offered width) from
+        // inflating its track to the container's whole inline size.
+        TrackSize::Auto => MinFn::Intrinsic(Kind::Min),
         TrackSize::MinContent => MinFn::Intrinsic(Kind::Min),
         TrackSize::MaxContent => MinFn::Intrinsic(Kind::Max),
-        TrackSize::Fr(_) => MinFn::Fixed(0.0),
+        TrackSize::Fr(_) => MinFn::Intrinsic(Kind::Min),
         TrackSize::MinMax(min, _) => match min.as_ref() {
             // An `fr` is not a valid `minmax` minimum — floor at 0.
             TrackSize::Fr(_) => MinFn::Fixed(0.0),
@@ -350,11 +385,16 @@ fn min_fn_of(track: &TrackSize, axis: f32) -> MinFn {
 
 /// The `max` sizing function of a track (§11.4). A nested `minmax` as the `max`
 /// bound is not meaningful; it is treated as `auto` (content-sized).
+// `auto` / `max-content` deliberately share the `Kind::Max` body but are kept as
+// separate, self-documenting arms.
+#[allow(clippy::match_same_arms)]
 fn max_fn_of(track: &TrackSize, axis: f32) -> MaxFn {
     match track {
         TrackSize::Fixed(px) => MaxFn::Fixed(px.max(0.0)),
         TrackSize::Percent(f) => MaxFn::Fixed((f * axis).max(0.0)),
-        TrackSize::Auto => MaxFn::Intrinsic(Kind::Auto),
+        // `auto` as a MAXIMUM is the item's max-content contribution (§12.5
+        // "For max-content maximums" applies to `auto`/`max-content` maxes).
+        TrackSize::Auto => MaxFn::Intrinsic(Kind::Max),
         TrackSize::MinContent => MaxFn::Intrinsic(Kind::Min),
         TrackSize::MaxContent => MaxFn::Intrinsic(Kind::Max),
         TrackSize::Fr(f) => MaxFn::Flex(f.max(0.0)),
@@ -374,13 +414,18 @@ fn max_fn_of(track: &TrackSize, axis: f32) -> MaxFn {
 /// all (a standalone `fr`'s min is floored at `0`, see [`min_fn_of`]).
 fn track_takes(track: &TrackSize, kind: Kind) -> bool {
     let bound = |t: &TrackSize| match t {
-        TrackSize::Auto => kind == Kind::Auto,
+        // `auto` is `minmax(min-content, max-content)`: its min is fed by the
+        // min-content contribution and its max by the max-content one.
+        TrackSize::Auto => kind == Kind::Min || kind == Kind::Max,
         TrackSize::MinContent => kind == Kind::Min,
         TrackSize::MaxContent => kind == Kind::Max,
         _ => false,
     };
     match track {
         TrackSize::MinMax(min, max) => bound(min) || bound(max),
+        // A standalone `fr` is `minmax(auto, fr)`: its base is fed by the item's
+        // min-content contribution (see [`min_fn_of`]), so it takes `Kind::Min`.
+        TrackSize::Fr(_) => kind == Kind::Min,
         other => bound(other),
     }
 }
@@ -514,6 +559,12 @@ fn distribute_to_limit(
     }
     for t in &mut tracks[start..hi] {
         t.increase = 0.0;
+        // Record that this item's max distribution targeted the track, so a
+        // content-sized track with an infinite growth limit that ends this batch
+        // with no increase is still committed to a finite growth limit (§12.5).
+        if affected(t) {
+            t.max_touched = true;
+        }
     }
     let sum: f32 = tracks[start..hi]
         .iter()
@@ -591,10 +642,19 @@ fn flush_limit(tracks: &mut [Track]) {
                 t.limit + t.planned_limit
             };
             t.infinitely_growable = true;
+        } else if t.max_touched && t.limit.is_infinite() {
+            // §12.5 span-1 simplification: a content-sized track whose growth limit
+            // was targeted by a max distribution but needed no increase (its base
+            // already covers the contribution) commits its infinite growth limit to
+            // that finite value now — a hard cap for later spanning items, not an
+            // infinitely-growable track.
+            t.limit = t.base;
+            t.infinitely_growable = false;
         } else {
             t.infinitely_growable = false;
         }
         t.planned_limit = 0.0;
+        t.max_touched = false;
     }
 }
 
@@ -757,7 +817,7 @@ fn expand_flexible(tracks: &mut [Track], avail: f32) {
 /// nothing else, which is the one place the three visibly part company. §11.8 is
 /// written against `auto` for exactly that reason.
 fn stretch_auto(tracks: &mut [Track], avail: f32) {
-    let stretchable = |t: &Track| matches!(t.max_fn, MaxFn::Intrinsic(Kind::Auto));
+    let stretchable = |t: &Track| t.auto_max;
     let count = tracks.iter().filter(|t| stretchable(t)).count();
     if count == 0 {
         return;
@@ -833,6 +893,8 @@ fn resolve_tracks(
                 planned_base: 0.0,
                 planned_limit: 0.0,
                 infinitely_growable: false,
+                max_touched: false,
+                auto_max: max_is_auto(ts),
             }
         })
         .collect();
@@ -892,7 +954,9 @@ fn content_distribution(n: usize, leftover: f32, mode: JustifyContent) -> (f32, 
         return (0.0, 0.0);
     }
     match mode {
-        JustifyContent::FlexStart => (0.0, 0.0),
+        // `stretch` grows the tracks themselves to consume the leftover (handled by
+        // the track-stretch step), so it leaves no gaps to distribute here.
+        JustifyContent::FlexStart | JustifyContent::Stretch => (0.0, 0.0),
         JustifyContent::FlexEnd => (leftover, 0.0),
         JustifyContent::Center => (leftover / 2.0, 0.0),
         JustifyContent::SpaceBetween => {
@@ -1430,7 +1494,10 @@ impl LayoutAlgorithm for GridLayout {
         // (the default) routes leftover space to §11.8 stretch of `auto` columns.
         let loose = BoxConstraints::loose(Size::new(content_width, content_height));
         let col_definite = !style.width.is_auto();
-        let col_stretch = matches!(style.justify_content, JustifyContent::FlexStart);
+        let col_stretch = matches!(
+            style.justify_content,
+            JustifyContent::FlexStart | JustifyContent::Stretch
+        );
         let mut col_items: Vec<(usize, usize, Contributions)> = Vec::with_capacity(count);
         for i in 0..count {
             let (start, span) = (place_col[i], col_span[i]);
@@ -1503,7 +1570,10 @@ impl LayoutAlgorithm for GridLayout {
             })
             .collect();
         let row_definite = !style.height.is_auto();
-        let row_stretch = matches!(style.align_content, JustifyContent::FlexStart);
+        let row_stretch = matches!(
+            style.align_content,
+            JustifyContent::FlexStart | JustifyContent::Stretch
+        );
         let mut row_items: Vec<(usize, usize, Contributions)> = Vec::with_capacity(count);
         for i in 0..count {
             let (start, span) = (place_row[i], row_span[i]);

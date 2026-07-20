@@ -11,9 +11,12 @@ use super::{GestureContender, GestureResolution, RecognizerId, RecognizerState};
 /// applies the arena rule to award the sequence to a single winner:
 ///
 /// - If any contender is [`Recognized`](RecognizerState::Recognized), the
-///   winner is the recognized contender with the **highest priority** (ties
-///   broken toward the smallest [`RecognizerId`]). System gestures win ties by
-///   carrying a high priority.
+///   winner is the recognized contender with the **highest priority**. A tie in
+///   priority is broken toward the **most recently entered** contender: a
+///   system gesture is entered into the arena after the application's own
+///   recognizers, so "System gestures have priority by default" (§6.16) holds
+///   with no explicit priority granted to either side. System gestures may also
+///   carry a high priority to win outright.
 /// - Otherwise, if there is at least one contender and every contender is
 ///   terminal but not recognized ([`Failed`](RecognizerState::Failed) /
 ///   [`Cancelled`](RecognizerState::Cancelled)), the result is
@@ -58,18 +61,20 @@ impl GestureArena {
     /// [`GestureResolution`] without mutating the arena.
     #[must_use]
     pub fn resolve(&self) -> GestureResolution {
+        // Iterate in insertion order. A candidate wins when its priority is
+        // strictly greater, or equal — the latter lets the most recently entered
+        // contender take a tie, so a system gesture entered after the app's
+        // recognizers wins by default (§6.16).
         let mut best: Option<(i32, RecognizerId)> = None;
         for (contender, state) in &self.contenders {
             if matches!(state, RecognizerState::Recognized) {
-                let candidate = (contender.priority(), contender.recognizer());
-                let better = match best {
+                let priority = contender.priority();
+                let take = match best {
                     None => true,
-                    Some((priority, id)) => {
-                        candidate.0 > priority || (candidate.0 == priority && candidate.1 < id)
-                    }
+                    Some((best_priority, _)) => priority >= best_priority,
                 };
-                if better {
-                    best = Some(candidate);
+                if take {
+                    best = Some((priority, contender.recognizer()));
                 }
             }
         }
@@ -92,7 +97,13 @@ impl GestureArena {
         let resolution = self.resolve();
         if let GestureResolution::Winner(winner) = resolution {
             for (contender, state) in &mut self.contenders {
-                if contender.recognizer() != winner && !state.is_terminal() {
+                // Every loser yields the sequence to the winner. A loser that
+                // had itself reached `Recognized` is revoked to `Cancelled` — it
+                // must receive no further updates (§6.16) — while contenders that
+                // already Failed or Cancelled are left as they are.
+                let already_out =
+                    matches!(state, RecognizerState::Failed | RecognizerState::Cancelled);
+                if contender.recognizer() != winner && !already_out {
                     *state = RecognizerState::Cancelled;
                 }
             }
@@ -183,7 +194,9 @@ mod tests {
     }
 
     #[test]
-    fn tie_priority_breaks_to_smallest_id() {
+    fn tie_priority_breaks_to_most_recently_entered() {
+        // Equal priority: the contender entered later (id 2, added second) takes
+        // the tie, so a system gesture entered after app recognizers wins.
         let mut arena = GestureArena::new();
         arena.add(contender(5, 3));
         arena.add(contender(2, 3));

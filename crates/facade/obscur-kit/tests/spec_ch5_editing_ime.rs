@@ -211,7 +211,8 @@ fn ed_01_backspace_deletes_one_grapheme_cluster() {
 /// at the wrap, not at a `\n` or the buffer end.
 #[test]
 fn ed_02_home_and_end_are_visual_line_not_paragraph() {
-    // One paragraph with no newline, narrow enough to wrap into two line boxes.
+    // One paragraph with no newline, narrow enough to wrap into at least two line
+    // boxes (the exact count depends on the shaper's metrics).
     let text = "alpha beta gamma delta epsilon zeta eta theta";
     let mut field = Field::multiline(text, 120.0);
     field.frame();
@@ -230,7 +231,13 @@ fn ed_02_home_and_end_are_visual_line_not_paragraph() {
         "line 0 must not be the whole paragraph (k={k}, n={n})"
     );
 
-    // From offset k: Home stays at k (the start of line 1), End goes to n.
+    // From offset k: Home stays at k (the start of line 1), End goes to the end of
+    // line 1 — which is the paragraph end ONLY when line 1 is the last line. The
+    // original assertion demanded `== n`, baking in a two-line wrap the setup never
+    // guarantees (it requires >= 2); under a shaper that wraps to more lines, End is
+    // still visual-line and stops at the end of *this* line. CORRECTED 2026-07-20 by
+    // the owner: assert the end of line 1 from the engine's own runs, not `n`.
+    let end_of_line_1 = k + runs[1].chars().count();
     seat_caret(&mut field, k);
     field.press(NamedKey::Home);
     assert_eq!(
@@ -239,10 +246,12 @@ fn ed_02_home_and_end_are_visual_line_not_paragraph() {
         "Home from the start of line 1 stays on line 1, it does not jump to 0"
     );
     field.press(NamedKey::End);
-    assert_eq!(
-        field.caret(),
-        n,
-        "End from line 1 reaches the paragraph end"
+    let end_from_line_1 = field.caret();
+    assert!(
+        end_from_line_1 <= end_of_line_1 && end_from_line_1 + 1 >= end_of_line_1,
+        "End from the start of line 1 stops at the end of THAT visual line \
+         (~{end_of_line_1}, modulo a trailing collapsed space), not at the \
+         paragraph end {n}"
     );
 
     // From offset 0: End reaches the end of line 0 (k, modulo a trailing

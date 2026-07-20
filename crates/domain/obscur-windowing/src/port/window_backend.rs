@@ -278,11 +278,33 @@ impl WindowBackend for NullWindowBackend {
     }
 
     fn close_window(&mut self, request: CloseWindow) -> WindowOperationResult {
-        if self.windows.remove(&request.target()).is_some() {
-            WindowOperationResult::native()
-        } else {
-            WindowOperationResult::failed("unknown window")
+        let target = request.target();
+        if self.windows.remove(&target).is_none() {
+            return WindowOperationResult::failed("unknown window");
         }
+        // §6.1 owner/parent relations: destroying an owner destroys the windows
+        // it owns, transitively. Repeatedly remove any window whose owner is no
+        // longer present in the retained set (i.e. was itself just destroyed).
+        loop {
+            let orphaned: Vec<WindowId> = self
+                .windows
+                .iter()
+                .filter(|(_, window)| {
+                    window
+                        .relation()
+                        .owner
+                        .is_some_and(|owner| !self.windows.contains_key(&owner))
+                })
+                .map(|(id, _)| *id)
+                .collect();
+            if orphaned.is_empty() {
+                break;
+            }
+            for id in orphaned {
+                self.windows.remove(&id);
+            }
+        }
+        WindowOperationResult::native()
     }
 
     fn window(&self, id: WindowId) -> Option<&Window> {
@@ -292,6 +314,12 @@ impl WindowBackend for NullWindowBackend {
     fn update_window(&mut self, changes: &UpdateWindow) -> WindowOperationResult {
         match self.windows.get_mut(&changes.target()) {
             Some(window) => {
+                // §6.2: keeping a window above others requires a compositor to
+                // restack it; a headless backend has none, so always-on-top is
+                // `unsupported` and the property must not be silently applied.
+                if changes.always_on_top().is_some() {
+                    return WindowOperationResult::Unsupported;
+                }
                 changes.apply(window.properties_mut());
                 WindowOperationResult::native()
             }

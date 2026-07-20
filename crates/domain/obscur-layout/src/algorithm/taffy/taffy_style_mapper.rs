@@ -156,11 +156,17 @@ impl TaffyStyleMapper {
     }
 
     /// Maps [`LayoutDisplay`] to `taffy::Display`.
+    // `Contents` shares the `Block` mapping (taffy has no `contents`) but is a
+    // distinct, self-documenting arm.
+    #[allow(clippy::match_same_arms)]
     fn display(display: LayoutDisplay) -> taffy::Display {
         match display {
             LayoutDisplay::Block => taffy::Display::Block,
             LayoutDisplay::Flex => taffy::Display::Flex,
             LayoutDisplay::Grid => taffy::Display::Grid,
+            // Taffy has no `contents` mode; the native coordinator hoists such a
+            // node's children away before layout, so this arm is unreached there.
+            LayoutDisplay::Contents => taffy::Display::Block,
             LayoutDisplay::None => taffy::Display::None,
         }
     }
@@ -193,6 +199,7 @@ impl TaffyStyleMapper {
             JustifyContent::SpaceBetween => taffy::JustifyContent::SpaceBetween,
             JustifyContent::SpaceAround => taffy::JustifyContent::SpaceAround,
             JustifyContent::SpaceEvenly => taffy::JustifyContent::SpaceEvenly,
+            JustifyContent::Stretch => taffy::JustifyContent::Stretch,
         }
     }
 

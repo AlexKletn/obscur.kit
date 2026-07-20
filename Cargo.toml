@@ -86,6 +86,15 @@ unicode-script = "0.5.8"
 # Unicode Bidirectional Algorithm (UAX #9) for per-byte embedding levels driving
 # direction itemization (adapter-only; spec §5.10).
 unicode-bidi = "0.3.18"
+# Unicode canonical composition (NFC) for the css-fonts-4 §5.3 canonical-equivalence
+# rule: a decomposed cluster (base + combining marks) that is canonically
+# equivalent to a single precomposed character shapes to that character's single
+# glyph when the font supports it (spec §5.10 font fallback / §5.18).
+unicode-normalization = "0.1.25"
+# Unicode extended grapheme-cluster segmentation (UAX #29) for the editing engine's
+# deletion/navigation granularity: one Backspace removes one user-perceived cluster
+# (a combining sequence or ZWJ emoji), not one code point (spec §5.11).
+unicode-segmentation = "1.13.3"
 # Knuth-Liang hyphenation patterns for real in-word break points (adapter-only;
 # spec §5.10). Confined to the hyphenation adapter so the pure `obscur-text`
 # domain carries no pattern tables. `embed_en-us` compiles the US-English

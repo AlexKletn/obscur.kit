@@ -12,3 +12,11 @@ workspace = true
 
 [dependencies]
 obscur-geometry = { workspace = true }
+# Unicode canonical composition (NFC) driving the css-fonts-4 §5.3
+# canonical-equivalence rule in the paragraph shaper: a base + combining-mark
+# sequence that is canonically equivalent to a single precomposed character
+# shapes to that character's single glyph when the resolved font supports it. This
+# is the one place the domain consults a Unicode composition table — kept here (not
+# in an adapter) because the shaping orchestrator, constructed directly, is where
+# the fallback/composition rule lives (spec §5.10).
+unicode-normalization = { workspace = true }

@@ -485,6 +485,13 @@ impl LayoutAlgorithm for FlexLayout {
             // extra measures.
             let min_floor = if let Some(explicit) = min_main.resolve(container_main) {
                 explicit
+            } else if child.style.scroll_container {
+                // §4.5: "for scroll containers the automatic minimum size is zero"
+                // (css-flexbox-1.txt:1084-1085). An item whose main-axis overflow is
+                // scrollable (`scroll`/`auto`/`hidden`) drops the content-based floor
+                // entirely, so it may shrink all the way to 0. `deferred_floor` stays
+                // `false`, so `place_line` never re-introduces a content floor.
+                0.0
             } else {
                 let has_definite = child
                     .style
@@ -576,6 +583,7 @@ impl LayoutAlgorithm for FlexLayout {
                 // indefinite) height of a ROW; otherwise skip the extra
                 // pre-stretch measurement so the definite path stays identical.
                 content_cross_needed: height_indefinite && is_row,
+                line_cross_stretch: None,
                 measurer: &mut *measurer,
                 child_boxes: &mut child_boxes,
             });
@@ -647,18 +655,32 @@ impl LayoutAlgorithm for FlexLayout {
             lines.reverse();
         }
 
-        // Stack each line at the running cross offset; the cross-axis gap sits
-        // between adjacent lines. The container's cross extent grows to the sum of
-        // the line cross sizes when it is `auto` (so all lines fit without
-        // overlap); an explicit cross size is kept as authored.
-        let mut cross_offset = 0.0_f32;
-        let mut total_cross = 0.0_f32;
-        for (i, line) in lines.iter().enumerate() {
-            if i > 0 {
-                cross_offset += gap;
-                total_cross += gap;
-            }
-            let line_cross = place_line(LineArgs {
+        // Whether the container's cross size is content-sized (`auto`) rather than
+        // a definite extent. `align-content` only redistributes leftover cross
+        // space, so it is inert on an `auto` cross (the container hugs its lines and
+        // there is nothing left over).
+        let cross_is_auto = if is_row {
+            style.height.resolve(constraints.max.height).is_none()
+        } else {
+            style.width.resolve(constraints.max.width).is_none()
+        };
+
+        // The default (`flex-start`) packs the lines at the cross start with no
+        // growth — the historical single-pass behaviour. Any other `align-content`
+        // on a definite cross needs the natural line crosses up front (to size the
+        // leftover space), so it takes a cheap measurement pass first.
+        let needs_align_content =
+            !cross_is_auto && !matches!(style.align_content, JustifyContent::FlexStart);
+
+        // A place-one-line closure so the packing and the align-content pass share
+        // exactly one call shape (only the cross offset and the stretch target differ).
+        let place = |line: &[usize],
+                     cross_offset: f32,
+                     line_cross_stretch: Option<f32>,
+                     boxes: &mut [LayoutBox],
+                     measurer: &mut dyn ChildMeasurer|
+         -> f32 {
+            place_line(LineArgs {
                 line,
                 base_main: &base_main,
                 flex_base: &flex_base,
@@ -679,22 +701,79 @@ impl LayoutAlgorithm for FlexLayout {
                 bp_left,
                 bp_top,
                 cross_offset,
-                // The multi-line path already resolves every item's own cross size
-                // to compute the line cross, so no extra pre-stretch pass is needed.
                 content_cross_needed: false,
-                measurer: &mut *measurer,
-                child_boxes: &mut child_boxes,
+                line_cross_stretch,
+                measurer,
+                child_boxes: boxes,
             })
-            .cross;
+            .cross
+        };
+
+        // §8.4 align-content: leading cross offset, extra spacing between adjacent
+        // lines, and a per-line cross growth (only `stretch` grows lines). Computed
+        // from the natural line crosses when a non-default distribution is asked for
+        // on a definite cross; otherwise all zero (the packing default).
+        let (ac_lead, ac_between, ac_grow, natural) = if needs_align_content {
+            let mut natural = Vec::with_capacity(lines.len());
+            for line in &lines {
+                natural.push(place(line, 0.0, None, &mut child_boxes, &mut *measurer));
+            }
+            let n = lines.len();
+            let total_natural: f32 = natural.iter().sum();
+            let total_gap = gap * (n.saturating_sub(1) as f32);
+            let free = container_cross - total_natural - total_gap;
+            let (lead, between, grow) = if free <= 0.0 || n == 0 {
+                (0.0, 0.0, 0.0)
+            } else {
+                let nf = n as f32;
+                match style.align_content {
+                    JustifyContent::FlexEnd => (free, 0.0, 0.0),
+                    JustifyContent::Center => (free / 2.0, 0.0, 0.0),
+                    JustifyContent::SpaceBetween if n > 1 => (0.0, free / (nf - 1.0), 0.0),
+                    JustifyContent::SpaceAround => {
+                        let s = free / nf;
+                        (s / 2.0, s, 0.0)
+                    }
+                    JustifyContent::SpaceEvenly => {
+                        let s = free / (nf + 1.0);
+                        (s, s, 0.0)
+                    }
+                    // `stretch` grows every line by an equal share of the leftover.
+                    JustifyContent::Stretch => (0.0, 0.0, free / nf),
+                    // `flex-start` (and `space-between` with a single line): pack.
+                    _ => (0.0, 0.0, 0.0),
+                }
+            };
+            (lead, between, grow, natural)
+        } else {
+            (0.0, 0.0, 0.0, Vec::new())
+        };
+
+        // Stack each line at the running cross offset; the cross-axis gap (plus any
+        // `align-content` spacing) sits between adjacent lines. The container's cross
+        // extent grows to the sum of the line cross sizes when it is `auto`.
+        let mut cross_offset = ac_lead;
+        let mut total_cross = 0.0_f32;
+        for (i, line) in lines.iter().enumerate() {
+            if i > 0 {
+                cross_offset += gap + ac_between;
+                total_cross += gap;
+            }
+            let stretch = if ac_grow > 0.0 {
+                Some(natural[i] + ac_grow)
+            } else {
+                None
+            };
+            let line_cross = place(
+                line,
+                cross_offset,
+                stretch,
+                &mut child_boxes,
+                &mut *measurer,
+            );
             cross_offset += line_cross;
             total_cross += line_cross;
         }
-
-        let cross_is_auto = if is_row {
-            style.height.resolve(constraints.max.height).is_none()
-        } else {
-            style.width.resolve(constraints.max.width).is_none()
-        };
         let (final_content_width, final_content_height) = if is_row {
             let h = if cross_is_auto {
                 total_cross
@@ -822,6 +901,12 @@ struct LineArgs<'a, 'm> {
     /// hypothetical cross is not measured, keeping the definite path byte-identical
     /// and avoiding an unnecessary measurement.
     content_cross_needed: bool,
+    /// Multi-line only (`stretch_target == None`): when `Some(target)`, the line's
+    /// cross box is grown to `max(natural, target)` and `align-items: stretch`
+    /// items fill the grown cross. This is how `align-content: stretch` grows each
+    /// flex line by its share of the container's leftover cross space
+    /// (css-flexbox-1 §8.4). `None` keeps the natural (max item cross) sizing.
+    line_cross_stretch: Option<f32>,
     /// Child measurer.
     measurer: &'m mut dyn ChildMeasurer,
     /// Output boxes, written at each item's global index.
@@ -871,6 +956,7 @@ fn place_line(args: LineArgs) -> PlacedLine {
         bp_top,
         cross_offset,
         content_cross_needed,
+        line_cross_stretch,
         measurer,
         child_boxes,
     } = args;
@@ -987,7 +1073,11 @@ fn place_line(args: LineArgs) -> PlacedLine {
                 );
                 base_cross.push(bc);
             }
-            let lc = base_cross.iter().copied().fold(0.0_f32, f32::max);
+            let natural_lc = base_cross.iter().copied().fold(0.0_f32, f32::max);
+            // `align-content: stretch` grows the line to its allotted cross size;
+            // the target is never smaller than the natural cross (free space is
+            // non-negative), and `None` leaves the natural sizing untouched.
+            let lc = line_cross_stretch.map_or(natural_lc, |t| t.max(natural_lc));
             for (pos, &i) in line.iter().enumerate() {
                 let cross_style = &children[i].style;
                 let cross_dim = if is_row {
@@ -1050,7 +1140,9 @@ fn place_line(args: LineArgs) -> PlacedLine {
     } else {
         let n = count as f32;
         match style.justify_content {
-            JustifyContent::FlexStart => (0.0, 0.0),
+            // `stretch` has no distinct main-axis effect in a flex container; the
+            // free space is left as a leading offset of zero, i.e. flex-start.
+            JustifyContent::FlexStart | JustifyContent::Stretch => (0.0, 0.0),
             JustifyContent::FlexEnd => (free_for_justify, 0.0),
             JustifyContent::Center => (free_for_justify / 2.0, 0.0),
             JustifyContent::SpaceBetween => {

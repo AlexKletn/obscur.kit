@@ -1041,7 +1041,28 @@ fn layout_style_from(
         // The container's `grid-auto-flow`; an unauthored value stays `Row`
         // (sparse), so auto-placement is byte-identical to before.
         grid_auto_flow: grid_auto_flow_of(computed),
+        // Whether this box scrolls its overflow (`scroll`/`auto`/`hidden`), which
+        // css-flexbox-1 §4.5 uses to zero a flex item's automatic minimum size.
+        // Unauthored `overflow` is `visible`, so a non-scrolling box stays `false`.
+        scroll_container: scroll_container_of(computed),
     }
+}
+
+/// Whether a node's computed `overflow` makes it a **scroll container** — the
+/// reserved `scroll` / `auto` / `hidden` handles (CSS Overflow 3 §overflow).
+/// `visible` / `clip` / absent are not scroll containers. This is the single-style
+/// twin of [`establishes_scroll_container`](super::establishes_scroll_container),
+/// which decides the same thing over the whole `ComputedStyles` map.
+fn scroll_container_of(computed: &ComputedStyle) -> bool {
+    matches!(
+        computed
+            .get(PropertyId::Overflow)
+            .map(ComputedValue::value),
+        Some(&PropertyValue::Keyword(sym))
+            if sym == layout_keyword::OVERFLOW_SCROLL
+                || sym == layout_keyword::OVERFLOW_AUTO
+                || sym == layout_keyword::OVERFLOW_HIDDEN
+    )
 }
 
 /// Resolves the computed `grid-auto-flow` keyword to a [`GridAutoFlow`],
@@ -1325,6 +1346,7 @@ fn display_of(computed: &ComputedStyle) -> LayoutDisplay {
         Some(sym) if sym == layout_keyword::DISPLAY_FLEX => LayoutDisplay::Flex,
         Some(sym) if sym == layout_keyword::DISPLAY_GRID => LayoutDisplay::Grid,
         Some(sym) if sym == layout_keyword::DISPLAY_NONE => LayoutDisplay::None,
+        Some(sym) if sym == layout_keyword::DISPLAY_CONTENTS => LayoutDisplay::Contents,
         _ => LayoutDisplay::Block,
     }
 }
@@ -1396,6 +1418,7 @@ fn justify_content_keyword(sym: Option<InternedSymbol>) -> JustifyContent {
         Some(sym) if sym == layout_keyword::JUSTIFY_SPACE_BETWEEN => JustifyContent::SpaceBetween,
         Some(sym) if sym == layout_keyword::JUSTIFY_SPACE_AROUND => JustifyContent::SpaceAround,
         Some(sym) if sym == layout_keyword::JUSTIFY_SPACE_EVENLY => JustifyContent::SpaceEvenly,
+        Some(sym) if sym == layout_keyword::JUSTIFY_STRETCH => JustifyContent::Stretch,
         _ => JustifyContent::FlexStart,
     }
 }
@@ -1490,7 +1513,10 @@ fn algorithm_for(
             Some(template) => Box::new(GridLayout::with_template(template.clone(), gap, gap)),
             None => Box::new(GridLayout::new(1)),
         }),
-        LayoutDisplay::None => None,
+        // A `display: contents` node generates no box; [`children_of`] hoists its
+        // children into the parent's formatting context, so the node itself is
+        // never handed to an algorithm. Treated as box-less if ever reached.
+        LayoutDisplay::Contents | LayoutDisplay::None => None,
     }
 }
 
@@ -1522,12 +1548,25 @@ fn transform_establishes_containing_block(computed: &ComputedStyles, node: NodeI
 /// A node absent from the tree contributes no children. Each child's style is
 /// resolved via [`style_of`] so the algorithm sees a complete descriptor.
 fn children_of(tree: &RetainedTree, styles: &LayoutStyles, node: NodeId) -> Vec<LayoutChild> {
-    tree.get(node).map_or_else(Vec::new, |n| {
-        n.children()
-            .iter()
-            .map(|&child| LayoutChild::new(child, style_of(styles, child)))
-            .collect()
-    })
+    let Some(n) = tree.get(node) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for &child in n.children() {
+        let style = style_of(styles, child);
+        // `display: contents` (css-display-3 §2.5): the element generates no box.
+        // It contributes no [`LayoutChild`] of its own; instead its own children
+        // are hoisted into this formatting context in its place, recursively (a
+        // chain of `contents` elements flattens all the way through). Inheritance
+        // and selector matching walk the untouched document tree, so only the box
+        // tree is affected.
+        if style.display == LayoutDisplay::Contents {
+            out.extend(children_of(tree, styles, child));
+        } else {
+            out.push(LayoutChild::new(child, style));
+        }
+    }
+    out
 }
 
 /// Collects only a node's **in-flow** children (`Static` / `Relative`).

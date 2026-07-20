@@ -4,7 +4,7 @@
 red is which**, because they are not the same thing and must not be acted on the same
 way.
 
-State: **5,574 passing, 43 failing** (was 111 at derivation; the implementation phase is
+State: **5,585 passing, 23 failing** (was 111 at derivation; the implementation phase is
 closing them). 310 cases were derived across §1–§7 and §9; §8 was skipped (67 sections of
 declared stubs, nothing to test). The current red list, with counting and baseline
 caveats, is at the end of this file.
@@ -49,26 +49,21 @@ and they are a consequence of the isolation, not a failure of it: the deriver ne
 the API, and the translator was forbidden from changing an expected value, so a wrong
 fixture got translated faithfully.
 
-## The red list (43)
+## The red list (23)
 
-**Anything red not on this list is a regression.** Verified by git-stash diff each batch.
+**Anything red not on this list is a regression.** git-stash verified each batch.
 
-State: **5,574 passing, 43 failing.** Held to the owner and left red on purpose:
-`arch_17` (context.window on a runtime with no window bound) and `arch_18`'s
-message-localization assertion (§1.6 requires a stable code, not a localized message).
+State: **5,585 passing, 23 failing.**
+
+Held to the owner, left red on purpose: arch_17 (context.window on an unbound runtime),
+arch_18's message-localization assertion (§1.6 wants a stable code, not a translated
+message). env(safe-area-inset-*) x2 are not-reachable: CSS env() is unimplemented.
 
 - `a_custom_loader_is_never_invoked_inside_the_frame_phase`
 - `a_newer_ir_version_is_refused_with_a_precise_diagnostic`
-- `a_reversed_transition_is_shortened_by_its_progress`
 - `a_synthetic_event_is_untrusted_and_a_gated_default_action_does_not_run`
-- `a_system_gesture_wins_the_arena_by_default`
-- `a_touch_leaves_no_persistent_hover_after_release`
 - `a_url_background_without_a_host_loader_fails_terminally_and_still_paints`
-- `align_content_stretch_grows_lines_by_equal_amounts`
-- `an_animated_opacity_never_reaches_computed_style`
 - `an_exported_style_part_crosses_the_scope_boundary_and_an_unexported_one_does_not`
-- `an_fr_track_blown_by_content_restarts_the_fr_algorithm`
-- `an_infinitely_growable_track_absorbs_the_whole_max_content_remainder`
 - `an_ungranted_required_capability_refuses_instantiation`
 - `arch_17_a_missing_resource_diagnostic_carries_all_five_required_fields`
 - `arch_18_the_stable_code_survives_locale_and_call_site`
@@ -78,25 +73,12 @@ message-localization assertion (§1.6 requires a stable code, not a localized me
 - `ch4_16_c_the_placeholder_is_an_exported_part_not_a_child`
 - `ch4_4_d_visibility_and_intersection_observers_track_the_scroll_chain`
 - `ch4_9_b_scroll_anchoring_compensates_growth_above_the_viewport`
-- `color_interpolation_is_premultiplied`
 - `d_an_absent_power_provider_reports_typed_absence_without_fabricating`
-- `destroying_an_owner_destroys_the_windows_it_owns`
-- `display_contents_affects_the_box_tree_only`
-- `ed_01_backspace_deletes_one_grapheme_cluster`
-- `ed_02_home_and_end_are_visual_line_not_paragraph`
 - `env_safe_area_inset_bottom_resolves_to_the_host_inset`
 - `env_safe_area_inset_top_resolves_to_the_host_inset`
 - `ft_01_the_default_provider_renders_in_an_isolated_environment`
-- `headless_reports_always_on_top_unsupported_but_size_native_or_emulated`
 - `im_03_a_2x_asset_has_a_halved_logical_intrinsic_size`
-- `ime_01_a_preedit_is_never_in_the_value`
 - `logical_block_start_maps_by_writing_mode`
-- `motion_runs_without_any_stylesheet`
 - `sc_04_gradient_stops_interpolate_premultiplied`
-- `the_application_pan_is_cancelled_when_the_system_gesture_takes_the_sequence`
-- `the_automatic_minimum_size_depends_on_overflow`
 - `the_same_fault_carries_one_stable_code_across_two_contexts`
-- `tx_02_a_canonically_equivalent_cluster_becomes_one_glyph`
-- `tx_03_collapsed_spaces_have_zero_advance_and_keep_their_offsets`
-- `tx_05_bidi_selection_is_disjoint_and_runs_reorder`
 - `virtualfor_realizes_a_count_independent_of_the_item_count`

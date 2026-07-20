@@ -1034,6 +1034,44 @@ impl SceneCoordinator {
         Some(self.byte_at_line_x(&layout, target, content, style, target_x))
     }
 
+    /// The byte offset of the **visual line** boundary — line start (`to_end =
+    /// false`, Home) or line end (`to_end = true`, End) — of the line the caret byte
+    /// `index` sits on, resolved against the SAME wrapped
+    /// [`ParagraphLayout`](obscur_text::layout::ParagraphLayout) the caret paints
+    /// from (spec §5.11 "Home/End are visual-line operations").
+    ///
+    /// Home/End are **visual-line**, not paragraph, operations: on soft-wrapped text
+    /// they stop at the wrap boundary, not at a `\n` or the buffer end. The caret's
+    /// line is resolved downstream ([`line_of_byte`](Self::line_of_byte)), so a caret
+    /// at a wrap boundary belongs to the following line; Home then returns that
+    /// line's content start and End its range end (the next line's start, or the text
+    /// end on the last line). A single-line / hard-`\n`-only field yields the same
+    /// offsets its logical line boundaries did — the two diverge only under soft
+    /// wrapping, which is the behaviour this resolves.
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub(crate) fn caret_visual_line_bound(
+        &self,
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+        node: NodeId,
+        content: &str,
+        box_width: f32,
+        index: usize,
+        to_end: bool,
+    ) -> usize {
+        let layout = self.shape_text_lines(tree, computed, node, content, box_width);
+        let li = Self::line_of_byte(&layout, index);
+        if to_end {
+            layout
+                .lines()
+                .get(li)
+                .map_or(content.len(), |line| line.range().end)
+        } else {
+            Self::line_start_byte(&layout, li)
+        }
+    }
+
     /// The vertical extent a **multi-line** field needs to scroll the caret into
     /// view: `(line_top, line_height, content_height)` for byte `index`, all
     /// measured DOWN from the text box origin over the SAME wrapped
@@ -3961,7 +3999,15 @@ impl EditingRole {
         match self {
             Self::None => false,
             Self::Value => true,
-            Self::Placeholder => !view.text.is_empty(),
+            // The `:placeholder-shown` rule is about the field's *effective*
+            // displayed text: while composing, an active IME preedit (spec §5.12) is
+            // shown inline even over an empty buffer, so the field is NOT
+            // placeholder-shown and the session overrides the overlay — the preedit
+            // is spliced into the (empty) display and painted in the field's ink.
+            Self::Placeholder => {
+                !view.text.is_empty()
+                    || view.preedit.is_some_and(|preedit| !preedit.text.is_empty())
+            }
         }
     }
 }

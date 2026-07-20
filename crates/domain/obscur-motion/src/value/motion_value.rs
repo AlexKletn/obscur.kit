@@ -37,6 +37,14 @@ pub enum MotionValue {
     /// instead of shearing and shrinking the box. See
     /// [`interpolate_checked`](Self::interpolate_checked).
     Transform(Matrix2D),
+    /// An sRGB color with straight alpha, `[r, g, b, a]`, each in `0.0..=1.0`.
+    ///
+    /// Unlike the numeric variants this does **not** blend straight component-
+    /// wise: it interpolates with **premultiplied** alpha (css-color-4 §13.3), so
+    /// a transition from an opaque color to a transparent one keeps the visible
+    /// hue full-strength instead of muddying it toward the transparent endpoint's
+    /// channels. See [`interpolate_checked`](Self::interpolate_checked).
+    Color([f32; 4]),
 }
 
 impl MotionValue {
@@ -68,6 +76,12 @@ impl MotionValue {
     #[must_use]
     pub const fn transform(matrix: Matrix2D) -> Self {
         Self::Transform(matrix)
+    }
+
+    /// Wraps an sRGB color with straight alpha, `[r, g, b, a]`.
+    #[must_use]
+    pub const fn color(rgba: [f32; 4]) -> Self {
+        Self::Color(rgba)
     }
 
     /// Returns the wrapped scalar, or `None` if this is not a
@@ -120,6 +134,16 @@ impl MotionValue {
         }
     }
 
+    /// Returns the wrapped sRGB color `[r, g, b, a]`, or `None` if this is not a
+    /// [`Color`](Self::Color).
+    #[must_use]
+    pub const fn as_color(&self) -> Option<[f32; 4]> {
+        match self {
+            Self::Color(value) => Some(*value),
+            _ => None,
+        }
+    }
+
     /// Returns whether `self` and `other` hold the same variant (and can
     /// therefore be blended by [`interpolate_checked`](Self::interpolate_checked)).
     #[must_use]
@@ -131,6 +155,7 @@ impl MotionValue {
                 | (Self::Size(_), Self::Size(_))
                 | (Self::Rect(_), Self::Rect(_))
                 | (Self::Transform(_), Self::Transform(_))
+                | (Self::Color(_), Self::Color(_))
         )
     }
 
@@ -155,8 +180,36 @@ impl MotionValue {
             (Self::Transform(a), Self::Transform(b)) => Some(Self::Transform(
                 transform_interp::interpolate_matrix(*a, *b, t),
             )),
+            // Colors interpolate with PREMULTIPLIED alpha (css-color-4 §13.3): the
+            // rgb channels are multiplied by alpha, all four components lerp, then
+            // rgb is divided back out by the interpolated alpha. This keeps a
+            // fade-to-transparent from muddying the visible hue toward the
+            // transparent endpoint's channels.
+            (Self::Color(a), Self::Color(b)) => Some(Self::Color(interpolate_color(*a, *b, t))),
             _ => None,
         }
+    }
+}
+
+/// Interpolates two straight-alpha sRGB colors with premultiplied alpha
+/// (css-color-4 §13.3): premultiply rgb by alpha, lerp all four components, then
+/// un-premultiply by dividing rgb by the interpolated alpha. When the
+/// interpolated alpha is zero the un-premultiplied rgb is the premultiplied value
+/// (zero), matching the spec's zero-alpha rule.
+fn interpolate_color(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
+    let pa = [a[0] * a[3], a[1] * a[3], a[2] * a[3], a[3]];
+    let pb = [b[0] * b[3], b[1] * b[3], b[2] * b[3], b[3]];
+    let m = [
+        pa[0].interpolate(&pb[0], t),
+        pa[1].interpolate(&pb[1], t),
+        pa[2].interpolate(&pb[2], t),
+        pa[3].interpolate(&pb[3], t),
+    ];
+    let alpha = m[3];
+    if alpha == 0.0 {
+        [0.0, 0.0, 0.0, 0.0]
+    } else {
+        [m[0] / alpha, m[1] / alpha, m[2] / alpha, alpha]
     }
 }
 

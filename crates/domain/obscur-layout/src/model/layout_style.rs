@@ -154,6 +154,17 @@ pub struct LayoutStyle {
     /// [`GridAutoFlow::Row`] (row-major, sparse) — the grid's historical
     /// behaviour — so a default style auto-places exactly as before.
     pub grid_auto_flow: GridAutoFlow,
+
+    /// Whether this box is a **scroll container** — its computed `overflow` is
+    /// `scroll` / `auto` / `hidden` (anything but `visible` / `clip` / absent).
+    ///
+    /// css-flexbox-1 §4.5 makes this decide a flex item's automatic minimum size:
+    /// a non-scrollable item's `min-*: auto` resolves to its content-based
+    /// minimum, but a scroll container's resolves to **zero** ("for scroll
+    /// containers the automatic minimum size is zero", css-flexbox-1.txt:1084-1085).
+    /// Default `false` (the initial `overflow: visible`), so a box that never
+    /// scrolls keeps its content-based automatic minimum unchanged.
+    pub scroll_container: bool,
 }
 
 impl LayoutStyle {
@@ -198,6 +209,7 @@ impl Default for LayoutStyle {
             font_size: Self::DEFAULT_FONT_SIZE,
             grid_placement: GridPlacement::default(),
             grid_auto_flow: GridAutoFlow::default(),
+            scroll_container: false,
         }
     }
 }

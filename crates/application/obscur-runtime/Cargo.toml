@@ -27,3 +27,8 @@ obscur-scene = { workspace = true }
 obscur-resources = { workspace = true }
 obscur-interaction = { workspace = true }
 obscur-data-transfer = { workspace = true }
+# Unicode extended grapheme-cluster segmentation (UAX #29): the runtime resolves a
+# Backspace/Delete on a collapsed caret to a whole user-perceived cluster (a
+# combining sequence or ZWJ emoji) before driving the pure editing buffer, whose
+# own grapheme motion is a documented one-`char` approximation (spec §5.11).
+unicode-segmentation = { workspace = true }

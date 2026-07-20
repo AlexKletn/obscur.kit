@@ -503,6 +503,29 @@ impl ParagraphLayout {
     ) -> Self {
         let mut stream = Self::flatten(runs);
 
+        // CSS Text 3 §4.1.1: in a collapsing white-space mode a collapsible space
+        // "immediately following another collapsible space … is collapsed to have
+        // zero advance width. (It is invisible, but retains its soft wrap
+        // opportunity, if any.)" Only the FIRST space of a run keeps its advance;
+        // every following collapsible space in the run is zeroed IN PLACE — its glyph
+        // and source cluster (byte offset) are kept so caret hit-testing and
+        // selection still see every original character, and deleting a collapsed
+        // space from the buffer still shifts every downstream offset. The preserving
+        // modes (`pre` / `pre-wrap`) keep every space, so this is inert for them; on
+        // the runtime path the pre-shape seam has usually already deleted the run to
+        // a single space, making this an idempotent no-op there.
+        if white_space.collapses_spaces() {
+            let mut prev_collapsible = false;
+            for tagged in &mut stream {
+                let is_collapsible =
+                    matches!(char_at(text, tagged.glyph.cluster()), Some(' ' | '\t'));
+                if is_collapsible && prev_collapsible {
+                    tagged.glyph = tagged.glyph.with_x_advance(0.0);
+                }
+                prev_collapsible = is_collapsible;
+            }
+        }
+
         // The ordinary break opportunities from the replaceable port (spec §5.10,
         // UAX #14). `word-break: keep-all` (CSS Text 3 §5.2) then suppresses any
         // soft break sitting between two adjacent CJK ideographs, so the letters of

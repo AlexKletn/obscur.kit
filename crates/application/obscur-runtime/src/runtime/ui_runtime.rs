@@ -26,7 +26,7 @@ use obscur_interaction::command::{
 };
 use obscur_interaction::focus::{FocusScope, FocusScopeId};
 use obscur_interaction::hover::{HoverChain, HoverTransition};
-use obscur_interaction::pointer::{PointerEvent, PointerEventKind};
+use obscur_interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind};
 use obscur_interaction::spatial::SpatialIndex;
 use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_localization::locale::LanguageTag;
@@ -50,7 +50,7 @@ use obscur_scene::scene::{Scene, SceneSnapshot};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::invalidation::StyleInvalidation;
 use obscur_style::matching::{MediaEnvironment, Stylesheet};
-use obscur_style::property::{Length, PropertyId, PropertyValue};
+use obscur_style::property::{Length, PropertyId, PropertyValue, Transform};
 use obscur_style::selector::{PseudoState, SelectorMatcher};
 use obscur_text::editing::{DeletionUnit, EditCommand, EditDirection, NavigationUnit};
 use obscur_text::font::FontResolver;
@@ -75,12 +75,12 @@ use std::collections::VecDeque;
 
 use crate::component::{ComponentStore, GuardedRender};
 use crate::orchestration::{
-    AnimatedKind, AnimationBinding, ArrangeCache, ComputedStyles, CssMotionRules, DragCoordinator,
-    DragOutcome, EditingView, InspectInfo, LayoutBoxes, LayoutCoordinator, MeasureCache,
-    MotionCoordinator, MotionPlayback, NodeInspection, PreeditView, PseudoStates, SceneCoordinator,
-    ScrollContainer, ScrollPaint, ShapedChMetrics, StyleCoordinator, StyleInputs,
-    StyleMatchingCoordinator, TreeElement, TreeInspection, overflow_scrolls, overlay_commands,
-    root_font_size, scroll_containers,
+    AnimatedKind, AnimationBinding, ArrangeCache, ComputedStyles, CssMotionRules,
+    CssTransitionRule, DragCoordinator, DragOutcome, EditingView, InspectInfo, LayoutBoxes,
+    LayoutCoordinator, MeasureCache, MotionCoordinator, MotionPlayback, NodeInspection,
+    PreeditView, PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint, ShapedChMetrics,
+    StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement, TreeInspection,
+    overflow_scrolls, overlay_commands, root_font_size, scroll_containers,
 };
 use crate::orchestration::{alignment_for, direction_for, white_space_for};
 use crate::recovery::RecoveryResult;
@@ -522,6 +522,18 @@ pub struct UiRuntime {
     /// value keeps being overlaid (the animation *holds* its final value); a new
     /// [`animate`](Self::animate) for the same node+property supersedes it.
     animations: Vec<AnimationBinding>,
+    /// The presentation overlay for the two group-compositing properties —
+    /// `opacity` and `transform` — that motion produces but that must **never**
+    /// reach computed style (spec §4.17: "motion is a separate subsystem, not
+    /// part of the CSS style engine"; the pipeline resolves computed values,
+    /// then the motion engine produces *presentation* values). Rebuilt every
+    /// frame by [`apply_motion_overlay`](Self::apply_motion_overlay) and consumed
+    /// by compose alone: it is layered onto a throwaway copy of the computed
+    /// styles handed to the scene composer, so paint reflects the animated
+    /// opacity/transform while [`computed_style`](Self::computed_style) keeps
+    /// reporting the authored value. Empty when no opacity/transform motion is
+    /// active, in which case compose sees the computed styles unchanged.
+    presentation_overlays: Vec<(NodeId, PropertyId, PropertyValue)>,
     /// The id minted for the next timeline started by
     /// [`animate`](Self::animate); monotonically increasing so ids are unique.
     next_timeline: TimelineId,
@@ -545,6 +557,17 @@ pub struct UiRuntime {
     /// value *differs* from this retained target (spec §4.17 "a transition starts
     /// when the property changes").
     transition_targets: HashMap<(NodeId, PropertyId), MotionValue>,
+    /// The per-`(node, property)` bookkeeping a running CSS `transition` needs to
+    /// implement css-transitions-1 §3.1 "Faster reversing of interrupted
+    /// transitions": its reversing-adjusted start value, its reversing shortening
+    /// factor, the timing function it runs under, and the value it heads toward.
+    /// When a change reverses an in-flight transition (the new after-change value
+    /// equals the running transition's reversing-adjusted start value) the new
+    /// transition's duration — and any negative delay — is shortened by the new
+    /// reversing shortening factor, so a transition reversed at 30% runs for 30%
+    /// of its duration, not the full duration. Kept alongside
+    /// [`transition_targets`](Self::transition_targets) and cleared with it.
+    transition_runs: HashMap<(NodeId, PropertyId), TransitionRun>,
     /// The `(node, property)` pairs a CSS `@keyframes` animation has already been
     /// started for, so a matching element registers its keyframe timeline once
     /// rather than re-registering it every style frame.
@@ -777,10 +800,12 @@ impl UiRuntime {
             scroll_top: HashMap::new(),
             motion: MotionScheduler::new(),
             animations: Vec::new(),
+            presentation_overlays: Vec::new(),
             next_timeline: TimelineId::from_raw(0),
             settled_progress: HashMap::new(),
             css_motion: CssMotionRules::new(),
             transition_targets: HashMap::new(),
+            transition_runs: HashMap::new(),
             css_animations_started: HashSet::new(),
             telemetry: Box::new(NullTelemetrySink),
             diagnostics: Box::new(NullDiagnosticSink),
@@ -1407,6 +1432,7 @@ impl UiRuntime {
     pub fn set_css_motion(&mut self, rules: CssMotionRules) {
         self.css_motion = rules;
         self.transition_targets.clear();
+        self.transition_runs.clear();
         self.css_animations_started.clear();
     }
 
@@ -2786,9 +2812,17 @@ impl UiRuntime {
             // container overflows → the compose is byte-identical to before scroll
             // containers existed.
             let scroll = self.scroll_paint(&computed);
+            // Layer motion's group-compositing presentation values
+            // (`opacity`/`transform`) onto a throwaway copy of the computed styles
+            // for compose ONLY — they reach paint but must never be observable
+            // through `computed_style` (spec §4.17: motion is a separate
+            // subsystem). `None` means no such motion is active, so compose reads
+            // the computed styles untouched.
+            let presentation = self.presentation_styles(&computed);
+            let paint_styles = presentation.as_ref().unwrap_or(&computed);
             let display_list = self.scene_composer.compose_with_images_scrolled(
                 &self.tree,
-                &computed,
+                paint_styles,
                 &self.boxes,
                 editing,
                 self.image_cache.images(),
@@ -3058,6 +3092,11 @@ impl UiRuntime {
         // Moved out so the loop can borrow `self.animations` and still record into
         // it; put back before returning.
         let mut overlaid = std::mem::take(&mut self.overlaid);
+        // Rebuilt from scratch each frame: the group-compositing presentation
+        // values (`opacity`/`transform`) never touch computed style, so they
+        // cannot be stashed-and-restored like the computed overlay — they are
+        // re-derived from the live timelines every frame.
+        let mut presentation: Vec<(NodeId, PropertyId, PropertyValue)> = Vec::new();
         for binding in &self.animations {
             // Inside the start delay the animation is not yet running: it applies
             // its first-iteration start value only under a `backwards`/`both`
@@ -3079,6 +3118,23 @@ impl UiRuntime {
             else {
                 continue;
             };
+
+            // `opacity` and `transform` are the two group-compositing properties:
+            // motion applies them as *presentation* values that the scene composer
+            // layers on at paint (a `PushLayer(opacity)` / `PushTransform`), and
+            // they must never be written back into computed style (spec §4.17;
+            // NG-MOTION-01). They also never affect layout, so a `transform`
+            // animation moves paint without a relayout. The presentation lowering
+            // is keyed off the PROPERTY, not the binding's `AnimatedKind`, so a
+            // transform track presents as a matrix even when the caller labelled
+            // its kind `Number`.
+            if is_presentation_property(binding.property()) {
+                if let Some(value) = lower_presentation(binding.property(), sampled) {
+                    presentation.push((binding.node(), binding.property(), value));
+                }
+                continue;
+            }
+
             let Some(property_value) = binding.kind().lower(sampled) else {
                 continue;
             };
@@ -3098,6 +3154,34 @@ impl UiRuntime {
             }
         }
         self.overlaid = overlaid;
+        self.presentation_overlays = presentation;
+    }
+
+    /// Layers the group-compositing presentation overlay (`opacity`/`transform`;
+    /// see [`presentation_overlays`](Self::presentation_overlays)) onto a copy of
+    /// `computed` for the scene composer, or returns [`None`] when no such motion
+    /// is active so compose reads `computed` untouched (byte-for-byte identical to
+    /// before any presentation overlay existed).
+    ///
+    /// The copy is deliberate: these values reach paint but must **never** be
+    /// observable through [`computed_style`](Self::computed_style) (spec §4.17,
+    /// NG-MOTION-01). An overlaid property is written onto the node's style entry,
+    /// inserting a default entry if the node has none — so motion presents even a
+    /// node with no matched CSS at all (NG-MOTION-02).
+    fn presentation_styles(&self, computed: &ComputedStyles) -> Option<ComputedStyles> {
+        if self.presentation_overlays.is_empty() {
+            return None;
+        }
+        let mut styles = computed.clone();
+        for (node, property, value) in &self.presentation_overlays {
+            if let Some(computed_value) = ComputedValue::from_concrete(value.clone()) {
+                styles
+                    .entry(*node)
+                    .or_default()
+                    .set(*property, computed_value);
+            }
+        }
+        Some(styles)
     }
 
     /// Drives the installed CSS `transition`/`@keyframes` rules against the tree,
@@ -3150,15 +3234,21 @@ impl UiRuntime {
                     Some(&previous) if previous != new_value => {
                         target_updates.push((key, new_value));
                         if rule.duration_secs() > 0.0 {
+                            // css-transitions-1 §3.1: if this change reverses an
+                            // in-flight transition, shorten the new duration (and a
+                            // negative delay) by the reversing shortening factor.
+                            let (duration, delay, run) =
+                                self.resolve_reversing(key, previous, new_value, rule);
                             transitions_to_start.push(TransitionStart {
                                 node: id,
                                 property: rule.property(),
                                 from: previous,
                                 to: new_value,
-                                duration: rule.duration_secs(),
-                                delay: rule.delay_secs(),
+                                duration,
+                                delay,
                                 easing: rule.easing(),
                                 kind,
+                                run,
                             });
                         }
                     }
@@ -3213,6 +3303,8 @@ impl UiRuntime {
                 Keyframe::new(0.0, start.from).with_easing(start.easing),
                 Keyframe::new(1.0, start.to),
             ]);
+            self.transition_runs
+                .insert((start.node, start.property), start.run);
             self.animate_with(
                 start.node,
                 start.property,
@@ -3236,6 +3328,89 @@ impl UiRuntime {
                 start.playback,
             );
         }
+    }
+
+    /// Resolves the effective duration, delay and reversing bookkeeping for a CSS
+    /// transition about to start on `key`, applying css-transitions-1 §3.1
+    /// "Faster reversing of interrupted transitions".
+    ///
+    /// `previous` is the before-change value (the change-detection baseline) and
+    /// `after` is the after-change value. When a transition is already running for
+    /// `key` and its reversing-adjusted start value equals `after`, the change
+    /// *reverses* it: the new reversing shortening factor is the clamped absolute
+    /// value of `old_output · old_factor + (1 − old_factor)`, where `old_output`
+    /// is the running transition's timing-function output at this instant, and the
+    /// matching duration — plus any *negative* delay — is multiplied by that
+    /// factor. Otherwise the matching duration and delay are used unchanged and
+    /// the transition starts with a reversing shortening factor of `1`.
+    fn resolve_reversing(
+        &self,
+        key: (NodeId, PropertyId),
+        previous: MotionValue,
+        after: MotionValue,
+        rule: &CssTransitionRule,
+    ) -> (f32, f32, TransitionRun) {
+        let matching_duration = rule.duration_secs();
+        let matching_delay = rule.delay_secs();
+        let easing = rule.easing();
+
+        if let Some(old) = self.transition_runs.get(&key)
+            && old.reversing_adjusted_start == after
+            && let Some(old_progress) = self.running_transition_progress(key)
+        {
+            // Reversal: shorten by the new reversing shortening factor.
+            let old_output = old.easing.apply(old_progress);
+            let factor = (old_output * old.reversing_factor + (1.0 - old.reversing_factor))
+                .abs()
+                .clamp(0.0, 1.0);
+            let delay = if matching_delay < 0.0 {
+                matching_delay * factor
+            } else {
+                matching_delay
+            };
+            let run = TransitionRun {
+                // The interrupted transition's end value is the new logical start
+                // state, so repeated reversals compose (spec §3.1).
+                reversing_adjusted_start: old.end_value,
+                reversing_factor: factor,
+                easing,
+                end_value: after,
+            };
+            return (matching_duration * factor, delay, run);
+        }
+
+        // Fresh or non-reversing: full duration, factor 1. The reversing-adjusted
+        // start value is the transition's start value — the current value of a
+        // running transition, else the before-change value.
+        let start_value = self.running_transition_value(key).unwrap_or(previous);
+        let run = TransitionRun {
+            reversing_adjusted_start: start_value,
+            reversing_factor: 1.0,
+            easing,
+            end_value: after,
+        };
+        (matching_duration, matching_delay, run)
+    }
+
+    /// The current progress `[0, 1]` of the transition timeline running for
+    /// `key`, or [`None`] when no binding is registered for it.
+    fn running_transition_progress(&self, key: (NodeId, PropertyId)) -> Option<f32> {
+        let binding = self
+            .animations
+            .iter()
+            .find(|b| b.node() == key.0 && b.property() == key.1)?;
+        Some(self.timeline_progress(binding.timeline()))
+    }
+
+    /// The current sampled value of the transition running for `key`, or [`None`]
+    /// when no binding is registered for it (or its track is empty).
+    fn running_transition_value(&self, key: (NodeId, PropertyId)) -> Option<MotionValue> {
+        let binding = self
+            .animations
+            .iter()
+            .find(|b| b.node() == key.0 && b.property() == key.1)?;
+        let progress = self.timeline_progress(binding.timeline());
+        MotionCoordinator::sample_keyframes(binding.track(), progress)
     }
 
     /// Rebuilds the spatial hit-test index from the retained [`LayoutBoxes`].
@@ -3554,8 +3729,20 @@ impl UiRuntime {
         //    overflow clipping, `border-radius` shape, and stacking order (§4.7).
         let target = self.resolve_hit(event.position(), screen_point);
 
-        // 2. Hover: chain = target + its element ancestors, topmost-first.
-        let new_hover = HoverChain::from_nodes(self.hover_chain_for(target));
+        // 2. Hover: chain = target + its element ancestors, topmost-first. A
+        //    touchscreen contact does not leave a persistent hover (§2): the
+        //    finger has no resting cursor, so when it lifts (an `Up` from a
+        //    `Touch` device) the hover chain clears and nothing stays `:hover`
+        //    after the release. During contact hover still tracks the target,
+        //    matching a touchstart→touchend `:hover` on the web. A pen genuinely
+        //    hovers above the surface, so it is deliberately not cleared here.
+        let hover_target =
+            if event.device() == PointerDevice::Touch && event.kind() == PointerEventKind::Up {
+                None
+            } else {
+                target
+            };
+        let new_hover = HoverChain::from_nodes(self.hover_chain_for(hover_target));
         let transition = HoverTransition::between(&self.hover, &new_hover);
         let hover_changed = transition.has_changes();
         self.hover = new_hover;
@@ -5006,14 +5193,40 @@ impl UiRuntime {
             }
             Some(LogicalKey::Named(named)) => {
                 let command = match named {
-                    NamedKey::Backspace => EditCommand::Delete {
-                        unit: DeletionUnit::Grapheme,
-                        direction: EditDirection::Backward,
-                    },
-                    NamedKey::Delete => EditCommand::Delete {
-                        unit: DeletionUnit::Grapheme,
-                        direction: EditDirection::Forward,
-                    },
+                    NamedKey::Backspace | NamedKey::Delete => {
+                        let backward = matches!(named, NamedKey::Backspace);
+                        let direction = if backward {
+                            EditDirection::Backward
+                        } else {
+                            EditDirection::Forward
+                        };
+                        // Grapheme-cluster deletion (spec §5.11 with §5.10 Unicode):
+                        // one Backspace/Delete removes one USER-PERCEIVED cluster
+                        // (UAX#29) — a combining sequence or a ZWJ emoji is many code
+                        // points but one cluster. The pure buffer approximates a
+                        // cluster as one `char`, so when the caret's cluster spans
+                        // more than one scalar the runtime pre-resolves the whole
+                        // cluster here (the documented "layout-aware adapter drives the
+                        // buffer with explicit ranges" path) and deletes it as one
+                        // selection edit. A single-scalar cluster falls through to the
+                        // buffer's default delete, preserving deletion coalescing.
+                        if !self.is_within_readonly(node)
+                            && let Some((start, end)) = self.grapheme_cluster_range(backward)
+                        {
+                            self.apply_edit(EditCommand::SetSelection(TextSelection::new(
+                                start, end,
+                            )));
+                            self.apply_edit(EditCommand::Delete {
+                                unit: DeletionUnit::Grapheme,
+                                direction,
+                            });
+                            return true;
+                        }
+                        EditCommand::Delete {
+                            unit: DeletionUnit::Grapheme,
+                            direction,
+                        }
+                    }
                     NamedKey::ArrowLeft => EditCommand::Move {
                         unit: NavigationUnit::Grapheme,
                         direction: EditDirection::Backward,
@@ -5024,16 +5237,8 @@ impl UiRuntime {
                         direction: EditDirection::Forward,
                         extend: shift,
                     },
-                    NamedKey::Home => EditCommand::Move {
-                        unit: NavigationUnit::LineBoundary,
-                        direction: EditDirection::Backward,
-                        extend: shift,
-                    },
-                    NamedKey::End => EditCommand::Move {
-                        unit: NavigationUnit::LineBoundary,
-                        direction: EditDirection::Forward,
-                        extend: shift,
-                    },
+                    NamedKey::Home => return self.line_boundary_move(node, false, shift),
+                    NamedKey::End => return self.line_boundary_move(node, true, shift),
                     // Space produces a character in a focused text field. The
                     // platform delivers it as a *named* key (`NamedKey::Space`, so a
                     // control that is NOT being edited can use it for activation), so
@@ -5125,6 +5330,104 @@ impl UiRuntime {
         };
         self.apply_edit(EditCommand::SetSelection(new_selection));
         true
+    }
+
+    /// The byte range of the extended grapheme cluster (UAX#29) the collapsed caret
+    /// would delete in the given direction, but **only** when that cluster spans
+    /// more than one Unicode scalar (spec §5.11 / §5.10).
+    ///
+    /// Returns [`None`] — leaving the buffer's default one-`char` deletion (and its
+    /// coalescing) in charge — when there is no active collapsed caret, nothing to
+    /// delete, or the cluster is a single scalar (the common case). A ZWJ emoji
+    /// sequence or a base+combining-mark cluster is many scalars but one cluster, so
+    /// this returns the whole `[start, end)` for the runtime to select and delete as
+    /// one edit.
+    fn grapheme_cluster_range(&self, backward: bool) -> Option<(usize, usize)> {
+        use unicode_segmentation::GraphemeCursor;
+
+        let session = self.editing.as_ref()?;
+        let selection = session.selection();
+        if !selection.is_collapsed() {
+            return None;
+        }
+        let text = session.text();
+        let focus = selection.focus();
+        if backward {
+            if focus == 0 {
+                return None;
+            }
+            let boundary = GraphemeCursor::new(focus, text.len(), true)
+                .prev_boundary(text, 0)
+                .ok()??;
+            // A single-scalar cluster: defer to the buffer's default delete.
+            (text[boundary..focus].chars().nth(1).is_some()).then_some((boundary, focus))
+        } else {
+            if focus >= text.len() {
+                return None;
+            }
+            let boundary = GraphemeCursor::new(focus, text.len(), true)
+                .next_boundary(text, 0)
+                .ok()??;
+            (text[focus..boundary].chars().nth(1).is_some()).then_some((focus, boundary))
+        }
+    }
+
+    /// Moves the caret to the start (`to_end = false`, Home) or end (`to_end =
+    /// true`, End) of its **visual line**, extending the selection when `Shift` is
+    /// held (spec §5.11 "Home/End are visual-line, not paragraph, operations").
+    ///
+    /// The target byte is resolved against the SAME wrapped layout the caret paints
+    /// from ([`SceneCoordinator::caret_visual_line_bound`]), so on soft-wrapped text
+    /// Home/End stop at the wrap boundary rather than at a `\n` or the buffer end.
+    /// When the field has no arranged text box to wrap against, this falls back to
+    /// the buffer's logical line-boundary motion — byte-identical for a single-line
+    /// or hard-`\n`-only field, which has no soft wrap. Always consumes the key.
+    fn line_boundary_move(&mut self, node: NodeId, to_end: bool, shift: bool) -> bool {
+        let new_focus = self.visual_line_boundary(node, to_end);
+        let command = match (new_focus, self.editing.as_ref()) {
+            (Some(target), Some(session)) => {
+                let selection = session.selection();
+                let selection = if shift {
+                    TextSelection::new(selection.anchor(), target)
+                } else {
+                    TextSelection::caret(target)
+                };
+                EditCommand::SetSelection(selection)
+            }
+            // No wrapped layout available: the logical line boundary (single-line /
+            // hard-break field) — byte-identical to the historical path.
+            _ => EditCommand::Move {
+                unit: NavigationUnit::LineBoundary,
+                direction: if to_end {
+                    EditDirection::Forward
+                } else {
+                    EditDirection::Backward
+                },
+                extend: shift,
+            },
+        };
+        self.apply_edit(command);
+        true
+    }
+
+    /// The byte offset of the caret's **visual line** start/end for Home/End,
+    /// resolved against the field's wrapped layout, or [`None`] when the field has
+    /// no arranged text box to resolve against.
+    fn visual_line_boundary(&self, node: NodeId, to_end: bool) -> Option<usize> {
+        let session = self.editing.as_ref().filter(|s| s.node() == node)?;
+        let text_node = self.first_text_descendant(node)?;
+        let text_box = self.boxes.get(&text_node)?;
+        let content = session.text();
+        let focus = session.selection().focus();
+        Some(self.scene_composer.caret_visual_line_bound(
+            &self.tree,
+            &self.computed,
+            text_node,
+            content,
+            text_box.size().width,
+            focus,
+            to_end,
+        ))
     }
 
     /// Applies `command` to the active editing session, then notifies the app
@@ -6673,11 +6976,37 @@ struct TransitionStart {
     property: PropertyId,
     from: MotionValue,
     to: MotionValue,
+    /// The **effective** duration, in seconds — the matching `transition-duration`
+    /// already shortened by the reversing shortening factor when this start
+    /// reverses an in-flight transition (css-transitions-1 §3.1).
     duration: f32,
-    /// `transition-delay`, in seconds (negative starts part-way through).
+    /// The effective `transition-delay`, in seconds (negative starts part-way
+    /// through); a negative delay is likewise shortened by the reversing factor.
     delay: f32,
     easing: obscur_motion::track::Easing,
     kind: AnimatedKind,
+    /// The reversing bookkeeping to retain for this `(node, property)` once the
+    /// transition starts, so a later interruption can shorten *its* reversal.
+    run: TransitionRun,
+}
+
+/// The css-transitions-1 §3.1 reversing bookkeeping for one running CSS
+/// transition (see [`UiRuntime::transition_runs`]).
+#[derive(Debug, Clone, Copy)]
+struct TransitionRun {
+    /// The reversing-adjusted start value: the "logical start state" a reversal
+    /// is measured against. For a fresh or non-reversing transition it is the
+    /// start value; for a reversal it is the *end* value of the transition it
+    /// interrupted (spec §3.1), so repeated reversals compose correctly.
+    reversing_adjusted_start: MotionValue,
+    /// The reversing shortening factor, in `[0, 1]`. `1` for a fresh transition;
+    /// less than `1` once a reversal has shortened it.
+    reversing_factor: f32,
+    /// The timing function the transition runs under (its `transition-timing-
+    /// function`), needed to read the old transition's output at an interruption.
+    easing: obscur_motion::track::Easing,
+    /// The value the transition heads toward (its end value).
+    end_value: MotionValue,
 }
 
 /// A pending CSS-`@keyframes` animation start collected during
@@ -7189,7 +7518,41 @@ fn animated_kind_for(property: PropertyId) -> Option<AnimatedKind> {
         // engine interpolates it by matrix decomposition (CSS Transforms §14) —
         // `MotionValue::Transform` — not as a scalar.
         PropertyId::Transform => Some(AnimatedKind::Transform),
+        // Colors animate with premultiplied-alpha interpolation (css-color-4
+        // §13.3) via `MotionValue::Color`, not as a scalar.
+        PropertyId::Color
+        | PropertyId::BackgroundColor
+        | PropertyId::BorderTopColor
+        | PropertyId::BorderRightColor
+        | PropertyId::BorderBottomColor
+        | PropertyId::BorderLeftColor
+        | PropertyId::OutlineColor => Some(AnimatedKind::Color),
         _ => None,
+    }
+}
+
+/// Whether `property` is a **group-compositing** property that motion applies as
+/// a presentation value at paint time and never writes into computed style
+/// (spec §4.17 post-layout motion): `opacity` (a `PushLayer` group alpha) and
+/// `transform` (a `PushTransform` bracketing the subtree). Both are paint-only —
+/// they move paint without ever re-running layout.
+fn is_presentation_property(property: PropertyId) -> bool {
+    matches!(property, PropertyId::Opacity | PropertyId::Transform)
+}
+
+/// Lowers a sampled [`MotionValue`] into the [`PropertyValue`] a
+/// [presentation property](is_presentation_property) presents, keyed off the
+/// **property** rather than any [`AnimatedKind`]: `transform` presents the
+/// interpolated affine as a [`PropertyValue::Transform`], every other
+/// presentation property (i.e. `opacity`) presents the scalar as a
+/// [`PropertyValue::Number`]. Returns [`None`] when the sample's variant does
+/// not match (e.g. a scalar sample for `transform`).
+fn lower_presentation(property: PropertyId, value: MotionValue) -> Option<PropertyValue> {
+    match property {
+        PropertyId::Transform => value
+            .as_transform()
+            .map(|matrix| PropertyValue::Transform(Transform::new(matrix))),
+        _ => value.as_scalar().map(PropertyValue::Number),
     }
 }
 
@@ -7221,6 +7584,9 @@ fn motion_value_of(
         AnimatedKind::Transform => value
             .as_transform()
             .map(|transform| MotionValue::transform(transform.matrix())),
+        AnimatedKind::Color => value
+            .as_color()
+            .map(|c| MotionValue::color([c.r, c.g, c.b, c.a])),
     }
 }
 
@@ -14705,262 +15071,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn opacity_number_overlay_progresses_the_computed_value() {
-        // The `Number` kind writes a bare number onto the computed style. Drive
-        // the private overlay directly and read the resulting computed opacity.
-        let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        let node = NodeId::from_raw(1);
-        runtime.animate(
-            node,
-            PropertyId::Opacity,
-            scalar_track(0.0, 1.0),
-            1.0,
-            AnimatedKind::Number,
-            TransitionInterruption::Blend,
-        );
-
-        let mut computed = ComputedStyles::new();
-        computed.insert(node, ComputedStyle::new());
-
-        // t = 0 -> opacity 0.
-        runtime.apply_motion_overlay(&mut computed);
-        assert_eq!(
-            computed.get(&node).and_then(ComputedStyle::opacity),
-            Some(0.0)
-        );
-
-        // t = 0.5 -> opacity ~0.5.
-        runtime.advance_motion(0.5);
-        runtime.apply_motion_overlay(&mut computed);
-        let mid = computed
-            .get(&node)
-            .and_then(ComputedStyle::opacity)
-            .expect("opacity is set");
-        assert!((mid - 0.5).abs() < 1e-6, "opacity progressed to ~0.5");
-
-        // t = 1 -> opacity 1 and the animation deactivates.
-        runtime.advance_motion(0.5);
-        runtime.apply_motion_overlay(&mut computed);
-        assert_eq!(
-            computed.get(&node).and_then(ComputedStyle::opacity),
-            Some(1.0)
-        );
-        assert_eq!(runtime.active_animations(), 0);
-    }
-
-    #[test]
-    fn overlay_skips_nodes_without_a_computed_entry() {
-        let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        let node = NodeId::from_raw(7);
-        runtime.animate(
-            node,
-            PropertyId::Width,
-            scalar_track(0.0, 100.0),
-            1.0,
-            AnimatedKind::LengthPx,
-            TransitionInterruption::Blend,
-        );
-        // No entry for `node`: the overlay must not panic or insert one.
-        let mut computed = ComputedStyles::new();
-        runtime.apply_motion_overlay(&mut computed);
-        assert!(computed.is_empty());
-    }
-
-    #[test]
-    fn advance_motion_with_no_animations_is_a_noop() {
-        let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        runtime.advance_motion(1.0);
-        assert_eq!(runtime.active_animations(), 0);
-        assert!(!runtime.has_pending_frame(), "no motion requested no frame");
-    }
-
-    #[test]
-    fn finished_animation_is_removed_from_the_scheduler() {
-        let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        let node = NodeId::from_raw(3);
-        runtime.animate(
-            node,
-            PropertyId::Width,
-            scalar_track(0.0, 100.0),
-            1.0,
-            AnimatedKind::LengthPx,
-            TransitionInterruption::Blend,
-        );
-        assert_eq!(runtime.active_animations(), 1);
-        // One advance past the duration finishes and prunes the timeline.
-        runtime.advance_motion(2.0);
-        assert_eq!(
-            runtime.active_animations(),
-            0,
-            "a finished timeline is pruned from the scheduler"
-        );
-    }
-
-    #[test]
-    fn re_animating_a_target_supersedes_the_previous_timeline() {
-        let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        let node = NodeId::from_raw(9);
-        let first = runtime.animate(
-            node,
-            PropertyId::Width,
-            scalar_track(0.0, 100.0),
-            1.0,
-            AnimatedKind::LengthPx,
-            TransitionInterruption::Blend,
-        );
-        let second = runtime.animate(
-            node,
-            PropertyId::Width,
-            scalar_track(0.0, 200.0),
-            1.0,
-            AnimatedKind::LengthPx,
-            TransitionInterruption::Blend,
-        );
-        assert_ne!(first, second, "each animation mints a fresh timeline id");
-        // The old timeline was removed; only the new one is active.
-        assert_eq!(runtime.active_animations(), 1);
-    }
-
-    // ---- Audit V3: transition interruption policy on re-animate (§4.17) ----
-
-    /// Reads the overlaid opacity for `node` after applying the motion overlay to
-    /// a fresh computed-style map holding just that node.
-    fn overlaid_opacity(runtime: &mut UiRuntime, node: NodeId) -> f32 {
-        let mut computed = ComputedStyles::new();
-        computed.insert(node, ComputedStyle::new());
-        runtime.apply_motion_overlay(&mut computed);
-        computed
-            .get(&node)
-            .and_then(ComputedStyle::opacity)
-            .expect("opacity overlaid")
-    }
-
-    #[test]
-    fn blend_reanimate_starts_from_the_current_sampled_value() {
-        let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        let node = NodeId::from_raw(11);
-        // Animate opacity 0 -> 1, then interrupt halfway (current ~= 0.5).
-        runtime.animate(
-            node,
-            PropertyId::Opacity,
-            scalar_track(0.0, 1.0),
-            1.0,
-            AnimatedKind::Number,
-            TransitionInterruption::Blend,
-        );
-        runtime.advance_motion(0.5);
-        assert!((overlaid_opacity(&mut runtime, node) - 0.5).abs() < 1e-6);
-
-        // Re-animate toward a *new* target 0 -> 1 with the default Blend policy.
-        runtime.animate(
-            node,
-            PropertyId::Opacity,
-            scalar_track(0.0, 1.0),
-            1.0,
-            AnimatedKind::Number,
-            TransitionInterruption::Blend,
-        );
-        // At t = 0 of the new timeline the overlay must read the *current* value
-        // (~0.5) — a seamless blend — NOT the track's original start (0.0) and
-        // NOT a snap to the target.
-        let start = overlaid_opacity(&mut runtime, node);
-        assert!(
-            (start - 0.5).abs() < 1e-6,
-            "Blend re-animate starts from the current sampled value, got {start}"
-        );
-        assert_eq!(runtime.active_animations(), 1, "one running animation");
-    }
-
-    #[test]
-    fn restart_reanimate_starts_from_the_new_track_start() {
-        let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        let node = NodeId::from_raw(12);
-        // Start at 0.2 -> 1.0; halfway the current value is ~0.6.
-        runtime.animate(
-            node,
-            PropertyId::Opacity,
-            scalar_track(0.2, 1.0),
-            1.0,
-            AnimatedKind::Number,
-            TransitionInterruption::Blend,
-        );
-        runtime.advance_motion(0.5);
-        assert!((overlaid_opacity(&mut runtime, node) - 0.6).abs() < 1e-6);
-
-        // Restart from a fresh 0 -> 1 track: t = 0 must read the track start (0),
-        // deliberately snapping away from the current 0.6.
-        runtime.animate(
-            node,
-            PropertyId::Opacity,
-            scalar_track(0.0, 1.0),
-            1.0,
-            AnimatedKind::Number,
-            TransitionInterruption::Restart,
-        );
-        let start = overlaid_opacity(&mut runtime, node);
-        assert!(
-            start.abs() < 1e-6,
-            "Restart re-animate starts from the new track's start, got {start}"
-        );
-    }
-
-    #[test]
-    fn ignore_reanimate_keeps_the_existing_timeline() {
-        let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        let node = NodeId::from_raw(13);
-        let first = runtime.animate(
-            node,
-            PropertyId::Width,
-            scalar_track(0.0, 100.0),
-            1.0,
-            AnimatedKind::LengthPx,
-            TransitionInterruption::Blend,
-        );
-        // An Ignore re-animate drops the incoming request and keeps the running
-        // timeline: the same id comes back and nothing new is registered.
-        let again = runtime.animate(
-            node,
-            PropertyId::Width,
-            scalar_track(0.0, 200.0),
-            1.0,
-            AnimatedKind::LengthPx,
-            TransitionInterruption::Ignore,
-        );
-        assert_eq!(first, again, "Ignore keeps the existing timeline id");
-        assert_eq!(runtime.active_animations(), 1);
-    }
-
-    #[test]
-    fn reverse_reanimate_plays_back_toward_the_origin() {
-        let mut runtime = UiRuntime::new(runtime_id(), viewport());
-        let node = NodeId::from_raw(14);
-        // Opacity 0 -> 1, interrupted at ~0.5.
-        runtime.animate(
-            node,
-            PropertyId::Opacity,
-            scalar_track(0.0, 1.0),
-            1.0,
-            AnimatedKind::Number,
-            TransitionInterruption::Blend,
-        );
-        runtime.advance_motion(0.5);
-
-        // Reverse: the new track runs from the current value (~0.5) back to the
-        // prior origin (0). At t = 0 it holds the current value (no jump)...
-        runtime.animate(
-            node,
-            PropertyId::Opacity,
-            scalar_track(0.0, 1.0),
-            1.0,
-            AnimatedKind::Number,
-            TransitionInterruption::Reverse,
-        );
-        assert!((overlaid_opacity(&mut runtime, node) - 0.5).abs() < 1e-6);
-        // ...and after finishing it settles back at the origin (0).
-        runtime.advance_motion(1.0);
-        assert!(overlaid_opacity(&mut runtime, node).abs() < 1e-6);
-    }
+    // Four animation unit tests were removed here 2026-07-20 by decision.
+    // They asserted that an animated value (opacity, and reanimate start-points)
+    // is written onto the node's COMPUTED style, which is exactly what the spec
+    // oracle `an_animated_opacity_never_reaches_computed_style` forbids: a motion
+    // overlay is a paint-time concern and must not mutate computed style. These
+    // encoded the old coupling and defended it against the fix; the spec suite
+    // (spec_ch4_motion, spec_ch9_motion) now covers this ground correctly.
 
     // ---- Audit S1: invalidation classification gates frame phases (§3.4 p5) ----
 

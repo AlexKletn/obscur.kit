@@ -4,9 +4,12 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+use unicode_normalization::UnicodeNormalization;
+
 use crate::font::{
     FontAttributes, FontFace, FontFallback, FontId, FontResolveRequest, FontResolver,
 };
+use crate::shaping::ScriptTag;
 use crate::shaping::paragraph_key::ParagraphKey;
 use crate::shaping::{
     GlyphRun, LineMetrics, ShapedGlyph, ShapedRun, ShapingRequest, TextDirection, TextItemizer,
@@ -292,8 +295,18 @@ impl ParagraphShaper {
                 None => (FontId::PRIMARY, default_face.clone(), false, false),
             };
 
+            // css-fonts-4 §5.3 canonical equivalence: when the itemized run is a
+            // multi-codepoint sequence canonically equivalent to a single
+            // precomposed character that the resolved font supports, shape that
+            // single character so the whole cluster maps to its one glyph — rather
+            // than the base plus a (possibly `.notdef`) mark. The `range` used for
+            // rebasing stays the ORIGINAL sub-run bytes, so the composed glyph's
+            // cluster still points at the sequence's start in the source text.
+            let composed = self.canonical_compose(sub, families, attributes, item.script(), font);
+            let shape_text: &str = composed.as_deref().unwrap_or(sub);
+
             let mut shape_request =
-                ShapingRequest::new(sub, face, font_size).with_direction(item.direction());
+                ShapingRequest::new(shape_text, face, font_size).with_direction(item.direction());
             if let Some(language) = &self.language {
                 shape_request = shape_request.with_language(language.clone());
             }
@@ -306,6 +319,52 @@ impl ParagraphShaper {
             );
         }
         runs
+    }
+
+    /// Returns the single precomposed character (as a `String`) a sub-run should
+    /// be shaped as under the css-fonts-4 §5.3 canonical-equivalence rule, or
+    /// [`None`] when the run shapes as-is.
+    ///
+    /// The rule fires only when **all** of these hold: `sub` is more than one
+    /// codepoint; its canonical composition ([NFC](UnicodeNormalization::nfc)) is a
+    /// **single** scalar `c` distinct from `sub`; and the resolver selects the same
+    /// font for `c` as it did for the whole sequence. That last check preserves the
+    /// spec's precedence — a font that *directly* supports the decomposed sequence
+    /// (or a different font in the chain) keeps the base + mark glyphs — so
+    /// composition happens exactly when the resolved font supports the precomposed
+    /// character but not the sequence as authored (the canonical-equivalence branch
+    /// of a coverage-driven resolver).
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    fn canonical_compose(
+        &self,
+        sub: &str,
+        families: &FontFallback,
+        attributes: &FontAttributes,
+        script: ScriptTag,
+        font: FontId,
+    ) -> Option<String> {
+        // Only a multi-codepoint sequence can be canonically equivalent to a
+        // single character; a single scalar (or empty) never composes.
+        sub.chars().nth(1)?;
+        let nfc: String = sub.nfc().collect();
+        // The composition must collapse to exactly one scalar, and must actually
+        // change the text (an already-composed or non-composable run is left alone).
+        let mut chars = nfc.chars();
+        let c = chars.next()?;
+        if chars.next().is_some() || nfc == sub {
+            return None;
+        }
+        // css §5.3: compose only when the font supports the precomposed character.
+        // Resolving `c` against the same chain and requiring the SAME font keeps a
+        // directly-supported sequence (resolved via a different or whole-sequence
+        // path) on its decomposed glyphs.
+        let mut buf = [0u8; 4];
+        let request =
+            FontResolveRequest::new(families, attributes, c.encode_utf8(&mut buf), script);
+        match self.resolver.resolve(&request) {
+            Some(resolved) if resolved.font() == font => Some(nfc),
+            _ => None,
+        }
     }
 }
 

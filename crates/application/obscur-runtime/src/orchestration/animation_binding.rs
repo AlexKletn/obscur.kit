@@ -5,7 +5,7 @@ use obscur_identity::NodeId;
 use obscur_motion::timeline::{FillMode, TimelineId};
 use obscur_motion::track::KeyframeTrack;
 use obscur_motion::value::MotionValue;
-use obscur_style::property::{Length, PropertyId, PropertyValue, Transform};
+use obscur_style::property::{Length, PropertyId, PropertyValue, StyleColor, Transform};
 
 /// How a sampled scalar [`MotionValue`](obscur_motion::value::MotionValue) is
 /// lowered into a concrete [`PropertyValue`] for a computed-style override.
@@ -28,6 +28,9 @@ pub enum AnimatedKind {
     /// A 2D `transform` affine `[a, b, c, d, e, f]` (spec §4.17 post-layout
     /// motion; CSS Transforms §14 decomposition interpolation).
     Transform,
+    /// An sRGB `color`/`background-color` etc., interpolated with premultiplied
+    /// alpha from a [`Color`](MotionValue::Color) (css-color-4 §13.3).
+    Color,
 }
 
 impl AnimatedKind {
@@ -45,6 +48,9 @@ impl AnimatedKind {
             Self::Transform => value
                 .as_transform()
                 .map(|matrix| PropertyValue::Transform(Transform::new(matrix))),
+            Self::Color => value
+                .as_color()
+                .map(|[r, g, b, a]| PropertyValue::Color(StyleColor::rgba(r, g, b, a))),
         }
     }
 }
