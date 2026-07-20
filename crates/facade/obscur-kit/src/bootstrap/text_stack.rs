@@ -5,9 +5,10 @@
 //! and hope the platform draws it: the shaper reads `cmap`/`GSUB`/`GPOS` itself, so
 //! "use the system font" is only meaningful once something has read a file off the
 //! host's disk. That is why the byte-carrying [`FontSet`] is the input to
-//! [`KitBootstrap::install_text_stack`](super::KitBootstrap::install_text_stack)
-//! and why the kit has no bundled fallback set — see
-//! [`crate::bootstrap`](super)'s note on the §5.18 deviation.
+//! [`KitBootstrap::install_text_stack`](super::KitBootstrap::install_text_stack).
+//! An **empty** set is not the end of the road: the install appends a bundled
+//! last-resort face so text still paints in an isolated environment — see
+//! [`crate::bootstrap`](super)'s note on the §5.18 bundled fallback.
 
 use std::sync::Arc;
 
@@ -71,8 +72,9 @@ pub struct FontSet {
 }
 
 impl FontSet {
-    /// Creates an empty set. Installing it wires the real shaping stack over *no*
-    /// faces, which resolves nothing and paints no text — see
+    /// Creates an empty set. Installing it wires the real shaping stack with no
+    /// host faces, and text is served from the bundled last-resort face the install
+    /// appends — see
     /// [`install_text_stack`](super::KitBootstrap::install_text_stack).
     #[must_use]
     pub fn new() -> Self {
@@ -175,8 +177,9 @@ impl InstalledFonts {
         self.faces.len()
     }
 
-    /// Whether nothing was installed — the state of an empty [`FontSet`], in which
-    /// no text will paint.
+    /// Whether the hand-off table is empty. Note an empty [`FontSet`] does **not**
+    /// yield an empty table: the install surfaces the bundled last-resort face so
+    /// the renderer can paint the isolated-environment fallback (§5.18).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.faces.is_empty()

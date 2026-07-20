@@ -414,20 +414,45 @@ impl KitBootstrap {
     /// [`InstalledFonts`](super::InstalledFonts), which exists to make that
     /// hand-off one loop.
     ///
-    /// # An empty `fonts` installs a working stack over nothing
+    /// # An empty `fonts` still renders — the bundled last-resort face (§5.18)
     ///
-    /// The real adapters go in either way, and then resolve nothing and paint no
-    /// text. That is the deliberate §5.18 deviation, not a bug to route around:
-    /// there is no bundled fallback set to quietly substitute, so a host that
-    /// supplies no bytes gets no text and can tell.
+    /// The kit ships one vendored face, `assets/fonts/NotoSans-Regular.ttf`,
+    /// embedded at compile time so it needs no filesystem — which the isolated /
+    /// WASM target does not have. It is appended to the registry **after** the
+    /// host's faces, under the generic `sans-serif` family every default fallback
+    /// chain terminates in, so:
+    ///
+    /// * a host that supplies its own faces is unaffected — its faces match first
+    ///   by family and coverage, and the bundled one only fills a gap nothing else
+    ///   covers;
+    /// * an **empty** `fonts` (the WASM/isolated case: nothing enumerated) falls
+    ///   through to the bundled face and paints, rather than rendering nothing.
+    ///
+    /// This is §5.18's "bundled fallback set for WASM/isolated environments" met,
+    /// not the deviation it once was. The bundled face is skipped when the host
+    /// already provides those exact bytes, so it never double-registers.
+    ///
+    /// The returned [`InstalledFonts`](super::InstalledFonts) — the renderer
+    /// hand-off table — lists the host's faces exactly, and additionally the
+    /// bundled face **only when the host supplied none**: that is the one case the
+    /// renderer must be handed the bundled bytes to paint from, while a host with
+    /// its own faces keeps the handle table it already expects.
     #[cfg(all(feature = "text-harfrust", feature = "text-unicode"))]
     pub fn install_text_stack(
         &self,
         runtime: &mut crate::runtime::UiRuntime,
         fonts: &super::FontSet,
     ) -> super::InstalledFonts {
+        use crate::text::font::{FontAttributes, FontFamily, GenericFamily};
+
+        /// The vendored last-resort face, embedded so it needs no filesystem.
+        const BUNDLED_FALLBACK: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../assets/fonts/NotoSans-Regular.ttf"
+        ));
+
         let mut registry = crate::text_harfrust::FontRegistry::new();
-        let mut handles = Vec::with_capacity(fonts.len());
+        let mut handles = Vec::with_capacity(fonts.len() + 1);
         for face in fonts.faces() {
             let id = registry.register(
                 face.family().clone(),
@@ -439,6 +464,30 @@ impl KitBootstrap {
                 std::sync::Arc::clone(face.bytes()),
             ));
         }
+
+        // Append the bundled last-resort face after the host's, unless the host
+        // already offered these exact bytes. It resolves under `sans-serif`, the
+        // family every default fallback chain terminates in, so an empty set still
+        // covers text and a host set only reaches it for glyphs nothing else has.
+        let host_has_bundled = fonts
+            .faces()
+            .iter()
+            .any(|face| face.bytes().as_ref() == BUNDLED_FALLBACK);
+        if !host_has_bundled {
+            let bundled: std::sync::Arc<[u8]> = std::sync::Arc::from(BUNDLED_FALLBACK);
+            let id = registry.register(
+                FontFamily::generic(GenericFamily::SansSerif),
+                FontAttributes::default(),
+                std::sync::Arc::clone(&bundled),
+            );
+            // Surface it to the renderer hand-off only when the host gave no faces
+            // of its own — otherwise the returned table stays exactly the host's,
+            // which every renderer-side caller already depends on.
+            if fonts.is_empty() {
+                handles.push((super::text_stack::font_handle(id), bundled));
+            }
+        }
+
         // Taken only now: a snapshot from before the loop would be empty, and the
         // shaper would silently answer every line-metric query with the ratios.
         let shaper = crate::text_harfrust::HarfrustShaper::without_font()

@@ -471,11 +471,12 @@ fn installed_fonts_hands_back_dense_handles_in_installed_order() {
     );
 }
 
-/// The documented §5.18 deviation, asserted rather than described: with no faces
-/// there is no bundled set to fall back on, so no text paints — and the install
-/// still reports honestly rather than pretending.
+/// §5.18's bundled fallback, asserted rather than described: an empty host set is
+/// the WASM/isolated case, and the install must still paint text from the vendored
+/// last-resort face. The kit now **ships** a bundled set — the earlier deviation is
+/// reversed.
 #[test]
-fn an_empty_font_set_installs_the_real_stack_and_paints_no_text() {
+fn an_empty_font_set_falls_back_to_the_bundled_face_and_paints() {
     let css = ".page { width: 400px; height: 400px; font-size: 16px } .item { }";
     let sheet = compile(css);
     let component = ComponentId::from_raw(0x00C0_0001);
@@ -487,15 +488,39 @@ fn an_empty_font_set_installs_the_real_stack_and_paints_no_text() {
 
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(400.0, 400.0));
     let installed = KitBootstrap::new().install_text_stack(&mut runtime, &FontSet::new());
-    assert!(
-        installed.is_empty(),
-        "an empty set installs no faces, and says so"
+    // The bundled last-resort face is surfaced to the renderer hand-off precisely
+    // because the host supplied none: it is the only face that can paint.
+    assert_eq!(
+        installed.len(),
+        1,
+        "an empty host set still hands the renderer the bundled fallback face"
+    );
+    assert_eq!(
+        installed.handle(0),
+        Some(0),
+        "the bundled face takes handle 0"
+    );
+    assert_eq!(
+        installed.iter().next().map(|(_, bytes)| bytes.as_ref()),
+        Some(NOTO_SANS),
+        "the bundled face is the vendored Noto Sans"
     );
 
     runtime.render_now(&view, std::slice::from_ref(&sheet));
+    let glyphs = glyph_ids(&runtime);
     assert!(
-        glyph_ids(&runtime).is_empty(),
-        "no faces means no glyphs — the kit ships no bundled fallback set (§5.18 deviation)"
+        !glyphs.is_empty(),
+        "an empty host set now paints text from the bundled fallback (§5.18 met)"
+    );
+    assert!(
+        glyphs.iter().all(|&g| g != 0),
+        "the bundled Noto Sans covers `hello` — no .notdef: {glyphs:?}"
+    );
+    // Not the mock: the installed HarfRust shaper emits Noto Sans's own gids, not
+    // Unicode scalars, so `h`/`e`/`l`/`l`/`o` are not their code points.
+    assert!(
+        glyphs != "hello".chars().map(|c| c as u32).collect::<Vec<_>>(),
+        "the real bundled face shaped these, not the mock: {glyphs:?}"
     );
 }
 
