@@ -200,6 +200,9 @@ fn rs_02_no_loader_means_no_implicit_network_access() {
     for _ in 0..5 {
         let _ = wired.render_now(&view, std::slice::from_ref(&sheet));
     }
+    // With no blocking executor the load is deferred out of the frame phase
+    // (§3.4/§5.15); draining it on poll is what runs the loader.
+    let _ = wired.poll_resource_tasks();
     assert_eq!(
         calls.load(Ordering::Relaxed),
         2,
@@ -237,6 +240,11 @@ fn rs_03_a_failed_load_is_a_state_not_a_panic_and_not_a_retry_loop() {
     for _ in 0..5 {
         let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
     }
+    // With no blocking executor the load is deferred out of the frame phase
+    // (§3.4/§5.15). The failed URL was queued ONCE (marked pending at enqueue
+    // time), so the five no-poll frames re-queue nothing and a single drain runs
+    // the loader exactly once.
+    let _ = runtime.poll_resource_tasks();
 
     assert_eq!(
         calls.load(Ordering::Relaxed),

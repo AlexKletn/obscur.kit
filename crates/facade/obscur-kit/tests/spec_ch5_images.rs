@@ -164,9 +164,16 @@ fn drawn(runtime: &UiRuntime) -> (Rect, Rect) {
 }
 
 /// Renders `css` over the picture view in a runtime sandboxed to `dir`.
+///
+/// With no blocking executor the image load is deferred out of the frame phase
+/// (§3.4/§5.15), so this drives it to completion — render (which queues the
+/// load), `poll_resource_tasks` (which runs it on the frame thread, after the
+/// frame), then render again so the now-decoded image sizes and composes.
 fn render(dir: &PathBuf, css: &str) -> UiRuntime {
     let sheet: Stylesheet = compile(css);
     let mut runtime = runtime_at(dir);
+    let _ = runtime.render_now(&picture_view(), std::slice::from_ref(&sheet));
+    let _ = runtime.poll_resource_tasks();
     let _ = runtime.render_now(&picture_view(), std::slice::from_ref(&sheet));
     runtime
 }
@@ -290,6 +297,11 @@ fn im_03_a_2x_asset_has_a_halved_logical_intrinsic_size() {
     for scale in [1.0_f32, 2.0] {
         let mut runtime = runtime_at(&dir);
         runtime.set_device_scale(scale);
+        // No executor: the load is deferred out of the frame phase (§3.4/§5.16);
+        // drive it, then re-render so the auto/auto box sizes from the decoded
+        // intrinsic size.
+        let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+        let _ = runtime.poll_resource_tasks();
         let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
 
         let (_, _, w, h) = geom(&runtime, at(&runtime, &[0]));

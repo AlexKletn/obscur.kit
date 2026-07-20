@@ -123,6 +123,10 @@ fn a_byte_budget_evicts_while_composing_a_real_frame() {
     // Room for two of the three 16-byte images.
     runtime.set_image_cache_budget(CacheBudget::bytes(2 * IMAGE_BYTES));
     runtime.render_now(&view, std::slice::from_ref(&sheet));
+    // The load is deferred out of the frame phase (no blocking executor): draining
+    // it here runs the load, admits the pixels, and lets the budget evict — the
+    // same insert-time eviction the old synchronous frame did in-line.
+    let _ = runtime.poll_resource_tasks();
 
     let stats = runtime.image_cache_statistics();
     assert_eq!(
@@ -170,6 +174,9 @@ fn the_devtools_caches_inspectable_reports_what_the_budget_did() {
     let mut runtime = runtime_at(&dir);
     runtime.set_image_cache_budget(CacheBudget::bytes(2 * IMAGE_BYTES));
     runtime.render_now(&view, std::slice::from_ref(&sheet));
+    // Drive the deferred load so the budget's insert-time eviction actually runs
+    // before we read what the DevTools inspectable reports.
+    let _ = runtime.poll_resource_tasks();
 
     let source = inspect_source_from(&runtime);
     let payload = source
@@ -205,6 +212,18 @@ fn the_default_budget_is_unlimited_and_never_evicts() {
     ]));
 
     let mut runtime = runtime_at(&dir);
+
+    // The first compose finds nothing resident — three misses — and, with no
+    // blocking executor, the loads are deferred out of the frame phase (§3.3/§3.4),
+    // so nothing is resident or painted yet. The miss signal is recorded here.
+    runtime.render_now(&view, std::slice::from_ref(&sheet));
+    let stats = runtime.image_cache_statistics();
+    assert_eq!(stats.hits(), 0, "the first frame could only miss");
+    assert_eq!(stats.misses(), 3, "one miss per referenced URL");
+
+    // Drive the deferred loads (on the frame thread, after the frame phase), then
+    // compose again so every decoded image is resident and paints.
+    let _ = runtime.poll_resource_tasks();
     let result = runtime.render_now(&view, std::slice::from_ref(&sheet));
 
     let stats = runtime.image_cache_statistics();
@@ -219,11 +238,6 @@ fn the_default_budget_is_unlimited_and_never_evicts() {
     // finds every one of them and loads nothing. That is the hit/miss signal §5.19
     // asks DevTools to be able to see, and it is recorded by composing a frame —
     // not by the test.
-    assert_eq!(stats.hits(), 0, "the first frame could only miss");
-    assert_eq!(stats.misses(), 3, "one miss per referenced URL");
-
-    runtime.render_now(&view, std::slice::from_ref(&sheet));
-    let stats = runtime.image_cache_statistics();
     assert_eq!(stats.hits(), 3, "the second frame hits every cached image");
     assert_eq!(stats.misses(), 3, "and misses nothing new");
     assert_eq!(stats.insertions(), 3, "nothing was decoded twice");
@@ -264,10 +278,18 @@ fn eviction_takes_the_offscreen_image_not_the_visible_one() {
 
     // Frame 1: both load and both fit — nothing is evicted yet.
     runtime.render_now(&two, std::slice::from_ref(&sheet));
+    // The two loads are deferred out of the frame phase; drain them so both are
+    // resident (and their visibility stamped) before the third frame forces a choice.
+    let _ = runtime.poll_resource_tasks();
     assert_eq!(runtime.image_cache_statistics().entries(), 2);
     assert_eq!(runtime.image_cache_statistics().evictions(), 0);
 
     // Frame 2: a third on-screen image arrives and one of the two must go.
+    // Render (queues c's load, stamps this frame's visibility), drain (admits c,
+    // which over-fills the budget and evicts the off-screen victim), then render
+    // again so the composed scene reflects who survived.
+    runtime.render_now(&three, std::slice::from_ref(&sheet));
+    let _ = runtime.poll_resource_tasks();
     let result = runtime.render_now(&three, std::slice::from_ref(&sheet));
 
     assert_eq!(runtime.image_cache_statistics().evictions(), 1);
@@ -293,6 +315,10 @@ fn an_evicted_image_reloads_when_referenced_again() {
     let view = View::from_fragment(ViewFragment::from_nodes(vec![img("a.png", "a")]));
 
     let mut runtime = runtime_at(&dir);
+    // Render queues the deferred load; drain it, then render again so the decoded
+    // image is resident and composes into the scene.
+    runtime.render_now(&view, std::slice::from_ref(&sheet));
+    let _ = runtime.poll_resource_tasks();
     let result = runtime.render_now(&view, std::slice::from_ref(&sheet));
     assert!(painted_at_y(&result, 0.0), "a.png paints unbudgeted");
 
@@ -306,6 +332,10 @@ fn an_evicted_image_reloads_when_referenced_again() {
 
     // Restoring the budget must let the very same URL load again.
     runtime.set_image_cache_budget(CacheBudget::unlimited());
+    // The re-request is a fresh deferred load: render to re-queue it, drain to
+    // re-decode and admit it, then render again so it composes back into the scene.
+    runtime.render_now(&view, std::slice::from_ref(&sheet));
+    let _ = runtime.poll_resource_tasks();
     let result = runtime.render_now(&view, std::slice::from_ref(&sheet));
     assert_eq!(
         runtime.image_cache_statistics().entries(),

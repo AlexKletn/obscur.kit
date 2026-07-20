@@ -88,6 +88,8 @@ fn image_primitive_src_reaches_paint_and_the_cpu_backend() {
     // real image decoder as domain ports — application depends on neither adapter.
     KitBootstrap::new().install_image_resources(&mut runtime, &dir);
 
+    let _ = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+    let _ = runtime.poll_resource_tasks();
     let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
 
     // 1. The scene carries a DrawImage over the element box: the primitive renders.
@@ -159,6 +161,8 @@ fn image_primitive_object_fit_none_centers_via_css() {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
     KitBootstrap::new().install_image_resources(&mut runtime, &dir);
 
+    let _ = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+    let _ = runtime.poll_resource_tasks();
     let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
     let snapshot = result.snapshot().clone();
     let PaintCommand::DrawImage { tile, .. } = snapshot

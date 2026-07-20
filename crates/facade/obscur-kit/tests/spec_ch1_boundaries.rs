@@ -393,6 +393,11 @@ fn arch_28_a_missing_resource_does_not_trip_the_component_boundary() {
         )]),
         std::slice::from_ref(&sheet),
     );
+    // With no blocking executor the missing-resource load is deferred out of the
+    // frame phase (§3.4/§5.15); draining it on poll is what fails the load and
+    // emits its one resources-subsystem diagnostic. Boundary activation and layout
+    // are unaffected either way.
+    let _ = rt.poll_resource_tasks();
 
     assert_eq!(
         diagnostics.boundary_activations().len(),

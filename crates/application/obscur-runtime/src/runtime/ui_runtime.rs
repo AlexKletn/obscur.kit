@@ -717,10 +717,12 @@ pub struct UiRuntime {
     /// facility", "`spawn_blocking` is explicit and capability-dependent").
     ///
     /// Absent by default, and that default is not a degradation: with no executor
-    /// a load runs **synchronously on the frame thread**, exactly as before. What
-    /// installing one buys is that the load leaves the frame — the core is tied to
-    /// no particular async runtime either way (§3.3 "the core is not tied to
-    /// Tokio").
+    /// a load still runs **on the frame thread** (no background thread), but its
+    /// run is **deferred to after the frame phase (frame thread, on poll)** rather
+    /// than performed inside `render_now`, so the loader is never reached while a
+    /// frame is in progress (§3.4, §5.15). What installing an executor buys is
+    /// that the load leaves the frame thread entirely — the core is tied to no
+    /// particular async runtime either way (§3.3 "the core is not tied to Tokio").
     blocking_executor: Option<Arc<dyn BlockingExecutor + Send + Sync>>,
     /// The typed messages finished load tasks deliver back (spec §3.3 "results
     /// return as typed messages"). The sender is cloned into each job.
@@ -739,6 +741,20 @@ pub struct UiRuntime {
     /// network access by itself."). Deduplicates the diagnostic so a referenced
     /// URL is named once, not once per frame.
     unresolved_reported: HashSet<Box<str>>,
+    /// Resource loads the frame phase QUEUED but has not yet run, when **no**
+    /// [`blocking_executor`](Self::blocking_executor) is installed (spec §3.3).
+    ///
+    /// The §3.3 no-executor default is preserved — the load still runs on the
+    /// frame thread, spawning no background thread — but its *timing* is lifted
+    /// out of the synchronous frame phase: the loader must never be invoked while
+    /// a frame is in progress (§3.4 "the synchronous frame phase must stay short",
+    /// §5.15 async load). Each closure carries its own loader/decoder and yields
+    /// the same typed [`ResourceOutcome`] the executor path returns. Drained by
+    /// [`poll_resource_tasks`](Self::poll_resource_tasks) on the frame thread,
+    /// AFTER the frame phase. The dedupe that stops a load re-queuing —
+    /// [`image_handles`](Self::image_handles) — is set at ENQUEUE time, so a
+    /// resource already queued (or already failed) is never queued twice.
+    deferred_loads: Vec<Box<dyn FnOnce() -> ResourceOutcome + Send>>,
 }
 
 impl UiRuntime {
@@ -839,6 +855,7 @@ impl UiRuntime {
             next_task: 0,
             image_handles: HashMap::new(),
             unresolved_reported: HashSet::new(),
+            deferred_loads: Vec::new(),
         }
     }
 
@@ -863,6 +880,10 @@ impl UiRuntime {
         self.resource_decoder = Some(decoder);
         self.image_cache.clear();
         self.image_handles.clear();
+        // Any load queued against the previous providers is abandoned — the new
+        // pair re-resolves every URL from scratch, and a stale closure still holds
+        // the old loader.
+        self.deferred_loads.clear();
         // A loader is now installed, so URLs previously reported as unresolvable
         // may resolve; forget the reports so they are attempted afresh.
         self.unresolved_reported.clear();
@@ -883,8 +904,9 @@ impl UiRuntime {
     /// Installs the blocking-work facility resource loads run on (spec §3.3).
     ///
     /// Explicit and capability-dependent by design: without it the runtime is
-    /// still fully functional — a load simply runs on the frame thread, exactly as
-    /// it always did. Installing one moves the load off the frame, and the core
+    /// still fully functional — a load simply runs on the frame thread, deferred
+    /// to after the frame phase (on poll) rather than inside `render_now`.
+    /// Installing one moves the load off the frame thread entirely, and the core
     /// stays tied to no particular async runtime, because all it ever sees is this
     /// port (§3.3 "the core is not tied to Tokio").
     ///
@@ -919,10 +941,51 @@ impl UiRuntime {
     /// what lets a load land while the UI is otherwise *idle* — it is the only
     /// path that asks for a frame.
     pub fn poll_resource_tasks(&mut self) -> usize {
-        let applied = self.commit_resource_results();
+        // Two sources of finished work land here: loads the frame phase DEFERRED
+        // because no executor is installed (run now, on this thread, after the
+        // frame phase — never during `render_now`), and off-thread loads whose
+        // typed results are waiting on the channel. Both commit through the same
+        // `apply_resource_outcome` path.
+        let mut applied = self.run_deferred_loads();
+        applied += self.commit_resource_results();
         if applied > 0 {
             self.scheduler
                 .request_reason(FrameReason::ResourceCompletion);
+        }
+        applied
+    }
+
+    /// Runs every resource load the frame phase deferred (the no-executor path,
+    /// spec §3.3) and commits its outcome, returning how many were accepted.
+    ///
+    /// Called only from [`poll_resource_tasks`](Self::poll_resource_tasks), so a
+    /// deferred load runs on the frame thread but strictly AFTER the synchronous
+    /// frame phase — the loader is never reached while a frame is in progress
+    /// (§3.4, §5.15). No background thread is spawned: the §3.3 capability default
+    /// keeps its "frame thread, not a background thread" guarantee; only the
+    /// timing moved out of `render_now`. Because the resolve pass marks a URL
+    /// pending in [`image_handles`](Self::image_handles) at ENQUEUE time, a load
+    /// already queued (or already failed) is never re-queued on a later frame, so
+    /// draining once runs each load exactly once.
+    fn run_deferred_loads(&mut self) -> usize {
+        let mut applied = 0usize;
+        // Take the queue up front: `apply_resource_outcome` borrows `self`, and a
+        // fresh enqueue cannot happen here (no frame runs during a drain).
+        for job in std::mem::take(&mut self.deferred_loads) {
+            if self.apply_resource_outcome(job()) {
+                applied += 1;
+            }
+        }
+        // A newly decoded image/vector can be the intrinsic size of a replaced
+        // element with `auto`/`auto` dimensions (§5.16). The frame that referenced
+        // it laid out before it existed, and the next `render_now` (a `UiCommit`
+        // frame) would refine layout to a Skip because no computed style changed —
+        // leaving the element sized from the missing image. Invalidate the retained
+        // layout inputs so that next frame re-lays out fully; the executor path
+        // gets the same effect from the `ResourceCompletion` frame its landing
+        // requests. (No effect when nothing landed — e.g. a failed load.)
+        if applied > 0 {
+            self.last_layout_inputs = None;
         }
         applied
     }
@@ -1242,11 +1305,14 @@ impl UiRuntime {
     }
 
     /// Runs one image load — off the frame thread when a blocking executor is
-    /// installed, on it when none is (spec §3.3).
+    /// installed, deferred to after the frame phase (frame thread, on poll) when
+    /// none is (spec §3.3).
     ///
     /// Both paths end in the same place: `apply_resource_outcome`, which lets the
-    /// hub rule on staleness. The only difference is *when* — so an app without the
-    /// capability behaves exactly as before rather than losing the feature.
+    /// hub rule on staleness. The only difference is *when*, and neither reaches
+    /// the loader inside `render_now`: with an executor the load leaves the frame
+    /// thread; with none it is queued and run by `poll_resource_tasks` after the
+    /// frame phase (§3.4, §5.15).
     ///
     /// The DPI-variant ladder (spec §5.16) is built **here**, on the frame thread,
     /// because it is where the device scale is known; the load job then only walks
@@ -1275,7 +1341,12 @@ impl UiRuntime {
                 let _ = tx.send(TaskResult::new(id, TaskScope::Runtime, outcome()));
             }));
         } else {
-            self.apply_resource_outcome(outcome());
+            // No executor: QUEUE the load rather than running it here. It runs on
+            // the frame thread — but on `poll_resource_tasks`, after the frame
+            // phase — so the loader is never invoked inside `render_now` (§3.4,
+            // §5.15). `image_handles` already marked this URL pending, so a later
+            // frame will not re-queue it.
+            self.deferred_loads.push(Box::new(outcome));
         }
     }
 
@@ -1352,7 +1423,10 @@ impl UiRuntime {
                 let _ = tx.send(TaskResult::new(id, TaskScope::Runtime, outcome()));
             }));
         } else {
-            self.apply_resource_outcome(outcome());
+            // No executor: defer the run out of the frame phase, exactly as
+            // `load_image` does — the loader must not be reached inside
+            // `render_now` (§3.4, §5.15). Drained by `poll_resource_tasks`.
+            self.deferred_loads.push(Box::new(outcome));
         }
     }
 
@@ -8943,11 +9017,26 @@ mod tests {
             .expect("one DrawImage was painted")
     }
 
+    /// Renders, then drives the deferred no-executor load to completion, then
+    /// renders again so the decoded image sizes and composes — returning the
+    /// second frame.
+    ///
+    /// With no blocking executor installed a load is queued out of the frame
+    /// phase and runs on the frame thread when `poll_resource_tasks` is called,
+    /// after the frame (spec §3.3/§3.4). A single `render_now` therefore no longer
+    /// resolves an image in-frame; this is the "render → drain → render" a real
+    /// host performs across its event loop, collapsed for a test.
+    fn render_resolved(runtime: &mut UiRuntime, view: &View, sheet: &Stylesheet) -> FrameResult {
+        let _ = runtime.render_now(view, std::slice::from_ref(sheet));
+        let _ = runtime.poll_resource_tasks();
+        runtime.render_now(view, std::slice::from_ref(sheet))
+    }
+
     #[test]
     fn a_1x_surface_loads_the_authored_asset_and_never_asks_for_a_variant() {
         let (mut runtime, loader) = variant_runtime(1.0, BOTH_VARIANTS);
         let sheet = img_stylesheet();
-        runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        let _ = render_resolved(&mut runtime, &img_view(), &sheet);
 
         // At base density the ladder is one rung: the `@2x` file is not even asked
         // for, so a 1x app pays nothing for the feature.
@@ -8961,7 +9050,7 @@ mod tests {
     fn a_2x_surface_picks_the_2x_asset() {
         let (mut runtime, loader) = variant_runtime(2.0, BOTH_VARIANTS);
         let sheet = img_stylesheet();
-        runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        let _ = render_resolved(&mut runtime, &img_view(), &sheet);
 
         // The densest rung is asked for first — and it exists, so the ladder stops
         // there and the authored path is never read.
@@ -8984,7 +9073,7 @@ mod tests {
         // The same 2x surface, but the project ships no `@2x` file.
         let (mut runtime, loader) = variant_runtime(2.0, &[("x", 2)]);
         let sheet = img_stylesheet();
-        let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        let result = render_resolved(&mut runtime, &img_view(), &sheet);
 
         // It asks for the variant, misses, and walks down to the authored path.
         assert_eq!(loader.asked(), vec!["x@2x".into(), "x".into()]);
@@ -9004,15 +9093,14 @@ mod tests {
 
         let (mut base, _) = variant_runtime(1.0, BOTH_VARIANTS);
         let base_tile = draw_image_tile(
-            base.render_now(&img_view(), std::slice::from_ref(&sheet))
+            render_resolved(&mut base, &img_view(), &sheet)
                 .snapshot()
                 .display_list(),
         );
 
         let (mut hidpi, _) = variant_runtime(2.0, BOTH_VARIANTS);
         let hidpi_tile = draw_image_tile(
-            hidpi
-                .render_now(&img_view(), std::slice::from_ref(&sheet))
+            render_resolved(&mut hidpi, &img_view(), &sheet)
                 .snapshot()
                 .display_list(),
         );
@@ -9036,7 +9124,7 @@ mod tests {
     fn the_hub_records_the_loaded_variants_density_and_pixel_size() {
         let (mut runtime, _) = variant_runtime(2.0, BOTH_VARIANTS);
         let sheet = img_stylesheet();
-        runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        let _ = render_resolved(&mut runtime, &img_view(), &sheet);
 
         let handle = *runtime.image_handles.get("x").expect("requested");
         let metadata = runtime
@@ -9055,6 +9143,9 @@ mod tests {
         let (mut runtime, _) = variant_runtime(1.0, BOTH_VARIANTS);
         let sheet = img_stylesheet();
         runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        // No executor: the load is deferred out of the frame phase; drive it so the
+        // 1x asset becomes resident before the density change reads it.
+        let _ = runtime.poll_resource_tasks();
         assert_eq!(
             resident_image(&runtime).width(),
             2,
@@ -9064,6 +9155,7 @@ mod tests {
         // The window is dragged to a 2x display.
         runtime.set_device_scale(2.0);
         runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        let _ = runtime.poll_resource_tasks();
 
         let image = resident_image(&runtime);
         assert_eq!(
@@ -9079,11 +9171,14 @@ mod tests {
         let (mut runtime, loader) = variant_runtime(2.0, BOTH_VARIANTS);
         let sheet = img_stylesheet();
         runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        // No executor: drive the deferred load so its one asked-for path is counted.
+        let _ = runtime.poll_resource_tasks();
         let asked_once = loader.asked().len();
 
         // 2.0 -> 1.5 still selects `@2x`, so there is nothing to reload.
         runtime.set_device_scale(1.5);
         runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        let _ = runtime.poll_resource_tasks();
 
         assert_eq!(
             loader.asked().len(),
@@ -9100,7 +9195,7 @@ mod tests {
             .set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
 
         let sheet = img_stylesheet();
-        let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        let result = render_resolved(&mut runtime, &img_view(), &sheet);
         let list = result.snapshot().display_list();
         assert_eq!(
             draw_image_count(list),
@@ -9130,7 +9225,7 @@ mod tests {
         runtime
             .set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
         let sheet = counter_stylesheet();
-        let result = runtime.render_now(&img_src_view("logo"), std::slice::from_ref(&sheet));
+        let result = render_resolved(&mut runtime, &img_src_view("logo"), &sheet);
         assert_eq!(
             draw_image_count(result.snapshot().display_list()),
             1,
@@ -15671,16 +15766,33 @@ mod tests {
 
     #[test]
     fn with_no_executor_a_load_still_runs_on_the_frame_thread() {
-        // The capability default is not a degradation: without the port the
-        // runtime behaves exactly as it always did — the image is ready THIS frame.
+        // The capability default is not a degradation: without the port the load
+        // still runs on the frame thread and spawns no background thread. What
+        // moved is its TIMING — it is deferred out of the synchronous frame phase
+        // (§3.4, §5.15), so the first frame paints without the image, `poll` runs
+        // the queued load inline, and the next frame composes it.
         let mut runtime = UiRuntime::new(runtime_id(), viewport());
         runtime
             .set_resource_providers(Arc::new(MockLoader { fails: false }), Arc::new(MockDecoder));
 
         let sheet = img_stylesheet();
-        let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
-        assert_eq!(draw_image_count(result.snapshot().display_list()), 1);
-        assert_eq!(runtime.poll_resource_tasks(), 0, "nothing was ever spawned");
+        let first = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        assert_eq!(
+            draw_image_count(first.snapshot().display_list()),
+            0,
+            "the load is deferred out of the frame phase — nothing paints yet"
+        );
+        assert_eq!(
+            runtime.poll_resource_tasks(),
+            1,
+            "the deferred load runs on poll — on the frame thread, nothing spawned"
+        );
+        let second = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+        assert_eq!(
+            draw_image_count(second.snapshot().display_list()),
+            1,
+            "the re-render composes the now-decoded image"
+        );
     }
 
     #[test]

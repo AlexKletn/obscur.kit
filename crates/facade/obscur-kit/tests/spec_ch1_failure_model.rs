@@ -219,6 +219,10 @@ fn arch_20_a_missing_image_falls_back_without_disturbing_the_column() {
         result.is_balanced(),
         "the frame completes rather than erroring out"
     );
+    // With no blocking executor the missing-image load is deferred out of the
+    // frame phase (§3.4/§5.15); draining it on poll is what fails the resource and
+    // emits its one recovery-bearing diagnostic. Layout is unaffected either way.
+    let _ = rt.poll_resource_tasks();
 
     // Every node keeps its declared geometry; node 3's top edge stays at y=200.
     let (_, y1, w1, h1) = geom(&rt, at(&rt, &[0, 0]));

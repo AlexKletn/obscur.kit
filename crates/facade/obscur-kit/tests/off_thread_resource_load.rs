@@ -205,13 +205,16 @@ fn an_installed_blocking_executor_runs_the_load_on_another_thread() {
     );
 }
 
-/// The half that must NOT change: without the executor the load still runs on the
-/// frame thread and the image is ready that same frame.
+/// The half that pins the §3.3 capability default: without the executor NO
+/// background thread is spawned — the load runs on the frame thread. What the
+/// frame-purity ruling (§3.4/§5.15) changed is only its TIMING: the load is
+/// deferred out of `render_now` and run by `poll_resource_tasks`, still on the
+/// frame thread. So the loader is never touched during the frame, and when it is
+/// finally run it runs right here on the caller — no thread was ever spawned.
 ///
-/// This is the §3.3 capability default — installing the port is opt-in, and
-/// declining it must not cost the feature. It is also what makes the test above
-/// discriminating: both halves drive the identical runtime path, and the only
-/// difference is the one install call.
+/// This is what makes the off-thread test above discriminating: both halves drive
+/// the identical runtime path, and the only difference is the one install call —
+/// with it, the load leaves this thread; without it, the load stays on it.
 #[test]
 fn with_no_executor_the_load_runs_on_the_frame_thread() {
     let dir = temp_asset_dir();
@@ -227,14 +230,35 @@ fn with_no_executor_the_load_runs_on_the_frame_thread() {
     let here = std::thread::current().id();
     let first = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
 
+    // The frame phase must stay short: the load is deferred, so the loader was not
+    // reached and nothing paints yet.
     assert_eq!(
         draw_image_count(first.snapshot()),
-        1,
-        "with no executor the image is ready this frame"
+        0,
+        "the deferred load has not run during the frame phase"
     );
+    assert!(
+        loader.loaded_on().is_empty(),
+        "the loader is never invoked inside render_now"
+    );
+
+    // Poll runs the deferred load — on THIS thread, with no executor and so no
+    // thread ever spawned — and the next frame composes the decoded image.
+    let applied = runtime.poll_resource_tasks();
+    assert_eq!(applied, 1, "the deferred load is run and committed on poll");
     let threads = loader.loaded_on();
-    assert_eq!(threads.len(), 1);
-    assert_eq!(threads[0], here, "the load ran on the frame thread");
+    assert_eq!(threads.len(), 1, "the load ran exactly once");
+    assert_eq!(
+        threads[0], here,
+        "with no executor the load runs on the frame thread — no thread spawned"
+    );
+
+    let second = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+    assert_eq!(
+        draw_image_count(second.snapshot()),
+        1,
+        "the re-render composes the now-decoded image",
+    );
 }
 
 /// The commit claim on its own, with no threads and no timing: a result that has

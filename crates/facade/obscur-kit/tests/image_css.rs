@@ -91,6 +91,10 @@ fn url_background_image_reaches_paint_and_the_cpu_backend() {
     // real image decoder as domain ports — application depends on neither adapter.
     KitBootstrap::new().install_image_resources(&mut runtime, &dir);
 
+    let _ = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+    // With no blocking executor, the first render defers the url() load; drive the
+    // queued resource task on the frame thread, then re-render to paint it.
+    let _ = runtime.poll_resource_tasks();
     let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
 
     // 1. The scene carries a DrawImage over the element box (V6-for-images closed).
@@ -177,6 +181,10 @@ fn background_size_position_repeat_flow_through_to_paint() {
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
     KitBootstrap::new().install_image_resources(&mut runtime, &dir);
 
+    let _ = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
+    // With no blocking executor, the first render defers the url() load; drive the
+    // queued resource task on the frame thread, then re-render to paint it.
+    let _ = runtime.poll_resource_tasks();
     let result = runtime.render_now(&img_view(), std::slice::from_ref(&sheet));
     let snapshot = result.snapshot().clone();
 

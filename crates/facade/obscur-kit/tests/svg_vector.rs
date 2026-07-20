@@ -112,6 +112,8 @@ fn an_svg_src_paints_as_vector_paths_and_never_as_an_image() {
     let sheet = compile(".icon { width: 20px; height: 20px; color: #ff0000 }");
     let mut runtime = runtime_at(&dir);
 
+    let _ = runtime.render_now(&icon_view(), std::slice::from_ref(&sheet));
+    let _ = runtime.poll_resource_tasks();
     let result = runtime.render_now(&icon_view(), std::slice::from_ref(&sheet));
     let commands = result.snapshot().display_list().commands().to_vec();
 
@@ -143,6 +145,8 @@ fn a_theme_change_recolours_the_same_document_without_reparsing() {
     let mut runtime = runtime_at(&dir);
 
     let red = compile(".icon { width: 20px; height: 20px; color: #ff0000 }");
+    let _ = runtime.render_now(&icon_view(), std::slice::from_ref(&red));
+    let _ = runtime.poll_resource_tasks();
     let first = runtime.render_now(&icon_view(), std::slice::from_ref(&red));
     assert_eq!(painted_fills(&first), vec![Color::rgba(1.0, 0.0, 0.0, 1.0)]);
 
@@ -164,6 +168,8 @@ fn the_vector_reaches_the_cpu_backend() {
     let dir = temp_asset_dir();
     let sheet = compile(".icon { width: 20px; height: 20px; color: #ff0000 }");
     let mut runtime = runtime_at(&dir);
+    let _ = runtime.render_now(&icon_view(), std::slice::from_ref(&sheet));
+    let _ = runtime.poll_resource_tasks();
     let result = runtime.render_now(&icon_view(), std::slice::from_ref(&sheet));
 
     let mut renderer = CpuRenderer::new(RendererId::from_raw(2));

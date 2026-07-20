@@ -123,6 +123,8 @@ fn okui_img_src_reaches_paint_on_both_paths() {
     KitBootstrap::new().install_image_resources(&mut runtime, &dir);
     let _renderer = CpuRenderer::new(RendererId::from_raw(2));
 
+    let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+    let _ = runtime.poll_resource_tasks();
     let result = runtime.render_now(&view, std::slice::from_ref(&sheet));
     let snapshot = result.snapshot().clone();
     let draw_images = snapshot

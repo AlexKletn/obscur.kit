@@ -127,6 +127,10 @@ fn sv_01_current_color_resolves_per_node_without_reparsing() {
     let view = View::from_fragment(ViewFragment::from_nodes(vec![icon("a"), icon("b")]));
 
     // Frame 1 — no hover. One parsed document, two different rendered colours.
+    // With no blocking executor the vector load is deferred out of the frame
+    // phase (§3.4/§5.17); drive it, then re-render so the parsed document composes.
+    let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+    let _ = runtime.poll_resource_tasks();
     let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
     let frame1 = fills(&runtime);
     assert!(
@@ -189,6 +193,10 @@ fn sv_02_an_svg_under_scale_stays_vector() {
         .with_children(ViewFragment::from_nodes(vec![icon("icon")]));
     let view = View::from_fragment(ViewFragment::from_nodes(vec![group]));
 
+    // No executor: the vector load is deferred out of the frame phase
+    // (§3.4/§5.17); drive it, then re-render so the vector reaches the scene.
+    let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+    let _ = runtime.poll_resource_tasks();
     let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
     let list = runtime.snapshot().display_list().commands().to_vec();
 
