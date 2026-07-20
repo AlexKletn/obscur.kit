@@ -26,13 +26,48 @@ pub enum SimpleSelector {
     PseudoClass(PseudoClassSelector),
     /// A pseudo-element such as `::before`; stores the name (no `::`).
     ///
-    /// Parsed and specificity-counted, but **never matched**: the kit generates
-    /// no box for a pseudo-element (there is no `content` property and no
-    /// synthetic node), so
+    /// Never matched by the ordinary single-element matcher: a pseudo-element
+    /// selects a *generated box* (§4.16 `::before`/`::after`), not the
+    /// originating element, so
     /// [`SelectorMatcher`](super::selector_matcher::SelectorMatcher) fails
-    /// closed rather than styling the originating element by mistake.
-    /// `obscur-css` raises an `UnsupportedCssFeature` for the selector (§4.13).
+    /// closed here rather than styling the originating element by mistake. The
+    /// runtime resolves generated-content rules through a dedicated
+    /// pseudo-element path (`matches_complex_for_pseudo`) that anchors the rule
+    /// on the originating element while keeping its declarations off that
+    /// element's own box.
     PseudoElement(Box<str>),
+    /// An exported style part such as `::part(label)`; stores the part name
+    /// (no `::part(` / `)`), §2.12 / §4.15.
+    ///
+    /// Like [`PseudoElement`](Self::PseudoElement) it is inert in the ordinary
+    /// single-element matcher: `Component::part(name)` matches an element in a
+    /// component's *scoped* render output that the component exports under
+    /// `name`, and deciding that needs the component-host boundary — tree
+    /// context the pure matcher does not have. The runtime's style-matching
+    /// coordinator matches it against the exported part while the rest of the
+    /// compound matches the host.
+    Part(Box<str>),
+}
+
+impl SimpleSelector {
+    /// Returns the part name if this is a [`Part`](Self::Part) selector.
+    #[must_use]
+    pub fn part_name(&self) -> Option<&str> {
+        match self {
+            Self::Part(name) => Some(name),
+            _ => None,
+        }
+    }
+
+    /// Returns the pseudo-element name if this is a
+    /// [`PseudoElement`](Self::PseudoElement) selector.
+    #[must_use]
+    pub fn pseudo_element_name(&self) -> Option<&str> {
+        match self {
+            Self::PseudoElement(name) => Some(name),
+            _ => None,
+        }
+    }
 }
 
 impl SimpleSelector {
@@ -52,7 +87,11 @@ impl SimpleSelector {
             Self::Id(_) => SelectorSpecificity::new(1, 0, 0),
             Self::PseudoClass(pseudo) => pseudo.specificity_contribution(),
             Self::Class(_) | Self::Attribute(_) => SelectorSpecificity::new(0, 1, 0),
-            Self::Type(_) | Self::PseudoElement(_) => SelectorSpecificity::new(0, 0, 1),
+            // A pseudo-element (`::before`) and the `::part()` pseudo-element
+            // both contribute like a pseudo-element: (0, 0, 1).
+            Self::Type(_) | Self::PseudoElement(_) | Self::Part(_) => {
+                SelectorSpecificity::new(0, 0, 1)
+            }
             Self::Universal => SelectorSpecificity::ZERO,
         }
     }

@@ -640,7 +640,10 @@ impl StyleResolver {
             // `overflow` initial is `visible` (no clip); its keyword initial
             // likewise needs the interner, so an absent value falls back to the
             // coordinator's default (no added clip) — byte-for-byte identical.
-            | PropertyId::Overflow => None,
+            | PropertyId::Overflow
+            // `content` is never a real element's computed value (it decorates a
+            // generated pseudo-element box only), so it has no element initial.
+            | PropertyId::Content => None,
         }
     }
 
@@ -1650,7 +1653,12 @@ mod tests {
                 | PropertyId::BorderInlineStartStyle
                 | PropertyId::BorderInlineEndStyle
                 | PropertyId::BorderBlockStartStyle
-                | PropertyId::BorderBlockEndStyle => {}
+                | PropertyId::BorderBlockEndStyle
+                // `content` is generated-content-only: like the logical properties
+                // it is deliberately NOT a computed property of a real box (it
+                // decorates a `::before`/`::after` pseudo-element), so it is
+                // classified here but excluded from `COMPUTED_PROPERTIES`.
+                | PropertyId::Content => {}
             }
         }
         let all = [

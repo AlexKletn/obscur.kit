@@ -64,6 +64,43 @@ impl SelectorMatcher {
             .map(ComplexSelector::specificity)
             .max()
     }
+
+    /// Returns `true` if `selector`'s subject compound names the `pseudo`
+    /// pseudo-element (e.g. `before`) and `element` — the pseudo-element's
+    /// *originating* element — satisfies the rest of the compound and the
+    /// combinator prefix to its left (§4.16).
+    ///
+    /// The pseudo-element simple itself is a *target*, not an element
+    /// constraint, so it is skipped when testing the subject; the remaining
+    /// simples (`.badge` in `.badge::before`) plus any ancestor/sibling prefix
+    /// must still match the originating element. Declarations selected this way
+    /// belong to the generated box, never to the originating element's own box —
+    /// that separation is the caller's, which is why the ordinary
+    /// [`matches_complex`](Self::matches_complex) still fails closed on a
+    /// pseudo-element (see [`matches_simple`]).
+    #[must_use]
+    pub fn matches_complex_for_pseudo<E: MatchElement>(
+        selector: &ComplexSelector,
+        element: &E,
+        pseudo: &str,
+    ) -> bool {
+        let k = selector.tail().len();
+        let subject = compound_at(selector, k);
+        if !subject
+            .simples()
+            .iter()
+            .any(|simple| simple.pseudo_element_name() == Some(pseudo))
+        {
+            return false;
+        }
+        // Test every simple except the pseudo-element target itself.
+        let subject_ok = subject
+            .simples()
+            .iter()
+            .filter(|simple| simple.pseudo_element_name().is_none())
+            .all(|simple| matches_simple(simple, element));
+        subject_ok && recurse_left(selector, k, element)
+    }
 }
 
 /// Matches the compound at index `k` of `selector` against `element`, then
@@ -73,6 +110,16 @@ fn matches_at<E: MatchElement>(selector: &ComplexSelector, k: usize, element: &E
     if !SelectorMatcher::matches_compound(compound, element) {
         return false;
     }
+    recurse_left(selector, k, element)
+}
+
+/// Walks the combinator immediately to the left of compound `k` (if any),
+/// backtracking for descendant / subsequent-sibling combinators. `k == 0` is the
+/// head, which has nothing to its left and always succeeds. Shared by
+/// [`matches_at`] and
+/// [`matches_complex_for_pseudo`](SelectorMatcher::matches_complex_for_pseudo)
+/// so both agree on combinator semantics.
+fn recurse_left<E: MatchElement>(selector: &ComplexSelector, k: usize, element: &E) -> bool {
     if k == 0 {
         return true;
     }
@@ -134,6 +181,10 @@ fn matches_simple<E: MatchElement>(simple: &SimpleSelector, element: &E) -> bool
         // selector as an unsupported feature, mirroring how the excluded
         // dynamic-state pseudo-classes are both inert and diagnosed (§4.13).
         SimpleSelector::PseudoElement(_) => false,
+        // `::part(name)` selects an exported part of a component's scoped render
+        // output, decided against the component-host boundary the pure matcher
+        // cannot see; it is inert here and resolved by the runtime coordinator.
+        SimpleSelector::Part(_) => false,
         SimpleSelector::PseudoClass(pseudo) => matches_pseudo_class(pseudo, element),
     }
 }

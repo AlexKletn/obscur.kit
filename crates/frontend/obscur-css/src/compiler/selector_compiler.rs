@@ -157,6 +157,7 @@ fn lower_simple(simple: &SimpleSelector) -> style::SimpleSelector {
         SimpleSelector::Class(name) => style::SimpleSelector::Class(name.clone()),
         SimpleSelector::Id(name) => style::SimpleSelector::Id(name.clone()),
         SimpleSelector::PseudoElement(name) => style::SimpleSelector::PseudoElement(name.clone()),
+        SimpleSelector::Part(name) => style::SimpleSelector::Part(name.clone()),
         SimpleSelector::Attribute { name, op, value } => {
             // A missing operator or operand is a bare presence test (`[a]`).
             let matcher = match (op, value.as_deref()) {

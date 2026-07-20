@@ -64,7 +64,10 @@ impl ComputedValue {
             | PropertyValue::GridAreaName(_)
             | PropertyValue::Transform(_)
             | PropertyValue::TransformOrigin(_) => Some(Self(value)),
-            PropertyValue::CustomRef(_)
+            // `content` is a generated-content decoration, never a computed value
+            // of a real element's box, so it has no place in a `ComputedValue`.
+            PropertyValue::String(_)
+            | PropertyValue::CustomRef(_)
             | PropertyValue::Inherit
             | PropertyValue::Initial
             | PropertyValue::Unset => None,

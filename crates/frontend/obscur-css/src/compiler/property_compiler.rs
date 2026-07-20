@@ -1293,7 +1293,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 116] = [
+    const ALL: [PropertyId; 117] = [
         // Logical box-model longhands (spec §4.13). They parse exactly like their
         // physical counterparts — a length — and resolve onto them at
         // computed-value time via `PropertyId::physical_under`.
@@ -1413,6 +1413,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::WordBreak,
         PropertyId::TabSize,
         PropertyId::Overflow,
+        PropertyId::Content,
     ];
     // `word-wrap` is the legacy alias for `overflow-wrap` (CSS Text 3 §5.2).
     if name.eq_ignore_ascii_case("word-wrap") {
@@ -1448,6 +1449,16 @@ fn lower_for_property(
     values: &[ParsedValue],
     interner: &mut CssSymbolInterner,
 ) -> Option<PropertyValue> {
+    if property == PropertyId::Content {
+        // `content: "…"` (§4.16 generated content). Only the plain string form is
+        // modelled — the quotes are already stripped by the tokenizer — so a
+        // single string component lowers to a `String` value; anything else
+        // (keywords, `attr()`, counters) is unsupported and dropped.
+        if let [ParsedValue::String(text)] = values {
+            return Some(PropertyValue::String(text.clone()));
+        }
+        return None;
+    }
     if property == PropertyId::FontFamily {
         if let Some(ParsedValue::Keyword(keyword)) = values.first()
             && let Some(wide) = css_wide_keyword(keyword)

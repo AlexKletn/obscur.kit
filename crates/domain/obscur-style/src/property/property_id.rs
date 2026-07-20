@@ -424,6 +424,15 @@ pub enum PropertyId {
     /// like `hidden` (no scrollbars are synthesised yet — a documented
     /// simplification). It changes no layout, only the scene coordinator's clip.
     Overflow,
+
+    /// The `content` property (a [`PropertyValue::String`](crate::property::PropertyValue::String)
+    /// literal; NOT inherited). Only meaningful on the `::before` / `::after`
+    /// generated-content pseudo-elements (§4.16): it never computes onto a real
+    /// element's box (it is absent from the resolver's computed-property set), and
+    /// the runtime reads it off a matched pseudo-element rule to paint a
+    /// decoration-only inline box. Only the plain string form is modelled; `none`
+    /// / counters / `attr()` are out of scope.
+    Content,
 }
 
 impl PropertyId {
@@ -686,6 +695,7 @@ impl PropertyId {
             Self::WordBreak => "word-break",
             Self::TabSize => "tab-size",
             Self::Overflow => "overflow",
+            Self::Content => "content",
         }
     }
 
@@ -823,7 +833,10 @@ impl PropertyId {
             // properties, which do).
             | Self::TextOverflow
             // `overflow` is a box / paint property and resets per element.
-            | Self::Overflow => Inheritance::NotInherited,
+            | Self::Overflow
+            // `content` selects generated text on a pseudo-element; it does not
+            // inherit (CSS Content 3).
+            | Self::Content => Inheritance::NotInherited,
         }
     }
 

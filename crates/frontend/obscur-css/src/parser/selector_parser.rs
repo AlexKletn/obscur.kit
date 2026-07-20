@@ -78,6 +78,9 @@ pub enum SimpleSelector {
     },
     /// A pseudo-element such as `::before` (without the leading `::`).
     PseudoElement(Box<str>),
+    /// The `::part(name)` exported-part pseudo-element; stores the part name
+    /// (§2.12 / §4.15).
+    Part(Box<str>),
 }
 
 /// An attribute selector match operator.
@@ -331,6 +334,17 @@ impl Inner<'_, '_> {
         if matches!(self.cursor.peek_kind(), Some(CssTokenKind::Colon)) {
             self.cursor.advance();
             let name = self.expect_ident("expected a pseudo-element name")?;
+            // A functional pseudo-element carries a parenthesised argument.
+            // `::part(name)` is the one we model (§2.12 / §4.15); any other
+            // `::foo(...)` keeps its bare pseudo-element name but its argument is
+            // consumed so the compound parse does not choke on the `(`.
+            if matches!(self.cursor.peek_kind(), Some(CssTokenKind::LParen)) {
+                let arg = self.capture_paren_arg()?;
+                if name.eq_ignore_ascii_case("part") {
+                    return Ok(SimpleSelector::Part(arg));
+                }
+                return Ok(SimpleSelector::PseudoElement(name));
+            }
             return Ok(SimpleSelector::PseudoElement(name));
         }
         let name = self.expect_ident("expected a pseudo-class name")?;

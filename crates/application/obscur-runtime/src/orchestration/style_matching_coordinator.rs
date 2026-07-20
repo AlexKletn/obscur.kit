@@ -1,11 +1,16 @@
 //! Matches authored stylesheets against the retained tree to build the
 //! per-node cascade inputs: [`StyleMatchingCoordinator`].
 
+use obscur_identity::NodeId;
+use obscur_style::cascade::{Cascade, Declaration, ResolvedDeclarations};
 use obscur_style::invalidation::StyleInvalidation;
 use obscur_style::matching::{MediaEnvironment, StyleMatcher, Stylesheet};
+use obscur_style::selector::MatchElement;
 use obscur_tree::tree::RetainedTree;
 
-use super::{PseudoStates, StyleInputs, TreeElement};
+use super::{
+    PseudoStates, StyleInputs, TreeElement, component_host, part_specificity_for, subject_part_name,
+};
 
 /// The orchestration glue that turns authored [`Stylesheet`]s plus the retained
 /// tree into the [`StyleInputs`] the [`StyleCoordinator`](super::StyleCoordinator)
@@ -111,8 +116,7 @@ impl StyleMatchingCoordinator {
             if !node.kind().is_element() {
                 continue;
             }
-            let element = TreeElement::with_pseudo(tree, id, pseudo);
-            let resolved = matcher.match_element_in(sheets, &element, environment);
+            let resolved = resolved_for_node(&matcher, sheets, tree, id, pseudo, environment);
             if !resolved.is_empty() {
                 inputs.set_cascaded(id, resolved);
             }
@@ -154,8 +158,7 @@ impl StyleMatchingCoordinator {
             if !tree.get(id).is_some_and(|node| node.kind().is_element()) {
                 continue;
             }
-            let element = TreeElement::with_pseudo(tree, id, pseudo);
-            let resolved = matcher.match_element_in(sheets, &element, environment);
+            let resolved = resolved_for_node(&matcher, sheets, tree, id, pseudo, environment);
             if resolved.is_empty() {
                 inputs.clear_cascaded(id);
             } else {
@@ -172,6 +175,91 @@ impl StyleMatchingCoordinator {
     pub fn match_single(&self, tree: &RetainedTree, sheet: &Stylesheet) -> StyleInputs {
         self.build_inputs(tree, std::slice::from_ref(sheet))
     }
+}
+
+/// Resolves `node`'s cascaded declarations, honouring the component-scope
+/// boundary (§4.15).
+///
+/// A **top-level** node (not inside any component's render output) matches the
+/// authored sheets exactly as before — the pure matcher already treats a
+/// `::part()` selector as inert, so nothing about the ordinary path changes. A
+/// **component-internal** node is *scoped by default*: the outside sheets' plain
+/// selectors do not reach it, and only an exported style part
+/// (`Component::part(name)` targeting a class the internal element carries, with
+/// the `Component` half matching the host) crosses the boundary.
+fn resolved_for_node(
+    matcher: &StyleMatcher,
+    sheets: &[Stylesheet],
+    tree: &RetainedTree,
+    node: NodeId,
+    pseudo: &PseudoStates,
+    environment: &MediaEnvironment,
+) -> ResolvedDeclarations {
+    let element = TreeElement::with_pseudo(tree, node, pseudo);
+    match component_host(tree, node) {
+        None => matcher.match_element_in(sheets, &element, environment),
+        Some(host) => scoped_internal_declarations(sheets, tree, node, host, pseudo, environment),
+    }
+}
+
+/// The cascade for a component-internal `node`: only `::part()` rules the host
+/// exports cross the scope boundary; every ordinary selector is contained.
+///
+/// The `source_order` counter advances over **every** encountered declaration
+/// (matching or not), exactly as [`StyleMatcher::match_element_in`] does, so
+/// document-order tie-breaks are identical for the declarations that do cross.
+fn scoped_internal_declarations(
+    sheets: &[Stylesheet],
+    tree: &RetainedTree,
+    node: NodeId,
+    host: NodeId,
+    pseudo: &PseudoStates,
+    environment: &MediaEnvironment,
+) -> ResolvedDeclarations {
+    let element = TreeElement::with_pseudo(tree, node, pseudo);
+    let host_cursor = TreeElement::with_pseudo(tree, host, pseudo);
+    let mut collected: Vec<Declaration> = Vec::new();
+    let mut source_order: u32 = 0;
+    for sheet in sheets {
+        let origin = sheet.origin();
+        for rule in sheet.rules() {
+            // The one door through the boundary: a `::part(name)` selector whose
+            // exported name is a class this internal element carries and whose
+            // host half matches the component host. Take the highest specificity
+            // among the list's crossing selectors.
+            let specificity = rule
+                .selectors()
+                .selectors()
+                .iter()
+                .filter_map(|selector| {
+                    let want = subject_part_name(selector)?;
+                    element
+                        .has_class(want)
+                        .then(|| part_specificity_for(selector, want, &host_cursor))
+                        .flatten()
+                })
+                .max();
+            let condition_holds = rule
+                .condition()
+                .is_none_or(|condition| condition.holds(environment));
+            for block_decl in rule.block() {
+                let order = source_order;
+                source_order = source_order.wrapping_add(1);
+                if condition_holds && let Some(specificity) = specificity {
+                    collected.push(Declaration::new(
+                        block_decl.property(),
+                        block_decl.value().clone(),
+                        block_decl.important_flag(),
+                        origin,
+                        specificity,
+                        order,
+                        None,
+                    ));
+                }
+            }
+        }
+    }
+    Cascade::new().resolve(&collected)
 }
 
 #[cfg(test)]

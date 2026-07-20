@@ -42,10 +42,10 @@ use obscur_tree::tree::RetainedTree;
 
 use super::stacking::{PaintLayer, PaintUnit, effective_paint_layer, effective_stacking_z};
 use super::{
-    ComputedStyles, EditingView, LayoutBoxes, TabSize, alignment_for, attributes_for,
-    direction_for, display_text, families_for, letter_spacing_for, line_height_for, overflow_for,
-    overflow_wrap_for, root_font_size, tab_size_for, text_transform_for, white_space_for,
-    word_break_for, word_spacing_for,
+    ComputedStyles, EditingView, GeneratedContent, GeneratedRun, LayoutBoxes, TabSize,
+    alignment_for, attributes_for, direction_for, display_text, families_for, letter_spacing_for,
+    line_height_for, overflow_for, overflow_wrap_for, root_font_size, tab_size_for,
+    text_transform_for, white_space_for, word_break_for, word_spacing_for,
 };
 
 /// The width, in logical pixels, of the caret rectangle painted at the collapsed
@@ -917,6 +917,54 @@ impl SceneCoordinator {
         )
     }
 
+    /// Paints one §4.16 generated run (`::before` / `::after` content or the
+    /// input placeholder) into `node_paint`, the owning node's own paint unit.
+    ///
+    /// The run is shaped with the OWNING node's font (so a `::before` decoration
+    /// picks up the element's `font-size` / family) and drawn from the node's box
+    /// origin. Its ink is the run's resolved `color` when it has one (a
+    /// `::part(placeholder)` or `::before { color }` rule), else the node's own
+    /// `currentColor`. It emits only `DrawText` leaves, so `node_paint` stays
+    /// balanced, and — living in the element's own unit — it sorts before the
+    /// element's real text child in paint order.
+    fn emit_generated_run(
+        &self,
+        node_paint: &mut DisplayListBuilder,
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+        node: NodeId,
+        origin: Point,
+        box_width: f32,
+        run: &GeneratedRun,
+    ) {
+        let color = run
+            .color
+            .map_or_else(|| text_color_of(computed, node), scene_color_from);
+        let brush = Brush::solid(color);
+        let font_size = font_size_of(computed, node);
+        let layout = self.shape_text_lines(tree, computed, node, &run.text, box_width);
+        for line in layout.lines() {
+            if line.segments().is_empty() {
+                continue;
+            }
+            let baseline = line.baseline();
+            let line_top = origin.y + line.top();
+            let line_left = origin.x + line.x_offset();
+            let mut seg_x = 0.0_f32;
+            for segment in line.segments() {
+                let range = segment.run().source();
+                let seg_text = run.text.get(range.start..range.end).unwrap_or_default();
+                let glyph_run = positioned_run(segment, baseline, font_size, seg_text, &run.text);
+                node_paint.draw_text(
+                    Point::new(line_left + seg_x, line_top),
+                    glyph_run,
+                    brush.clone(),
+                );
+                seg_x += segment.run().advance();
+            }
+        }
+    }
+
     /// Resolves a pointer at text-box-local `(local_x, local_y)` (already
     /// scroll-adjusted; measured from the text node's box origin) to a byte offset
     /// in `content`, picking the wrapped line by `local_y` then the byte by
@@ -1174,6 +1222,7 @@ impl SceneCoordinator {
             images,
             &HashMap::new(),
             &HashMap::new(),
+            &HashMap::new(),
         )
     }
 
@@ -1210,6 +1259,7 @@ impl SceneCoordinator {
         images: &HashMap<Box<str>, SceneImage>,
         vectors: &HashMap<Box<str>, SceneVector>,
         scroll: &HashMap<NodeId, ScrollPaint>,
+        generated: &HashMap<NodeId, GeneratedContent>,
     ) -> DisplayList {
         let Some(root) = tree.root() else {
             return DisplayListBuilder::new().build();
@@ -1650,6 +1700,30 @@ impl SceneCoordinator {
                 && !vector.is_empty()
             {
                 emit_vector(&mut node_paint, computed, node, vector, layout_box.bounds);
+            }
+
+            // §4.16 generated content (`::before` / `::after`) paints inside THIS
+            // node's own paint unit, so a `::before` run sorts BEFORE the element's
+            // real text child (a separate, later paint unit). It never becomes a
+            // tree node, an accessibility node, or a hit-test target — it exists
+            // only here in the display list. `::after` is a documented
+            // approximation: it also paints in the node's own unit rather than
+            // after the subtree.
+            if let (Some(content), Some(layout_box)) = (generated.get(&node), boxes.get(&node)) {
+                for run in [content.before.as_ref(), content.after.as_ref()]
+                    .into_iter()
+                    .flatten()
+                {
+                    self.emit_generated_run(
+                        &mut node_paint,
+                        tree,
+                        computed,
+                        node,
+                        layout_box.origin(),
+                        layout_box.size().width,
+                        run,
+                    );
+                }
             }
 
             if let Some(retained) = tree.get(node) {
@@ -7639,6 +7713,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
+            &HashMap::new(),
         );
         assert_eq!(
             plain.commands(),
@@ -7669,6 +7744,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &scroll,
+            &HashMap::new(),
         );
         let cmds = list.commands();
         assert!(list.is_balanced(), "scroll + clip brackets stay balanced");
@@ -9209,6 +9285,7 @@ mod tests {
                 &HashMap::new(),
                 &vectors(),
                 &HashMap::new(),
+                &HashMap::new(),
             )
         }
 
@@ -9278,6 +9355,7 @@ mod tests {
                 &computed,
                 &boxes,
                 None,
+                &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),
                 &HashMap::new(),

@@ -43,6 +43,11 @@ mod style_inputs;
 pub use style_inputs::StyleInputs;
 mod style_matching_coordinator;
 pub use style_matching_coordinator::StyleMatchingCoordinator;
+mod style_scoping;
+pub(crate) use style_scoping::{component_host, part_specificity_for, subject_part_name};
+mod generated_content;
+pub(crate) use generated_content::resolve_generated_content;
+pub use generated_content::{GeneratedContent, GeneratedRun};
 mod text_attributes;
 pub(crate) use text_attributes::{
     TabSize, alignment_for, attributes_for, direction_for, display_text, letter_spacing_for,

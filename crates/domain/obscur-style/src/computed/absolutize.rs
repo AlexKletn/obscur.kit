@@ -85,6 +85,8 @@ pub(super) fn absolutize_value(value: PropertyValue, ctx: &LengthContext) -> Pro
         | PropertyValue::GridAreas(_)
         | PropertyValue::GridAreaName(_)
         | PropertyValue::Transform(_)
+        // `content` is a plain string; it carries no length to fold.
+        | PropertyValue::String(_)
         | PropertyValue::CustomRef(_)
         | PropertyValue::Inherit
         | PropertyValue::Initial

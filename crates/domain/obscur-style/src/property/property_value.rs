@@ -153,6 +153,13 @@ pub enum PropertyValue {
     /// a / b / c / d` line form does not produce this value; it expands to the four
     /// [`GridLine`](PropertyValue::GridLine) longhands instead.
     GridAreaName(Box<str>),
+    /// A plain string literal: the value of the `content` property on a
+    /// `::before` / `::after` generated-content rule (§4.16), stored **as a
+    /// string** (its quotes stripped) because the runtime paints it directly and
+    /// never crosses it into the interner. It is not a computed value of any real
+    /// element's box — the runtime reads it off a matched pseudo-element rule to
+    /// build a decoration-only inline box.
+    String(Box<str>),
     /// A resolved CSS 2D `transform`: the authored `<transform-function>+` list
     /// composed left-to-right into a single 2x3 affine (see [`Transform`]).
     /// `transform: none` lowers to an absent value, not this. The scene
@@ -240,6 +247,8 @@ impl PropertyValue {
             | Self::GridAreas(_)
             | Self::GridAreaName(_)
             | Self::Transform(_)
+            // A `content` string carries no length.
+            | Self::String(_)
             | Self::CustomRef(_)
             | Self::Inherit
             | Self::Initial

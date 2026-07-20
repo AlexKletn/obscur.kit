@@ -77,12 +77,12 @@ use std::collections::VecDeque;
 use crate::component::{ComponentStore, GuardedRender};
 use crate::orchestration::{
     AnimatedKind, AnimationBinding, ArrangeCache, ComputedStyles, CssMotionRules,
-    CssTransitionRule, DragCoordinator, DragOutcome, EditingView, InspectInfo, LayoutBoxes,
-    LayoutCoordinator, LayoutStyles, MeasureCache, MotionCoordinator, MotionPlayback,
+    CssTransitionRule, DragCoordinator, DragOutcome, EditingView, GeneratedContent, InspectInfo,
+    LayoutBoxes, LayoutCoordinator, LayoutStyles, MeasureCache, MotionCoordinator, MotionPlayback,
     NodeInspection, PreeditView, PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint,
     ShapedChMetrics, StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement,
-    TreeInspection, overflow_scrolls, overlay_commands, root_font_size, scroll_containers,
-    scrollbar_rects,
+    TreeInspection, overflow_scrolls, overlay_commands, resolve_generated_content, root_font_size,
+    scroll_containers, scrollbar_rects,
 };
 use crate::orchestration::{alignment_for, direction_for, white_space_for};
 use crate::recovery::RecoveryResult;
@@ -245,6 +245,11 @@ pub struct UiRuntime {
     /// future paint-only class) can reuse them instead of re-resolving (§3.4
     /// phase 5 incremental recalculation).
     computed: ComputedStyles,
+    /// The §4.16 generated / synthetic decoration resolved for the last styled
+    /// frame, keyed by node: `::before` / `::after` content and the input
+    /// placeholder. Read by compose (to paint the runs) and `inspect_snapshot`
+    /// (to project the synthetic placeholder part). Empty when nothing decorates.
+    generated_content: HashMap<NodeId, GeneratedContent>,
     /// The settled cascade value of every node the motion overlay has written
     /// into `computed`, keyed by node.
     ///
@@ -765,6 +770,7 @@ impl UiRuntime {
             boxes: LayoutBoxes::new(),
             inputs: StyleInputs::new(),
             computed: ComputedStyles::new(),
+            generated_content: HashMap::new(),
             overlaid: ComputedStyles::new(),
             last_style: None,
             spatial: SpatialIndex::new(),
@@ -2696,6 +2702,13 @@ impl UiRuntime {
                 }
                 None => self.restyle_everything(&sheets, &environment, ctx.viewport()),
             };
+            // §4.16 generated / synthetic decoration (`::before`/`::after` content
+            // and the input placeholder) is resolved from the SAME sheets (UA +
+            // author) and environment the cascade used, so compose can paint it and
+            // `inspect_snapshot` can project the synthetic placeholder part. It is
+            // pure decoration — it never becomes a tree / a11y / hit node — so it
+            // is computed here rather than materialised into the tree.
+            self.generated_content = resolve_generated_content(&self.tree, &sheets, &environment);
             // Remember what these inputs/styles were produced from, so the next
             // frame can tell whether interaction state is all that moved.
             self.last_style = Some(StyleKey {
@@ -2926,6 +2939,7 @@ impl UiRuntime {
                 self.image_cache.images(),
                 &self.vector_cache,
                 &scroll,
+                &self.generated_content,
             );
             // Inspect overlay (spec §7.6): when inspect mode is on, append a
             // highlight over the hovered node's border box on top of the scene.
