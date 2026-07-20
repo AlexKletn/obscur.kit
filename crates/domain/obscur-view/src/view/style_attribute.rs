@@ -71,6 +71,17 @@ pub const READONLY: InternedSymbol = InternedSymbol::from_raw(0x0000_0007);
 /// Same reserved low-symbol namespace so it survives reconciliation.
 pub const VALUE: InternedSymbol = InternedSymbol::from_raw(0x0000_0008);
 
+/// Reserved symbol for a text control's **placeholder** — the hint shown while the
+/// field is empty (the CSS `::placeholder` pseudo-element, shown while
+/// `:placeholder-shown` holds). Like [`VALUE`] (and unlike `class`/`id`/`type`)
+/// this is **not** a CSS selector input: it is the field's own placeholder string,
+/// carried verbatim (as [`ViewValue::Text`]). A widget emits it so the runtime can
+/// paint the placeholder as a §4.16 synthetic part — paint-only, DevTools-visible,
+/// hit-transparent, and **not** a component-tree child — rather than materialising
+/// it into the tree. Same reserved low-symbol namespace so it survives
+/// reconciliation.
+pub const PLACEHOLDER: InternedSymbol = InternedSymbol::from_raw(0x0000_0009);
+
 /// The CSS-relevant identity of an element view node: its local name, `id`, and
 /// class list, extracted from a node's [`ViewProperty`] bindings.
 ///
@@ -102,6 +113,12 @@ pub struct StyleAttributes {
     /// selector input — it is the field's model value the runtime reflects into the
     /// editing buffer. Absent for a bare editable (its text is its only value).
     control_value: Option<Box<str>>,
+    /// The text control's **placeholder** hint (the CSS `::placeholder` string),
+    /// if the widget emits one. Derived from the [`PLACEHOLDER`] reserved symbol.
+    /// Not a CSS selector input — the runtime reads it to paint the placeholder as
+    /// a §4.16 synthetic part while the field is empty. Absent for a control with
+    /// no placeholder.
+    placeholder: Option<Box<str>>,
 }
 
 /// Whether a reserved boolean state attribute's value counts as *set*. Bare
@@ -167,6 +184,7 @@ impl StyleAttributes {
                 TYPE => attributes.local_name = Some(text.clone()),
                 SRC => attributes.image_source = Some(text.clone()),
                 VALUE => attributes.control_value = Some(text.clone()),
+                PLACEHOLDER => attributes.placeholder = Some(text.clone()),
                 _ => {}
             }
         }
@@ -232,6 +250,13 @@ impl StyleAttributes {
         self.control_value.as_deref()
     }
 
+    /// The text control's placeholder hint (the CSS `::placeholder` string), if
+    /// the widget emitted one. `None` for a control with no placeholder.
+    #[must_use]
+    pub fn placeholder(&self) -> Option<&str> {
+        self.placeholder.as_deref()
+    }
+
     /// Whether no style attribute is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -243,6 +268,7 @@ impl StyleAttributes {
             && !self.checked
             && !self.readonly
             && self.control_value.is_none()
+            && self.placeholder.is_none()
     }
 }
 

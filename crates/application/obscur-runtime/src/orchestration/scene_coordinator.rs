@@ -1710,7 +1710,19 @@ impl SceneCoordinator {
             // approximation: it also paints in the node's own unit rather than
             // after the subtree.
             if let (Some(content), Some(layout_box)) = (generated.get(&node), boxes.get(&node)) {
-                for run in [content.before.as_ref(), content.after.as_ref()]
+                // The placeholder synthetic part (§4.16) paints only while the field
+                // is *effectively* empty (`:placeholder-shown`): the resolver already
+                // gated it on the retained empty value, but a live editing session on
+                // THIS field with typed text or an active IME preedit makes the
+                // effective text non-empty, so the hint is suppressed for that frame.
+                let placeholder = content.placeholder.as_ref().filter(|_| {
+                    editing.is_none_or(|view| {
+                        view.node != node
+                            || (view.text.is_empty()
+                                && view.preedit.is_none_or(|preedit| preedit.text.is_empty()))
+                    })
+                });
+                for run in [content.before.as_ref(), content.after.as_ref(), placeholder]
                     .into_iter()
                     .flatten()
                 {

@@ -144,7 +144,7 @@ fn ch4_16_b_scrollbar_parts_are_hidden_from_the_component_tree_but_in_devtools()
 fn ch4_16_c_the_placeholder_is_an_exported_part_not_a_child() {
     let css = "
         Input::part(placeholder) { color: rgb(128,128,128); }
-        .field { position: absolute; left: 0px; top: 0px;
+        input { position: absolute; left: 0px; top: 0px;
                  width: 200px; height: 40px; font-size: 16px; }
     ";
     let sheet = compile(css);

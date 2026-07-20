@@ -6479,7 +6479,45 @@ impl UiRuntime {
         // rectangles the scene coordinator paints (`scrollbar_rects`), attributed to
         // the container as their parent, appended after the real tree.
         self.collect_synthetic_scrollbar_parts(&mut nodes);
+        // §4.16: the input placeholder is likewise a synthetic part — paint-only and
+        // hidden from the component tree, yet visible here as a named "placeholder"
+        // node attributed to its field. Projected from the same `generated_content`
+        // the compose phase paints.
+        self.collect_synthetic_placeholder_parts(&mut nodes);
         TreeInspection { nodes }
+    }
+
+    /// Appends a synthetic DevTools node for the placeholder part of every field
+    /// currently showing one (§4.16). Like the scrollbar parts these are **not**
+    /// retained-tree nodes and appear in no node's `children()`; they exist only in
+    /// this projection, carrying the field's box and named `placeholder`.
+    fn collect_synthetic_placeholder_parts(&self, out: &mut Vec<NodeInspection>) {
+        for (&field, content) in &self.generated_content {
+            if content.placeholder.is_none() {
+                continue;
+            }
+            let depth = out
+                .iter()
+                .find(|n| n.node == field)
+                .map_or(0, |n| n.depth + 1);
+            // A stable, collision-free synthetic id derived from the field: the high
+            // bits are set (real ids never reach `1 << 61`) and the low bits carry
+            // the field id, distinct from the scrollbar-part id space (`1 << 62`).
+            let raw = (1_u64 << 61) | field.raw();
+            out.push(NodeInspection {
+                node: NodeId::from_raw(raw),
+                parent: Some(field),
+                depth,
+                kind: "synthetic",
+                component: None,
+                local_name: Some("placeholder".to_owned()),
+                id: None,
+                classes: Vec::new(),
+                text: None,
+                bounds: self.boxes.get(&field).map(|layout_box| layout_box.bounds),
+                styles: Vec::new(),
+            });
+        }
     }
 
     /// Appends a synthetic DevTools node for each scrollbar part (track + thumb) of

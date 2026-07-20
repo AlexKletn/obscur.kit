@@ -4,8 +4,9 @@ use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_text::editing::{EditCommand, TextBuffer};
 use obscur_view::view::{
-    CLASS, DISABLED as ATTR_DISABLED, EVENT_CHANGE, EVENT_INPUT, READONLY as ATTR_READONLY, TYPE,
-    VALUE as ATTR_VALUE, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
+    DISABLED as ATTR_DISABLED, EVENT_CHANGE, EVENT_INPUT, PLACEHOLDER as ATTR_PLACEHOLDER,
+    READONLY as ATTR_READONLY, TYPE, VALUE as ATTR_VALUE, View, ViewEventBinding, ViewFragment,
+    ViewNode, ViewProperty, ViewValue,
 };
 
 /// A headless text-input control (spec §2.6).
@@ -55,12 +56,6 @@ impl Input {
     ///
     /// [`Button::COMPONENT_ID`]: crate::button::Button::COMPONENT_ID
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0002);
-
-    /// Component id of the placeholder sub-part (the `.placeholder` overlay shown
-    /// while the field is empty). Shares the widget id space with the high nibble
-    /// of the suffix flipped (`..12`), mirroring the `.checkbox-box` sub-part
-    /// scheme.
-    const PLACEHOLDER_PART_ID: ComponentId = ComponentId::from_raw(0x00D0_0012);
 
     /// Interned name of the semantic-role property (`role`); shares the
     /// `0x00D1_NNXX` scheme with `NN = 02` (input): role=`00`, disabled=`01`,
@@ -235,19 +230,17 @@ impl Input {
     /// editing-session auto-seeding — which reads the focused editable's
     /// descendant [`ViewNode::Text`] content — picks up the value.
     ///
-    /// **Placeholder as a distinct overlay.** When the value is *empty*, the field
-    /// shows its `placeholder` inside a marked `.placeholder` sub-part element
-    /// instead of an editable value node — the toolkit's analogue of the CSS
-    /// **`::placeholder`** pseudo-element, shown only while **`:placeholder-shown`**
-    /// holds (an empty value): CSS Pseudo-Elements Level 4 §4.5 (`::placeholder`)
-    /// and CSS Selectors Level 4 §11.2 (`:placeholder-shown`). Per that model the
-    /// placeholder is a separate, non-editable rendering layer — *not* the value:
-    /// the runtime skips the `.placeholder` subtree both when seeding the editing
-    /// buffer (an empty field focuses to an empty buffer, caret at 0) and when the
-    /// compose pass overrides the field's editable text (so typing replaces the
-    /// placeholder with the typed value, never `placeholder + typed`). Styling the
-    /// placeholder muted is a UA-sheet concern (`.placeholder { color: … }`), not
-    /// baked in here.
+    /// **Placeholder as a §4.16 synthetic part.** The `placeholder` hint is carried
+    /// as the reserved [`PLACEHOLDER`](obscur_view::view::PLACEHOLDER) structural
+    /// attribute — *not* materialised into the tree as a child element. The runtime
+    /// paints it as a synthetic part (paint-only, DevTools-visible, hit-transparent,
+    /// and **not** a component-tree child) while the field is empty — the toolkit's
+    /// analogue of the CSS **`::placeholder`** pseudo-element, shown only while
+    /// **`:placeholder-shown`** holds (an empty value): CSS Pseudo-Elements Level 4
+    /// §4.5 (`::placeholder`) and CSS Selectors Level 4 §11.2 (`:placeholder-shown`).
+    /// Per that model the placeholder is a separate, non-editable rendering layer —
+    /// never seeded into the editing buffer and never a hit target. An author can
+    /// restyle it through the exported-part selector `Input::part(placeholder)`.
     ///
     /// [`COMPONENT_ID`]: Self::COMPONENT_ID
     /// [`PROP_VALUE`]: Self::PROP_VALUE
@@ -287,6 +280,15 @@ impl Input {
                 Self::PROP_PLACEHOLDER,
                 ViewValue::from(&*self.placeholder),
             ))
+            // The reserved `PLACEHOLDER` structural attribute (distinct from the
+            // semantic `PROP_PLACEHOLDER` a11y surface): the runtime reads it (via
+            // `StyleAttributes::placeholder`) to paint the placeholder as a §4.16
+            // synthetic part while the field is empty, rather than materialising a
+            // `.placeholder` child. Survives reconcile.
+            .with_prop(ViewProperty::new(
+                ATTR_PLACEHOLDER,
+                ViewValue::from(&*self.placeholder),
+            ))
             .with_event(ViewEventBinding::new(EVENT_INPUT, self.command))
             .with_event(ViewEventBinding::new(EVENT_CHANGE, self.command));
         // Reserved `:disabled` structural-state attribute — emitted only when
@@ -306,25 +308,13 @@ impl Input {
         } else {
             node
         };
-        // Children (CSS `::placeholder` / `:placeholder-shown` model):
-        //   • non-empty value → a single editable `Text` child carrying the value
-        //     (byte-identical to the pre-placeholder-fix rendering);
-        //   • empty value → the `placeholder` inside a `.placeholder` sub-part
-        //     element. The reserved [`CLASS`] survives reconcile (like DISABLED /
-        //     CHECKED), so the UA sheet's `.placeholder { color: … }` mutes it and
-        //     the runtime can identify — and skip — it as a non-editable overlay.
-        let children = if value.is_empty() {
-            vec![
-                ViewNode::element(Self::PLACEHOLDER_PART_ID)
-                    .with_prop(ViewProperty::new(CLASS, ViewValue::from("placeholder")))
-                    .with_children(ViewFragment::from_nodes(vec![ViewNode::text(
-                        &*self.placeholder,
-                    )])),
-            ]
-        } else {
-            vec![ViewNode::text(value)]
-        };
-        let node = node.with_children(ViewFragment::from_nodes(children));
+        // The field's editable text is always a single `Text` child carrying the
+        // current value (empty when the field is empty). It is the caret/selection
+        // and IME-preedit paint target and what the editing session auto-seeds from;
+        // being a `Text` node it is content, not a component-tree child. The
+        // placeholder is NOT a child — it is a §4.16 synthetic part the runtime
+        // paints from the reserved `PLACEHOLDER` attribute while the value is empty.
+        let node = node.with_children(ViewFragment::from_nodes(vec![ViewNode::text(value)]));
         View::single(node)
     }
 }
@@ -481,13 +471,12 @@ mod tests {
     }
 
     #[test]
-    fn empty_input_renders_placeholder_in_a_marked_overlay_not_as_value() {
-        // Previously an empty field emitted the placeholder AS its single editable
-        // `Text` child (indistinguishable from a real value, and seeded into the
-        // editing buffer on focus). Per the CSS `::placeholder` / `:placeholder-shown`
-        // model the placeholder is now a SEPARATE, non-editable overlay: a
-        // `.placeholder` sub-part element (reserved CLASS, survives reconcile), NOT
-        // the value. The value prop is still the empty value.
+    fn empty_input_carries_placeholder_as_a_reserved_attr_not_a_child_overlay() {
+        // Per §4.16 the placeholder is a SYNTHETIC part, not a tree node: an empty
+        // field emits its (empty) value as the single editable `Text` child — never
+        // a `.placeholder` overlay element — and carries the placeholder hint as the
+        // reserved `PLACEHOLDER` structural attribute for the runtime to paint from.
+        // The value prop is still the empty value.
         let i = Input::new(cmd()).placeholder("type here");
         let view = i.view();
         match &view.root().nodes()[0] {
@@ -499,31 +488,19 @@ mod tests {
                     .find(|p| p.name() == Input::PROP_VALUE)
                     .expect("value prop present");
                 assert_eq!(*value.value(), ViewValue::from(""));
-                // The single child is the `.placeholder` overlay element, not a bare
-                // Text value node.
+                // The placeholder rides on the reserved PLACEHOLDER attribute.
+                let placeholder = props
+                    .iter()
+                    .find(|p| p.name() == ATTR_PLACEHOLDER)
+                    .expect("reserved PLACEHOLDER attr present");
+                assert_eq!(*placeholder.value(), ViewValue::from("type here"));
+                // The single child is the (empty) editable value Text node, NOT a
+                // `.placeholder` overlay element.
                 assert_eq!(children.len(), 1);
                 match &children.nodes()[0] {
-                    ViewNode::Element {
-                        component,
-                        props,
-                        children,
-                        ..
-                    } => {
-                        assert_eq!(*component, Input::PLACEHOLDER_PART_ID);
-                        let class = props
-                            .iter()
-                            .find(|p| p.name() == CLASS)
-                            .expect("placeholder overlay carries the reserved CLASS marker");
-                        assert_eq!(*class.value(), ViewValue::from("placeholder"));
-                        // The placeholder text lives inside the marked overlay.
-                        assert_eq!(children.len(), 1);
-                        match &children.nodes()[0] {
-                            ViewNode::Text { content, .. } => assert_eq!(&**content, "type here"),
-                            ViewNode::Element { .. } => panic!("expected placeholder text"),
-                        }
-                    }
-                    ViewNode::Text { .. } => {
-                        panic!("empty field must emit a `.placeholder` overlay, not a Text value")
+                    ViewNode::Text { content, .. } => assert_eq!(&**content, ""),
+                    ViewNode::Element { .. } => {
+                        panic!("empty field must emit its value Text child, not an overlay element")
                     }
                 }
             }
