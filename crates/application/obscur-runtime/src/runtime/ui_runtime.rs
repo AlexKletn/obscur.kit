@@ -251,8 +251,21 @@ pub struct UiRuntime {
     scheduler: FrameScheduler,
     /// The runtime-owned per-node interaction state feeding the matcher.
     pseudo: PseudoStates,
-    /// The absolute layout boxes retained from the last produced frame.
+    /// The absolute layout boxes retained from the last produced frame, in
+    /// **content space** (scroll not folded in). Paint/compose and hit-test read
+    /// this field directly and apply each scroll container's offset themselves.
     boxes: LayoutBoxes,
+    /// The scroll-chain-adjusted (viewport-relative) view of [`boxes`](Self::boxes)
+    /// that the public [`layout_boxes`](Self::layout_boxes) accessor exposes for
+    /// geometry observers (spec §4.4). Populated only while
+    /// [`folded_boxes_active`](Self::folded_boxes_active) is set — i.e. some scroll
+    /// container overflows — so an unscrolled tree keeps returning the content-space
+    /// boxes by reference with no per-frame clone.
+    folded_boxes: LayoutBoxes,
+    /// Whether [`folded_boxes`](Self::folded_boxes) currently holds a distinct
+    /// (scroll-folded) map. `false` when no scroll container overflows, in which
+    /// case the public accessor returns [`boxes`](Self::boxes) unchanged.
+    folded_boxes_active: bool,
     /// The cascade inputs computed for the last produced frame.
     inputs: StyleInputs,
     /// The computed styles resolved for the last produced frame, retained so a
@@ -799,6 +812,8 @@ impl UiRuntime {
             scheduler: FrameScheduler::new(),
             pseudo: PseudoStates::new(),
             boxes: LayoutBoxes::new(),
+            folded_boxes: LayoutBoxes::new(),
+            folded_boxes_active: false,
             inputs: StyleInputs::new(),
             computed: ComputedStyles::new(),
             generated_content: HashMap::new(),
@@ -3131,6 +3146,11 @@ impl UiRuntime {
         // phase, then advance the frame counter.
         self.computed = computed;
         self.next_frame = self.next_frame.next();
+
+        // Refresh the viewport-relative projection the public `layout_boxes`
+        // accessor exposes now that this frame's boxes, styles and scroll state
+        // have settled (spec §4.4). A no-op reference swap when nothing overflows.
+        self.refresh_scroll_folded_boxes();
 
         FrameResult::new(ctx.id(), snapshot, reconciled, restyled, relaid_out, true)
     }
@@ -6941,13 +6961,74 @@ impl UiRuntime {
         self.scene.snapshot()
     }
 
-    /// Returns the absolute layout boxes retained from the last produced frame.
+    /// Returns the absolute layout boxes retained from the last produced frame,
+    /// each translated into **viewport-relative** space by the scroll chain above
+    /// it (spec §4.4 geometry observers): a node inside an overflowing scroll
+    /// container reports the position it is painted at, with every scroll-container
+    /// ancestor's `scroll_top` folded out. A node under no scrolled ancestor —
+    /// including a scroll container reporting its own box — is unchanged, so an
+    /// unscrolled tree returns the content-space boxes untouched.
     ///
-    /// Empty until the first frame runs. This is the map hit-testing walks to map
-    /// a pointer position back to a [`NodeId`].
+    /// Empty until the first frame runs. The runtime's own paint/compose and
+    /// hit-test do **not** read this projection; they fold scroll themselves from
+    /// the retained content-space boxes.
     #[must_use]
     pub fn layout_boxes(&self) -> &LayoutBoxes {
-        &self.boxes
+        if self.folded_boxes_active {
+            &self.folded_boxes
+        } else {
+            &self.boxes
+        }
+    }
+
+    /// Recomputes the scroll-chain-adjusted view of the retained layout boxes that
+    /// [`layout_boxes`](Self::layout_boxes) exposes.
+    ///
+    /// The internal [`boxes`](Self::boxes) stay in content space — paint/compose
+    /// ([`SceneCoordinator::compose_with_images_scrolled`]) and hit-test (the
+    /// spatial index plus [`apply_scroll_to_point`](Self::apply_scroll_to_point))
+    /// read that field directly and apply scroll themselves. The public accessor
+    /// instead reports each box translated up by the summed `scroll_top` of every
+    /// overflowing scroll container on its ancestor chain. When nothing overflows,
+    /// [`folded_boxes_active`](Self::folded_boxes_active) is cleared and the
+    /// accessor returns the content-space boxes with no clone (the common case).
+    fn refresh_scroll_folded_boxes(&mut self) {
+        let containers = scroll_containers(&self.tree, &self.computed, &self.boxes);
+        if containers.is_empty() {
+            self.folded_boxes_active = false;
+            self.folded_boxes.clear();
+            return;
+        }
+        // The live scroll offset of each overflowing scroll container, so an
+        // ancestor walk can add every crossed container's contribution.
+        let scroll_of: HashMap<NodeId, f32> = containers
+            .iter()
+            .map(|c| (c.node, self.clamped_scroll_top(*c)))
+            .collect();
+        let mut folded = self.boxes.clone();
+        let cap = self.tree.len();
+        for (&node, layout_box) in &mut folded {
+            let mut dy = 0.0;
+            let mut current = node;
+            // Fold every scroll-container ancestor, exclusive of the node itself: a
+            // scroll container reports its own unscrolled position.
+            for _ in 0..cap {
+                let Some(parent) = self
+                    .tree
+                    .get(current)
+                    .and_then(|n| n.logical_parent().parent())
+                else {
+                    break;
+                };
+                if let Some(offset) = scroll_of.get(&parent) {
+                    dy += *offset;
+                }
+                current = parent;
+            }
+            layout_box.bounds.origin.y -= dy;
+        }
+        self.folded_boxes = folded;
+        self.folded_boxes_active = true;
     }
 
     /// Returns this runtime's identity.
@@ -7128,6 +7209,9 @@ impl UiRuntime {
             return;
         };
         self.scroll_top.insert(node, clamped);
+        // Keep the public viewport-relative box projection in step with the new
+        // offset even before the caller's next frame (spec §4.4).
+        self.refresh_scroll_folded_boxes();
     }
 
     /// Scrolls the scroll container `node` by `dy` logical px (positive = toward the
@@ -7142,6 +7226,9 @@ impl UiRuntime {
         let current = self.clamped_scroll_top(container);
         let next = (current + dy).clamp(0.0, container.max_scroll_top());
         self.scroll_top.insert(node, next);
+        // Keep the public viewport-relative box projection in step with the new
+        // offset even before the caller's next frame (spec §4.4).
+        self.refresh_scroll_folded_boxes();
         next
     }
 
