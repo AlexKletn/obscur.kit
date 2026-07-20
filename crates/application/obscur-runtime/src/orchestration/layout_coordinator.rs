@@ -10,8 +10,8 @@ use obscur_layout::algorithm::{
 };
 use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_layout::model::{
-    AlignItems, AlignSelf, BoxSizing, Dimension, FlexDirection, FlexWrap, Inset, JustifyContent,
-    LayoutBox, LayoutDisplay, LayoutStyle, Margin, MarginEdges, Position,
+    AlignItems, AlignSelf, BoxSizing, Dimension, Direction, FlexDirection, FlexWrap, Inset,
+    JustifyContent, LayoutBox, LayoutDisplay, LayoutStyle, Margin, MarginEdges, Position,
 };
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{
@@ -959,6 +959,13 @@ fn layout_style_from(
     );
     LayoutStyle {
         display: display_of(computed),
+        // The box's inline base `direction`, so flow layout can settle an
+        // over-constrained in-flow child against the correct physical edge
+        // (line-left under `ltr`, line-right under `rtl`). Logical box-model
+        // longhands were already folded to physical ones by the style crate;
+        // this carries only the geometry that mapping cannot express. An
+        // unauthored value stays `Ltr`, byte-for-byte identical to before.
+        direction: direction_of(computed),
         // Positioning scheme + insets. An unauthored `position` stays `Static`
         // and unauthored insets stay `Auto`, so a default node contributes no
         // offset — byte-for-byte identical to before positioning was wired.
@@ -1332,6 +1339,22 @@ fn box_sizing_of(computed: &ComputedStyle) -> BoxSizing {
     match keyword_sym(computed, PropertyId::BoxSizing) {
         Some(sym) if sym == layout_keyword::BOX_SIZING_BORDER_BOX => BoxSizing::BorderBox,
         _ => BoxSizing::ContentBox,
+    }
+}
+
+/// Resolves the computed `direction` keyword to a [`Direction`], defaulting to
+/// [`Direction::Ltr`] (the CSS initial).
+///
+/// Compares the interned symbol against the reserved
+/// [`layout_keyword::DIRECTION_RTL`] handle; an absent or unrecognized value maps
+/// to [`Direction::Ltr`]. This is the same `direction` the style crate already
+/// resolved to fold logical box-model properties onto physical ones; the layout
+/// bridge re-reads it because flow layout also needs the geometric half (which
+/// physical edge an over-constrained child settles against).
+fn direction_of(computed: &ComputedStyle) -> Direction {
+    match keyword_sym(computed, PropertyId::Direction) {
+        Some(sym) if sym == layout_keyword::DIRECTION_RTL => Direction::Rtl,
+        _ => Direction::Ltr,
     }
 }
 

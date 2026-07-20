@@ -40,8 +40,9 @@ use super::{
 /// * **Inline margins (CSS 2.1 §10.3.3)** — a child's *fixed* `margin-left` /
 ///   `margin-right` take from the inline space it is offered, so a `width: auto`
 ///   child fills what is left, and `margin-left` offsets it. An over-constrained
-///   box (definite width + both margins) resolves by ignoring `margin-right`, the
-///   `direction: ltr` rule.
+///   box (definite width + both margins) drops its *end* margin — the one on the
+///   inline-end side of `style.direction`: `margin-right` under `ltr` (the child
+///   stays line-left), `margin-left` under `rtl` (the child settles line-right).
 /// * **`auto` inline margins (CSS 2.1 §10.3.3)** — an `auto` edge reserves
 ///   nothing; it *absorbs* the space left over once the child's used width is
 ///   known. Both edges `auto` splits the leftover evenly — `margin: 0 auto`
@@ -312,9 +313,10 @@ impl LayoutAlgorithm for FlowLayout {
             // the child's used width is known:
             //
             // * neither edge `auto` — `margin-left` offsets, and an over-constrained
-            //   box (definite width plus both margins) resolves by ignoring
-            //   `margin-right`. That falls out of only ever adding the left edge
-            //   here: the rule for `direction: ltr`.
+            //   box (definite width plus both margins) drops its inline-*end*
+            //   margin per the containing block's `direction`: `margin-right` under
+            //   `ltr` (keep line-left), `margin-left` under `rtl` (keep line-right;
+            //   the child's left edge moves inward by the whole leftover).
             // * both `auto` — the leftover splits evenly, which is `margin: 0 auto`
             //   centring.
             // * one `auto` — it takes the whole leftover, pushing the box to the
@@ -332,7 +334,27 @@ impl LayoutAlgorithm for FlowLayout {
             ) {
                 (true, true) => leftover / 2.0,
                 (true, false) => leftover,
-                (false, _) => child_style.margin.left.resolve(content_width),
+                (false, true) => child_style.margin.left.resolve(content_width),
+                // Both inline margins are fixed. If the child's used width leaves
+                // room (`leftover > 0`) the inline dimension is *over-constrained*,
+                // and CSS drops the **end** margin "as determined by the writing
+                // mode of the containing block" (css-writing-modes-4.txt:1988-1990).
+                // Under `ltr` the end is line-right, so `margin-right` is dropped
+                // and the child keeps `margin-left` — it stays against the
+                // line-left edge (`leftover` is absorbed on the right, unchanged
+                // behaviour). Under `rtl` the end is line-left, so `margin-left` is
+                // the one dropped: the child keeps its `margin-right` against the
+                // line-right edge, which shifts its left edge inward by the whole
+                // `leftover`. A `width: auto` child has already filled its offer, so
+                // `leftover` is `0` and this is inert whichever the direction.
+                (false, false) => {
+                    let margin_left = child_style.margin.left.resolve(content_width);
+                    if style.direction.is_rtl() {
+                        margin_left + leftover
+                    } else {
+                        margin_left
+                    }
+                }
             };
             let left = bp_left + left_margin;
 

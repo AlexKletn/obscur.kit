@@ -4,32 +4,47 @@
 use obscur_identity::NodeId;
 use obscur_motion::timeline::{FillMode, TimelineId};
 use obscur_motion::track::KeyframeTrack;
-use obscur_style::property::{Length, PropertyId, PropertyValue};
+use obscur_motion::value::MotionValue;
+use obscur_style::property::{Length, PropertyId, PropertyValue, Transform};
 
 /// How a sampled scalar [`MotionValue`](obscur_motion::value::MotionValue) is
 /// lowered into a concrete [`PropertyValue`] for a computed-style override.
 ///
-/// The motion engine speaks in dimensionless scalars; the target property
-/// decides what that scalar *means* in CSS terms. `opacity` and `flex-grow` want
-/// a bare [`Number`](PropertyValue::Number); `width`/`height`/margins want a
-/// pixel [`Length`](PropertyValue::Length). This enum is the small,
-/// property-kind-driven bridge between the two.
+/// The motion engine speaks in typed [`MotionValue`]s; the target property
+/// decides what that value *means* in CSS terms. `opacity` and `flex-grow` want
+/// a bare [`Number`](PropertyValue::Number) sampled from a
+/// [`Scalar`](MotionValue::Scalar); `width`/`height`/margins want a pixel
+/// [`Length`](PropertyValue::Length), also from a scalar; `transform` wants a
+/// [`Transform`](PropertyValue::Transform) affine sampled from a
+/// [`Transform`](MotionValue::Transform) matrix — which interpolates by
+/// decomposition, never component-wise (CSS Transforms §14). This enum is the
+/// small, property-kind-driven bridge between the two.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnimatedKind {
     /// A bare number (e.g. `opacity`, `flex-grow`).
     Number,
     /// A pixel length (e.g. `width`, `height`, margins, padding).
     LengthPx,
+    /// A 2D `transform` affine `[a, b, c, d, e, f]` (spec §4.17 post-layout
+    /// motion; CSS Transforms §14 decomposition interpolation).
+    Transform,
 }
 
 impl AnimatedKind {
-    /// Lowers a sampled `scalar` into the concrete [`PropertyValue`] this kind
-    /// represents.
+    /// Lowers a sampled [`MotionValue`] into the concrete [`PropertyValue`] this
+    /// kind represents, or [`None`] when the sample's variant does not match the
+    /// kind (a scalar for `Number`/`LengthPx`, a transform matrix for
+    /// `Transform`).
     #[must_use]
-    pub fn to_property_value(self, scalar: f32) -> PropertyValue {
+    pub fn lower(self, value: MotionValue) -> Option<PropertyValue> {
         match self {
-            Self::Number => PropertyValue::Number(scalar),
-            Self::LengthPx => PropertyValue::Length(Length::px(scalar)),
+            Self::Number => value.as_scalar().map(PropertyValue::Number),
+            Self::LengthPx => value
+                .as_scalar()
+                .map(|s| PropertyValue::Length(Length::px(s))),
+            Self::Transform => value
+                .as_transform()
+                .map(|matrix| PropertyValue::Transform(Transform::new(matrix))),
         }
     }
 }

@@ -20,8 +20,13 @@
 
 use obscur_css::cache::StylesheetCache;
 use obscur_css::compiler::{CompiledStylesheet, StylesheetCompiler};
-use obscur_css::error::{CssParseError, UnsupportedCssFeature};
+use obscur_css::error::{
+    CssParseError, CssParseErrorKind, UnsupportedCssFeature, UnsupportedFeatureKind,
+};
 use obscur_css::source::CssSource;
+use obscur_diagnostics::{
+    Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem, RecoveryAction,
+};
 use obscur_runtime::UiRuntime;
 use obscur_runtime::orchestration::{CssKeyframeRule, CssMotionRules, CssTransitionRule};
 use obscur_style::matching::Stylesheet;
@@ -80,9 +85,18 @@ impl CssPipeline {
     /// parse (compile, lower, install) runs every call — this caches parsing, which
     /// is what §4.12 specifies.
     ///
-    /// Diagnostics are not raised here: a malformed sheet compiles to whatever it
-    /// recovered, and the rejected parts are readable on [`errors`](Self::errors)
-    /// and [`unsupported`](Self::unsupported).
+    /// A malformed sheet compiles to whatever it recovered — the rejected parts
+    /// never reach the runtime, and the surviving rules do (spec §1.6 "failures
+    /// should be localized to the smallest safe scope"). Each rejected part is
+    /// **also** raised as a `Style`-subsystem [`Diagnostic`] on the runtime's
+    /// §1.6 channel via
+    /// [`report_diagnostic`](crate::runtime::UiRuntime::report_diagnostic): a
+    /// syntactic error (`color: ;`) and a recognised-but-unsupported construct
+    /// (`width: 10qq`, `float: left`) each report one diagnostic. The runtime
+    /// receives only compiled rules and never a sheet's source, so this — the one
+    /// place holding both the errors and the runtime — is where they reach the
+    /// channel. The same lists remain readable on [`errors`](Self::errors) and
+    /// [`unsupported`](Self::unsupported).
     pub fn install(&mut self, runtime: &mut UiRuntime, sources: &[CssSource]) {
         self.sheets.clear();
         self.errors.clear();
@@ -96,6 +110,13 @@ impl CssPipeline {
             self.sheets.push(compiled.matchable);
             self.errors.extend(compiled.errors);
             self.unsupported.extend(compiled.unsupported);
+        }
+
+        for error in &self.errors {
+            runtime.report_diagnostic(&diagnostic_for_error(error));
+        }
+        for feature in &self.unsupported {
+            runtime.report_diagnostic(&diagnostic_for_unsupported(feature));
         }
 
         self.motion = CssMotionRules::from_parts(transitions, keyframes);
@@ -147,6 +168,63 @@ impl CssPipeline {
     /// [`version`](CssSource::version) — §4.12's explicit invalidation.
     pub fn invalidate_cache(&mut self) {
         self.cache.clear();
+    }
+}
+
+/// Builds the `Style`-subsystem diagnostic for a CSS syntactic error. The
+/// [`stable code`](DiagnosticCode) is derived from the error's *kind*, not its
+/// (localizable) message or its source span, so it is identical across locales
+/// and call sites (spec §1.6). The human-readable message carries the detail.
+fn diagnostic_for_error(error: &CssParseError) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::new(code_for_parse_error(error.kind())),
+        DiagnosticSeverity::Error,
+        DiagnosticSubsystem::Style,
+        error.to_string(),
+    )
+    // The offending declaration/rule is dropped and the rest of the sheet is
+    // kept — a localized failure, not a torn-down sheet (spec §1.6).
+    .with_recovery(RecoveryAction::Fallback)
+}
+
+/// Builds the `Style`-subsystem diagnostic for a recognised-but-unsupported CSS
+/// construct. Unsupported features degrade gracefully (§4.13), so this is a
+/// warning, not an error; its stable code is derived from the feature's kind.
+fn diagnostic_for_unsupported(feature: &UnsupportedCssFeature) -> Diagnostic {
+    Diagnostic::new(
+        DiagnosticCode::new(code_for_unsupported(feature.kind())),
+        DiagnosticSeverity::Warning,
+        DiagnosticSubsystem::Style,
+        feature.to_string(),
+    )
+    .with_recovery(RecoveryAction::Fallback)
+}
+
+/// The stable code for a [`CssParseErrorKind`]. One code per kind, never derived
+/// from message text, so it survives localization (spec §1.6).
+const fn code_for_parse_error(kind: CssParseErrorKind) -> &'static str {
+    match kind {
+        CssParseErrorKind::UnexpectedToken => "css.unexpected_token",
+        CssParseErrorKind::UnexpectedEof => "css.unexpected_eof",
+        CssParseErrorKind::InvalidSelector => "css.invalid_selector",
+        CssParseErrorKind::InvalidValue => "css.invalid_value",
+        CssParseErrorKind::ExpectedColon => "css.expected_colon",
+        CssParseErrorKind::ExpectedSemicolon => "css.expected_semicolon",
+        CssParseErrorKind::UnterminatedBlock => "css.unterminated_block",
+        CssParseErrorKind::UnterminatedString => "css.unterminated_string",
+        CssParseErrorKind::InvalidAtRule => "css.invalid_at_rule",
+    }
+}
+
+/// The stable code for an [`UnsupportedFeatureKind`].
+const fn code_for_unsupported(kind: UnsupportedFeatureKind) -> &'static str {
+    match kind {
+        UnsupportedFeatureKind::AtRule => "css.unsupported_at_rule",
+        UnsupportedFeatureKind::Property => "css.unsupported_property",
+        UnsupportedFeatureKind::Selector => "css.unsupported_selector",
+        UnsupportedFeatureKind::Function => "css.unsupported_function",
+        UnsupportedFeatureKind::Unit => "css.unsupported_unit",
+        UnsupportedFeatureKind::PseudoElement => "css.unsupported_pseudo_element",
     }
 }
 

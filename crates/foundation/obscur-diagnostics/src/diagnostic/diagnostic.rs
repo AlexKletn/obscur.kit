@@ -39,4 +39,11 @@ impl Diagnostic {
             recovery: RecoveryAction::None,
         }
     }
+
+    /// Sets the recovery action taken or recommended for this diagnostic.
+    #[must_use]
+    pub const fn with_recovery(mut self, recovery: RecoveryAction) -> Self {
+        self.recovery = recovery;
+        self
+    }
 }

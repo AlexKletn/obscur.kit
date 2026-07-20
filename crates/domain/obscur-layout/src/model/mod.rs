@@ -7,6 +7,8 @@ mod box_sizing;
 pub use box_sizing::BoxSizing;
 mod dimension;
 pub use dimension::Dimension;
+mod direction;
+pub use direction::Direction;
 mod flex_direction;
 pub use flex_direction::FlexDirection;
 mod flex_wrap;

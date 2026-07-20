@@ -163,6 +163,21 @@ struct PointerClick {
 /// `UiRuntime` is built from, not an alternative host.
 ///
 /// [`FramePipeline`]: crate::frame::FramePipeline
+///
+/// The desired tree a frame reconciles, resolved lazily so a reactive frame can
+/// build it **after** phase 3 (§3.4 "dispatch input/events") — an input handler
+/// that commits state must have run before the view is rebuilt from that state,
+/// or its mutation lands a frame late.
+enum DesiredView<'a> {
+    /// A tree the caller already has in hand (`render_now`, the `&View` frame
+    /// loop). Materialization is a no-op borrow.
+    Ready(&'a View),
+    /// A tree built on demand from current state, called once, at reconcile time
+    /// (after input dispatch). The closure was moved out of the runtime by the
+    /// reactive caller, so invoking it does not alias `&mut self`.
+    Build(&'a mut dyn FnMut() -> View),
+}
+
 pub struct UiRuntime {
     /// Identity of this runtime.
     id: RuntimeId,
@@ -529,7 +544,7 @@ pub struct UiRuntime {
     /// compares against. A transition starts only when the freshly resolved
     /// value *differs* from this retained target (spec §4.17 "a transition starts
     /// when the property changes").
-    transition_targets: HashMap<(NodeId, PropertyId), f32>,
+    transition_targets: HashMap<(NodeId, PropertyId), MotionValue>,
     /// The `(node, property)` pairs a CSS `@keyframes` animation has already been
     /// started for, so a matching element registers its keyframe timeline once
     /// rather than re-registering it every style frame.
@@ -1789,8 +1804,17 @@ impl UiRuntime {
             self.service_background_unit();
         }
         let request = self.scheduler.next_frame()?;
+        // §3.4 step 2 "choose frame reasons" (plural) + §3.5 "updates are
+        // coalesced": one frame serves EVERY reason pending in this scheduling
+        // window, not one frame per reason. The most-urgent reason (popped first,
+        // §3.6 priority order) classifies the frame; the pipeline itself orders
+        // the phases within it (input dispatch, then the commit, then the
+        // resource-completion drain), and dispatch/staged-plan/landed-result each
+        // fold their own reason's work into this same frame. Drain the rest so a
+        // three-reason window is one frame, not three.
+        self.scheduler.coalesce_pending();
         let ctx = FrameContext::new(self.next_frame, request.reason(), self.viewport);
-        Some(self.run_frame(ctx, desired, sheets))
+        Some(self.run_frame(ctx, DesiredView::Ready(desired), sheets))
     }
 
     /// Renders every component whose output is stale and reconciles it into that
@@ -2009,6 +2033,11 @@ impl UiRuntime {
             format!("failed to load or decode image `{key}`: {error:?}"),
         );
         diagnostic.context.resource = Some(handle.id());
+        // The frame is not torn down for a missing image: the reference resolves
+        // to nothing and the box paints empty, keeping the layout around it intact
+        // (spec §1.6 "fallback and recovery are preferred where correctness can be
+        // maintained"; §5.15 failed state). That substitution is the recovery.
+        diagnostic.recovery = RecoveryAction::Fallback;
         self.diagnostics.emit(&diagnostic);
     }
 
@@ -2111,13 +2140,29 @@ impl UiRuntime {
     ///
     /// # What reaches it
     ///
-    /// Component-render failures and the §1.7 boundary decision taken for each.
-    /// The engine's other subsystems do not report here yet: layout, style,
-    /// renderer and resource failures still take their own paths (a
-    /// [`BudgetViolation`], a `Result`, a last-good value), and routing those
-    /// through this sink is separate work.
+    /// Component-render failures and the §1.7 boundary decision taken for each;
+    /// resource load/decode failures with the resource's identity attached; and
+    /// CSS parse/compile diagnostics, which a host routes here through
+    /// [`report_diagnostic`](Self::report_diagnostic) after compiling (the
+    /// runtime never sees a sheet's source, only its compiled rules, so it cannot
+    /// raise them itself). Layout and renderer failures still take their own paths
+    /// (a [`BudgetViolation`], a `Result`, a last-good value).
     pub fn set_diagnostic_sink(&mut self, sink: Box<dyn DiagnosticSink>) {
         self.diagnostics = sink;
+    }
+
+    /// Reports a `diagnostic` on the runtime's structured-diagnostics channel
+    /// (spec §1.6), through the sink installed by
+    /// [`set_diagnostic_sink`](Self::set_diagnostic_sink).
+    ///
+    /// The runtime raises its own failures (component render, resource load) via
+    /// this same channel; this entry point lets a host raise a failure the runtime
+    /// cannot observe by itself but that belongs on the one channel — chiefly the
+    /// CSS frontend's parse/compile diagnostics, which are produced host-side
+    /// (from a sheet's *source*, which the runtime never receives) and would
+    /// otherwise have no way onto the channel.
+    pub fn report_diagnostic(&self, diagnostic: &Diagnostic) {
+        self.diagnostics.emit(diagnostic);
     }
 
     /// Registers a component kind so nodes naming its
@@ -2290,20 +2335,25 @@ impl UiRuntime {
         }
         // Nothing due: no side effects, no rebuild.
         self.scheduler.next_frame()?;
+        // Coalesce the whole scheduling window into this one frame (§3.4 step 2,
+        // §3.5), exactly as the `&View` loop does.
+        self.scheduler.coalesce_pending();
 
         // Take the builder and the held stylesheets out so the `FnMut` call and
         // the `&mut self` render below do not overlap the `&mut`/`&` field borrows;
         // both are restored before returning. `take()` yields `Some` here (the
         // builder was just observed present, and nothing above removes it).
         let mut builder = self.root_view.take()?;
-        let view = builder();
         let sheets = std::mem::take(&mut self.stylesheets);
 
         // A reactive frame rebuilt the view from current state, so it is a UI
         // transaction commit: classify it structurally so the rebuilt view is
-        // reconciled into the tree (see the doc comment).
+        // reconciled into the tree (see the doc comment). The builder is handed to
+        // the frame as a lazy `DesiredView::Build` so it runs AFTER the frame's
+        // input-dispatch phase: a click handler that commits state has then
+        // already run, and the view is built from the state it left behind.
         let ctx = FrameContext::new(self.next_frame, FrameReason::UiCommit, self.viewport);
-        let result = self.run_frame(ctx, &view, &sheets);
+        let result = self.run_frame(ctx, DesiredView::Build(&mut *builder), &sheets);
 
         self.stylesheets = sheets;
         self.root_view = Some(builder);
@@ -2320,7 +2370,7 @@ impl UiRuntime {
     /// identical display lists.
     pub fn render_now(&mut self, desired: &View, sheets: &[Stylesheet]) -> FrameResult {
         let ctx = FrameContext::new(self.next_frame, FrameReason::UiCommit, self.viewport);
-        self.run_frame(ctx, desired, sheets)
+        self.run_frame(ctx, DesiredView::Ready(desired), sheets)
     }
 
     /// Runs the deterministic core over the runtime-owned state, retaining the
@@ -2344,7 +2394,7 @@ impl UiRuntime {
     fn run_frame(
         &mut self,
         ctx: FrameContext,
-        desired: &View,
+        desired: DesiredView<'_>,
         sheets: &[Stylesheet],
     ) -> FrameResult {
         // Author-sheet retention: a frame given no sheets reuses the last non-empty
@@ -2441,6 +2491,19 @@ impl UiRuntime {
         //    whether the commit carried any operation — identical to the previous
         //    `!plan.is_empty()`.
         let reconciled = if plan.reconcile() {
+            // Materialize the desired tree HERE — after phase 3's input dispatch,
+            // not before it. A reactive frame's builder reads current state, and a
+            // dispatched input handler may have just committed to that state, so
+            // building any earlier would reconcile the pre-dispatch view and paint
+            // the handler's mutation a frame late (§3.4: dispatch precedes commit).
+            let built_view;
+            let desired: &View = match desired {
+                DesiredView::Ready(view) => view,
+                DesiredView::Build(build) => {
+                    built_view = build();
+                    &built_view
+                }
+            };
             // §2.12: `desired` is the application's own view, so it is nobody's
             // render output and no `project_slots` will ever run over it. An
             // outlet in it — at the root or anywhere in a component host's
@@ -3016,10 +3079,9 @@ impl UiRuntime {
             else {
                 continue;
             };
-            let Some(scalar) = sampled.as_scalar() else {
+            let Some(property_value) = binding.kind().lower(sampled) else {
                 continue;
             };
-            let property_value = binding.kind().to_property_value(scalar);
             let Some(value) = ComputedValue::from_concrete(property_value) else {
                 continue;
             };
@@ -3058,7 +3120,7 @@ impl UiRuntime {
 
         // Stage 1: collect. Pure reads of `self.css_motion`, `self.tree`,
         // `self.pseudo`, and the change-detection baselines.
-        let mut target_updates: Vec<((NodeId, PropertyId), f32)> = Vec::new();
+        let mut target_updates: Vec<((NodeId, PropertyId), MotionValue)> = Vec::new();
         let mut transitions_to_start: Vec<TransitionStart> = Vec::new();
         let mut animations_to_start: Vec<AnimationStart> = Vec::new();
 
@@ -3074,9 +3136,9 @@ impl UiRuntime {
                 if SelectorMatcher::matches_list(rule.selectors(), &element).is_none() {
                     continue;
                 }
-                let Some(new_scalar) = computed
+                let Some(new_value) = computed
                     .get(&id)
-                    .and_then(|style| scalar_of(style, rule.property(), kind))
+                    .and_then(|style| motion_value_of(style, rule.property(), kind))
                 else {
                     continue;
                 };
@@ -3085,14 +3147,14 @@ impl UiRuntime {
                     // A real change of a watched property: start a transition from
                     // the previous target to the new one, unless the duration is
                     // non-positive (then it would just snap).
-                    Some(&previous) if previous != new_scalar => {
-                        target_updates.push((key, new_scalar));
+                    Some(&previous) if previous != new_value => {
+                        target_updates.push((key, new_value));
                         if rule.duration_secs() > 0.0 {
                             transitions_to_start.push(TransitionStart {
                                 node: id,
                                 property: rule.property(),
                                 from: previous,
-                                to: new_scalar,
+                                to: new_value,
                                 duration: rule.duration_secs(),
                                 delay: rule.delay_secs(),
                                 easing: rule.easing(),
@@ -3103,7 +3165,7 @@ impl UiRuntime {
                     // Unchanged: nothing to do.
                     Some(_) => {}
                     // First observation: record the baseline, do not animate.
-                    None => target_updates.push((key, new_scalar)),
+                    None => target_updates.push((key, new_value)),
                 }
             }
         }
@@ -3148,8 +3210,8 @@ impl UiRuntime {
         }
         for start in transitions_to_start {
             let track = KeyframeTrack::from_keyframes(vec![
-                Keyframe::new(0.0, MotionValue::scalar(start.from)).with_easing(start.easing),
-                Keyframe::new(1.0, MotionValue::scalar(start.to)),
+                Keyframe::new(0.0, start.from).with_easing(start.easing),
+                Keyframe::new(1.0, start.to),
             ]);
             self.animate_with(
                 start.node,
@@ -6609,8 +6671,8 @@ impl UiRuntime {
 struct TransitionStart {
     node: NodeId,
     property: PropertyId,
-    from: f32,
-    to: f32,
+    from: MotionValue,
+    to: MotionValue,
     duration: f32,
     /// `transition-delay`, in seconds (negative starts part-way through).
     delay: f32,
@@ -7123,24 +7185,42 @@ fn animated_kind_for(property: PropertyId) -> Option<AnimatedKind> {
         | PropertyId::Gap
         | PropertyId::FlexBasis
         | PropertyId::FontSize => Some(AnimatedKind::LengthPx),
+        // `transform` animates as post-layout motion (spec §4.17). The motion
+        // engine interpolates it by matrix decomposition (CSS Transforms §14) —
+        // `MotionValue::Transform` — not as a scalar.
+        PropertyId::Transform => Some(AnimatedKind::Transform),
         _ => None,
     }
 }
 
-/// Extracts `property`'s computed value from `style` as the scalar `kind`
-/// animates, or [`None`] when the property is absent or not that scalar shape.
+/// Extracts `property`'s computed value from `style` as the [`MotionValue`] that
+/// `kind` animates, or [`None`] when the property is absent or not that value
+/// shape.
 ///
-/// A [`AnimatedKind::Number`] reads a bare [`PropertyValue::Number`]; a
+/// An [`AnimatedKind::Number`] reads a bare [`PropertyValue::Number`]; an
 /// [`AnimatedKind::LengthPx`] reads an absolute pixel length (a percentage or
-/// `auto` length has no fixed scalar and yields [`None`]).
-fn scalar_of(style: &ComputedStyle, property: PropertyId, kind: AnimatedKind) -> Option<f32> {
+/// `auto` length has no fixed scalar and yields [`None`]); an
+/// [`AnimatedKind::Transform`] reads the resolved 2D affine, so a change is
+/// detected on the whole matrix and the transition interpolates through it by
+/// decomposition (CSS Transforms §14).
+fn motion_value_of(
+    style: &ComputedStyle,
+    property: PropertyId,
+    kind: AnimatedKind,
+) -> Option<MotionValue> {
     let value = style.get(property)?;
     match kind {
         AnimatedKind::Number => match value.value() {
-            PropertyValue::Number(n) => Some(*n),
+            PropertyValue::Number(n) => Some(MotionValue::scalar(*n)),
             _ => None,
         },
-        AnimatedKind::LengthPx => value.as_length().and_then(Length::as_px).map(|px| px.0),
+        AnimatedKind::LengthPx => value
+            .as_length()
+            .and_then(Length::as_px)
+            .map(|px| MotionValue::scalar(px.0)),
+        AnimatedKind::Transform => value
+            .as_transform()
+            .map(|transform| MotionValue::transform(transform.matrix())),
     }
 }
 
