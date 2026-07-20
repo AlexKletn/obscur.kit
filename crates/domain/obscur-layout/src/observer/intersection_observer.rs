@@ -87,13 +87,19 @@ impl IntersectionObserver {
     /// unchanged.
     #[must_use]
     pub fn observe(&mut self, target: Rect, root: Rect) -> Option<IntersectionChange> {
+        let overlap = overlap_area(target, root);
         let target_area = target.size.width * target.size.height;
         let ratio = if target_area > 0.0 {
-            overlap_area(target, root) / target_area
+            overlap / target_area
         } else {
             0.0
         };
-        let intersecting = ratio >= self.threshold;
+        // A non-empty intersection is a precondition for intersecting: like the
+        // web `IntersectionObserver`, a target that does not overlap the root at
+        // all is never "intersecting", even under a `0.0` threshold (a `0`
+        // threshold means "fire as soon as one pixel enters", not "an untouched
+        // target intersects"). Above zero overlap the `threshold` governs.
+        let intersecting = overlap > 0.0 && ratio >= self.threshold;
         if self.last_intersecting == Some(intersecting) {
             return None;
         }
