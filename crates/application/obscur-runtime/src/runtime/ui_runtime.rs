@@ -29,6 +29,7 @@ use obscur_interaction::hover::{HoverChain, HoverTransition};
 use obscur_interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind};
 use obscur_interaction::spatial::SpatialIndex;
 use obscur_layout::invalidation::LayoutInvalidation;
+use obscur_layout::model::Dimension;
 use obscur_localization::locale::LanguageTag;
 use obscur_motion::scheduler::MotionScheduler;
 use obscur_motion::timeline::{Timeline, TimelineId};
@@ -77,10 +78,11 @@ use crate::component::{ComponentStore, GuardedRender};
 use crate::orchestration::{
     AnimatedKind, AnimationBinding, ArrangeCache, ComputedStyles, CssMotionRules,
     CssTransitionRule, DragCoordinator, DragOutcome, EditingView, InspectInfo, LayoutBoxes,
-    LayoutCoordinator, MeasureCache, MotionCoordinator, MotionPlayback, NodeInspection,
-    PreeditView, PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint, ShapedChMetrics,
-    StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement, TreeInspection,
-    overflow_scrolls, overlay_commands, root_font_size, scroll_containers, scrollbar_rects,
+    LayoutCoordinator, LayoutStyles, MeasureCache, MotionCoordinator, MotionPlayback,
+    NodeInspection, PreeditView, PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint,
+    ShapedChMetrics, StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement,
+    TreeInspection, overflow_scrolls, overlay_commands, root_font_size, scroll_containers,
+    scrollbar_rects,
 };
 use crate::orchestration::{alignment_for, direction_for, white_space_for};
 use crate::recovery::RecoveryResult;
@@ -1393,6 +1395,60 @@ impl UiRuntime {
         }
     }
 
+    /// Sizes replaced elements whose width **and** height are both `auto` to
+    /// their content's intrinsic logical size, patching `layout_styles` in place
+    /// before the arrange pass (CSS Images 3 §5.4 default sizing algorithm; spec
+    /// §5.16).
+    ///
+    /// A replaced element with neither dimension authored has no CSS length to
+    /// resolve — its box is a property of the decoded content, so it must be
+    /// measured. It reads the decoded representation's **logical** size (its pixel
+    /// size over its density, spec §5.16 DPI variants) from the already-resolved
+    /// image/vector caches — [`resolve_element_images`](Self::resolve_element_images)
+    /// and friends run once per frame *before* this, so the size is present — and
+    /// writes it as a concrete width/height so the box algorithms size the element
+    /// exactly as they would an authored `Npx`/`Npx`.
+    ///
+    /// Only the both-`auto` case is handled here: an element with one axis
+    /// authored (the aspect-ratio-derived other axis) is a broader slice of §5.4
+    /// left for later. An intrinsic size with a zero or negative extent is
+    /// skipped, so a not-yet-decoded or degenerate asset leaves the element's
+    /// `auto` boxes untouched rather than collapsing them.
+    fn size_replaced_elements(&self, layout_styles: &mut LayoutStyles) {
+        // Collect (node, logical size) first so the retained-tree borrow is
+        // released before the styles map is mutated.
+        let intrinsic: Vec<(NodeId, (f32, f32))> = self
+            .tree
+            .iter()
+            .filter_map(|(node, n)| {
+                let src = n.attributes().image_source()?;
+                let size = self
+                    .image_cache
+                    .images()
+                    .get(src)
+                    .map(SceneImage::logical_size)
+                    .or_else(|| {
+                        self.vector_cache
+                            .get(src)
+                            .map(|vector| (vector.size().width, vector.size().height))
+                    })?;
+                Some((node, size))
+            })
+            .collect();
+        for (node, (iw, ih)) in intrinsic {
+            if iw <= 0.0 || ih <= 0.0 {
+                continue;
+            }
+            if let Some(style) = layout_styles.get_mut(&node)
+                && style.width.is_auto()
+                && style.height.is_auto()
+            {
+                style.width = Dimension::Px(iw);
+                style.height = Dimension::Px(ih);
+            }
+        }
+    }
+
     /// Installs the performance-telemetry `sink` each frame's phases record into
     /// (spec §7.9), replacing any previously installed sink.
     ///
@@ -2679,6 +2735,25 @@ impl UiRuntime {
             (computed, false, StyleDelta::Full)
         };
 
+        // 3c. Resolve every image this frame references — `background-image`
+        //     URLs and element `src`s — into the decoded-image/vector caches
+        //     BEFORE layout. Two things need it here rather than at compose: a
+        //     replaced element with no authored size is measured against its
+        //     content's intrinsic size (see `size_replaced_elements`), which the
+        //     arrange pass below reads; and the §5.19 cache is then touched
+        //     exactly once per frame, so its hit/miss/eviction metrics count one
+        //     lookup per URL. `mark_image_visibility` runs first (against the
+        //     retained boxes) so an eviction the loads force drops what this frame
+        //     stopped showing, not what it is about to paint. Gated on `compose()`
+        //     because a frame that will not paint has no reason to load; the later
+        //     compose phase then finds every one cached.
+        if plan.compose() {
+            self.mark_image_visibility(&computed);
+            self.resolve_background_images(&computed);
+            self.resolve_element_images();
+            self.resolve_element_vectors();
+        }
+
         // 4. Layout: map to layout styles, arrange, and retain the boxes.
         //    The document root's `font-size` supplies the `rem` base; the
         //    viewport supplies `vw`/`vh` (spec §4.5). When skipped, the retained
@@ -2722,6 +2797,13 @@ impl UiRuntime {
             // line are left untouched.
             self.layout
                 .resolve_named_grid_lines(&mut layout_styles, &self.tree, &computed);
+            // Replaced elements (`<img>`) with neither dimension authored take
+            // their content's own intrinsic logical size (CSS Images 3 §5.4
+            // default sizing; spec §5.16). The image bytes must be decoded before
+            // the box can be sized from them, so this resolves element image/vector
+            // sources now — synchronously, before arrange — and patches the just
+            // built styles; the compose phase's later resolve is then a no-op.
+            self.size_replaced_elements(&mut layout_styles);
             // Authored grid templates (`grid-template-columns`/`-rows`) become a
             // per-node side-table so a grid container dispatches the real
             // track-sizing algorithm; a grid node with no template falls back to a
@@ -2808,23 +2890,12 @@ impl UiRuntime {
         // 5. Compose: build the display list, install it, publish a snapshot.
         //    When skipped, the retained scene's current snapshot is republished.
         if plan.compose() {
-            // Score every resident image against this frame's tree and boxes BEFORE
-            // resolving new ones, so an eviction triggered by the loads below drops
-            // what this frame stopped showing rather than what it is about to paint
-            // (spec §5.19 visibility priority).
-            self.mark_image_visibility(&computed);
-            // Resolve any `background-image: url(...)` referenced by this frame's
-            // computed styles into decoded images (load → decode → cache) BEFORE
-            // composing, so the coordinator can paint the ready ones. A no-op when
-            // no loader/decoder is installed or no URL is authored.
-            self.resolve_background_images(&computed);
-            // Resolve each element's own image `src` (an `<img>` primitive's
-            // source) into the SAME cache via the SAME load/decode path, so the
-            // coordinator can paint the ready ones over their box as element
-            // content. A no-op when no loader/decoder is installed or no `src` is
-            // authored.
-            self.resolve_element_images();
-            self.resolve_element_vectors();
+            // Images this frame references were already scored for visibility and
+            // resolved into the decoded caches in phase 3c (before layout, so a
+            // replaced element could be sized from its content and the §5.19 cache
+            // is touched once per frame); the coordinator below simply paints the
+            // ready ones.
+            //
             // Thread the runtime-owned editing session into compose so the focused
             // editable paints its live session text plus a caret + selection
             // highlight (spec §5.11) — the SAME [`EditingView`] the measure pass

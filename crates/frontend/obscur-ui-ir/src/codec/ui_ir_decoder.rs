@@ -25,7 +25,7 @@ use obscur_capability::CapabilityId;
 
 use crate::codec::ui_ir_encoder::{FORMAT_VERSION, MAGIC};
 use crate::document::{UiIrDocument, UiIrEvent, UiIrExpression, UiIrNode, UiIrProperty, UiIrValue};
-use crate::version::UiIrVersion;
+use crate::version::{UiIrVersion, UiIrVersionRange};
 
 /// A fault encountered while decoding a UI IR byte stream (spec §2.5).
 ///
@@ -41,6 +41,16 @@ pub enum UiIrDecodeError {
     /// The header carried a format version this codec does not support; the
     /// payload is the version that was read.
     UnsupportedFormatVersion(u16),
+    /// The document declared an IR schema version outside the range this codec
+    /// can read (spec §2.15 "precise diagnostics for newer unsupported IR"). The
+    /// payload carries the document's declared version and the codec's supported
+    /// range so the diagnostic can name both.
+    UnsupportedIrVersion {
+        /// The IR version the document declared.
+        document: UiIrVersion,
+        /// The inclusive range of IR versions this codec can read.
+        supported: UiIrVersionRange,
+    },
     /// A node carried a kind tag outside the known 0..=5 range; the payload is
     /// the unknown tag.
     UnknownNodeKind(u8),
@@ -65,6 +75,20 @@ impl std::fmt::Display for UiIrDecodeError {
             Self::UnsupportedFormatVersion(v) => {
                 write!(f, "unsupported format version: {v}")
             }
+            Self::UnsupportedIrVersion {
+                document,
+                supported,
+            } => write!(
+                f,
+                "unsupported IR version {}.{}: this codec reads IR versions \
+                 {}.{} through {}.{}",
+                document.major(),
+                document.minor(),
+                supported.min().major(),
+                supported.min().minor(),
+                supported.max().major(),
+                supported.max().minor(),
+            ),
             Self::UnknownNodeKind(tag) => write!(f, "unknown node kind tag: {tag}"),
             Self::UnknownExpressionTag(tag) => {
                 write!(f, "unknown expression tag: {tag}")
@@ -90,6 +114,13 @@ impl std::error::Error for UiIrDecodeError {}
 pub struct UiIrDecoder;
 
 impl UiIrDecoder {
+    /// The inclusive range of IR schema versions this decoder can read: from
+    /// the first shipped version up to [`UiIrVersion::CURRENT`] (spec §2.15). A
+    /// document declaring a version outside this range is refused with
+    /// [`UiIrDecodeError::UnsupportedIrVersion`].
+    pub const SUPPORTED_VERSIONS: UiIrVersionRange =
+        UiIrVersionRange::new(UiIrVersion::new(1, 0), UiIrVersion::CURRENT);
+
     /// Creates a new decoder.
     #[must_use]
     pub const fn new() -> Self {
@@ -119,6 +150,12 @@ impl UiIrDecoder {
         let major = cursor.read_u16()?;
         let minor = cursor.read_u16()?;
         let version = UiIrVersion::new(major, minor);
+        if !Self::SUPPORTED_VERSIONS.contains(version) {
+            return Err(UiIrDecodeError::UnsupportedIrVersion {
+                document: version,
+                supported: Self::SUPPORTED_VERSIONS,
+            });
+        }
 
         let cap_count = cursor.read_u32()?;
         let mut caps = Vec::new();
