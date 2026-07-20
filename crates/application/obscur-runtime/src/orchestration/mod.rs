@@ -30,6 +30,7 @@ pub use pseudo_states::PseudoStates;
 mod render_coordinator;
 pub use render_coordinator::RenderCoordinator;
 mod scene_coordinator;
+pub(crate) use scene_coordinator::scrollbar_rects;
 pub use scene_coordinator::{SceneCoordinator, ScrollPaint};
 mod scroll;
 mod shaped_ch_metrics;

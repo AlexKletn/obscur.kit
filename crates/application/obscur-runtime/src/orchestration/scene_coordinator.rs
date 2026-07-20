@@ -3705,11 +3705,33 @@ fn overflow_clips(computed: &ComputedStyles, node: NodeId) -> bool {
 /// documented follow-up.
 #[must_use]
 fn scrollbar_commands(scrollport: Rect, scroll_top: f32, content_height: f32) -> Vec<PaintCommand> {
+    let Some((track, thumb)) = scrollbar_rects(scrollport, scroll_top, content_height) else {
+        return Vec::new();
+    };
+    let mut builder = DisplayListBuilder::new();
+    builder.fill_rect(track, Brush::solid(SCROLLBAR_TRACK_COLOR));
+    builder.fill_rect(thumb, Brush::solid(SCROLLBAR_THUMB_COLOR));
+    builder.build().commands().to_vec()
+}
+
+/// The `(track, thumb)` border-box rectangles of a scroll container's vertical
+/// scrollbar (CSS Overflow 3 §scrollbars) — the geometry `scrollbar_commands`
+/// paints, factored out so the DevTools tree can project the SAME two part rects
+/// (spec §4.16 "scrollbar parts") without re-deriving them. Returns `None` when
+/// the geometry is degenerate (a non-positive scrollport, or content that does
+/// not exceed the scrollport), so a non-overflowing container has no scrollbar
+/// parts anywhere.
+#[must_use]
+pub(crate) fn scrollbar_rects(
+    scrollport: Rect,
+    scroll_top: f32,
+    content_height: f32,
+) -> Option<(Rect, Rect)> {
     let track_h = scrollport.size.height;
     let track_w = SCROLLBAR_WIDTH.min(scrollport.size.width);
     let scroll_range = content_height - track_h;
     if track_h <= 0.0 || track_w <= 0.0 || scroll_range <= 0.0 {
-        return Vec::new();
+        return None;
     }
     let track_x = scrollport.right() - track_w;
     let track_y = scrollport.origin.y;
@@ -3722,11 +3744,7 @@ fn scrollbar_commands(scrollport: Rect, scroll_top: f32, content_height: f32) ->
     let free = (track_h - thumb_h).max(0.0);
     let thumb_y = track_y + free * (scroll_top / scroll_range).clamp(0.0, 1.0);
     let thumb = Rect::new(Point::new(track_x, thumb_y), Size::new(track_w, thumb_h));
-
-    let mut builder = DisplayListBuilder::new();
-    builder.fill_rect(track, Brush::solid(SCROLLBAR_TRACK_COLOR));
-    builder.fill_rect(thumb, Brush::solid(SCROLLBAR_THUMB_COLOR));
-    builder.build().commands().to_vec()
+    Some((track, thumb))
 }
 
 /// Whether a node's computed `border-*-style` (`id`) is the reserved `solid`

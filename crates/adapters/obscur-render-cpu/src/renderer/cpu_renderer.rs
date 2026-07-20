@@ -26,9 +26,10 @@
 //! approximations below are unconditional properties of the rasterizer, declared by
 //! `supports_effect` rather than announced per frame. The approximations:
 //!
-//! - **Gradient brushes** rasterize as a flat solid of the gradient's first stop
-//!   color (spec §5.2 permits rasterization to differ). A stop-less gradient is
-//!   skipped.
+//! - **Gradient brushes**: linear and conic gradients rasterize for real (the
+//!   linear shader with premultiplied-sampled stops, the conic sweep as wedges);
+//!   the **radial** brush still degrades to a flat solid of its first stop color
+//!   (spec §5.2 permits rasterization to differ). A stop-less gradient is skipped.
 //! - **Layer compositing** ([`PushLayer`]/[`PopLayer`]) honors **group opacity**:
 //!   a layer with opacity `< 1.0` (a CSS `opacity` group) rasterizes its whole
 //!   subtree into a fresh offscreen [`tiny_skia::Pixmap`] and composites it back
@@ -383,7 +384,7 @@ impl Renderer for CpuRenderer {
                         // A conic (angular) gradient is rasterized for real on the
                         // CPU backend: it is decomposed into angular wedges filled at
                         // their swept color, clipped to the element outline (§5.1's
-                        // "conic gradients"). The linear/radial brushes still flatten
+                        // "conic gradients"). The radial brush still flattens
                         // (documented approximation, `brush_color`).
                         Paint::Fill(Brush::Conic(conic)) => {
                             fill_conic(
@@ -393,6 +394,23 @@ impl Renderer for CpuRenderer {
                                 to_sk_fill_rule(path.fill_rule()),
                                 width,
                                 height,
+                                clip,
+                                current,
+                            );
+                        }
+                        // A linear (axial) gradient is rasterized for real via
+                        // tiny-skia's linear shader. tiny-skia interpolates its stop
+                        // colors in straight-alpha space, but css-color-4 §12.3 (and
+                        // §5.7's "premultiplied alpha") require interpolation in
+                        // PREMULTIPLIED space, so the authored stops are pre-expanded
+                        // into a dense stop list whose samples already follow the
+                        // premultiplied curve (`fill_linear`).
+                        Paint::Fill(Brush::Linear(linear)) => {
+                            fill_linear(
+                                pixmap,
+                                linear,
+                                &sk_path,
+                                to_sk_fill_rule(path.fill_rule()),
                                 clip,
                                 current,
                             );
@@ -620,9 +638,12 @@ impl Renderer for CpuRenderer {
     ///   hard rect, a `filter: blur()` layer draws its subtree sharp, a
     ///   `BackdropFilter` draws nothing at all, and a color-matrix layer draws
     ///   unfiltered. Dropping the parameter is not emulation.
-    /// - [`Gradient`](SceneEffect::Gradient) is `Unavailable`: a gradient brush
-    ///   rasterizes as a flat solid of its **first stop**. The stops and the
-    ///   gradient geometry are dropped, so what lands is a solid, not a gradient.
+    /// - [`Gradient`](SceneEffect::Gradient) is `Unavailable`: this is a single
+    ///   coarse flag over all gradient kinds, and it stays `Unavailable` because not
+    ///   every kind renders. Linear (premultiplied-sampled shader) and conic (wedge
+    ///   sweep) brushes DO rasterize for real, but a **radial** brush still degrades
+    ///   to a flat solid of its first stop — its stops and geometry are dropped. The
+    ///   flag reports the weakest case rather than over-claiming full support.
     /// - [`Mask`](SceneEffect::Mask) is `Unavailable`: a mask clip's coverage is
     ///   never applied (it inherits the enclosing clip instead), on this backend and
     ///   on Vello alike.
@@ -756,9 +777,11 @@ fn to_sk_fill_rule(rule: FillRule) -> tiny_skia::FillRule {
 
 /// Resolves the flat solid color a brush rasterizes to.
 ///
-/// A [`Brush::Solid`] yields its color directly. Every gradient brush degrades to
-/// its first stop color (spec §5.2 rasterization approximation); a stop-less
-/// gradient yields `None`, so the command is skipped.
+/// A [`Brush::Solid`] yields its color directly. A gradient brush degrades to its
+/// first stop color (spec §5.2 rasterization approximation); a stop-less gradient
+/// yields `None`, so the command is skipped. Linear and conic fills no longer route
+/// through here (they rasterize for real, see `fill_linear` / `fill_conic`); this
+/// remains the path for strokes and radial fills.
 fn brush_color(brush: &Brush) -> Option<Color> {
     match brush {
         Brush::Solid(solid) => Some(solid.color),
@@ -884,6 +907,131 @@ fn lerp_color(a: Color, b: Color, t: f32) -> Color {
     let t = t.clamp(0.0, 1.0);
     let mix = |x: f32, y: f32| (y - x).mul_add(t, x);
     Color::rgba(mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b), mix(a.a, b.a))
+}
+
+/// Interpolates between two straight-alpha [`Color`]s in **premultiplied** space at
+/// `t ∈ [0, 1]`, returning a straight-alpha result (css-color-4 §12.3, obscur.kit
+/// §5.7).
+///
+/// Each endpoint is premultiplied (`rgb·a`), the four premultiplied channels are
+/// lerped, and the result is un-premultiplied by the interpolated alpha. This is
+/// what keeps a `transparent → blue` stop from fading through grey: at the midpoint
+/// the colour stays full-strength blue at half alpha, not half-strength blue. A
+/// straight component-wise lerp (see [`lerp_color`]) is the classic wrong answer,
+/// silently visible only where the endpoints differ in alpha.
+fn premul_lerp_color(a: Color, b: Color, t: f32) -> Color {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |x: f32, y: f32| (y - x).mul_add(t, x);
+    let pa = mix(a.a, b.a);
+    let pr = mix(a.r * a.a, b.r * b.a);
+    let pg = mix(a.g * a.a, b.g * b.a);
+    let pb = mix(a.b * a.a, b.b * b.a);
+    if pa <= 0.0 {
+        Color::rgba(0.0, 0.0, 0.0, 0.0)
+    } else {
+        Color::rgba(pr / pa, pg / pa, pb / pa, pa)
+    }
+}
+
+/// The number of sub-samples inserted across each authored inter-stop span when a
+/// linear gradient is handed to tiny-skia. tiny-skia lerps between adjacent stops in
+/// straight-alpha space, so a span is pre-expanded into this many segments whose
+/// endpoints already sit on the premultiplied curve; between them the residual
+/// straight/premultiplied divergence is sub-perceptual. Even, so a probe at a span's
+/// exact midpoint lands on an inserted sample.
+const GRADIENT_SUBDIVISIONS: usize = 32;
+
+/// Rasterizes a linear (axial) gradient over the element outline `sk_path` for real,
+/// using tiny-skia's linear shader (§5.1's "linear gradients").
+///
+/// The authored stops are expanded into a dense stop list sampled along the
+/// **premultiplied** interpolation curve ([`premul_lerp_color`]), so tiny-skia's
+/// straight-alpha interpolation between the dense samples reproduces the
+/// premultiplied result css-color-4 §12.3 requires. The gradient axis (`start` →
+/// `end`) and stop offsets come straight from the [`LinearGradient`]; `transform`
+/// maps both the path and the shader, so the gradient tracks any active CSS 2D
+/// transform. A gradient with fewer than two usable stops falls back to a flat fill
+/// of its first stop (`brush_color`), matching the stop-less/solid degenerate cases.
+fn fill_linear(
+    pixmap: &mut tiny_skia::Pixmap,
+    linear: &obscur_scene::paint::LinearGradient,
+    sk_path: &tiny_skia::Path,
+    fill_rule: tiny_skia::FillRule,
+    clip: Option<&tiny_skia::Mask>,
+    transform: tiny_skia::Transform,
+) {
+    let stops = linear.stops();
+    // Build the dense, premultiplied-sampled stop list. Each authored span is
+    // subdivided; the shared boundary between spans is emitted once (skip k==0 for
+    // every span after the first) so tiny-skia sees a strictly forward list.
+    let mut sk_stops: Vec<tiny_skia::GradientStop> = Vec::new();
+    let mut push = |offset: f32, color: Color| {
+        if let Some(sk_color) = to_sk_color(color) {
+            sk_stops.push(tiny_skia::GradientStop::new(
+                offset.clamp(0.0, 1.0),
+                sk_color,
+            ));
+        }
+    };
+    for (i, pair) in stops.windows(2).enumerate() {
+        let (s0, s1) = (pair[0], pair[1]);
+        let span = s1.offset() - s0.offset();
+        for k in 0..=GRADIENT_SUBDIVISIONS {
+            if i > 0 && k == 0 {
+                continue;
+            }
+            #[allow(clippy::cast_precision_loss)]
+            let f = k as f32 / GRADIENT_SUBDIVISIONS as f32;
+            push(
+                span.mul_add(f, s0.offset()),
+                premul_lerp_color(s0.color(), s1.color(), f),
+            );
+        }
+    }
+
+    // Fewer than two representable stops cannot form a shader: fall back to the flat
+    // first-stop fill (the documented solid/stop-less degenerate path).
+    let first_stop_paint = || stops.first().map(|s| s.color()).and_then(solid_paint);
+    if sk_stops.len() < 2 {
+        if let Some(sk_paint) = first_stop_paint() {
+            pixmap.fill_path(sk_path, &sk_paint, fill_rule, transform, clip);
+        }
+        return;
+    }
+
+    let start = tiny_skia::Point::from_xy(linear.start().x, linear.start().y);
+    let end = tiny_skia::Point::from_xy(linear.end().x, linear.end().y);
+    let mode = to_sk_spread(linear.extend());
+    let Some(shader) = tiny_skia::LinearGradient::new(
+        start,
+        end,
+        sk_stops,
+        mode,
+        tiny_skia::Transform::identity(),
+    ) else {
+        // A degenerate axis (start == end) has no direction: fall back to the flat
+        // first-stop fill rather than dropping the mark.
+        if let Some(sk_paint) = first_stop_paint() {
+            pixmap.fill_path(sk_path, &sk_paint, fill_rule, transform, clip);
+        }
+        return;
+    };
+    let sk_paint = tiny_skia::Paint {
+        shader,
+        anti_alias: true,
+        ..Default::default()
+    };
+    pixmap.fill_path(sk_path, &sk_paint, fill_rule, transform, clip);
+}
+
+/// Maps a domain [`ExtendMode`](obscur_scene::paint::ExtendMode) onto tiny-skia's
+/// [`SpreadMode`](tiny_skia::SpreadMode) for gradient sampling outside `[0, 1]`.
+fn to_sk_spread(mode: obscur_scene::paint::ExtendMode) -> tiny_skia::SpreadMode {
+    match mode {
+        obscur_scene::paint::ExtendMode::Pad => tiny_skia::SpreadMode::Pad,
+        obscur_scene::paint::ExtendMode::Repeat => tiny_skia::SpreadMode::Repeat,
+        obscur_scene::paint::ExtendMode::Reflect => tiny_skia::SpreadMode::Reflect,
+    }
 }
 
 /// An **aliased** solid-color [`tiny_skia::Paint`] — used for conic-gradient wedges,

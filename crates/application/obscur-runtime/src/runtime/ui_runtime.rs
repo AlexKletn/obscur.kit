@@ -80,7 +80,7 @@ use crate::orchestration::{
     LayoutCoordinator, MeasureCache, MotionCoordinator, MotionPlayback, NodeInspection,
     PreeditView, PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint, ShapedChMetrics,
     StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement, TreeInspection,
-    overflow_scrolls, overlay_commands, root_font_size, scroll_containers,
+    overflow_scrolls, overlay_commands, root_font_size, scroll_containers, scrollbar_rects,
 };
 use crate::orchestration::{alignment_for, direction_for, white_space_for};
 use crate::recovery::RecoveryResult;
@@ -1155,10 +1155,14 @@ impl UiRuntime {
     /// loader (ready the same frame); the design is async-friendly — an unready URL
     /// is just absent from the cache and paints on a later frame once decoded.
     fn resolve_background_images(&mut self, computed: &ComputedStyles) {
-        // Both a loader and a decoder are required; without either, `url()`
-        // backgrounds honestly resolve to nothing — but silence would hide a
-        // missing provider, so each referenced URL is named once on the
-        // diagnostics channel: the kit does not fetch it by itself (spec §5.15).
+        // Both a loader and a decoder are required to actually fetch and decode.
+        // Without either, a `url()` background cannot become `ready` — but the
+        // reference is still a real resource request and must REACH the hub (spec
+        // §5.15 "loading/ready/failed states;"): the kit does not fetch it by
+        // itself, so with no provider the request lands in a terminal `failed`
+        // state rather than never existing. A handle parked outside the hub is
+        // indistinguishable from a URL that was never referenced. Each URL is
+        // registered with the hub once and named once on the diagnostics channel.
         if self.resource_loader.is_none() || self.resource_decoder.is_none() {
             let urls: Vec<Box<str>> = computed
                 .values()
@@ -1170,6 +1174,29 @@ impl UiRuntime {
                 })
                 .collect();
             for url in urls {
+                // `image_handles` is the persistent "already requested" set, so a
+                // URL is registered and reported exactly once however many frames
+                // reference it (the diagnostics dedup on their own channel too).
+                if self.image_handles.contains_key(&url) {
+                    continue;
+                }
+                let source = ResourceSource::file(url.clone());
+                let handle = self
+                    .resource_hub
+                    .request(ResourceRequest::new(source, ResourceKind::Image));
+                self.image_handles.insert(url.clone(), handle);
+                // No provider can ever service this request: drive it straight to a
+                // terminal `failed` state, so a caller of `state()` can tell it is
+                // dead rather than parked in `loading` behind a slow network.
+                if let Some(version) = self.resource_hub.begin_load(handle) {
+                    let _ = self.resource_hub.fail(
+                        handle,
+                        version,
+                        ResourceError::SourceUnavailable(
+                            "no host loader is installed to service this source".into(),
+                        ),
+                    );
+                }
                 self.report_unresolvable_source(&url);
             }
             return;
@@ -6360,7 +6387,58 @@ impl UiRuntime {
         if let Some(root) = self.tree.root() {
             self.collect_inspection(root, None, 0, &mut nodes);
         }
+        // §4.16: system-generated parts are synthetic — hidden from the component
+        // tree (they are never in any node's `children()`, so `collect_inspection`
+        // above never reaches them) but visible in DevTools. Project the scrollbar
+        // parts of every overflowing scroll container here: the SAME track/thumb
+        // rectangles the scene coordinator paints (`scrollbar_rects`), attributed to
+        // the container as their parent, appended after the real tree.
+        self.collect_synthetic_scrollbar_parts(&mut nodes);
         TreeInspection { nodes }
+    }
+
+    /// Appends a synthetic DevTools node for each scrollbar part (track + thumb) of
+    /// every currently-overflowing scroll container to `out` (spec §4.16).
+    ///
+    /// These are **not** retained-tree nodes and appear in no node's `children()`,
+    /// so the component tree never sees them; they exist only in this DevTools
+    /// projection, carrying the real part rectangles the coordinator paints. A tree
+    /// with no overflowing scroll container appends nothing.
+    fn collect_synthetic_scrollbar_parts(&self, out: &mut Vec<NodeInspection>) {
+        for container in scroll_containers(&self.tree, &self.computed, &self.boxes) {
+            let scroll_top = self.clamped_scroll_top(container);
+            let Some((track, thumb)) =
+                scrollbar_rects(container.scrollport, scroll_top, container.content_height)
+            else {
+                continue;
+            };
+            let depth = out
+                .iter()
+                .find(|n| n.node == container.node)
+                .map_or(0, |n| n.depth + 1);
+            for (index, (name, rect)) in [("scrollbar-track", track), ("scrollbar-thumb", thumb)]
+                .into_iter()
+                .enumerate()
+            {
+                // A stable, collision-free synthetic id derived from the container:
+                // the high bits are set (real ids never reach `1 << 62`) and the low
+                // bits carry the container id plus the part index.
+                let raw = (1_u64 << 62) | (container.node.raw() << 1) | (index as u64);
+                out.push(NodeInspection {
+                    node: NodeId::from_raw(raw),
+                    parent: Some(container.node),
+                    depth,
+                    kind: "synthetic",
+                    component: None,
+                    local_name: Some(name.to_owned()),
+                    id: None,
+                    classes: Vec::new(),
+                    text: None,
+                    bounds: Some(rect),
+                    styles: Vec::new(),
+                });
+            }
+        }
     }
 
     /// Appends `node` (and its subtree, pre-order) to `out` as [`NodeInspection`]s.
