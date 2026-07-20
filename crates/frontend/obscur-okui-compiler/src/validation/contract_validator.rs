@@ -3,6 +3,7 @@
 
 use obscur_okui_syntax::ast::{Attribute, Element};
 use obscur_okui_syntax::syntax::SyntaxKind;
+use obscur_view::contract::PropTypeSurface;
 
 use crate::validation::contract_rule::{
     AttributeUse, ElementUse, MemberArity, MemberUse, SlotUse, ViolationAnchor, check_contract,
@@ -54,6 +55,7 @@ pub struct ComponentContract {
     allowed_props: Vec<Box<str>>,
     allowed_events: Vec<Box<str>>,
     allowed_children: Vec<Box<str>>,
+    prop_types: Vec<(Box<str>, PropTypeSurface)>,
     slots: Vec<SlotRule>,
 }
 
@@ -68,8 +70,30 @@ impl ComponentContract {
             allowed_props: Vec::new(),
             allowed_events: Vec::new(),
             allowed_children: Vec::new(),
+            prop_types: Vec::new(),
             slots: Vec::new(),
         }
+    }
+
+    /// Records the declared type category of prop `name` (fluent; spec §2.8), so
+    /// [`validate_element`](ContractValidator::validate_element) can reject a
+    /// literal of the wrong kind. Bridged from a
+    /// [`ComponentSurface`](obscur_view::contract::ComponentSurface); a prop with
+    /// no recorded type, or one recorded as [`PropTypeSurface::Other`], is not
+    /// type-checked.
+    #[must_use]
+    pub fn with_prop_type(mut self, name: impl Into<Box<str>>, ty: PropTypeSurface) -> Self {
+        self.prop_types.push((name.into(), ty));
+        self
+    }
+
+    /// Returns the declared type category of prop `name`, if one was recorded.
+    #[must_use]
+    pub fn prop_type(&self, name: &str) -> Option<PropTypeSurface> {
+        self.prop_types
+            .iter()
+            .find(|(prop, _)| prop.as_ref() == name)
+            .map(|(_, ty)| *ty)
     }
 
     /// Adds `name` to the contract's required props (fluent).
@@ -234,10 +258,13 @@ impl ContractValidator {
     /// the offending attribute's or child's byte offset; the required-prop and
     /// cardinality diagnostics are anchored at the element's own.
     ///
-    /// String-named method/command references (§2.13) are not modelled by the
-    /// `.okui` AST — attribute values are string literals or `{expr}` text with
-    /// no named-method node — so there is no unknown-method check here; it is
-    /// N/A until such a node exists.
+    /// **String-based method dispatch** (§2.3, §2.13) *is* modelled, at the one
+    /// place the `.okui` AST spells it: an `on:<event>` whose value is a string
+    /// literal — `on:pressed="handle_submit"` — is a named-method reference, which
+    /// §2.3 ("Events are typed. String-based method dispatch is not used.")
+    /// forbids. It is refused whether or not the event is declared, because the
+    /// *form* is the fault: a handler is bound with `{…}`, never named by string.
+    /// See [`check_string_dispatch`](Self::check_string_dispatch).
     #[must_use]
     pub fn validate_element(
         &self,
@@ -246,15 +273,92 @@ impl ContractValidator {
     ) -> Vec<ValidationDiagnostic> {
         let offset = element.syntax().offset().unwrap_or(0);
         let instance = AstInstance::of(element, offset);
-        check_contract(&instance.as_use(), contract)
-            .into_iter()
-            .map(|violation| {
-                ValidationDiagnostic::new(
-                    violation.message(contract.component()),
-                    instance.offset_of(violation.anchor(), offset),
-                )
-            })
-            .collect()
+        let mut diagnostics: Vec<ValidationDiagnostic> =
+            check_contract(&instance.as_use(), contract)
+                .into_iter()
+                .map(|violation| {
+                    ValidationDiagnostic::new(
+                        violation.message(contract.component()),
+                        instance.offset_of(violation.anchor(), offset),
+                    )
+                })
+                .collect();
+        Self::check_string_dispatch(element, contract, offset, &mut diagnostics);
+        Self::check_prop_types(element, contract, offset, &mut diagnostics);
+        diagnostics
+    }
+
+    /// Appends a diagnostic for every prop attribute given a literal of the wrong
+    /// type — a `String` prop handed an integer, an `i64` prop handed a string
+    /// (spec §2.8, "typed props … compile-time validation").
+    ///
+    /// One diagnostic per offending attribute, anchored at that attribute, so two
+    /// wrong props on one element are two pointed errors, not one merged one. A
+    /// prop the contract records no type for (or records as
+    /// [`PropTypeSurface::Other`]), an attribute whose value is not a literal
+    /// (`count={total}` — a binding whose type is unknown here), and every event
+    /// attribute are all left alone.
+    fn check_prop_types(
+        element: &Element,
+        contract: &ComponentContract,
+        element_offset: u32,
+        diagnostics: &mut Vec<ValidationDiagnostic>,
+    ) {
+        for attribute in element.attributes() {
+            if attribute.is_event() {
+                continue;
+            }
+            let Some(name) = attribute.name() else {
+                continue;
+            };
+            let Some(expected) = contract.prop_type(&name) else {
+                continue;
+            };
+            let found = attribute_value_type(&attribute);
+            if !value_type_matches(expected, found) {
+                let offset = attribute.syntax().offset().unwrap_or(element_offset);
+                diagnostics.push(ValidationDiagnostic::new(
+                    format!(
+                        "prop '{name}' on '{}' expects {} but was given {} (spec §2.8)",
+                        contract.component(),
+                        describe_prop_type(expected),
+                        describe_value_type(found),
+                    ),
+                    offset,
+                ));
+            }
+        }
+    }
+
+    /// Appends a diagnostic for every `on:<event>` handler given as a string
+    /// literal — string-based method dispatch, which §2.3/§2.13 forbid.
+    ///
+    /// A handler is bound as an expression (`on:pressed={handle_submit}`) or, on
+    /// the file path, a bare reference (`on:pressed=handle_submit`); a *quoted*
+    /// value names a method by string, and that is the form refused. A prop
+    /// attribute's string value is untouched — only an event's is a dispatch
+    /// reference.
+    fn check_string_dispatch(
+        element: &Element,
+        contract: &ComponentContract,
+        element_offset: u32,
+        diagnostics: &mut Vec<ValidationDiagnostic>,
+    ) {
+        for attribute in element.attributes() {
+            if attribute.is_event() && attribute.string_value().is_some() {
+                let event = event_name(&attribute);
+                let offset = attribute.syntax().offset().unwrap_or(element_offset);
+                diagnostics.push(ValidationDiagnostic::new(
+                    format!(
+                        "event handler for '{event}' on '{}' is a string literal; \
+                         string-based method dispatch is not used (spec §2.3, §2.13) — \
+                         bind a handler with {{…}}",
+                        contract.component()
+                    ),
+                    offset,
+                ));
+            }
+        }
     }
 }
 
@@ -400,6 +504,108 @@ const fn degrade(arity: MemberArity, inner: MemberArity) -> MemberArity {
     match arity {
         MemberArity::Any => MemberArity::Any,
         MemberArity::Once | MemberArity::AtMostOnce => inner,
+    }
+}
+
+/// The kind of literal an attribute was given, as far as it can be told at
+/// compile time (spec §2.8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AttributeValueType {
+    /// A quoted `attr="…"` value, or a braced string literal `attr={"…"}`.
+    String,
+    /// A braced integer literal `attr={5}` (or its negation).
+    Int,
+    /// A braced float literal `attr={1.5}` (or its negation).
+    Float,
+    /// A braced boolean literal `attr={true}`.
+    Bool,
+    /// A binding, a computed expression, or a bare word — nothing a literal type
+    /// can be read from, so it is not type-checked.
+    Unknown,
+}
+
+/// Classifies the literal an attribute carries, for the §2.8 type check.
+///
+/// A quoted value is a string; a braced value is parsed as a Rust expression and
+/// classified only when it is a literal (or a negated numeric literal). Anything
+/// else — a binding `{count}`, an arithmetic expression `{a + b}`, a bare word —
+/// is [`Unknown`](AttributeValueType::Unknown) and left unchecked.
+fn attribute_value_type(attribute: &Attribute) -> AttributeValueType {
+    if let Some(expression) = attribute.value_expression() {
+        let Ok(expr) = syn::parse_str::<syn::Expr>(&expression.text()) else {
+            return AttributeValueType::Unknown;
+        };
+        return literal_expr_type(&expr);
+    }
+    if attribute.string_value().is_some() {
+        return AttributeValueType::String;
+    }
+    AttributeValueType::Unknown
+}
+
+/// Classifies a braced expression that is a literal (or a negated numeric
+/// literal), else [`Unknown`](AttributeValueType::Unknown).
+fn literal_expr_type(expr: &syn::Expr) -> AttributeValueType {
+    match expr {
+        syn::Expr::Lit(lit) => match &lit.lit {
+            syn::Lit::Str(_) => AttributeValueType::String,
+            syn::Lit::Int(_) => AttributeValueType::Int,
+            syn::Lit::Float(_) => AttributeValueType::Float,
+            syn::Lit::Bool(_) => AttributeValueType::Bool,
+            _ => AttributeValueType::Unknown,
+        },
+        // A negative numeric literal is `-` applied to the literal.
+        syn::Expr::Unary(unary) if matches!(unary.op, syn::UnOp::Neg(_)) => {
+            match literal_expr_type(&unary.expr) {
+                ty @ (AttributeValueType::Int | AttributeValueType::Float) => ty,
+                _ => AttributeValueType::Unknown,
+            }
+        }
+        _ => AttributeValueType::Unknown,
+    }
+}
+
+/// Whether a value of type `found` satisfies a prop declared `expected`.
+///
+/// An [`Unknown`](AttributeValueType::Unknown) value and an
+/// [`Other`](PropTypeSurface::Other) prop are always accepted — neither carries
+/// enough information to prove a mismatch. An integer literal is accepted for a
+/// float prop (`opacity={1}`), since it is a valid float; every other pairing
+/// must match exactly.
+fn value_type_matches(expected: PropTypeSurface, found: AttributeValueType) -> bool {
+    if found == AttributeValueType::Unknown || expected == PropTypeSurface::Other {
+        return true;
+    }
+    match expected {
+        PropTypeSurface::String => found == AttributeValueType::String,
+        PropTypeSurface::Int => found == AttributeValueType::Int,
+        PropTypeSurface::Float => {
+            matches!(found, AttributeValueType::Float | AttributeValueType::Int)
+        }
+        PropTypeSurface::Bool => found == AttributeValueType::Bool,
+        PropTypeSurface::Other => true,
+    }
+}
+
+/// The human phrase for a declared prop type, for a diagnostic.
+fn describe_prop_type(ty: PropTypeSurface) -> &'static str {
+    match ty {
+        PropTypeSurface::String => "a string",
+        PropTypeSurface::Int => "an integer",
+        PropTypeSurface::Float => "a number",
+        PropTypeSurface::Bool => "a boolean",
+        PropTypeSurface::Other => "a value",
+    }
+}
+
+/// The human phrase for the literal an attribute was given, for a diagnostic.
+fn describe_value_type(ty: AttributeValueType) -> &'static str {
+    match ty {
+        AttributeValueType::String => "a string",
+        AttributeValueType::Int => "an integer",
+        AttributeValueType::Float => "a number",
+        AttributeValueType::Bool => "a boolean",
+        AttributeValueType::Unknown => "an expression",
     }
 }
 

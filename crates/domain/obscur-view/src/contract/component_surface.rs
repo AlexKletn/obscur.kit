@@ -31,6 +31,32 @@ pub enum ChildrenSurface {
     Only(Vec<&'static str>),
 }
 
+/// The broad category of a prop's declared Rust type, kept on the tooling
+/// surface so a string-keyed checker can reject a literal of the wrong kind at
+/// compile time (spec §2.8, "typed props … compile-time validation").
+///
+/// `#[derive(Contract)]` classifies each prop field's type into one of these
+/// from its normalized type string; the `.okui` compiler then compares it
+/// against the literal an attribute was given (`label={5}` → an integer for a
+/// `String` prop). [`Other`](PropTypeSurface::Other) is the escape hatch for a
+/// type the classifier does not recognise (an enum, a struct, a newtype), and a
+/// prop of that kind is never type-checked — the surface cannot know what
+/// literal, if any, would be valid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PropTypeSurface {
+    /// A string prop (`String`, `&str`, `Box<str>`, `Cow<str>`, …).
+    String,
+    /// An integer prop (`i8`…`i128`, `u8`…`u128`, `isize`, `usize`).
+    Int,
+    /// A floating-point prop (`f32`, `f64`).
+    Float,
+    /// A boolean prop (`bool`).
+    Bool,
+    /// A type the classifier does not recognise; never type-checked.
+    #[default]
+    Other,
+}
+
 /// The string-keyed *tooling* view of a component's usage contract (spec §2.13).
 ///
 /// The typed [`ComponentContract`](crate::component::ComponentContract) is the
@@ -77,6 +103,7 @@ pub struct ComponentSurface {
     required_props: Vec<&'static str>,
     allowed_props: Vec<&'static str>,
     allowed_events: Vec<&'static str>,
+    prop_types: Vec<(&'static str, PropTypeSurface)>,
     children: ChildrenSurface,
     slots: Vec<SlotSurface>,
 }
@@ -91,9 +118,36 @@ impl ComponentSurface {
             required_props: Vec::new(),
             allowed_props: Vec::new(),
             allowed_events: Vec::new(),
+            prop_types: Vec::new(),
             children: ChildrenSurface::Any,
             slots: Vec::new(),
         }
+    }
+
+    /// Records the declared type category of prop `name` (fluent; spec §2.8).
+    ///
+    /// `#[derive(Contract)]` emits one call per prop, so the `.okui` compiler can
+    /// reject a literal of the wrong kind. A prop with no recorded type — or one
+    /// recorded as [`PropTypeSurface::Other`] — is not type-checked.
+    #[must_use]
+    pub fn with_prop_type(mut self, name: &'static str, ty: PropTypeSurface) -> Self {
+        self.prop_types.push((name, ty));
+        self
+    }
+
+    /// Returns the declared type category of prop `name`, if one was recorded.
+    #[must_use]
+    pub fn prop_type(&self, name: &str) -> Option<PropTypeSurface> {
+        self.prop_types
+            .iter()
+            .find(|(prop, _)| *prop == name)
+            .map(|(_, ty)| *ty)
+    }
+
+    /// Returns every recorded `(prop name, type)` pair, in declaration order.
+    #[must_use]
+    pub fn prop_types(&self) -> &[(&'static str, PropTypeSurface)] {
+        &self.prop_types
     }
 
     /// Adds `name` to the surface's required props (fluent).

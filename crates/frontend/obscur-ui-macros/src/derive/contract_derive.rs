@@ -550,11 +550,49 @@ impl FieldModel {
         }
 
         let optional = self.is_option || self.attrs.default;
-        if optional {
-            Some(quote! { .allowing_prop(#name) })
+        let prop = if optional {
+            quote! { .allowing_prop(#name) }
         } else {
-            Some(quote! { .requiring_prop(#name) })
-        }
+            quote! { .requiring_prop(#name) }
+        };
+        // The prop's type category, so the `.okui` compiler can reject a literal
+        // of the wrong kind (§2.8). An unrecognised type classifies as `Other`
+        // and is left unchecked rather than guessed at.
+        let variant = syn::Ident::new(classify_prop_type(&self.type_string), Span::call_site());
+        Some(quote! {
+            #prop.with_prop_type(#name, ::obscur_view::contract::PropTypeSurface::#variant)
+        })
+    }
+}
+
+/// Classifies a prop field's normalized type string into the
+/// `PropTypeSurface` variant name it should carry (spec §2.8).
+///
+/// The check is on whole identifier tokens, not substrings, so a user type named
+/// `MyString` is `Other` rather than a string. An `Option<T>` classifies as its
+/// inner `T` — the `Option` token is simply not one of the ones looked for. Every
+/// unrecognised type is `Other`, which the compiler leaves untyped.
+fn classify_prop_type(type_string: &str) -> &'static str {
+    let tokens: Vec<&str> = type_string
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .filter(|token| !token.is_empty())
+        .collect();
+    let has = |name: &str| tokens.iter().any(|token| *token == name);
+    if has("String") || has("str") {
+        "String"
+    } else if has("bool") {
+        "Bool"
+    } else if has("f32") || has("f64") {
+        "Float"
+    } else if [
+        "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize",
+    ]
+    .iter()
+    .any(|int| has(int))
+    {
+        "Int"
+    } else {
+        "Other"
     }
 }
 
@@ -704,7 +742,9 @@ mod tests {
             }
         });
         assert!(generated.contains("ComponentContract :: new"));
-        assert_eq!(generated.matches("with_prop").count(), 2);
+        // `with_prop (` alone — the surface's `with_prop_type (` also contains the
+        // substring `with_prop`, so the bare needle would double-count.
+        assert_eq!(generated.matches("with_prop (").count(), 2);
         assert_eq!(generated.matches(". required ()").count(), 1);
         assert_eq!(generated.matches(". with_default ()").count(), 1);
     }
@@ -767,7 +807,9 @@ mod tests {
                 ignore_me: String,
             }
         });
-        assert_eq!(generated.matches("with_prop").count(), 1);
+        // `with_prop (` alone: the surface's `with_prop_type (` shares the
+        // `with_prop` substring and would otherwise inflate the count.
+        assert_eq!(generated.matches("with_prop (").count(), 1);
     }
 
     #[test]
@@ -1001,8 +1043,10 @@ mod tests {
                 ignore_me: String,
             }
         });
-        // One prop in the surface (skipped field absent).
-        assert_eq!(generated.matches("requiring_prop").count(), 1);
+        // One prop in the surface (skipped field absent). `requiring_prop (`
+        // alone, since `with_prop_type` shares no needle here but the typed
+        // contract's `with_prop (` would if we counted the bare `_prop`.
+        assert_eq!(generated.matches("requiring_prop (").count(), 1);
         // The skipped field contributes no NAME to the surface. It does still
         // appear as an ident in the generated `FromProps` impl — a struct literal
         // must initialise every field — so the check is on the quoted name.

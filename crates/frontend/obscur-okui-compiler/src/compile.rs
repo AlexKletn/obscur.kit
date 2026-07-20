@@ -16,7 +16,7 @@ use obscur_view::contract::ComponentSurface;
 
 use crate::lowering::{LoweringError, UiIrLowering};
 use crate::resolution::{NameResolver, ResolutionError};
-use crate::symbol::{Symbol, SymbolTable};
+use crate::symbol::{Symbol, SymbolKind, SymbolTable};
 use crate::typing::TypeError;
 use crate::validation::{
     CapabilityValidator, CollectionValidator, ComponentContract, ContractValidator,
@@ -354,8 +354,20 @@ impl Compiler {
 
         // 2. Type checking has no whole-document pass yet (see the doc comment).
 
-        // 3. Validation: expressions, capabilities, then contracts.
-        for diagnostic in ExpressionValidator::new().validate_document(document) {
+        // 3. Validation: expressions, capabilities, then contracts. The
+        //    expression check is handed the names declared as `Function` symbols
+        //    (§2.10's "explicitly exported pure functions"), so a call to one is
+        //    admitted where an unconstrained free call is refused.
+        let functions: Vec<Box<str>> = self
+            .symbols
+            .iter()
+            .filter(|symbol| matches!(symbol.kind(), SymbolKind::Function))
+            .map(|symbol| symbol.name().into())
+            .collect();
+        for diagnostic in ExpressionValidator::new()
+            .with_functions(functions)
+            .validate_document(document)
+        {
             diagnostics.push(CompileDiagnostic::Validation(diagnostic));
         }
         let capability_validator = CapabilityValidator::new(self.granted.iter().cloned());

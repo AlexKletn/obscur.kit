@@ -2,7 +2,7 @@
 
 use obscur_geometry::{Point, Rect, Size};
 
-use crate::model::Dimension;
+use crate::model::{BoxSizing, Dimension};
 
 /// A node's positioning insets — the `top` / `right` / `bottom` / `left`
 /// offsets used by a positioned node (spec §4.1; CSS `inset`).
@@ -69,6 +69,15 @@ impl Inset {
     /// * **neither definite** → **static-position fallback**: `x = cb.x` (a
     ///   documented simplification — the true static position would be the node's
     ///   in-flow position), `width` = explicit-or-natural.
+    ///
+    /// `box_sizing` and `border_padding` (the per-axis border + padding sum) convert
+    /// an explicit `width`/`height` — which under `box-sizing: content-box` is a
+    /// *content* size — into the **border-box** size this function returns: the
+    /// border box is `content_extent(size) + border_padding`, so a `content-box`
+    /// width grows by its border + padding and a `border-box` width is used as-is
+    /// (CSS 2.1 §10.3.7 uses content widths; the flow path applies the same
+    /// [`BoxSizing::content_extent`]). Insets and `natural` are already border-box
+    /// values and are unaffected.
     #[must_use]
     pub fn resolve_absolute_box(
         self,
@@ -76,11 +85,16 @@ impl Inset {
         width: Dimension,
         height: Dimension,
         natural: Size,
+        box_sizing: BoxSizing,
+        border_padding: Size,
     ) -> Rect {
+        let to_border_box = |size: f32, bp: f32| box_sizing.content_extent(size, bp) + bp;
         let (x, w) = resolve_axis(
             self.left.resolve(cb.size.width),
             self.right.resolve(cb.size.width),
-            width.resolve(cb.size.width),
+            width
+                .resolve(cb.size.width)
+                .map(|content| to_border_box(content, border_padding.width)),
             cb.origin.x,
             cb.size.width,
             natural.width,
@@ -88,7 +102,9 @@ impl Inset {
         let (y, h) = resolve_axis(
             self.top.resolve(cb.size.height),
             self.bottom.resolve(cb.size.height),
-            height.resolve(cb.size.height),
+            height
+                .resolve(cb.size.height)
+                .map(|content| to_border_box(content, border_padding.height)),
             cb.origin.y,
             cb.size.height,
             natural.height,
@@ -232,7 +248,7 @@ impl Default for Inset {
 #[cfg(test)]
 mod tests {
     use super::Inset;
-    use crate::model::Dimension;
+    use crate::model::{BoxSizing, Dimension};
     use obscur_geometry::{Point, Rect, Size};
 
     #[test]
@@ -278,6 +294,8 @@ mod tests {
             Dimension::Px(40.0),
             Dimension::Px(30.0),
             Size::new(40.0, 30.0),
+            BoxSizing::ContentBox,
+            Size::new(0.0, 0.0),
         );
         assert_eq!(
             rect,
@@ -299,6 +317,8 @@ mod tests {
             Dimension::Px(20.0),
             Dimension::Px(20.0),
             Size::new(20.0, 20.0),
+            BoxSizing::ContentBox,
+            Size::new(0.0, 0.0),
         );
         // 100 + 200 - 0 - 20 = 280 on each axis.
         assert_eq!(
@@ -322,6 +342,8 @@ mod tests {
             Dimension::Px(5.0),
             Dimension::Auto,
             Size::new(5.0, 5.0),
+            BoxSizing::ContentBox,
+            Size::new(0.0, 0.0),
         );
         assert_eq!(rect.origin, Point::new(110.0, 110.0));
         assert_eq!(rect.size, Size::new(160.0, 180.0));
@@ -335,6 +357,8 @@ mod tests {
             Dimension::Auto,
             Dimension::Auto,
             Size::new(40.0, 30.0),
+            BoxSizing::ContentBox,
+            Size::new(0.0, 0.0),
         );
         assert_eq!(
             rect,
@@ -356,6 +380,8 @@ mod tests {
             Dimension::Px(10.0),
             Dimension::Px(10.0),
             Size::new(10.0, 10.0),
+            BoxSizing::ContentBox,
+            Size::new(0.0, 0.0),
         );
         assert_eq!(rect.origin, Point::new(150.0, 120.0));
     }

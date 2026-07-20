@@ -11,9 +11,9 @@ use obscur_scene::color::Color;
 use obscur_scene::command::{DisplayList, DisplayListBuilder, PaintCommand};
 use obscur_scene::layer::{LayerEffect, SceneLayer};
 use obscur_scene::paint::{
-    Brush, ConicGradient as SceneConicGradient, ExtendMode, GradientStop as SceneGradientStop,
-    LinearGradient as SceneLinearGradient, Paint, RadialGradient as SceneRadialGradient,
-    SceneImage, SceneVector, Stroke,
+    BlendMode, Brush, ConicGradient as SceneConicGradient, ExtendMode,
+    GradientStop as SceneGradientStop, LinearGradient as SceneLinearGradient, Paint,
+    RadialGradient as SceneRadialGradient, SceneImage, SceneVector, Stroke,
 };
 use obscur_scene::path::Path;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
@@ -1229,6 +1229,12 @@ impl SceneCoordinator {
         // A fully opaque (or absent) opacity records nothing — byte-for-byte
         // identical to before opacity layers existed.
         let mut opacity_brackets: Vec<(NodeId, f32)> = Vec::new();
+        // A CSS `mix-blend-mode` other than `normal` makes the node a compositing
+        // group blended onto its backdrop: the subtree paint is bracketed by a
+        // `PushLayer(SceneLayer::with_blend_mode(mode))` … `PopLayer`, nested with
+        // the opacity layer (compositing-1 §5). `normal` (or absent) records nothing
+        // — byte-for-byte identical.
+        let mut blend_brackets: Vec<(NodeId, BlendMode)> = Vec::new();
         // A CSS `filter` blurs and/or color-transforms a node's WHOLE composited
         // subtree: it brackets the subtree with a
         // `PushLayer(SceneLayer::with_clip(border_box).add_effect(...))` …
@@ -1350,6 +1356,12 @@ impl SceneCoordinator {
             // records nothing (byte-for-byte identical to before).
             if let Some(alpha) = opacity_of(computed, node) {
                 opacity_brackets.push((node, alpha));
+            }
+
+            // A CSS `mix-blend-mode` other than `normal` brackets this node's
+            // subtree with a blend group layer. Like opacity it needs no box.
+            if let Some(mode) = blend_mode_of(computed, node) {
+                blend_brackets.push((node, mode));
             }
 
             // A CSS `filter` (blur and/or color ops) brackets this node's subtree
@@ -1913,6 +1925,7 @@ impl SceneCoordinator {
         if !clip_brackets.is_empty()
             || !transform_brackets.is_empty()
             || !opacity_brackets.is_empty()
+            || !blend_brackets.is_empty()
             || !blur_brackets.is_empty()
             || !outline_brackets.is_empty()
             || !scroll_brackets.is_empty()
@@ -2013,6 +2026,35 @@ impl SceneCoordinator {
                     order: PaintUnit::LAYER_PUSH_ORDER,
                     commands: vec![PaintCommand::PushLayer(
                         SceneLayer::new().with_opacity(alpha),
+                    )],
+                });
+                units.push(PaintUnit {
+                    z,
+                    layer,
+                    tree_index: exit,
+                    order: PaintUnit::layer_pop_order(depth),
+                    commands: vec![PaintCommand::PopLayer],
+                });
+            }
+            // Blend-mode group layers are emitted like opacity layers (same push /
+            // pop ordering), so a node carrying both gets two nested group layers and
+            // the subtree composites as one group blended onto its backdrop.
+            for (node, mode) in blend_brackets {
+                let z = zmap.get(&node).copied().unwrap_or(0);
+                let layer = layermap
+                    .get(&node)
+                    .copied()
+                    .unwrap_or(PaintLayer::NonPositioned);
+                let enter = enter_index.get(&node).copied().unwrap_or(0);
+                let exit = exit_index.get(&node).copied().unwrap_or(enter);
+                let depth = depth_of.get(&node).copied().unwrap_or(0);
+                units.push(PaintUnit {
+                    z,
+                    layer,
+                    tree_index: enter,
+                    order: PaintUnit::LAYER_PUSH_ORDER,
+                    commands: vec![PaintCommand::PushLayer(
+                        SceneLayer::new().with_blend_mode(mode),
                     )],
                 });
                 units.push(PaintUnit {
@@ -2517,6 +2559,18 @@ fn object_fit_of(computed: &ComputedStyles, node: NodeId) -> ObjectFit {
         .unwrap_or(ObjectFit::Fill)
 }
 
+/// Reads a node's computed `object-position`, defaulting to the CSS initial
+/// `50% 50%` (centered) when absent — NOT `background-position`'s `0% 0%`. Placed
+/// by the same [`BackgroundPosition`] value type since it is the same
+/// `<position>` grammar (CSS Images 3 §5.2).
+fn object_position_of(computed: &ComputedStyles, node: NodeId) -> BackgroundPosition {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::ObjectPosition))
+        .and_then(ComputedValue::as_background_position)
+        .unwrap_or_else(|| BackgroundPosition::new(Length::Percent(50.0), Length::Percent(50.0)))
+}
+
 /// Resolves the placed tile rect for an element's image `content` within its box
 /// `region`, per `object-fit`, centered (the `object-position: 50% 50%` default).
 ///
@@ -2554,9 +2608,12 @@ fn object_fit_tile_sized(
     let bw = region.size.width;
     let bh = region.size.height;
     let (tw, th) = resolve_object_fit_size(fit, iw, ih, bw, bh);
-    // Center the tile (object-position default 50% 50%): (box - tile) / 2 per axis.
-    let ox = region.origin.x + (bw - tw) / 2.0;
-    let oy = region.origin.y + (bh - th) / 2.0;
+    // Place the tile per `object-position` (initial `50% 50%` = centered), by the
+    // same CSS position formula as `background-position`: a `%` aligns the tile's
+    // pct point to the box's pct point, so `(box − tile) × pct` per axis.
+    let position = object_position_of(computed, node);
+    let ox = region.origin.x + resolve_background_position(position.x(), bw, tw);
+    let oy = region.origin.y + resolve_background_position(position.y(), bh, th);
     Rect::new(Point::new(ox, oy), Size::new(tw, th))
 }
 
@@ -2930,15 +2987,35 @@ fn emit_box_shadow(
 ) {
     let px = |length: Length| length.as_px().map_or(0.0, |px| px.0);
     let color = scene_color_from(shadow.color().unwrap_or(current));
-    builder.draw_shadow(
-        bounds,
-        radii,
-        color,
-        px(shadow.blur()),
-        px(shadow.spread()),
-        (px(shadow.offset_x()), px(shadow.offset_y())),
-        shadow.is_inset(),
+    let blur = px(shadow.blur());
+    let spread = px(shadow.spread());
+    let offset = (px(shadow.offset_x()), px(shadow.offset_y()));
+    let inset = shadow.is_inset();
+    // css-backgrounds-3 §6.1: an OUTER (drop) shadow "is clipped inside the
+    // border-box of the element" — it is painted only OUTSIDE the border edge. The
+    // element's own (possibly translucent) background then paints over an untinted
+    // border box. Without this the shadow bleeds under a translucent background and
+    // tints it. The clip is the complement of the border box: an even-odd ring
+    // whose outer rectangle comfortably contains the whole shadow (border box grown
+    // by spread + offset + a blur allowance) and whose punched-out hole is the
+    // border box with its own corner radii. An inset shadow is confined to the box
+    // by the renderer and takes no such clip.
+    if inset {
+        builder.draw_shadow(bounds, radii, color, blur, spread, offset, inset);
+        return;
+    }
+    let grow = spread + blur * 3.0 + offset.0.abs() + offset.1.abs() + 2.0;
+    let outer = Rect::new(
+        Point::new(bounds.origin.x - grow, bounds.origin.y - grow),
+        Size::new(
+            bounds.size.width + 2.0 * grow,
+            bounds.size.height + 2.0 * grow,
+        ),
     );
+    let exclusion = Path::rounded_rect_ring(outer, CornerRadii::uniform(0.0), bounds, radii);
+    builder.push_clip(Clip::path(exclusion));
+    builder.draw_shadow(bounds, radii, color, blur, spread, offset, inset);
+    builder.pop_clip();
 }
 
 /// Resolves a node's CSS 2D `transform` into the absolute-space affine that
@@ -2989,6 +3066,54 @@ fn opacity_of(computed: &ComputedStyles, node: NodeId) -> Option<f32> {
     let alpha = computed.get(&node).and_then(ComputedStyle::opacity)?;
     let alpha = alpha.clamp(0.0, 1.0);
     (alpha < 1.0).then_some(alpha)
+}
+
+/// Reads a node's computed `mix-blend-mode` as a scene [`BlendMode`], or [`None`]
+/// when the subtree needs no blend layer (compositing-1 §5).
+///
+/// Reads [`PropertyId::MixBlendMode`] — a [`PropertyValue::Keyword`] backed by one
+/// of the reserved [`layout_keyword`] `MIX_BLEND_MODE_*` handles — and maps it to
+/// the matching separable [`BlendMode`]. Returns [`None`] for `normal` (or an
+/// absent value), so nothing is bracketed and the command stream is byte-for-byte
+/// identical to before mix-blend-mode existed. A non-normal value brackets the
+/// node's whole subtree with a `PushLayer(SceneLayer::with_blend_mode(mode))` …
+/// `PopLayer`, compositing the group onto its backdrop with that blend.
+fn blend_mode_of(computed: &ComputedStyles, node: NodeId) -> Option<BlendMode> {
+    let sym = match computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::MixBlendMode))
+        .map(ComputedValue::value)
+    {
+        Some(&PropertyValue::Keyword(sym)) => sym,
+        _ => return None,
+    };
+    let mode = if sym == layout_keyword::MIX_BLEND_MODE_MULTIPLY {
+        BlendMode::Multiply
+    } else if sym == layout_keyword::MIX_BLEND_MODE_SCREEN {
+        BlendMode::Screen
+    } else if sym == layout_keyword::MIX_BLEND_MODE_OVERLAY {
+        BlendMode::Overlay
+    } else if sym == layout_keyword::MIX_BLEND_MODE_DARKEN {
+        BlendMode::Darken
+    } else if sym == layout_keyword::MIX_BLEND_MODE_LIGHTEN {
+        BlendMode::Lighten
+    } else if sym == layout_keyword::MIX_BLEND_MODE_COLOR_DODGE {
+        BlendMode::ColorDodge
+    } else if sym == layout_keyword::MIX_BLEND_MODE_COLOR_BURN {
+        BlendMode::ColorBurn
+    } else if sym == layout_keyword::MIX_BLEND_MODE_HARD_LIGHT {
+        BlendMode::HardLight
+    } else if sym == layout_keyword::MIX_BLEND_MODE_SOFT_LIGHT {
+        BlendMode::SoftLight
+    } else if sym == layout_keyword::MIX_BLEND_MODE_DIFFERENCE {
+        BlendMode::Difference
+    } else if sym == layout_keyword::MIX_BLEND_MODE_EXCLUSION {
+        BlendMode::Exclusion
+    } else {
+        // `normal` or an unmodelled keyword: no blend layer.
+        return None;
+    };
+    Some(mode)
 }
 
 /// Reads a node's computed `transform`, if present and a resolved affine.

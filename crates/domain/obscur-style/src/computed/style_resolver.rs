@@ -94,6 +94,7 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::BackgroundPosition,
     PropertyId::BackgroundRepeat,
     PropertyId::ObjectFit,
+    PropertyId::ObjectPosition,
     PropertyId::Opacity,
     PropertyId::Visibility,
     // Positioning.
@@ -151,6 +152,8 @@ const COMPUTED_PROPERTIES: &[PropertyId] = &[
     // 2D transform.
     PropertyId::Transform,
     PropertyId::TransformOrigin,
+    // Compositing.
+    PropertyId::MixBlendMode,
     // Flex container / item.
     PropertyId::Display,
     PropertyId::FlexDirection,
@@ -408,6 +411,18 @@ impl StyleResolver {
                 ))
                 .expect("ObjectFit is a concrete computed value"),
             ),
+            // `object-position` initial is `50% 50%` (centered) — NOT
+            // `background-position`'s `0% 0%`. Resolved explicitly so an absent
+            // property still centers the replaced content (CSS Images 3 §5.2).
+            PropertyId::ObjectPosition => Some(
+                ComputedValue::from_concrete(PropertyValue::BackgroundPosition(
+                    crate::property::BackgroundPosition::new(
+                        crate::property::Length::Percent(50.0),
+                        crate::property::Length::Percent(50.0),
+                    ),
+                ))
+                .expect("ObjectPosition is a concrete computed value"),
+            ),
             // `box-shadow` initial is `none` (no shadows). There is no
             // `BoxShadow` list value for `none` other than an empty one, and an
             // absent value paints nothing all the same, so it is left unresolved —
@@ -430,6 +445,10 @@ impl StyleResolver {
             // value is left unresolved and the coordinator defaults to the center,
             // so no value need be minted here.
             PropertyId::TransformOrigin => None,
+            // `mix-blend-mode` initial is the `normal` keyword, an interned symbol
+            // Phase 1 cannot mint, so it is left unresolved (the coordinator treats
+            // an absent value as `normal` and brackets nothing) — like `display`.
+            PropertyId::MixBlendMode => None,
             PropertyId::Opacity => Some(ComputedValue::number(1.0)),
             PropertyId::Width | PropertyId::Height => Some(ComputedValue::length(Length::Auto)),
             // Box-model spacing: initial `0`.
@@ -1509,6 +1528,7 @@ mod tests {
                 | PropertyId::BackgroundPosition
                 | PropertyId::BackgroundRepeat
                 | PropertyId::ObjectFit
+                | PropertyId::ObjectPosition
                 | PropertyId::Opacity
                 | PropertyId::Width
                 | PropertyId::Height
@@ -1554,6 +1574,7 @@ mod tests {
                 | PropertyId::BackdropFilter
                 | PropertyId::Transform
                 | PropertyId::TransformOrigin
+                | PropertyId::MixBlendMode
                 | PropertyId::MinWidth
                 | PropertyId::MinHeight
                 | PropertyId::MaxWidth
@@ -1624,6 +1645,7 @@ mod tests {
             PropertyId::BackgroundPosition,
             PropertyId::BackgroundRepeat,
             PropertyId::ObjectFit,
+            PropertyId::ObjectPosition,
             PropertyId::Opacity,
             PropertyId::Width,
             PropertyId::Height,
@@ -1669,6 +1691,7 @@ mod tests {
             PropertyId::BackdropFilter,
             PropertyId::Transform,
             PropertyId::TransformOrigin,
+            PropertyId::MixBlendMode,
             PropertyId::MinWidth,
             PropertyId::MinHeight,
             PropertyId::MaxWidth,

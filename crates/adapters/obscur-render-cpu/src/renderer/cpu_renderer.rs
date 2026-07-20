@@ -100,7 +100,7 @@ use obscur_render::{
 use obscur_scene::clip::{Clip, ClipShape};
 use obscur_scene::color::{AlphaMode, Color};
 use obscur_scene::command::PaintCommand;
-use obscur_scene::paint::{Brush, Paint, SceneImage};
+use obscur_scene::paint::{BlendMode, Brush, Paint, SceneImage};
 use obscur_scene::path::{FillRule, Path, PathSegment};
 use obscur_scene::text::GlyphRun;
 use skrifa::instance::{LocationRef, Size as SkrifaSize};
@@ -350,7 +350,10 @@ impl Renderer for CpuRenderer {
         // offscreen target to composite on `PopLayer`, or `None` for a trivial
         // (passthrough) layer that pushed nothing. Keeps pushes and pops balanced
         // regardless of whether a layer needed an offscreen pass.
-        let mut layer_stack: Vec<Option<f32>> = Vec::new();
+        // Each open group layer that pushed an offscreen records how to composite it
+        // back: its opacity and its (separable) blend mode. `None` marks a
+        // passthrough layer that pushed no offscreen.
+        let mut layer_stack: Vec<Option<(f32, tiny_skia::BlendMode)>> = Vec::new();
 
         // The clip stack: each entry is the effective clip mask in force after a
         // `PushClip`, or `None` when no representable clip is active at that depth.
@@ -377,6 +380,23 @@ impl Renderer for CpuRenderer {
                         continue;
                     };
                     match paint {
+                        // A conic (angular) gradient is rasterized for real on the
+                        // CPU backend: it is decomposed into angular wedges filled at
+                        // their swept color, clipped to the element outline (§5.1's
+                        // "conic gradients"). The linear/radial brushes still flatten
+                        // (documented approximation, `brush_color`).
+                        Paint::Fill(Brush::Conic(conic)) => {
+                            fill_conic(
+                                pixmap,
+                                conic,
+                                &sk_path,
+                                to_sk_fill_rule(path.fill_rule()),
+                                width,
+                                height,
+                                clip,
+                                current,
+                            );
+                        }
                         Paint::Fill(brush) => {
                             let Some(color) = brush_color(brush) else {
                                 continue;
@@ -435,14 +455,16 @@ impl Renderer for CpuRenderer {
                     // Guard against an unbalanced list: a stray pop is ignored.
                     let _ = clip_stack.pop();
                 }
-                // A CSS `opacity` group layer. A layer with reduced opacity pushes
-                // a fresh transparent offscreen target the whole group rasterizes
-                // into; `PopLayer` composites it back at that opacity, so the group
-                // blends as one (overlapping opaque children are not double-
-                // darkened). A trivial layer (opacity `1.0`) stays a passthrough:
-                // it pushes no offscreen, so the plain path is byte-identical. The
-                // layer's own blend-mode / transform / effect fields are still not
-                // honored here — a documented approximation.
+                // A CSS `opacity` / `mix-blend-mode` group layer. A layer with
+                // reduced opacity OR a non-`Normal` blend mode pushes a fresh
+                // transparent offscreen target the whole group rasterizes into;
+                // `PopLayer` composites it back at that opacity and blend, so the
+                // group blends as one (overlapping opaque children are not double-
+                // darkened, and the group multiplies/screens/… onto the backdrop as
+                // a whole — compositing-1 §5). A trivial layer (opacity `1.0`, blend
+                // `Normal`) stays a passthrough: it pushes no offscreen, so the plain
+                // path is byte-identical. The layer's own transform / effect fields
+                // are still not honored here — a documented approximation.
                 PaintCommand::PushLayer(layer) => {
                     // A layer's own clip confines its subtree exactly as a
                     // `PushClip` of the same region would, and it reaches this
@@ -459,14 +481,17 @@ impl Renderer for CpuRenderer {
                         |clip| resolve_clip_entry(clip, parent, width, height, current),
                     );
                     clip_stack.push(entry);
-                    if layer.opacity() < 1.0 {
+                    let blend = to_sk_blend_mode(layer.blend_mode());
+                    let needs_offscreen =
+                        layer.opacity() < 1.0 || blend != tiny_skia::BlendMode::SourceOver;
+                    if needs_offscreen {
                         match targets
                             .last()
                             .and_then(|top| tiny_skia::Pixmap::new(top.width(), top.height()))
                         {
                             Some(offscreen) => {
                                 targets.push(offscreen);
-                                layer_stack.push(Some(layer.opacity().clamp(0.0, 1.0)));
+                                layer_stack.push(Some((layer.opacity().clamp(0.0, 1.0), blend)));
                             }
                             // Allocation failed: fall back to passthrough so the
                             // group still paints (at full opacity) and the list
@@ -486,8 +511,8 @@ impl Renderer for CpuRenderer {
                     let _ = clip_stack.pop();
                     // Balance a stray pop; composite the offscreen when this layer
                     // opened one.
-                    if let Some(Some(opacity)) = layer_stack.pop() {
-                        composite_top_layer(&mut targets, opacity);
+                    if let Some(Some((opacity, blend))) = layer_stack.pop() {
+                        composite_top_layer(&mut targets, opacity, blend);
                     }
                 }
                 PaintCommand::DrawText { origin, run, brush } => {
@@ -501,7 +526,7 @@ impl Renderer for CpuRenderer {
                     rect,
                     radii,
                     color,
-                    blur: _,
+                    blur,
                     spread,
                     offset,
                     inset,
@@ -511,7 +536,8 @@ impl Renderer for CpuRenderer {
                         continue;
                     };
                     draw_shadow_approx(
-                        pixmap, *rect, *radii, *color, *spread, *offset, *inset, clip, current,
+                        pixmap, *rect, *radii, *color, *blur, *spread, *offset, *inset, clip,
+                        current,
                     );
                 }
                 PaintCommand::DrawImage {
@@ -543,8 +569,8 @@ impl Renderer for CpuRenderer {
         // offscreen back at its opacity so its content is not lost, leaving only the
         // root frame buffer.
         while let Some(entry) = layer_stack.pop() {
-            if let Some(opacity) = entry {
-                composite_top_layer(&mut targets, opacity);
+            if let Some((opacity, blend)) = entry {
+                composite_top_layer(&mut targets, opacity, blend);
             }
         }
         // The root frame buffer is the only remaining target (a well-formed list
@@ -617,17 +643,42 @@ impl Renderer for CpuRenderer {
     }
 }
 
+/// Maps a scene [`BlendMode`] onto the `tiny-skia` compositing operator. The
+/// separable CSS `mix-blend-mode` values map one-to-one; [`BlendMode::Normal`] is
+/// `SourceOver`, the neutral operator.
+fn to_sk_blend_mode(mode: BlendMode) -> tiny_skia::BlendMode {
+    match mode {
+        BlendMode::Normal => tiny_skia::BlendMode::SourceOver,
+        BlendMode::Multiply => tiny_skia::BlendMode::Multiply,
+        BlendMode::Screen => tiny_skia::BlendMode::Screen,
+        BlendMode::Overlay => tiny_skia::BlendMode::Overlay,
+        BlendMode::Darken => tiny_skia::BlendMode::Darken,
+        BlendMode::Lighten => tiny_skia::BlendMode::Lighten,
+        BlendMode::ColorDodge => tiny_skia::BlendMode::ColorDodge,
+        BlendMode::ColorBurn => tiny_skia::BlendMode::ColorBurn,
+        BlendMode::HardLight => tiny_skia::BlendMode::HardLight,
+        BlendMode::SoftLight => tiny_skia::BlendMode::SoftLight,
+        BlendMode::Difference => tiny_skia::BlendMode::Difference,
+        BlendMode::Exclusion => tiny_skia::BlendMode::Exclusion,
+    }
+}
+
 /// Composites the top layer target of `targets` back onto the target beneath it
-/// at `opacity`, then drops it — the group-opacity blend for a CSS `opacity`
-/// layer (spec §5.1).
+/// at `opacity` and `blend`, then drops it — the group blend for a CSS `opacity` /
+/// `mix-blend-mode` layer (spec §5.1, compositing-1 §5).
 ///
 /// The offscreen (which already holds the whole group's paint at full opacity) is
-/// drawn onto the parent with a [`tiny_skia::PixmapPaint`] at `opacity` and
-/// `SrcOver`, so the group blends **as one**: two overlapping opaque children
-/// composite once, not twice (real group compositing, not per-element alpha).
-/// Does nothing when only the root target remains (a stray pop), so the root is
-/// never consumed.
-fn composite_top_layer(targets: &mut Vec<tiny_skia::Pixmap>, opacity: f32) {
+/// drawn onto the parent with a [`tiny_skia::PixmapPaint`] at `opacity` and the
+/// `blend` operator, so the group blends **as one**: two overlapping opaque
+/// children composite once, not twice (real group compositing, not per-element
+/// alpha), and a non-`SourceOver` blend multiplies/screens/… the whole group onto
+/// its backdrop. Does nothing when only the root target remains (a stray pop), so
+/// the root is never consumed.
+fn composite_top_layer(
+    targets: &mut Vec<tiny_skia::Pixmap>,
+    opacity: f32,
+    blend: tiny_skia::BlendMode,
+) {
     // Only composite an actual layer: never pop the root frame buffer.
     if targets.len() < 2 {
         return;
@@ -642,6 +693,7 @@ fn composite_top_layer(targets: &mut Vec<tiny_skia::Pixmap>, opacity: f32) {
     };
     let paint = tiny_skia::PixmapPaint {
         opacity: opacity.clamp(0.0, 1.0),
+        blend_mode: blend,
         ..Default::default()
     };
     parent.draw_pixmap(
@@ -716,6 +768,136 @@ fn brush_color(brush: &Brush) -> Option<Color> {
     }
 }
 
+/// Rasterizes a conic (angular) gradient over the element outline `sk_path`
+/// (§5.1's "conic gradients"). tiny-skia has no conic shader, so the sweep is
+/// decomposed into angular **wedges** — thin triangles fanning out from the
+/// gradient center — each filled at the color swept at its mid-angle and confined
+/// to the element outline (intersected with the active `clip`).
+///
+/// The gradient center and start angle come from [`ConicGradient`]; a wedge at
+/// normalized offset `o` points along `start_angle + o·2π` (screen-space
+/// clockwise), matching the coordinator's `(from_angle − 90°)` convention and the
+/// `atan2(dy, dx)` a reader would sample with. Wedges cover the full `[0, 1]` turn:
+/// the range before the first stop and after the last is filled with that stop's
+/// color (the [`ExtendMode::Pad`](obscur_scene::paint::ExtendMode) edge), and each
+/// inter-stop span is subdivided finely and its endpoints' colors interpolated, so
+/// a smooth gradient is approximated and a hard-stop gradient (equal endpoint
+/// colors) is exact. Wedges are filled **aliased** so adjacent triangles tile
+/// without a seam; the outline's own anti-aliasing comes from the clip mask.
+#[allow(clippy::too_many_arguments)]
+fn fill_conic(
+    pixmap: &mut tiny_skia::Pixmap,
+    conic: &obscur_scene::paint::ConicGradient,
+    sk_path: &tiny_skia::Path,
+    fill_rule: tiny_skia::FillRule,
+    width: u32,
+    height: u32,
+    clip: Option<&tiny_skia::Mask>,
+    transform: tiny_skia::Transform,
+) {
+    let stops = conic.stops();
+    let Some(&first) = stops.first() else {
+        return;
+    };
+    let last = stops[stops.len() - 1];
+    // The element outline (∩ active clip) becomes the mask every wedge is confined
+    // to. Without it there is nothing to fill.
+    let Some(region) = build_clip_mask(width, height, sk_path, fill_rule, clip, transform) else {
+        return;
+    };
+    let center = conic.center();
+    let start = conic.start_angle();
+    // A radius that reaches beyond every corner of the buffer from the center, so a
+    // wedge's outer edge always lies outside the region being filled.
+    #[allow(clippy::cast_precision_loss)]
+    let radius = (width as f32 + center.x.abs()).hypot(height as f32 + center.y.abs()) + 1.0;
+
+    // The gap-free segment list covering the whole `[0, 1]` turn: a leading pad, the
+    // inter-stop spans, and a trailing pad (each `(o0, c0, o1, c1)`).
+    let mut segments: Vec<(f32, Color, f32, Color)> = Vec::new();
+    if first.offset() > 0.0 {
+        segments.push((0.0, first.color(), first.offset(), first.color()));
+    }
+    for pair in stops.windows(2) {
+        if pair[1].offset() > pair[0].offset() {
+            segments.push((
+                pair[0].offset(),
+                pair[0].color(),
+                pair[1].offset(),
+                pair[1].color(),
+            ));
+        }
+    }
+    if last.offset() < 1.0 {
+        segments.push((last.offset(), last.color(), 1.0, last.color()));
+    }
+    // A single stop (or all-coincident stops) paints the whole region one color.
+    if segments.is_empty() {
+        segments.push((0.0, first.color(), 1.0, first.color()));
+    }
+
+    for (o0, c0, o1, c1) in segments {
+        let span = o1 - o0;
+        if span <= 0.0 {
+            continue;
+        }
+        // ~1° per sub-wedge so the outer arc stays outside the box and a smooth
+        // span reads as a gradient rather than a fan of facets.
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )]
+        let steps = ((span * 360.0).ceil() as usize).max(1);
+        for k in 0..steps {
+            #[allow(clippy::cast_precision_loss)]
+            let f0 = k as f32 / steps as f32;
+            #[allow(clippy::cast_precision_loss)]
+            let f1 = (k + 1) as f32 / steps as f32;
+            let color = lerp_color(c0, c1, (f0 + f1) * 0.5);
+            let Some(sk_paint) = aliased_solid_paint(color) else {
+                continue;
+            };
+            let a0 = start + (o0 + span * f0) * std::f32::consts::TAU;
+            let a1 = start + (o0 + span * f1) * std::f32::consts::TAU;
+            let mut builder = tiny_skia::PathBuilder::new();
+            builder.move_to(center.x, center.y);
+            builder.line_to(center.x + radius * a0.cos(), center.y + radius * a0.sin());
+            builder.line_to(center.x + radius * a1.cos(), center.y + radius * a1.sin());
+            builder.close();
+            if let Some(wedge) = builder.finish() {
+                pixmap.fill_path(
+                    &wedge,
+                    &sk_paint,
+                    tiny_skia::FillRule::Winding,
+                    transform,
+                    Some(&region),
+                );
+            }
+        }
+    }
+}
+
+/// Linearly interpolates between two straight-alpha [`Color`]s at `t ∈ [0, 1]`
+/// (component-wise; `t` is clamped). Used to sample a gradient span's swept color.
+fn lerp_color(a: Color, b: Color, t: f32) -> Color {
+    let t = t.clamp(0.0, 1.0);
+    let mix = |x: f32, y: f32| (y - x).mul_add(t, x);
+    Color::rgba(mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b), mix(a.a, b.a))
+}
+
+/// An **aliased** solid-color [`tiny_skia::Paint`] — used for conic-gradient wedges,
+/// whose shared internal edges must tile pixel-exactly without the AA seam an
+/// anti-aliased fill would leave between adjacent triangles.
+fn aliased_solid_paint(color: Color) -> Option<tiny_skia::Paint<'static>> {
+    let sk_color = to_sk_color(color)?;
+    Some(tiny_skia::Paint {
+        shader: tiny_skia::Shader::SolidColor(sk_color),
+        anti_alias: false,
+        ..Default::default()
+    })
+}
+
 /// Maps a domain [`Color`] (straight-alpha sRGB, `f32`) onto a
 /// [`tiny_skia::Color`], clamping each component to `0.0..=1.0`. Returns `None`
 /// only if `tiny-skia` rejects the clamped components.
@@ -764,6 +946,7 @@ fn draw_shadow_approx(
     rect: Rect,
     radii: CornerRadii,
     color: Color,
+    blur: f32,
     spread: f32,
     offset: (f32, f32),
     inset: bool,
@@ -795,7 +978,16 @@ fn draw_shadow_approx(
     let Some(sk_path) = to_sk_path(&path) else {
         return;
     };
-    let faded = Color::rgba(color.r, color.g, color.b, color.a * SHADOW_APPROX_ALPHA);
+    // The alpha fade fakes the softness a real gaussian blur would give. A shadow
+    // with **no blur** (`blur == 0`) has a crisp, fully-opaque edge — there is no
+    // softness to fake — so it keeps the color's own alpha, exactly as the inset
+    // path does for its exact ring. Only a blurred shadow is faded.
+    let alpha = if blur > 0.0 {
+        color.a * SHADOW_APPROX_ALPHA
+    } else {
+        color.a
+    };
+    let faded = Color::rgba(color.r, color.g, color.b, alpha);
     let Some(sk_paint) = solid_paint(faded) else {
         return;
     };

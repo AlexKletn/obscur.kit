@@ -1293,7 +1293,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 106] = [
+    const ALL: [PropertyId; 108] = [
         // Logical box-model longhands (spec §4.13). They parse exactly like their
         // physical counterparts — a length — and resolve onto them at
         // computed-value time via `PropertyId::physical_under`.
@@ -1316,6 +1316,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::BackgroundPosition,
         PropertyId::BackgroundRepeat,
         PropertyId::ObjectFit,
+        PropertyId::ObjectPosition,
         PropertyId::Opacity,
         PropertyId::Width,
         PropertyId::Height,
@@ -1361,6 +1362,7 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::BackdropFilter,
         PropertyId::Transform,
         PropertyId::TransformOrigin,
+        PropertyId::MixBlendMode,
         PropertyId::MinWidth,
         PropertyId::MinHeight,
         PropertyId::MaxWidth,
@@ -1494,6 +1496,17 @@ fn lower_for_property(
             return Some(wide);
         }
         return lower_object_fit(values);
+    }
+    if property == PropertyId::ObjectPosition {
+        if let Some(ParsedValue::Keyword(keyword)) = values.first()
+            && let Some(wide) = css_wide_keyword(keyword)
+            && values.len() == 1
+        {
+            return Some(wide);
+        }
+        // `object-position` is the same `<position>` grammar as
+        // `background-position`; reuse its lowering (CSS Images 3 §5.2).
+        return lower_background_position(values);
     }
     if property == PropertyId::BoxShadow {
         if let Some(ParsedValue::Keyword(keyword)) = values.first()
@@ -1751,6 +1764,7 @@ fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<Inte
         PropertyId::OverflowWrap => Some(layout_keyword::overflow_wrap_from_name),
         PropertyId::WordBreak => Some(layout_keyword::word_break_from_name),
         PropertyId::Overflow => Some(layout_keyword::overflow_from_name),
+        PropertyId::MixBlendMode => Some(layout_keyword::mix_blend_mode_from_name),
         _ => None,
     }
 }
@@ -3105,7 +3119,7 @@ fn lower_transform(values: &[ParsedValue]) -> Option<PropertyValue> {
     if let [ParsedValue::Keyword(keyword)] = values
         && keyword.eq_ignore_ascii_case("none")
     {
-        return Some(PropertyValue::Transform(Transform::IDENTITY));
+        return Some(PropertyValue::Transform(Transform::NONE));
     }
     if values.is_empty() {
         return None;
@@ -4010,7 +4024,7 @@ fn lower_conic_gradient(args: &[ParsedValue]) -> Option<ConicGradient> {
     }
     let mut stops: Vec<GradientStop> = Vec::with_capacity(stop_parts.len());
     for part in stop_parts {
-        stops.push(parse_color_stop(part)?);
+        stops.push(parse_conic_color_stop(part)?);
     }
     resolve_stop_positions(&mut stops);
     Some(ConicGradient::new(angle, cx, cy, stops))
@@ -4236,6 +4250,38 @@ fn parse_stop_color(value: &ParsedValue) -> Option<StyleColor> {
 fn stop_position(value: &ParsedValue) -> Option<f32> {
     match value {
         ParsedValue::Percentage(p) => Some(narrow_f32(*p) / 100.0),
+        _ => None,
+    }
+}
+
+/// Parses one `<angular-color-stop>` for a `conic-gradient`: a lone color
+/// (auto-positioned) or a color followed by an `<angle-percentage>` position
+/// (css-images-4 §3.4). Unlike a linear/radial stop, a conic stop's position may be
+/// an `<angle>`, normalized against a full turn (`0deg` → `0.0`, `360deg` → `1.0`);
+/// a `<percentage>` is also accepted. Returns [`None`] for an unparseable color or
+/// an out-of-grammar position.
+fn parse_conic_color_stop(part: &[ParsedValue]) -> Option<GradientStop> {
+    match part {
+        [color] => Some(GradientStop::auto(parse_stop_color(color)?)),
+        [color, position] => {
+            let color = parse_stop_color(color)?;
+            let position = conic_stop_position(position)?;
+            Some(GradientStop::new(color, position))
+        }
+        _ => None,
+    }
+}
+
+/// Reads a conic-gradient stop's used position as a normalized `0.0..=1.0` fraction
+/// of a full turn: a `<percentage>` divides by 100, an `<angle>` divides by 360deg,
+/// and a bare `0` is the zero angle. Any other shape is out of grammar ([`None`]).
+fn conic_stop_position(value: &ParsedValue) -> Option<f32> {
+    match value {
+        ParsedValue::Percentage(p) => Some(narrow_f32(*p) / 100.0),
+        ParsedValue::Dimension { value, unit } => {
+            angle_to_degrees(*value, unit).map(|deg| deg / 360.0)
+        }
+        ParsedValue::Number(n) if *n == 0.0 => Some(0.0),
         _ => None,
     }
 }

@@ -27,7 +27,7 @@ use obscur_interaction::command::{
 use obscur_interaction::focus::{FocusScope, FocusScopeId};
 use obscur_interaction::hover::{HoverChain, HoverTransition};
 use obscur_interaction::pointer::{PointerEvent, PointerEventKind};
-use obscur_interaction::spatial::{HitTest, SpatialIndex};
+use obscur_interaction::spatial::SpatialIndex;
 use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_localization::locale::LanguageTag;
 use obscur_motion::scheduler::MotionScheduler;
@@ -599,6 +599,13 @@ pub struct UiRuntime {
     /// held [`root_view`](Self::root_view). Empty by default; the explicit
     /// `&[Stylesheet]`-taking render paths ignore this field.
     stylesheets: Vec<Stylesheet>,
+    /// The last **non-empty** author sheet set any frame was rendered with, reused
+    /// when a subsequent frame supplies none. A runtime-state change that owns no
+    /// styling (a scroll position, a hover) followed by a bare
+    /// `render_now(view, &[])` must re-present the SAME styled tree, not restyle to
+    /// the UA default and collapse the author's layout. Empty until the first
+    /// styled frame, so an initial `&[]` frame is still genuinely unstyled.
+    retained_author_sheets: Vec<Stylesheet>,
     /// The built-in **user-agent (UA) default** stylesheet, installed via
     /// [`set_default_stylesheet`](Self::set_default_stylesheet). When present it is
     /// matched *first* — below every author sheet — on **all** render paths
@@ -682,6 +689,11 @@ pub struct UiRuntime {
     /// hub lifecycle (begin_load → complete/fail) is driven per resource and a URL
     /// is requested at most once.
     image_handles: HashMap<Box<str>, ResourceHandle>,
+    /// Image sources this runtime has already reported as unresolvable because no
+    /// loader/decoder is installed (spec §5.15 "The kit does not perform arbitrary
+    /// network access by itself."). Deduplicates the diagnostic so a referenced
+    /// URL is named once, not once per frame.
+    unresolved_reported: HashSet<Box<str>>,
 }
 
 impl UiRuntime {
@@ -763,6 +775,7 @@ impl UiRuntime {
             root_view: None,
             components: ComponentStore::new(),
             stylesheets: Vec::new(),
+            retained_author_sheets: Vec::new(),
             default_stylesheet: None,
             resource_loader: None,
             resource_decoder: None,
@@ -777,6 +790,7 @@ impl UiRuntime {
             resource_rx: resource_channel.1,
             next_task: 0,
             image_handles: HashMap::new(),
+            unresolved_reported: HashSet::new(),
         }
     }
 
@@ -801,6 +815,9 @@ impl UiRuntime {
         self.resource_decoder = Some(decoder);
         self.image_cache.clear();
         self.image_handles.clear();
+        // A loader is now installed, so URLs previously reported as unresolvable
+        // may resolve; forget the reports so they are attempted afresh.
+        self.unresolved_reported.clear();
     }
 
     /// Installs the port that parses **vector** sources (spec §5.17), replacing
@@ -920,7 +937,12 @@ impl UiRuntime {
                     true
                 }
                 Err(error) => {
-                    self.resource_hub.fail(handle, version, error);
+                    // The hub rejects a stale/superseded failure; report only a
+                    // fresh one, so a resource fails loudly exactly once (with its
+                    // identity attached) rather than on every late arrival.
+                    if self.resource_hub.fail(handle, version, error.clone()) {
+                        self.report_resource_failure(handle, &key, &error);
+                    }
                     false
                 }
             },
@@ -1094,10 +1116,22 @@ impl UiRuntime {
     /// is just absent from the cache and paints on a later frame once decoded.
     fn resolve_background_images(&mut self, computed: &ComputedStyles) {
         // Both a loader and a decoder are required; without either, `url()`
-        // backgrounds honestly resolve to nothing.
-        // Both a loader and a decoder are required; `load_image` re-checks and
-        // clones them, so this is only the early-out.
+        // backgrounds honestly resolve to nothing — but silence would hide a
+        // missing provider, so each referenced URL is named once on the
+        // diagnostics channel: the kit does not fetch it by itself (spec §5.15).
         if self.resource_loader.is_none() || self.resource_decoder.is_none() {
+            let urls: Vec<Box<str>> = computed
+                .values()
+                .filter_map(|style| {
+                    style
+                        .get(PropertyId::BackgroundImage)
+                        .and_then(ComputedValue::as_background_image_url)
+                        .map(Box::<str>::from)
+                })
+                .collect();
+            for url in urls {
+                self.report_unresolvable_source(&url);
+            }
             return;
         }
         // Disjoint field borrows: `loader`/`decoder` borrow their fields while the
@@ -1249,9 +1283,19 @@ impl UiRuntime {
 
     fn resolve_element_images(&mut self) {
         // Both a loader and a decoder are required; without either, element images
-        // honestly resolve to nothing. `load_image` re-checks and clones them, so
-        // this is only the early-out.
+        // honestly resolve to nothing — but each referenced `src` is named once on
+        // the diagnostics channel so a missing provider is loud, not silent: the
+        // kit does not fetch it by itself (spec §5.15).
         if self.resource_loader.is_none() || self.resource_decoder.is_none() {
+            let sources: Vec<Box<str>> = self
+                .tree
+                .iter()
+                .filter_map(|(_, node)| node.attributes().image_source().map(Box::<str>::from))
+                .filter(|src| !is_vector_source(src))
+                .collect();
+            for src in sources {
+                self.report_unresolvable_source(&src);
+            }
             return;
         }
         // Gather each element node's own image source up front, so the retained-tree
@@ -1927,6 +1971,47 @@ impl UiRuntime {
         self.diagnostics.emit(&diagnostic);
     }
 
+    /// Reports, once per source, an image reference the runtime cannot resolve
+    /// because no loader/decoder is installed (spec §5.15 "The kit does not
+    /// perform arbitrary network access by itself.").
+    ///
+    /// The dedup set makes this a *state*, not a per-frame log flood: a URL
+    /// referenced across many frames is named exactly once. There is no
+    /// [`ResourceId`] to attach — nothing was requested — so the source is named
+    /// in the message instead.
+    fn report_unresolvable_source(&mut self, key: &str) {
+        if !self.unresolved_reported.insert(key.into()) {
+            return;
+        }
+        self.diagnostics.emit(&Diagnostic::new(
+            DiagnosticCode::new("resource.no_loader"),
+            DiagnosticSeverity::Error,
+            DiagnosticSubsystem::Resources,
+            format!(
+                "no resource loader/decoder is installed to resolve `{key}`; the \
+                 kit does not perform network access by itself (spec §5.15), so \
+                 the reference is left unresolved and paints nothing"
+            ),
+        ));
+    }
+
+    /// Reports, with the resource's identity attached, an image load/decode that
+    /// failed under an installed loader (spec §1.6 "failures should be localized
+    /// to the smallest safe scope"; §5.15 loading/ready/**failed** states).
+    ///
+    /// The hub has already recorded the `failed` state and will not retry, so this
+    /// fires exactly once per resource, not once per frame.
+    fn report_resource_failure(&self, handle: ResourceHandle, key: &str, error: &ResourceError) {
+        let mut diagnostic = Diagnostic::new(
+            DiagnosticCode::new("resource.load_failed"),
+            DiagnosticSeverity::Error,
+            DiagnosticSubsystem::Resources,
+            format!("failed to load or decode image `{key}`: {error:?}"),
+        );
+        diagnostic.context.resource = Some(handle.id());
+        self.diagnostics.emit(&diagnostic);
+    }
+
     /// Reports a **stray §2.12 slot outlet** in `desired` on the diagnostics
     /// channel (spec §1.6, §2.12).
     ///
@@ -2262,6 +2347,20 @@ impl UiRuntime {
         desired: &View,
         sheets: &[Stylesheet],
     ) -> FrameResult {
+        // Author-sheet retention: a frame given no sheets reuses the last non-empty
+        // set (see [`retained_author_sheets`](Self::retained_author_sheets)), so a
+        // pure runtime-state change (scroll, hover) re-rendered with `&[]` keeps the
+        // styled tree instead of restyling to the UA default. A non-empty set both
+        // applies and is remembered; the first-ever `&[]` retains nothing and stays
+        // unstyled, so existing single-render callers are byte-identical.
+        let effective_sheets: Vec<Stylesheet> = if sheets.is_empty() {
+            self.retained_author_sheets.clone()
+        } else {
+            self.retained_author_sheets = sheets.to_vec();
+            sheets.to_vec()
+        };
+        let sheets: &[Stylesheet] = &effective_sheets;
+
         // Phase 5 (§3.4): classify what this frame must recalculate. The first
         // frame over an empty tree is always full so every retained output
         // exists before later frames can reuse it.
@@ -3121,6 +3220,167 @@ impl UiRuntime {
         depth
     }
 
+    /// Resolves the topmost node under a hit-test point (§4.7).
+    ///
+    /// `mapped` is the scroll-adjusted point in unscrolled layout space (the space
+    /// the spatial index and layout boxes are keyed by); `screen` is the point
+    /// before per-element scroll was added, in which a scroll container's clip is a
+    /// fixed on-screen rectangle. Candidates come from the spatial index (bounding
+    /// box containment); each is then admitted only if it survives
+    /// [`is_hittable`](Self::is_hittable) — overflow clipping, `border-radius`
+    /// shape — and the topmost surviving candidate wins by stacking order.
+    ///
+    /// Stacking order is `(z-index, logical depth, tree pre-order)`, higher on top:
+    /// a positive `z-index` lifts a box over a lower-`z-index` sibling regardless of
+    /// document order (§4.7 "layers and z-order"), a deeper box paints over a
+    /// shallower ancestor, and among equals a later sibling paints over an earlier
+    /// one. This is a deliberate simplification of the full CSS paint-order tree —
+    /// it does not model per-stacking-context isolation or negative z-index layers —
+    /// but it is exact for the flat and singly-nested cases hit testing exercises.
+    fn resolve_hit(&self, mapped: Point, screen: Point) -> Option<NodeId> {
+        let preorder = self.preorder_index();
+        let mut best: Option<((i32, i32, usize), NodeId)> = None;
+        for hit in self.spatial.hits_at(mapped) {
+            let node = hit.node();
+            if !self.is_hittable(node, mapped, screen) {
+                continue;
+            }
+            let key = (
+                self.used_z_index(node),
+                self.logical_depth(node),
+                preorder.get(&node).copied().unwrap_or(0),
+            );
+            if best.is_none_or(|(bk, _)| key > bk) {
+                best = Some((key, node));
+            }
+        }
+        best.map(|(_, node)| node)
+    }
+
+    /// A node's used `z-index`: the authored integer, or `0` for `auto` / absent
+    /// (the initial value). Only an integer participates in stacking order here.
+    // `z-index` is lowered only from an integral `Number` (`fract() == 0.0`), so
+    // the truncation is exact across the representable stacking range.
+    #[allow(clippy::cast_possible_truncation)]
+    fn used_z_index(&self, node: NodeId) -> i32 {
+        match self
+            .computed
+            .get(&node)
+            .and_then(|style| style.get(PropertyId::ZIndex))
+            .map(ComputedValue::value)
+        {
+            Some(&PropertyValue::Number(n)) => n as i32,
+            _ => 0,
+        }
+    }
+
+    /// Every node's index in a pre-order walk of the retained tree (root first).
+    /// A larger index is later in document order, so it paints on top of an equal
+    /// peer.
+    fn preorder_index(&self) -> HashMap<NodeId, usize> {
+        let mut out = HashMap::new();
+        let Some(root) = self.tree.root() else {
+            return out;
+        };
+        // Explicit stack DFS, children pushed in reverse so they pop in order. The
+        // visited guard makes a malformed (cyclic) child list terminate.
+        let mut stack = vec![root];
+        let mut next = 0usize;
+        while let Some(node) = stack.pop() {
+            if out.contains_key(&node) {
+                continue;
+            }
+            out.insert(node, next);
+            next += 1;
+            if let Some(n) = self.tree.get(node) {
+                for &child in n.children().iter().rev() {
+                    stack.push(child);
+                }
+            }
+        }
+        out
+    }
+
+    /// Whether `node` actually receives the hit at these points, beyond mere
+    /// bounding-box containment (§4.7 "clipping", "custom shapes").
+    ///
+    /// * **Clipping** — every logical ancestor whose computed `overflow` is not
+    ///   `visible` clips its subtree to its border box, which is a fixed on-screen
+    ///   rectangle; the `screen` point must lie inside each such ancestor's box, or
+    ///   `node` is clipped away.
+    /// * **Shape** — when `node` has a `border-radius`, the `mapped` point must lie
+    ///   inside the rounded border box, not merely its rectangular bounds, so a
+    ///   corner cut-out falls through to whatever is beneath.
+    fn is_hittable(&self, node: NodeId, mapped: Point, screen: Point) -> bool {
+        // Clip against every overflow-clipping logical ancestor.
+        let cap = self.tree.len();
+        let mut current = node;
+        for _ in 0..cap {
+            let Some(parent) = self
+                .tree
+                .get(current)
+                .and_then(|n| n.logical_parent().parent())
+            else {
+                break;
+            };
+            if self.overflow_clips(parent)
+                && let Some(b) = self.boxes.get(&parent)
+                && !b.bounds.contains(screen)
+            {
+                return false;
+            }
+            current = parent;
+        }
+        // Shape: a non-zero border-radius carves the corners out of the box.
+        if let Some(b) = self.boxes.get(&node) {
+            let radii = self.corner_radii(node, b.bounds);
+            if !rounded_rect_contains(b.bounds, radii, mapped) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Whether `node`'s computed `overflow` clips its subtree (anything but
+    /// `visible`), mirroring the scene coordinator's paint clip.
+    fn overflow_clips(&self, node: NodeId) -> bool {
+        matches!(
+            self.computed
+                .get(&node)
+                .and_then(|style| style.get(PropertyId::Overflow))
+                .map(ComputedValue::value),
+            Some(&PropertyValue::Keyword(sym))
+                if sym != obscur_style::property::layout_keyword::OVERFLOW_VISIBLE
+        )
+    }
+
+    /// A node's four `border-*-radius` corners resolved against its border `bounds`,
+    /// each as an `(rx, ry)` pair — top-left, top-right, bottom-right, bottom-left.
+    /// Percentages resolve per axis; absent corners are square (zero).
+    fn corner_radii(&self, node: NodeId, bounds: Rect) -> [(f32, f32); 4] {
+        let corner = |id: PropertyId| -> (f32, f32) {
+            match self
+                .computed
+                .get(&node)
+                .and_then(|style| style.get(id))
+                .and_then(ComputedValue::as_length)
+            {
+                Some(Length::Px(px)) => (px.0, px.0),
+                Some(Length::Percent(pct)) => (
+                    pct / 100.0 * bounds.size.width,
+                    pct / 100.0 * bounds.size.height,
+                ),
+                _ => (0.0, 0.0),
+            }
+        };
+        [
+            corner(PropertyId::BorderTopLeftRadius),
+            corner(PropertyId::BorderTopRightRadius),
+            corner(PropertyId::BorderBottomRightRadius),
+            corner(PropertyId::BorderBottomLeftRadius),
+        ]
+    }
+
     /// Records `state` as `node`'s interaction state for subsequent frames.
     ///
     /// This does **not** itself schedule a frame: the caller (the input step) is
@@ -3215,18 +3475,22 @@ impl UiRuntime {
         //     `scroll_top` so a click while scrolled hit-tests the scrolled content
         //     (CSS Overflow 3 §scroll-container). With no scroll container this is
         //     the identity, so the hit-test is byte-identical for existing hosts.
+        //
+        //     The **screen** point (before this per-element scroll offset is added)
+        //     is retained: a scroll container clips its content to the scrollport
+        //     ON SCREEN, so the clip test in [`is_hittable`](Self::is_hittable) is
+        //     against the screen point while box containment / shape below is against
+        //     the scroll-mapped point (the space the unscrolled boxes live in).
+        let screen_point = event.position();
         let containers = scroll_containers(&self.tree, &self.computed, &self.boxes);
         if !containers.is_empty() {
             let (mapped, _) = self.apply_scroll_to_point(event.position(), &containers);
             event.position = mapped;
         }
 
-        // 1. Hit-test: the first hit is the topmost (highest z-order) node.
-        let target = self
-            .spatial
-            .hits_at(event.position())
-            .first()
-            .map(HitTest::node);
+        // 1. Hit-test: the topmost node whose box contains the point, respecting
+        //    overflow clipping, `border-radius` shape, and stacking order (§4.7).
+        let target = self.resolve_hit(event.position(), screen_point);
 
         // 2. Hover: chain = target + its element ancestors, topmost-first.
         let new_hover = HoverChain::from_nodes(self.hover_chain_for(target));
@@ -3242,32 +3506,40 @@ impl UiRuntime {
             // A disabled control is not a focus / press / editing target: a press
             // that lands inside one is inert (it seats no focus, no caret, and no
             // press anchor), so typing can't reach it and its release activates
-            // nothing. Focus/editing simply stay wherever they were.
-            let interactive_target = target.filter(|&t| !self.is_within_disabled(t));
-            if self.focused != interactive_target {
-                self.focused = interactive_target;
-                focus_changed = true;
-                // Focus moved: begin/clear the runtime-owned editing session so
-                // the focused editable's text/caret/selection is live for keys
-                // (and step-2 rendering).
-                self.sync_editing_to_focus();
+            // nothing. Crucially it also does NOT blur whatever was focused —
+            // clicking a disabled control is not a blur — so focus, the editing
+            // session, and the press anchor simply stay wherever they were. A press
+            // on empty space (a target that is None, not merely disabled) still
+            // blurs, exactly as before.
+            let disabled_press = target.is_some_and(|t| self.is_within_disabled(t));
+            if !disabled_press {
+                let interactive_target = target;
+                if self.focused != interactive_target {
+                    self.focused = interactive_target;
+                    focus_changed = true;
+                    // Focus moved: begin/clear the runtime-owned editing session so
+                    // the focused editable's text/caret/selection is live for keys
+                    // (and step-2 rendering).
+                    self.sync_editing_to_focus();
+                }
+                if self.press_target != interactive_target {
+                    press_changed = true;
+                }
+                self.press_target = interactive_target;
+                // Resolve the click count (single / double / triple) from this
+                // press's relationship to the previous one, so a double click can
+                // select the word and a triple click the line under the pointer
+                // (spec §5.11).
+                self.click_count =
+                    self.next_click_count(interactive_target, event.position(), event.timestamp());
+                // Click → caret / word / line: after `sync_editing_to_focus` has
+                // (re)seated the session for the clicked editable, a single click
+                // places the caret and arms a potential drag-selection; a double
+                // click selects the word and a triple click the line under the
+                // point. A press on a non-editable target clears any armed drag and
+                // leaves the session untouched.
+                self.begin_text_pointer(interactive_target, event.position());
             }
-            if self.press_target != interactive_target {
-                press_changed = true;
-            }
-            self.press_target = interactive_target;
-            // Resolve the click count (single / double / triple) from this press's
-            // relationship to the previous one, so a double click can select the
-            // word and a triple click the line under the pointer (spec §5.11).
-            self.click_count =
-                self.next_click_count(interactive_target, event.position(), event.timestamp());
-            // Click → caret / word / line: after `sync_editing_to_focus` has
-            // (re)seated the session for the clicked editable, a single click places
-            // the caret and arms a potential drag-selection; a double click selects
-            // the word and a triple click the line under the point. A press on a
-            // non-editable (or disabled) target clears any armed drag and leaves
-            // the session untouched.
-            self.begin_text_pointer(interactive_target, event.position());
         }
 
         // 3a-drag. While a drag is armed, a pointer move re-selects the range from
@@ -4314,6 +4586,20 @@ impl UiRuntime {
     ///
     /// On a reseed the caret is preserved (clamped into the new value); otherwise
     /// only the watermark is advanced.
+    /// The **controlled value** `node` declares, if any — the reserved `VALUE`
+    /// attribute a widget emits to say "this field is controlled; reflect this
+    /// value" (WHATWG HTML §4.10.5.5; §3.1 "values flow down"). Returned owned so
+    /// the retained-tree borrow is released before the editing session is mutated.
+    ///
+    /// [`None`] for a bare editable that declares no explicit value — such a field
+    /// is its own source of truth and is never snapped back.
+    fn declared_control_value(&self, node: NodeId) -> Option<String> {
+        self.tree
+            .get(node)
+            .and_then(|n| n.attributes().control_value())
+            .map(str::to_owned)
+    }
+
     fn reseed_editing_from_retained(&mut self) {
         let Some(field) = self.editing.as_ref().map(TextEditSession::node) else {
             return;
@@ -4325,8 +4611,27 @@ impl UiRuntime {
             return;
         };
         // (1) Unchanged retained value: a static/uncontrolled field, or a frame
-        //     that rewrote something else. Never reseed — that would fight typing.
+        //     that rewrote something else.
+        //
+        //     A field that declares an EXPLICIT controlled value (the reserved
+        //     `VALUE` attribute the `Input` widget emits — WHATWG HTML §4.10.5.5
+        //     value reflection, §3.1 "values flow down") reflects that value: if the
+        //     buffer has drifted from a value the app is holding CONSTANT, that
+        //     drift is a keystroke the app proposed and refused, so snap the buffer
+        //     back — a controlled field must never drift. A field that declares NO
+        //     explicit value (a bare editable whose text is its only value) is its
+        //     OWN source of truth, so an in-flight edit is kept untouched, never
+        //     fought (this is what lets a lag frame paint the session's typed text
+        //     while the retained tree still carries the pre-keystroke value).
         if retained == session.mirror() {
+            if let Some(declared) = self.declared_control_value(field)
+                && declared != session.text()
+            {
+                if let Some(session) = self.editing.as_mut() {
+                    session.reseed_controlled(declared);
+                }
+                self.update_caret_scroll();
+            }
             return;
         }
         // (2) The session's OWN edit reached the tree (passthrough controlled
@@ -6466,6 +6771,80 @@ fn decode_one_image(
     SceneImage::new(width, height, decoded.data().clone(), AlphaMode::Straight).ok_or_else(|| {
         ResourceError::DecodeFailed("decoded image bytes do not match its intrinsic size".into())
     })
+}
+
+/// Whether `point` lies inside the rounded rectangle `bounds` with per-corner
+/// `radii` (top-left, top-right, bottom-right, bottom-left as `(rx, ry)`) — the
+/// hit region of a `border-radius` box (§4.7 "custom shapes"; CSS Backgrounds 3
+/// §4.1 border-radius curve).
+///
+/// The point must first be inside the rectangle. Then, in each corner's quadrant
+/// where the point is nearer the corner than the straight edges begin, it must
+/// also fall inside that corner's ellipse: `((px−cx)/rx)² + ((py−cy)/ry)² ≤ 1`,
+/// where `(cx, cy)` is the ellipse centre inset by the radii. A zero-radius corner
+/// contributes no cut-out (its quadrant test never triggers), so an all-zero
+/// `radii` reduces exactly to `bounds.contains(point)`.
+fn rounded_rect_contains(bounds: Rect, radii: [(f32, f32); 4], point: Point) -> bool {
+    if !bounds.contains(point) {
+        return false;
+    }
+    let (l, t, r, b) = (
+        bounds.origin.x,
+        bounds.origin.y,
+        bounds.right(),
+        bounds.bottom(),
+    );
+    // Clamp each radius so opposing corners never overlap past the box.
+    let clamp_pair = |rx: f32, ry: f32| {
+        (
+            rx.min(bounds.size.width).max(0.0),
+            ry.min(bounds.size.height).max(0.0),
+        )
+    };
+    let [(tlx, tly), (trx, tr_y), (brx, bry), (blx, bly)] = radii;
+    let (tlx, tly) = clamp_pair(tlx, tly);
+    let (trx, tr_y) = clamp_pair(trx, tr_y);
+    let (brx, bry) = clamp_pair(brx, bry);
+    let (blx, bly) = clamp_pair(blx, bly);
+    // For a corner with centre `(cx, cy)` and radii `(rx, ry)`, a point in that
+    // corner's outer quadrant is outside the box iff it is outside the ellipse.
+    let outside_ellipse = |px: f32, py: f32, cx: f32, cy: f32, rx: f32, ry: f32| -> bool {
+        if rx <= 0.0 || ry <= 0.0 {
+            return false;
+        }
+        let dx = (px - cx) / rx;
+        let dy = (py - cy) / ry;
+        dx * dx + dy * dy > 1.0
+    };
+    // Top-left.
+    if point.x < l + tlx
+        && point.y < t + tly
+        && outside_ellipse(point.x, point.y, l + tlx, t + tly, tlx, tly)
+    {
+        return false;
+    }
+    // Top-right.
+    if point.x > r - trx
+        && point.y < t + tr_y
+        && outside_ellipse(point.x, point.y, r - trx, t + tr_y, trx, tr_y)
+    {
+        return false;
+    }
+    // Bottom-right.
+    if point.x > r - brx
+        && point.y > b - bry
+        && outside_ellipse(point.x, point.y, r - brx, b - bry, brx, bry)
+    {
+        return false;
+    }
+    // Bottom-left.
+    if point.x < l + blx
+        && point.y > b - bly
+        && outside_ellipse(point.x, point.y, l + blx, b - bly, blx, bly)
+    {
+        return false;
+    }
+    true
 }
 
 /// The editing field's visible content width `W` (logical px): its border-box

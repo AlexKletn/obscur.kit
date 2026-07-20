@@ -40,6 +40,11 @@ pub enum PropertyId {
     /// replaced element's content (e.g. an `<img>`'s pixels) within its content
     /// box: `fill` (default) / `contain` / `cover` / `none` / `scale-down`.
     ObjectFit,
+    /// The `object-position` property (a `BackgroundPosition` value — the same
+    /// `<position>` pair; NOT inherited). Places a replaced element's content
+    /// within its content box once `object-fit` has sized it; initial `50% 50%`
+    /// (centered), unlike `background-position`'s `0% 0%` (CSS Images 3 §5.2).
+    ObjectPosition,
     /// The `opacity` property.
     Opacity,
     /// The `width` property.
@@ -227,6 +232,14 @@ pub enum PropertyId {
     /// The `transform-origin` property (a `TransformOrigin`; NOT inherited).
     /// Initial `50% 50%` (the box center).
     TransformOrigin,
+
+    /// The `mix-blend-mode` property (a `BlendMode` keyword; NOT inherited).
+    /// Initial `normal`. A value other than `normal` makes the element a group that
+    /// composites onto the backdrop with that separable blend mode (compositing-1
+    /// §5): the scene coordinator brackets the element's subtree with a
+    /// `PushLayer` carrying the blend mode. Keyword handles live in
+    /// [`crate::property::layout_keyword`].
+    MixBlendMode,
 
     // ---- Sizing constraints (Length-valued, not inherited) ----
     /// The `min-width` property.
@@ -507,6 +520,7 @@ impl PropertyId {
             Self::BackgroundPosition => "background-position",
             Self::BackgroundRepeat => "background-repeat",
             Self::ObjectFit => "object-fit",
+            Self::ObjectPosition => "object-position",
             Self::Opacity => "opacity",
             Self::Width => "width",
             Self::Height => "height",
@@ -564,6 +578,7 @@ impl PropertyId {
             Self::BackdropFilter => "backdrop-filter",
             Self::Transform => "transform",
             Self::TransformOrigin => "transform-origin",
+            Self::MixBlendMode => "mix-blend-mode",
             Self::MinWidth => "min-width",
             Self::MinHeight => "min-height",
             Self::MaxWidth => "max-width",
@@ -645,6 +660,7 @@ impl PropertyId {
             | Self::BackgroundPosition
             | Self::BackgroundRepeat
             | Self::ObjectFit
+            | Self::ObjectPosition
             | Self::Opacity
             | Self::Width
             | Self::Height
@@ -689,6 +705,7 @@ impl PropertyId {
             | Self::BackdropFilter
             | Self::Transform
             | Self::TransformOrigin
+            | Self::MixBlendMode
             | Self::MinWidth
             | Self::MinHeight
             | Self::MaxWidth
@@ -766,6 +783,8 @@ impl PropertyId {
                 | Self::BackgroundRepeat
                 // How an image fills its box; the box itself is unchanged.
                 | Self::ObjectFit
+                // Where the image sits inside its box; the box is unchanged.
+                | Self::ObjectPosition
                 | Self::Opacity
                 // `visibility: hidden` still occupies its box (unlike `display: none`).
                 | Self::Visibility
@@ -791,6 +810,9 @@ impl PropertyId {
                 // CSS transforms are applied at paint time; layout is unaffected.
                 | Self::Transform
                 | Self::TransformOrigin
+                // Compositing only: the blend mode changes how the group paints,
+                // never its box.
+                | Self::MixBlendMode
         )
     }
 

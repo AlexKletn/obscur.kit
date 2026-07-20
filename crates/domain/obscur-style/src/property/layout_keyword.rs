@@ -627,6 +627,61 @@ pub fn overflow_from_name(name: &str) -> Option<InternedSymbol> {
     }
 }
 
+// ---- `mix-blend-mode` keyword values ----
+//
+// The separable blend modes plus `normal` (the initial). A value other than
+// `normal` makes the element a compositing group blended onto its backdrop
+// (compositing-1 §5). The non-separable modes (`hue`/`saturation`/`color`/
+// `luminosity`) are not modelled yet.
+
+/// `mix-blend-mode: normal` (the initial): source-over compositing.
+pub const MIX_BLEND_MODE_NORMAL: InternedSymbol = InternedSymbol::from_raw(0x0000_2501);
+/// `mix-blend-mode: multiply`.
+pub const MIX_BLEND_MODE_MULTIPLY: InternedSymbol = InternedSymbol::from_raw(0x0000_2502);
+/// `mix-blend-mode: screen`.
+pub const MIX_BLEND_MODE_SCREEN: InternedSymbol = InternedSymbol::from_raw(0x0000_2503);
+/// `mix-blend-mode: overlay`.
+pub const MIX_BLEND_MODE_OVERLAY: InternedSymbol = InternedSymbol::from_raw(0x0000_2504);
+/// `mix-blend-mode: darken`.
+pub const MIX_BLEND_MODE_DARKEN: InternedSymbol = InternedSymbol::from_raw(0x0000_2505);
+/// `mix-blend-mode: lighten`.
+pub const MIX_BLEND_MODE_LIGHTEN: InternedSymbol = InternedSymbol::from_raw(0x0000_2506);
+/// `mix-blend-mode: color-dodge`.
+pub const MIX_BLEND_MODE_COLOR_DODGE: InternedSymbol = InternedSymbol::from_raw(0x0000_2507);
+/// `mix-blend-mode: color-burn`.
+pub const MIX_BLEND_MODE_COLOR_BURN: InternedSymbol = InternedSymbol::from_raw(0x0000_2508);
+/// `mix-blend-mode: hard-light`.
+pub const MIX_BLEND_MODE_HARD_LIGHT: InternedSymbol = InternedSymbol::from_raw(0x0000_2509);
+/// `mix-blend-mode: soft-light`.
+pub const MIX_BLEND_MODE_SOFT_LIGHT: InternedSymbol = InternedSymbol::from_raw(0x0000_250A);
+/// `mix-blend-mode: difference`.
+pub const MIX_BLEND_MODE_DIFFERENCE: InternedSymbol = InternedSymbol::from_raw(0x0000_250B);
+/// `mix-blend-mode: exclusion`.
+pub const MIX_BLEND_MODE_EXCLUSION: InternedSymbol = InternedSymbol::from_raw(0x0000_250C);
+
+/// Maps a `mix-blend-mode` keyword string to its reserved [`InternedSymbol`].
+///
+/// The input is ASCII-lowercased before matching. Returns [`None`] for any keyword
+/// outside the separable set modelled here (`normal` plus the separable modes).
+#[must_use]
+pub fn mix_blend_mode_from_name(name: &str) -> Option<InternedSymbol> {
+    match name.to_ascii_lowercase().as_str() {
+        "normal" => Some(MIX_BLEND_MODE_NORMAL),
+        "multiply" => Some(MIX_BLEND_MODE_MULTIPLY),
+        "screen" => Some(MIX_BLEND_MODE_SCREEN),
+        "overlay" => Some(MIX_BLEND_MODE_OVERLAY),
+        "darken" => Some(MIX_BLEND_MODE_DARKEN),
+        "lighten" => Some(MIX_BLEND_MODE_LIGHTEN),
+        "color-dodge" => Some(MIX_BLEND_MODE_COLOR_DODGE),
+        "color-burn" => Some(MIX_BLEND_MODE_COLOR_BURN),
+        "hard-light" => Some(MIX_BLEND_MODE_HARD_LIGHT),
+        "soft-light" => Some(MIX_BLEND_MODE_SOFT_LIGHT),
+        "difference" => Some(MIX_BLEND_MODE_DIFFERENCE),
+        "exclusion" => Some(MIX_BLEND_MODE_EXCLUSION),
+        _ => None,
+    }
+}
+
 /// Maps a relative `font-weight` keyword string (`bolder` / `lighter`) to its
 /// reserved [`InternedSymbol`].
 ///

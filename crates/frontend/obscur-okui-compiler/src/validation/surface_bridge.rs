@@ -40,6 +40,9 @@ impl From<&ComponentSurface> for ComponentContract {
         for event in surface.allowed_events() {
             contract = contract.allowing_event(*event);
         }
+        for (name, ty) in surface.prop_types() {
+            contract = contract.with_prop_type(*name, *ty);
+        }
         if let ChildrenSurface::Only(tags) = surface.children() {
             for tag in tags {
                 contract = contract.allowing_child(*tag);

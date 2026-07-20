@@ -69,6 +69,28 @@ pub(crate) fn overflow_scrolls(computed: &ComputedStyles, node: NodeId) -> bool 
     )
 }
 
+/// Whether a node's computed `overflow` makes it a **scroll container** in the
+/// CSS Overflow 3 §overflow sense: `scroll`, `auto`, **or `hidden`**. Unlike
+/// [`overflow_scrolls`] (which names only the visibly-scrollable `scroll`/`auto`),
+/// this includes `hidden` because "the content must still be scrollable
+/// programmatically […] and the box is therefore still a scroll container". Only
+/// `overflow: clip` (and `visible` / absent) is excluded — `clip` "forbids
+/// scrolling entirely, through any mechanism, and therefore the box is not a scroll
+/// container".
+#[must_use]
+pub(crate) fn establishes_scroll_container(computed: &ComputedStyles, node: NodeId) -> bool {
+    matches!(
+        computed
+            .get(&node)
+            .and_then(|style| style.get(PropertyId::Overflow))
+            .map(ComputedValue::value),
+        Some(&PropertyValue::Keyword(sym))
+            if sym == layout_keyword::OVERFLOW_SCROLL
+                || sym == layout_keyword::OVERFLOW_AUTO
+                || sym == layout_keyword::OVERFLOW_HIDDEN
+    )
+}
+
 /// The scrollable content height of `node` (logical px), measured from its
 /// scrollport top down to the bottom-most descendant edge (CSS Overflow 3
 /// §scrollable-overflow-region), never less than the scrollport height.
@@ -98,7 +120,7 @@ fn scrollable_content_height(
             max_bottom = max_bottom.max(b.bounds.bottom());
         }
         // Do not descend into a nested scroll container: it clips its own overflow.
-        if !overflow_scrolls(computed, child)
+        if !establishes_scroll_container(computed, child)
             && let Some(n) = tree.get(child)
         {
             stack.extend(n.children().iter().copied());
@@ -130,7 +152,7 @@ pub(crate) fn scroll_containers(
         if !visited.insert(node) {
             continue;
         }
-        if overflow_scrolls(computed, node)
+        if establishes_scroll_container(computed, node)
             && let Some(b) = boxes.get(&node)
         {
             let scrollport = b.bounds;

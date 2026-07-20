@@ -59,6 +59,18 @@ pub const CHECKED: InternedSymbol = InternedSymbol::from_raw(0x0000_0006);
 /// retained node, where the runtime reads it to gate *only* the mutation path.
 pub const READONLY: InternedSymbol = InternedSymbol::from_raw(0x0000_0007);
 
+/// Reserved symbol for a form control's **controlled value** — the authoritative
+/// value the application declares for the field (WHATWG HTML §4.10.5.5 *value
+/// reflection*; obscur.kit §3.1 "values flow down"). Like [`SRC`] (and unlike
+/// `class`/`id`/`type`) this is **not** a CSS selector input: it is the field's
+/// own model value, carried verbatim (as [`ViewValue::Text`]). A widget emits it
+/// to declare "this field is controlled — its buffer must reflect this value";
+/// the runtime reads it to snap a focused editable's buffer back when the app
+/// holds the value constant while the user typed (a refused proposal). A bare
+/// editable that emits no `VALUE` is its own source of truth and is never snapped.
+/// Same reserved low-symbol namespace so it survives reconciliation.
+pub const VALUE: InternedSymbol = InternedSymbol::from_raw(0x0000_0008);
+
 /// The CSS-relevant identity of an element view node: its local name, `id`, and
 /// class list, extracted from a node's [`ViewProperty`] bindings.
 ///
@@ -85,6 +97,11 @@ pub struct StyleAttributes {
     /// symbol. Independent of [`disabled`](Self::disabled): a readonly control is
     /// focusable + selectable but not editable.
     readonly: bool,
+    /// The control's declared **controlled value** (WHATWG HTML §4.10.5.5), if the
+    /// widget emits one. Derived from the [`VALUE`] reserved symbol. Not a CSS
+    /// selector input — it is the field's model value the runtime reflects into the
+    /// editing buffer. Absent for a bare editable (its text is its only value).
+    control_value: Option<Box<str>>,
 }
 
 /// Whether a reserved boolean state attribute's value counts as *set*. Bare
@@ -149,6 +166,7 @@ impl StyleAttributes {
                 ID => attributes.id = Some(text.clone()),
                 TYPE => attributes.local_name = Some(text.clone()),
                 SRC => attributes.image_source = Some(text.clone()),
+                VALUE => attributes.control_value = Some(text.clone()),
                 _ => {}
             }
         }
@@ -207,6 +225,13 @@ impl StyleAttributes {
         self.readonly
     }
 
+    /// The control's declared controlled value (WHATWG HTML §4.10.5.5), if the
+    /// widget emitted one. `None` for a bare editable whose text is its own value.
+    #[must_use]
+    pub fn control_value(&self) -> Option<&str> {
+        self.control_value.as_deref()
+    }
+
     /// Whether no style attribute is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -217,6 +242,7 @@ impl StyleAttributes {
             && !self.disabled
             && !self.checked
             && !self.readonly
+            && self.control_value.is_none()
     }
 }
 

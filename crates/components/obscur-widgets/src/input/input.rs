@@ -5,7 +5,7 @@ use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_text::editing::{EditCommand, TextBuffer};
 use obscur_view::view::{
     CLASS, DISABLED as ATTR_DISABLED, EVENT_CHANGE, EVENT_INPUT, READONLY as ATTR_READONLY, TYPE,
-    View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
+    VALUE as ATTR_VALUE, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
 /// A headless text-input control (spec §2.6).
@@ -275,6 +275,14 @@ impl Input {
                 ViewValue::Bool(self.readonly),
             ))
             .with_prop(ViewProperty::new(Self::PROP_VALUE, ViewValue::from(value)))
+            // The reserved `VALUE` structural attribute (WHATWG HTML §4.10.5.5
+            // value reflection; §3.1 "values flow down") declares this field's
+            // authoritative CONTROLLED value to the runtime: a focused buffer that
+            // drifts from it (a keystroke the app held constant) is snapped back, so
+            // the field never drifts from the application's value. Distinct from the
+            // semantic `PROP_VALUE` (the a11y surface): this one the runtime reads
+            // via `StyleAttributes::control_value`. Survives reconcile.
+            .with_prop(ViewProperty::new(ATTR_VALUE, ViewValue::from(value)))
             .with_prop(ViewProperty::new(
                 Self::PROP_PLACEHOLDER,
                 ViewValue::from(&*self.placeholder),

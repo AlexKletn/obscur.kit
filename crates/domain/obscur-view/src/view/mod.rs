@@ -18,7 +18,9 @@ pub use slot::{
 mod stable_selector;
 pub use stable_selector::{AUTOMATION_ID, TEST_ID};
 mod style_attribute;
-pub use style_attribute::{CHECKED, CLASS, DISABLED, ID, READONLY, SRC, StyleAttributes, TYPE};
+pub use style_attribute::{
+    CHECKED, CLASS, DISABLED, ID, READONLY, SRC, StyleAttributes, TYPE, VALUE,
+};
 mod view_property;
 pub use view_property::ViewProperty;
 mod view_value;

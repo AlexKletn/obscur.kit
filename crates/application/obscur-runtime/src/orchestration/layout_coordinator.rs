@@ -1476,6 +1476,24 @@ fn style_of(styles: &LayoutStyles, node: NodeId) -> LayoutStyle {
     styles.get(&node).copied().unwrap_or_default()
 }
 
+/// Whether `node`'s computed `transform` establishes a containing block for its
+/// absolute- and fixed-positioned descendants (css-transforms-1 §3: "any value
+/// other than `none` for the transform property also causes the element to
+/// establish a containing block for all descendants … used to layout for all of
+/// its absolute-position descendants, fixed-position descendants").
+///
+/// The used padding box is then the positioning reference for those descendants —
+/// including `position: fixed` ones, which would otherwise resolve against the
+/// viewport. An authored transform qualifies even when it resolves to the identity
+/// matrix (e.g. `translateX(0px)`); only the `none` keyword does not.
+fn transform_establishes_containing_block(computed: &ComputedStyles, node: NodeId) -> bool {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::Transform))
+        .and_then(ComputedValue::as_transform)
+        .is_some_and(|transform| transform.establishes_containing_block())
+}
+
 /// Collects a node's children as [`LayoutChild`] descriptors (identity + style).
 ///
 /// A node absent from the tree contributes no children. Each child's style is
@@ -2394,14 +2412,26 @@ fn arrange(
     boxes.insert(node, LayoutBox::new(border_box));
 
     // The containing block this node establishes for its positioned descendants:
-    // a positioned node (`relative`/`absolute`/`fixed`) hands down its own padding
-    // box; a `static` node is transparent and passes the inherited block through
-    // (so an absolute grandchild resolves against the nearest positioned ancestor,
-    // not this static node). `fixed` descendants use `viewport` regardless.
-    let descendant_cb = if style.position.is_positioned() {
-        padding_box(border_box, style.border)
+    // a positioned node (`relative`/`absolute`/`fixed`) — OR any node carrying a
+    // `transform` other than `none` (css-transforms-1 §3) — hands down its own
+    // padding box; a plain `static` node is transparent and passes the inherited
+    // block through (so an absolute grandchild resolves against the nearest
+    // positioned/transformed ancestor, not this static node).
+    let establishes_cb_by_transform = transform_establishes_containing_block(computed, node);
+    let node_padding_box = padding_box(border_box, style.border);
+    let descendant_cb = if style.position.is_positioned() || establishes_cb_by_transform {
+        node_padding_box
     } else {
         containing_block
+    };
+    // A `transform` other than `none` ALSO becomes the containing block for
+    // `position: fixed` descendants, which otherwise resolve against `viewport`
+    // (css-transforms-1 §3). Without a transform the viewport rides through
+    // unchanged, so an untransformed subtree is byte-for-byte identical.
+    let descendant_fixed_cb = if establishes_cb_by_transform {
+        node_padding_box
+    } else {
+        viewport
     };
 
     // The containing block for a relatively-positioned child is this node's
@@ -2464,7 +2494,7 @@ fn arrange(
             paragraph,
             hyphenator,
             descendant_cb,
-            viewport,
+            descendant_fixed_cb,
             scroll_offset,
             editing,
             depth - 1,
@@ -2483,7 +2513,7 @@ fn arrange(
             grid_templates,
             *child,
             descendant_cb,
-            viewport,
+            descendant_fixed_cb,
             scroll_offset,
             boxes,
             paragraph,
@@ -2553,9 +2583,21 @@ fn arrange_out_of_flow(
         depth,
         cache,
     );
-    let rect = style
-        .inset
-        .resolve_absolute_box(cb, style.width, style.height, natural);
+    // The per-axis border + padding sum, so an explicit `content-box` width/height
+    // grows into the border box `resolve_absolute_box` returns (matching the flow
+    // path's `box_sizing.content_extent`). `natural` is already a border box.
+    let border_padding = Size::new(
+        style.border.left + style.border.right + style.padding.left + style.padding.right,
+        style.border.top + style.border.bottom + style.padding.top + style.padding.bottom,
+    );
+    let rect = style.inset.resolve_absolute_box(
+        cb,
+        style.width,
+        style.height,
+        natural,
+        style.box_sizing,
+        border_padding,
+    );
 
     // Arrange the child's subtree under a tight constraint at its resolved box.
     // The recursive `arrange` re-derives and writes the child's own box (identical
