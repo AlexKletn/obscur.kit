@@ -131,6 +131,22 @@ pub enum PropertyId {
     InsetBlockStart,
     /// The `inset-block-end` logical longhand.
     InsetBlockEnd,
+    /// The `border-inline-start-width` logical longhand.
+    BorderInlineStartWidth,
+    /// The `border-inline-end-width` logical longhand.
+    BorderInlineEndWidth,
+    /// The `border-block-start-width` logical longhand.
+    BorderBlockStartWidth,
+    /// The `border-block-end-width` logical longhand.
+    BorderBlockEndWidth,
+    /// The `border-inline-start-style` logical longhand.
+    BorderInlineStartStyle,
+    /// The `border-inline-end-style` logical longhand.
+    BorderInlineEndStyle,
+    /// The `border-block-start-style` logical longhand.
+    BorderBlockStartStyle,
+    /// The `border-block-end-style` logical longhand.
+    BorderBlockEndStyle,
 
     // ---- Box model: border width (Length-valued, not inherited) ----
     /// The `border-top-width` longhand. Feeds the box model's border insets and,
@@ -468,6 +484,34 @@ impl PropertyId {
                     Self::Right
                 }
             }
+            Self::BorderInlineStartWidth => {
+                if rtl {
+                    Self::BorderRightWidth
+                } else {
+                    Self::BorderLeftWidth
+                }
+            }
+            Self::BorderInlineEndWidth => {
+                if rtl {
+                    Self::BorderLeftWidth
+                } else {
+                    Self::BorderRightWidth
+                }
+            }
+            Self::BorderInlineStartStyle => {
+                if rtl {
+                    Self::BorderRightStyle
+                } else {
+                    Self::BorderLeftStyle
+                }
+            }
+            Self::BorderInlineEndStyle => {
+                if rtl {
+                    Self::BorderLeftStyle
+                } else {
+                    Self::BorderRightStyle
+                }
+            }
             // Block axis: vertical, and `direction` does not touch it.
             Self::MarginBlockStart => Self::MarginTop,
             Self::MarginBlockEnd => Self::MarginBottom,
@@ -475,6 +519,10 @@ impl PropertyId {
             Self::PaddingBlockEnd => Self::PaddingBottom,
             Self::InsetBlockStart => Self::Top,
             Self::InsetBlockEnd => Self::Bottom,
+            Self::BorderBlockStartWidth => Self::BorderTopWidth,
+            Self::BorderBlockEndWidth => Self::BorderBottomWidth,
+            Self::BorderBlockStartStyle => Self::BorderTopStyle,
+            Self::BorderBlockEndStyle => Self::BorderBottomStyle,
             _ => return None,
         })
     }
@@ -490,8 +538,8 @@ impl PropertyId {
     /// Every logical property, in a stable order.
     ///
     /// Used to find which logical declarations could feed a given physical
-    /// property; there are twelve, so a scan is cheaper than a reverse map.
-    pub const LOGICAL: [Self; 12] = [
+    /// property; there are twenty, so a scan is cheaper than a reverse map.
+    pub const LOGICAL: [Self; 20] = [
         Self::MarginInlineStart,
         Self::MarginInlineEnd,
         Self::MarginBlockStart,
@@ -504,6 +552,14 @@ impl PropertyId {
         Self::InsetInlineEnd,
         Self::InsetBlockStart,
         Self::InsetBlockEnd,
+        Self::BorderInlineStartWidth,
+        Self::BorderInlineEndWidth,
+        Self::BorderBlockStartWidth,
+        Self::BorderBlockEndWidth,
+        Self::BorderInlineStartStyle,
+        Self::BorderInlineEndStyle,
+        Self::BorderBlockStartStyle,
+        Self::BorderBlockEndStyle,
     ];
 
     /// Returns the property's canonical CSS name as a stable string.
@@ -553,6 +609,14 @@ impl PropertyId {
             Self::InsetInlineEnd => "inset-inline-end",
             Self::InsetBlockStart => "inset-block-start",
             Self::InsetBlockEnd => "inset-block-end",
+            Self::BorderInlineStartWidth => "border-inline-start-width",
+            Self::BorderInlineEndWidth => "border-inline-end-width",
+            Self::BorderBlockStartWidth => "border-block-start-width",
+            Self::BorderBlockEndWidth => "border-block-end-width",
+            Self::BorderInlineStartStyle => "border-inline-start-style",
+            Self::BorderInlineEndStyle => "border-inline-end-style",
+            Self::BorderBlockStartStyle => "border-block-start-style",
+            Self::BorderBlockEndStyle => "border-block-end-style",
             Self::BorderTopWidth => "border-top-width",
             Self::BorderRightWidth => "border-right-width",
             Self::BorderBottomWidth => "border-bottom-width",
@@ -724,6 +788,14 @@ impl PropertyId {
             | Self::InsetInlineEnd
             | Self::InsetBlockStart
             | Self::InsetBlockEnd
+            | Self::BorderInlineStartWidth
+            | Self::BorderInlineEndWidth
+            | Self::BorderBlockStartWidth
+            | Self::BorderBlockEndWidth
+            | Self::BorderInlineStartStyle
+            | Self::BorderInlineEndStyle
+            | Self::BorderBlockStartStyle
+            | Self::BorderBlockEndStyle
             | Self::Gap
             | Self::FlexBasis
             | Self::FlexGrow

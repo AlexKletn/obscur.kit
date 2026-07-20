@@ -369,7 +369,15 @@ impl StyleResolver {
             | PropertyId::InsetInlineStart
             | PropertyId::InsetInlineEnd
             | PropertyId::InsetBlockStart
-            | PropertyId::InsetBlockEnd => None,
+            | PropertyId::InsetBlockEnd
+            | PropertyId::BorderInlineStartWidth
+            | PropertyId::BorderInlineEndWidth
+            | PropertyId::BorderBlockStartWidth
+            | PropertyId::BorderBlockEndWidth
+            | PropertyId::BorderInlineStartStyle
+            | PropertyId::BorderInlineEndStyle
+            | PropertyId::BorderBlockStartStyle
+            | PropertyId::BorderBlockEndStyle => None,
             PropertyId::Color => Some(ComputedValue::color(StyleColor::BLACK)),
             PropertyId::BackgroundColor => Some(ComputedValue::color(StyleColor::TRANSPARENT)),
             // `background-image` initial is `none` (no image). There is no
@@ -1634,7 +1642,15 @@ mod tests {
                 | PropertyId::InsetInlineStart
                 | PropertyId::InsetInlineEnd
                 | PropertyId::InsetBlockStart
-                | PropertyId::InsetBlockEnd => {}
+                | PropertyId::InsetBlockEnd
+                | PropertyId::BorderInlineStartWidth
+                | PropertyId::BorderInlineEndWidth
+                | PropertyId::BorderBlockStartWidth
+                | PropertyId::BorderBlockEndWidth
+                | PropertyId::BorderInlineStartStyle
+                | PropertyId::BorderInlineEndStyle
+                | PropertyId::BorderBlockStartStyle
+                | PropertyId::BorderBlockEndStyle => {}
             }
         }
         let all = [

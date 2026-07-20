@@ -1293,7 +1293,7 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
 /// separately by their `--` prefix.
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 108] = [
+    const ALL: [PropertyId; 116] = [
         // Logical box-model longhands (spec §4.13). They parse exactly like their
         // physical counterparts — a length — and resolve onto them at
         // computed-value time via `PropertyId::physical_under`.
@@ -1309,6 +1309,14 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::InsetInlineEnd,
         PropertyId::InsetBlockStart,
         PropertyId::InsetBlockEnd,
+        PropertyId::BorderInlineStartWidth,
+        PropertyId::BorderInlineEndWidth,
+        PropertyId::BorderBlockStartWidth,
+        PropertyId::BorderBlockEndWidth,
+        PropertyId::BorderInlineStartStyle,
+        PropertyId::BorderInlineEndStyle,
+        PropertyId::BorderBlockStartStyle,
+        PropertyId::BorderBlockEndStyle,
         PropertyId::Color,
         PropertyId::BackgroundColor,
         PropertyId::BackgroundImage,
@@ -1666,6 +1674,10 @@ fn is_length_longhand(property: PropertyId) -> bool {
             | PropertyId::BorderRightWidth
             | PropertyId::BorderBottomWidth
             | PropertyId::BorderLeftWidth
+            | PropertyId::BorderInlineStartWidth
+            | PropertyId::BorderInlineEndWidth
+            | PropertyId::BorderBlockStartWidth
+            | PropertyId::BorderBlockEndWidth
             | PropertyId::BorderTopLeftRadius
             | PropertyId::BorderTopRightRadius
             | PropertyId::BorderBottomRightRadius
@@ -1753,6 +1765,12 @@ fn layout_keyword_mapper(property: PropertyId) -> Option<fn(&str) -> Option<Inte
         | PropertyId::BorderRightStyle
         | PropertyId::BorderBottomStyle
         | PropertyId::BorderLeftStyle
+        // The logical `border-*-style` longhands share the same closed keyword set;
+        // they resolve onto a physical `border-*-style` at computed-value time.
+        | PropertyId::BorderInlineStartStyle
+        | PropertyId::BorderInlineEndStyle
+        | PropertyId::BorderBlockStartStyle
+        | PropertyId::BorderBlockEndStyle
         // `outline-style` shares the same closed line-style keyword set.
         | PropertyId::OutlineStyle => Some(layout_keyword::border_style_from_name),
         PropertyId::Direction => Some(layout_keyword::direction_from_name),
