@@ -99,13 +99,21 @@ fn padding_inline_start_maps_to_the_right_edge_in_rtl() {
 /// `border-inline-start-width`.
 #[test]
 fn border_inline_start_width_maps_to_the_right_edge_in_rtl() {
+    // CORRECTED 2026-07-20 by the owner: this expected 180 (= 300 - 20 - 100), the
+    // MARGIN arithmetic copied onto a container BORDER. It is wrong under the default
+    // `box-sizing: content-box`: the container's `width: 300` is the *content* width,
+    // so the border sits OUTSIDE it and does not shrink the child's content area. The
+    // child (100px) right-aligns to the 300px content edge → left = 200. (A child's
+    // margin does enter the child's leftover, which is why the margin sibling is 180;
+    // a container border under content-box does not.) The LTR value stays 20: the left
+    // border shifts the content-box *origin*, which is a different effect.
     assert_inline_start_pair(
         "border-inline-start-width",
         "border-inline-start-style: solid; border-inline-start-width: 20px; \
          border-inline-end-width: 0",
         "",
-        180.0,
-        "300 - 20 - 100 = 180",
+        200.0,
+        "the child right-aligns to the 300px content edge (border is outside it)",
     );
 }
 

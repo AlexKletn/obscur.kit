@@ -6,7 +6,7 @@
 mod spec_ch4b_support;
 
 use obscur_kit::identity::{ComponentId, NodeId};
-use obscur_kit::layout::virtualization::VirtualLayout;
+use obscur_kit::layout::virtualization::{OverscanPolicy, SizeEstimator, VirtualLayout};
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 use spec_ch4b_support::harness::{approx, at, compile, el, geom, runtime, txt};
 
@@ -147,7 +147,14 @@ fn ch4_9_b_scroll_anchoring_compensates_growth_above_the_viewport() {
 /// stay far below 1000 (no virtualization at all).
 #[test]
 fn ch4_9_c_materialization_overscans_past_the_visible_range() {
-    let layout = VirtualLayout::with_default_extent(50.0);
+    // CORRECTED 2026-07-20 by the owner: this built the layout with
+    // `with_default_extent`, which is `OverscanPolicy::none` — no buffer — yet
+    // asserted a materialization buffer past the visible range. It only "passed"
+    // because `visible_range` used to include the item flush with the viewport
+    // bottom (a half-open-interval bug now fixed, and pinned by ch4_9_b). §4.9
+    // lists overscan as a supported mechanism; to exercise it the layout must
+    // actually declare one.
+    let layout = VirtualLayout::new(SizeEstimator::new(50.0), OverscanPolicy::symmetric(3));
     let range = layout.visible_range(0.0, 500.0, 1000);
 
     assert_eq!(range.start(), 0, "the materialized range starts at item 0");

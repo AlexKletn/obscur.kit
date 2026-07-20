@@ -61,11 +61,18 @@ impl VirtualLayout {
             return MaterializedRange::empty();
         }
         let first = self.estimator.index_at_offset(scroll_offset, item_count);
-        let last = self
-            .estimator
-            .index_at_offset(scroll_offset + viewport_extent, item_count);
-        // `last` is the item containing the viewport bottom; include it, so the
-        // visible band is the half-open range `[first, last + 1)`.
+        let bottom = scroll_offset + viewport_extent;
+        let mut last = self.estimator.index_at_offset(bottom, item_count);
+        // The viewport is half-open, `[scroll_offset, bottom)`: an item whose *top*
+        // sits exactly on `bottom` has zero visible pixels and is not in the band.
+        // `index_at_offset` returns that item (it "starts at" `bottom`), so step
+        // back to the item straddling the last visible pixel. `offset_of(last)` is
+        // `last`'s top, which is <= `bottom` by construction; equality is precisely
+        // the boundary case.
+        if last > first && self.estimator.offset_of(last, item_count) >= bottom {
+            last -= 1;
+        }
+        // The visible band is the half-open range `[first, last + 1)`.
         let visible_end = last.saturating_add(1);
         let (start, end) = self.overscan.expand(first, visible_end, item_count);
         MaterializedRange::new(start, end)

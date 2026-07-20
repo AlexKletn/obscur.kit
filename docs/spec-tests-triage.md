@@ -4,7 +4,7 @@
 red is which**, because they are not the same thing and must not be acted on the same
 way.
 
-State: **5,585 passing, 23 failing** (was 111 at derivation; the implementation phase is
+State: **5,589 passing, 19 failing** (was 111 at derivation; the implementation phase is
 closing them). 310 cases were derived across §1–§7 and §9; §8 was skipped (67 sections of
 declared stubs, nothing to test). The current red list, with counting and baseline
 caveats, is at the end of this file.
@@ -49,36 +49,32 @@ and they are a consequence of the isolation, not a failure of it: the deriver ne
 the API, and the translator was forbidden from changing an expected value, so a wrong
 fixture got translated faithfully.
 
-## The red list (23)
+## The red list (19)
 
 **Anything red not on this list is a regression.** git-stash verified each batch.
 
-State: **5,585 passing, 23 failing.**
+State: **5,589 passing, 19 failing.**
 
-Held to the owner, left red on purpose: arch_17 (context.window on an unbound runtime),
-arch_18's message-localization assertion (§1.6 wants a stable code, not a translated
-message). env(safe-area-inset-*) x2 are not-reachable: CSS env() is unimplemented.
+Held to the owner: arch_17, arch_18 (localization half), env(safe-area-inset) x2 and
+border_inline_start_width (needs a border-inline-* -> physical mapping that does not
+exist yet — the test's expected value was corrected to 200 under content-box).
 
 - `a_custom_loader_is_never_invoked_inside_the_frame_phase`
 - `a_newer_ir_version_is_refused_with_a_precise_diagnostic`
 - `a_synthetic_event_is_untrusted_and_a_gated_default_action_does_not_run`
-- `a_url_background_without_a_host_loader_fails_terminally_and_still_paints`
 - `an_exported_style_part_crosses_the_scope_boundary_and_an_unexported_one_does_not`
 - `an_ungranted_required_capability_refuses_instantiation`
 - `arch_17_a_missing_resource_diagnostic_carries_all_five_required_fields`
 - `arch_18_the_stable_code_survives_locale_and_call_site`
 - `border_inline_start_width_maps_to_the_right_edge_in_rtl`
 - `ch4_16_a_generated_content_paints_without_becoming_a_node`
-- `ch4_16_b_scrollbar_parts_are_hidden_from_the_component_tree_but_in_devtools`
 - `ch4_16_c_the_placeholder_is_an_exported_part_not_a_child`
 - `ch4_4_d_visibility_and_intersection_observers_track_the_scroll_chain`
-- `ch4_9_b_scroll_anchoring_compensates_growth_above_the_viewport`
 - `d_an_absent_power_provider_reports_typed_absence_without_fabricating`
 - `env_safe_area_inset_bottom_resolves_to_the_host_inset`
 - `env_safe_area_inset_top_resolves_to_the_host_inset`
 - `ft_01_the_default_provider_renders_in_an_isolated_environment`
 - `im_03_a_2x_asset_has_a_halved_logical_intrinsic_size`
 - `logical_block_start_maps_by_writing_mode`
-- `sc_04_gradient_stops_interpolate_premultiplied`
 - `the_same_fault_carries_one_stable_code_across_two_contexts`
 - `virtualfor_realizes_a_count_independent_of_the_item_count`

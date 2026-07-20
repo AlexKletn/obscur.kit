@@ -103,10 +103,19 @@ fn sc_04_gradient_stops_interpolate_premultiplied() {
         r, g,
         "the midpoint carries no red/green tint of its own (R={r}, G={g})"
     );
-    // Under §5.7's linear compositing the composited value is rgb(188,188,255).
+    // CORRECTED 2026-07-20 by the owner: this asserted (188,188,255) — linear-light
+    // compositing — which contradicts the sc_03 ruling that plain source-over (a
+    // gradient stop's alpha over its backdrop) composites in the element's own
+    // GAMMA space, with linear reserved for blend modes, blur and filters. Half-
+    // alpha blue over white in gamma is (1-a)·255 per channel not already
+    // saturated. Pixel row 50's centre is at y=50.5, so the gradient fraction is
+    // 0.505 and the blue alpha is 0.505 — not exactly 0.5; (1-0.505)·255 = 126.2,
+    // giving R=G=126, B saturated at 255. The premultiplied-interpolation point
+    // above (blue stays full-strength, not lerped toward black) is unchanged and is
+    // the actual §5.16 requirement this case was written for.
     assert_eq!(
         (r, g, b),
-        (188, 188, 255),
-        "half-alpha blue over white, composited in linear light"
+        (126, 126, 255),
+        "half-alpha blue over white, source-over in the element's gamma space"
     );
 }

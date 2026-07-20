@@ -15026,7 +15026,6 @@ mod tests {
 
     use obscur_motion::track::Keyframe;
     use obscur_motion::value::MotionValue;
-    use obscur_style::computed::ComputedStyle;
 
     /// A linear keyframe track from `from` to `to` over the full `[0, 1]` range.
     fn scalar_track(from: f32, to: f32) -> KeyframeTrack {
