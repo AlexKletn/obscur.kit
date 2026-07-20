@@ -30,6 +30,7 @@ use obscur_interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind}
 use obscur_interaction::spatial::SpatialIndex;
 use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_layout::model::Dimension;
+use obscur_layout::virtualization::{OverscanPolicy, SizeEstimator, VirtualLayout};
 use obscur_localization::locale::LanguageTag;
 use obscur_motion::scheduler::MotionScheduler;
 use obscur_motion::timeline::{Timeline, TimelineId};
@@ -64,7 +65,10 @@ use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::boundary::ComponentFailure;
 use obscur_view::component::{ComponentRegistration, RegistryError};
-use obscur_view::view::{EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, View, has_outlet, project_slots};
+use obscur_view::view::{
+    EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, View, has_outlet, has_virtual_collection,
+    project_slots, realize_virtual_collections,
+};
 
 use super::{
     AppCommands, CommandTarget, FrameBudget, FramePlan, KeyDispatch, PointerDispatch,
@@ -108,6 +112,17 @@ const MULTI_CLICK_WINDOW_MICROS: u64 = 500_000;
 /// The maximum distance, in logical pixels, between two presses for them to count
 /// as a multi-click — a press that jumps farther starts a fresh count.
 const MULTI_CLICK_RADIUS: f32 = 4.0;
+
+/// Overscan for a realized `<VirtualFor>` window — extra rows materialized past
+/// each viewport edge so a scroll reveals laid-out rows rather than blanks (spec
+/// §4.9 *overscan*).
+const VIRTUAL_OVERSCAN: usize = 3;
+
+/// The item count a `<VirtualFor>` window is sized against when the collection's
+/// real length is unknown at build time (spec §4.9). Deliberately far larger
+/// than any viewport can show, so it never bounds the window: the window is
+/// bounded by the viewport, which is the whole point of virtualization.
+const ASSUMED_VIRTUAL_ITEM_COUNT: usize = 1_000_000;
 
 /// The last [`PointerEventKind::Down`] press, retained so a rapid run of presses
 /// on the same target near the same point is recognised as a double/triple
@@ -2580,6 +2595,36 @@ impl UiRuntime {
     /// motion (`Animation`) frame does **not** re-reconcile, and an idle
     /// diagnostics capture recalculates nothing and simply re-presents the
     /// retained scene.
+    /// The number of rows a `<VirtualFor>` realizes for a viewport of
+    /// `viewport_height` logical pixels scrolled to `scroll_y`, given an
+    /// estimated row `extent` (spec §4.9).
+    ///
+    /// It is the length of the materialized range
+    /// [`VirtualLayout`](obscur_layout::virtualization::VirtualLayout) computes
+    /// for the viewport — the visible band widened by overscan — so it grows with
+    /// the viewport and shrinks as rows get taller, and is **independent of how
+    /// many items the collection holds**. A `<VirtualFor>`'s `each={…}` carries no
+    /// compile-time length, so the layout is queried over an assumed-large
+    /// collection: virtualization is exactly the regime where the collection
+    /// overflows the viewport, and the window is bounded by the viewport, not by
+    /// that count. This is what a `<For>` — one node per item — cannot promise.
+    fn virtual_window_len(extent: f32, viewport_height: f32, scroll_y: f32) -> usize {
+        // A non-positive estimate would make the size walk never advance; fall
+        // back to the shared default rather than loop.
+        let row_extent = if extent > 0.0 {
+            extent
+        } else {
+            obscur_view::view::DEFAULT_VIRTUAL_ROW_EXTENT
+        };
+        let layout = VirtualLayout::new(
+            SizeEstimator::new(row_extent),
+            OverscanPolicy::symmetric(VIRTUAL_OVERSCAN),
+        );
+        layout
+            .visible_range(scroll_y, viewport_height, ASSUMED_VIRTUAL_ITEM_COUNT)
+            .len()
+    }
+
     fn run_frame(
         &mut self,
         ctx: FrameContext,
@@ -2686,12 +2731,28 @@ impl UiRuntime {
             // building any earlier would reconcile the pre-dispatch view and paint
             // the handler's mutation a frame late (§3.4: dispatch precedes commit).
             let built_view;
-            let desired: &View = match desired {
+            let resolved: &View = match desired {
                 DesiredView::Ready(view) => view,
                 DesiredView::Build(build) => {
                     built_view = build();
                     &built_view
                 }
+            };
+            // §4.9: realize every `<VirtualFor>` HERE — the one place that owns the
+            // viewport. Each marker (spec §2.11) is replaced by a window of its
+            // template whose length comes from `VirtualLayout` against this frame's
+            // viewport, so the tree that reconciles below holds tens of rows, not
+            // one per item. A view with no marker is returned untouched.
+            let realized_view;
+            let desired: &View = if has_virtual_collection(resolved.root().nodes()) {
+                let viewport_height = ctx.viewport().height;
+                let scroll_y = self.viewport_scroll.1;
+                realized_view = realize_virtual_collections(resolved.clone(), &|extent| {
+                    Self::virtual_window_len(extent, viewport_height, scroll_y)
+                });
+                &realized_view
+            } else {
+                resolved
             };
             // §2.12: `desired` is the application's own view, so it is nobody's
             // render output and no `project_slots` will ever run over it. An
@@ -7954,6 +8015,63 @@ mod tests {
             .root()
             .expect("tree has a root after a frame");
         runtime.tree().get(root).unwrap().child_nodes().to_vec()[0]
+    }
+
+    /// The number of retained nodes carrying `class`.
+    fn count_class(runtime: &UiRuntime, class: &str) -> usize {
+        runtime
+            .tree()
+            .iter()
+            .filter(|(_, n)| n.attributes().has_class(class))
+            .count()
+    }
+
+    /// `<div>` wrapping a virtual collection of a single `row`-classed template.
+    fn virtual_list_view() -> View {
+        let template = ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(0x00C0_0009))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("row".into()))),
+        ]);
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(0x00C0_0001)).with_children(
+                ViewFragment::from_nodes(vec![ViewNode::virtual_collection(24.0, template)]),
+            ),
+        ]))
+    }
+
+    #[test]
+    fn virtual_for_realizes_a_viewport_bounded_window_not_the_item_count() {
+        // §4.9: a `<VirtualFor>` marker is realized into a window whose size comes
+        // from `VirtualLayout` against the committed viewport — tens of rows, not
+        // the (assumed-huge) item count. A taller viewport realizes strictly more,
+        // which is what proves the bound is the viewport and not a constant.
+        let mut short = UiRuntime::new(runtime_id(), Size::new(300.0, 400.0));
+        short.render_now(&virtual_list_view(), &[]);
+        let short_rows = count_class(&short, "row");
+
+        let mut tall = UiRuntime::new(runtime_id(), Size::new(300.0, 1600.0));
+        tall.render_now(&virtual_list_view(), &[]);
+        let tall_rows = count_class(&tall, "row");
+
+        // 400px / 24px + overscan is on the order of tens, and far below the
+        // million-item collection the window is sized against.
+        assert!(
+            (1..200).contains(&short_rows),
+            "a 400px viewport realizes tens of rows, got {short_rows}"
+        );
+        assert!(
+            tall_rows > short_rows,
+            "a 4x-taller viewport realizes strictly more rows ({tall_rows} vs {short_rows}), \
+             so the bound is the viewport"
+        );
+        // The marker itself is substituted away: the realized rows are the direct
+        // children of the div, with no virtual-collection node retained between.
+        let div = counter_child(&short);
+        assert_eq!(
+            short.tree().get(div).expect("live div").child_nodes().len(),
+            short_rows,
+            "every realized row is a direct child of the div; no marker node remains"
+        );
     }
 
     // ---- runtime-driven components (§2.1, §2.14, §3.1) ----------------------

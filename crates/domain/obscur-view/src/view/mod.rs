@@ -15,6 +15,11 @@ mod slot;
 pub use slot::{
     SLOT, SLOT_OUTLET, assigns_slots, has_outlet, is_outlet, project_slots, slot_assignment,
 };
+mod virtual_collection;
+pub use virtual_collection::{
+    DEFAULT_VIRTUAL_ROW_EXTENT, VIRTUAL_COLLECTION, VIRTUAL_ROW_EXTENT, has_virtual_collection,
+    is_virtual_collection, realize_virtual_collections, virtual_row_extent,
+};
 mod stable_selector;
 pub use stable_selector::{AUTOMATION_ID, TEST_ID};
 mod style_attribute;

@@ -102,6 +102,11 @@
 //!
 //! `<Empty>` and `<Separator>` children are the §2.11 slots, not template nodes;
 //! `<Loading>` is deliberately absent — see [`loop_slot`].
+//!
+//! A `<VirtualFor>` is the exception: it emits **no** loop. It is a §4.9
+//! performance contract, so it lowers to a single virtual-collection marker
+//! carrying its row template, which the runtime realizes into a viewport-bounded
+//! window — see [`emit_virtual_collection`].
 
 use std::fmt::Write as _;
 
@@ -249,6 +254,15 @@ fn loop_slot(tag: &str) -> bool {
 /// `.iter()` reads the same on a `Vec`, a slice, an array and a borrow of any of
 /// them.
 fn emit_loop(node: &UiIrNode, out: &mut String, indent: usize) {
+    // A `<VirtualFor>` is not a `<For>`: it does not walk the collection at all.
+    // It emits a virtual-collection marker the runtime realizes into a
+    // viewport-bounded window (spec §4.9), so it is handled apart from the
+    // per-item `for` below.
+    if node.tag() == "VirtualFor" {
+        emit_virtual_collection(node, out, indent);
+        return;
+    }
+
     let pad = indentation(indent);
     let inner = indentation(indent + 1);
 
@@ -295,6 +309,48 @@ fn emit_loop(node: &UiIrNode, out: &mut String, indent: usize) {
         emit_into(&children, out, indent + 1, None);
         let _ = writeln!(out, "{pad}}}");
     }
+}
+
+/// Emits a `<VirtualFor>` as a virtual-collection marker (spec §2.11, §4.9).
+///
+/// Where [`emit_loop`] emits a real `for` that materializes one node per item, a
+/// `<VirtualFor>` emits a single
+/// [`ViewNode::virtual_collection`](obscur_view::view::ViewNode::virtual_collection)
+/// carrying its row template. The runtime, which owns the viewport, realizes that
+/// marker into a viewport-bounded window — so the generated code never walks the
+/// collection and its size is independent of the collection's length, which is
+/// the promise a `<For>` cannot make.
+///
+/// The window template is emitted **once**, with no item binding: a windowed row
+/// is not yet a function of per-item data (the retained collection consumer the
+/// `collection_rule` docs describe is what would thread it in), so a
+/// `<VirtualFor>` body reads no `item`. Its `empty`/`separator` slots — a `<For>`
+/// affordance about iteration — are not part of a window template and are
+/// dropped.
+fn emit_virtual_collection(node: &UiIrNode, out: &mut String, indent: usize) {
+    let pad = indentation(indent);
+    let inner = indentation(indent + 1);
+
+    let body: Vec<&UiIrNode> = node
+        .children()
+        .iter()
+        .filter(|child| !loop_slot(child.tag()))
+        .collect();
+    let template = emit_nodes_block(&body, indent + 1);
+
+    let _ = writeln!(
+        out,
+        "{pad}__nodes.push(::obscur_view::view::ViewNode::virtual_collection("
+    );
+    let _ = writeln!(
+        out,
+        "{inner}::obscur_view::view::DEFAULT_VIRTUAL_ROW_EXTENT,"
+    );
+    let _ = writeln!(
+        out,
+        "{inner}::obscur_view::view::ViewFragment::from_nodes({template}),"
+    );
+    let _ = writeln!(out, "{pad}));");
 }
 
 /// Whether `node` opens a conditional chain (an `<If>`).

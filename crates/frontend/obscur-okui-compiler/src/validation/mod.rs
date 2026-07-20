@@ -8,10 +8,12 @@
 //!   assignment, mutation, I/O, async or forbidden keywords in an `{expr}`.
 //! - [`CapabilityValidator`] checks that each element's declared required
 //!   capability is granted (§2.13).
-//! - [`CollectionValidator`] refuses a §2.11 collection construct whose contract
-//!   this pipeline does not keep — today `<VirtualFor>`, whose §4.9 windowing
-//!   promise nothing honours. The rule is [`check_collection`], shared with the
-//!   macro front end for the reason [`collection_rule`]'s docs give.
+//! - [`CollectionValidator`] applies the §2.11 collection rule
+//!   ([`check_collection`], shared with the macro front end): both `<For>` and
+//!   `<VirtualFor>` are honoured — the latter lowers to a virtual-collection
+//!   marker the runtime realizes into a viewport-bounded window (§4.9) — so the
+//!   rule accepts them, and the walk is the seam a future collection constraint
+//!   would live in. See [`collection_rule`]'s docs.
 //! - [`ContractValidator`] checks a component instance against a
 //!   [`ComponentContract`] — required props, allowed children and the §2.12
 //!   slots — on the **file** front end.
@@ -30,7 +32,7 @@ pub use builtin_contracts::{builtin_contracts, widget_contracts};
 mod capability_validator;
 pub use capability_validator::CapabilityValidator;
 pub mod collection_rule;
-pub use collection_rule::{VIRTUAL_FOR_MESSAGE, check_collection};
+pub use collection_rule::check_collection;
 mod collection_validator;
 pub use collection_validator::CollectionValidator;
 pub mod contract_rule;

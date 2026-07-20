@@ -441,7 +441,6 @@ impl Compiler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::validation::VIRTUAL_FOR_MESSAGE;
     use obscur_okui_syntax::ast::Document;
     use obscur_okui_syntax::parser::Parser;
 
@@ -656,24 +655,34 @@ mod tests {
     }
 
     #[test]
-    fn virtual_for_makes_the_compile_report_errors() {
-        // §2-D: a `<VirtualFor>` used to compile clean and emit the same loop a
-        // `<For>` does. `has_errors()` is the gate the one production consumer of
-        // this pipeline reads (`obscur-kit`'s build.rs panics on it), so the
-        // refusal is only real if it lands there.
+    fn virtual_for_compiles_clean_and_lowers_to_a_virtual_collection() {
+        // §2-D: a `<VirtualFor>` used to be refused because it emitted the same
+        // loop a `<For>` does and kept no windowing promise. It is now a
+        // first-class §2.11 construct: it compiles clean and lowers to a virtual
+        // collection — NOT to a `<For>` — that the runtime realizes into a
+        // viewport-bounded window (spec §4.9).
         let doc = document("<VirtualFor each={items} key={id}><Row/></VirtualFor>");
         let result = Compiler::new("app.okui")
             .defining(Symbol::prop("items"))
             .defining(Symbol::prop("id"))
             .compile(&doc);
-        assert!(result.has_errors(), "a `<VirtualFor>` is refused");
         assert!(
-            result.diagnostics().iter().any(|d| matches!(
-                d,
-                CompileDiagnostic::Validation(v) if v.message() == VIRTUAL_FOR_MESSAGE
-            )),
+            !result.has_errors(),
             "diagnostics: {:?}",
             result.diagnostics()
+        );
+        let document = result.document().expect("a lowered document");
+        // The IR keeps the construct as a `VirtualFor` loop node...
+        assert_eq!(document.root().tag(), "VirtualFor");
+        // ...and bridging it produces a virtual-collection marker, not the spliced
+        // template a `<For>` bridges to.
+        let view = crate::bridge::UiIrViewBridge::document_to_view(document);
+        assert!(
+            view.root()
+                .nodes()
+                .iter()
+                .any(obscur_view::view::is_virtual_collection),
+            "a `<VirtualFor>` bridges to a virtual-collection marker"
         );
     }
 

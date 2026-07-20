@@ -130,15 +130,14 @@ fn is_conditional_tag(tag: &str) -> bool {
 /// Whether `tag` names a collection construct rather than an element
 /// (spec §2.11).
 ///
-/// `VirtualFor` is still classified with `For` — §2.11 says it is a collection,
-/// and misclassifying it as an element would render a node called `VirtualFor`.
-/// What it no longer does is *compile*:
-/// [`check_collection`](obscur_okui_compiler::validation::check_collection)
-/// refuses it in [`validate_element`], which runs before any of this, because the
-/// emitter treats the two alike and a `<VirtualFor>` that silently materializes
-/// every item is a performance contract nobody keeps. This predicate keeps both
-/// names so the refusal reads as "a loop we will not compile" rather than "an
-/// unknown component".
+/// `VirtualFor` is classified with `For` — §2.11 says it is a collection, and
+/// misclassifying it as an element would render a node called `VirtualFor`. The
+/// two are *not* emitted alike, though: a `<For>` lowers to a loop node the
+/// codegen emits as a real per-item `for`, while a `<VirtualFor>` keeps its tag
+/// so the codegen/bridge lower it to a virtual-collection marker the runtime
+/// realizes into a viewport-bounded window (spec §4.9). This predicate keeps
+/// both names so each reads as "a loop", the tag downstream then telling them
+/// apart.
 fn is_loop_tag(tag: &str) -> bool {
     matches!(tag, "For" | "VirtualFor")
 }
@@ -479,8 +478,9 @@ fn validate_contracts(nodes: &[DslNode]) -> syn::Result<()> {
 ///
 /// Three rules run here, and all three are the compiler's own: the §2.12/§2.13
 /// contract ([`check_contract`]), the §2.11 collection rule
-/// ([`check_collection`]), which refuses a `<VirtualFor>`, and the §2.12 outlet
-/// rule ([`check_outlet`]), which polices an authored `<slot name="…"/>`. The
+/// ([`check_collection`]), which honours both `<For>` and `<VirtualFor>`, and the
+/// §2.12 outlet rule ([`check_outlet`]), which polices an authored
+/// `<slot name="…"/>`. The
 /// macro adds the [`Span`], which is the whole reason this front end reports
 /// better than the file one — the author's build stops on the tag they wrote.
 fn validate_element(
@@ -1079,20 +1079,26 @@ mod tests {
     }
 
     #[test]
-    fn virtual_for_is_refused_rather_than_compiled_as_a_plain_for() {
-        // §2-D: `<VirtualFor>` parsed, classified and lowered with its tag, and
-        // `emit_loop` never read the tag — so a performance contract was accepted
-        // and kept by nothing. It is now a compile error on the author's tag.
-        let message = rejection(quote! {
+    fn virtual_for_compiles_and_lowers_with_its_own_tag() {
+        // §2-D: `<VirtualFor>` used to be refused on this front end because
+        // `emit_loop` never read the tag and it compiled to a plain `<For>`. It is
+        // now a first-class §2.11 construct: the macro accepts it and lowers it to
+        // a loop node that KEEPS the `VirtualFor` tag, which the codegen/bridge
+        // then realize as a viewport-bounded window (spec §4.9) rather than a
+        // per-item loop.
+        let document = doc(quote! {
             <div><VirtualFor each={rows} as={row} key={row.id}><span/></VirtualFor></div>
         });
-        assert!(
-            message.contains("`<VirtualFor>` is not implemented"),
-            "the author is told the tag is refused, got: {message}"
-        );
-        assert!(
-            message.contains("Use `<For>`"),
-            "and what to write instead, got: {message}"
+        let virtual_for = document
+            .root()
+            .children()
+            .iter()
+            .find(|node| node.kind() == UiIrNodeKind::Loop)
+            .expect("the div holds a loop node");
+        assert_eq!(
+            virtual_for.tag(),
+            "VirtualFor",
+            "the construct keeps its tag, so it is not a plain `<For>`"
         );
     }
 
@@ -1182,14 +1188,14 @@ mod tests {
 
     #[test]
     fn a_plain_for_still_compiles() {
-        // The other half: the refusal must be about `<VirtualFor>` alone. A
-        // rule that also broke `<For>` would be breakage, not enforcement.
+        // `<For>` and `<VirtualFor>` are both §2.11 constructs this front end
+        // compiles; this pins the per-item one.
         assert!(
             DslMacro::to_document(quote! {
                 <div><For each={rows} as={row} key={row.id}><span/></For></div>
             })
             .is_ok(),
-            "`<For>` is the collection construct that is really implemented"
+            "`<For>` materializes one node per item"
         );
     }
 

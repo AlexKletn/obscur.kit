@@ -10,13 +10,15 @@ use crate::validation::{ValidationDiagnostic, check_collection};
 ///
 /// The rule itself is [`check_collection`](crate::validation::check_collection) —
 /// the same function the `okui!` macro is checked with. This type only walks the
-/// syntax tree and attaches a byte offset to each refusal, the mirror of what
+/// syntax tree and attaches a byte offset to each verdict, the mirror of what
 /// [`ExpressionValidator`](crate::validation::ExpressionValidator) does for
 /// §2.10.
 ///
-/// Today it refuses exactly one tag, `<VirtualFor>`; see the
-/// [`collection_rule`](crate::validation::collection_rule) module docs for why a
-/// refusal is better than the silent `<For>` it used to compile to.
+/// Both §2.11 constructs, `<For>` and `<VirtualFor>`, are honoured, so the walk
+/// reports nothing today; it is the seam a future collection constraint would
+/// live in. See the [`collection_rule`](crate::validation::collection_rule)
+/// module docs for how `<VirtualFor>` is realized as a viewport-bounded window
+/// rather than the silent `<For>` it used to compile to.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CollectionValidator;
 
@@ -40,8 +42,8 @@ impl CollectionValidator {
 
     /// Checks one element's tag, then recurses into its element-shaped children.
     ///
-    /// The walk does not stop at a refusal: a document with two `<VirtualFor>`s
-    /// reports both, the same report-them-all policy `Compiler::compile` follows.
+    /// The walk does not stop at a diagnostic: it reports every offending
+    /// element, the same report-them-all policy `Compiler::compile` follows.
     fn validate_element(element: &Element, diagnostics: &mut Vec<ValidationDiagnostic>) {
         if let Some(tag) = element.tag_name()
             && let Err(message) = check_collection(&tag)
@@ -62,7 +64,6 @@ impl CollectionValidator {
 #[cfg(test)]
 mod tests {
     use super::CollectionValidator;
-    use crate::validation::collection_rule::VIRTUAL_FOR_MESSAGE;
     use obscur_okui_syntax::ast::Document;
     use obscur_okui_syntax::parser::Parser;
 
@@ -77,26 +78,25 @@ mod tests {
     }
 
     #[test]
-    fn a_virtual_for_is_refused_at_its_own_offset() {
+    fn a_virtual_for_is_now_accepted() {
+        // §2.11's `<VirtualFor>` is a first-class construct realized as a
+        // viewport-bounded window (spec §4.9), so the walk reports nothing.
         let src = "<div><VirtualFor each={items} key={id}><Row/></VirtualFor></div>";
-        let diagnostics = CollectionValidator::new().validate(&document(src));
-        assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].message(), VIRTUAL_FOR_MESSAGE);
-        // Pointed at the `<VirtualFor>` itself, not at the document root.
-        assert_eq!(
-            diagnostics[0].offset() as usize,
-            src.find("<VirtualFor").expect("the tag is in the source")
+        assert!(
+            CollectionValidator::new()
+                .validate(&document(src))
+                .is_empty()
         );
     }
 
     #[test]
-    fn every_virtual_for_is_reported_not_just_the_first() {
+    fn several_virtual_fors_are_all_accepted() {
         let doc = document(
             "<div>\
                <VirtualFor each={a} key={id}><Row/></VirtualFor>\
                <VirtualFor each={b} key={id}><Row/></VirtualFor>\
              </div>",
         );
-        assert_eq!(CollectionValidator::new().validate(&doc).len(), 2);
+        assert!(CollectionValidator::new().validate(&doc).is_empty());
     }
 }

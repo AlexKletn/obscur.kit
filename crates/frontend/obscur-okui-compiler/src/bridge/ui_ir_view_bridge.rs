@@ -77,6 +77,13 @@ impl UiIrViewBridge {
             }
             UiIrNodeKind::Element => vec![lower_element(node, TagPosition::Element)],
             UiIrNodeKind::Component => vec![lower_element(node, TagPosition::Component)],
+            // A `<VirtualFor>` is *not* a `<For>`: it lowers to a single
+            // virtual-collection marker carrying its row template, which the
+            // runtime realizes into a viewport-bounded window (spec §4.9) rather
+            // than materializing one node per item.
+            UiIrNodeKind::Loop if node.tag() == "VirtualFor" => {
+                vec![lower_virtual_collection(node)]
+            }
             UiIrNodeKind::Fragment | UiIrNodeKind::Conditional | UiIrNodeKind::Loop => node
                 .children()
                 .iter()
@@ -126,6 +133,24 @@ fn lower_element(node: &UiIrNode, position: TagPosition) -> ViewNode {
         view = view.with_key(lower_key(key));
     }
     view
+}
+
+/// Lowers a `<VirtualFor>` [`Loop`](UiIrNodeKind::Loop) node into a
+/// virtual-collection marker (spec §2.11, §4.9).
+///
+/// The loop's template body becomes the marker's per-row template — lowered
+/// once, not once per item — and the marker carries the default estimated row
+/// extent. The runtime substitutes the marker away before reconcile, replacing
+/// it with as many template clones as the viewport-bounded window holds; the
+/// realized count is therefore a function of the viewport, not of the
+/// collection's length, which is the promise a `<For>` cannot keep.
+fn lower_virtual_collection(node: &UiIrNode) -> ViewNode {
+    let template: ViewFragment = node
+        .children()
+        .iter()
+        .flat_map(UiIrViewBridge::node_to_view_nodes)
+        .collect();
+    ViewNode::virtual_collection(obscur_view::view::DEFAULT_VIRTUAL_ROW_EXTENT, template)
 }
 
 /// Lowers an IR value expression into a concrete [`ViewValue`].
