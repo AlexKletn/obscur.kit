@@ -3188,6 +3188,7 @@ impl UiRuntime {
             relaid_out
         };
         phase_clock.mark_layout();
+        self.dump_virtual_geometry();
 
         // 5. Compose: build the display list, install it, publish a snapshot.
         //    When skipped, the retained scene's current snapshot is republished.
@@ -6478,6 +6479,12 @@ impl UiRuntime {
         viewport: Size,
         reconcile_roots: &[NodeId],
     ) -> Option<StyleInvalidation> {
+        // Diagnostic escape hatch: `OBSCUR_FULL_RESTYLE=1` forces the pre-incremental
+        // behaviour, so a suspected stale-style artifact can be attributed to this
+        // pass by toggling it rather than by argument.
+        if std::env::var_os("OBSCUR_FULL_RESTYLE").is_some() {
+            return None;
+        }
         let last = self.last_style.as_ref()?;
         if last.viewport != viewport || last.sheets != sheets {
             return None;
@@ -7403,6 +7410,41 @@ impl UiRuntime {
     /// for a node that is not a scroll container, does not overflow, or has never
     /// been scrolled (CSS Overflow 3 §scroll-container).
     #[must_use]
+    /// Prints the realized geometry of every virtual list when
+    /// `OBSCUR_VLIST_DEBUG=1` is set.
+    ///
+    /// A rendering artifact can be a layout fault or a paint fault, and arguing from
+    /// the picture cannot tell them apart. This says where each realized child
+    /// actually is: if the boxes overlap, layout produced them that way; if they tile
+    /// cleanly, the fault is downstream.
+    fn dump_virtual_geometry(&self) {
+        if std::env::var_os("OBSCUR_VLIST_DEBUG").is_none() {
+            return;
+        }
+        for (&id, &container) in &self.virtual_container {
+            let Some(node) = self.tree.get(container) else {
+                continue;
+            };
+            let scroll = self.scroll_top.get(&container).copied().unwrap_or(0.0);
+            let window = self.virtual_windows.get(&id);
+            println!("[vlist {id:?}] scroll {scroll:.1} window {window:?}");
+            for child in node.children() {
+                let kind = self
+                    .tree
+                    .get(*child)
+                    .and_then(|n| n.kind().component_id())
+                    .map_or_else(|| "?".to_owned(), |c| format!("{:#x}", c.raw()));
+                if let Some(b) = self.boxes.get(child) {
+                    println!(
+                        "    {kind:>10}  y {:>9.1}  h {:>8.1}",
+                        b.origin().y,
+                        b.size().height
+                    );
+                }
+            }
+        }
+    }
+
     /// Records which container each virtual list realized into, by looking at where
     /// its spacers landed (spec §4.9).
     ///
