@@ -4373,6 +4373,50 @@ fn resolve_stop_positions(stops: &mut [GradientStop]) {
     }
 }
 
+/// Whether `values` is a bare keyword `property` cannot use — a foreign value
+/// the lenient keyword path lowered to an inert interned keyword the property
+/// ignores, i.e. an unparseable value that was dropped (§4.13).
+///
+/// Only the unambiguous cases are reported, so a clean sheet never trips it:
+/// a `<color>` longhand handed a bare keyword that is not a named colour, or a
+/// `<length>` longhand handed a keyword that is neither `auto` nor an intrinsic
+/// sizing keyword. A CSS-wide keyword (`inherit`/`initial`/`unset`) is always
+/// valid, and any non-keyword component (length, number, colour, function) is
+/// judged by ordinary lowering, never here.
+#[must_use]
+pub(crate) fn keyword_value_is_foreign(property: PropertyId, values: &[ParsedValue]) -> bool {
+    let [ParsedValue::Keyword(keyword)] = values else {
+        return false;
+    };
+    if css_wide_keyword(keyword).is_some() {
+        return false;
+    }
+    if is_color_longhand(property) {
+        return named_color(keyword).is_none();
+    }
+    if is_length_longhand(property) {
+        return !keyword.eq_ignore_ascii_case("auto")
+            && layout_keyword::sizing_from_name(keyword).is_none();
+    }
+    false
+}
+
+/// The colour-valued longhands, for which a bare keyword (other than a CSS-wide
+/// one) is never a valid value.
+#[must_use]
+const fn is_color_longhand(property: PropertyId) -> bool {
+    matches!(
+        property,
+        PropertyId::Color
+            | PropertyId::BackgroundColor
+            | PropertyId::BorderTopColor
+            | PropertyId::BorderRightColor
+            | PropertyId::BorderBottomColor
+            | PropertyId::BorderLeftColor
+            | PropertyId::OutlineColor
+    )
+}
+
 /// Picks the unsupported-feature category to report when a value cannot be
 /// lowered, based on the shape of its first component.
 fn value_unsupported_kind(values: &[ParsedValue]) -> UnsupportedFeatureKind {

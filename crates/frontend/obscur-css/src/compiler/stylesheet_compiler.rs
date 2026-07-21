@@ -29,7 +29,9 @@ use super::animation_compiler::{AnimationCompiler, AnimationRef};
 use super::condition_lowering::lower_condition;
 use super::keyframe_compiler::{CompiledKeyframes, KeyframeCompiler};
 use super::motion_rule::{CompiledAnimation, CompiledMotionRule};
-use super::property_compiler::{CompiledDeclaration, PropertyCompiler};
+use super::property_compiler::{
+    CompiledDeclaration, PropertyCompiler, keyword_value_is_foreign, property_id_from_name,
+};
 use super::selector_compiler::SelectorCompiler;
 use super::transition_compiler::{CompiledTransition, TransitionCompiler};
 
@@ -353,6 +355,11 @@ impl StylesheetCompiler {
     /// there, so they are silently skipped here to avoid double reporting).
     fn lower_matchable_rule(&mut self, style: &ParsedStyleRule) -> StyleRule {
         let mut block = Vec::new();
+        // The longhands this rule authored whose value could not be parsed: they
+        // never enter the block, so a matched element loses only that one
+        // declaration (§4.13). Recorded on the rule so the runtime can raise a
+        // per-node diagnostic attributed to the element that matched it.
+        let mut invalid_values = Vec::new();
         for decl in &style.declarations {
             if is_motion_decl(&decl.name) {
                 continue;
@@ -377,8 +384,20 @@ impl StylesheetCompiler {
                     ));
                 }
             }
+            // A recognised longhand handed a bare keyword it cannot use had an
+            // unparseable value: the lenient keyword path lowered it to an inert
+            // interned keyword the property ignores, so it is dropped in effect —
+            // an "invalid value" fault (§4.13) recorded per rule. Unknown property
+            // names and custom properties are a different class (and both fail
+            // `property_id_from_name`, so they are excluded here).
+            if let Some(property) = property_id_from_name(&decl.name)
+                && keyword_value_is_foreign(property, &decl.value)
+            {
+                invalid_values.push(property);
+            }
         }
         StyleRule::new(SelectorCompiler::lower_list(&style.selectors), block)
+            .with_invalid_values(invalid_values)
     }
 }
 

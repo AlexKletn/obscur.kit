@@ -2,6 +2,7 @@
 //! [`StyleRule`].
 
 use crate::matching::{BlockDeclaration, RuleCondition};
+use crate::property::PropertyId;
 use crate::selector::SelectorList;
 
 /// One authored style rule: a [`SelectorList`] paired with the block of
@@ -23,6 +24,12 @@ pub struct StyleRule {
     selectors: SelectorList,
     block: Vec<BlockDeclaration>,
     condition: Option<RuleCondition>,
+    /// The longhand properties whose authored value could not be parsed and was
+    /// therefore dropped from [`block`](Self::block) (§4.13). An element that
+    /// matches this rule carries a recoverable, per-node style fault for each —
+    /// the value never reached the cascade, so the rest of the block still
+    /// applies. Empty for a rule every declaration of which lowered cleanly.
+    invalid_values: Vec<PropertyId>,
 }
 
 impl StyleRule {
@@ -34,7 +41,25 @@ impl StyleRule {
             selectors,
             block,
             condition: None,
+            invalid_values: Vec::new(),
         }
+    }
+
+    /// Returns a copy of this rule that records `properties` as the longhands
+    /// whose authored value could not be parsed and was dropped (§4.13),
+    /// replacing any previously recorded set.
+    #[must_use]
+    pub fn with_invalid_values(mut self, properties: Vec<PropertyId>) -> Self {
+        self.invalid_values = properties;
+        self
+    }
+
+    /// Returns the longhand properties whose authored value was dropped as
+    /// unparseable, in authored order. Empty when every declaration lowered
+    /// cleanly.
+    #[must_use]
+    pub fn invalid_values(&self) -> &[PropertyId] {
+        &self.invalid_values
     }
 
     /// Returns a copy of this rule gated behind `condition`, replacing any

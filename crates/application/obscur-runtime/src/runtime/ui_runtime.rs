@@ -6348,6 +6348,35 @@ impl UiRuntime {
         Some(dirty)
     }
 
+    /// Raises one structured [`Diagnostic`] per node-attributed "invalid value"
+    /// style fault this frame's match produced (spec §1.6, §7.8, §4.13).
+    ///
+    /// Each dropped, unparseable declaration value (`width: not-a-length`)
+    /// carries the same stable code and subsystem regardless of which property
+    /// or which node it came from — the fault class is one thing — while the
+    /// node context differs so a tool points at the exact element. The property
+    /// is kept out of the message so two faults on two properties read
+    /// identically; it is a typed record on the matched
+    /// [`StyleRule`](obscur_style::matching::StyleRule), not interpolated text.
+    /// The value was dropped and the rest of the block still applies, so the
+    /// recovery is [`RecoveryAction::Fallback`].
+    fn emit_style_value_faults(&self, sheets: &[Stylesheet], environment: &MediaEnvironment) {
+        for node in
+            self.matcher
+                .collect_invalid_value_faults(&self.tree, sheets, &self.pseudo, environment)
+        {
+            let mut diagnostic = Diagnostic::new(
+                DiagnosticCode::new("css.invalid_value"),
+                DiagnosticSeverity::Warning,
+                DiagnosticSubsystem::Style,
+                "a declaration value could not be parsed and was dropped",
+            )
+            .with_recovery(RecoveryAction::Fallback);
+            diagnostic.context.node = Some(node);
+            self.report_diagnostic(&diagnostic);
+        }
+    }
+
     /// Runs the whole match + style pass: every element is re-matched and every
     /// node re-resolved.
     ///
@@ -6366,6 +6395,12 @@ impl UiRuntime {
             &self.pseudo,
             environment,
         );
+        // Per-node style faults: a matched rule that authored an unparseable
+        // declaration value (`width: not-a-length`) dropped it and kept the rest
+        // (§4.13). The runtime is the only place that knows *which* element
+        // matched the rule, so it raises the structured diagnostic here, on the
+        // full pass that visits every node.
+        self.emit_style_value_faults(sheets, environment);
         // The scene's paragraph orchestrator is the `ch` port, so `ch` folds to
         // pixels here with every other relative unit. It is the same shaper the
         // measure and compose passes use (disjoint fields, so a legal split
