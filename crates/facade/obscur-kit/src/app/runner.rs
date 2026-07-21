@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
+use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::PhysicalKey as WinitPhysicalKey;
@@ -20,7 +20,7 @@ use crate::css::source::CssSource;
 use crate::geometry::{Point, Size};
 use crate::identity::{InternedSymbol, RuntimeId};
 use crate::interaction::command::KeyEvent;
-use crate::interaction::pointer::{PointerDevice, PointerEvent, PointerId};
+use crate::interaction::pointer::{PointerButtons, PointerEvent, PointerId};
 use crate::render::frame::{FrameSubmission, RenderFrame};
 use crate::render::renderer::RendererId;
 use crate::render_vello::renderer::{VelloDevice, VelloRenderer, VelloSurface};
@@ -183,7 +183,15 @@ impl AppRunner {
     /// swapchain is reconfigured and the frame skipped (the next redraw recovers).
     #[allow(clippy::cast_precision_loss)]
     fn render_frame(&mut self) {
-        self.runtime.run_due_frame_reactive();
+        // Only present when a frame was actually produced. A redraw request that
+        // finds nothing due — a bare cursor move over unchanged UI, which winit
+        // delivers continuously — would otherwise rebuild the view, re-snapshot and
+        // re-present an identical scene on every pointer twitch. The runtime is the
+        // authority on whether anything changed: it schedules a frame itself when
+        // hover, focus, animation or a landed resource makes one necessary.
+        if self.runtime.run_due_frame_reactive().is_none() {
+            return;
+        }
         let snapshot = self.runtime.snapshot();
 
         let (Some(surface), Some(renderer)) = (self.surface.as_ref(), self.renderer.as_mut())
@@ -215,13 +223,27 @@ impl AppRunner {
     /// [`PointerConverter::kind`] to map the winit state (the converter has no
     /// public builder for a button transition *at a position*).
     #[allow(clippy::cast_possible_truncation)]
+    /// Builds the press/release for a left-button change.
+    ///
+    /// It goes through [`PointerConverter`]'s `pressed`/`released` builders rather
+    /// than `PointerEvent::new`, because those are the ones that mark the event
+    /// **trusted** (§2.3). This is the platform-adapter path — a real user gesture —
+    /// and a gated default action (the click → command dispatch) only runs for a
+    /// trusted event, so building the event by hand here silently disabled every
+    /// click in every `App`.
     fn pointer_button_event(&self, state: ElementState) -> PointerEvent {
-        PointerEvent::new(
-            PointerId::MOUSE,
-            PointerDevice::Mouse,
-            PointerConverter::kind(state),
-            Point::new(self.cursor.0 as f32, self.cursor.1 as f32),
-        )
+        let at = PhysicalPosition::new(self.cursor.0, self.cursor.1);
+        let converter = PointerConverter::new();
+        match state {
+            ElementState::Pressed => converter.pressed(
+                PointerId::MOUSE,
+                at,
+                PointerButtons::from_bits(PointerButtons::PRIMARY),
+            ),
+            ElementState::Released => {
+                converter.released(PointerId::MOUSE, at, PointerButtons::new())
+            }
+        }
     }
 }
 
