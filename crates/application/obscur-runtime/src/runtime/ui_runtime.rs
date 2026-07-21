@@ -86,7 +86,7 @@ use crate::orchestration::{
     NodeInspection, PreeditView, PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint,
     ShapedChMetrics, StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement,
     TreeInspection, overflow_scrolls, overlay_commands, resolve_generated_content, root_font_size,
-    scroll_containers, scrollbar_rects,
+    scroll_containers, scrollbar_rects, user_scrollable,
 };
 use crate::orchestration::{alignment_for, direction_for, white_space_for};
 use crate::recovery::RecoveryResult;
@@ -3188,7 +3188,7 @@ impl UiRuntime {
             relaid_out
         };
         phase_clock.mark_layout();
-        self.dump_virtual_geometry();
+        let () = self.dump_virtual_geometry();
 
         // 5. Compose: build the display list, install it, publish a snapshot.
         //    When skipped, the retained scene's current snapshot is republished.
@@ -7581,7 +7581,14 @@ impl UiRuntime {
     /// container's own `scroll_top`, so the hit-tested container is the one the
     /// pointer visually sits over while scrolled.
     pub fn handle_scroll(&mut self, delta_y: f32, position: Point) -> Option<NodeId> {
-        let containers = scroll_containers(&self.tree, &self.computed, &self.boxes);
+        // Only what the user may scroll. A `hidden` box is a scroll container in the
+        // CSS sense — it clips and can be scrolled programmatically — but the wheel
+        // must pass through it, or a row that clips a long name eats the scroll meant
+        // for the list it sits in.
+        let containers: Vec<_> = scroll_containers(&self.tree, &self.computed, &self.boxes)
+            .into_iter()
+            .filter(|c| user_scrollable(&self.computed, c.node))
+            .collect();
         if containers.is_empty() {
             return None;
         }

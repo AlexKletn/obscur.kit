@@ -34,7 +34,7 @@ pub(crate) use scene_coordinator::scrollbar_rects;
 pub use scene_coordinator::{SceneCoordinator, ScrollPaint};
 mod scroll;
 mod shaped_ch_metrics;
-pub(crate) use scroll::{ScrollContainer, overflow_scrolls, scroll_containers};
+pub(crate) use scroll::{ScrollContainer, overflow_scrolls, scroll_containers, user_scrollable};
 pub use shaped_ch_metrics::ShapedChMetrics;
 mod stacking;
 mod style_coordinator;
