@@ -407,6 +407,7 @@ impl ApplicationHandler for AppRunner {
         #[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(unused_mut))]
         let mut attributes = WindowAttributes::default()
             .with_title(self.title.clone())
+            .with_transparent(true)
             .with_inner_size(LogicalSize::new(
                 f64::from(self.size.0),
                 f64::from(self.size.1),
@@ -605,6 +606,25 @@ fn init_gpu(
     let mut config = surface
         .get_default_config(&adapter, size.width.max(1), size.height.max(1))
         .ok_or_else(|| "surface unsupported by adapter".to_owned())?;
+    // Let the root's own `background-color` decide whether the window is see-through,
+    // with no API to opt into: `get_default_config` picks `Opaque`, which throws the
+    // alpha away at composite time, so an `rgba(…, 0.7)` root would paint correctly
+    // and still show up solid. Asking for a premultiplied surface hands the alpha to
+    // the compositor instead — Vello already clears to `TRANSPARENT`, so an opaque
+    // root still fills every pixel with alpha 1 and looks exactly as before. This is
+    // therefore not a mode: it is the absence of one, and the only thing that decides
+    // the result is the stylesheet. Where the compositor offers neither premultiplied
+    // nor postmultiplied alpha the default stands and the window stays opaque.
+    let alpha_modes = surface.get_capabilities(&adapter).alpha_modes;
+    for mode in [
+        wgpu::CompositeAlphaMode::PreMultiplied,
+        wgpu::CompositeAlphaMode::PostMultiplied,
+    ] {
+        if alpha_modes.contains(&mode) {
+            config.alpha_mode = mode;
+            break;
+        }
+    }
     // `get_default_config` picks `Fifo` — vsync — which is the right default: it
     // paces to the display and burns no power on frames nobody sees. But it also
     // makes `present` block until the next refresh, so a profiling run cannot tell

@@ -46,7 +46,7 @@ const FILES: InternedSymbol = InternedSymbol::from_raw(0x00F1_0001);
 /// The styling. Authored CSS, installed through the motion-aware pipeline by
 /// [`App::stylesheet`].
 const CSS: &str = "\
-.app      { background-color: #12161f; width: 100%; height: 100%; \
+.app      { background-color: rgba(18, 22, 31, 0.78); width: 100%; height: 100%; \
             display: flex; flex-direction: column; }\n\
 .toolbar  { background-color: #1b2130; width: 100%; height: 46px; \
             display: flex; flex-direction: row; gap: 8px; }\n\
