@@ -100,6 +100,12 @@ fn maybe(text: String) -> String {
 /// One directory entry as the UI needs it — every field already a `String`, so the
 /// markup binds them directly.
 struct Row {
+    /// The reconciler's key. ALWAYS the real name, never blanked: the glyph probe
+    /// empties what is *displayed*, and if it emptied this too every row would share
+    /// the key `""`. 76 duplicate keys make keyed matching thrash — a full restyle
+    /// and a full layout every frame — which looks exactly like a layout bug and is
+    /// not one.
+    key: String,
     name: String,
     kind: String,
     size: String,
@@ -133,6 +139,15 @@ impl State {
                 self.entries = entries;
                 self.selected = 0;
                 self.message = format!("{} entries", self.entries.len());
+                if blank_text() {
+                    // The probe blanks the UI, so state that would be on screen has
+                    // to be said out loud: this is what layout is actually sizing.
+                    println!(
+                        "[glyph-probe] {} entries in {}",
+                        self.entries.len(),
+                        self.dir.display()
+                    );
+                }
             }
             Err(error) => self.message = format!("cannot open: {error}"),
         }
@@ -146,6 +161,7 @@ impl State {
             .iter()
             .enumerate()
             .map(|(index, entry)| Row {
+                key: entry.name.clone(),
                 name: maybe(entry.name.clone()),
                 kind: maybe(if entry.is_dir { "DIR" } else { "file" }.to_owned()),
                 size: maybe(if entry.is_dir {
@@ -245,7 +261,7 @@ fn build_view(state: &State) -> View {
                 <span class="path">{path}</span>
             </div>
             <div class="list">
-                <For each={rows} as={row} key={row.name}>
+                <For each={rows} as={row} key={row.key}>
                     <div class={row.class}>
                         <span class="kind">{row.kind}</span>
                         <span class="name">{row.name}</span>
