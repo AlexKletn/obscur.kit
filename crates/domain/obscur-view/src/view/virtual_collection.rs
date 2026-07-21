@@ -95,6 +95,23 @@ pub const VIRTUAL_LIST_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0303
 /// honest, the wheel is native, and nothing about paging is the app's arithmetic.
 pub const VIRTUAL_ITEM_COUNT: InternedSymbol = InternedSymbol::from_raw(0x0000_0304);
 
+/// Reserved symbol for a virtual list's **scroll-reset token** — an opaque value
+/// whose *change* means "this list now shows different content, start it at the top"
+/// (spec §4.9).
+///
+/// A scroll offset belongs to the content it was scrolled through. When an app
+/// replaces a list's items — a file manager entering another directory — the offset
+/// is meaningless against the new content, but the runtime cannot see that the model
+/// changed: the marker looks the same and the container node is reconciled in place,
+/// so its `scroll_top` survives and the new list opens scrolled into nowhere. The app
+/// is the only party that knows its content changed, and the view is its only channel
+/// to the runtime, so it states a token here (typically a generation counter); the
+/// runtime resets the container's scroll whenever the token it last saw differs.
+///
+/// It sits in the structural `0x0000_03xx` namespace with the other realization
+/// inputs, not the CSS-relevant reserved attributes, so no selector can match on it.
+pub const VIRTUAL_SCROLL_RESET: InternedSymbol = InternedSymbol::from_raw(0x0000_0305);
+
 /// The default estimated row extent, in logical pixels, a `<VirtualFor>` uses
 /// until its rows are really measured (spec §4.9 *estimated geometry*).
 ///
@@ -356,6 +373,59 @@ pub fn virtual_list_id(props: &[ViewProperty]) -> Option<InternedSymbol> {
             _ => None,
         })?
     })
+}
+
+/// The scroll-reset token a marker carries, or [`None`] when it carries none.
+///
+/// A change in this value between frames is the app's signal to start the list at the
+/// top; its absolute value is meaningless.
+#[must_use]
+pub fn virtual_scroll_reset(props: &[ViewProperty]) -> Option<u64> {
+    props.iter().find_map(|p| {
+        (p.name() == VIRTUAL_SCROLL_RESET).then(|| match p.value() {
+            #[expect(
+                clippy::cast_sign_loss,
+                reason = "the token is an opaque generation counter; its bit pattern is all that matters"
+            )]
+            ViewValue::Int(token) => Some(*token as u64),
+            _ => None,
+        })?
+    })
+}
+
+/// Every `(list id, scroll-reset token)` a document's virtual-list markers carry, so
+/// the runtime can reset the scroll of a list whose token changed (spec §4.9).
+///
+/// Only markers that name a list *and* carry a token appear; a marker without a token
+/// opts out of reset-on-change entirely and keeps its scroll across content edits.
+#[must_use]
+pub fn virtual_scroll_resets(view: &View) -> Vec<(InternedSymbol, u64)> {
+    let mut out = Vec::new();
+    collect_scroll_resets(view.root().nodes(), &mut out);
+    out
+}
+
+/// Depth-first walk gathering the `(list id, token)` pairs [`virtual_scroll_resets`]
+/// returns.
+fn collect_scroll_resets(nodes: &[ViewNode], out: &mut Vec<(InternedSymbol, u64)>) {
+    for node in nodes {
+        let ViewNode::Element {
+            component,
+            props,
+            children,
+            ..
+        } = node
+        else {
+            continue;
+        };
+        if *component == VIRTUAL_COLLECTION
+            && let Some(id) = virtual_list_id(props)
+            && let Some(token) = virtual_scroll_reset(props)
+        {
+            out.push((id, token));
+        }
+        collect_scroll_resets(children.nodes(), out);
+    }
 }
 
 /// How many items the marker says exist.

@@ -118,6 +118,10 @@ struct State {
     entries: Vec<Entry>,
     selected: usize,
     message: String,
+    /// Bumped on every successful directory load. Handed to the virtual-list marker
+    /// as its scroll-reset token so the runtime starts a freshly-entered directory at
+    /// the top instead of carrying the previous listing's scroll offset into it.
+    generation: u64,
 }
 
 /// A directory entry as read from the filesystem.
@@ -137,6 +141,9 @@ impl State {
                 self.dir = dir;
                 self.entries = entries;
                 self.selected = 0;
+                // A new listing is new content: bump the token so the list resets to
+                // the top rather than opening at the previous directory's offset.
+                self.generation += 1;
                 self.message = format!("{} entries", self.entries.len());
                 if blank_text() {
                     // The probe blanks the UI, so state that would be on screen has
@@ -249,11 +256,10 @@ fn build_view(state: &State) -> View {
     // with the sheet beyond the row height the model is estimated at.
     let list = ViewNode::element(ComponentId::from_raw(0x00F0_0001))
         .with_prop(ViewProperty::new(CLASS, ViewValue::Text("list".into())))
-        .with_children(ViewFragment::from_nodes(vec![ViewNode::virtual_list(
-            FILES,
-            state.entries.len(),
-            ROW_H,
-        )]));
+        .with_children(ViewFragment::from_nodes(vec![
+            ViewNode::virtual_list(FILES, state.entries.len(), ROW_H)
+                .with_virtual_scroll_reset(state.generation),
+        ]));
     let shell = okui! {
         <div class="app">
             <div class="toolbar">
@@ -334,6 +340,7 @@ fn main() -> Result<(), obscur_kit::AppError> {
         entries: Vec::new(),
         selected: 0,
         message: String::new(),
+        generation: 0,
     }));
     state.borrow_mut().load(start);
 

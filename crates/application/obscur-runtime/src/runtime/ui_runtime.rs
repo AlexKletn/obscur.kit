@@ -68,6 +68,7 @@ use obscur_view::component::{ComponentRegistration, RegistryError};
 use obscur_view::view::{
     EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, VIRTUAL_SPACER, View, ViewNode, has_outlet,
     has_virtual_collection, project_slots, realize_virtual_collections, realize_virtual_lists,
+    virtual_scroll_resets,
 };
 
 use super::{
@@ -565,6 +566,12 @@ pub struct UiRuntime {
     /// spacers, so its content is at least a viewport tall, so every point inside its
     /// (clamped) scrollport already lands on a real row.
     virtual_row_extent: HashMap<InternedSymbol, f32>,
+    /// The scroll-reset token each virtual list last presented. When a frame's marker
+    /// carries a different token, the list's content has been replaced, so its
+    /// container's `scroll_top` is zeroed before the window is computed — the offset
+    /// belonged to the old content. The app is the only party that can know the model
+    /// changed, and the view is its only channel here, so it drives this.
+    virtual_scroll_reset_seen: HashMap<InternedSymbol, u64>,
     /// A click handler per virtual list, run when a trusted click lands on one of its
     /// rows with the resolved model index and the click count (1 single, 2 double).
     /// This is how a virtualized row becomes clickable at all: every row realized from
@@ -891,6 +898,7 @@ impl UiRuntime {
             virtual_container: HashMap::new(),
             virtual_windows: HashMap::new(),
             virtual_row_extent: HashMap::new(),
+            virtual_scroll_reset_seen: HashMap::new(),
             virtual_row_click_handlers: HashMap::new(),
             motion: MotionScheduler::new(),
             animations: Vec::new(),
@@ -2856,6 +2864,20 @@ impl UiRuntime {
             let realized_view;
             let desired: &View = if has_virtual_collection(resolved.root().nodes()) {
                 let viewport_height = ctx.viewport().height;
+                // Reset the scroll of any list whose content the app has replaced,
+                // BEFORE the window below is computed against that scroll. The app
+                // signals a replacement by changing the marker's scroll-reset token;
+                // the container it resets is the one tracked from the previous frame
+                // (on the frame a list first appears there is no container yet and the
+                // offset is already zero, so this is a no-op then). `insert` returns
+                // the token last seen, so a differing or absent one triggers the reset.
+                for (id, token) in virtual_scroll_resets(resolved) {
+                    if self.virtual_scroll_reset_seen.insert(id, token) != Some(token)
+                        && let Some(&container) = self.virtual_container.get(&id)
+                    {
+                        self.scroll_top.insert(container, 0.0);
+                    }
+                }
                 // A registered virtual list realizes through its builder: the
                 // runtime asks `VirtualLayout` for the window against THIS list's
                 // own scroll offset, builds only those rows, and brackets them with
