@@ -7435,8 +7435,20 @@ impl UiRuntime {
                     .and_then(|n| n.kind().component_id())
                     .map_or_else(|| "?".to_owned(), |c| format!("{:#x}", c.raw()));
                 if let Some(b) = self.boxes.get(child) {
+                    // Every text this row carries. Layout showing one clean box while
+                    // the screen shows two names means the row holds more text than
+                    // it should — a stale run left beside the new one.
+                    let mut texts = Vec::new();
+                    let mut stack = vec![*child];
+                    while let Some(id) = stack.pop() {
+                        let Some(n) = self.tree.get(id) else { continue };
+                        if let Some(t) = n.kind().text() {
+                            texts.push(t.to_string());
+                        }
+                        stack.extend(n.child_nodes().iter().copied());
+                    }
                     println!(
-                        "    {kind:>10}  y {:>9.1}  h {:>8.1}",
+                        "    {kind:>10}  y {:>9.1}  h {:>8.1}  texts {texts:?}",
                         b.origin().y,
                         b.size().height
                     );

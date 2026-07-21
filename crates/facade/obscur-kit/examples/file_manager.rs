@@ -190,7 +190,20 @@ fn read_entries(dir: &Path) -> std::io::Result<Vec<Entry>> {
             }
         })
         .collect();
-    entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name)));
+    // Directories first, then by name — case-insensitively.
+    //
+    // A plain `str` comparison orders by code point, which puts every capital
+    // Cyrillic letter (А-Я, U+0410..) before every lowercase one (а-я, U+0430..): in
+    // a home directory that drops "образы" after "Шаблоны" instead of among the
+    // о-names, which reads as broken. Lowercasing both sides is the pragmatic fix;
+    // real locale-aware collation (§7.2) is not built in the kit, so this is the
+    // app's call, and the raw name breaks ties so the order stays stable.
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            .then_with(|| a.name.cmp(&b.name))
+    });
     Ok(entries)
 }
 
