@@ -192,6 +192,13 @@ required-features = ["full"]
 name = "hello_app"
 required-features = ["full"]
 
+# A minimal file manager authored in `okui!` markup over a real directory listing:
+# `<For>` emits one row per entry, `{row.name}` / `class={row.class}` bind real Rust
+# values, and `std::fs` does the I/O (the kit performs none of its own, §5.15).
+[[example]]
+name = "file_manager"
+required-features = ["full"]
+
 # Proof that CSS `filter: blur()` renders as a REAL gaussian through our own wgpu
 # pass over Vello: a sharp hard-edged checkerboard beside the same checkerboard
 # under a blur layer, rendered headless to `target/blur_proof.png`. Needs the GPU
