@@ -80,6 +80,7 @@ mod tests {
         let mut plan = ReconciliationPlan::new();
         let a = ReconciliationOp::Remove {
             id: NodeId::from_raw(1),
+            parent: None,
         };
         let b = ReconciliationOp::Update {
             id: NodeId::from_raw(2),

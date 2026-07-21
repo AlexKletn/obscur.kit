@@ -2820,7 +2820,7 @@ impl UiRuntime {
             // restyle what the tree edit touched instead of everything. `None`
             // means the edit could not be bounded and the full pass is the only
             // correct answer.
-            let mut roots = restyle_roots_of(&reconcile_plan);
+            let mut roots = restyle_roots_of(&self.tree, &reconcile_plan);
             // 1b. Mount an instance for every inserted component-backed node and
             //     unmount every removed one, from the plan's structural deltas.
             //     A host that registered no component kinds pays nothing here.
@@ -16557,19 +16557,33 @@ impl FramePhaseClock {
 /// The restyle roots a root reconcile implies, or [`None`] when its effect cannot be
 /// bounded.
 ///
-/// `Insert`/`Move`/`Update` all name a node that still exists, so the style phase can
-/// expand from it. A `Remove` cannot: the node is already gone from the tree, so
-/// [`RestyleScope::expand`] can neither find it nor reach the following siblings whose
-/// `:nth-child`/`+`/`~` matches its disappearance shifted — the honest answer there is
-/// the full pass.
-fn restyle_roots_of(plan: &ReconciliationPlan) -> Option<Vec<NodeId>> {
+/// The distinction that matters is **structural vs in-place**:
+///
+/// * `Update` changed a node's own text or props. Nothing about the sibling *count*
+///   moved, so the reach is that node's subtree plus the siblings that follow it —
+///   what `+` and `~` can see. The node itself is the root.
+/// * `Insert`, `Move` and `Remove` all change how many children the parent has, and
+///   the structural pseudo-classes count from **both** ends: `:last-child`,
+///   `:nth-last-child`, `:only-child` and `:nth-last-of-type` re-match for siblings
+///   *before* the edit too, and the parent's own `:empty` can flip. Expanding from
+///   the edited node would silently miss all of those, so the root is the **parent**,
+///   whose subtree covers every sibling in both directions.
+///
+/// `None` — a full pass — is left for the cases with no parent to expand from: a
+/// removal of a root, or a `Move` whose node has somehow left the tree.
+fn restyle_roots_of(tree: &RetainedTree, plan: &ReconciliationPlan) -> Option<Vec<NodeId>> {
     let mut roots = Vec::new();
     for op in plan.ops() {
         match op {
-            ReconciliationOp::Remove { .. } => return None,
-            ReconciliationOp::Insert { id, .. }
-            | ReconciliationOp::Move { id, .. }
-            | ReconciliationOp::Update { id } => roots.push(*id),
+            // In place: the node's own subtree and what follows it.
+            ReconciliationOp::Update { id } => roots.push(*id),
+            // Structural: the parent, so both directions of sibling counting and
+            // the parent's own `:empty` are covered.
+            ReconciliationOp::Insert { parent, .. } => roots.push(*parent),
+            ReconciliationOp::Remove { parent, .. } => roots.push((*parent)?),
+            ReconciliationOp::Move { id, .. } => {
+                roots.push(tree.get(*id)?.logical_parent().parent()?);
+            }
         }
     }
     Some(roots)

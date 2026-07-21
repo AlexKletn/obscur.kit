@@ -270,8 +270,12 @@ impl Reconciler {
             let mut ids = Subtree::new(root).descendants(tree);
             ids.reverse();
             for id in ids {
+                // Captured before the removal: afterwards the node is gone and its
+                // parent is unreachable, which is exactly what forced consumers to
+                // widen to a full restyle.
+                let parent = tree.get(id).and_then(|node| node.logical_parent().parent());
                 if tree.remove(id).is_some() {
-                    plan.push(ReconciliationOp::Remove { id });
+                    plan.push(ReconciliationOp::Remove { id, parent });
                 }
             }
         }
@@ -549,7 +553,7 @@ mod tests {
         let removed: Vec<NodeId> = plan
             .iter()
             .filter_map(|op| match op {
-                ReconciliationOp::Remove { id } => Some(*id),
+                ReconciliationOp::Remove { id, .. } => Some(*id),
                 _ => None,
             })
             .collect();

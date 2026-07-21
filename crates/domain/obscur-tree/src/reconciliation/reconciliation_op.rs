@@ -27,6 +27,14 @@ pub enum ReconciliationOp {
     Remove {
         /// The removed node's id.
         id: NodeId,
+        /// The node's logical parent, captured **before** the removal.
+        ///
+        /// A removal changes the sibling count, so every remaining sibling's
+        /// backward-counting match (`:last-child`, `:nth-last-child`) and the
+        /// parent's own `:empty` can change. Without the parent there is nothing
+        /// left to reach them through — the node itself is already gone — so a
+        /// consumer had to widen to a full restyle. `None` only for a root.
+        parent: Option<NodeId>,
     },
     /// A reused node repositioned to child `index` under its parent (a reorder
     /// that preserves the node's identity).
@@ -50,7 +58,7 @@ impl ReconciliationOp {
     pub const fn id(self) -> NodeId {
         match self {
             Self::Insert { id, .. }
-            | Self::Remove { id }
+            | Self::Remove { id, .. }
             | Self::Move { id, .. }
             | Self::Update { id } => id,
         }
@@ -98,7 +106,7 @@ mod tests {
         assert!(insert.is_insert());
         assert_eq!(insert.id(), id);
 
-        let remove = ReconciliationOp::Remove { id };
+        let remove = ReconciliationOp::Remove { id, parent: None };
         assert!(remove.is_remove());
         assert_eq!(remove.id(), id);
 
