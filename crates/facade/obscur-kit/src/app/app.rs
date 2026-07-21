@@ -2,6 +2,7 @@
 
 use super::app_error::AppError;
 use super::runner;
+use crate::geometry::Size;
 use crate::identity::InternedSymbol;
 use crate::okui_compiler::bridge::UiIrViewBridge;
 use crate::okui_compiler::compile::Compiler;
@@ -15,9 +16,23 @@ const DEFAULT_SIZE: (f32, f32) = (800.0, 600.0);
 /// The default Wayland `app_id` / X11 `WM_CLASS` when the app sets none.
 const DEFAULT_APP_ID: &str = "obscur-kit";
 
-/// The root the window renders: either a reactive Rust view builder or an `.okui`
-/// screen compiled to a static [`View`]. The last of [`App::view`] / [`App::screen`]
-/// to be called wins.
+/// What the runtime knows about the frame that an app needs in order to size or
+/// window its own content.
+///
+/// A view builder is otherwise blind: it cannot tell how tall the window is, so it
+/// cannot decide how many rows are worth building. That is the whole prerequisite
+/// for app-side virtualization — a list of 10,000 entries costs style, layout and
+/// compose per node, so the only way to stay cheap is to not build the nodes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FrameInfo {
+    /// The viewport in logical (CSS) pixels.
+    pub viewport: Size,
+    /// The display's device-pixel ratio.
+    pub scale: f32,
+}
+
+/// The root the window renders. The last of [`App::view`] / [`App::view_with`] /
+/// [`App::screen`] to be called wins.
 enum Root {
     /// A reactive builder re-invoked each frame — the same shape
     /// [`UiRuntime::set_root_view`](crate::runtime::UiRuntime::set_root_view) holds.
@@ -25,6 +40,8 @@ enum Root {
     /// An `.okui` source, compiled to a `View` when [`App::run`] is called (a
     /// compile failure surfaces as an [`AppError`] from `run`).
     Screen(String),
+    /// A builder that additionally reads the frame's [`FrameInfo`].
+    ViewWith(Box<dyn FnMut(&FrameInfo) -> View + 'static>),
 }
 
 /// A declarative, one-call builder for a **standalone windowed** application
@@ -41,6 +58,7 @@ pub struct App {
     stylesheets: Vec<String>,
     root: Option<Root>,
     commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
+    scroll: Option<Box<dyn FnMut(f32) + 'static>>,
 }
 
 impl App {
@@ -54,6 +72,7 @@ impl App {
             stylesheets: Vec::new(),
             root: None,
             commands: Vec::new(),
+            scroll: None,
         }
     }
 
@@ -95,6 +114,29 @@ impl App {
         self
     }
 
+    /// Sets the root to a builder that also receives the frame's [`FrameInfo`] —
+    /// the viewport and the device scale.
+    ///
+    /// Use this when what to build depends on how much is visible: a long list
+    /// should window itself to the rows the viewport can show rather than emit one
+    /// node per item. Overrides any previous [`view`](Self::view) /
+    /// [`screen`](Self::screen).
+    pub fn view_with(mut self, builder: impl FnMut(&FrameInfo) -> View + 'static) -> Self {
+        self.root = Some(Root::ViewWith(Box::new(builder)));
+        self
+    }
+
+    /// Registers a handler for wheel scrolling the kit did not consume.
+    ///
+    /// A `overflow: scroll` container inside the kit takes the wheel first; this is
+    /// what is left over, in logical pixels, positive when the content should move
+    /// down. An app that windows its own list owns its scroll position and needs
+    /// this to move it.
+    pub fn on_scroll(mut self, handler: impl FnMut(f32) + 'static) -> Self {
+        self.scroll = Some(Box::new(handler));
+        self
+    }
+
     /// Sets the root to an `.okui` screen, compiled (parse → compile → bridge) to a
     /// static [`View`] when [`run`](Self::run) is called; a compile failure makes
     /// `run` return an [`AppError`] carrying the diagnostics. Overrides any previous
@@ -131,6 +173,19 @@ impl App {
                 let view = compile_screen(&src)?;
                 Box::new(move || view.clone())
             }
+            // The frame-aware builder is wrapped by the runner, which owns the
+            // window and therefore the only authoritative viewport.
+            Some(Root::ViewWith(builder)) => {
+                return runner::run_with_frame(
+                    self.title,
+                    self.app_id,
+                    self.size,
+                    self.stylesheets,
+                    builder,
+                    self.commands,
+                    self.scroll,
+                );
+            }
             None => Box::new(View::default),
         };
         runner::run(
@@ -140,6 +195,7 @@ impl App {
             self.stylesheets,
             builder,
             self.commands,
+            self.scroll,
         )
     }
 }

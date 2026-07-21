@@ -5,6 +5,8 @@
 //! hand-wiring them again. Lifted from the `uikit_window` / `windowed_counter`
 //! examples so an application does not spell out ~700 lines to open one window.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use winit::application::ApplicationHandler;
@@ -15,6 +17,7 @@ use winit::keyboard::PhysicalKey as WinitPhysicalKey;
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use super::AppError;
+use super::app::FrameInfo;
 use crate::bootstrap::{CssPipeline, KitBootstrap};
 use crate::css::source::CssSource;
 use crate::geometry::{Point, Size};
@@ -96,6 +99,63 @@ pub(super) fn run(
     stylesheets: Vec<String>,
     builder: Box<dyn FnMut() -> View + 'static>,
     commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
+    scroll: Option<Box<dyn FnMut(f32) + 'static>>,
+) -> Result<(), AppError> {
+    run_inner(
+        title,
+        app_id,
+        size,
+        stylesheets,
+        builder,
+        commands,
+        scroll,
+        None,
+    )
+}
+
+/// [`run`] for a builder that reads the frame's [`FrameInfo`].
+///
+/// The runner owns the window, so it owns the only authoritative viewport: it keeps
+/// the current one in a cell, refreshes it whenever the surface changes, and hands
+/// the builder a snapshot each frame. That is what lets an app window its own list
+/// to what is visible instead of building a node per item.
+pub(super) fn run_with_frame(
+    title: String,
+    app_id: String,
+    size: (f32, f32),
+    stylesheets: Vec<String>,
+    mut builder: Box<dyn FnMut(&FrameInfo) -> View + 'static>,
+    commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
+    scroll: Option<Box<dyn FnMut(f32) + 'static>>,
+) -> Result<(), AppError> {
+    let info = Rc::new(Cell::new(FrameInfo {
+        viewport: Size::new(size.0, size.1),
+        scale: 1.0,
+    }));
+    let seen = Rc::clone(&info);
+    let wrapped: Box<dyn FnMut() -> View + 'static> = Box::new(move || builder(&seen.get()));
+    run_inner(
+        title,
+        app_id,
+        size,
+        stylesheets,
+        wrapped,
+        commands,
+        scroll,
+        Some(info),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_inner(
+    title: String,
+    app_id: String,
+    size: (f32, f32),
+    stylesheets: Vec<String>,
+    builder: Box<dyn FnMut() -> View + 'static>,
+    commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
+    scroll: Option<Box<dyn FnMut(f32) + 'static>>,
+    frame_info: Option<Rc<Cell<FrameInfo>>>,
 ) -> Result<(), AppError> {
     let (width, height) = size;
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(width, height));
@@ -133,6 +193,8 @@ pub(super) fn run(
         scale_factor: 1.0,
         cursor: (0.0, 0.0),
         init_failure: None,
+        scroll,
+        frame_info,
         stats: std::env::var_os("OBSCUR_FRAME_STATS").map(|_| FrameStats::default()),
     };
 
@@ -209,6 +271,11 @@ struct AppRunner {
     /// A window/GPU failure recorded on `resumed` (which cannot return a `Result`)
     /// so [`run`] can surface it instead of returning `Ok` on a blank window.
     init_failure: Option<AppError>,
+    /// The app's leftover-wheel handler, if it registered one.
+    scroll: Option<Box<dyn FnMut(f32) + 'static>>,
+    /// The viewport snapshot a frame-aware builder reads, refreshed on every
+    /// surface change.
+    frame_info: Option<Rc<Cell<FrameInfo>>>,
     /// Per-phase frame timings, present only when `OBSCUR_FRAME_STATS=1` is set.
     stats: Option<FrameStats>,
 }
@@ -231,6 +298,15 @@ impl AppRunner {
                 Size::new(config.width as f32, config.height as f32),
                 self.scale(),
             );
+            if let Some(info) = self.frame_info.as_ref() {
+                let scale = self.scale();
+                info.set(FrameInfo {
+                    // Logical, because that is the space the app's CSS and its
+                    // layout are in; the physical extent is the runner's business.
+                    viewport: Size::new(config.width as f32 / scale, config.height as f32 / scale),
+                    scale,
+                });
+            }
         }
     }
 
@@ -436,6 +512,12 @@ impl ApplicationHandler for AppRunner {
                 let at = Point::new(self.cursor.0 as f32, self.cursor.1 as f32);
                 if self.runtime.handle_scroll(step, at).is_some() {
                     self.runtime.request_frame(FrameReason::WindowChange);
+                    self.request_redraw();
+                } else if let Some(handler) = self.scroll.as_mut() {
+                    // No `overflow: scroll` container took it, so the app may want
+                    // it: an app that windows its own list owns its scroll position.
+                    handler(step / self.scale_factor.max(0.05) as f32);
+                    self.runtime.request_frame(FrameReason::UiCommit);
                     self.request_redraw();
                 }
             }

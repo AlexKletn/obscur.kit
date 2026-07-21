@@ -33,7 +33,7 @@
 //! a headless host), IME text input, and HiDPI. See
 //! [`KitBootstrap`](crate::bootstrap::KitBootstrap) for the manual equivalents.
 mod app;
-pub use app::App;
+pub use app::{App, FrameInfo};
 mod app_error;
 pub use app_error::AppError;
 mod runner;

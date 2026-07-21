@@ -31,7 +31,7 @@ pub mod default_stylesheet;
 pub mod prelude;
 
 #[cfg(all(feature = "window-winit", feature = "render-vello"))]
-pub use app::{App, AppError};
+pub use app::{App, AppError, FrameInfo};
 pub use default_stylesheet::{ua_css, ua_stylesheet};
 
 // --- foundation ---
