@@ -62,8 +62,11 @@ cache-fs = ["dep:obscur-cache-fs"]
 task-smol = ["dep:obscur-task-smol"]
 task-tokio = ["dep:obscur-task-tokio"]
 render-cpu = ["dep:obscur-render-cpu"]
-render-vello = ["dep:obscur-render-vello"]
-window-winit = ["dep:obscur-window-winit"]
+# `render-vello` also pulls the raw wgpu/pollster the standalone `App::run` needs to
+# build the swapchain (same pins as the adapter); `window-winit` pulls raw winit for
+# the event loop + converters. Together they gate the `app` module.
+render-vello = ["dep:obscur-render-vello", "dep:wgpu", "dep:pollster"]
+window-winit = ["dep:obscur-window-winit", "dep:winit"]
 accesskit = ["dep:obscur-accessibility-accesskit"]
 text-harfrust = ["dep:obscur-text-harfrust"]
 text-unicode = ["dep:obscur-text-unicode"]
@@ -125,6 +128,12 @@ obscur-accessibility-accesskit = { workspace = true, optional = true }
 obscur-text-harfrust = { workspace = true, optional = true }
 obscur-text-unicode = { workspace = true, optional = true }
 obscur-font-fontconfig = { workspace = true, optional = true }
+# Raw platform crates the standalone `App::run` builds directly on (behind the
+# windowed features). Same pins the adapters use: obscur-window-winit → winit 0.30,
+# obscur-render-vello → wgpu 29; pollster drives wgpu's async init to completion.
+winit = { version = "0.30", optional = true }
+wgpu = { version = "29", optional = true }
+pollster = { version = "0.4", optional = true }
 
 # The platform system provider is selected automatically by target.
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -173,6 +182,14 @@ tiny-skia = "0.11"
 
 [[example]]
 name = "windowed_counter"
+required-features = ["full"]
+
+# The declarative rewrite of `windowed_counter` on the one-call `obscur_kit::App`
+# entry (spec §1.4): the same on-screen counter + `:hover` behaviour in ~15 lines
+# of app code instead of ~890. Needs the full windowed backend (a display/GPU are
+# required at runtime); builds display-free in CI.
+[[example]]
+name = "hello_app"
 required-features = ["full"]
 
 # Proof that CSS `filter: blur()` renders as a REAL gaussian through our own wgpu

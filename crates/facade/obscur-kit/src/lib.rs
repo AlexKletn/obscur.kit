@@ -21,10 +21,17 @@
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+// The one-call standalone windowed entry point (spec §1.4). It owns a window and
+// the event loop, so it exists only on the full windowed feature set (`window-winit`
+// + `render-vello`) and is entirely absent from the headless `default` build.
+#[cfg(all(feature = "window-winit", feature = "render-vello"))]
+pub mod app;
 pub mod bootstrap;
 pub mod default_stylesheet;
 pub mod prelude;
 
+#[cfg(all(feature = "window-winit", feature = "render-vello"))]
+pub use app::{App, AppError};
 pub use default_stylesheet::{ua_css, ua_stylesheet};
 
 // --- foundation ---
