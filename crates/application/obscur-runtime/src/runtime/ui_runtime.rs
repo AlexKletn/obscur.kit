@@ -19,7 +19,7 @@ use obscur_diagnostics::{
 };
 use obscur_geometry::{AffineTransform, Point, Rect, Size};
 use obscur_identity::SignalId;
-use obscur_identity::{InternedSymbol, NodeId, RuntimeId};
+use obscur_identity::{InternedSymbol, NodeId, RuntimeId, WindowId};
 use obscur_interaction::command::{
     Command, CommandRegistry, CommandRouter, CommandState, KeyEvent, LogicalKey, Modifier,
     Modifiers, NamedKey, Shortcut,
@@ -764,6 +764,14 @@ pub struct UiRuntime {
     /// hub lifecycle (begin_load → complete/fail) is driven per resource and a URL
     /// is requested at most once.
     image_handles: HashMap<Box<str>, ResourceHandle>,
+    /// The node that first referenced each requested image URL, retained so a
+    /// resource load/decode failure can be attributed to the node that asked for
+    /// it (spec §1.6 "node/resource/window context"). Populated at request time
+    /// in the resolve passes — the frame thread is where a URL and its referring
+    /// node are known together — and read back by
+    /// [`report_resource_failure`](Self::report_resource_failure) when the load,
+    /// which may be deferred out of the frame phase, finally fails.
+    image_referrers: HashMap<Box<str>, NodeId>,
     /// Image sources this runtime has already reported as unresolvable because no
     /// loader/decoder is installed (spec §5.15 "The kit does not perform arbitrary
     /// network access by itself."). Deduplicates the diagnostic so a referenced
@@ -884,6 +892,7 @@ impl UiRuntime {
             resource_rx: resource_channel.1,
             next_task: 0,
             image_handles: HashMap::new(),
+            image_referrers: HashMap::new(),
             unresolved_reported: HashSet::new(),
             deferred_loads: Vec::new(),
         }
@@ -910,6 +919,7 @@ impl UiRuntime {
         self.resource_decoder = Some(decoder);
         self.image_cache.clear();
         self.image_handles.clear();
+        self.image_referrers.clear();
         // Any load queued against the previous providers is abandoned — the new
         // pair re-resolves every URL from scratch, and a stale closure still holds
         // the old loader.
@@ -1304,13 +1314,16 @@ impl UiRuntime {
         }
         // Disjoint field borrows: `loader`/`decoder` borrow their fields while the
         // hub and caches are mutated through their own distinct fields.
-        for style in computed.values() {
+        for (node, style) in computed {
             let Some(url) = style
                 .get(PropertyId::BackgroundImage)
                 .and_then(ComputedValue::as_background_image_url)
             else {
                 continue;
             };
+            // Attribute the resource to the element whose `background-image`
+            // referenced it, so a later load failure names the node (spec §1.6).
+            self.image_referrers.entry(url.into()).or_insert(*node);
             // Asking through `record_lookup` is what makes this frame's reference
             // count as a hit and stamp the entry's recency, so eviction can tell a
             // live image from a stale one (spec §5.19).
@@ -1478,17 +1491,24 @@ impl UiRuntime {
             return;
         }
         // Gather each element node's own image source up front, so the retained-tree
-        // borrow is released before the hub / caches are mutated below.
-        let sources: Vec<Box<str>> = self
+        // borrow is released before the hub / caches are mutated below. The node is
+        // kept alongside the source so a later load failure can be attributed to the
+        // element that referenced it (spec §1.6 node context).
+        let sources: Vec<(NodeId, Box<str>)> = self
             .tree
             .iter()
-            .filter_map(|(_, node)| node.attributes().image_source().map(Box::<str>::from))
+            .filter_map(|(node, n)| {
+                n.attributes()
+                    .image_source()
+                    .map(|src| (node, Box::<str>::from(src)))
+            })
             // A vector source is not a bitmap: it goes through
             // `resolve_element_vectors`, and handing it to the raster decoder
             // would only produce a decode failure.
-            .filter(|src| !is_vector_source(src))
+            .filter(|(_, src)| !is_vector_source(src))
             .collect();
-        for key in sources {
+        for (node, key) in sources {
+            self.image_referrers.entry(key.clone()).or_insert(node);
             if self.image_cache.record_lookup(&key) || self.image_handles.contains_key(&key) {
                 // Already resolved, or already attempted (and failed): do not retry.
                 continue;
@@ -2244,14 +2264,28 @@ impl UiRuntime {
     ///
     /// The hub has already recorded the `failed` state and will not retry, so this
     /// fires exactly once per resource, not once per frame.
+    ///
+    /// The record carries the full §1.6 context: the stable `code`
+    /// (`resource.load_failed`, machine-readable and identical across locales and
+    /// call sites), the missing `resource`'s id, the `node` that referenced it,
+    /// the `window` (this runtime's surface) it happened in, and the `recovery`
+    /// that kept the frame alive. Only the human `message` is localized — resolved
+    /// from the fault class and the runtime's current locale — so the code stays a
+    /// stable key while the wording follows the user's language (spec §7.2).
     fn report_resource_failure(&self, handle: ResourceHandle, key: &str, error: &ResourceError) {
+        const CODE: &str = "resource.load_failed";
         let mut diagnostic = Diagnostic::new(
-            DiagnosticCode::new("resource.load_failed"),
+            DiagnosticCode::new(CODE),
             DiagnosticSeverity::Error,
             DiagnosticSubsystem::Resources,
-            format!("failed to load or decode image `{key}`: {error:?}"),
+            localized_diagnostic_message(CODE, self.locale.language(), key, error),
         );
         diagnostic.context.resource = Some(handle.id());
+        // Attributed to the node that referenced the resource (recorded at request
+        // time in the resolve passes) and to this runtime's window surface — this
+        // runtime is one window (spec §1.6 node/resource/window context).
+        diagnostic.context.node = self.image_referrers.get(key).copied();
+        diagnostic.context.window = Some(WindowId::from_raw(self.id.raw()));
         // The frame is not torn down for a missing image: the reference resolves
         // to nothing and the box paints empty, keeping the layout around it intact
         // (spec §1.6 "fallback and recovery are preferred where correctness can be
@@ -7513,6 +7547,37 @@ fn is_activation_key(key: Option<LogicalKey>) -> bool {
 #[allow(clippy::cast_precision_loss)]
 fn intrinsic_of(image: &SceneImage) -> Size {
     Size::new(image.width() as f32, image.height() as f32)
+}
+
+/// The localized human message for a diagnostic `code`, in the language named by
+/// `lang` (a BCP-47 language subtag such as `en`, `ru`, or `und`).
+///
+/// This is a **scoped** diagnostic-message catalog (spec §1.6, §7.2), not the
+/// deferred number/date i18n formatting system: it maps a stable diagnostic
+/// *code* to a per-language human string, so the machine-readable code stays
+/// locale-invariant while the wording follows the user's locale. The lookup is
+/// keyed first by the code (the fault class) and then by the language subtag,
+/// and falls back to English for any language without its own entry — including
+/// the undetermined `und` locale a host never localized.
+fn localized_diagnostic_message(
+    code: &str,
+    lang: &str,
+    key: &str,
+    error: &ResourceError,
+) -> String {
+    match code {
+        "resource.load_failed" => match lang {
+            // Russian — a second real language so the code can be proven
+            // locale-invariant while the message localizes.
+            "ru" => {
+                format!("не удалось загрузить или декодировать ресурс «{key}»: {error:?}")
+            }
+            // English is the fallback for `und` and every other language.
+            _ => format!("failed to load or decode image `{key}`: {error:?}"),
+        },
+        // A class with no localized entry keeps its English wording.
+        _ => format!("failed to load or decode image `{key}`: {error:?}"),
+    }
 }
 
 /// Whether two axis-aligned rectangles overlap in any area.

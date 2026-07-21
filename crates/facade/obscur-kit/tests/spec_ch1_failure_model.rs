@@ -84,6 +84,10 @@ fn arch_17_a_missing_resource_diagnostic_carries_all_five_required_fields() {
 
     let sheet = compile(".img { width: 50px; height: 50px }");
     rt.render_now(&image_view("missing-logo"), std::slice::from_ref(&sheet));
+    // With no blocking executor the missing-image load defers out of the frame
+    // phase (§3.4/§5.15); draining it on poll is what fails the resource and emits
+    // its one diagnostic. (The sanctioned frame-purity poll, matching arch_20.)
+    let _ = rt.poll_resource_tasks();
 
     let all = diagnostics.all();
     assert_eq!(
@@ -141,6 +145,9 @@ fn arch_18_the_stable_code_survives_locale_and_call_site() {
     let en_diagnostics = Collected::install(&mut en);
     en.set_locale(&LanguageTag::parse("en-US").expect("a valid tag"));
     en.render_now(&image_view("missing-logo"), std::slice::from_ref(&sheet));
+    // The sanctioned frame-purity poll: the no-executor load defers, and draining
+    // it on poll is what fails the resource and emits its diagnostic (§3.4/§5.15).
+    let _ = en.poll_resource_tasks();
 
     // (b) ru-RU, same failure.
     let mut ru = runtime_with_id(2, VP, VP);
@@ -148,6 +155,7 @@ fn arch_18_the_stable_code_survives_locale_and_call_site() {
     let ru_diagnostics = Collected::install(&mut ru);
     ru.set_locale(&LanguageTag::parse("ru-RU").expect("a valid tag"));
     ru.render_now(&image_view("missing-logo"), std::slice::from_ref(&sheet));
+    let _ = ru.poll_resource_tasks();
 
     // (c) a different call site: a CSS `background-image` reference.
     let bg_sheet =
@@ -159,6 +167,7 @@ fn arch_18_the_stable_code_survives_locale_and_call_site() {
         &view(vec![el(10, "bg", vec![])]),
         std::slice::from_ref(&bg_sheet),
     );
+    let _ = bg.poll_resource_tasks();
 
     let a = en_diagnostics.all();
     let b = ru_diagnostics.all();
