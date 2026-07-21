@@ -56,11 +56,13 @@ const CSS: &str = "\
 .path     { color: #9fb0d0; width: 100%; height: 30px; }\n\
 .list     { width: 100%; height: 100%; display: flex; flex-direction: column; \
             overflow: scroll; }\n\
-.row      { width: 100%; height: 24px; display: flex; flex-direction: row; gap: 10px; }\n\
+.row      { width: 100%; height: 24px; display: flex; flex-direction: row; \
+            gap: 10px; overflow: hidden; }\n\
 .row:hover{ background-color: #1b2130; }\n\
 .sel      { background-color: #2b3f66; }\n\
 .kind     { color: #7f8db0; width: 52px; height: 20px; }\n\
-.name     { color: #e6e9f0; width: 100%; height: 20px; }\n\
+.name     { color: #e6e9f0; width: 100%; height: 20px; \
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n\
 .size     { color: #9fb0d0; width: 96px; height: 20px; }\n\
 .status   { background-color: #1b2130; width: 100%; height: 24px; }\n\
 .hint     { color: #7f8db0; width: 100%; height: 20px; }\n\
@@ -81,9 +83,11 @@ const CSS_NO_BG: &str = "\
 .path     { color: #9fb0d0; width: 100%; height: 30px; }\n\
 .list     { width: 100%; height: 100%; display: flex; flex-direction: column; \
             overflow: scroll; }\n\
-.row      { width: 100%; height: 24px; display: flex; flex-direction: row; gap: 10px; }\n\
+.row      { width: 100%; height: 24px; display: flex; flex-direction: row; \
+            gap: 10px; overflow: hidden; }\n\
 .kind     { color: #7f8db0; width: 52px; height: 20px; }\n\
-.name     { color: #e6e9f0; width: 100%; height: 20px; }\n\
+.name     { color: #e6e9f0; width: 100%; height: 20px; \
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n\
 .size     { color: #9fb0d0; width: 96px; height: 20px; }\n\
 .status   { width: 100%; height: 24px; }\n\
 .hint     { color: #7f8db0; width: 100%; height: 20px; }\n\
