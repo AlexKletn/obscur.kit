@@ -91,27 +91,6 @@ pub(crate) fn establishes_scroll_container(computed: &ComputedStyles, node: Node
     )
 }
 
-/// Whether the **user** may scroll `node` — with the wheel, a drag or a scrollbar
-/// (CSS Overflow 3 §3 *scrollable overflow*).
-///
-/// Narrower than [`establishes_scroll_container`] on purpose. `overflow: hidden` DOES
-/// establish a scroll container: it clips, it has a scrollport, and it can be scrolled
-/// **programmatically**. What it must not do is respond to the user — it shows no
-/// scrollbar and the wheel passes through it to whatever can scroll behind. Treating
-/// the two as one thing turns every `hidden` clip into a wheel target, so a row that
-/// merely clips a long file name swallows the scroll meant for the list around it.
-#[must_use]
-pub(crate) fn user_scrollable(computed: &ComputedStyles, node: NodeId) -> bool {
-    matches!(
-        computed
-            .get(&node)
-            .and_then(|style| style.get(PropertyId::Overflow))
-            .map(ComputedValue::value),
-        Some(&PropertyValue::Keyword(sym))
-            if sym == layout_keyword::OVERFLOW_SCROLL || sym == layout_keyword::OVERFLOW_AUTO
-    )
-}
-
 /// The scrollable content height of `node` (logical px), measured from its
 /// scrollport top down to the bottom-most descendant edge (CSS Overflow 3
 /// §scrollable-overflow-region), never less than the scrollport height.

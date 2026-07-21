@@ -83,3 +83,38 @@ fn a_hidden_box_still_clips() {
          what would make the row a scroll candidate at all"
     );
 }
+
+/// How many paint commands the frame holds. A scrollbar is two filled rects (a track
+/// and a thumb), so a container that wrongly paints one is visible as a count.
+fn command_count(rt: &UiRuntime) -> usize {
+    rt.snapshot().display_list().commands().len()
+}
+
+#[test]
+fn a_hidden_box_paints_no_scrollbar() {
+    // The visual half of the same rule. `hidden` clips and can be scrolled
+    // programmatically, so it keeps its clip and its content translation — but a
+    // scrollbar advertises a scroll the user cannot perform, and CSS gives one only
+    // to `scroll` (always) and `auto` (when overflowing).
+    let sheet = compile(CSS);
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 100.0));
+    let _ = rt.render_now(&view(), std::slice::from_ref(&sheet));
+    let with_clipping_rows = command_count(&rt);
+
+    // The same tree with `clip` instead of `hidden`. The two clip identically; `clip`
+    // is explicitly NOT a scroll container, so it never had a scrollbar. Any
+    // difference in the painted commands is therefore the scrollbar and nothing else.
+    let no_clip = compile(
+        ".list { width: 200px; height: 100px; overflow: scroll }\
+         .row { width: 200px; height: 20px; overflow: clip }\
+         .wide { width: 200px; height: 200px }",
+    );
+    let mut plain = UiRuntime::new(RuntimeId::from_raw(2), Size::new(200.0, 100.0));
+    let _ = plain.render_now(&view(), std::slice::from_ref(&no_clip));
+
+    assert_eq!(
+        with_clipping_rows,
+        command_count(&plain),
+        "clipping rows must not add scrollbar rects — only the `scroll` list has one"
+    );
+}

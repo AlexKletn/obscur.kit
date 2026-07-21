@@ -86,7 +86,7 @@ use crate::orchestration::{
     NodeInspection, PreeditView, PseudoStates, SceneCoordinator, ScrollContainer, ScrollPaint,
     ShapedChMetrics, StyleCoordinator, StyleInputs, StyleMatchingCoordinator, TreeElement,
     TreeInspection, overflow_scrolls, overlay_commands, resolve_generated_content, root_font_size,
-    scroll_containers, scrollbar_rects, user_scrollable,
+    scroll_containers, scrollbar_rects,
 };
 use crate::orchestration::{alignment_for, direction_for, white_space_for};
 use crate::recovery::RecoveryResult;
@@ -7587,7 +7587,7 @@ impl UiRuntime {
         // for the list it sits in.
         let containers: Vec<_> = scroll_containers(&self.tree, &self.computed, &self.boxes)
             .into_iter()
-            .filter(|c| user_scrollable(&self.computed, c.node))
+            .filter(|c| overflow_scrolls(&self.computed, c.node))
             .collect();
         if containers.is_empty() {
             return None;
@@ -7697,6 +7697,10 @@ impl UiRuntime {
                     ScrollPaint {
                         scroll_top: self.clamped_scroll_top(c),
                         content_height: c.content_height,
+                        // `hidden` clips and scrolls programmatically, but shows no
+                        // scrollbar — advertising one would promise a scroll the user
+                        // cannot perform.
+                        shows_scrollbar: overflow_scrolls(computed, c.node),
                     },
                 )
             })

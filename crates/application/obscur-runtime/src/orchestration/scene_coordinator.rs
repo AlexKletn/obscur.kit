@@ -120,6 +120,14 @@ pub struct ScrollPaint {
     pub scroll_top: f32,
     /// The scrollable content height (logical px), `> scrollport_height`.
     pub content_height: f32,
+    /// Whether this container shows a scrollbar.
+    ///
+    /// `overflow: hidden` is a scroll container — it clips, and it can be scrolled
+    /// programmatically — so it still needs the clip and the content translation this
+    /// struct drives. What it must not have is a **scrollbar**: CSS gives one only to
+    /// `scroll` (always) and `auto` (when overflowing). Painting one for `hidden`
+    /// advertises a scroll the user cannot perform.
+    pub shows_scrollbar: bool,
 }
 
 /// Default font size (in pixels) used to emit text runs.
@@ -1419,12 +1427,14 @@ impl SceneCoordinator {
                 if paint.scroll_top != 0.0 {
                     scroll_brackets.push((node, paint.scroll_top));
                 }
-                scrollbar_units.push((
-                    node,
-                    layout_box.bounds,
-                    paint.scroll_top,
-                    paint.content_height,
-                ));
+                if paint.shows_scrollbar {
+                    scrollbar_units.push((
+                        node,
+                        layout_box.bounds,
+                        paint.scroll_top,
+                        paint.content_height,
+                    ));
+                }
             }
 
             // A non-identity CSS 2D `transform` brackets this node's subtree. The
@@ -7746,6 +7756,7 @@ mod tests {
             ScrollPaint {
                 scroll_top: 80.0,
                 content_height: 120.0,
+                shows_scrollbar: true,
             },
         );
         let list = SceneCoordinator::new().compose_with_images_scrolled(
