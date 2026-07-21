@@ -138,6 +138,12 @@ impl Reconciler {
             desired
         };
 
+        // §2.4: a key names one child. Two children claiming the same one cannot
+        // both be matched — the key index keeps the first, the rest are inserted as
+        // new while their predecessors are removed, and the group churns every
+        // frame. Nothing else surfaces it, so record it for the runtime to report.
+        report_duplicate_keys(parent, desired, plan);
+
         let matching = self.matcher.match_children(tree, &existing, desired);
         let (matches, removed) = matching.into_parts();
 
@@ -298,6 +304,21 @@ fn node_kind_of(node: &ViewNode) -> NodeKind {
         ViewNode::Text { content, .. } => NodeKind::Text {
             content: content.clone(),
         },
+    }
+}
+
+/// Records any key that more than one desired child claims (spec §2.4).
+fn report_duplicate_keys(parent: NodeId, desired: &[ViewNode], plan: &mut ReconciliationPlan) {
+    let mut counts: HashMap<StableKey, usize> = HashMap::new();
+    for node in desired {
+        if let Some(key) = desired_key(node) {
+            *counts.entry(key).or_insert(0) += 1;
+        }
+    }
+    for (key, count) in counts {
+        if count > 1 {
+            let () = plan.push_duplicate_key(parent, key, count);
+        }
     }
 }
 

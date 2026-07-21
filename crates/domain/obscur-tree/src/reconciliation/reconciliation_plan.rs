@@ -1,5 +1,7 @@
 //! `ReconciliationPlan`: the ordered op log produced by a reconcile pass.
 
+use obscur_identity::{NodeId, StableKey};
+
 use super::ReconciliationOp;
 
 /// An ordered record of the [`ReconciliationOp`]s produced by a reconcile pass.
@@ -14,6 +16,10 @@ use super::ReconciliationOp;
 /// guarantees of its own.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ReconciliationPlan {
+    /// Sibling groups whose desired children reused one key (spec §2.4 keyed
+    /// identity). Recorded rather than reported: this crate is domain code and
+    /// performs no I/O, so the runtime raises the diagnostic.
+    duplicate_keys: Vec<DuplicateKey>,
     ops: Vec<ReconciliationOp>,
 }
 
@@ -21,7 +27,10 @@ impl ReconciliationPlan {
     /// Creates an empty plan.
     #[must_use]
     pub const fn new() -> Self {
-        Self { ops: Vec::new() }
+        Self {
+            ops: Vec::new(),
+            duplicate_keys: Vec::new(),
+        }
     }
 
     /// Appends an op to the end of the log, preserving order.
@@ -31,6 +40,18 @@ impl ReconciliationPlan {
 
     /// Returns the recorded ops in order.
     #[must_use]
+    /// Records a sibling group that reused `key` `count` times under `parent`.
+    pub fn push_duplicate_key(&mut self, parent: NodeId, key: StableKey, count: usize) {
+        self.duplicate_keys
+            .push(DuplicateKey { parent, key, count });
+    }
+
+    /// The duplicate-key collisions this reconcile saw (spec §2.4).
+    #[must_use]
+    pub fn duplicate_keys(&self) -> &[DuplicateKey] {
+        &self.duplicate_keys
+    }
+
     pub fn ops(&self) -> &[ReconciliationOp] {
         &self.ops
     }
@@ -92,4 +113,21 @@ mod tests {
         let collected: Vec<_> = plan.iter().copied().collect();
         assert_eq!(collected, vec![a, b]);
     }
+}
+
+/// One sibling group that gave the same key to more than one desired child.
+///
+/// Keyed identity assumes a key names **one** child (spec §2.4). When several share
+/// it, the matcher's key index keeps the first and the rest find no partner: they are
+/// inserted as new while the previous ones are removed, every frame, which makes the
+/// whole group churn — a full restyle and a full layout each time. It is silent
+/// otherwise, so the runtime turns this into a diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DuplicateKey {
+    /// The parent whose children collided.
+    pub parent: NodeId,
+    /// The key more than one child claimed.
+    pub key: StableKey,
+    /// How many children claimed it.
+    pub count: usize,
 }

@@ -2820,6 +2820,7 @@ impl UiRuntime {
             // restyle what the tree edit touched instead of everything. `None`
             // means the edit could not be bounded and the full pass is the only
             // correct answer.
+            self.emit_duplicate_key_faults(&reconcile_plan);
             let mut roots = restyle_roots_of(&self.tree, &reconcile_plan);
             // 1b. Mount an instance for every inserted component-backed node and
             //     unmount every removed one, from the plan's structural deltas.
@@ -6418,6 +6419,33 @@ impl UiRuntime {
             }
         }
         Some(dirty)
+    }
+
+    /// Raises one diagnostic per sibling group that reused a key (spec §2.4, §7.8).
+    ///
+    /// Keyed identity assumes a key names one child. When several claim it the
+    /// matcher keeps the first and the rest find no partner, so they are inserted as
+    /// new while their predecessors are removed — every frame, which forces a full
+    /// restyle and a full layout and makes a list an order of magnitude slower. The
+    /// failure is otherwise completely silent: the UI still looks right, it is only
+    /// slow, so an author has no way to connect the symptom to the cause. This is the
+    /// diagnostic that connects it.
+    ///
+    /// The recovery is [`RecoveryAction::Fallback`]: reconcile proceeds with the
+    /// first claimant and rebuilds the rest, so the frame is correct but not cheap.
+    fn emit_duplicate_key_faults(&self, plan: &ReconciliationPlan) {
+        for duplicate in plan.duplicate_keys() {
+            let mut diagnostic = Diagnostic::new(
+                DiagnosticCode::new("tree.duplicate_key"),
+                DiagnosticSeverity::Warning,
+                DiagnosticSubsystem::Tree,
+                "several sibling children claim one key, so the group is rebuilt \
+                 every frame instead of being reused",
+            )
+            .with_recovery(RecoveryAction::Fallback);
+            diagnostic.context.node = Some(duplicate.parent);
+            self.report_diagnostic(&diagnostic);
+        }
     }
 
     /// Raises one structured [`Diagnostic`] per node-attributed "invalid value"
