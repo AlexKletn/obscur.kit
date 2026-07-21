@@ -16470,6 +16470,8 @@ mod tests {
 /// the facade runner's `[frame-stats]`.
 struct FramePhaseClock {
     enabled: bool,
+    /// When the frame began, so the phases can be reconciled against the whole.
+    began: std::time::Instant,
     last: std::cell::Cell<std::time::Instant>,
     reconcile: std::cell::Cell<std::time::Duration>,
     style: std::cell::Cell<std::time::Duration>,
@@ -16481,15 +16483,17 @@ const PHASE_REPORT_EVERY: u32 = 60;
 
 thread_local! {
     /// Rolling totals across frames, printed every [`PHASE_REPORT_EVERY`].
-    static PHASE_TOTALS: std::cell::RefCell<(u32, std::time::Duration, std::time::Duration, std::time::Duration, std::time::Duration)> =
-        const { std::cell::RefCell::new((0, std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO)) };
+    static PHASE_TOTALS: std::cell::RefCell<(u32, std::time::Duration, std::time::Duration, std::time::Duration, std::time::Duration, std::time::Duration)> =
+        const { std::cell::RefCell::new((0, std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO)) };
 }
 
 impl FramePhaseClock {
     fn start() -> Self {
+        let now = std::time::Instant::now();
         Self {
             enabled: std::env::var_os("OBSCUR_FRAME_STATS").is_some(),
-            last: std::cell::Cell::new(std::time::Instant::now()),
+            began: now,
+            last: std::cell::Cell::new(now),
             reconcile: std::cell::Cell::new(std::time::Duration::ZERO),
             style: std::cell::Cell::new(std::time::Duration::ZERO),
             layout: std::cell::Cell::new(std::time::Duration::ZERO),
@@ -16528,6 +16532,7 @@ impl FramePhaseClock {
             return;
         }
         let compose = self.lap();
+        let total = self.began.elapsed();
         let (reconcile, style, layout) =
             (self.reconcile.get(), self.style.get(), self.layout.get());
         PHASE_TOTALS.with(|totals| {
@@ -16537,19 +16542,24 @@ impl FramePhaseClock {
             t.2 += style;
             t.3 += layout;
             t.4 += compose;
+            t.5 += total;
             if t.0 < PHASE_REPORT_EVERY {
                 return;
             }
             let n = f64::from(t.0);
             let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0 / n;
+            // Everything the four marks do not bracket: input dispatch, generated
+            // content, the editing reseed, accessibility, snapshot install.
+            let other = (ms(t.5) - ms(t.1) - ms(t.2) - ms(t.3) - ms(t.4)).max(0.0);
             println!(
-                "[phase-stats] {n:.0} frames | reconcile+build {:.2}ms | style {:.2}ms | layout {:.2}ms | compose {:.2}ms",
+                "[phase-stats] {n:.0} frames | reconcile+build {:.2}ms | style {:.2}ms | layout {:.2}ms | compose {:.2}ms | other {other:.2}ms | frame {:.2}ms",
                 ms(t.1),
                 ms(t.2),
                 ms(t.3),
                 ms(t.4),
+                ms(t.5),
             );
-            *t = (0, std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO);
+            *t = (0, std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO);
         });
     }
 }

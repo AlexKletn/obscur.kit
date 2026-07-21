@@ -512,8 +512,24 @@ fn init_gpu(
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
             .map_err(|error| error.to_string())?;
     let size = window.inner_size();
-    let config = surface
+    let mut config = surface
         .get_default_config(&adapter, size.width.max(1), size.height.max(1))
         .ok_or_else(|| "surface unsupported by adapter".to_owned())?;
+    // `get_default_config` picks `Fifo` — vsync — which is the right default: it
+    // paces to the display and burns no power on frames nobody sees. But it also
+    // makes `present` block until the next refresh, so a profiling run cannot tell
+    // real GPU cost from waiting, and a frame that misses the deadline reads the
+    // same as one that is merely paced. `OBSCUR_NO_VSYNC=1` unpaces the swapchain
+    // so a measurement shows the true frame cost.
+    if std::env::var_os("OBSCUR_NO_VSYNC").is_some() {
+        let supported = surface.get_capabilities(&adapter).present_modes;
+        for mode in [wgpu::PresentMode::Immediate, wgpu::PresentMode::Mailbox] {
+            if supported.contains(&mode) {
+                config.present_mode = mode;
+                break;
+            }
+        }
+        println!("[present-mode] {:?}", config.present_mode);
+    }
     Ok((surface, config, device, queue))
 }
