@@ -34,6 +34,59 @@ use crate::window_winit::conversion::{KeyboardConverter, PointerConverter};
 /// than raw pixels.
 const WHEEL_LINE_STEP: f32 = 48.0;
 
+/// Rolling per-phase frame timings, printed every [`REPORT_EVERY`] presented
+/// frames when `OBSCUR_FRAME_STATS=1` is set.
+///
+/// This exists because the kit measures nothing itself: §7.9's
+/// [`PerformanceSpan`](crate::diagnostics::performance::PerformanceSpan) carries a
+/// name and a subsystem but **no duration**, and the DevTools protocol has no
+/// timing field, so neither telemetry nor an attached inspector can answer "why is
+/// this slow". Until a span records elapsed time, this is the honest way to profile
+/// a running app.
+#[derive(Default)]
+struct FrameStats {
+    frames: u32,
+    build: std::time::Duration,
+    snapshot: std::time::Duration,
+    present: std::time::Duration,
+    worst: std::time::Duration,
+}
+
+/// How many presented frames each stats line covers.
+const REPORT_EVERY: u32 = 60;
+
+impl FrameStats {
+    /// Folds one presented frame in, printing a summary every [`REPORT_EVERY`].
+    fn record(
+        &mut self,
+        build: std::time::Duration,
+        snapshot: std::time::Duration,
+        present: std::time::Duration,
+    ) {
+        self.frames += 1;
+        self.build += build;
+        self.snapshot += snapshot;
+        self.present += present;
+        self.worst = self.worst.max(build + snapshot + present);
+        if self.frames < REPORT_EVERY {
+            return;
+        }
+        let n = f64::from(self.frames);
+        let ms = |total: std::time::Duration| total.as_secs_f64() * 1000.0 / n;
+        let total = ms(self.build) + ms(self.snapshot) + ms(self.present);
+        println!(
+            "[frame-stats] {n:.0} frames | build {:.2}ms | snapshot {:.2}ms | present {:.2}ms | \
+             total {total:.2}ms (~{:.0} fps if saturated) | worst {:.2}ms",
+            ms(self.build),
+            ms(self.snapshot),
+            ms(self.present),
+            1000.0 / total.max(0.001),
+            self.worst.as_secs_f64() * 1000.0,
+        );
+        *self = Self::default();
+    }
+}
+
 /// Builds the runtime, forwards the app's root builder + command handlers + CSS,
 /// then opens the window and runs the event loop to completion.
 pub(super) fn run(
@@ -80,6 +133,7 @@ pub(super) fn run(
         scale_factor: 1.0,
         cursor: (0.0, 0.0),
         init_failure: None,
+        stats: std::env::var_os("OBSCUR_FRAME_STATS").map(|_| FrameStats::default()),
     };
 
     let event_loop = EventLoop::new().map_err(|error| AppError::EventLoop(error.to_string()))?;
@@ -155,6 +209,8 @@ struct AppRunner {
     /// A window/GPU failure recorded on `resumed` (which cannot return a `Result`)
     /// so [`run`] can surface it instead of returning `Ok` on a blank window.
     init_failure: Option<AppError>,
+    /// Per-phase frame timings, present only when `OBSCUR_FRAME_STATS=1` is set.
+    stats: Option<FrameStats>,
 }
 
 impl AppRunner {
@@ -189,10 +245,15 @@ impl AppRunner {
         // re-present an identical scene on every pointer twitch. The runtime is the
         // authority on whether anything changed: it schedules a frame itself when
         // hover, focus, animation or a landed resource makes one necessary.
+        let started = std::time::Instant::now();
         if self.runtime.run_due_frame_reactive().is_none() {
             return;
         }
+        let built = started.elapsed();
+        let snapshot_at = std::time::Instant::now();
         let snapshot = self.runtime.snapshot();
+        let snapshotted = snapshot_at.elapsed();
+        let present_at = std::time::Instant::now();
 
         let (Some(surface), Some(renderer)) = (self.surface.as_ref(), self.renderer.as_mut())
         else {
@@ -209,6 +270,9 @@ impl AppRunner {
             if let (Some(surface), Some(device)) = (self.surface.as_ref(), self.device.as_ref()) {
                 surface.configure(device);
             }
+        }
+        if let Some(stats) = self.stats.as_mut() {
+            stats.record(built, snapshotted, present_at.elapsed());
         }
     }
 

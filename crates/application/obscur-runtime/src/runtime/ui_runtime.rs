@@ -61,7 +61,7 @@ use obscur_text::layout::{Hyphenator, TextAlignment};
 use obscur_text::selection::TextSelection;
 use obscur_text::shaping::{TextDirection, TextItemizer, TextShaper};
 use obscur_tree::node::NodeKind;
-use obscur_tree::reconciliation::Reconciler;
+use obscur_tree::reconciliation::{Reconciler, ReconciliationOp, ReconciliationPlan};
 use obscur_tree::tree::RetainedTree;
 use obscur_view::boundary::ComponentFailure;
 use obscur_view::component::{ComponentRegistration, RegistryError};
@@ -2773,7 +2773,7 @@ impl UiRuntime {
         //    version when the tree actually changed. `reconciled` is derived from
         //    whether the commit carried any operation — identical to the previous
         //    `!plan.is_empty()`.
-        let reconciled = if plan.reconcile() {
+        let (reconciled, reconcile_roots) = if plan.reconcile() {
             // Materialize the desired tree HERE — after phase 3's input dispatch,
             // not before it. A reactive frame's builder reads current state, and a
             // dispatched input handler may have just committed to that state, so
@@ -2815,6 +2815,11 @@ impl UiRuntime {
                 .commit_root(&self.reconciler, &mut self.tree, desired)
                 .expect("a root reconcile is a single, structurally-valid ReplaceRoot");
             let changed = !commit.is_empty();
+            // The restyle roots this reconcile implies, so the style phase can
+            // restyle what the tree edit touched instead of everything. `None`
+            // means the edit could not be bounded and the full pass is the only
+            // correct answer.
+            let mut roots = restyle_roots_of(&reconcile_plan);
             // 1b. Mount an instance for every inserted component-backed node and
             //     unmount every removed one, from the plan's structural deltas.
             //     A host that registered no component kinds pays nothing here.
@@ -2823,6 +2828,11 @@ impl UiRuntime {
             //     its own children, so a component-backed node's subtree exists
             //     before style/layout read the tree.
             let rendered = self.render_components();
+            // A component sub-reconcile edits the tree through its own plan, which
+            // this frame never sees, so its roots are unknowable here: widen.
+            if rendered {
+                roots = None;
+            }
             let changed = changed || rendered;
             // Telemetry: mark the reconcile phase and count the resulting nodes,
             // budgeting the retained-tree size (spec §7.9).
@@ -2836,9 +2846,9 @@ impl UiRuntime {
                 self.budget.check_reconcile(nodes),
                 ctx.id(),
             );
-            changed
+            (changed, roots)
         } else {
-            false
+            (false, Some(Vec::new()))
         };
 
         // 1a. Controlled-input reseed (WHATWG HTML §4.10.5.5 *value reflection*): a
@@ -2879,7 +2889,12 @@ impl UiRuntime {
             // Phase 5 (§3.4), per node: does this frame have to restyle everything,
             // or does it know exactly which nodes can differ? `None` means it does
             // not know and must run the whole pass.
-            let scope = self.restyle_scope(&sheets, ctx.viewport(), reconciled);
+            let scope = match reconcile_roots.as_deref() {
+                Some(roots) => self.restyle_scope(&sheets, ctx.viewport(), roots),
+                // The reconcile could not be bounded (a removal, or a component
+                // sub-reconcile): restyle everything.
+                None => None,
+            };
             let (mut computed, resolved_count, delta) = match scope {
                 Some(dirty) => {
                     self.restyle_invalidated(&sheets, &environment, ctx.viewport(), &dirty)
@@ -6355,22 +6370,23 @@ impl UiRuntime {
     /// resize, a tree edit — answers `None` and restyles in full, which is what the
     /// runtime did for all of them before.
     ///
-    /// # Why `reconciled` and not `plan.reconcile()`
+    /// # Why a reconcile is no longer an automatic full pass
     ///
-    /// Identical to the reasoning in [`layout_phase`](Self::layout_phase):
-    /// the reactive path classifies every frame as structural, so gating on the
-    /// plan would never take this path from a real windowed host. Reconcile reports
-    /// whether it actually changed anything, and an empty commit proves the tree is
-    /// byte-identical to the one the retained styles were resolved over.
+    /// It used to be: any tree edit answered `None`. But the reactive path — a
+    /// builder that returns a fresh `View` every frame — classifies *every* frame as
+    /// structural, so the incremental path was unreachable from a real windowed host
+    /// and a 300-node tree restyled in full at 60Hz. The reconciler already reports
+    /// exactly which nodes it touched (it compares by value: identical text and
+    /// props produce no op at all), so those ids become restyle roots here and are
+    /// expanded like any other. Only a change that cannot be bounded — a removal,
+    /// whose node is gone before its shifted siblings can be reached from it, or a
+    /// component sub-reconcile this frame never sees — widens back to everything.
     fn restyle_scope(
         &self,
         sheets: &[Stylesheet],
         viewport: Size,
-        reconciled: bool,
+        reconcile_roots: &[NodeId],
     ) -> Option<StyleInvalidation> {
-        if reconciled {
-            return None;
-        }
         let last = self.last_style.as_ref()?;
         if last.viewport != viewport || last.sheets != sheets {
             return None;
@@ -6386,6 +6402,13 @@ impl UiRuntime {
             if !RestyleScope::expand(&self.tree, root, &mut dirty) {
                 // The scope could not be bounded; a partial set would be a wrong
                 // one, so widen to everything.
+                return None;
+            }
+        }
+        // The nodes this frame's tree edit touched, expanded the same way: a
+        // reconcile is no longer an automatic full pass.
+        for &root in reconcile_roots {
+            if !RestyleScope::expand(&self.tree, root, &mut dirty) {
                 return None;
             }
         }
@@ -16432,4 +16455,25 @@ mod tests {
             );
         }
     }
+}
+
+/// The restyle roots a root reconcile implies, or [`None`] when its effect cannot be
+/// bounded.
+///
+/// `Insert`/`Move`/`Update` all name a node that still exists, so the style phase can
+/// expand from it. A `Remove` cannot: the node is already gone from the tree, so
+/// [`RestyleScope::expand`] can neither find it nor reach the following siblings whose
+/// `:nth-child`/`+`/`~` matches its disappearance shifted — the honest answer there is
+/// the full pass.
+fn restyle_roots_of(plan: &ReconciliationPlan) -> Option<Vec<NodeId>> {
+    let mut roots = Vec::new();
+    for op in plan.ops() {
+        match op {
+            ReconciliationOp::Remove { .. } => return None,
+            ReconciliationOp::Insert { id, .. }
+            | ReconciliationOp::Move { id, .. }
+            | ReconciliationOp::Update { id } => roots.push(*id),
+        }
+    }
+    Some(roots)
 }
