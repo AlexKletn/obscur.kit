@@ -68,6 +68,33 @@ pub const VIRTUAL_COLLECTION: ComponentId = ComponentId::from_raw(0x00B0_0002);
 /// selector can match on it.
 pub const VIRTUAL_ROW_EXTENT: InternedSymbol = InternedSymbol::from_raw(0x0000_0302);
 
+/// Reserved symbol naming which registered row builder a virtual list realizes
+/// through (spec §4.9).
+///
+/// The builder itself cannot live in the [`View`]: a `View` is plain data —
+/// `Clone`, `Debug`, `PartialEq` — and a closure is none of those. So the view
+/// carries only this name and the runtime holds the builder, which is what lets a
+/// list of 10,000 entries put 10,000 *items* in the model while only ever building
+/// the nodes the viewport can show.
+/// A realized virtual list's spacer: an empty box standing in for the rows outside
+/// the window, sized to exactly the space they would have taken.
+///
+/// It is what makes the container's content extent true without building the rows,
+/// so the scrollbar is proportioned correctly and native scrolling covers the whole
+/// list rather than only the part that happens to exist.
+pub const VIRTUAL_SPACER: ComponentId = ComponentId::from_raw(0x00B0_0003);
+
+pub const VIRTUAL_LIST_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0303);
+
+/// Reserved symbol for a virtual list's **item count** — how many items exist,
+/// not how many are built (spec §4.9).
+///
+/// This is the half an app-side virtualization cannot express. Because the runtime
+/// knows it, it can give the scroll container the true content extent
+/// (`count * row_extent`) while realizing only the window — so the scrollbar is
+/// honest, the wheel is native, and nothing about paging is the app's arithmetic.
+pub const VIRTUAL_ITEM_COUNT: InternedSymbol = InternedSymbol::from_raw(0x0000_0304);
+
 /// The default estimated row extent, in logical pixels, a `<VirtualFor>` uses
 /// until its rows are really measured (spec §4.9 *estimated geometry*).
 ///
@@ -318,4 +345,113 @@ mod tests {
         };
         assert_eq!(virtual_row_extent(props), Some(20.0));
     }
+}
+
+/// The registered builder name a virtual-list marker names, if it is one.
+#[must_use]
+pub fn virtual_list_id(props: &[ViewProperty]) -> Option<InternedSymbol> {
+    props.iter().find_map(|p| {
+        (p.name() == VIRTUAL_LIST_ID).then(|| match p.value() {
+            ViewValue::Int(raw) => u32::try_from(*raw).ok().map(InternedSymbol::from_raw),
+            _ => None,
+        })?
+    })
+}
+
+/// How many items the marker says exist.
+#[must_use]
+pub fn virtual_item_count(props: &[ViewProperty]) -> usize {
+    props
+        .iter()
+        .find_map(|p| {
+            (p.name() == VIRTUAL_ITEM_COUNT).then(|| match p.value() {
+                ViewValue::Int(n) => usize::try_from(*n).ok(),
+                _ => None,
+            })?
+        })
+        .unwrap_or(0)
+}
+
+/// Replaces every virtual-list marker with its realized window (spec §4.9).
+///
+/// `window` is asked, per marker, for the half-open range of item indices the
+/// viewport can show; `row` builds one item's node. The realized children are
+/// **a leading spacer, the window's rows, then a trailing spacer**, each spacer
+/// sized to the items it stands in for — so the container's content extent is the
+/// true `count * row_extent` even though only the window exists as nodes. That is
+/// what a scroll container needs in order to size a scrollbar honestly, and it is
+/// exactly the half an app cannot supply for itself: to state the full height it
+/// would have to build the full list, which is the cost virtualization exists to
+/// avoid.
+pub fn realize_virtual_lists<W, R>(view: View, window: &W, row: &mut R) -> View
+where
+    W: Fn(InternedSymbol, usize, f32) -> core::ops::Range<usize>,
+    R: FnMut(InternedSymbol, usize) -> Option<ViewNode>,
+{
+    View::from_fragment(realize_list_fragment(view.into_fragment(), window, row))
+}
+
+/// A spacer standing in for `items` unbuilt rows of `extent` each.
+fn spacer(items: usize, extent: f32) -> ViewNode {
+    ViewNode::element(VIRTUAL_SPACER).with_prop(ViewProperty::new(
+        VIRTUAL_ROW_EXTENT,
+        ViewValue::Float(f64::from(items as f32 * extent)),
+    ))
+}
+
+fn realize_list_fragment<W, R>(fragment: ViewFragment, window: &W, row: &mut R) -> ViewFragment
+where
+    W: Fn(InternedSymbol, usize, f32) -> core::ops::Range<usize>,
+    R: FnMut(InternedSymbol, usize) -> Option<ViewNode>,
+{
+    let mut out = Vec::new();
+    for node in fragment.into_nodes() {
+        let ViewNode::Element {
+            component, props, ..
+        } = &node
+        else {
+            out.push(node);
+            continue;
+        };
+        let Some(id) = (*component == VIRTUAL_COLLECTION)
+            .then(|| virtual_list_id(props))
+            .flatten()
+        else {
+            let ViewNode::Element {
+                component,
+                props,
+                children,
+                key,
+                events,
+            } = node
+            else {
+                unreachable!("matched an Element above");
+            };
+            out.push(ViewNode::Element {
+                component,
+                props,
+                key,
+                events,
+                children: realize_list_fragment(children, window, row),
+            });
+            continue;
+        };
+        let count = virtual_item_count(props);
+        let extent = virtual_row_extent(props).unwrap_or(DEFAULT_VIRTUAL_ROW_EXTENT);
+        let range = window(id, count, extent);
+        let first = range.start.min(count);
+        let last = range.end.min(count);
+        if first > 0 {
+            out.push(spacer(first, extent));
+        }
+        for index in first..last {
+            if let Some(built) = row(id, index) {
+                out.push(built);
+            }
+        }
+        if last < count {
+            out.push(spacer(count - last, extent));
+        }
+    }
+    ViewFragment::from_nodes(out)
 }

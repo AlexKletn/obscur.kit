@@ -66,8 +66,8 @@ use obscur_tree::tree::RetainedTree;
 use obscur_view::boundary::ComponentFailure;
 use obscur_view::component::{ComponentRegistration, RegistryError};
 use obscur_view::view::{
-    EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, View, has_outlet, has_virtual_collection,
-    project_slots, realize_virtual_collections,
+    EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, VIRTUAL_SPACER, View, ViewNode, has_outlet,
+    has_virtual_collection, project_slots, realize_virtual_collections, realize_virtual_lists,
 };
 
 use super::{
@@ -544,6 +544,14 @@ pub struct UiRuntime {
     /// written (see [`scroll_paint`](Self::scroll_paint)), so a layout change that
     /// shrinks the content never leaves a stale over-scroll.
     scroll_top: HashMap<NodeId, f32>,
+    /// Row builders for registered virtual lists, keyed by the name a marker names.
+    /// They live here rather than in the `View` because a `View` is plain data.
+    virtual_lists: HashMap<InternedSymbol, Box<dyn FnMut(usize) -> ViewNode>>,
+    /// Each virtual list's own scroll offset, in logical pixels.
+    virtual_scroll: HashMap<InternedSymbol, f32>,
+    /// The window each virtual list realized last frame, so a host can ask what is
+    /// actually built.
+    virtual_windows: HashMap<InternedSymbol, core::ops::Range<usize>>,
     /// The domain motion scheduler owning every active timeline (spec §4.17).
     ///
     /// The runtime *owns* the scheduler and its timelines; each frame it samples
@@ -860,6 +868,9 @@ impl UiRuntime {
             device_scale: 1.0,
             content_offset: (0.0, 0.0),
             scroll_top: HashMap::new(),
+            virtual_lists: HashMap::new(),
+            virtual_scroll: HashMap::new(),
+            virtual_windows: HashMap::new(),
             motion: MotionScheduler::new(),
             animations: Vec::new(),
             presentation_overlays: Vec::new(),
@@ -1544,6 +1555,34 @@ impl UiRuntime {
     /// left for later. An intrinsic size with a zero or negative extent is
     /// skipped, so a not-yet-decoded or degenerate asset leaves the element's
     /// `auto` boxes untouched rather than collapsing them.
+    /// Gives each realized virtual-list spacer the height of the rows it stands in
+    /// for (spec §4.9).
+    ///
+    /// The spacers are what make a virtualized container's extent true: the window's
+    /// rows are real nodes, and everything above and below them is one box sized to
+    /// exactly the space those items would occupy. Without this the scroll container
+    /// would measure only the window, so the scrollbar would claim the list is a
+    /// screenful long and scrolling would stop at the end of what happens to be
+    /// built. The size cannot come from CSS — it changes with the scroll position and
+    /// the model — so it is applied here, next to the replaced-element sizing that
+    /// has the same shape.
+    fn size_virtual_spacers(&self, layout_styles: &mut LayoutStyles) {
+        let spacers: Vec<(NodeId, f32)> = self
+            .tree
+            .iter()
+            .filter_map(|(id, node)| {
+                (node.kind().component_id() == Some(VIRTUAL_SPACER))
+                    .then(|| node.attributes().virtual_extent().map(|h| (id, h)))
+                    .flatten()
+            })
+            .collect();
+        for (node, height) in spacers {
+            if let Some(style) = layout_styles.get_mut(&node) {
+                style.height = Dimension::Px(height);
+            }
+        }
+    }
+
     fn size_replaced_elements(&self, layout_styles: &mut LayoutStyles) {
         // Collect (node, logical size) first so the retained-tree borrow is
         // released before the styles map is mutated.
@@ -2796,8 +2835,43 @@ impl UiRuntime {
             let realized_view;
             let desired: &View = if has_virtual_collection(resolved.root().nodes()) {
                 let viewport_height = ctx.viewport().height;
+                // A registered virtual list realizes through its builder: the
+                // runtime asks `VirtualLayout` for the window against THIS list's
+                // own scroll offset, builds only those rows, and brackets them with
+                // spacers so the container's extent stays the full `count * extent`.
+                // That is the half an app cannot state for itself.
+                let windows = std::mem::take(&mut self.virtual_windows);
+                let mut builders = std::mem::take(&mut self.virtual_lists);
+                let scrolls = self.virtual_scroll.clone();
+                let mut chosen: HashMap<InternedSymbol, core::ops::Range<usize>> = HashMap::new();
+                let with_lists = if builders.is_empty() {
+                    resolved.clone()
+                } else {
+                    let picked = std::cell::RefCell::new(&mut chosen);
+                    let view = realize_virtual_lists(
+                        resolved.clone(),
+                        &|id, count, extent| {
+                            let offset = scrolls.get(&id).copied().unwrap_or(0.0);
+                            let layout = VirtualLayout::new(
+                                SizeEstimator::new(extent),
+                                OverscanPolicy::symmetric(VIRTUAL_OVERSCAN),
+                            );
+                            let range = layout.visible_range(offset, viewport_height, count);
+                            let range = range.start()..range.end();
+                            picked.borrow_mut().insert(id, range.clone());
+                            range
+                        },
+                        &mut |id, index| builders.get_mut(&id).map(|build| build(index)),
+                    );
+                    view
+                };
+                self.virtual_lists = builders;
+                self.virtual_windows = windows;
+                self.virtual_windows.extend(chosen);
+                // The older template marker (`<VirtualFor>` with no builder) still
+                // clones its template across the window.
                 let scroll_y = self.viewport_scroll.1;
-                realized_view = realize_virtual_collections(resolved.clone(), &|extent| {
+                realized_view = realize_virtual_collections(with_lists, &|extent| {
                     Self::virtual_window_len(extent, viewport_height, scroll_y)
                 });
                 &realized_view
@@ -3020,6 +3094,7 @@ impl UiRuntime {
             // sources now — synchronously, before arrange — and patches the just
             // built styles; the compose phase's later resolve is then a no-op.
             self.size_replaced_elements(&mut layout_styles);
+            self.size_virtual_spacers(&mut layout_styles);
             // Authored grid templates (`grid-template-columns`/`-rows`) become a
             // per-node side-table so a grid container dispatches the real
             // track-sizing algorithm; a grid node with no template falls back to a
@@ -7318,6 +7393,39 @@ impl UiRuntime {
     /// for a node that is not a scroll container, does not overflow, or has never
     /// been scrolled (CSS Overflow 3 §scroll-container).
     #[must_use]
+    /// Registers the row builder a virtual list realizes through (spec §4.9).
+    ///
+    /// `build(index)` produces one item's node and is called only for the indices
+    /// the viewport can show, so a model of any size costs a screenful of nodes. The
+    /// view names this builder with `ViewNode::virtual_list` and states the item
+    /// count; the runtime owns the window, the scroll offset and the content extent
+    /// — the half an app cannot own, since stating the full height would mean
+    /// building the full list.
+    pub fn register_virtual_list(
+        &mut self,
+        id: InternedSymbol,
+        build: Box<dyn FnMut(usize) -> ViewNode>,
+    ) {
+        self.virtual_lists.insert(id, build);
+    }
+
+    /// Scrolls a registered virtual list by `dy` logical pixels, clamped to its
+    /// content extent, returning the new offset (spec §4.9).
+    pub fn scroll_virtual_list(&mut self, id: InternedSymbol, dy: f32, content: f32) -> f32 {
+        let max = (content - self.viewport.height).max(0.0);
+        let offset = self.virtual_scroll.entry(id).or_insert(0.0);
+        *offset = (*offset + dy).clamp(0.0, max);
+        let next = *offset;
+        self.request_frame(FrameReason::UiCommit);
+        next
+    }
+
+    /// The item range a virtual list realized on the last frame (spec §4.9).
+    #[must_use]
+    pub fn virtual_window(&self, id: InternedSymbol) -> Option<core::ops::Range<usize>> {
+        self.virtual_windows.get(&id).cloned()
+    }
+
     pub fn scroll_top(&self, node: NodeId) -> f32 {
         let containers = scroll_containers(&self.tree, &self.computed, &self.boxes);
         containers

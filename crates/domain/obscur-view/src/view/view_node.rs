@@ -1,6 +1,6 @@
 //! `ViewNode`: the core recursive node of the desired view tree.
 
-use obscur_identity::ComponentId;
+use obscur_identity::{ComponentId, InternedSymbol};
 
 use super::{ViewEventBinding, ViewFragment, ViewKey, ViewProperty};
 
@@ -94,6 +94,29 @@ impl ViewNode {
                 super::ViewValue::Float(f64::from(row_extent)),
             ))
             .with_children(template)
+    }
+
+    /// Creates a virtual-list marker: `count` items of `row_extent` each, realized
+    /// through the row builder registered under `list_id` (spec §4.9).
+    ///
+    /// The builder is deliberately absent from the view — a `View` is plain data and
+    /// a closure is not — so the runtime holds it and this names it. That split is
+    /// what lets the model carry every item while only the visible nodes are built.
+    #[must_use]
+    pub fn virtual_list(list_id: InternedSymbol, count: usize, row_extent: f32) -> Self {
+        Self::element(super::VIRTUAL_COLLECTION)
+            .with_prop(ViewProperty::new(
+                super::VIRTUAL_LIST_ID,
+                super::ViewValue::Int(i64::from(list_id.raw())),
+            ))
+            .with_prop(ViewProperty::new(
+                super::VIRTUAL_ITEM_COUNT,
+                super::ViewValue::Int(count as i64),
+            ))
+            .with_prop(ViewProperty::new(
+                super::VIRTUAL_ROW_EXTENT,
+                super::ViewValue::Float(f64::from(row_extent)),
+            ))
     }
 
     /// Creates an unkeyed text node holding `content`.

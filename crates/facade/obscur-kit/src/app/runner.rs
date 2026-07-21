@@ -30,7 +30,7 @@ use crate::render_vello::renderer::{VelloDevice, VelloRenderer, VelloSurface};
 use crate::runtime::UiRuntime;
 use crate::runtime::frame::FrameReason;
 use crate::text::ime::{CompositionEvent, Preedit};
-use crate::view::view::View;
+use crate::view::view::{View, ViewNode};
 use crate::window_winit::conversion::{KeyboardConverter, PointerConverter};
 
 /// Pixels scrolled per wheel line, when the platform reports whole lines rather
@@ -100,6 +100,7 @@ pub(super) fn run(
     builder: Box<dyn FnMut() -> View + 'static>,
     commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
+    virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
 ) -> Result<(), AppError> {
     run_inner(
         title,
@@ -110,6 +111,7 @@ pub(super) fn run(
         commands,
         scroll,
         None,
+        virtual_lists,
     )
 }
 
@@ -127,6 +129,7 @@ pub(super) fn run_with_frame(
     mut builder: Box<dyn FnMut(&FrameInfo) -> View + 'static>,
     commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
+    virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
 ) -> Result<(), AppError> {
     let info = Rc::new(Cell::new(FrameInfo {
         viewport: Size::new(size.0, size.1),
@@ -143,6 +146,7 @@ pub(super) fn run_with_frame(
         commands,
         scroll,
         Some(info),
+        virtual_lists,
     )
 }
 
@@ -156,6 +160,7 @@ fn run_inner(
     commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
     frame_info: Option<Rc<Cell<FrameInfo>>>,
+    virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
 ) -> Result<(), AppError> {
     let (width, height) = size;
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(width, height));
@@ -166,6 +171,9 @@ fn run_inner(
     runtime.set_root_view(builder);
     for (command, handler) in commands {
         runtime.on_command(command, handler);
+    }
+    for (id, build) in virtual_lists {
+        runtime.register_virtual_list(id, build);
     }
 
     let boot = KitBootstrap::new();

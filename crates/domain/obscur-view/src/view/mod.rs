@@ -17,8 +17,10 @@ pub use slot::{
 };
 mod virtual_collection;
 pub use virtual_collection::{
-    DEFAULT_VIRTUAL_ROW_EXTENT, VIRTUAL_COLLECTION, VIRTUAL_ROW_EXTENT, has_virtual_collection,
-    is_virtual_collection, realize_virtual_collections, virtual_row_extent,
+    DEFAULT_VIRTUAL_ROW_EXTENT, VIRTUAL_COLLECTION, VIRTUAL_ITEM_COUNT, VIRTUAL_LIST_ID,
+    VIRTUAL_ROW_EXTENT, VIRTUAL_SPACER, has_virtual_collection, is_virtual_collection,
+    realize_virtual_collections, realize_virtual_lists, virtual_item_count, virtual_list_id,
+    virtual_row_extent,
 };
 mod stable_selector;
 pub use stable_selector::{AUTOMATION_ID, TEST_ID};

@@ -8,7 +8,7 @@ use crate::okui_compiler::bridge::UiIrViewBridge;
 use crate::okui_compiler::compile::Compiler;
 use crate::okui_syntax::ast::Document;
 use crate::okui_syntax::parser::Parser;
-use crate::view::view::View;
+use crate::view::view::{View, ViewNode};
 
 /// The default logical window size, in CSS pixels.
 const DEFAULT_SIZE: (f32, f32) = (800.0, 600.0);
@@ -59,6 +59,7 @@ pub struct App {
     root: Option<Root>,
     commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
+    virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
 }
 
 impl App {
@@ -73,6 +74,7 @@ impl App {
             root: None,
             commands: Vec::new(),
             scroll: None,
+            virtual_lists: Vec::new(),
         }
     }
 
@@ -123,6 +125,23 @@ impl App {
     /// [`screen`](Self::screen).
     pub fn view_with(mut self, builder: impl FnMut(&FrameInfo) -> View + 'static) -> Self {
         self.root = Some(Root::ViewWith(Box::new(builder)));
+        self
+    }
+
+    /// Registers the row builder a virtual list realizes through (spec §4.9).
+    ///
+    /// The view names this list with `ViewNode::virtual_list(id, count, row_extent)`
+    /// and states how many items exist; `build(index)` produces one row and is
+    /// called only for the indices the viewport can show. The runtime owns the
+    /// window, the scroll offset and the content extent — which is the half an app
+    /// cannot own for itself, because stating the full height would mean building
+    /// the full list.
+    pub fn virtual_list(
+        mut self,
+        id: InternedSymbol,
+        build: impl FnMut(usize) -> ViewNode + 'static,
+    ) -> Self {
+        self.virtual_lists.push((id, Box::new(build)));
         self
     }
 
@@ -184,6 +203,7 @@ impl App {
                     builder,
                     self.commands,
                     self.scroll,
+                    self.virtual_lists,
                 );
             }
             None => Box::new(View::default),
@@ -196,6 +216,7 @@ impl App {
             builder,
             self.commands,
             self.scroll,
+            self.virtual_lists,
         )
     }
 }

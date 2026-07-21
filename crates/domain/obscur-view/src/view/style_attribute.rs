@@ -13,6 +13,7 @@
 
 use obscur_identity::InternedSymbol;
 
+use super::virtual_collection::VIRTUAL_ROW_EXTENT;
 use super::{ViewProperty, ViewValue};
 
 /// Reserved symbol for the element's `class` attribute — a whitespace-separated
@@ -113,6 +114,17 @@ pub struct StyleAttributes {
     /// selector input — it is the field's model value the runtime reflects into the
     /// editing buffer. Absent for a bare editable (its text is its only value).
     control_value: Option<Box<str>>,
+    /// A realized virtual-list spacer's extent along the scroll axis, in logical
+    /// pixels — the space the rows outside the window would have taken.
+    ///
+    /// Not a CSS input: it changes with the scroll position and the model, so it
+    /// cannot be authored. The runtime reads it to size the spacer, which is what
+    /// keeps a virtualized container's content extent (and therefore its scrollbar)
+    /// true while only the window exists as nodes.
+    /// Stored as whole logical pixels: the value is a span of hundreds to hundreds
+    /// of thousands of them, so sub-pixel precision is meaningless, and the
+    /// attribute set derives `Eq`.
+    virtual_extent: Option<u32>,
     /// The text control's **placeholder** hint (the CSS `::placeholder` string),
     /// if the widget emits one. Derived from the [`PLACEHOLDER`] reserved symbol.
     /// Not a CSS selector input — the runtime reads it to paint the placeholder as
@@ -171,6 +183,15 @@ impl StyleAttributes {
                     continue;
                 }
                 _ => {}
+            }
+            // The spacer extent is numeric, so it is read before the string block.
+            if prop.name() == VIRTUAL_ROW_EXTENT {
+                attributes.virtual_extent = match prop.value() {
+                    ViewValue::Float(px) => (*px >= 0.0).then(|| px.round() as u32),
+                    ViewValue::Int(px) => u32::try_from(*px).ok(),
+                    _ => None,
+                };
+                continue;
             }
             // The remaining reserved attributes are string-valued selector inputs.
             let ViewValue::Text(text) = prop.value() else {
@@ -257,6 +278,12 @@ impl StyleAttributes {
         self.placeholder.as_deref()
     }
 
+    /// A realized virtual-list spacer's extent, if this node is one.
+    #[must_use]
+    pub fn virtual_extent(&self) -> Option<f32> {
+        self.virtual_extent.map(|px| px as f32)
+    }
+
     /// Whether no style attribute is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -269,6 +296,7 @@ impl StyleAttributes {
             && !self.readonly
             && self.control_value.is_none()
             && self.placeholder.is_none()
+            && self.virtual_extent.is_none()
     }
 }
 
