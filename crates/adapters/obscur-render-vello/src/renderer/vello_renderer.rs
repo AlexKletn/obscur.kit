@@ -52,6 +52,14 @@ pub struct VelloRenderer {
     /// its render pipeline, so we keep one alive across frames and only rebuild
     /// when absent or when the surface format changes.
     blitter: Option<(wgpu::TextureFormat, wgpu::util::TextureBlitter)>,
+    /// Cached offscreen render target, reused while the extent holds.
+    ///
+    /// Vello renders into an offscreen and the result is blitted to the surface
+    /// (the surface cannot carry the STORAGE_BINDING usage Vello needs). That
+    /// target used to be allocated **per frame** — a full-window RGBA texture
+    /// created and dropped 60-120 times a second, which dominated present. Vello
+    /// clears it to `base_color` on every render, so reuse shows nothing stale.
+    frame_cache: Option<VelloFrame>,
     /// Cached owned wgpu gaussian-blur pipeline set for `filter: blur()` (spec
     /// §5.2). Built lazily on the first blurred frame (it needs the device) and
     /// reused across frames; a scene with no blur layer never constructs it, so
@@ -91,6 +99,7 @@ impl VelloRenderer {
             scene_converter: SceneConverter::new(),
             frames_rendered: 0,
             blitter: None,
+            frame_cache: None,
             blur: None,
             color_matrix: None,
             diagnostics: Arc::new(NullDiagnosticSink),
@@ -229,6 +238,19 @@ impl VelloRenderer {
     /// [`RendererError::DeviceLost`] when no device is attached, or
     /// [`RendererError::Backend`] on a Vello rasterization failure.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    /// The offscreen target for `width` x `height`, allocated once and reused until
+    /// the extent changes (a resize).
+    fn cached_offscreen(&mut self, device: &wgpu::Device, width: u32, height: u32) -> VelloFrame {
+        if let Some(frame) = self.frame_cache.as_ref() {
+            if frame.width() == width && frame.height() == height {
+                return frame.clone();
+            }
+        }
+        let frame = VelloFrame::new_offscreen(device, width, height);
+        self.frame_cache = Some(frame.clone());
+        frame
+    }
+
     fn render_to_frame(
         &mut self,
         submission: &FrameSubmission,
@@ -268,13 +290,20 @@ impl VelloRenderer {
         // Convert first (device-free): the main scene plus any blur sub-scenes.
         let (main_scene, blurs) = self.scene_converter.convert_with_blurs(display_list);
 
+        let Some(device) = self.device.as_ref() else {
+            return Err(
+                VelloRenderError::DeviceCreation("no gpu device".into()).into_renderer_error()
+            );
+        };
+        // A cheap ref-counted clone, so the cache lookup below does not hold a
+        // borrow of `self.device` while it takes `&mut self`.
+        let cache_device = device.device().clone();
+        let frame = self.cached_offscreen(&cache_device, width, height);
         let Some(device) = self.device.as_mut() else {
             return Err(
                 VelloRenderError::DeviceCreation("no gpu device".into()).into_renderer_error()
             );
         };
-
-        let frame = VelloFrame::new_offscreen(device.device(), width, height);
         // `new_offscreen` clamps to >= 1 per axis; use the effective extent below.
         let (width, height) = frame.size();
         let params = vello::RenderParams {

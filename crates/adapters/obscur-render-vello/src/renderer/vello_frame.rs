@@ -10,6 +10,7 @@
 /// texture plus the matching [`wgpu::TextureView`] Vello binds. Additional
 /// usages — render-attachment, texture-binding, and copy-source — let a host
 /// blit the result to a surface or read it back for an offscreen/bitmap target.
+#[derive(Clone)]
 pub struct VelloFrame {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
