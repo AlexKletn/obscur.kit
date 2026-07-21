@@ -34,6 +34,7 @@ use crate::window_winit::conversion::{KeyboardConverter, PointerConverter};
 /// then opens the window and runs the event loop to completion.
 pub(super) fn run(
     title: String,
+    app_id: String,
     size: (f32, f32),
     stylesheets: Vec<String>,
     builder: Box<dyn FnMut() -> View + 'static>,
@@ -64,6 +65,7 @@ pub(super) fn run(
 
     let mut app = AppRunner {
         title,
+        app_id,
         size,
         runtime,
         _css: css,
@@ -131,6 +133,7 @@ fn install_text(_boot: &KitBootstrap, _runtime: &mut UiRuntime, _renderer: &mut 
 /// swapchain surface, and the embeddable runtime, all created lazily on `resumed`.
 struct AppRunner {
     title: String,
+    app_id: String,
     size: (f32, f32),
     runtime: UiRuntime,
     /// The CSS pipeline is kept alive for the app's lifetime (it owns the §4.12
@@ -227,12 +230,29 @@ impl ApplicationHandler for AppRunner {
             return;
         }
 
-        let attributes = WindowAttributes::default()
+        #[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(unused_mut))]
+        let mut attributes = WindowAttributes::default()
             .with_title(self.title.clone())
             .with_inner_size(LogicalSize::new(
                 f64::from(self.size.0),
                 f64::from(self.size.1),
             ));
+        // The Wayland `app_id` / X11 `WM_CLASS` — the stable identity a compositor
+        // matches window rules on (Hyprland's `class`, sway's `app_id`) and the one
+        // a taskbar keys off. winit exposes it only through the per-backend
+        // extension traits, and setting both is correct: they write different
+        // platform fields, so an X11 session and a Wayland one each get the id.
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            {
+                use winit::platform::wayland::WindowAttributesExtWayland as _;
+                attributes = attributes.with_name(self.app_id.clone(), String::new());
+            }
+            {
+                use winit::platform::x11::WindowAttributesExtX11 as _;
+                attributes = attributes.with_name(self.app_id.clone(), String::new());
+            }
+        }
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
             Err(error) => {

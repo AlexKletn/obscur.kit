@@ -12,6 +12,9 @@ use crate::view::view::View;
 /// The default logical window size, in CSS pixels.
 const DEFAULT_SIZE: (f32, f32) = (800.0, 600.0);
 
+/// The default Wayland `app_id` / X11 `WM_CLASS` when the app sets none.
+const DEFAULT_APP_ID: &str = "obscur-kit";
+
 /// The root the window renders: either a reactive Rust view builder or an `.okui`
 /// screen compiled to a static [`View`]. The last of [`App::view`] / [`App::screen`]
 /// to be called wins.
@@ -33,6 +36,7 @@ enum Root {
 #[must_use = "an `App` does nothing until `.run()` is called"]
 pub struct App {
     title: String,
+    app_id: String,
     size: (f32, f32),
     stylesheets: Vec<String>,
     root: Option<Root>,
@@ -45,11 +49,25 @@ impl App {
     pub fn new(title: impl Into<String>) -> Self {
         Self {
             title: title.into(),
+            app_id: DEFAULT_APP_ID.to_owned(),
             size: DEFAULT_SIZE,
             stylesheets: Vec::new(),
             root: None,
             commands: Vec::new(),
         }
+    }
+
+    /// Sets the Wayland `app_id` (and X11 `WM_CLASS`) the window reports, defaulting
+    /// to `"obscur-kit"`.
+    ///
+    /// This is the identity a desktop environment matches on — a compositor's rules
+    /// (Hyprland's `class`, sway's `app_id`), the taskbar, and `.desktop` file
+    /// association all key off it, **not** off the human-readable
+    /// [`title`](Self::new). Give each application a distinct one so a rule can
+    /// target it alone.
+    pub fn app_id(mut self, app_id: impl Into<String>) -> Self {
+        self.app_id = app_id.into();
+        self
     }
 
     /// Sets the initial window size in **logical** (CSS) pixels. The window stays
@@ -117,6 +135,7 @@ impl App {
         };
         runner::run(
             self.title,
+            self.app_id,
             self.size,
             self.stylesheets,
             builder,

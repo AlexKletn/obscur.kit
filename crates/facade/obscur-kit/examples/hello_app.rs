@@ -52,6 +52,10 @@ fn main() -> Result<(), obscur_kit::AppError> {
     let dec = count.clone();
 
     App::new("obscur-kit — hello_app (declarative counter)")
+        // A distinct Wayland `app_id` / X11 `WM_CLASS`, so a compositor rule can
+        // target this example alone (the title is human-readable and may change;
+        // the app_id is the stable identity rules match on).
+        .app_id("obscur-kit-hello-app")
         .with_size(480.0, 240.0)
         .stylesheet(COUNTER_CSS)
         .view(move || build_counter_view(view_count.get()))
