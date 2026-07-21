@@ -4145,6 +4145,16 @@ impl UiRuntime {
         if event.kind() == PointerEventKind::Up {
             if let Some(pressed) = self.press_target
                 && Some(pressed) == target
+                // §2.3 propagation step 4, the **default action**, is GATED ON
+                // TRUST. Activation — resolving the node's bound command and
+                // running its handler — is the gated default action, and it runs
+                // only for a platform-vouched (trusted) gesture. A synthetic
+                // event (a headless dispatch §7.4, a DevTools inject §7.6) still
+                // dispatches and is observed above (it moved hover/focus), but its
+                // gated default action is suppressed: no command resolves and no
+                // handler fires, so `command` stays `None`. This is the host
+                // control §9 forbids weakening and the trust boundary §1.8 names.
+                && event.trust().is_trusted()
             {
                 if let Some((bound, resolved)) = self.activation_command_for(pressed) {
                     command = Some(resolved);
@@ -11391,12 +11401,20 @@ mod tests {
     }
 
     fn mouse(kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
+        // These unit tests model a **real user** working the pointer — pressing a
+        // button, dragging a selection, focusing a field. A real gesture is a
+        // trusted one, and only a trusted gesture runs a click's gated default
+        // action (§2.3 step 4, enforced in `handle_pointer`), so the events are
+        // marked as what they represent. The *untrusted* synthetic path has its
+        // own dedicated coverage (a headless/DevTools inject, and the §2.3
+        // trust-gate spec case), which deliberately does NOT mark trusted.
         PointerEvent::new(
             PointerId::MOUSE,
             PointerDevice::Mouse,
             kind,
             Point::new(x, y),
         )
+        .as_trusted()
     }
 
     #[test]

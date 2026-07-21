@@ -1,14 +1,16 @@
 //! `ComponentRegistry`: the static-default store of component registrations
 //! (spec §2.14).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use obscur_capability::CapabilityId;
 use obscur_identity::ComponentId;
 
 use crate::component::{
     ComponentContract, ComponentInstance, ComponentRegistration, ErasedComponent, InstanceId,
     RegistryError,
 };
+use crate::contract::CapabilityRequirement;
 
 /// Maps each [`ComponentId`] to its [`ComponentRegistration`] (spec §2.14).
 ///
@@ -35,18 +37,60 @@ use crate::component::{
 /// [`register`]: ComponentRegistry::register
 /// [`new`]: ComponentRegistry::new
 /// [`create_instance`]: ComponentRegistry::create_instance
+///
+/// # Capability enforcement
+///
+/// The registry holds a set of **granted capabilities** (spec §1.8, §2.13,
+/// §2.14). It starts **empty** — a fresh registry grants nothing. A component
+/// whose contract declares a [`CapabilityRequirement::Required`] capability that
+/// is not in this set does not instantiate: [`create_instance`] returns `None`.
+/// This is the seam through which the host controls what untrusted components
+/// may do (§9 forbids weakening host control over plugin capabilities). Grant
+/// capabilities with [`grant`]; a component that requires none is unaffected and
+/// instantiates exactly as before.
+///
+/// [`grant`]: ComponentRegistry::grant
 #[derive(Debug, Default)]
 pub struct ComponentRegistry {
     entries: HashMap<ComponentId, ComponentRegistration>,
+    granted: HashSet<CapabilityId>,
 }
 
 impl ComponentRegistry {
-    /// Creates an empty registry.
+    /// Creates an empty registry with **no capabilities granted**.
     #[must_use]
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
+            granted: HashSet::new(),
         }
+    }
+
+    /// Grants `capability`, so a component that requires it may instantiate.
+    ///
+    /// The default grant set is empty; this is how a host authorizes a
+    /// capability boundary (spec §1.8). Granting an already-granted capability
+    /// is a no-op.
+    pub fn grant(&mut self, capability: CapabilityId) {
+        self.granted.insert(capability);
+    }
+
+    /// Returns whether `capability` has been granted on this registry.
+    #[must_use]
+    pub fn is_granted(&self, capability: &CapabilityId) -> bool {
+        self.granted.contains(capability)
+    }
+
+    /// Returns whether every [`CapabilityRequirement::Required`] capability in
+    /// `contract` has been granted — the gate [`create_instance`](Self::create_instance)
+    /// applies before minting an instance.
+    #[must_use]
+    fn required_capabilities_satisfied(&self, contract: &ComponentContract) -> bool {
+        contract
+            .capabilities
+            .iter()
+            .filter(|c| c.requirement == CapabilityRequirement::Required)
+            .all(|c| self.granted.contains(&c.capability))
     }
 
     /// Registers a component kind.
@@ -79,18 +123,23 @@ impl ComponentRegistry {
 
     /// Mints a fresh runtime instance of the component registered under `id`.
     ///
-    /// Returns `None` if `id` is not registered. The minted
-    /// [`ComponentInstance`] is in
-    /// [`LifecycleState::Created`](crate::lifecycle::LifecycleState::Created).
+    /// Returns `None` if `id` is not registered, **or** if the component's
+    /// contract declares a [`CapabilityRequirement::Required`] capability that
+    /// has not been [`grant`](Self::grant)ed on this registry (spec §2.13,
+    /// §2.14) — an ungranted required capability refuses instantiation, so no
+    /// factory runs and no record is minted. The minted [`ComponentInstance`] is
+    /// in [`LifecycleState::Created`](crate::lifecycle::LifecycleState::Created).
     #[must_use]
     pub fn create_instance(
         &self,
         id: ComponentId,
         instance: InstanceId,
     ) -> Option<ComponentInstance> {
-        self.entries
-            .get(&id)
-            .map(|registration| registration.create_instance(instance))
+        let registration = self.entries.get(&id)?;
+        if !self.required_capabilities_satisfied(registration.contract()) {
+            return None;
+        }
+        Some(registration.create_instance(instance))
     }
 
     /// Mints a fresh renderable component value for `id`, or [`None`] when no

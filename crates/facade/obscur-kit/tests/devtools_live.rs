@@ -195,8 +195,24 @@ fn external_client_inspects_the_live_tree_over_the_socket() {
     handle.join().expect("join");
 }
 
+/// §7.6 + §2.3 trust gate: an external client with an Inject token can push a
+/// click over the socket, and the host dispatches it — it hit-tests the button
+/// and moves interaction state — but because an injected event is UNTRUSTED, its
+/// **gated default action** (§2.3 step 4: activating the control and firing its
+/// bound command) does NOT run. An Inject-scoped agent drives *observation*, not
+/// consequential actions; only a platform-vouched (trusted) gesture does that.
+///
+/// REWRITTEN 2026-07-21 (owner-authorized, non-spec). The prior version asserted
+/// the injected click ran the button command (`clicked == true`). That encoded
+/// the pre-enforcement assumption that an external inject acts. Under the now-real
+/// trust gate — and consistent with this file's sibling
+/// `injected_pointer_is_not_trusted_but_a_platform_event_is`, which still passes —
+/// an untrusted inject is dispatched and observed but its default action is
+/// suppressed. The untrusted-flag, acknowledgement, queue-drain and hit-test
+/// assertions are unchanged; only the "command ran" expectation is inverted to
+/// the enforced truth.
 #[test]
-fn external_client_injects_a_click_that_drives_the_runtime() {
+fn external_client_inject_is_observed_but_its_gated_action_is_suppressed() {
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -285,17 +301,32 @@ fn external_client_injects_a_click_that_drives_the_runtime() {
         dispatches.push(apply_injected(&mut runtime, event).expect("a pointer inject dispatches"));
     }
 
-    assert!(
-        clicked.get(),
-        "the externally injected click dispatched the button command"
-    );
-
-    // §2.3: the click worked — and every event that drove it is marked as what it
-    // is. An agent holding an Inject token can drive this button, but it cannot
-    // make the runtime call the result a user gesture.
+    // Every event that drove the runtime is marked as what it is: an agent holding
+    // an Inject token cannot make the runtime call the result a user gesture.
     assert!(
         dispatches.iter().all(|d| !d.is_trusted()),
         "an event injected over the DevTools socket is NOT a user gesture"
+    );
+
+    // And under the trust gate that verdict has teeth. The injected click is still
+    // dispatched and OBSERVED — the release hit-tests the button node — but its
+    // GATED DEFAULT ACTION is suppressed for an untrusted event: the release
+    // resolves NO command and the bound handler never runs.
+    let release = dispatches.last().expect("the release dispatched");
+    assert!(
+        release.target().is_some(),
+        "the injected release still hit-tests a node — dispatch and observation happen"
+    );
+    assert_eq!(
+        release.command(),
+        None,
+        "the untrusted injected click resolves NO command — its gated default action \
+         is suppressed"
+    );
+    assert!(
+        !clicked.get(),
+        "the externally injected click did NOT run the button's gated command — an \
+         Inject-scoped agent drives observation, not consequential actions"
     );
 }
 

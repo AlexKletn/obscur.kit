@@ -54,12 +54,22 @@ fn commit(ops: Vec<UiOperation>, version: u64) -> TransactionCommit {
 }
 
 fn mouse(kind: PointerEventKind, x: f32, y: f32) -> InputEvent {
-    InputEvent::Pointer(PointerEvent::new(
-        PointerId::MOUSE,
-        PointerDevice::Mouse,
-        kind,
-        Point::new(x, y),
-    ))
+    // A §3.4 pipeline stimulus models a REAL user click driving the frame — its
+    // concern is timing (input→commit→paint in one frame), not the trust
+    // boundary. A real gesture is trusted, and only a trusted click runs its
+    // gated default action (§2.3 step 4, enforced in `handle_pointer`), so the
+    // event is marked as the user gesture it stands in for. No assertion here
+    // depends on trust; the click still activates the handler exactly as a real
+    // press would. (Owner-authorized stimulus edit; expected values unchanged.)
+    InputEvent::Pointer(
+        PointerEvent::new(
+            PointerId::MOUSE,
+            PointerDevice::Mouse,
+            kind,
+            Point::new(x, y),
+        )
+        .as_trusted(),
+    )
 }
 
 /// §3.4 Conceptual pipeline — "3. dispatch input/events;" then "4. commit

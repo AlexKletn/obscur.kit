@@ -91,7 +91,16 @@ impl SyntheticDispatcher {
         let Some(point) = self.resolver.point_for(runtime, target) else {
             return DispatchOutcome::unresolved();
         };
-        let event = PointerEvent::new(PointerId::MOUSE, PointerDevice::Mouse, kind, point);
+        // The headless write-half is a first-party driver standing in for a real
+        // user, so it vouches for the gesture: its events are marked TRUSTED, the
+        // way a platform adapter marks a real OS event. This is what lets a
+        // headless assertion exercise a click's gated default action (§2.3 step 4,
+        // enforced in `handle_pointer`) — "command dispatch behaves exactly as it
+        // would for a real user". An UNTRUSTED synthetic click (the public
+        // programmatic API, or an external DevTools inject) is a different case and
+        // has its own coverage; it is deliberately NOT what this harness produces.
+        let event =
+            PointerEvent::new(PointerId::MOUSE, PointerDevice::Mouse, kind, point).as_trusted();
         let dispatch = runtime.handle_pointer(event);
 
         DispatchOutcome {

@@ -53,12 +53,17 @@ fn button_sheet() -> Stylesheet {
 
 /// A left-button pointer event of `kind` at `(x, y)`.
 fn mouse(kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
+    // This test clicks a REAL button as a user would; a real gesture is trusted,
+    // and only a trusted click runs its gated default action (§2.3 step 4, now
+    // enforced by the runtime). Mark the event as the user gesture it stands in
+    // for — the untrusted synthetic path is covered separately.
     PointerEvent::new(
         PointerId::MOUSE,
         PointerDevice::Mouse,
         kind,
         Point::new(x, y),
     )
+    .as_trusted()
 }
 
 /// The content of the first text node in the retained tree — the button's label,
