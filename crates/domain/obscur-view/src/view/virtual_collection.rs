@@ -39,7 +39,7 @@
 //! case to every exhaustive match over the enum to describe a node no consumer
 //! of the retained tree can ever see.
 
-use obscur_identity::{ComponentId, InternedSymbol, StableKey};
+use obscur_identity::{ComponentId, InternedSymbol};
 
 use super::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
@@ -456,14 +456,7 @@ where
         }
         for index in first..last {
             if let Some(built) = row(id, index) {
-                // Key each row by its model index. The index IS the row's identity
-                // here, and the runtime knows it, so an app never has to say so.
-                // Without it the reconciler matches the window positionally, and a
-                // scroll of one row reads as "every row's content changed" — every
-                // row re-updates and its invalidation cascades to the siblings that
-                // follow it, which is most of the list, on every frame of a scroll.
-                // With it, a one-row scroll is one insert and one remove.
-                out.push(built.with_key(StableKey::from(index as u64)));
+                out.push(built);
             }
         }
         if last < count {
