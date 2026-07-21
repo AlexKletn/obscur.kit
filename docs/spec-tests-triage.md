@@ -4,9 +4,9 @@
 red is which**, because they are not the same thing and must not be acted on the same
 way.
 
-State: **5,614 passing, 7 failing** (was 111 red at derivation; 19 at the start of the
-2026-07-20/21 campaign; all 7 remaining are owner-deferred/held — see the red list at the
-end). 310 cases were derived across §1–§7 and §9; §8 was skipped (67 sections of
+State: **5,619 passing, 2 failing** (was 111 red at derivation; 19 at the start of the
+2026-07-20/21 campaign; the 2 remaining are the owner-deferred env safe-area tests — see
+the red list at the end). 310 cases were derived across §1–§7 and §9; §8 was skipped (67 sections of
 declared stubs, nothing to test). The current red list, with counting and baseline
 caveats, is at the end of this file.
 
@@ -50,14 +50,14 @@ and they are a consequence of the isolation, not a failure of it: the deriver ne
 the API, and the translator was forbidden from changing an expected value, so a wrong
 fixture got translated faithfully.
 
-## The red list (7)
+## The red list (2)
 
 **Anything red not on this list is a regression.** git-stash verified each batch.
 
-State: **5,614 passing, 7 failing** (2026-07-21). All 7 remaining are owner-deferred/held;
-every buildable red has been closed.
+State: **5,619 passing, 2 failing** (2026-07-21). Every buildable red has been closed; the
+2 remaining are the owner-deferred env safe-area tests.
 
-**Closed in the 19 → 7 campaign (2026-07-20/21), each by an implementation change with no
+**Closed in the 19 → 2 campaign (2026-07-20/21), each by an implementation change with no
 spec assertion weakened:**
 - `border_inline_start_width_maps_to_the_right_edge_in_rtl` — logical border-* physical mapping (017449a).
 - `a_newer_ir_version_is_refused_with_a_precise_diagnostic` — IR version range check (8387a55).
@@ -72,9 +72,12 @@ spec assertion weakened:**
 - `virtualfor_realizes_a_count_independent_of_the_item_count` — real VirtualLayout windowing, not a For in disguise (323edf1).
 - `ch4_4_d_visibility_and_intersection_observers_track_the_scroll_chain` — public layout geometry is scroll-chain-relative (90c5c68; offset-0 half was the earlier bdeefad intersection fix).
 
-**The 7 remaining — all owner-deferred/held:**
-- `arch_17_a_missing_resource_diagnostic_carries_all_five_required_fields` — stable-code cluster.
-- `arch_18_the_stable_code_survives_locale_and_call_site` — §1.6 wants a stable machine code, not a localized message.
-- `the_same_fault_carries_one_stable_code_across_two_contexts` — same cluster; a stable-code surface exists (`css_pipeline.rs` `code_for_parse_error`) but per-node style diagnostics with node context are not emitted on the render/style phase. FEATURE, buildable if the owner chooses.
+**Also closed after the first triage (owner chose to build the deferred clusters):**
+- `the_same_fault_carries_one_stable_code_across_two_contexts` — per-node style-value faults, one stable code, node context, property-independent message (289a5f2).
+- `arch_17_a_missing_resource_diagnostic_carries_all_five_required_fields` — the resource diagnostic carries node + window context, stable code, recovery; poll on the frame-purity model (105b9d1).
+- `arch_18_the_stable_code_survives_locale_and_call_site` — one stable code across locales/call sites + a scoped locale-keyed diagnostic message (en/ru/und), NOT the number/date i18n system (105b9d1).
+- `an_ungranted_required_capability_refuses_instantiation` — ComponentRegistry granted-set; create_instance refuses a Required-but-ungranted capability (a34ab2b).
+- `a_synthetic_event_is_untrusted_and_a_gated_default_action_does_not_run` — the click default action fires only for Trusted events; trust model = platform + first-party headless harness trusted, public programmatic API + external DevTools inject untrusted (a34ab2b).
+
+**The 2 remaining — owner-deferred:**
 - `env_safe_area_inset_top_resolves_to_the_host_inset`, `env_safe_area_inset_bottom_resolves_to_the_host_inset` — no host-inset supply API; env() correctly resolves to 0; §6.15 says 44/34 are the host's report. Owner ruled keep red, defer. Self-contradictory as written (needs a host→runtime typed-env injection API to close without editing the test).
-- `an_ungranted_required_capability_refuses_instantiation`, `a_synthetic_event_is_untrusted_and_a_gated_default_action_does_not_run` — the two security reds: kept red until access-control enforcement exists (weakening turned known gaps silently green). Buildable as an enforcement feature if the owner chooses.
