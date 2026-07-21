@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{ElementState, Ime, MouseButton, WindowEvent};
+use winit::event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::PhysicalKey as WinitPhysicalKey;
 use winit::window::{Window, WindowAttributes, WindowId};
@@ -29,6 +29,10 @@ use crate::runtime::frame::FrameReason;
 use crate::text::ime::{CompositionEvent, Preedit};
 use crate::view::view::View;
 use crate::window_winit::conversion::{KeyboardConverter, PointerConverter};
+
+/// Pixels scrolled per wheel line, when the platform reports whole lines rather
+/// than raw pixels.
+const WHEEL_LINE_STEP: f32 = 48.0;
 
 /// Builds the runtime, forwards the app's root builder + command handlers + CSS,
 /// then opens the window and runs the event loop to completion.
@@ -328,6 +332,26 @@ impl ApplicationHandler for AppRunner {
                 let event = self.pointer_button_event(state);
                 self.runtime.handle_pointer(event);
                 self.request_redraw();
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                // A wheel notch scrolls the `overflow: scroll` container under the
+                // cursor. winit reports whole lines or raw pixels; normalize both to
+                // a pixel step, and invert so that wheel-down (negative lines)
+                // increases scroll_top — i.e. reveals content further down. The
+                // cursor is passed in the same (physical) space the pointer
+                // converter uses, so the hit that finds the container matches the
+                // one a click would make.
+                let step = match delta {
+                    MouseScrollDelta::LineDelta(_, lines) => -lines * WHEEL_LINE_STEP,
+                    #[allow(clippy::cast_possible_truncation)]
+                    MouseScrollDelta::PixelDelta(position) => -(position.y as f32),
+                };
+                #[allow(clippy::cast_possible_truncation)]
+                let at = Point::new(self.cursor.0 as f32, self.cursor.1 as f32);
+                if self.runtime.handle_scroll(step, at).is_some() {
+                    self.runtime.request_frame(FrameReason::WindowChange);
+                    self.request_redraw();
+                }
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if let WinitPhysicalKey::Code(code) = event.physical_key {

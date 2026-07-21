@@ -35,10 +35,6 @@ use obscur_kit::ui_ir::name_binding::fallback_symbol;
 use obscur_kit::ui_macros::okui;
 use obscur_kit::view::view::View;
 
-/// How many entries the list shows at once (the viewport holds ~18 rows; the rest
-/// are reachable by moving the cursor, which scrolls the window).
-const WINDOW: usize = 18;
-
 /// The styling. Authored CSS, installed through the motion-aware pipeline by
 /// [`App::stylesheet`].
 const CSS: &str = "\
@@ -46,10 +42,12 @@ const CSS: &str = "\
             display: flex; flex-direction: column; }\n\
 .toolbar  { background-color: #1b2130; width: 100%; height: 46px; \
             display: flex; flex-direction: row; gap: 8px; }\n\
-.btn      { background-color: #2b3348; width: 92px; height: 30px; }\n\
+.btn      { background-color: #2b3348; width: 96px; height: 30px; }\n\
 .btn:hover{ background-color: #3d4a6b; }\n\
+.btn-label{ color: #e6e9f0; width: 100%; height: 20px; }\n\
 .path     { color: #9fb0d0; width: 100%; height: 30px; }\n\
-.list     { width: 100%; height: 100%; display: flex; flex-direction: column; }\n\
+.list     { width: 100%; height: 100%; display: flex; flex-direction: column; \
+            overflow: scroll; }\n\
 .row      { width: 100%; height: 24px; display: flex; flex-direction: row; gap: 10px; }\n\
 .row:hover{ background-color: #1b2130; }\n\
 .sel      { background-color: #2b3f66; }\n\
@@ -101,14 +99,13 @@ impl State {
         }
     }
 
-    /// The visible window of rows, each already shaped for the markup.
+    /// Every entry, shaped for the markup. The whole listing is emitted and the
+    /// list box scrolls (`overflow: scroll`) — the wheel reaches it through the
+    /// runtime's scroll chain.
     fn rows(&self) -> Vec<Row> {
-        let first = self.selected.saturating_sub(WINDOW - 1);
         self.entries
             .iter()
             .enumerate()
-            .skip(first)
-            .take(WINDOW)
             .map(|(index, entry)| Row {
                 name: entry.name.clone(),
                 kind: if entry.is_dir { "DIR" } else { "file" }.to_owned(),
@@ -202,10 +199,10 @@ fn build_view(state: &State) -> View {
     okui! {
         <div class="app">
             <div class="toolbar">
-                <Button class="btn" label="Назад" on:click={goParent}/>
-                <Button class="btn" label="Открыть" on:click={openEntry}/>
-                <Button class="btn" label="Выше" on:click={selectUp}/>
-                <Button class="btn" label="Ниже" on:click={selectDown}/>
+                <div class="btn" on:click={goParent}><span class="btn-label">"Назад"</span></div>
+                <div class="btn" on:click={openEntry}><span class="btn-label">"Открыть"</span></div>
+                <div class="btn" on:click={selectUp}><span class="btn-label">"Выше"</span></div>
+                <div class="btn" on:click={selectDown}><span class="btn-label">"Ниже"</span></div>
                 <span class="path">{path}</span>
             </div>
             <div class="list">
