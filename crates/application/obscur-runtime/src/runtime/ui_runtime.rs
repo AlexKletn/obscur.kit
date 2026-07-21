@@ -547,8 +547,13 @@ pub struct UiRuntime {
     /// Row builders for registered virtual lists, keyed by the name a marker names.
     /// They live here rather than in the `View` because a `View` is plain data.
     virtual_lists: HashMap<InternedSymbol, Box<dyn FnMut(usize) -> ViewNode>>,
-    /// Each virtual list's own scroll offset, in logical pixels.
-    virtual_scroll: HashMap<InternedSymbol, f32>,
+    /// The container each virtual list realized into, discovered from its spacers.
+    ///
+    /// The window must be computed against the SAME offset the wheel, the scrollbar
+    /// and `scroll_by` move — the container's own `scroll_top`. Keeping a separate
+    /// offset let the two drift: the container scrolled while the window stayed put,
+    /// so the built rows slid out of view and left the viewport empty.
+    virtual_container: HashMap<InternedSymbol, NodeId>,
     /// The window each virtual list realized last frame, so a host can ask what is
     /// actually built.
     virtual_windows: HashMap<InternedSymbol, core::ops::Range<usize>>,
@@ -869,7 +874,7 @@ impl UiRuntime {
             content_offset: (0.0, 0.0),
             scroll_top: HashMap::new(),
             virtual_lists: HashMap::new(),
-            virtual_scroll: HashMap::new(),
+            virtual_container: HashMap::new(),
             virtual_windows: HashMap::new(),
             motion: MotionScheduler::new(),
             animations: Vec::new(),
@@ -2842,7 +2847,11 @@ impl UiRuntime {
                 // That is the half an app cannot state for itself.
                 let windows = std::mem::take(&mut self.virtual_windows);
                 let mut builders = std::mem::take(&mut self.virtual_lists);
-                let scrolls = self.virtual_scroll.clone();
+                let scrolls: HashMap<InternedSymbol, f32> = self
+                    .virtual_container
+                    .iter()
+                    .map(|(&id, &node)| (id, self.clamped_scroll_top_of(node)))
+                    .collect();
                 let mut chosen: HashMap<InternedSymbol, core::ops::Range<usize>> = HashMap::new();
                 let with_lists = if builders.is_empty() {
                     resolved.clone()
@@ -2895,6 +2904,7 @@ impl UiRuntime {
             // means the edit could not be bounded and the full pass is the only
             // correct answer.
             self.emit_duplicate_key_faults(&reconcile_plan);
+            self.track_virtual_containers();
             let mut roots = restyle_roots_of(&self.tree, &reconcile_plan);
             // 1b. Mount an instance for every inserted component-backed node and
             //     unmount every removed one, from the plan's structural deltas.
@@ -7393,6 +7403,34 @@ impl UiRuntime {
     /// for a node that is not a scroll container, does not overflow, or has never
     /// been scrolled (CSS Overflow 3 §scroll-container).
     #[must_use]
+    /// Records which container each virtual list realized into, by looking at where
+    /// its spacers landed (spec §4.9).
+    ///
+    /// A spacer names its list, and its parent is the box the window lives in — which
+    /// is the box the user actually scrolls. Reading the offset from there is what
+    /// keeps the realized window and the visible scroll position the same thing.
+    fn track_virtual_containers(&mut self) {
+        for (id, node) in self.tree.iter() {
+            if node.kind().component_id() != Some(VIRTUAL_SPACER) {
+                continue;
+            }
+            let Some(list) = node.attributes().virtual_list() else {
+                continue;
+            };
+            let Some(parent) = node.logical_parent().parent() else {
+                continue;
+            };
+            let _ = id;
+            self.virtual_container
+                .insert(InternedSymbol::from_raw(list), parent);
+        }
+    }
+
+    /// A container's scroll offset, clamped to what it can actually scroll.
+    fn clamped_scroll_top_of(&self, node: NodeId) -> f32 {
+        self.scroll_top.get(&node).copied().unwrap_or(0.0).max(0.0)
+    }
+
     /// Registers the row builder a virtual list realizes through (spec §4.9).
     ///
     /// `build(index)` produces one item's node and is called only for the indices
@@ -7411,11 +7449,13 @@ impl UiRuntime {
 
     /// Scrolls a registered virtual list by `dy` logical pixels, clamped to its
     /// content extent, returning the new offset (spec §4.9).
-    pub fn scroll_virtual_list(&mut self, id: InternedSymbol, dy: f32, content: f32) -> f32 {
-        let max = (content - self.viewport.height).max(0.0);
-        let offset = self.virtual_scroll.entry(id).or_insert(0.0);
-        *offset = (*offset + dy).clamp(0.0, max);
-        let next = *offset;
+    pub fn scroll_virtual_list(&mut self, id: InternedSymbol, dy: f32, _content: f32) -> f32 {
+        // Delegates to the container's own scroll, so a programmatic scroll and a
+        // wheel scroll move the same thing.
+        let Some(&node) = self.virtual_container.get(&id) else {
+            return 0.0;
+        };
+        let next = self.scroll_by(node, dy);
         self.request_frame(FrameReason::UiCommit);
         next
     }

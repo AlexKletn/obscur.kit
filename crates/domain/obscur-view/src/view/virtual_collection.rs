@@ -392,11 +392,21 @@ where
 }
 
 /// A spacer standing in for `items` unbuilt rows of `extent` each.
-fn spacer(items: usize, extent: f32) -> ViewNode {
-    ViewNode::element(VIRTUAL_SPACER).with_prop(ViewProperty::new(
-        VIRTUAL_ROW_EXTENT,
-        ViewValue::Float(f64::from(items as f32 * extent)),
-    ))
+fn spacer(list: InternedSymbol, items: usize, extent: f32) -> ViewNode {
+    ViewNode::element(VIRTUAL_SPACER)
+        .with_prop(ViewProperty::new(
+            VIRTUAL_ROW_EXTENT,
+            ViewValue::Float(f64::from(items as f32 * extent)),
+        ))
+        // Names the list this spacer belongs to, so the runtime can find the
+        // container it was realized into and read that container's scroll offset.
+        // The offset has to be the container's own — it is what the wheel, the
+        // scrollbar and `scroll_by` all move — or the window and the scroll drift
+        // apart and the rows slide out of view.
+        .with_prop(ViewProperty::new(
+            VIRTUAL_LIST_ID,
+            ViewValue::Int(i64::from(list.raw())),
+        ))
 }
 
 fn realize_list_fragment<W, R>(fragment: ViewFragment, window: &W, row: &mut R) -> ViewFragment
@@ -442,7 +452,7 @@ where
         let first = range.start.min(count);
         let last = range.end.min(count);
         if first > 0 {
-            out.push(spacer(first, extent));
+            out.push(spacer(id, first, extent));
         }
         for index in first..last {
             if let Some(built) = row(id, index) {
@@ -450,7 +460,7 @@ where
             }
         }
         if last < count {
-            out.push(spacer(count - last, extent));
+            out.push(spacer(id, count - last, extent));
         }
     }
     ViewFragment::from_nodes(out)

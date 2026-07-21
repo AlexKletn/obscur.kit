@@ -157,3 +157,44 @@ fn the_content_keeps_its_full_extent() {
          the window: got {content}px"
     );
 }
+
+#[test]
+fn scrolling_the_container_moves_the_window() {
+    // The regression this exists for: the window was computed against a private
+    // offset while the wheel moved the CONTAINER's own `scroll_top`. The two drifted,
+    // so the container scrolled, the realized rows slid out of view, and the viewport
+    // went blank below one clipped row. The offset must be the container's.
+    let sheet = compile(
+        ".scroller { width: 300px; height: 200px; overflow: scroll }\
+         .row { width: 300px; height: 20px }",
+    );
+    let built = Rc::new(RefCell::new(Vec::new()));
+    let mut rt = runtime(&built);
+    let _ = rt.render_now(&view(), std::slice::from_ref(&sheet));
+
+    let root = rt.tree().root().expect("a root");
+    let scroller = rt.tree().get(root).expect("live").children()[0];
+
+    // Scroll the container the way the wheel does.
+    rt.scroll_by(scroller, 2_000.0);
+    let _ = rt.render_now(&view(), std::slice::from_ref(&sheet));
+
+    let window = rt.virtual_window(LIST).expect("a window was realized");
+    assert!(
+        window.start >= 90,
+        "2000px over 20px rows is item ~100; the window must follow the container's \
+         scroll, got {window:?}"
+    );
+
+    // And the rows that exist must be the ones the scroll landed on.
+    let rows_at: Vec<usize> = built
+        .borrow()
+        .iter()
+        .copied()
+        .filter(|&i| i >= 90)
+        .collect();
+    assert!(
+        !rows_at.is_empty(),
+        "the builder must have been asked for the scrolled-to indices"
+    );
+}

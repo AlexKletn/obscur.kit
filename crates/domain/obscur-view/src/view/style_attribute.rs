@@ -13,7 +13,7 @@
 
 use obscur_identity::InternedSymbol;
 
-use super::virtual_collection::VIRTUAL_ROW_EXTENT;
+use super::virtual_collection::{VIRTUAL_LIST_ID, VIRTUAL_ROW_EXTENT};
 use super::{ViewProperty, ViewValue};
 
 /// Reserved symbol for the element's `class` attribute — a whitespace-separated
@@ -125,6 +125,9 @@ pub struct StyleAttributes {
     /// of thousands of them, so sub-pixel precision is meaningless, and the
     /// attribute set derives `Eq`.
     virtual_extent: Option<u32>,
+    /// The virtual list a realized spacer belongs to, so the runtime can find the
+    /// container it sits in and use that container's scroll offset as the window's.
+    virtual_list: Option<u32>,
     /// The text control's **placeholder** hint (the CSS `::placeholder` string),
     /// if the widget emits one. Derived from the [`PLACEHOLDER`] reserved symbol.
     /// Not a CSS selector input — the runtime reads it to paint the placeholder as
@@ -189,6 +192,13 @@ impl StyleAttributes {
                 attributes.virtual_extent = match prop.value() {
                     ViewValue::Float(px) => (*px >= 0.0).then(|| px.round() as u32),
                     ViewValue::Int(px) => u32::try_from(*px).ok(),
+                    _ => None,
+                };
+                continue;
+            }
+            if prop.name() == VIRTUAL_LIST_ID {
+                attributes.virtual_list = match prop.value() {
+                    ViewValue::Int(raw) => u32::try_from(*raw).ok(),
                     _ => None,
                 };
                 continue;
@@ -284,6 +294,12 @@ impl StyleAttributes {
         self.virtual_extent.map(|px| px as f32)
     }
 
+    /// The virtual list a spacer belongs to, if this node is one.
+    #[must_use]
+    pub const fn virtual_list(&self) -> Option<u32> {
+        self.virtual_list
+    }
+
     /// Whether no style attribute is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -297,6 +313,7 @@ impl StyleAttributes {
             && self.control_value.is_none()
             && self.placeholder.is_none()
             && self.virtual_extent.is_none()
+            && self.virtual_list.is_none()
     }
 }
 
