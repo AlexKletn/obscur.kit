@@ -14,11 +14,14 @@
 //! * The kit performs no I/O of its own (§5.15): `std::fs` reads the directory,
 //!   the kit only renders. No network, no new dependency.
 //!
-//! Navigation is **selection-based** — the toolbar moves a cursor and opens the
-//! selected entry — because an `on:click=name` handler compiles to one symbol per
-//! markup site, so every row rendered from the same `<For>` body would share it.
-//! Per-row click targets need either a payload on the command or a distinct symbol
-//! per row; neither exists yet.
+//! Rows are **clickable**: a click selects an entry and a double click opens it (a
+//! directory is entered, a file reported in the status line), with the toolbar as a
+//! keyboard-free alternative. A per-row `on:click` cannot carry this — every row the
+//! builder emits lowers to the *same* command symbol, so the symbol alone can never
+//! say which row was hit. The runtime resolves the click to the entry's model index
+//! from its own geometry (the container box, its scroll offset, the row extent) and
+//! calls [`App::on_row_click`]; that is the same "only the runtime holds both halves"
+//! argument as the virtual list itself.
 //!
 //! Run it (a display and a GPU adapter are required):
 //! `cargo run -p obscur-kit --example file_manager --features full`
@@ -147,6 +150,12 @@ impl State {
             }
             Err(error) => self.message = format!("cannot open: {error}"),
         }
+    }
+
+    /// Moves the cursor to `index`, clamped to the listing. What a row click sets.
+    fn select(&mut self, index: usize) {
+        let last = self.entries.len().saturating_sub(1);
+        self.selected = index.min(last);
     }
 
     fn select_up(&mut self) {
@@ -338,6 +347,7 @@ fn main() -> Result<(), obscur_kit::AppError> {
     let down = state.clone();
     let open = state.clone();
     let parent = state.clone();
+    let click = state.clone();
 
     App::new("obscur-kit — file manager (.okui)")
         .app_id("obscur-kit-file-manager")
@@ -357,5 +367,16 @@ fn main() -> Result<(), obscur_kit::AppError> {
         })
         .on_command(command("openEntry"), move || open.borrow_mut().open())
         .on_command(command("goParent"), move || parent.borrow_mut().parent())
+        // A row click selects it; a double click opens it (a directory is entered, a
+        // file reported). The index is the entry's place in the whole listing — the
+        // runtime resolves it from the click's geometry, which is the only thing that
+        // can, since every row the builder emits shares one command symbol.
+        .on_row_click(FILES, move |index, clicks| {
+            let mut state = click.borrow_mut();
+            state.select(index);
+            if clicks >= 2 {
+                state.open();
+            }
+        })
         .run()
 }

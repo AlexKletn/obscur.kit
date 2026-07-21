@@ -92,6 +92,7 @@ impl FrameStats {
 
 /// Builds the runtime, forwards the app's root builder + command handlers + CSS,
 /// then opens the window and runs the event loop to completion.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn run(
     title: String,
     app_id: String,
@@ -101,6 +102,7 @@ pub(super) fn run(
     commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
     virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
+    virtual_clicks: Vec<(InternedSymbol, Box<dyn FnMut(usize, u32) + 'static>)>,
 ) -> Result<(), AppError> {
     run_inner(
         title,
@@ -112,6 +114,7 @@ pub(super) fn run(
         scroll,
         None,
         virtual_lists,
+        virtual_clicks,
     )
 }
 
@@ -121,6 +124,7 @@ pub(super) fn run(
 /// the current one in a cell, refreshes it whenever the surface changes, and hands
 /// the builder a snapshot each frame. That is what lets an app window its own list
 /// to what is visible instead of building a node per item.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn run_with_frame(
     title: String,
     app_id: String,
@@ -130,6 +134,7 @@ pub(super) fn run_with_frame(
     commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
     virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
+    virtual_clicks: Vec<(InternedSymbol, Box<dyn FnMut(usize, u32) + 'static>)>,
 ) -> Result<(), AppError> {
     let info = Rc::new(Cell::new(FrameInfo {
         viewport: Size::new(size.0, size.1),
@@ -147,6 +152,7 @@ pub(super) fn run_with_frame(
         scroll,
         Some(info),
         virtual_lists,
+        virtual_clicks,
     )
 }
 
@@ -161,6 +167,7 @@ fn run_inner(
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
     frame_info: Option<Rc<Cell<FrameInfo>>>,
     virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
+    virtual_clicks: Vec<(InternedSymbol, Box<dyn FnMut(usize, u32) + 'static>)>,
 ) -> Result<(), AppError> {
     let (width, height) = size;
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(width, height));
@@ -174,6 +181,9 @@ fn run_inner(
     }
     for (id, build) in virtual_lists {
         runtime.register_virtual_list(id, build);
+    }
+    for (id, handler) in virtual_clicks {
+        runtime.on_virtual_row_click(id, handler);
     }
 
     let boot = KitBootstrap::new();

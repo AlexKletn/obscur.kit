@@ -557,6 +557,20 @@ pub struct UiRuntime {
     /// The window each virtual list realized last frame, so a host can ask what is
     /// actually built.
     virtual_windows: HashMap<InternedSymbol, core::ops::Range<usize>>,
+    /// Each virtual list's estimated row extent, captured when its window is realized.
+    /// This is what makes a click on a row resolvable to a model index: the extent
+    /// maps a y-offset within the container to a row. Only the runtime holds it — the
+    /// same reason it, not the app, owns the window and the scrollbar's extent. A
+    /// bound against the item count is deliberately not kept: a tracked container has
+    /// spacers, so its content is at least a viewport tall, so every point inside its
+    /// (clamped) scrollport already lands on a real row.
+    virtual_row_extent: HashMap<InternedSymbol, f32>,
+    /// A click handler per virtual list, run when a trusted click lands on one of its
+    /// rows with the resolved model index and the click count (1 single, 2 double).
+    /// This is how a virtualized row becomes clickable at all: every row realized from
+    /// one builder shares a single command symbol, so a symbol cannot say *which* row
+    /// was hit — only the geometry can, and only the runtime has it.
+    virtual_row_click_handlers: HashMap<InternedSymbol, Box<dyn FnMut(usize, u32)>>,
     /// The domain motion scheduler owning every active timeline (spec §4.17).
     ///
     /// The runtime *owns* the scheduler and its timelines; each frame it samples
@@ -876,6 +890,8 @@ impl UiRuntime {
             virtual_lists: HashMap::new(),
             virtual_container: HashMap::new(),
             virtual_windows: HashMap::new(),
+            virtual_row_extent: HashMap::new(),
+            virtual_row_click_handlers: HashMap::new(),
             motion: MotionScheduler::new(),
             animations: Vec::new(),
             presentation_overlays: Vec::new(),
@@ -2853,10 +2869,14 @@ impl UiRuntime {
                     .map(|(&id, &node)| (id, self.clamped_scroll_top_of(node)))
                     .collect();
                 let mut chosen: HashMap<InternedSymbol, core::ops::Range<usize>> = HashMap::new();
+                // The row extent each list realizes against, captured here so a later
+                // click on a row can be resolved to a model index.
+                let mut extents: HashMap<InternedSymbol, f32> = HashMap::new();
                 let with_lists = if builders.is_empty() {
                     resolved.clone()
                 } else {
                     let picked = std::cell::RefCell::new(&mut chosen);
+                    let sized = std::cell::RefCell::new(&mut extents);
                     let view = realize_virtual_lists(
                         resolved.clone(),
                         &|id, count, extent| {
@@ -2868,6 +2888,7 @@ impl UiRuntime {
                             let range = layout.visible_range(offset, viewport_height, count);
                             let range = range.start()..range.end();
                             picked.borrow_mut().insert(id, range.clone());
+                            sized.borrow_mut().insert(id, extent);
                             range
                         },
                         &mut |id, index| builders.get_mut(&id).map(|build| build(index)),
@@ -2877,6 +2898,7 @@ impl UiRuntime {
                 self.virtual_lists = builders;
                 self.virtual_windows = windows;
                 self.virtual_windows.extend(chosen);
+                self.virtual_row_extent.extend(extents);
                 // The older template marker (`<VirtualFor>` with no builder) still
                 // clones its template across the window.
                 let scroll_y = self.viewport_scroll.1;
@@ -4268,6 +4290,24 @@ impl UiRuntime {
                     current_target = Some(bound);
                 }
                 self.activate(pressed);
+                // A click on a virtualized row: resolve it to the model index and run
+                // the list's row-click handler. This is independent of command
+                // activation — the row carries no per-row binding, since one symbol
+                // could not distinguish the rows — so the geometry is the only thing
+                // that says which row was hit.
+                if let Some((list, index)) = self.virtual_index_at(screen_point) {
+                    let clicks = self.click_count;
+                    let fired =
+                        if let Some(handler) = self.virtual_row_click_handlers.get_mut(&list) {
+                            handler(index, clicks);
+                            true
+                        } else {
+                            false
+                        };
+                    if fired {
+                        self.request_frame(FrameReason::Input);
+                    }
+                }
             }
             if self.press_target.is_some() {
                 press_changed = true;
@@ -7499,6 +7539,74 @@ impl UiRuntime {
         build: Box<dyn FnMut(usize) -> ViewNode>,
     ) {
         self.virtual_lists.insert(id, build);
+    }
+
+    /// Registers a click handler for the rows of virtual list `id` (spec §4.9).
+    ///
+    /// When a trusted pointer click lands inside that list's realized container, the
+    /// runtime resolves the click to the row's **model index** — not the index of a
+    /// built node, but the item's place in the full collection — and calls
+    /// `handler(index, clicks)`, where `clicks` is `1` for a single click and `2` for
+    /// a double.
+    ///
+    /// This exists because a virtual row cannot carry a per-row `on-click`: every row
+    /// realized from one builder lowers to the *same* command symbol, so the symbol
+    /// alone can never say which row was hit. The index can only be recovered from the
+    /// container's box, its scroll offset and the row extent — which the runtime owns
+    /// and the app, having deliberately not built the rows, does not.
+    pub fn on_virtual_row_click(
+        &mut self,
+        id: InternedSymbol,
+        handler: Box<dyn FnMut(usize, u32)>,
+    ) {
+        self.virtual_row_click_handlers.insert(id, handler);
+    }
+
+    /// Resolves an on-screen point to the virtual list and model index under it, if
+    /// any (spec §4.9).
+    ///
+    /// `screen` is the point in the **unscrolled** layout-box space — the space the
+    /// spatial index and every [`LayoutBox`] live in, i.e. the pointer after device
+    /// scale and content offset but *before* per-element scroll is added back. The
+    /// point must fall within a tracked container's visible box; the container's own
+    /// `scroll_top` is then added to turn it into a content-space offset, and the row
+    /// extent maps that to an index. A tracked container always has spacers, so its
+    /// content is at least a viewport tall and every point in its clamped scrollport
+    /// lands on a real row — no separate item-count bound is needed.
+    #[must_use]
+    pub fn virtual_index_at(&self, screen: Point) -> Option<(InternedSymbol, usize)> {
+        for (&id, &container) in &self.virtual_container {
+            let Some(layout_box) = self.boxes.get(&container) else {
+                continue;
+            };
+            // The click must be within the visible scrollport, tested on screen — a
+            // scrolled container clips its content on screen, so a point below the box
+            // is not a row of this list even though its content extends further.
+            if !layout_box.bounds.contains(screen) {
+                continue;
+            }
+            let Some(&extent) = self.virtual_row_extent.get(&id) else {
+                continue;
+            };
+            if extent <= 0.0 {
+                continue;
+            }
+            // Screen y relative to the container top, plus the scroll the content is
+            // shifted by, is the offset into the full list; divide by the row extent.
+            let offset =
+                (screen.y - layout_box.bounds.origin.y) + self.clamped_scroll_top_of(container);
+            if offset < 0.0 {
+                continue;
+            }
+            #[expect(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "offset is non-negative and bounded by the container's clamped scrollport"
+            )]
+            let index = (offset / extent) as usize;
+            return Some((id, index));
+        }
+        None
     }
 
     /// Scrolls a registered virtual list by `dy` logical pixels, clamped to its

@@ -60,6 +60,7 @@ pub struct App {
     commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
     virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
+    virtual_clicks: Vec<(InternedSymbol, Box<dyn FnMut(usize, u32) + 'static>)>,
 }
 
 impl App {
@@ -75,6 +76,7 @@ impl App {
             commands: Vec::new(),
             scroll: None,
             virtual_lists: Vec::new(),
+            virtual_clicks: Vec::new(),
         }
     }
 
@@ -145,6 +147,24 @@ impl App {
         self
     }
 
+    /// Registers a click handler for the rows of virtual list `id` (spec §4.9).
+    ///
+    /// When a row is clicked, `handler(index, clicks)` runs with the entry's **model
+    /// index** — its place in the full collection, not among the built nodes — and the
+    /// click count (`1` single, `2` double), so an app can select on a single click
+    /// and open on a double. This is the piece that makes a virtualized list an
+    /// *interactive* list: a per-row `on:click` cannot, because every row a builder
+    /// emits shares one command symbol, so only the runtime's geometry can say which
+    /// row was hit.
+    pub fn on_row_click(
+        mut self,
+        id: InternedSymbol,
+        handler: impl FnMut(usize, u32) + 'static,
+    ) -> Self {
+        self.virtual_clicks.push((id, Box::new(handler)));
+        self
+    }
+
     /// Registers a handler for wheel scrolling the kit did not consume.
     ///
     /// A `overflow: scroll` container inside the kit takes the wheel first; this is
@@ -204,6 +224,7 @@ impl App {
                     self.commands,
                     self.scroll,
                     self.virtual_lists,
+                    self.virtual_clicks,
                 );
             }
             None => Box::new(View::default),
@@ -217,6 +238,7 @@ impl App {
             self.commands,
             self.scroll,
             self.virtual_lists,
+            self.virtual_clicks,
         )
     }
 }
