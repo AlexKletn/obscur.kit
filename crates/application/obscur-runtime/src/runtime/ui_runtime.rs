@@ -2773,6 +2773,7 @@ impl UiRuntime {
         //    version when the tree actually changed. `reconciled` is derived from
         //    whether the commit carried any operation — identical to the previous
         //    `!plan.is_empty()`.
+        let phase_clock = FramePhaseClock::start();
         let (reconciled, reconcile_roots) = if plan.reconcile() {
             // Materialize the desired tree HERE — after phase 3's input dispatch,
             // not before it. A reactive frame's builder reads current state, and a
@@ -2889,6 +2890,7 @@ impl UiRuntime {
             // Phase 5 (§3.4), per node: does this frame have to restyle everything,
             // or does it know exactly which nodes can differ? `None` means it does
             // not know and must run the whole pass.
+            phase_clock.mark_reconcile();
             let scope = match reconcile_roots.as_deref() {
                 Some(roots) => self.restyle_scope(&sheets, ctx.viewport(), roots),
                 // The reconcile could not be bounded (a removal, or a component
@@ -2978,6 +2980,7 @@ impl UiRuntime {
         //    even on the reactive path where every frame is classified structural,
         //    and a hover that DOES move one box re-measures that box's contexts
         //    rather than the tree.
+        phase_clock.mark_style();
         let layout_phase =
             self.layout_phase(plan, &ctx, first_frame, reconciled, &computed, &delta);
         let relaid_out = if matches!(layout_phase, LayoutPhase::Skip) {
@@ -3098,6 +3101,7 @@ impl UiRuntime {
             );
             relaid_out
         };
+        phase_clock.mark_layout();
 
         // 5. Compose: build the display list, install it, publish a snapshot.
         //    When skipped, the retained scene's current snapshot is republished.
@@ -3146,6 +3150,7 @@ impl UiRuntime {
             // hovered. Appended before the device-scale root so the highlight is
             // in the same logical space as the layout boxes it traces.
             let display_list = self.apply_inspect_overlay(display_list);
+            phase_clock.finish();
             // Telemetry: mark the compose phase and count paint commands (§7.9).
             let count = display_list.len() as u64;
             record_phase(
@@ -16454,6 +16459,98 @@ mod tests {
                 recorded.borrow()
             );
         }
+    }
+}
+
+/// Per-phase frame timing for profiling, active only when `OBSCUR_FRAME_STATS=1`.
+///
+/// The kit measures nothing itself — §7.9's `PerformanceSpan` names a phase but
+/// carries no duration — so this is what answers "which phase is the frame's cost".
+/// It aggregates over [`PHASE_REPORT_EVERY`] frames and prints one line, mirroring
+/// the facade runner's `[frame-stats]`.
+struct FramePhaseClock {
+    enabled: bool,
+    last: std::cell::Cell<std::time::Instant>,
+    reconcile: std::cell::Cell<std::time::Duration>,
+    style: std::cell::Cell<std::time::Duration>,
+    layout: std::cell::Cell<std::time::Duration>,
+}
+
+/// How many frames each `[phase-stats]` line covers.
+const PHASE_REPORT_EVERY: u32 = 60;
+
+thread_local! {
+    /// Rolling totals across frames, printed every [`PHASE_REPORT_EVERY`].
+    static PHASE_TOTALS: std::cell::RefCell<(u32, std::time::Duration, std::time::Duration, std::time::Duration, std::time::Duration)> =
+        const { std::cell::RefCell::new((0, std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO)) };
+}
+
+impl FramePhaseClock {
+    fn start() -> Self {
+        Self {
+            enabled: std::env::var_os("OBSCUR_FRAME_STATS").is_some(),
+            last: std::cell::Cell::new(std::time::Instant::now()),
+            reconcile: std::cell::Cell::new(std::time::Duration::ZERO),
+            style: std::cell::Cell::new(std::time::Duration::ZERO),
+            layout: std::cell::Cell::new(std::time::Duration::ZERO),
+        }
+    }
+
+    /// Closes the current phase and returns its duration.
+    fn lap(&self) -> std::time::Duration {
+        let now = std::time::Instant::now();
+        let elapsed = now.duration_since(self.last.get());
+        self.last.set(now);
+        elapsed
+    }
+
+    fn mark_reconcile(&self) {
+        if self.enabled {
+            self.reconcile.set(self.lap());
+        }
+    }
+
+    fn mark_style(&self) {
+        if self.enabled {
+            self.style.set(self.lap());
+        }
+    }
+
+    fn mark_layout(&self) {
+        if self.enabled {
+            self.layout.set(self.lap());
+        }
+    }
+
+    /// Closes the compose phase and reports when the window is full.
+    fn finish(&self) {
+        if !self.enabled {
+            return;
+        }
+        let compose = self.lap();
+        let (reconcile, style, layout) =
+            (self.reconcile.get(), self.style.get(), self.layout.get());
+        PHASE_TOTALS.with(|totals| {
+            let mut t = totals.borrow_mut();
+            t.0 += 1;
+            t.1 += reconcile;
+            t.2 += style;
+            t.3 += layout;
+            t.4 += compose;
+            if t.0 < PHASE_REPORT_EVERY {
+                return;
+            }
+            let n = f64::from(t.0);
+            let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0 / n;
+            println!(
+                "[phase-stats] {n:.0} frames | reconcile+build {:.2}ms | style {:.2}ms | layout {:.2}ms | compose {:.2}ms",
+                ms(t.1),
+                ms(t.2),
+                ms(t.3),
+                ms(t.4),
+            );
+            *t = (0, std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO);
+        });
     }
 }
 
