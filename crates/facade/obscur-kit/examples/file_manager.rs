@@ -58,6 +58,45 @@ const CSS: &str = "\
 .hint     { color: #7f8db0; width: 100%; height: 20px; }\n\
 ";
 
+/// The same sheet with every `background-color` dropped — an overdraw probe.
+///
+/// The normal sheet stacks opaque fills: `.app` covers the window, `.list` covers
+/// it again, and each of the ~76 rows paints its own. A path renderer that does no
+/// occlusion culling pays for all of them. Running with `OBSCUR_NO_BG=1` renders the
+/// identical tree and the identical text with none of those fills, so the difference
+/// in `present` is the cost of the overdraw rather than of the geometry.
+const CSS_NO_BG: &str = "\
+.app      { width: 100%; height: 100%; display: flex; flex-direction: column; }\n\
+.toolbar  { width: 100%; height: 46px; display: flex; flex-direction: row; gap: 8px; }\n\
+.btn      { width: 96px; height: 30px; }\n\
+.btn-label{ color: #e6e9f0; width: 100%; height: 20px; }\n\
+.path     { color: #9fb0d0; width: 100%; height: 30px; }\n\
+.list     { width: 100%; height: 100%; display: flex; flex-direction: column; \
+            overflow: scroll; }\n\
+.row      { width: 100%; height: 24px; display: flex; flex-direction: row; gap: 10px; }\n\
+.kind     { color: #7f8db0; width: 52px; height: 20px; }\n\
+.name     { color: #e6e9f0; width: 100%; height: 20px; }\n\
+.size     { color: #9fb0d0; width: 96px; height: 20px; }\n\
+.status   { width: 100%; height: 24px; }\n\
+.hint     { color: #7f8db0; width: 100%; height: 20px; }\n\
+";
+
+/// Whether to blank every string the UI renders (`OBSCUR_NO_TEXT=1`).
+///
+/// A glyph probe. The tree, the node count, the classes and the layout stay
+/// **identical** — only the text content becomes empty, so no glyph is shaped or
+/// rasterized. The difference in `present` is therefore the cost of the text alone,
+/// with nothing else moving. Vello draws glyphs as filled paths rather than from an
+/// atlas, and this list carries ~230 runs a frame.
+fn blank_text() -> bool {
+    std::env::var_os("OBSCUR_NO_TEXT").is_some()
+}
+
+/// `text` unless the glyph probe is on, in which case the empty string.
+fn maybe(text: String) -> String {
+    if blank_text() { String::new() } else { text }
+}
+
 /// One directory entry as the UI needs it — every field already a `String`, so the
 /// markup binds them directly.
 struct Row {
@@ -107,13 +146,13 @@ impl State {
             .iter()
             .enumerate()
             .map(|(index, entry)| Row {
-                name: entry.name.clone(),
-                kind: if entry.is_dir { "DIR" } else { "file" }.to_owned(),
-                size: if entry.is_dir {
+                name: maybe(entry.name.clone()),
+                kind: maybe(if entry.is_dir { "DIR" } else { "file" }.to_owned()),
+                size: maybe(if entry.is_dir {
                     String::new()
                 } else {
                     human_size(entry.size)
-                },
+                }),
                 class: if index == self.selected {
                     "row sel".to_owned()
                 } else {
@@ -193,8 +232,8 @@ fn human_size(bytes: u64) -> String {
 /// local of this function — that is what the inline macro buys over a compiled
 /// `.okui` file.
 fn build_view(state: &State) -> View {
-    let path = state.dir.display().to_string();
-    let status = state.message.clone();
+    let path = maybe(state.dir.display().to_string());
+    let status = maybe(state.message.clone());
     let rows = state.rows();
     okui! {
         <div class="app">
@@ -228,6 +267,10 @@ fn main() -> Result<(), obscur_kit::AppError> {
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("/"));
 
+    if blank_text() {
+        println!("[glyph-probe] text blanked (4 static button labels remain)");
+    }
+
     let state = Rc::new(RefCell::new(State {
         dir: PathBuf::new(),
         entries: Vec::new(),
@@ -249,7 +292,12 @@ fn main() -> Result<(), obscur_kit::AppError> {
     App::new("obscur-kit — file manager (.okui)")
         .app_id("obscur-kit-file-manager")
         .with_size(760.0, 560.0)
-        .stylesheet(CSS)
+        .stylesheet(if std::env::var_os("OBSCUR_NO_BG").is_some() {
+            println!("[overdraw-probe] backgrounds stripped");
+            CSS_NO_BG
+        } else {
+            CSS
+        })
         .view(move || build_view(&view_state.borrow()))
         .on_command(command("selectUp"), move || up.borrow_mut().select_up())
         .on_command(command("selectDown"), move || {
