@@ -26,7 +26,7 @@ use obscur_interaction::command::{
 };
 use obscur_interaction::focus::{FocusScope, FocusScopeId};
 use obscur_interaction::hover::{HoverChain, HoverTransition};
-use obscur_interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind};
+use obscur_interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind, PointerId};
 use obscur_interaction::spatial::SpatialIndex;
 use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_layout::model::Dimension;
@@ -138,6 +138,24 @@ struct PointerClick {
     time_micros: u64,
     /// The running click count of this press (`1`, `2`, or `3`, then cycling).
     count: u32,
+}
+
+/// One outstanding press: a `Down` with no matching `Up` or `Cancel` yet, held
+/// per [`PointerId`] so concurrent pointers do not overwrite each other.
+///
+/// A mouse can only ever have one of these; a touchscreen has one per finger,
+/// and they are genuinely independent — one finger pressing a button must not
+/// retarget, activate or cancel what another finger is holding.
+#[derive(Debug, Clone, Copy)]
+struct Press {
+    /// The interactive target the press landed on. `None` for a press on empty
+    /// space, which is still an outstanding press — it simply anchors nothing, so
+    /// it activates nothing on release and lights no `:active`.
+    target: Option<NodeId>,
+    /// The click count this press resolved to (`1`, `2`, or `3`), kept here so a
+    /// release reports the count of **its own** press rather than whichever press
+    /// happened to be the most recent.
+    clicks: u32,
 }
 
 /// The embeddable UI runtime: the application-core **integrator** the catalog
@@ -322,11 +340,19 @@ pub struct UiRuntime {
     /// does not yet do, so a plain `Option<NodeId>` is the simpler correct model
     /// for pointer-press focus (documented fallback).
     focused: Option<NodeId>,
-    /// The node the most recent [`PointerEventKind::Down`] press landed on, if
-    /// any — the anchor for click detection. A [`PointerEventKind::Up`] whose
-    /// hit-test target equals this node completes a *click* on it; the field is
-    /// then cleared. `None` between clicks (no press outstanding).
-    press_target: Option<NodeId>,
+    /// The outstanding presses, keyed by the pointer holding each — the anchors
+    /// for click detection. A [`PointerEventKind::Down`] records its pointer's
+    /// press; a [`PointerEventKind::Up`] whose hit-test target equals that
+    /// press's target completes a *click* on it, and a
+    /// [`PointerEventKind::Cancel`] discards it without a click. Empty between
+    /// clicks (nothing outstanding).
+    ///
+    /// Keyed rather than single because a touchscreen has one press per finger:
+    /// with one slot, a second contact overwrote the first, so the first
+    /// finger's release found the wrong anchor (or none) and activated nothing.
+    /// A mouse only ever occupies the one [`PointerId::MOUSE`] entry, so its
+    /// behaviour is unchanged.
+    presses: HashMap<PointerId, Press>,
     /// The in-flight pointer drag-selection over the focused editable, if any:
     /// `(field node, anchor byte offset)`. Armed by a
     /// [`PointerEventKind::Down`] whose editable ancestor has an active editing
@@ -335,12 +361,17 @@ pub struct UiRuntime {
     /// while this is set re-selects `[anchor, current]` over the same field; a
     /// [`PointerEventKind::Up`] clears it. `None` between presses (spec §5.11).
     text_drag: Option<(NodeId, usize)>,
-    /// The most recent [`PointerEventKind::Down`] press, used to detect a
-    /// double/triple *click* (a rapid run of presses on the same target at
-    /// nearly the same point) so the pointer path can select a word or line
+    /// Each pointer's most recent [`PointerEventKind::Down`] press, used to
+    /// detect a double/triple *click* (a rapid run of presses on the same target
+    /// at nearly the same point) so the pointer path can select a word or line
     /// under the cursor (spec §5.11 editing engine — word/line navigation).
-    /// `None` until the first press; see [`next_click_count`](Self::next_click_count).
-    last_click: Option<PointerClick>,
+    /// Empty until the first press; see
+    /// [`next_click_count`](Self::next_click_count).
+    ///
+    /// Per pointer because a click run belongs to the pointer making it: a second
+    /// finger tapping elsewhere is not the second click of the first finger's
+    /// double click, and must not chain with it.
+    last_clicks: HashMap<PointerId, PointerClick>,
     /// The click count of the current [`PointerEventKind::Down`]: `1` for a
     /// single click (caret placement), `2` for a double click (word select),
     /// `3` for a triple click (line select), cycling back to `1`. Resolved once
@@ -866,9 +897,9 @@ impl UiRuntime {
             last_layout_inputs: None,
             inspect_mode: false,
             focused: None,
-            press_target: None,
+            presses: HashMap::new(),
             text_drag: None,
-            last_click: None,
+            last_clicks: HashMap::new(),
             click_count: 1,
             handlers: HashMap::new(),
             node_handlers: HashMap::new(),
@@ -4188,12 +4219,15 @@ impl UiRuntime {
         //    after the release. During contact hover still tracks the target,
         //    matching a touchstart→touchend `:hover` on the web. A pen genuinely
         //    hovers above the surface, so it is deliberately not cleared here.
-        let hover_target =
-            if event.device() == PointerDevice::Touch && event.kind() == PointerEventKind::Up {
-                None
-            } else {
-                target
-            };
+        let contact_ended = matches!(
+            event.kind(),
+            PointerEventKind::Up | PointerEventKind::Cancel
+        );
+        let hover_target = if event.device() == PointerDevice::Touch && contact_ended {
+            None
+        } else {
+            target
+        };
         let new_hover = HoverChain::from_nodes(self.hover_chain_for(hover_target));
         let transition = HoverTransition::between(&self.hover, &new_hover);
         let hover_changed = transition.has_changes();
@@ -4223,16 +4257,33 @@ impl UiRuntime {
                     // (and step-2 rendering).
                     self.sync_editing_to_focus();
                 }
-                if self.press_target != interactive_target {
+                // Flattened deliberately: "no press outstanding" and "a press on
+                // empty space" are the same *styling* state (nothing is `:active`),
+                // which is what `press_changed` schedules a restyle for.
+                let held = self
+                    .presses
+                    .get(&event.pointer())
+                    .and_then(|press| press.target);
+                if held != interactive_target {
                     press_changed = true;
                 }
-                self.press_target = interactive_target;
                 // Resolve the click count (single / double / triple) from this
-                // press's relationship to the previous one, so a double click can
-                // select the word and a triple click the line under the pointer
-                // (spec §5.11).
-                self.click_count =
-                    self.next_click_count(interactive_target, event.position(), event.timestamp());
+                // press's relationship to the previous one *by the same pointer*,
+                // so a double click can select the word and a triple click the
+                // line under the pointer (spec §5.11).
+                self.click_count = self.next_click_count(
+                    event.pointer(),
+                    interactive_target,
+                    event.position(),
+                    event.timestamp(),
+                );
+                self.presses.insert(
+                    event.pointer(),
+                    Press {
+                        target: interactive_target,
+                        clicks: self.click_count,
+                    },
+                );
                 // Click → caret / word / line: after `sync_editing_to_focus` has
                 // (re)seated the session for the clicked editable, a single click
                 // places the caret and arms a potential drag-selection; a double
@@ -4294,7 +4345,12 @@ impl UiRuntime {
         // an ancestor of `target` whenever the click bubbled to find one.
         let mut current_target = None;
         if event.kind() == PointerEventKind::Up {
-            if let Some(pressed) = self.press_target
+            // This pointer's own press — not whichever press happened to be the
+            // most recent. A second finger landing mid-gesture used to overwrite
+            // the single anchor, so the first finger's release found the wrong
+            // target and activated nothing.
+            let held = self.presses.remove(&event.pointer());
+            if let Some(pressed) = held.and_then(|press| press.target)
                 && Some(pressed) == target
                 // §2.3 propagation step 4, the **default action**, is GATED ON
                 // TRUST. Activation — resolving the node's bound command and
@@ -4318,7 +4374,10 @@ impl UiRuntime {
                 // could not distinguish the rows — so the geometry is the only thing
                 // that says which row was hit.
                 if let Some((list, index)) = self.virtual_index_at(screen_point) {
-                    let clicks = self.click_count;
+                    // The count of *this* press's run, carried on the press
+                    // itself, so another pointer pressing in between cannot turn
+                    // a single tap on a row into a double one.
+                    let clicks = held.map_or(self.click_count, |press| press.clicks);
                     let fired =
                         if let Some(handler) = self.virtual_row_click_handlers.get_mut(&list) {
                             handler(index, clicks);
@@ -4331,12 +4390,29 @@ impl UiRuntime {
                     }
                 }
             }
-            if self.press_target.is_some() {
+            if held.and_then(|press| press.target).is_some() {
                 press_changed = true;
             }
-            self.press_target = None;
             // A release ends any in-flight drag-selection: the selection stays
             // wherever the last move left it.
+            self.text_drag = None;
+        }
+
+        // 3c. Cancel: the system took the sequence away — a gesture claimed it, the
+        //    window lost the contact, the device went away. The press is discarded
+        //    *without* a click: an interrupted gesture must not activate the control
+        //    the pointer was resting on, which is the one thing separating a cancel
+        //    from a release. Until touch there was no producer of a `Cancel` at all,
+        //    so the press simply stayed outstanding and its `:active` stuck.
+        if event.kind() == PointerEventKind::Cancel {
+            if self
+                .presses
+                .remove(&event.pointer())
+                .and_then(|press| press.target)
+                .is_some()
+            {
+                press_changed = true;
+            }
             self.text_drag = None;
         }
 
@@ -5434,11 +5510,25 @@ impl UiRuntime {
     /// [`target`](PointerClick::target), within [`MULTI_CLICK_WINDOW_MICROS`] of
     /// the previous press, and within [`MULTI_CLICK_RADIUS`] of its point — the
     /// standard platform double-click test. Any press that fails one of these
-    /// conditions restarts the count at `1`. The resolved press is recorded as the
-    /// new [`last_click`](Self::last_click) so the next press can chain off it.
-    fn next_click_count(&mut self, target: Option<NodeId>, point: Point, time_micros: u64) -> u32 {
+    /// conditions restarts the count at `1`. The resolved press is recorded as
+    /// `pointer`'s new [`last_clicks`](Self::last_clicks) entry so the next press
+    /// *by that pointer* can chain off it.
+    ///
+    /// The run belongs to the pointer making it. A second finger tapping while
+    /// the first is mid-double-click is a fresh single click of its own, not the
+    /// next beat of someone else's run — with one shared slot the two interleaved
+    /// and each finger read the other's history.
+    fn next_click_count(
+        &mut self,
+        pointer: PointerId,
+        target: Option<NodeId>,
+        point: Point,
+        time_micros: u64,
+    ) -> u32 {
         let count = self
-            .last_click
+            .last_clicks
+            .get(&pointer)
+            .copied()
             .filter(|prev| {
                 prev.target == target
                     && time_micros.saturating_sub(prev.time_micros) <= MULTI_CLICK_WINDOW_MICROS
@@ -5448,12 +5538,15 @@ impl UiRuntime {
             // single caret (matching platform multi-click behaviour) and the count
             // stays bounded.
             .map_or(1, |prev| (prev.count % 3) + 1);
-        self.last_click = Some(PointerClick {
-            target,
-            point,
-            time_micros,
-            count,
-        });
+        self.last_clicks.insert(
+            pointer,
+            PointerClick {
+                target,
+                point,
+                time_micros,
+                count,
+            },
+        );
         count
     }
 
@@ -6240,11 +6333,23 @@ impl UiRuntime {
             self.pseudo.set(focused, merged);
         }
         // `:active` — while a press is outstanding (a `Down` with no matching
-        // `Up` yet), the pressed node and its element ancestors are active; CSS
-        // applies `:active` up the ancestor chain, mirroring the hover chain.
-        for node in self.hover_chain_for(self.press_target) {
-            let merged = self.pseudo.get(node).union(PseudoState::ACTIVE);
-            self.pseudo.set(node, merged);
+        // `Up` or `Cancel` yet), the pressed node and its element ancestors are
+        // active; CSS applies `:active` up the ancestor chain, mirroring the hover
+        // chain. Every outstanding press contributes: two fingers holding two
+        // buttons light both, and one lifting leaves the other lit. The union is
+        // order-independent, so the map's iteration order does not leak into the
+        // computed styles.
+        let pressed: Vec<Option<NodeId>> = self
+            .presses
+            .values()
+            .filter(|press| press.target.is_some())
+            .map(|press| press.target)
+            .collect();
+        for target in pressed {
+            for node in self.hover_chain_for(target) {
+                let merged = self.pseudo.get(node).union(PseudoState::ACTIVE);
+                self.pseudo.set(node, merged);
+            }
         }
     }
 
@@ -11913,6 +12018,147 @@ mod tests {
         assert!(runtime.pseudo_state(node).contains(PseudoState::HOVER));
     }
 
+    // ---- Concurrent pointers (§2.4: several pointers at once) ------------------
+
+    /// A touchscreen contact event: contact `contact` in `kind` at `(x, y)`,
+    /// trusted the way [`mouse`] is, because it models a real finger.
+    fn finger(contact: u64, kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
+        PointerEvent::new(
+            PointerId::touch(contact),
+            PointerDevice::Touch,
+            kind,
+            Point::new(x, y),
+        )
+        .as_trusted()
+    }
+
+    /// A contact carrying an explicit logical timestamp (µs), so a test can drive
+    /// the multi-click window across two fingers deterministically.
+    fn finger_t(contact: u64, kind: PointerEventKind, x: f32, y: f32, t: u64) -> PointerEvent {
+        finger(contact, kind, x, y).with_timestamp(t)
+    }
+
+    /// The `panel` view with `a` (y ∈ [0,50)) and `b` (y ∈ [50,100)) each bound to
+    /// its own click command, so a release can be attributed to one or the other.
+    fn two_command_view(cmd_a: InternedSymbol, cmd_b: InternedSymbol) -> View {
+        let child = |component: u64, class: &str, cmd: InternedSymbol| {
+            ViewNode::element(ComponentId::from_raw(component))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
+                .with_event(ViewEventBinding::new(EVENT_CLICK, cmd))
+        };
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(100))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+                .with_children(ViewFragment::from_nodes(vec![
+                    child(101, "a", cmd_a),
+                    child(102, "b", cmd_b),
+                ])),
+        ]))
+    }
+
+    /// Two fingers, two controls, two independent presses.
+    ///
+    /// This is the whole point of keying presses by pointer. With a single anchor
+    /// the second contact overwrote the first, so the *first* finger's release
+    /// looked up the second finger's target, matched nothing, and activated
+    /// nothing — one of the two buttons simply never fired, and which one
+    /// depended on the order the fingers happened to land.
+    #[test]
+    fn two_fingers_hold_two_controls_and_each_release_activates_its_own() {
+        let cmd_a = InternedSymbol::from_raw(0x0A);
+        let cmd_b = InternedSymbol::from_raw(0x0B);
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let (ran_a, ran_b) = (Rc::new(Cell::new(false)), Rc::new(Cell::new(false)));
+        {
+            let (a, b) = (ran_a.clone(), ran_b.clone());
+            runtime.on_command(cmd_a, move || a.set(true));
+            runtime.on_command(cmd_b, move || b.set(true));
+        }
+        let sheet = interaction_sheet();
+        let _ = runtime.render_now(
+            &two_command_view(cmd_a, cmd_b),
+            std::slice::from_ref(&sheet),
+        );
+        let (_panel, a, b) = panel_nodes(&runtime);
+
+        // Both fingers go down before either lifts — the interleaving a single
+        // anchor cannot represent.
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 50.0, 25.0));
+        runtime.handle_pointer(finger(1, PointerEventKind::Down, 50.0, 75.0));
+        assert!(
+            runtime.pseudo_state(a).contains(PseudoState::ACTIVE),
+            "the control the first finger holds is `:active`"
+        );
+        assert!(
+            runtime.pseudo_state(b).contains(PseudoState::ACTIVE),
+            "and so is the one the second finger holds — both presses are \
+             outstanding at once"
+        );
+
+        // Lift them in the order they landed; each release finds its own press.
+        let first = runtime.handle_pointer(finger(0, PointerEventKind::Up, 50.0, 25.0));
+        assert_eq!(first.command(), Some(cmd_a));
+        assert!(ran_a.get(), "the first finger's control ran its handler");
+        assert!(!ran_b.get(), "and did not run the other's");
+        assert!(
+            !runtime.pseudo_state(a).contains(PseudoState::ACTIVE),
+            "the lifted finger's control is no longer `:active`"
+        );
+        assert!(
+            runtime.pseudo_state(b).contains(PseudoState::ACTIVE),
+            "while the finger still down keeps its control `:active`"
+        );
+
+        let second = runtime.handle_pointer(finger(1, PointerEventKind::Up, 50.0, 75.0));
+        assert_eq!(second.command(), Some(cmd_b));
+        assert!(ran_b.get(), "the second finger's control ran its own handler");
+    }
+
+    /// A cancelled contact activates nothing and leaves nothing held.
+    ///
+    /// `Cancel` is what the system sends when it takes a sequence away — a shell
+    /// gesture claims it, the window loses the contact. Before touch there was no
+    /// producer of one, so `handle_pointer` ignored the kind entirely: the press
+    /// stayed outstanding and its `:active` stuck on the control forever.
+    #[test]
+    fn a_cancelled_contact_activates_nothing_and_ends_the_press() {
+        let cmd_a = InternedSymbol::from_raw(0x0A);
+        let cmd_b = InternedSymbol::from_raw(0x0B);
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let ran = Rc::new(Cell::new(false));
+        {
+            let r = ran.clone();
+            runtime.on_command(cmd_a, move || r.set(true));
+        }
+        let sheet = interaction_sheet();
+        let _ = runtime.render_now(
+            &two_command_view(cmd_a, cmd_b),
+            std::slice::from_ref(&sheet),
+        );
+        let (_panel, a, _b) = panel_nodes(&runtime);
+
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 50.0, 25.0));
+        assert!(runtime.pseudo_state(a).contains(PseudoState::ACTIVE));
+
+        let cancelled = runtime.handle_pointer(finger(0, PointerEventKind::Cancel, 50.0, 25.0));
+        assert_eq!(
+            cancelled.command(),
+            None,
+            "an interrupted gesture must not press what the finger rested on"
+        );
+        assert!(!ran.get(), "no handler runs for a cancelled contact");
+        assert!(
+            !runtime.pseudo_state(a).contains(PseudoState::ACTIVE),
+            "the cancelled press is released, not left holding the control"
+        );
+
+        // And it is genuinely gone: a later release for that contact — the shape a
+        // platform can still deliver after a cancel — finds no press to complete.
+        let late = runtime.handle_pointer(finger(0, PointerEventKind::Up, 50.0, 25.0));
+        assert_eq!(late.command(), None);
+        assert!(!ran.get());
+    }
+
     /// The lone child node of the root after a frame (for single-element views).
     fn panel_single_child(runtime: &UiRuntime) -> NodeId {
         let root = runtime.tree().root().expect("root after a frame");
@@ -15962,6 +16208,32 @@ mod tests {
             sel.is_collapsed(),
             "a press past the multi-click window seats a caret; it does not select \
              the word the way the in-window double click does"
+        );
+    }
+
+    /// A click run belongs to the pointer making it.
+    ///
+    /// Everything the multi-click test looks at — target, point, elapsed time —
+    /// is held identical here, so the *pointer* is the only axis that differs.
+    /// With one shared history the second finger read the first finger's press
+    /// and counted itself as the second click of a double, selecting a word
+    /// nobody double-tapped.
+    #[test]
+    fn a_second_pointer_does_not_continue_the_first_pointers_click_run() {
+        let (mut runtime, _mirror) = focused_editable("ab cd");
+        let ox = editing_text_origin_x(&runtime);
+        let x = ox + ADVANCE * 1.0; // inside the first word "ab"
+        let t = 1_000_000;
+        runtime.handle_pointer(finger_t(0, PointerEventKind::Down, x, 25.0, t));
+        runtime.handle_pointer(finger_t(0, PointerEventKind::Up, x, 25.0, t));
+        // A different finger, same spot, well inside the window.
+        runtime.handle_pointer(finger_t(1, PointerEventKind::Down, x, 25.0, t + 1_000));
+
+        let sel = runtime.editing_selection().expect("session active");
+        assert!(
+            sel.is_collapsed(),
+            "the second finger's first press is a single click of its own; it \
+             seats a caret rather than completing someone else's double click"
         );
     }
 
