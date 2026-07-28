@@ -26,7 +26,7 @@ use obscur_interaction::command::{
 };
 use obscur_interaction::focus::{FocusScope, FocusScopeId};
 use obscur_interaction::hover::{HoverChain, HoverTransition};
-use obscur_interaction::gesture::{PanRecognizer, RecognizerId};
+use obscur_interaction::gesture::{Fling, PanRecognizer, RecognizerId};
 use obscur_interaction::pointer::{
     PointerCaptureRegistry, PointerDevice, PointerEvent, PointerEventKind, PointerId,
 };
@@ -125,6 +125,31 @@ const MULTI_CLICK_RADIUS: f32 = 4.0;
 /// "held still" is much wider than a mouse's. Too small and every tap scrolls the
 /// list a little; too large and the list feels stuck before it starts moving.
 const TOUCH_SLOP: f32 = 10.0;
+
+/// How long a direct contact may go without moving before a lift throws nothing
+/// (µs). See [`PanRecognizer::velocity_at`].
+const PAN_REST_MICROS: u64 = 100_000;
+
+/// The time constant of a flung list's friction, in seconds.
+///
+/// Total coast is `velocity × tau`, so a 1000 px/s flick carries about 325px —
+/// roughly three rows of a file listing, which is the distance that reads as
+/// "the list kept going" without overshooting where the eye was aiming.
+const FLING_TAU: f32 = 0.325;
+
+/// The speed (px/s) below which a coasting list is simply stopped, rather than
+/// creeping toward a limit it approaches but never reaches.
+const FLING_REST_SPEED: f32 = 20.0;
+
+/// The speed (px/s) a lift must exceed for the drag to have *thrown* the list.
+///
+/// Deliberately higher than [`FLING_REST_SPEED`], and not the same question. The
+/// rest speed asks when an existing coast has effectively stopped; this asks
+/// whether there was ever a throw. Conflating them means a slow, deliberate drag
+/// — one that ends at a walking pace because the user was placing the list
+/// exactly — drifts on for another few pixels past where they let go, which
+/// reads as the list disobeying.
+const FLING_MIN_LAUNCH_SPEED: f32 = 50.0;
 
 /// Overscan for a realized `<VirtualFor>` window — extra rows materialized past
 /// each viewport edge so a scroll reveals laid-out rows rather than blanks (spec
@@ -390,6 +415,9 @@ pub struct UiRuntime {
     /// The pans armed for each pointer — one per direct contact that went down
     /// inside a user-scrollable container (spec §6.16 `Pan`).
     pans: HashMap<PointerId, ActivePan>,
+    /// The scroll containers still coasting from a flick, advanced by
+    /// [`advance_motion`](Self::advance_motion) (spec §6.16).
+    flings: HashMap<NodeId, Fling>,
     /// The in-flight pointer drag-selection over the focused editable, if any:
     /// `(field node, anchor byte offset)`. Armed by a
     /// [`PointerEventKind::Down`] whose editable ancestor has an active editing
@@ -937,6 +965,7 @@ impl UiRuntime {
             presses: HashMap::new(),
             captures: PointerCaptureRegistry::new(),
             pans: HashMap::new(),
+            flings: HashMap::new(),
             text_drag: None,
             last_clicks: HashMap::new(),
             click_count: 1,
@@ -3561,6 +3590,12 @@ impl UiRuntime {
     /// overlay keeps applying the settled endpoint value (the animation *holds*
     /// its final value) until superseded.
     pub fn advance_motion(&mut self, delta: f32) {
+        // A flung list is motion too, and this is the runtime's one "time passed"
+        // signal — the tick a host already drives. Giving the coast its own entry
+        // point would mean every host had to learn to call a second clock, and
+        // the one that forgot would have inertia only on the frames something
+        // else happened to be animating.
+        self.advance_flings(delta);
         // Remember where each timeline that finished on this tick settled: the
         // scheduler prunes it, and the overlay still has to apply the value the
         // animation ended on, which for a reversed final iteration is progress
@@ -4462,7 +4497,11 @@ impl UiRuntime {
                 press_changed = true;
             }
             if let Some(mut active) = self.pans.remove(&event.pointer()) {
+                let dragging = active.pan.has_begun();
                 active.pan.end();
+                if dragging {
+                    self.launch_fling(&active, event.timestamp());
+                }
             }
             // §2.4: a capture is released on pointer completion. The gesture the
             // captor claimed is over, so the next one hit-tests normally.
@@ -4530,6 +4569,14 @@ impl UiRuntime {
         let Some(container) = self.scrollable_container_at(screen_point) else {
             return;
         };
+        // Catching a coasting list stops it — and the contact that caught it is
+        // spent doing so. Without discarding the press, grabbing a list that is
+        // still moving would also open whatever row happened to be sliding under
+        // the finger at that instant, which is the least forgiving way a file
+        // manager can be wrong.
+        if self.flings.remove(&container).is_some_and(|f| !f.is_done()) {
+            self.presses.remove(&event.pointer());
+        }
         let id = RecognizerId::from_raw(event.pointer().raw());
         self.pans.insert(
             event.pointer(),
@@ -4605,6 +4652,60 @@ impl UiRuntime {
         self.scroll_by(container, -dy);
         self.request_frame(FrameReason::Input);
         true
+    }
+
+    /// Throws `active`'s container into a coast, if the contact that just lifted
+    /// at logical time `micros` was still moving (spec §6.16).
+    ///
+    /// A drag that ends while the finger is travelling has *thrown* the list; one
+    /// that ends after the finger has come to rest has placed it. The recognizer
+    /// answers which, and reports nothing for a finger that stopped before
+    /// lifting — see [`PanRecognizer::velocity_at`].
+    ///
+    /// The velocity is negated for the same reason the drag deltas are: the
+    /// content follows the finger, so a finger travelling up the screen leaves
+    /// `scroll_top` increasing.
+    fn launch_fling(&mut self, active: &ActivePan, micros: u64) {
+        let (_, vy) = active.pan.velocity_at(micros, PAN_REST_MICROS);
+        if vy.abs() < FLING_MIN_LAUNCH_SPEED {
+            return;
+        }
+        let fling = Fling::new(-vy, FLING_TAU, FLING_REST_SPEED);
+        self.flings.insert(active.container, fling);
+        self.request_frame(FrameReason::Animation);
+    }
+
+    /// Advances every coasting container by `delta` seconds, scrolling each by
+    /// the distance its fling covered, and requests another animation frame while
+    /// any coast remains (spec §6.16, §4.17).
+    ///
+    /// A coast that reaches the end of its content is **stopped** rather than
+    /// left decaying against the clamp: the list has arrived, and a fling that
+    /// went on being advanced would keep asking for frames while moving nothing.
+    fn advance_flings(&mut self, delta: f32) {
+        if self.flings.is_empty() {
+            return;
+        }
+        let steps: Vec<(NodeId, f32)> = self
+            .flings
+            .iter_mut()
+            .map(|(node, fling)| (*node, fling.advance(delta)))
+            .collect();
+        for (node, distance) in steps {
+            let before = self.scroll_top(node);
+            let after = self.scroll_by(node, distance);
+            if distance != 0.0 && (after - before).abs() < f32::EPSILON {
+                if let Some(fling) = self.flings.get_mut(&node) {
+                    fling.stop();
+                }
+            }
+        }
+        self.flings.retain(|_, fling| !fling.is_done());
+        // Unconditionally, not just while a coast remains: the step that *ends* a
+        // fling still moved the list, and skipping its frame would leave the last
+        // few pixels of travel unpainted until something unrelated asked for a
+        // frame.
+        self.request_frame(FrameReason::Animation);
     }
 
     /// The innermost **user-scrollable** container containing `point` (content
@@ -12689,6 +12790,180 @@ mod tests {
             "the release that ends a scroll is not a click"
         );
         assert!(!ran.get(), "no row handler ran");
+    }
+
+    /// A contact at `(x, y)` at logical time `t` µs — inertia is a function of
+    /// how fast the finger was moving, so these tests must control the clock.
+    fn finger_at(contact: u64, kind: PointerEventKind, x: f32, y: f32, t: u64) -> PointerEvent {
+        finger(contact, kind, x, y).with_timestamp(t)
+    }
+
+    /// Flicks the list upward: three 30px samples 30ms apart, then lifts. That is
+    /// 1000 px/s, so the coast should be about `1000 × FLING_TAU` = 325px — but
+    /// the list only has 120px of scroll, so it will arrive at the end.
+    fn flick_up(runtime: &mut UiRuntime) {
+        runtime.handle_pointer(finger_at(0, PointerEventKind::Down, 100.0, 110.0, 0));
+        runtime.handle_pointer(finger_at(0, PointerEventKind::Move, 100.0, 80.0, 30_000));
+        runtime.handle_pointer(finger_at(0, PointerEventKind::Move, 100.0, 50.0, 60_000));
+        runtime.handle_pointer(finger_at(0, PointerEventKind::Up, 100.0, 50.0, 60_000));
+    }
+
+    #[test]
+    fn a_flick_keeps_the_list_moving_after_the_finger_lifts() {
+        let (mut runtime, scroller, _ran) = pan_fixture();
+        flick_up(&mut runtime);
+        let at_release = runtime.scroll_top(scroller);
+
+        runtime.advance_motion(0.016);
+        let after_a_frame = runtime.scroll_top(scroller);
+        assert!(
+            after_a_frame > at_release,
+            "the list coasted on: {at_release} → {after_a_frame}"
+        );
+
+        // And it comes to rest instead of coasting forever.
+        for _ in 0..600 {
+            runtime.advance_motion(0.016);
+        }
+        let settled = runtime.scroll_top(scroller);
+        runtime.advance_motion(0.016);
+        assert!(
+            (runtime.scroll_top(scroller) - settled).abs() < f32::EPSILON,
+            "the coast ended"
+        );
+    }
+
+    /// The pair to the test above: a drag that ends slowly has *placed* the list,
+    /// not thrown it, and nothing should keep moving.
+    #[test]
+    fn a_slow_drag_does_not_fling() {
+        let (mut runtime, scroller, _ran) = pan_fixture();
+        // 30px over a full second — deliberate, not a flick.
+        runtime.handle_pointer(finger_at(0, PointerEventKind::Down, 100.0, 110.0, 0));
+        runtime.handle_pointer(finger_at(0, PointerEventKind::Move, 100.0, 80.0, 1_000_000));
+        runtime.handle_pointer(finger_at(0, PointerEventKind::Up, 100.0, 80.0, 1_000_000));
+        let at_release = runtime.scroll_top(scroller);
+
+        runtime.advance_motion(0.016);
+        assert!(
+            (runtime.scroll_top(scroller) - at_release).abs() < f32::EPSILON,
+            "a placed list stays where it was put"
+        );
+    }
+
+    /// A finger that stops and *then* lifts has thrown nothing, however fast it
+    /// was moving a moment before. No events arrive while a finger rests, so the
+    /// last sample still holds the old speed — this is the case a naive velocity
+    /// gets wrong, and it is the one users notice, because stopping a list with
+    /// your finger is deliberate.
+    #[test]
+    fn a_finger_that_stops_before_lifting_does_not_fling() {
+        let (mut runtime, scroller, _ran) = pan_fixture();
+        runtime.handle_pointer(finger_at(0, PointerEventKind::Down, 100.0, 110.0, 0));
+        runtime.handle_pointer(finger_at(0, PointerEventKind::Move, 100.0, 80.0, 30_000));
+        runtime.handle_pointer(finger_at(0, PointerEventKind::Move, 100.0, 50.0, 60_000));
+        // Held still for a quarter second, then lifted.
+        runtime.handle_pointer(finger_at(0, PointerEventKind::Up, 100.0, 50.0, 310_000));
+        let at_release = runtime.scroll_top(scroller);
+
+        runtime.advance_motion(0.016);
+        assert!(
+            (runtime.scroll_top(scroller) - at_release).abs() < f32::EPSILON,
+            "the list stayed where the finger left it"
+        );
+    }
+
+    #[test]
+    fn touching_a_coasting_list_stops_it() {
+        let (mut runtime, scroller, _ran) = pan_fixture();
+        flick_up(&mut runtime);
+        runtime.advance_motion(0.016);
+        let moving = runtime.scroll_top(scroller);
+
+        // Catch it.
+        runtime.handle_pointer(finger_at(0, PointerEventKind::Down, 100.0, 60.0, 500_000));
+        runtime.advance_motion(0.016);
+        assert!(
+            (runtime.scroll_top(scroller) - moving).abs() < f32::EPSILON,
+            "the list stopped under the finger"
+        );
+    }
+
+    /// And the contact that caught it is spent doing so — it must not also open
+    /// whatever row was sliding past at that instant.
+    #[test]
+    fn the_tap_that_catches_a_coasting_list_activates_nothing() {
+        let (mut runtime, _scroller, ran) = pan_fixture();
+        flick_up(&mut runtime);
+        runtime.advance_motion(0.016);
+        assert!(!ran.get(), "the flick itself activated nothing");
+
+        runtime.handle_pointer(finger_at(0, PointerEventKind::Down, 100.0, 60.0, 500_000));
+        let dispatch = runtime.handle_pointer(finger_at(
+            0,
+            PointerEventKind::Up,
+            100.0,
+            60.0,
+            560_000,
+        ));
+
+        assert_eq!(dispatch.command(), None);
+        assert!(!ran.get(), "catching a moving list is not tapping a row");
+    }
+
+    /// A tap on a list that is *not* moving is an ordinary tap — otherwise the
+    /// rule above would have quietly disabled tapping altogether.
+    #[test]
+    fn a_tap_on_a_still_list_activates_its_row() {
+        let (mut runtime, _scroller, ran) = pan_fixture();
+        runtime.handle_pointer(finger_at(0, PointerEventKind::Down, 100.0, 60.0, 0));
+        let dispatch = runtime.handle_pointer(finger_at(0, PointerEventKind::Up, 100.0, 60.0, 50_000));
+
+        assert!(dispatch.command().is_some());
+        assert!(ran.get());
+    }
+
+    /// Every step of a coast — including the one that ends it — has to reach
+    /// paint. A fling that stopped requesting frames on its final step would
+    /// leave the list a few pixels short of where it actually came to rest, until
+    /// something unrelated happened to schedule a frame.
+    #[test]
+    fn every_step_of_a_coast_asks_for_the_frame_that_paints_it() {
+        let (mut runtime, scroller, _ran) = pan_fixture();
+        flick_up(&mut runtime);
+        let _ = runtime.run_due_frame_reactive();
+
+        let mut steps = 0;
+        loop {
+            let before = runtime.scroll_top(scroller);
+            runtime.advance_motion(0.016);
+            let moved = (runtime.scroll_top(scroller) - before).abs() > f32::EPSILON;
+            if !moved {
+                break;
+            }
+            assert!(
+                runtime.has_pending_frame(),
+                "step {steps} moved the list and must be painted"
+            );
+            let _ = runtime.run_due_frame_reactive();
+            steps += 1;
+            assert!(steps < 1_000, "the coast terminated");
+        }
+    }
+
+    #[test]
+    fn a_coast_stops_at_the_end_of_the_content() {
+        let (mut runtime, scroller, _ran) = pan_fixture();
+        flick_up(&mut runtime);
+        // 1000 px/s coasts ~325px, and there are only 120px of scroll.
+        for _ in 0..120 {
+            runtime.advance_motion(0.016);
+        }
+        assert!(
+            (runtime.scroll_top(scroller) - 120.0).abs() < f32::EPSILON,
+            "the list is at its end, clamped; got {}",
+            runtime.scroll_top(scroller)
+        );
     }
 
     /// The case the *press discard* exists for, as opposed to the capture.

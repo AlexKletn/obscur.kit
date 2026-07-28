@@ -39,6 +39,8 @@ pub struct PanRecognizer {
     last: Point,
     last_micros: u64,
     slop: f32,
+    velocity: (f32, f32),
+    sampled: bool,
 }
 
 impl PanRecognizer {
@@ -54,6 +56,8 @@ impl PanRecognizer {
             last: origin,
             last_micros: micros,
             slop,
+            velocity: (0.0, 0.0),
+            sampled: false,
         }
     }
 
@@ -70,6 +74,7 @@ impl PanRecognizer {
         if self.recognizer.state().is_terminal() {
             return None;
         }
+        self.sample_velocity(at, micros);
         let from = if self.recognizer.state() == RecognizerState::Began {
             self.last
         } else if self.travel_from_origin(at) > self.slop {
@@ -136,11 +141,56 @@ impl PanRecognizer {
         self.origin_micros
     }
 
+    /// The contact's velocity in px per second at the moment it lifted, given the
+    /// lift's logical timestamp `micros` — what a fling is thrown with.
+    ///
+    /// **Zero if the contact had come to rest**: a finger that stops and *then*
+    /// lifts has thrown nothing, however fast it was moving a moment earlier.
+    /// This needs saying explicitly because no event arrives while a finger rests,
+    /// so the last sample still holds the speed it had before the pause; a
+    /// recognizer that reported it would fling a list the user had deliberately
+    /// stopped — the classic touch-scrolling bug. `rest_micros` is how long
+    /// without a sample counts as stopped.
+    #[must_use]
+    pub fn velocity_at(&self, micros: u64, rest_micros: u64) -> (f32, f32) {
+        if micros.saturating_sub(self.last_micros) > rest_micros {
+            return (0.0, 0.0);
+        }
+        self.velocity
+    }
+
+    /// Folds one sample into the running velocity estimate.
+    ///
+    /// A low-pass blend rather than the raw last-two-samples slope: touch
+    /// delivery jitters (two samples one millisecond apart, then one after
+    /// twenty), and the instantaneous slope across the short gap can be several
+    /// times the speed the finger is actually moving. Smoothing keeps a flick's
+    /// launch speed close to what the eye saw.
+    fn sample_velocity(&mut self, at: Point, micros: u64) {
+        let dt = micros.saturating_sub(self.last_micros) as f32 / 1_000_000.0;
+        if dt <= 0.0 {
+            return;
+        }
+        let instant = ((at.x - self.last.x) / dt, (at.y - self.last.y) / dt);
+        self.velocity = if self.sampled {
+            (
+                self.velocity.0.mul_add(SMOOTHING, instant.0 * (1.0 - SMOOTHING)),
+                self.velocity.1.mul_add(SMOOTHING, instant.1 * (1.0 - SMOOTHING)),
+            )
+        } else {
+            instant
+        };
+        self.sampled = true;
+    }
+
     /// The straight-line distance from the origin to `at`.
     fn travel_from_origin(&self, at: Point) -> f32 {
         (at.x - self.origin.x).hypot(at.y - self.origin.y)
     }
 }
+
+/// How much of the previous velocity estimate each new sample keeps.
+const SMOOTHING: f32 = 0.4;
 
 #[cfg(test)]
 mod tests {
@@ -226,6 +276,51 @@ mod tests {
         assert_eq!(pan.state(), RecognizerState::Cancelled);
         assert_eq!(pan.update(Point::new(100.0, 200.0), 2_000), None);
         assert!(!pan.has_begun());
+    }
+
+    /// A quarter-second in µs — long enough that a contact counts as rested.
+    const REST: u64 = 250_000;
+
+    #[test]
+    fn a_moving_contact_reports_the_speed_it_is_moving_at() {
+        let mut pan = recognizer();
+        // 30px in 30ms, twice: 1000 px/s, and the smoothing has converged.
+        pan.update(Point::new(100.0, 130.0), 30_000);
+        pan.update(Point::new(100.0, 160.0), 60_000);
+        let (_, vy) = pan.velocity_at(60_000, REST);
+        assert!((vy - 1_000.0).abs() < 1.0, "got {vy} px/s");
+    }
+
+    #[test]
+    fn velocity_is_signed_by_direction() {
+        let mut pan = recognizer();
+        pan.update(Point::new(100.0, 70.0), 30_000);
+        pan.update(Point::new(100.0, 40.0), 60_000);
+        assert!(pan.velocity_at(60_000, REST).1 < 0.0);
+    }
+
+    /// A finger that stops before lifting has thrown nothing.
+    ///
+    /// Nothing is delivered while a finger rests, so the last sample still holds
+    /// the speed from before the pause. Reporting it would fling a list the user
+    /// had deliberately brought to a stop — which is exactly what it feels like
+    /// when a toolkit gets this wrong.
+    #[test]
+    fn a_contact_that_came_to_rest_before_lifting_has_no_velocity() {
+        let mut pan = recognizer();
+        pan.update(Point::new(100.0, 130.0), 30_000);
+        pan.update(Point::new(100.0, 160.0), 60_000);
+        assert!(pan.velocity_at(60_000, REST).1 > 0.0, "moving at the sample");
+
+        // Lifted half a second after the last movement.
+        let (_, vy) = pan.velocity_at(560_000, REST);
+        assert!((vy - 0.0).abs() < f32::EPSILON, "got {vy} px/s after resting");
+    }
+
+    #[test]
+    fn a_contact_that_never_moved_has_no_velocity() {
+        let pan = recognizer();
+        assert_eq!(pan.velocity_at(0, REST), (0.0, 0.0));
     }
 
     #[test]

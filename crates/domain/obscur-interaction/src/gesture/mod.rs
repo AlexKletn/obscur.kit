@@ -7,5 +7,7 @@ mod gesture_recognizer;
 pub use gesture_recognizer::{GestureKind, GestureRecognizer, RecognizerId, RecognizerState};
 mod gesture_resolution;
 pub use gesture_resolution::GestureResolution;
+mod fling;
+pub use fling::Fling;
 mod pan_recognizer;
 pub use pan_recognizer::PanRecognizer;
