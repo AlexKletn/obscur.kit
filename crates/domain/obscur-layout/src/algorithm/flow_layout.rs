@@ -186,7 +186,9 @@ impl LayoutAlgorithm for FlowLayout {
         // **unbounded** while this box is itself being measured for someone else's
         // `max-content`.
         let stretch = (constraints.max.width - bp_x).max(0.0);
-        let explicit = style.width.resolve(constraints.max.width);
+        // See `FlexLayout`: a percentage resolves against the containing block the
+        // caller states, `max` is only the available space for an `auto` size.
+        let explicit = style.width.resolve(constraints.percent_width());
         // `auto` normally stretches to the space offered — but at the two ends of
         // the range there is no space to stretch to, and the offer is a QUESTION
         // about the content rather than an amount of room (see `BoxConstraints`'s
@@ -527,7 +529,7 @@ fn layout_vertical(
     let block_avail = (constraints.max.width - bp_x).max(0.0);
     let explicit_block = style
         .width
-        .resolve(constraints.max.width)
+        .resolve(constraints.percent_width())
         .map(|w| style.box_sizing.content_extent(w, bp_x).max(0.0));
 
     // Which physical edges the block-start / block-end sides map to under this

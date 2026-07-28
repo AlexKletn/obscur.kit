@@ -87,6 +87,7 @@ fn probe_main(
         BoxConstraints {
             min: Size::ZERO,
             max,
+            percent_basis: None,
         },
     );
     if is_row {
@@ -314,16 +315,20 @@ impl LayoutAlgorithm for FlexLayout {
         // subtracts border + padding, so both modes are consistent — no phantom
         // inflation and no clamp mismatch when an explicitly-sized container is
         // arranged at its authored (border-box) size by its parent.
+        // A percentage resolves against the **containing block**, which the
+        // caller states; `max` is the space available for an `auto` size and is
+        // the fallback when no basis was given. Conflating the two let an
+        // arranged box read its own border box as its containing block.
         let content_width = style
             .width
-            .resolve(constraints.max.width)
+            .resolve(constraints.percent_width())
             .map_or(constraints.max.width - bp_x, |w| {
                 style.box_sizing.content_extent(w, bp_x)
             })
             .max(0.0);
         let content_height = style
             .height
-            .resolve(constraints.max.height)
+            .resolve(constraints.percent_height())
             .map_or(constraints.max.height - bp_y, |h| {
                 style.box_sizing.content_extent(h, bp_y)
             })
@@ -1414,11 +1419,13 @@ fn cross_item_size(
             BoxConstraints {
                 min: Size::new(main, 0.0),
                 max: Size::new(main, container_cross),
+                percent_basis: None,
             }
         } else {
             BoxConstraints {
                 min: Size::new(0.0, main),
                 max: Size::new(container_cross, main),
+                percent_basis: None,
             }
         };
         let measured = measurer.measure_child(index, item_constraints);

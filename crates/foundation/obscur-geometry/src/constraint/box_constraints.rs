@@ -10,6 +10,22 @@ pub struct BoxConstraints {
     pub min: Size,
     /// Maximum size. Components may be [`f32::INFINITY`] for unbounded axes.
     pub max: Size,
+    /// The **containing block's content size**, when the caller knows it — the
+    /// basis a percentage size resolves against (CSS 2.1 §10.2).
+    ///
+    /// `min`/`max` cannot answer this. They are a *range*, and a range means two
+    /// different things at two different moments: "I have decided your size"
+    /// while arranging, and "how small could you be?" while measuring — a
+    /// `min-content` question arrives as a tight `0`. A box that resolved its own
+    /// `width: 100%` against that range therefore read its own border box as its
+    /// containing block and came back one padding wider, every level down.
+    ///
+    /// [`None`] means the caller did not say, and a percentage falls back to
+    /// resolving against `max` — the behaviour every caller had before this
+    /// existed. Servo threads the same distinction as
+    /// `SizeConstraint = Definite | MinMax`; this is its first half, carried
+    /// alongside the range rather than replacing it.
+    pub percent_basis: Option<Size>,
 }
 
 impl BoxConstraints {
@@ -19,7 +35,37 @@ impl BoxConstraints {
         Self {
             min: Size::ZERO,
             max,
+            percent_basis: None,
         }
+    }
+
+    /// Returns these constraints with the containing block's content size
+    /// attached, so a percentage size resolves against **it** rather than against
+    /// whatever range the box was handed.
+    ///
+    /// Set it wherever the caller already knows the containing block — arranging
+    /// a child, laying out a root against the viewport. A measure pass asking a
+    /// box how small it can be knows no such thing and leaves it unset.
+    #[must_use]
+    pub const fn with_percent_basis(mut self, basis: Size) -> Self {
+        self.percent_basis = Some(basis);
+        self
+    }
+
+    /// The width a percentage resolves against: the containing block's content
+    /// width when known, else the upper bound (the pre-existing behaviour).
+    #[must_use]
+    pub fn percent_width(self) -> f32 {
+        self.percent_basis
+            .map_or(self.max.width, |basis| basis.width)
+    }
+
+    /// The height a percentage resolves against — see
+    /// [`percent_width`](Self::percent_width).
+    #[must_use]
+    pub fn percent_height(self) -> f32 {
+        self.percent_basis
+            .map_or(self.max.height, |basis| basis.height)
     }
 
     /// Constraints that force exactly `size`.
@@ -28,6 +74,7 @@ impl BoxConstraints {
         Self {
             min: size,
             max: size,
+            percent_basis: None,
         }
     }
 
@@ -148,6 +195,7 @@ mod tests {
         let c = BoxConstraints {
             min: Size::new(50.0, 5.0),
             max: Size::new(400.0, 400.0),
+            percent_basis: None,
         };
         assert_eq!(
             c.constrain_allowing_overflow(Size::new(10.0, 1.0)),

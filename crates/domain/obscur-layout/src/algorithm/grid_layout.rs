@@ -1549,6 +1549,7 @@ impl LayoutAlgorithm for GridLayout {
                 BoxConstraints {
                     min: Size::new(w, 0.0),
                     max: Size::new(w, content_height),
+                    percent_basis: None,
                 },
             );
         }
@@ -1680,6 +1681,7 @@ impl LayoutAlgorithm for GridLayout {
                             },
                         ),
                         max: Size::new(cell_w, cell_h),
+                        percent_basis: None,
                     },
                 );
                 let iw = if inline == CellAlign::Stretch {

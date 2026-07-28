@@ -128,6 +128,7 @@ impl LayoutAlgorithm for DockingLayout {
                     let cc = BoxConstraints {
                         min: Size::new(remaining.size.width, 0.0),
                         max: Size::new(remaining.size.width, remaining.size.height),
+                        percent_basis: None,
                     };
                     let measured = measurer.measure_child(index, cc);
                     let band = measured.height.min(remaining.size.height);
@@ -140,6 +141,7 @@ impl LayoutAlgorithm for DockingLayout {
                     let cc = BoxConstraints {
                         min: Size::new(remaining.size.width, 0.0),
                         max: Size::new(remaining.size.width, remaining.size.height),
+                        percent_basis: None,
                     };
                     let measured = measurer.measure_child(index, cc);
                     let band = measured.height.min(remaining.size.height);
@@ -154,6 +156,7 @@ impl LayoutAlgorithm for DockingLayout {
                     let cc = BoxConstraints {
                         min: Size::new(0.0, remaining.size.height),
                         max: Size::new(remaining.size.width, remaining.size.height),
+                        percent_basis: None,
                     };
                     let measured = measurer.measure_child(index, cc);
                     let band = measured.width.min(remaining.size.width);
@@ -166,6 +169,7 @@ impl LayoutAlgorithm for DockingLayout {
                     let cc = BoxConstraints {
                         min: Size::new(0.0, remaining.size.height),
                         max: Size::new(remaining.size.width, remaining.size.height),
+                        percent_basis: None,
                     };
                     let measured = measurer.measure_child(index, cc);
                     let band = measured.width.min(remaining.size.width);

@@ -2465,6 +2465,9 @@ fn arrange(
         BoxConstraints {
             min: Size::new(constraints.min.width, 0.0),
             max: Size::new(constraints.max.width, f32::INFINITY),
+            // The relaxation frees the block axis only; the percentage basis the
+            // caller supplied still describes the same containing block.
+            percent_basis: constraints.percent_basis,
         }
     } else {
         constraints
@@ -2528,6 +2531,25 @@ fn arrange(
     // definite percentage inset is affected by the approximation; a `px` inset is
     // exact.
     let containing = out.size();
+    // The containing block a child's percentage size resolves against: **this**
+    // node's content box, not the border box the child is arranged at. Stating it
+    // is what stops the child from re-resolving `width: 100%` against its own
+    // arranged size and coming back one padding wider at every level (CSS 2.1
+    // §10.2; Servo's `SizeConstraint::Definite`).
+    let percent_basis = Size::new(
+        (containing.width
+            - style.padding.left
+            - style.padding.right
+            - style.border.left
+            - style.border.right)
+            .max(0.0),
+        (containing.height
+            - style.padding.top
+            - style.padding.bottom
+            - style.border.top
+            - style.border.bottom)
+            .max(0.0),
+    );
 
     // Recurse into in-flow children, translating each parent-relative box to
     // absolute. Zipping bounds both sides, so a mismatched length never indexes
@@ -2576,7 +2598,7 @@ fn arrange(
             grid_templates,
             child.node(),
             child_origin,
-            BoxConstraints::tight(child_rel.size()),
+            BoxConstraints::tight(child_rel.size()).with_percent_basis(percent_basis),
             boxes,
             paragraph,
             hyphenator,
