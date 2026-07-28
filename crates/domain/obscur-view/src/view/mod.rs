@@ -10,7 +10,7 @@ pub use view_key::ViewKey;
 mod view_node;
 pub use view_node::ViewNode;
 mod event_name;
-pub use event_name::{EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT};
+pub use event_name::{EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, EVENT_LONG_PRESS};
 mod slot;
 pub use slot::{
     SLOT, SLOT_OUTLET, assigns_slots, has_outlet, is_outlet, project_slots, slot_assignment,

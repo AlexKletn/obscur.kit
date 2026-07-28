@@ -26,7 +26,7 @@ use obscur_interaction::command::{
 };
 use obscur_interaction::focus::{FocusScope, FocusScopeId};
 use obscur_interaction::hover::{HoverChain, HoverTransition};
-use obscur_interaction::gesture::{Fling, PanRecognizer, RecognizerId};
+use obscur_interaction::gesture::{Fling, LongPressRecognizer, PanRecognizer, RecognizerId};
 use obscur_interaction::pointer::{
     PointerCaptureRegistry, PointerDevice, PointerEvent, PointerEventKind, PointerId,
 };
@@ -69,7 +69,8 @@ use obscur_tree::tree::RetainedTree;
 use obscur_view::boundary::ComponentFailure;
 use obscur_view::component::{ComponentRegistration, RegistryError};
 use obscur_view::view::{
-    EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, VIRTUAL_SPACER, View, ViewNode, has_outlet,
+    EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, EVENT_LONG_PRESS, VIRTUAL_SPACER, View, ViewNode,
+    has_outlet,
     has_virtual_collection, project_slots, realize_virtual_collections, realize_virtual_lists,
     virtual_scroll_resets,
 };
@@ -141,6 +142,15 @@ const FLING_TAU: f32 = 0.325;
 /// creeping toward a limit it approaches but never reaches.
 const FLING_REST_SPEED: f32 = 20.0;
 
+/// How long a direct contact must be held still to be a long press, in seconds
+/// (spec §6.16 `LongPress`).
+///
+/// The platform convention, and it is a compromise both ways: shorter and a
+/// slow, deliberate tap starts firing context actions; longer and the gesture
+/// feels broken, because nothing on screen has happened yet and the user has no
+/// way to know the hold is being counted.
+const LONG_PRESS_SECONDS: f32 = 0.5;
+
 /// The speed (px/s) a lift must exceed for the drag to have *thrown* the list.
 ///
 /// Deliberately higher than [`FLING_REST_SPEED`], and not the same question. The
@@ -175,6 +185,21 @@ struct PointerClick {
     time_micros: u64,
     /// The running click count of this press (`1`, `2`, or `3`, then cycling).
     count: u32,
+}
+
+/// A long press armed for one pointer: the recognizer counting the hold, the
+/// node the contact went down on, where it went down, and whether the platform
+/// vouched for the contact.
+///
+/// The trust is carried from the `Down` because a long press *is* a §2.3 default
+/// action, gated exactly like a click's: an injected contact may be observed,
+/// but it must not run the handler a real finger would.
+#[derive(Debug, Clone, Copy)]
+struct ActiveHold {
+    press: LongPressRecognizer,
+    target: NodeId,
+    origin: Point,
+    trusted: bool,
 }
 
 /// A pan armed for one pointer: the recognizer deciding whether the contact is a
@@ -418,6 +443,9 @@ pub struct UiRuntime {
     /// The scroll containers still coasting from a flick, advanced by
     /// [`advance_motion`](Self::advance_motion) (spec §6.16).
     flings: HashMap<NodeId, Fling>,
+    /// The long presses being counted, one per direct contact that went down on
+    /// something with an `EVENT_LONG_PRESS` binding (spec §6.16).
+    holds: HashMap<PointerId, ActiveHold>,
     /// The in-flight pointer drag-selection over the focused editable, if any:
     /// `(field node, anchor byte offset)`. Armed by a
     /// [`PointerEventKind::Down`] whose editable ancestor has an active editing
@@ -966,6 +994,7 @@ impl UiRuntime {
             captures: PointerCaptureRegistry::new(),
             pans: HashMap::new(),
             flings: HashMap::new(),
+            holds: HashMap::new(),
             text_drag: None,
             last_clicks: HashMap::new(),
             click_count: 1,
@@ -3596,6 +3625,7 @@ impl UiRuntime {
         // the one that forgot would have inertia only on the frames something
         // else happened to be animating.
         self.advance_flings(delta);
+        self.advance_holds(delta);
         // Remember where each timeline that finished on this tick settled: the
         // scheduler prunes it, and the overlay still has to apply the value the
         // animation ended on, which for a reversed final iteration is progress
@@ -4304,6 +4334,16 @@ impl UiRuntime {
         //     target the row under the finger, which is the row the gesture has
         //     just decided it is not pressing.
         let mut press_changed = false;
+        // A contact that wanders is doing something other than waiting, so the
+        // hold is ruled out before the pan is even consulted — the same travel
+        // that starts a drag ends a hold, and a context action firing in the
+        // middle of a scroll is the failure this prevents.
+        if event.kind() == PointerEventKind::Move
+            && let Some(hold) = self.holds.get_mut(&event.pointer())
+        {
+            let travel = (screen_point.x - hold.origin.x).hypot(screen_point.y - hold.origin.y);
+            hold.press.moved(travel, TOUCH_SLOP);
+        }
         let panning = self.update_pan(&event, screen_point, &mut press_changed);
         if panning && let Some(captor) = self.captures.target(event.pointer()) {
             target = Some(captor);
@@ -4393,6 +4433,13 @@ impl UiRuntime {
             //    recognizer stays `Possible` until the finger travels past the
             //    slop, so a tap here costs one struct and changes nothing.
             self.arm_pan(&event, screen_point);
+            // 3a-hold-arm. And, if what it landed on binds a long press, arms the
+            //    hold that will fire if the finger stays put. The two coexist:
+            //    whichever the finger goes on to do — travel or wait — rules the
+            //    other out, and a tap short of both is still a tap.
+            if let Some(node) = target {
+                self.arm_long_press(&event, screen_point, node);
+            }
         }
 
         // 3a-drag. While a drag is armed, a pointer move re-selects the range from
@@ -4496,6 +4543,9 @@ impl UiRuntime {
             if held.and_then(|press| press.target).is_some() {
                 press_changed = true;
             }
+            if let Some(mut hold) = self.holds.remove(&event.pointer()) {
+                hold.press.end();
+            }
             if let Some(mut active) = self.pans.remove(&event.pointer()) {
                 let dragging = active.pan.has_begun();
                 active.pan.end();
@@ -4525,6 +4575,9 @@ impl UiRuntime {
                 .is_some()
             {
                 press_changed = true;
+            }
+            if let Some(mut hold) = self.holds.remove(&event.pointer()) {
+                hold.press.cancel();
             }
             if let Some(mut active) = self.pans.remove(&event.pointer()) {
                 active.pan.cancel();
@@ -4652,6 +4705,88 @@ impl UiRuntime {
         self.scroll_by(container, -dy);
         self.request_frame(FrameReason::Input);
         true
+    }
+
+    /// Arms a long press for `event`'s pointer if a **direct** contact went down
+    /// on something that binds `EVENT_LONG_PRESS` (spec §6.16).
+    ///
+    /// Armed only where the gesture is actually bound, which is not an
+    /// optimisation but the difference between an idle app and one that renders
+    /// continuously: a long press is the one gesture that must fire while nothing
+    /// is happening, so an armed hold keeps asking for frames until it resolves.
+    /// Arming on every contact would spend half a second of frames on every tap
+    /// in the application, almost always to conclude nothing.
+    ///
+    /// Direct devices only. A mouse has a second button for what a hold reaches.
+    fn arm_long_press(&mut self, event: &PointerEvent, screen_point: Point, target: NodeId) {
+        if !event.device().is_direct() {
+            return;
+        }
+        if self.is_within_disabled(target) {
+            return;
+        }
+        if self
+            .command_for_event_bubbling(target, EVENT_LONG_PRESS)
+            .is_none()
+        {
+            return;
+        }
+        let id = RecognizerId::from_raw(event.pointer().raw());
+        self.holds.insert(
+            event.pointer(),
+            ActiveHold {
+                press: LongPressRecognizer::new(id, LONG_PRESS_SECONDS),
+                target,
+                origin: screen_point,
+                trusted: event.trust().is_trusted(),
+            },
+        );
+        // Nothing else will schedule the frames that count the hold down.
+        self.request_frame(FrameReason::Animation);
+    }
+
+    /// Advances every armed hold by `delta` seconds, firing the ones that cross
+    /// the threshold (spec §6.16).
+    ///
+    /// A recognized hold **consumes the contact**: the press is discarded, so the
+    /// lift that follows is not also a click. Holding a control and letting go
+    /// must do one thing, not both — and it is the hold the user waited for.
+    fn advance_holds(&mut self, delta: f32) {
+        if self.holds.is_empty() {
+            return;
+        }
+        let fired: Vec<(PointerId, NodeId, bool)> = self
+            .holds
+            .iter_mut()
+            .filter_map(|(pointer, hold)| {
+                hold.press
+                    .advance(delta)
+                    .then_some((*pointer, hold.target, hold.trusted))
+            })
+            .collect();
+        for (pointer, target, trusted) in fired {
+            self.presses.remove(&pointer);
+            // §2.3 step 4: the default action runs only for a platform-vouched
+            // gesture. An untrusted contact still had its hold counted and
+            // observed; it just does not run the handler.
+            if trusted {
+                self.fire_long_press(target);
+            }
+            self.request_frame(FrameReason::Input);
+        }
+        self.holds.retain(|_, hold| hold.press.is_pending());
+        if !self.holds.is_empty() {
+            self.request_frame(FrameReason::Animation);
+        }
+    }
+
+    /// Dispatches the `EVENT_LONG_PRESS` command bound at or above `node`.
+    /// Returns whether a handler ran.
+    fn fire_long_press(&mut self, node: NodeId) -> bool {
+        match self.command_for_event_bubbling(node, EVENT_LONG_PRESS) {
+            Some((_bound, command)) => self.dispatch_command_from(Some(node), command),
+            None => false,
+        }
     }
 
     /// Throws `active`'s container into a coast, if the contact that just lifted
@@ -12512,6 +12647,218 @@ mod tests {
         let late = runtime.handle_pointer(finger(0, PointerEventKind::Up, 50.0, 25.0));
         assert_eq!(late.command(), None);
         assert!(!ran.get());
+    }
+
+    // ---- Long press (§6.16) ----------------------------------------------------
+
+    /// The panel with `a` bound to a **click** command and `b` bound to a **long
+    /// press**, so the two gestures can be told apart by which handler ran.
+    /// Returns `(runtime, a, b, clicked, held)`.
+    #[allow(clippy::type_complexity)]
+    fn long_press_fixture() -> (
+        UiRuntime,
+        View,
+        Stylesheet,
+        NodeId,
+        NodeId,
+        Rc<Cell<bool>>,
+        Rc<Cell<bool>>,
+    ) {
+        let cmd_click = InternedSymbol::from_raw(0x1A);
+        let cmd_hold = InternedSymbol::from_raw(0x1B);
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let (clicked, held) = (Rc::new(Cell::new(false)), Rc::new(Cell::new(false)));
+        {
+            let (c, h) = (clicked.clone(), held.clone());
+            runtime.on_command(cmd_click, move || c.set(true));
+            runtime.on_command(cmd_hold, move || h.set(true));
+        }
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(100))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+                .with_children(ViewFragment::from_nodes(vec![
+                    ViewNode::element(ComponentId::from_raw(101))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("a".into())))
+                        .with_event(ViewEventBinding::new(EVENT_CLICK, cmd_click)),
+                    ViewNode::element(ComponentId::from_raw(102))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("b".into())))
+                        .with_event(ViewEventBinding::new(EVENT_CLICK, cmd_click))
+                        .with_event(ViewEventBinding::new(EVENT_LONG_PRESS, cmd_hold)),
+                ])),
+        ]));
+        let sheet = interaction_sheet();
+        let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+        let (_panel, a, b) = panel_nodes(&runtime);
+        (runtime, view, sheet, a, b, clicked, held)
+    }
+
+    /// `b` is at y ∈ [50, 100) and binds the hold.
+    const HOLD_TARGET_Y: f32 = 75.0;
+
+    #[test]
+    fn a_contact_held_still_fires_the_long_press_before_it_lifts() {
+        let (mut runtime, _view, _sheet, _a, _b, clicked, held) = long_press_fixture();
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 50.0, HOLD_TARGET_Y));
+
+        runtime.advance_motion(0.3);
+        assert!(!held.get(), "not yet — the threshold is half a second");
+        runtime.advance_motion(0.3);
+        assert!(held.get(), "the hold fired while the finger was still down");
+        assert!(!clicked.get(), "and it is not a click");
+    }
+
+    /// The lift after a recognized hold must not *also* click. Holding something
+    /// and letting go does one thing, and it is the thing the user waited for.
+    #[test]
+    fn the_lift_after_a_long_press_is_not_a_click() {
+        let (mut runtime, _view, _sheet, _a, _b, clicked, held) = long_press_fixture();
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 50.0, HOLD_TARGET_Y));
+        runtime.advance_motion(0.6);
+        assert!(held.get());
+
+        let dispatch = runtime.handle_pointer(finger(0, PointerEventKind::Up, 50.0, HOLD_TARGET_Y));
+        assert_eq!(dispatch.command(), None);
+        assert!(!clicked.get(), "the release was consumed by the hold");
+    }
+
+    /// The pair to the test above: lifting *before* the threshold is an ordinary
+    /// tap. Without this, an implementation that simply broke clicks on
+    /// long-pressable elements would pass.
+    #[test]
+    fn a_contact_that_lifts_before_the_threshold_is_a_plain_tap() {
+        let (mut runtime, _view, _sheet, _a, _b, clicked, held) = long_press_fixture();
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 50.0, HOLD_TARGET_Y));
+        runtime.advance_motion(0.2);
+        runtime.handle_pointer(finger(0, PointerEventKind::Up, 50.0, HOLD_TARGET_Y));
+
+        assert!(clicked.get(), "the tap clicked");
+        assert!(!held.get(), "and no hold fired");
+
+        // And the hold cannot fire late, after the finger is long gone.
+        runtime.advance_motion(1.0);
+        assert!(!held.get());
+    }
+
+    /// A finger that wanders is scrolling, or dragging, or changing its mind —
+    /// anything but waiting. A context action firing mid-scroll is the failure
+    /// this prevents.
+    #[test]
+    fn a_contact_that_wanders_past_the_slop_fires_no_hold() {
+        let (mut runtime, _view, _sheet, _a, _b, _clicked, held) = long_press_fixture();
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 50.0, HOLD_TARGET_Y));
+        runtime.advance_motion(0.2);
+        runtime.handle_pointer(finger(0, PointerEventKind::Move, 50.0, HOLD_TARGET_Y - 30.0));
+        runtime.advance_motion(1.0);
+
+        assert!(!held.get(), "the hold was ruled out by the travel");
+    }
+
+    #[test]
+    fn jitter_within_the_slop_still_holds() {
+        // The pair to the test above, one axis apart: a fingertip rolls while it
+        // presses, and a hold any tremor killed would be unreachable.
+        let (mut runtime, _view, _sheet, _a, _b, _clicked, held) = long_press_fixture();
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 50.0, HOLD_TARGET_Y));
+        runtime.advance_motion(0.2);
+        runtime.handle_pointer(finger(0, PointerEventKind::Move, 52.0, HOLD_TARGET_Y + 2.0));
+        runtime.advance_motion(0.4);
+
+        assert!(held.get());
+    }
+
+    #[test]
+    fn a_cancelled_contact_fires_no_hold() {
+        let (mut runtime, _view, _sheet, _a, _b, _clicked, held) = long_press_fixture();
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 50.0, HOLD_TARGET_Y));
+        runtime.advance_motion(0.2);
+        runtime.handle_pointer(finger(0, PointerEventKind::Cancel, 50.0, HOLD_TARGET_Y));
+        runtime.advance_motion(1.0);
+
+        assert!(!held.get());
+    }
+
+    /// A mouse has a second button for what a hold reaches, and a cursor resting
+    /// on a control is not a gesture at all — it is where the pointer happens to
+    /// be.
+    #[test]
+    fn a_resting_mouse_is_not_a_long_press() {
+        let (mut runtime, _view, _sheet, _a, _b, _clicked, held) = long_press_fixture();
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, HOLD_TARGET_Y));
+        runtime.advance_motion(2.0);
+
+        assert!(!held.get());
+    }
+
+    /// §2.3 step 4: the default action is gated on trust, exactly like a click's.
+    /// An injected contact is observed — the hold is counted — but the handler a
+    /// real finger would run does not run.
+    #[test]
+    fn an_untrusted_contact_counts_its_hold_but_runs_no_handler() {
+        let (mut runtime, _view, _sheet, _a, _b, _clicked, held) = long_press_fixture();
+        let untrusted = PointerEvent::new(
+            PointerId::touch(0),
+            PointerDevice::Touch,
+            PointerEventKind::Down,
+            Point::new(50.0, HOLD_TARGET_Y),
+        );
+        runtime.handle_pointer(untrusted);
+        runtime.advance_motion(0.6);
+
+        assert!(!held.get(), "a synthetic hold runs no gated default action");
+    }
+
+    /// A hold is the one gesture that fires while nothing is happening, so the
+    /// runtime has to keep asking for the frames that count it down — nothing
+    /// else will.
+    #[test]
+    fn an_armed_hold_keeps_asking_for_the_frames_that_count_it() {
+        let (mut runtime, _view, _sheet, _a, _b, _clicked, held) = long_press_fixture();
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 50.0, HOLD_TARGET_Y));
+
+        let mut ticks = 0;
+        while !held.get() && ticks < 100 {
+            assert!(
+                runtime.has_pending_frame(),
+                "tick {ticks}: the countdown must keep the loop turning"
+            );
+            let _ = runtime.run_due_frame_reactive();
+            runtime.advance_motion(0.1);
+            ticks += 1;
+        }
+        assert!(held.get(), "the hold fired within {ticks} ticks");
+    }
+
+    /// And an ordinary tap on something with no hold bound must not put the app
+    /// into a frame loop for half a second.
+    ///
+    /// Measured by draining the scheduler and then ticking: a press schedules a
+    /// restyle frame either way, and that one is owed. What must differ is
+    /// whether *ticking* keeps producing more.
+    #[test]
+    fn a_contact_on_an_unbound_element_arms_nothing() {
+        let (mut runtime, view, sheet, _a, _b, clicked, _held) = long_press_fixture();
+        let sheets = std::slice::from_ref(&sheet);
+
+        // `a` (y ∈ [0,50)) binds only a click; `b` binds the hold.
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 50.0, 25.0));
+        while runtime.run_due_frame(&view, sheets).is_some() {}
+        runtime.advance_motion(0.1);
+        assert!(
+            !runtime.has_pending_frame(),
+            "nothing is counting, so ticking schedules nothing"
+        );
+
+        runtime.handle_pointer(finger(0, PointerEventKind::Up, 50.0, 25.0));
+        assert!(clicked.get(), "and it is still an ordinary tap");
+
+        // The contrast, on the element that *does* bind a hold.
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 50.0, HOLD_TARGET_Y));
+        while runtime.run_due_frame(&view, sheets).is_some() {}
+        runtime.advance_motion(0.1);
+        assert!(
+            runtime.has_pending_frame(),
+            "an armed hold keeps the loop turning"
+        );
     }
 
     // ---- Pointer capture (§2.4) ------------------------------------------------

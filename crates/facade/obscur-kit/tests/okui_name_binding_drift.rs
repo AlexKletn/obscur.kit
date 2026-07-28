@@ -75,6 +75,14 @@ fn reserved_event_symbols_match_obscur_view() {
     assert_eq!(name_binding::EVENT_CLICK, view::EVENT_CLICK);
     assert_eq!(name_binding::EVENT_INPUT, view::EVENT_INPUT);
     assert_eq!(name_binding::EVENT_CHANGE, view::EVENT_CHANGE);
+    assert_eq!(name_binding::EVENT_LONG_PRESS, view::EVENT_LONG_PRESS);
+    // And the markup spelling reaches it: `on:longpress="showMenu"` must lower to
+    // the symbol the runtime fires a recognized hold on, or the binding silently
+    // becomes an ordinary hashed name that nothing ever dispatches.
+    assert_eq!(
+        name_binding::event_symbol("longpress"),
+        view::EVENT_LONG_PRESS
+    );
 }
 
 #[test]

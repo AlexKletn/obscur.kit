@@ -38,6 +38,18 @@ pub const EVENT_INPUT: InternedSymbol = InternedSymbol::from_raw(0x0000_0102);
 /// later wiring; the runtime does not yet fire it.
 pub const EVENT_CHANGE: InternedSymbol = InternedSymbol::from_raw(0x0000_0103);
 
+/// Reserved symbol naming a **long press** — a direct contact held still past
+/// the runtime's threshold without lifting (spec §6.16 `LongPress`).
+///
+/// The touch counterpart to a secondary click. A touchscreen has one button and
+/// no modifiers, so everything a right-click or a modifier would reach on a
+/// desktop is reached by holding still, which makes this the only route to
+/// context actions on a tablet. Bound the same way a click is —
+/// [`ViewEventBinding::new(EVENT_LONG_PRESS, command)`](super::ViewEventBinding::new)
+/// — and the runtime fires `command` when the hold is recognized, *before* the
+/// finger lifts, and instead of the click that lift would otherwise have been.
+pub const EVENT_LONG_PRESS: InternedSymbol = InternedSymbol::from_raw(0x0000_0104);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -48,6 +60,9 @@ mod tests {
         assert_ne!(EVENT_CLICK, EVENT_INPUT);
         assert_ne!(EVENT_INPUT, EVENT_CHANGE);
         assert_ne!(EVENT_CLICK, EVENT_CHANGE);
+        assert_ne!(EVENT_LONG_PRESS, EVENT_CLICK);
+        assert_ne!(EVENT_LONG_PRESS, EVENT_INPUT);
+        assert_ne!(EVENT_LONG_PRESS, EVENT_CHANGE);
         // Distinct from the style-attribute namespace (`0x0000_00xx`).
         assert_ne!(EVENT_CLICK, super::super::CLASS);
         assert_ne!(EVENT_CLICK, super::super::ID);

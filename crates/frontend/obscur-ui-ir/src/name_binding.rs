@@ -168,6 +168,8 @@ pub const EVENT_CLICK: InternedSymbol = InternedSymbol::from_raw(0x0000_0101);
 pub const EVENT_INPUT: InternedSymbol = InternedSymbol::from_raw(0x0000_0102);
 /// Reserved `change` event symbol (`obscur_view::view::EVENT_CHANGE`).
 pub const EVENT_CHANGE: InternedSymbol = InternedSymbol::from_raw(0x0000_0103);
+/// Reserved `longpress` event symbol (`obscur_view::view::EVENT_LONG_PRESS`).
+pub const EVENT_LONG_PRESS: InternedSymbol = InternedSymbol::from_raw(0x0000_0104);
 
 // --- Primitive component ids (mirror `obscur_primitives::*::COMPONENT_ID`). ---
 
@@ -394,6 +396,10 @@ pub fn event_symbol(name: &str) -> InternedSymbol {
         "click" => EVENT_CLICK,
         "input" => EVENT_INPUT,
         "change" => EVENT_CHANGE,
+        // Spelled without a separator to match `click`/`input`/`change`: these
+        // are markup attribute names (`on:longpress=…`), and one convention
+        // across all of them is worth more than matching any outside spelling.
+        "longpress" => EVENT_LONG_PRESS,
         other => fallback_symbol(other),
     }
 }
