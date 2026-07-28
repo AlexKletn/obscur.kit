@@ -26,6 +26,7 @@ use obscur_interaction::command::{
 };
 use obscur_interaction::focus::{FocusScope, FocusScopeId};
 use obscur_interaction::hover::{HoverChain, HoverTransition};
+use obscur_interaction::gesture::{PanRecognizer, RecognizerId};
 use obscur_interaction::pointer::{
     PointerCaptureRegistry, PointerDevice, PointerEvent, PointerEventKind, PointerId,
 };
@@ -116,6 +117,15 @@ const MULTI_CLICK_WINDOW_MICROS: u64 = 500_000;
 /// as a multi-click — a press that jumps farther starts a fresh count.
 const MULTI_CLICK_RADIUS: f32 = 4.0;
 
+/// How far a direct contact must travel from where it went down before it is a
+/// pan rather than a tap, in logical px (spec §6.16 `Pan`).
+///
+/// Larger than [`MULTI_CLICK_RADIUS`] on purpose: a fingertip covers millimetres
+/// of screen and rolls as it presses, so the movement that still counts as
+/// "held still" is much wider than a mouse's. Too small and every tap scrolls the
+/// list a little; too large and the list feels stuck before it starts moving.
+const TOUCH_SLOP: f32 = 10.0;
+
 /// Overscan for a realized `<VirtualFor>` window — extra rows materialized past
 /// each viewport edge so a scroll reveals laid-out rows rather than blanks (spec
 /// §4.9 *overscan*).
@@ -140,6 +150,19 @@ struct PointerClick {
     time_micros: u64,
     /// The running click count of this press (`1`, `2`, or `3`, then cycling).
     count: u32,
+}
+
+/// A pan armed for one pointer: the recognizer deciding whether the contact is a
+/// drag, and the scroll container it would drag.
+///
+/// The container is resolved **once**, where the contact went down, and never
+/// re-resolved: a drag belongs to the list it started in, even once the finger
+/// has left that list's bounds (which is exactly what the pointer capture taken
+/// on the first delta guarantees).
+#[derive(Debug, Clone, Copy)]
+struct ActivePan {
+    pan: PanRecognizer,
+    container: NodeId,
 }
 
 /// One outstanding press: a `Down` with no matching `Up` or `Cancel` yet, held
@@ -364,6 +387,9 @@ pub struct UiRuntime {
     /// gesture that has wandered off it: a thumb being dragged, a finger that
     /// slid past the edge of the row it started on.
     captures: PointerCaptureRegistry,
+    /// The pans armed for each pointer — one per direct contact that went down
+    /// inside a user-scrollable container (spec §6.16 `Pan`).
+    pans: HashMap<PointerId, ActivePan>,
     /// The in-flight pointer drag-selection over the focused editable, if any:
     /// `(field node, anchor byte offset)`. Armed by a
     /// [`PointerEventKind::Down`] whose editable ancestor has an active editing
@@ -910,6 +936,7 @@ impl UiRuntime {
             focused: None,
             presses: HashMap::new(),
             captures: PointerCaptureRegistry::new(),
+            pans: HashMap::new(),
             text_drag: None,
             last_clicks: HashMap::new(),
             click_count: 1,
@@ -4228,9 +4255,24 @@ impl UiRuntime {
         //    claimed a gesture keeps it even when the pointer wanders off, which is
         //    the difference between a drag that works past the edge of its thumb
         //    and one that dies there.
-        let target = self
+        let mut target = self
             .captured_target(event.pointer())
             .or_else(|| self.resolve_hit(event.position(), screen_point));
+
+        // 1b. Pan: a begun drag scrolls its container one-to-one with the finger
+        //     and takes the sequence away from the click and the drag-selection
+        //     that would otherwise be reading the same moves.
+        //
+        //     Before hover, not after, because the move that *begins* a pan is
+        //     also the move that captures the pointer — and a capture that only
+        //     took effect on the next event would let that first move hover and
+        //     target the row under the finger, which is the row the gesture has
+        //     just decided it is not pressing.
+        let mut press_changed = false;
+        let panning = self.update_pan(&event, screen_point, &mut press_changed);
+        if panning && let Some(captor) = self.captures.target(event.pointer()) {
+            target = Some(captor);
+        }
 
         // 2. Hover: chain = target + its element ancestors, topmost-first. A
         //    touchscreen contact does not leave a persistent hover (§2): the
@@ -4256,7 +4298,6 @@ impl UiRuntime {
         // 3. Focus: only a press moves focus. A press also anchors click
         //    detection on the pressed node.
         let mut focus_changed = false;
-        let mut press_changed = false;
         if event.kind() == PointerEventKind::Down {
             // A disabled control is not a focus / press / editing target: a press
             // that lands inside one is inert (it seats no focus, no caret, and no
@@ -4312,13 +4353,20 @@ impl UiRuntime {
                 // leaves the session untouched.
                 self.begin_text_pointer(interactive_target, event.position());
             }
+            // 3a-pan-arm. A direct contact that lands inside a user-scrollable
+            //    container arms a pan for it. Arming is not panning: the
+            //    recognizer stays `Possible` until the finger travels past the
+            //    slop, so a tap here costs one struct and changes nothing.
+            self.arm_pan(&event, screen_point);
         }
 
         // 3a-drag. While a drag is armed, a pointer move re-selects the range from
         //    the press anchor to the current pointer offset over the same field —
         //    live drag-selection (spec §5.11). Not a press/release, so it never
         //    perturbs focus or click detection.
-        if event.kind() == PointerEventKind::Move {
+        //    A move the pan consumed is not a selection gesture: the finger is
+        //    dragging the list, not sweeping over text.
+        if event.kind() == PointerEventKind::Move && !panning {
             self.update_text_drag(event.position());
         }
 
@@ -4413,6 +4461,9 @@ impl UiRuntime {
             if held.and_then(|press| press.target).is_some() {
                 press_changed = true;
             }
+            if let Some(mut active) = self.pans.remove(&event.pointer()) {
+                active.pan.end();
+            }
             // §2.4: a capture is released on pointer completion. The gesture the
             // captor claimed is over, so the next one hit-tests normally.
             self.captures.release(event.pointer());
@@ -4436,6 +4487,9 @@ impl UiRuntime {
             {
                 press_changed = true;
             }
+            if let Some(mut active) = self.pans.remove(&event.pointer()) {
+                active.pan.cancel();
+            }
             // A cancelled pointer has completed just as surely as a released one.
             self.captures.release(event.pointer());
             self.text_drag = None;
@@ -4456,6 +4510,119 @@ impl UiRuntime {
             current_target,
             event.trust(),
         )
+    }
+
+    /// Arms a pan for `event`'s pointer if a **direct** contact went down inside
+    /// a user-scrollable container (spec §6.16 `Pan`).
+    ///
+    /// Direct only — touch and pen. A mouse drag inside a list is a text
+    /// selection or a data drag, and turning it into a scroll would break both;
+    /// the wheel is the mouse's scroll gesture and it already works. A finger has
+    /// no wheel, so dragging the content *is* how it scrolls.
+    ///
+    /// Arming is cheap and speculative: the recognizer starts `Possible` and
+    /// stays there unless the finger travels past the slop, so a tap arms one and
+    /// nothing else happens.
+    fn arm_pan(&mut self, event: &PointerEvent, screen_point: Point) {
+        if !event.device().is_direct() {
+            return;
+        }
+        let Some(container) = self.scrollable_container_at(screen_point) else {
+            return;
+        };
+        let id = RecognizerId::from_raw(event.pointer().raw());
+        self.pans.insert(
+            event.pointer(),
+            ActivePan {
+                pan: PanRecognizer::new(id, screen_point, event.timestamp(), TOUCH_SLOP),
+                container,
+            },
+        );
+    }
+
+    /// Feeds a move to `event`'s armed pan, scrolling its container by the
+    /// reported delta. Returns whether the pan consumed this move.
+    ///
+    /// The first delta — the one that crosses the slop — is where a drag stops
+    /// being a possible tap and becomes a scroll, so it is where the sequence is
+    /// taken away from everything else: the press is **discarded** (the release
+    /// will activate nothing), any armed text drag-selection is dropped, and the
+    /// pointer is captured to the container. Without the discard, flicking a list
+    /// would activate whichever row the finger happened to start on — the single
+    /// most noticeable way touch scrolling goes wrong.
+    ///
+    /// What each of the three does is worth keeping straight, because they
+    /// overlap and it is easy to credit the wrong one:
+    ///
+    /// - The *remembered* container keeps the drag scrolling the right list once
+    ///   the finger has left it.
+    /// - The *capture* stops the rest of the sequence interacting with what it
+    ///   sweeps across, and — because the release then targets the container
+    ///   rather than the row — it is what saves a flick that started **on a row**
+    ///   from activating that row.
+    /// - The *press discard* covers what capture cannot: a flick that started on
+    ///   the container itself, where the pressed node and the captor are the same
+    ///   node, the release matches, and the container's own binding would fire at
+    ///   the end of every flick.
+    ///
+    /// Points arrive in **content space before each container's own scroll
+    /// offset** is folded in. That matters: the scroll-mapped point moves as the
+    /// container scrolls, so tracking it would feed the pan its own output.
+    fn update_pan(
+        &mut self,
+        event: &PointerEvent,
+        screen_point: Point,
+        press_changed: &mut bool,
+    ) -> bool {
+        if event.kind() != PointerEventKind::Move {
+            return false;
+        }
+        let Some(active) = self.pans.get_mut(&event.pointer()) else {
+            return false;
+        };
+        let was_panning = active.pan.has_begun();
+        let Some((_dx, dy)) = active.pan.update(screen_point, event.timestamp()) else {
+            return false;
+        };
+        let container = active.container;
+
+        if !was_panning {
+            if self
+                .presses
+                .remove(&event.pointer())
+                .and_then(|press| press.target)
+                .is_some()
+            {
+                *press_changed = true;
+            }
+            self.text_drag = None;
+            self.captures.capture(event.pointer(), container);
+        }
+
+        // The content follows the finger: dragging up (negative dy) reveals what
+        // is below, which is a larger `scroll_top` — the same sign convention the
+        // wheel path uses.
+        self.scroll_by(container, -dy);
+        self.request_frame(FrameReason::Input);
+        true
+    }
+
+    /// The innermost **user-scrollable** container containing `point` (content
+    /// space), or [`None`].
+    ///
+    /// Filtered by `overflow_scrolls` for the same reason the wheel is: an
+    /// `overflow: hidden` box clips and can be scrolled programmatically but is
+    /// not the user's to drag, or a row that ellipsizes a long name would eat the
+    /// drag meant for the list it sits in.
+    fn scrollable_container_at(&self, point: Point) -> Option<NodeId> {
+        let containers: Vec<_> = scroll_containers(&self.tree, &self.computed, &self.boxes)
+            .into_iter()
+            .filter(|c| overflow_scrolls(&self.computed, c.node))
+            .collect();
+        if containers.is_empty() {
+            return None;
+        }
+        self.apply_scroll_to_point(point, &containers).1
     }
 
     /// Captures `pointer` to `node`, so every subsequent event from that pointer
@@ -12442,6 +12609,237 @@ mod tests {
         let scroller = runtime.tree().get(root).unwrap().child_nodes()[0];
         let rows = runtime.tree().get(scroller).unwrap().child_nodes().to_vec();
         (scroller, rows)
+    }
+
+    // ---- Touch panning (§6.16 `Pan`) -------------------------------------------
+
+    /// The scroller, with every row bound to a click command, so a gesture can be
+    /// asked whether it activated the row it started on.
+    fn scroller_view_with_command(cmd: InternedSymbol) -> View {
+        let rows: Vec<ViewNode> = (0..6)
+            .map(|i| {
+                ViewNode::element(ComponentId::from_raw(200 + i))
+                    .with_prop(ViewProperty::new(CLASS, ViewValue::Text("row".into())))
+                    .with_event(ViewEventBinding::new(EVENT_CLICK, cmd))
+            })
+            .collect();
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(100))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("scroller".into())))
+                .with_children(ViewFragment::from_nodes(rows)),
+        ]))
+    }
+
+    /// A 200×120 scroller of six 40px rows (240px of content ⇒ 120px of scroll),
+    /// every row bound to one command. Returns `(runtime, scroller, ran)`.
+    fn pan_fixture() -> (UiRuntime, NodeId, Rc<Cell<bool>>) {
+        let cmd = InternedSymbol::from_raw(0x0C);
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let ran = Rc::new(Cell::new(false));
+        {
+            let r = ran.clone();
+            runtime.on_command(cmd, move || r.set(true));
+        }
+        let sheet = scroller_sheet();
+        let _ = runtime.render_now(
+            &scroller_view_with_command(cmd),
+            std::slice::from_ref(&sheet),
+        );
+        let (scroller, _rows) = scroller_nodes(&runtime);
+        (runtime, scroller, ran)
+    }
+
+    #[test]
+    fn a_finger_dragging_a_list_scrolls_it_one_to_one() {
+        let (mut runtime, scroller, _ran) = pan_fixture();
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 100.0, 60.0));
+        // Up the screen by 40px: past the slop, so the pan begins and the content
+        // follows the finger — what is below comes into view.
+        runtime.handle_pointer(finger(0, PointerEventKind::Move, 100.0, 20.0));
+
+        assert!(
+            (runtime.scroll_top(scroller) - 40.0).abs() < f32::EPSILON,
+            "the whole 40px of travel scrolled the list, with no slop swallowed; \
+             got {}",
+            runtime.scroll_top(scroller)
+        );
+
+        // And it keeps tracking: another 20px up.
+        runtime.handle_pointer(finger(0, PointerEventKind::Move, 100.0, 0.0));
+        assert!((runtime.scroll_top(scroller) - 60.0).abs() < f32::EPSILON);
+
+        // Dragging back down reverses it.
+        runtime.handle_pointer(finger(0, PointerEventKind::Move, 100.0, 30.0));
+        assert!((runtime.scroll_top(scroller) - 30.0).abs() < f32::EPSILON);
+    }
+
+    /// The behaviour that makes touch scrolling usable at all: flicking a list
+    /// must not press the row the finger happened to land on.
+    #[test]
+    fn a_flick_does_not_activate_the_row_it_started_on() {
+        let (mut runtime, scroller, ran) = pan_fixture();
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 100.0, 60.0));
+        runtime.handle_pointer(finger(0, PointerEventKind::Move, 100.0, 20.0));
+        let dispatch = runtime.handle_pointer(finger(0, PointerEventKind::Up, 100.0, 20.0));
+
+        assert!(runtime.scroll_top(scroller) > 0.0, "the list did scroll");
+        assert_eq!(
+            dispatch.command(),
+            None,
+            "the release that ends a scroll is not a click"
+        );
+        assert!(!ran.get(), "no row handler ran");
+    }
+
+    /// The case the *press discard* exists for, as opposed to the capture.
+    ///
+    /// A flick that started on a row is already saved by the capture: the release
+    /// targets the container, which is not the row that was pressed, so nothing
+    /// matches and nothing activates. But when the drag starts on the scroll
+    /// container **itself** — bare space beside the rows — the pressed node and
+    /// the captor are the same node, the release matches, and the container's own
+    /// binding fires at the end of every flick. Only discarding the press stops
+    /// that.
+    #[test]
+    fn a_flick_that_starts_on_the_container_does_not_activate_the_container() {
+        let cmd = InternedSymbol::from_raw(0x0D);
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let ran = Rc::new(Cell::new(false));
+        {
+            let r = ran.clone();
+            runtime.on_command(cmd, move || r.set(true));
+        }
+        // Rows are half the scroller's width, so x = 150 is inside the container
+        // and on no row at all.
+        let mut scroller = size(200.0, 120.0);
+        scroller.push(overflow_auto());
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![
+                class_rule("scroller", scroller),
+                class_rule("row", size(100.0, 40.0)),
+            ],
+        );
+        let rows: Vec<ViewNode> = (0..6)
+            .map(|i| {
+                ViewNode::element(ComponentId::from_raw(200 + i))
+                    .with_prop(ViewProperty::new(CLASS, ViewValue::Text("row".into())))
+            })
+            .collect();
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(100))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("scroller".into())))
+                .with_event(ViewEventBinding::new(EVENT_CLICK, cmd))
+                .with_children(ViewFragment::from_nodes(rows)),
+        ]));
+        let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+        let (scroller_node, _rows) = scroller_nodes(&runtime);
+
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 150.0, 60.0));
+        runtime.handle_pointer(finger(0, PointerEventKind::Move, 150.0, 20.0));
+        let dispatch = runtime.handle_pointer(finger(0, PointerEventKind::Up, 150.0, 20.0));
+
+        assert!(
+            runtime.scroll_top(scroller_node) > 0.0,
+            "the drag scrolled the container it started on"
+        );
+        assert_eq!(
+            dispatch.command(),
+            None,
+            "and the release that ended it is not a click on that container"
+        );
+        assert!(!ran.get(), "the container's own handler did not run");
+    }
+
+    /// The same gesture, one axis different — the finger stays inside the slop —
+    /// and it is a tap again. Without this pair, the test above would also pass
+    /// for an implementation that simply broke activation.
+    #[test]
+    fn a_contact_that_stays_inside_the_slop_still_taps_the_row() {
+        let (mut runtime, scroller, ran) = pan_fixture();
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 100.0, 60.0));
+        runtime.handle_pointer(finger(0, PointerEventKind::Move, 100.0, 57.0));
+        let dispatch = runtime.handle_pointer(finger(0, PointerEventKind::Up, 100.0, 57.0));
+
+        assert!(
+            (runtime.scroll_top(scroller) - 0.0).abs() < f32::EPSILON,
+            "a tap does not nudge the list"
+        );
+        assert!(dispatch.command().is_some(), "the row was tapped");
+        assert!(ran.get(), "the row's handler ran");
+    }
+
+    /// A mouse drag is a selection or a data drag, not a scroll — the mouse
+    /// already has the wheel. Only a *direct* contact drags content.
+    #[test]
+    fn a_mouse_drag_does_not_scroll_the_list() {
+        let (mut runtime, scroller, _ran) = pan_fixture();
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 100.0, 60.0));
+        runtime.handle_pointer(mouse(PointerEventKind::Move, 100.0, 20.0));
+
+        assert!(
+            (runtime.scroll_top(scroller) - 0.0).abs() < f32::EPSILON,
+            "the mouse must not drag the content"
+        );
+
+        // The wheel still scrolls the same container, so this is a gate on the
+        // gesture and not a broken scroller.
+        runtime.handle_scroll(30.0, Point::new(100.0, 60.0));
+        assert!((runtime.scroll_top(scroller) - 30.0).abs() < f32::EPSILON);
+    }
+
+    /// A drag belongs to the list it started in. Once the finger has left the
+    /// scroller's bounds the content under it says nothing about what should
+    /// scroll — the remembered container does.
+    #[test]
+    fn a_pan_keeps_scrolling_its_own_list_after_the_finger_leaves_it() {
+        let (mut runtime, scroller, _ran) = pan_fixture();
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 100.0, 60.0));
+        runtime.handle_pointer(finger(0, PointerEventKind::Move, 100.0, 20.0));
+        // Well outside the 200×120 scroller.
+        runtime.handle_pointer(finger(0, PointerEventKind::Move, 100.0, -10.0));
+
+        assert!(
+            (runtime.scroll_top(scroller) - 70.0).abs() < f32::EPSILON,
+            "the drag went on scrolling the list it started in; got {}",
+            runtime.scroll_top(scroller)
+        );
+    }
+
+    /// While a pan is in flight the pointer is captured by the container, so the
+    /// finger sweeping across the list does not light up every row it crosses.
+    #[test]
+    fn a_panning_finger_targets_its_container_and_hovers_nothing_it_sweeps_over() {
+        let (mut runtime, scroller, _ran) = pan_fixture();
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 100.0, 60.0));
+        let moved = runtime.handle_pointer(finger(0, PointerEventKind::Move, 100.0, 20.0));
+
+        assert_eq!(
+            runtime.pointer_capture(PointerId::touch(0)),
+            Some(scroller),
+            "the container captured the pointer when the pan began"
+        );
+        assert_eq!(
+            moved.target(),
+            Some(scroller),
+            "and the events target it, not the row under the finger"
+        );
+    }
+
+    /// A cancelled contact ends the pan with it — the finger is gone, so nothing
+    /// should still be following it.
+    #[test]
+    fn a_cancelled_contact_ends_the_pan() {
+        let (mut runtime, scroller, _ran) = pan_fixture();
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 100.0, 60.0));
+        runtime.handle_pointer(finger(0, PointerEventKind::Move, 100.0, 20.0));
+        runtime.handle_pointer(finger(0, PointerEventKind::Cancel, 100.0, 20.0));
+        let at = runtime.scroll_top(scroller);
+
+        // A stray move for a contact that is over changes nothing.
+        runtime.handle_pointer(finger(0, PointerEventKind::Move, 100.0, 0.0));
+        assert!((runtime.scroll_top(scroller) - at).abs() < f32::EPSILON);
+        assert_eq!(runtime.pointer_capture(PointerId::touch(0)), None);
     }
 
     #[test]
