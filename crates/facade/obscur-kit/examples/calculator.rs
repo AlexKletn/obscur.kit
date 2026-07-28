@@ -68,8 +68,11 @@ const CMD_CLEAR_ALL: InternedSymbol = InternedSymbol::named("clearAll");
 ///   here, so each nesting level grows by its parent's padding and the content
 ///   spills out of the window. Flex stretches a child across the cross axis
 ///   anyway, so stating no width at all is both shorter and exact.
-/// - **No `text-align`.** It parses and computes and the layout ignores it;
-///   `justify-content` on a flex row is what actually moves text.
+/// - **Type is set with `clamp(min, vmin, max)`**, not in fixed pixels. Keys
+///   scale with the window and a fixed label does not, so it drifts visibly out
+///   of proportion — the label stays the size it was while its key grows around
+///   it. The `vmin` term follows the window, the bounds keep it readable on a
+///   phone-sized window and sane on a wall-sized one.
 ///
 /// **Transparency is the root's alpha and nothing else.** The window is always
 /// created transparent with a premultiplied composite mode, so the bottom-most
@@ -105,9 +108,9 @@ const CSS: &str = "\
               justify-content: flex-end; align-items: center; \
               padding-left: 14px; padding-right: 14px; overflow: hidden; }\n\
 .tape-row:hover { background-color: rgba(27, 34, 51, 0.75); }\n\
-.tape-text  { color: #7c89ad; font-size: 15px; white-space: nowrap; \
+.tape-text  { color: #7c89ad; font-size: clamp(12px, 3.4vmin, 18px); white-space: nowrap; \
               overflow: hidden; text-overflow: ellipsis; }\n\
-.tape-empty { color: #3f4a66; font-size: 15px; }\n\
+.tape-empty { color: #3f4a66; font-size: clamp(12px, 3.4vmin, 18px); }\n\
 .display    { flex: 2; background-color: rgba(20, 25, 38, 0.55); border-radius: 14px; \
               display: flex; flex-direction: column; justify-content: center; \
               padding-left: 18px; padding-right: 18px; }\n\
@@ -115,17 +118,18 @@ const CSS: &str = "\
               justify-content: flex-end; align-items: center; }\n\
 .value-row  { height: 52px; display: flex; flex-direction: row; \
               justify-content: flex-end; align-items: center; }\n\
-.pending    { color: #6b7799; font-size: 18px; }\n\
-.value      { color: #f2f5ff; font-size: 40px; }\n\
+.pending    { color: #6b7799; font-size: clamp(14px, 4vmin, 22px); }\n\
+.value      { color: #f2f5ff; font-size: clamp(28px, 9vmin, 52px); }\n\
 .pad        { flex: 8; display: flex; flex-direction: column; gap: 10px; }\n\
 .krow       { flex: 1; display: flex; flex-direction: row; gap: 10px; }\n\
 .key        { flex: 1; background-color: rgba(28, 34, 51, 0.72); border-radius: 14px; \
-              color: #eef2ff; font-size: 26px; \
+              color: #eef2ff; font-size: clamp(18px, 6vmin, 34px); \
               display: flex; justify-content: center; align-items: center; }\n\
 .key:hover  { background-color: rgba(38, 46, 69, 0.85); }\n\
 .key:active { background-color: rgba(67, 80, 122, 0.95); }\n\
 .wide       { flex: 2; }\n\
-.fn         { background-color: rgba(22, 27, 41, 0.66); color: #b9c4e0; font-size: 20px; }\n\
+.fn         { background-color: rgba(22, 27, 41, 0.66); color: #b9c4e0; \
+              font-size: clamp(14px, 4.6vmin, 26px); }\n\
 .fn:active  { background-color: rgba(51, 61, 92, 0.95); }\n\
 .op         { background-color: rgba(35, 44, 73, 0.78); color: #cfe0ff; }\n\
 .op:active  { background-color: rgba(70, 89, 143, 0.95); }\n\

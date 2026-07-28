@@ -840,9 +840,37 @@ impl StyleResolver {
         // No parent = the root, whose implicit parent `font-size` is the initial
         // `medium` — the same value `rem` means there.
         let parent_font_size = parent.map_or(INITIAL_FONT_SIZE, Self::font_size_of);
-        let specified = self
-            .resolve_property(PropertyId::FontSize, cascaded, custom, parent, rtl, wm)
-            .and_then(|value| value.as_length());
+        let declared =
+            self.resolve_property(PropertyId::FontSize, cascaded, custom, parent, rtl, wm);
+        // A math function — `calc()`, `min()`, `max()`, `clamp()` — is a
+        // `PropertyValue::Calc`, not a `Length`, so reading only the length here
+        // dropped the whole declaration and left `font-size` at its initial
+        // `medium`. That silently ruled out **responsive typography entirely**:
+        // `clamp(16px, 5vmin, 30px)` is how type is meant to follow the window
+        // between bounds, and it computed to 16px at every size.
+        //
+        // The expression is folded against the **parent's** size, per CSS Values 4
+        // §6.1.2: a font-relative unit inside a `font-size` means the parent's,
+        // not this node's — which is also why `%` resolves against it. A `ch`
+        // inside the expression takes `ch_base`'s `0.5em` substitute rather than a
+        // measured advance; measuring it would need the parent's glyph metrics
+        // threaded through the expression walk, and `font-size: calc(… 1ch …)` is
+        // vanishingly rare next to the units this unlocks.
+        let specified = match declared.as_ref().map(ComputedValue::value) {
+            Some(PropertyValue::Calc(expr)) => expr
+                .resolve(
+                    &LengthContext::new(
+                        parent_font_size,
+                        ctx.root_font_size,
+                        ctx.viewport_width,
+                        ctx.viewport_height,
+                    )
+                    .with_percent_basis(parent_font_size)
+                    .with_environment(ctx.environment),
+                )
+                .map(Length::px),
+            _ => declared.and_then(|value| value.as_length()),
+        };
         // `font-size: 2ch` needs the PARENT's `0` advance, not this node's — see
         // `absolute_font_size`. Measured only when the declaration is actually a
         // `ch`: the port shapes a glyph, and `font-size` is on every node while
