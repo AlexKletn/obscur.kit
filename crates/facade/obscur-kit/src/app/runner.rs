@@ -37,6 +37,14 @@ use crate::window_winit::conversion::{KeyboardConverter, PointerConverter};
 /// than raw pixels.
 const WHEEL_LINE_STEP: f32 = 48.0;
 
+/// The largest time step a single frame may advance motion by, in seconds.
+///
+/// A window that was occluded, starved or dragged between monitors can resume
+/// after an arbitrary gap; without a clamp the first frame back would advance
+/// every animation by that whole gap and they would all appear to have finished
+/// while the window was hidden.
+const MAX_FRAME_DELTA: f32 = 0.1;
+
 /// Rolling per-phase frame timings, printed every [`REPORT_EVERY`] presented
 /// frames when `OBSCUR_FRAME_STATS=1` is set.
 ///
@@ -211,6 +219,7 @@ fn run_inner(
         scale_factor: 1.0,
         cursor: (0.0, 0.0),
         epoch: std::time::Instant::now(),
+        last_frame: None,
         init_failure: None,
         scroll,
         frame_info,
@@ -290,6 +299,9 @@ struct AppRunner {
     /// The instant the app started, and the origin of every pointer event's
     /// logical timestamp — see [`now_micros`](AppRunner::now_micros).
     epoch: std::time::Instant,
+    /// When the previous frame ran, so the next one can advance motion by the
+    /// time that actually elapsed. `None` until the first frame.
+    last_frame: Option<std::time::Instant>,
     /// A window/GPU failure recorded on `resumed` (which cannot return a `Result`)
     /// so [`run`] can surface it instead of returning `Ok` on a blank window.
     init_failure: Option<AppError>,
@@ -360,8 +372,33 @@ impl AppRunner {
         // re-present an identical scene on every pointer twitch. The runtime is the
         // authority on whether anything changed: it schedules a frame itself when
         // hover, focus, animation or a landed resource makes one necessary.
+        // Time passes here or nowhere. The interaction and motion domains take
+        // the clock as data, so a host must supply it, and this one never did:
+        // `advance_motion` had no caller in any windowed path, which left every
+        // CSS transition and `@keyframes` animation frozen in a real window while
+        // passing every headless test (the test harnesses tick it themselves).
+        // §4.17's "active animations keep requesting frames" was half-true — the
+        // runtime asked for the frames, and nothing moved the clock they were for.
         let started = std::time::Instant::now();
+        let delta = self
+            .last_frame
+            .replace(started)
+            // Clamped: a window that was occluded, dragged between monitors or
+            // simply starved must not resume by jumping an animation forward by
+            // however many seconds the gap was.
+            .map_or(0.0, |prev| {
+                (started - prev).as_secs_f32().min(MAX_FRAME_DELTA)
+            });
+        if delta > 0.0 {
+            self.runtime.advance_motion(delta);
+        }
         if self.runtime.run_due_frame_reactive().is_none() {
+            // Nothing was due, but the tick above may have scheduled the *next*
+            // animation frame; without asking for it the loop would sleep and the
+            // animation would stall on its first idle turn.
+            if self.runtime.has_pending_frame() {
+                self.request_redraw();
+            }
             return;
         }
         let built = started.elapsed();
@@ -388,6 +425,12 @@ impl AppRunner {
         }
         if let Some(stats) = self.stats.as_mut() {
             stats.record(built, snapshotted, present_at.elapsed());
+        }
+        // While motion (or a fling) remains, keep the loop turning. The runtime is
+        // the authority on whether another frame is owed, so an idle UI still
+        // sleeps — this is not a render-forever loop.
+        if self.runtime.has_pending_frame() {
+            self.request_redraw();
         }
     }
 
