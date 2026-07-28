@@ -15934,6 +15934,37 @@ mod tests {
         );
     }
 
+    /// The other half of the multi-click window, and the half nothing asserted: a
+    /// press that lands on the same spot but **after** the window is a fresh
+    /// single click, not a double one.
+    ///
+    /// Worth its own test because the window is the condition a caller can most
+    /// easily make vacuous. `time_micros.saturating_sub(prev)` against a constant
+    /// `0` timestamp is always `0`, which is always inside the window — so a host
+    /// that never stamps its events (as the `App` runner did not) turns every
+    /// second press on a spot into a double click, however many seconds apart.
+    /// The rule reads as enforced while only the radius and the target are
+    /// actually being checked.
+    #[test]
+    fn a_press_after_the_multi_click_window_is_a_fresh_single_click() {
+        let (mut runtime, _mirror) = focused_editable("ab cd");
+        let ox = editing_text_origin_x(&runtime);
+        let x = ox + ADVANCE * 1.0; // inside the first word "ab"
+        let t = 1_000_000;
+        runtime.handle_pointer(mouse_t(PointerEventKind::Down, x, 25.0, t));
+        runtime.handle_pointer(mouse_t(PointerEventKind::Up, x, 25.0, t));
+        // Same target, same point — only the elapsed time differs, so this
+        // isolates the window from the other two conditions.
+        let late = t + MULTI_CLICK_WINDOW_MICROS + 1;
+        runtime.handle_pointer(mouse_t(PointerEventKind::Down, x, 25.0, late));
+        let sel = runtime.editing_selection().expect("session active");
+        assert!(
+            sel.is_collapsed(),
+            "a press past the multi-click window seats a caret; it does not select \
+             the word the way the in-window double click does"
+        );
+    }
+
     #[test]
     fn triple_click_selects_the_line_under_the_pointer() {
         // (b) Fix 1 (§5.11): a TRIPLE click selects the whole LINE under the pointer

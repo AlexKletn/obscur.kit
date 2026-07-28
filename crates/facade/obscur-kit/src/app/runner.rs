@@ -210,6 +210,7 @@ fn run_inner(
         renderer: None,
         scale_factor: 1.0,
         cursor: (0.0, 0.0),
+        epoch: std::time::Instant::now(),
         init_failure: None,
         scroll,
         frame_info,
@@ -286,6 +287,9 @@ struct AppRunner {
     /// Last cursor position in physical px, so a `MouseInput` (which carries none)
     /// dispatches at the cursor.
     cursor: (f64, f64),
+    /// The instant the app started, and the origin of every pointer event's
+    /// logical timestamp — see [`now_micros`](AppRunner::now_micros).
+    epoch: std::time::Instant,
     /// A window/GPU failure recorded on `resumed` (which cannot return a `Result`)
     /// so [`run`] can surface it instead of returning `Ok` on a blank window.
     init_failure: Option<AppError>,
@@ -299,6 +303,23 @@ struct AppRunner {
 }
 
 impl AppRunner {
+    /// Microseconds since the app started — the logical timestamp every pointer
+    /// event this runner dispatches carries.
+    ///
+    /// The interaction domain never reads a clock (it takes the time as data), so
+    /// supplying one is the platform adapter's job, and nothing did it: every
+    /// event went out stamped `0`. That is not a cosmetic gap — the runtime's
+    /// multi-click test is *same target, within the click window, within the
+    /// radius*, and with every press at time `0` the window condition
+    /// (`0 - 0 <= 500ms`) is vacuously true. A press on the same spot was a
+    /// double click no matter how many seconds apart, so a file-manager row
+    /// clicked twice a minute apart opened the directory. Only the elapsed clock
+    /// makes the window mean anything.
+    #[allow(clippy::cast_possible_truncation)]
+    fn now_micros(&self) -> u64 {
+        self.epoch.elapsed().as_micros() as u64
+    }
+
     /// The device-pixel scale the runtime renders at: the display density, floored
     /// so a degenerate `0` never divides the viewport.
     #[allow(clippy::cast_possible_truncation)]
@@ -402,6 +423,7 @@ impl AppRunner {
                 converter.released(PointerId::MOUSE, at, PointerButtons::new())
             }
         }
+        .with_timestamp(self.now_micros())
     }
 }
 
@@ -505,7 +527,9 @@ impl ApplicationHandler for AppRunner {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x, position.y);
-                let moved = PointerConverter::new().moved(PointerId::MOUSE, position);
+                let moved = PointerConverter::new()
+                    .moved(PointerId::MOUSE, position)
+                    .with_timestamp(self.now_micros());
                 self.runtime.handle_pointer(moved);
                 self.request_redraw();
             }
