@@ -2,7 +2,7 @@
 
 use obscur_identity::{ComponentId, InternedSymbol};
 
-use super::{ViewEventBinding, ViewFragment, ViewKey, ViewProperty};
+use super::{CLASS, ViewEventBinding, ViewFragment, ViewKey, ViewProperty, ViewValue};
 
 /// A single node in a component's desired declarative view tree.
 ///
@@ -192,6 +192,19 @@ impl ViewNode {
         }
         self
     }
+
+    /// Sets this element's `class` attribute (spec §4.13), the input the cascade
+    /// matches `.name` rules against. A no-op on a text node, like
+    /// [`with_prop`](Self::with_prop).
+    ///
+    /// The shorthand for the single most common styling operation — it is exactly
+    /// `self.with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))`.
+    /// Like a `class="a b"` attribute, `class` carries the whole space-separated
+    /// list; call it once with every class rather than chaining it.
+    #[must_use]
+    pub fn class(self, class: impl Into<Box<str>>) -> Self {
+        self.with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
+    }
 }
 
 #[cfg(test)]
@@ -246,6 +259,24 @@ mod tests {
         }
         // No-op path on text.
         let tx = ViewNode::text("x").with_prop(prop);
+        assert!(matches!(tx, ViewNode::Text { .. }));
+    }
+
+    #[test]
+    fn class_sets_the_class_attribute_as_text() {
+        let el = ViewNode::element(ComponentId::from_raw(1)).class("row sel");
+        match el {
+            ViewNode::Element { props, .. } => assert_eq!(
+                props,
+                vec![ViewProperty::new(CLASS, ViewValue::Text("row sel".into()))]
+            ),
+            ViewNode::Text { .. } => panic!("expected element"),
+        }
+    }
+
+    #[test]
+    fn class_is_a_noop_on_text() {
+        let tx = ViewNode::text("x").class("row");
         assert!(matches!(tx, ViewNode::Text { .. }));
     }
 }

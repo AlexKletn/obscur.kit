@@ -23,12 +23,14 @@ use std::rc::Rc;
 use obscur_kit::App;
 use obscur_kit::identity::InternedSymbol;
 use obscur_kit::primitives::{Container, Text};
-use obscur_kit::view::view::{CLASS, View, ViewNode, ViewProperty, ViewValue};
+use obscur_kit::view::view::{View, ViewNode};
 use obscur_kit::widgets::button::Button;
 
-/// The two button commands (interned symbol handles), identical to the original.
-const CMD_DECREMENT: InternedSymbol = InternedSymbol::from_raw(0x1001);
-const CMD_INCREMENT: InternedSymbol = InternedSymbol::from_raw(0x1002);
+/// The two button commands, named rather than hand-numbered: `named` derives a
+/// stable symbol from the string, so there is no unique integer to invent or keep
+/// distinct (the old `from_raw(0x1001)` / `0x1002`).
+const CMD_DECREMENT: InternedSymbol = InternedSymbol::named("decrement");
+const CMD_INCREMENT: InternedSymbol = InternedSymbol::named("increment");
 
 /// The authored stylesheet — byte-identical to `windowed_counter.rs`, so the look
 /// and the `:hover` behaviour are the same.
@@ -78,7 +80,7 @@ fn build_counter_view(count: i32) -> View {
         .child(minus)
         .child(plus)
         .into_view_node()
-        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into())));
+        .class("counter");
     View::single(container)
 }
 
@@ -87,18 +89,12 @@ fn tagged(class: &str, children: Vec<ViewNode>) -> ViewNode {
     Container::new()
         .with_children(children)
         .into_view_node()
-        .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
+        .class(class)
 }
 
 /// A real [`Button`] bound to `command`, rendered as a sizing bar (the sizing
 /// class is on the button's own node so the click resolves to it — see the
 /// original example's note on ancestor-chain resolution).
 fn button_bar(class: &str, label: &str, command: InternedSymbol) -> ViewNode {
-    Button::new(label, command)
-        .view()
-        .into_fragment()
-        .nodes()
-        .to_vec()
-        .remove(0)
-        .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
+    Button::new(label, command).into_view_node().class(class)
 }

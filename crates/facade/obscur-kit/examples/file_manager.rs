@@ -35,16 +35,16 @@ use std::rc::Rc;
 use obscur_kit::App;
 use obscur_kit::identity::ComponentId;
 use obscur_kit::identity::InternedSymbol;
-use obscur_kit::ui_ir::name_binding::fallback_symbol;
 use obscur_kit::ui_macros::okui;
-use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
+use obscur_kit::view::view::{View, ViewFragment, ViewNode};
 
 /// The row height the model is estimated at, matching the sheet. The runtime sizes
 /// its window and its spacers from this until real measurement refines it.
 const ROW_H: f32 = 24.0;
 
-/// The registered virtual list's name.
-const FILES: InternedSymbol = InternedSymbol::from_raw(0x00F1_0001);
+/// The registered virtual list's name — derived from the string rather than a
+/// hand-assigned index.
+const FILES: InternedSymbol = InternedSymbol::named("files");
 
 /// The styling. Authored CSS, installed through the motion-aware pipeline by
 /// [`App::stylesheet`].
@@ -255,7 +255,7 @@ fn build_view(state: &State) -> View {
     // indices only. No row arithmetic here, and no `ROW_H` maths to keep in step
     // with the sheet beyond the row height the model is estimated at.
     let list = ViewNode::element(ComponentId::from_raw(0x00F0_0001))
-        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("list".into())))
+        .class("list")
         .with_children(ViewFragment::from_nodes(vec![
             ViewNode::virtual_list(FILES, state.entries.len(), ROW_H)
                 .with_virtual_scroll_reset(state.generation),
@@ -318,9 +318,7 @@ fn row_node(state: &State, index: usize) -> ViewNode {
             <span class="size">{size}</span>
         </div>
     };
-    row.into_fragment()
-        .into_nodes()
-        .pop()
+    row.into_single_node()
         .unwrap_or_else(|| ViewNode::element(ComponentId::from_raw(0x00F0_0002)))
 }
 
@@ -344,9 +342,9 @@ fn main() -> Result<(), obscur_kit::AppError> {
     }));
     state.borrow_mut().load(start);
 
-    // `on:click=name` in the markup compiles to `fallback_symbol(name)`, so the
-    // handler registered here under the same name is the one it reaches.
-    let command = |name: &str| -> InternedSymbol { fallback_symbol(name) };
+    // `on:click="name"` in the markup lowers to the same named symbol, so the
+    // handler registered here under that name is the one it reaches.
+    let command = InternedSymbol::named;
 
     let view_state = state.clone();
     let row_state = state.clone();

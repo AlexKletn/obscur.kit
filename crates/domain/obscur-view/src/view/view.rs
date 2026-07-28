@@ -51,6 +51,24 @@ impl View {
     pub fn into_fragment(self) -> ViewFragment {
         self.root
     }
+
+    /// Consumes this `View`, returning its sole top-level [`ViewNode`], or [`None`]
+    /// unless there is exactly one.
+    ///
+    /// A widget's `view()` (and `Button::new(..).view()`) produces a single-root
+    /// `View`; this is the one call that turns such a view back into a placeable,
+    /// stylable node, replacing the `into_fragment().into_nodes()` + take-the-only
+    /// -element dance. `None` for an empty or multi-root view keeps the caller
+    /// honest about the shape it assumed rather than silently taking the first.
+    #[must_use]
+    pub fn into_single_node(self) -> Option<ViewNode> {
+        let mut nodes = self.root.into_nodes();
+        if nodes.len() == 1 {
+            nodes.pop()
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -75,5 +93,18 @@ mod tests {
         fragment.push(ViewNode::text("a"));
         let view = View::from_fragment(fragment.clone());
         assert_eq!(view.into_fragment(), fragment);
+    }
+
+    #[test]
+    fn into_single_node_yields_the_only_node() {
+        let node = ViewNode::element(ComponentId::from_raw(1));
+        assert_eq!(View::single(node.clone()).into_single_node(), Some(node));
+    }
+
+    #[test]
+    fn into_single_node_is_none_when_empty_or_multi() {
+        assert_eq!(View::empty().into_single_node(), None);
+        let fragment = ViewFragment::from_nodes(vec![ViewNode::text("a"), ViewNode::text("b")]);
+        assert_eq!(View::from_fragment(fragment).into_single_node(), None);
     }
 }

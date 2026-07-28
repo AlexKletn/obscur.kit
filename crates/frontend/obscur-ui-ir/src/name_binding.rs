@@ -625,6 +625,18 @@ mod tests {
     }
 
     #[test]
+    fn named_symbol_mirrors_fallback_symbol() {
+        // `InternedSymbol::named` (foundation) is the author-facing way to name a
+        // command or list, and it must resolve to the *same* handle this crate
+        // lowers an unreserved `on:click="save"` / `class="…"`-style name to — so a
+        // handler registered under `named("save")` is the one an `.okui`
+        // `on:click="save"` reaches. Drift here silently unbinds markup from code.
+        for name in ["save", "goParent", "selectUp", "increment", "data-x", ""] {
+            assert_eq!(fallback_symbol(name), InternedSymbol::named(name), "{name}");
+        }
+    }
+
+    #[test]
     fn reserved_symbols_are_outside_the_hash_namespace() {
         // Every reserved symbol lives in the low range (top bit clear), so the
         // fallback hash can never alias one.
