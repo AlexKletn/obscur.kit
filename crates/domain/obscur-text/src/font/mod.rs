@@ -7,6 +7,8 @@ mod font_fallback;
 pub use font_fallback::FontFallback;
 mod font_id;
 pub use font_id::FontId;
+mod system_font_fallback;
+pub use system_font_fallback::{FallbackFace, SystemFontFallback};
 mod font_family;
 pub use font_family::{FontFamily, GenericFamily};
 mod font_provider;

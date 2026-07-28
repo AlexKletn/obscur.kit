@@ -492,10 +492,22 @@ impl KitBootstrap {
         // shaper would silently answer every line-metric query with the ratios.
         let shaper = crate::text_harfrust::HarfrustShaper::without_font()
             .with_faces(registry.face_metrics());
-        runtime.set_font_resolver(Box::new(registry));
+        // Per-character host fallback (§5.10): the three generic faces plus the
+        // bundled one cover Latin, Cyrillic and Greek and almost nothing else, so
+        // without this a CJK file name or a symbol on a key draws *nothing*. With
+        // it, the first appearance of such a character costs one `fc-match`
+        // lookup and the face is then kept. Only wired where fontconfig is — a
+        // host without it keeps exactly the previous behaviour.
+        #[cfg(feature = "font-fontconfig")]
+        let registry =
+            registry.with_system_fallback(std::sync::Arc::new(super::FontconfigFallback::new()));
+        // The registry is cloned rather than moved: the discovery state is shared
+        // between clones, so the copy kept here sees the faces the runtime's copy
+        // pulls in and can hand them to the renderer.
+        runtime.set_font_resolver(Box::new(registry.clone()));
         runtime.set_text_itemizer(Box::new(crate::text_unicode::UnicodeTextItemizer::new()));
         runtime.set_text_shaper(Box::new(shaper));
-        super::InstalledFonts::new(handles)
+        super::InstalledFonts::new(handles).with_registry(registry)
     }
 
     /// Reads the host's own `sans-serif` / `serif` / `monospace` faces off disk via

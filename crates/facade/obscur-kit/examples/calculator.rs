@@ -10,7 +10,7 @@
 //!   and light `:active` while held. The runtime's press state is per-pointer, so
 //!   resting one thumb on a key and pressing another with the other hand lights
 //!   both and fires both.
-//! - **A held key means something else.** `DEL` removes one digit on a tap and
+//! - **A held key means something else.** `⌫` removes one digit on a tap and
 //!   clears everything when held — a touchscreen has one button and no
 //!   modifiers, so holding is the only "other" gesture a key has. It fires while
 //!   the finger is still down, and the lift is consumed rather than also
@@ -50,7 +50,12 @@ const TAPE: InternedSymbol = InternedSymbol::named("tape");
 /// its window and spacers from this.
 const TAPE_ROW: f32 = 28.0;
 
-/// Held `DEL` clears everything; tapped, it deletes one digit.
+/// Held `⌫` clears everything; tapped, it deletes one digit.
+///
+/// The label is `U+232B`, which the bundled face does **not** carry — it draws
+/// only because the text stack now asks the host for a face covering it. On a
+/// system with no fontconfig the key would be blank again, which is the honest
+/// dependency and not a hidden one.
 const CMD_CLEAR_ALL: InternedSymbol = InternedSymbol::named("clearAll");
 
 /// The styling.
@@ -174,7 +179,7 @@ impl Key {
 
 /// Every key: `(command name, label, key, extra classes)`.
 const KEYS: &[(&str, &str, Key, &str)] = &[
-    ("back", "DEL", Key::Back, "fn"),
+    ("back", "⌫", Key::Back, "fn"),
     ("sign", "±", Key::Sign, "fn"),
     ("pct", "%", Key::Percent, "fn"),
     ("div", "÷", Key::Div, "op"),
@@ -349,7 +354,7 @@ impl Calc {
         });
     }
 
-    /// Held `DEL`: back to nothing at all.
+    /// Held `⌫`: back to nothing at all.
     fn clear_all(&mut self) {
         "0".clone_into(&mut self.entry);
         self.acc = None;
@@ -494,7 +499,7 @@ fn key_row(row: &[usize]) -> ViewNode {
 /// One key: a real [`Button`] bound to its command, with the sizing class on the
 /// button's own node so the tap resolves to it.
 ///
-/// `DEL` additionally binds `EVENT_LONG_PRESS`, which is what makes a held key a
+/// `⌫` additionally binds `EVENT_LONG_PRESS`, which is what makes a held key a
 /// different action rather than a slow tap.
 fn key(index: usize) -> ViewNode {
     let (name, label, key, extra) = KEYS[index];
@@ -623,7 +628,7 @@ mod tests {
         assert_eq!(c.entry, "0", "it bottoms out rather than emptying");
     }
 
-    /// The pair to the test above, and the reason `DEL` binds a long press: held,
+    /// The pair to the test above, and the reason `⌫` binds a long press: held,
     /// it is a different action, not a faster one.
     #[test]
     fn clear_all_forgets_the_pending_operation_too() {

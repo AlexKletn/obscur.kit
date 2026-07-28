@@ -1,11 +1,13 @@
 //! The [`FontRegistry`] adapter implementing [`FontResolver`] with real,
 //! `cmap`-coverage-driven font fallback (spec §5.10).
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use obscur_text::font::{
     FontAttributes, FontFace, FontFamily, FontId, FontMetrics, FontResolveRequest, FontResolver,
-    FontSource, ResolvedFont,
+    FontSource, ResolvedFont, SystemFontFallback,
 };
 use obscur_text::span::FontSlant;
 use read_fonts::{FontRef as ReadFontRef, TableProvider};
@@ -34,10 +36,47 @@ use crate::face_metrics::FaceMetrics;
 /// (cheap: resolution happens once per itemized run, not per glyph, and an
 /// upstream cache elides repeats), so the registry holds only the raw bytes and
 /// pre-read metrics — no borrowed, self-referential font handle.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct FontRegistry {
     fonts: Vec<RegisteredFont>,
+    /// Faces pulled in from the host on demand for characters nothing
+    /// registered covers — see [`with_system_fallback`](Self::with_system_fallback).
+    ///
+    /// Kept apart from `fonts` so the registered chain's ids, order and search
+    /// stay exactly what they were: a discovered face is only ever consulted
+    /// after every authored family has already declined the run.
+    ///
+    /// **Shared across clones.** The registry is cloned to be handed to the
+    /// runtime, and a face discovered on the runtime's copy must be visible to
+    /// the copy a host drains for the renderer — otherwise the glyph resolves
+    /// but nothing rasterizes it.
+    discovered: Rc<RefCell<Vec<RegisteredFont>>>,
+    /// Discovered faces the renderer has not been handed yet — drained by
+    /// [`take_undelivered_faces`](Self::take_undelivered_faces).
+    undelivered: UndeliveredFaces,
+    /// The host lookup, when one is wired.
+    fallback: Option<Arc<dyn SystemFontFallback>>,
 }
+
+impl std::fmt::Debug for FontRegistry {
+    /// Reports whether a host fallback is attached, not what it is — a port is
+    /// opaque, and "is one attached?" is the question a missing-glyph bug asks.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FontRegistry")
+            .field("fonts", &self.fonts)
+            .field("discovered", &self.discovered)
+            .field("undelivered", &self.undelivered.borrow().len())
+            .field(
+                "fallback",
+                &self.fallback.as_ref().map(|_| "<SystemFontFallback>"),
+            )
+            .finish()
+    }
+}
+
+/// Faces discovered at shape time and not yet handed to a renderer, as
+/// `(id, bytes)`. Shared across clones for the same reason `discovered` is.
+type UndeliveredFaces = Rc<RefCell<Vec<(FontId, Arc<[u8]>)>>>;
 
 /// One registered font: its id, requested family/attributes, raw bytes, and the
 /// vertical metrics read once at registration time — `None` when the bytes carry
@@ -87,6 +126,86 @@ impl FontRegistry {
             metrics,
         });
         id
+    }
+
+    /// Attaches the host lookup consulted when **no** registered family covers a
+    /// run (spec §5.10).
+    ///
+    /// Without one, a character outside the registered faces' `cmap`s resolves
+    /// to nothing and is simply not drawn — a blank where a glyph should be.
+    /// With one, the first appearance of such a character costs one host lookup;
+    /// the face is then kept and answers instantly thereafter.
+    ///
+    /// Attach it **after** every `register` call: discovered faces take ids
+    /// above the registered ones, and a `register` afterwards would collide.
+    #[must_use]
+    pub fn with_system_fallback(mut self, fallback: Arc<dyn SystemFontFallback>) -> Self {
+        self.fallback = Some(fallback);
+        self
+    }
+
+    /// Takes the discovered faces the renderer has not been given yet, as
+    /// `(id, bytes)`.
+    ///
+    /// A face found mid-frame exists only in this registry; the renderer
+    /// rasterizes from its own id→bytes table and would draw nothing for a glyph
+    /// whose face it has never seen. A host drains this after each frame and
+    /// hands what it finds to the renderer — the same id→bytes hand-off
+    /// `InstalledFonts` performs at startup, continued for the faces that arrive
+    /// later.
+    #[must_use]
+    pub fn take_undelivered_faces(&self) -> Vec<(FontId, Arc<[u8]>)> {
+        std::mem::take(&mut self.undelivered.borrow_mut())
+    }
+
+    /// Resolves `text` against the host lookup: finds the first character no
+    /// registered face covers, asks for a face that does, and keeps it.
+    ///
+    /// Returns the newly discovered font's index in `discovered`, or [`None`]
+    /// when there is no lookup, every character is already covered by something,
+    /// or the host has nothing to offer.
+    fn discover(&self, text: &str) -> Option<usize> {
+        let fallback = self.fallback.as_ref()?;
+        // The first character no face — registered or already discovered — can
+        // draw. Anything else is already answerable and asking about it would
+        // pull in a face nobody needs.
+        let uncovered = text.chars().find(|ch| {
+            !is_ignorable(*ch)
+                && !self.fonts.iter().any(|font| font.covers_char(*ch))
+                && !self
+                    .discovered
+                    .borrow()
+                    .iter()
+                    .any(|font| font.covers_char(*ch))
+        })?;
+        let face = fallback.face_for_char(uncovered)?;
+        // Trust but verify: a host that answers with a face lacking the very
+        // character asked about would otherwise be registered forever as the
+        // wrong answer for it.
+        let bytes = Arc::clone(face.bytes());
+        let candidate = RegisteredFont {
+            id: self.next_id(),
+            family: face.family().clone(),
+            attributes: FontAttributes::default(),
+            metrics: read_metrics(&bytes),
+            bytes,
+        };
+        if !candidate.covers_char(uncovered) {
+            return None;
+        }
+        self.undelivered
+            .borrow_mut()
+            .push((candidate.id, Arc::clone(&candidate.bytes)));
+        let mut discovered = self.discovered.borrow_mut();
+        discovered.push(candidate);
+        Some(discovered.len() - 1)
+    }
+
+    /// The next free [`FontId`]: registered faces occupy `0..fonts.len()` and
+    /// discovered ones continue from there.
+    fn next_id(&self) -> FontId {
+        let used = self.fonts.len() + self.discovered.borrow().len();
+        FontId::new(u32::try_from(used).unwrap_or(u32::MAX))
     }
 
     /// Returns a snapshot of every registered face's real design metrics, keyed by
@@ -150,7 +269,29 @@ impl FontResolver for FontRegistry {
                 return Some(ResolvedFont::new(font.id, face).with_synthesis(oblique, bold));
             }
         }
-        None
+        // Nothing the application named can draw this run. Before giving up —
+        // which means drawing *nothing*, since an unresolved run paints no
+        // glyphs — consult the faces already discovered for earlier runs, then
+        // ask the host for one covering the first character none of them has.
+        let already = self
+            .discovered
+            .borrow()
+            .iter()
+            .position(|font| font.covers(text));
+        let index = match already {
+            Some(index) => index,
+            None => self.discover(text)?,
+        };
+        let discovered = self.discovered.borrow();
+        let font = discovered.get(index)?;
+        let face = FontFace::new(
+            font.family.clone(),
+            font.attributes,
+            FontSource::memory(Arc::clone(&font.bytes)),
+            font.metrics.unwrap_or(IDEALIZED_METRICS),
+        );
+        let (oblique, bold) = synthesis(requested, &font.attributes);
+        Some(ResolvedFont::new(font.id, face).with_synthesis(oblique, bold))
     }
 }
 
@@ -161,6 +302,19 @@ impl RegisteredFont {
     /// ASCII whitespace and control characters are treated as always covered, so
     /// a run like `"ab cd"` is not rejected for its space. Bytes that fail to
     /// parse (or lack a `cmap`) cover nothing.
+    /// Whether this font's `cmap` maps `character` to a real (non-`.notdef`)
+    /// glyph.
+    fn covers_char(&self, character: char) -> bool {
+        let Ok(font) = ReadFontRef::new(&self.bytes) else {
+            return false;
+        };
+        let Ok(cmap) = font.cmap() else {
+            return false;
+        };
+        cmap.map_codepoint(character)
+            .is_some_and(|gid| gid.to_u32() != 0)
+    }
+
     fn covers(&self, text: &str) -> bool {
         let Ok(font) = ReadFontRef::new(&self.bytes) else {
             return false;

@@ -151,12 +151,51 @@ impl FontSet {
 #[derive(Debug, Clone, Default)]
 pub struct InstalledFonts {
     faces: Vec<(u32, Arc<[u8]>)>,
+    /// A clone of the live registry, when one was installed, so faces the host
+    /// discovers *later* can still reach the renderer — see
+    /// [`take_discovered`](Self::take_discovered).
+    #[cfg(all(feature = "text-harfrust", feature = "text-unicode"))]
+    registry: Option<crate::text_harfrust::FontRegistry>,
 }
 
 impl InstalledFonts {
     /// Creates the handle table for `faces`, in installed order.
     pub(super) fn new(faces: Vec<(u32, Arc<[u8]>)>) -> Self {
-        Self { faces }
+        Self {
+            faces,
+            #[cfg(all(feature = "text-harfrust", feature = "text-unicode"))]
+            registry: None,
+        }
+    }
+
+    /// Attaches the live registry whose per-character fallback may pull in faces
+    /// after startup.
+    #[cfg(all(feature = "text-harfrust", feature = "text-unicode"))]
+    pub(super) fn with_registry(mut self, registry: crate::text_harfrust::FontRegistry) -> Self {
+        self.registry = Some(registry);
+        self
+    }
+
+    /// Takes the faces discovered since the last call, as `(handle, bytes)`.
+    ///
+    /// The startup table above is not the end of the story: a character outside
+    /// every registered face pulls one in from the host mid-frame, and the
+    /// renderer rasterizes from its own id→bytes table — it would draw nothing
+    /// for a face it has never been given. A host calls this each frame and
+    /// registers what it finds, which is the same hand-off as at startup,
+    /// continued.
+    ///
+    /// Empty on every frame where nothing new appeared, which is almost all of
+    /// them.
+    #[cfg(all(feature = "text-harfrust", feature = "text-unicode"))]
+    pub fn take_discovered(&self) -> Vec<(u32, Arc<[u8]>)> {
+        self.registry.as_ref().map_or_else(Vec::new, |registry| {
+            registry
+                .take_undelivered_faces()
+                .into_iter()
+                .map(|(id, bytes)| (super::text_stack::font_handle(id), bytes))
+                .collect()
+        })
     }
 
     /// Iterates `(scene font handle, bytes)` in installed order.

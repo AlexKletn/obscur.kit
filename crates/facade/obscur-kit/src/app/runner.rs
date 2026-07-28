@@ -232,6 +232,7 @@ fn run_inner(
         scroll,
         frame_info,
         stats: std::env::var_os("OBSCUR_FRAME_STATS").map(|_| FrameStats::default()),
+        fonts: None,
     };
 
     let event_loop = EventLoop::new().map_err(|error| AppError::EventLoop(error.to_string()))?;
@@ -270,7 +271,11 @@ fn install_resources(boot: &KitBootstrap, runtime: &mut UiRuntime) {
 /// and hands the renderer the *same* id→bytes assignment so scene font handles
 /// line up with what it rasterizes — the codified fix for the id-matching problem.
 #[cfg(all(feature = "text-harfrust", feature = "text-unicode"))]
-fn install_text(boot: &KitBootstrap, runtime: &mut UiRuntime, renderer: &mut VelloRenderer) {
+fn install_text(
+    boot: &KitBootstrap,
+    runtime: &mut UiRuntime,
+    renderer: &mut VelloRenderer,
+) -> crate::bootstrap::InstalledFonts {
     #[cfg(feature = "font-fontconfig")]
     let font_set = boot.system_font_set().unwrap_or_default();
     #[cfg(not(feature = "font-fontconfig"))]
@@ -280,10 +285,17 @@ fn install_text(boot: &KitBootstrap, runtime: &mut UiRuntime, renderer: &mut Vel
     for (handle, bytes) in installed.iter() {
         renderer.register_font(handle, bytes.to_vec());
     }
+    installed
 }
 
 #[cfg(not(all(feature = "text-harfrust", feature = "text-unicode")))]
-fn install_text(_boot: &KitBootstrap, _runtime: &mut UiRuntime, _renderer: &mut VelloRenderer) {}
+fn install_text(
+    _boot: &KitBootstrap,
+    _runtime: &mut UiRuntime,
+    _renderer: &mut VelloRenderer,
+) -> crate::bootstrap::InstalledFonts {
+    crate::bootstrap::InstalledFonts::default()
+}
 
 /// The winit application the runner drives: the window, the GPU renderer, the
 /// swapchain surface, and the embeddable runtime, all created lazily on `resumed`.
@@ -320,6 +332,10 @@ struct AppRunner {
     frame_info: Option<Rc<Cell<FrameInfo>>>,
     /// Per-phase frame timings, present only when `OBSCUR_FRAME_STATS=1` is set.
     stats: Option<FrameStats>,
+    /// The renderer's font hand-off table, kept so faces the text stack pulls in
+    /// from the host mid-run can be handed over too — see
+    /// [`InstalledFonts::take_discovered`](crate::bootstrap::InstalledFonts::take_discovered).
+    fonts: Option<crate::bootstrap::InstalledFonts>,
 }
 
 impl AppRunner {
@@ -419,6 +435,18 @@ impl AppRunner {
         else {
             return;
         };
+
+        // A character outside every registered face pulls one in from the host
+        // while the frame is being built. The renderer rasterizes from its own
+        // id→bytes table, so it has to be told before this frame is presented —
+        // otherwise the glyph resolves, the run shapes, and nothing is drawn.
+        // Empty on every frame where no new character appeared, which is nearly
+        // all of them.
+        if let Some(fonts) = self.fonts.as_ref() {
+            for (handle, bytes) in fonts.take_discovered() {
+                renderer.register_font(handle, bytes.to_vec());
+            }
+        }
 
         let physical = Size::new(
             surface.config().width as f32,
@@ -542,7 +570,11 @@ impl ApplicationHandler for AppRunner {
             }
         };
         let mut renderer = VelloRenderer::new(RendererId::from_raw(1)).with_device(vello_device);
-        install_text(&KitBootstrap::new(), &mut self.runtime, &mut renderer);
+        self.fonts = Some(install_text(
+            &KitBootstrap::new(),
+            &mut self.runtime,
+            &mut renderer,
+        ));
 
         self.scale_factor = window.scale_factor();
         self.surface = Some(vello_surface);

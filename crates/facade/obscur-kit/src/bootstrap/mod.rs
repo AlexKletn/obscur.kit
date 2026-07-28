@@ -14,6 +14,10 @@
 //! reversed. See `docs/conformance-audit.md` §5-B.
 mod css_pipeline;
 pub use css_pipeline::CssPipeline;
+#[cfg(feature = "font-fontconfig")]
+mod fontconfig_fallback;
+#[cfg(feature = "font-fontconfig")]
+pub use fontconfig_fallback::FontconfigFallback;
 mod kit_bootstrap;
 pub use kit_bootstrap::KitBootstrap;
 mod text_stack;
