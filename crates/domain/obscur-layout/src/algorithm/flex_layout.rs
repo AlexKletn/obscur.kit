@@ -1307,6 +1307,30 @@ fn resolve_flexible_lengths(
         // (b) remaining free space against the current (partly frozen) sizes.
         let mut remaining = available - used_main(&target, &frozen);
 
+        // An **unbounded** main axis carries no free space to distribute. It is
+        // the `max-content` *question* — "how big would you like to be?" — not a
+        // decision, and §9.7 resolves flexible lengths against a used main size
+        // that is definite. Every item therefore keeps its flex base size, which
+        // is what `max-content` means for a flex line.
+        //
+        // Leaving this to the loop below is how a squeezed window hung the entire
+        // application: the item grew toward `inf`, was clamped against an `inf`
+        // maximum, and its violation came out `inf − inf = NaN`. NaN compares
+        // false against `== 0`, `> 0` and `< 0` alike, so the sign test froze
+        // *nothing*, the state repeated exactly, and the frame never returned —
+        // taking the event loop with it, which is why the window could not even be
+        // closed.
+        if !remaining.is_finite() {
+            for pos in 0..n {
+                if !frozen[pos] {
+                    let i = line[pos];
+                    target[pos] = clamp_floor(flex_base[i], main_min[i], main_max[i]);
+                    frozen[pos] = true;
+                }
+            }
+            continue;
+        }
+
         // Sum of the unfrozen flex factors. If it is < 1, the spec caps the space
         // handed out this pass at `initial_free · Σfactors` when that magnitude is
         // smaller — this is what makes a lone `flex-grow: 0.5` item claim only half
@@ -1364,6 +1388,7 @@ fn resolve_flexible_lengths(
         // everything; a positive total freezes the min-violators (whose clamp
         // pushed them up); a negative total freezes the max-violators. Freezing only
         // the sign-matched items lets the loop redistribute their freed space.
+        let before = frozen.iter().filter(|&&f| f).count();
         if total_violation == 0.0 {
             frozen.fill(true);
         } else if total_violation > 0.0 {
@@ -1378,6 +1403,20 @@ fn resolve_flexible_lengths(
                     frozen[pos] = true;
                 }
             }
+        }
+
+        // Termination is a *property of this loop*, not of the arithmetic that
+        // feeds it. Every pass must freeze at least one item, or the next pass
+        // recomputes the identical state and the loop never ends — and a layout
+        // that never ends does not merely draw wrongly, it takes the frame, the
+        // event loop and the window's close button with it.
+        //
+        // The sign test above can freeze nothing whenever a violation is not an
+        // ordinary number: NaN is false against every comparison. The guard above
+        // removes the one source of that we know of; this makes the loop safe
+        // against the ones we do not.
+        if frozen.iter().filter(|&&f| f).count() == before {
+            frozen.fill(true);
         }
     }
 
@@ -2805,6 +2844,93 @@ mod tests {
             base_width_of(rigid_basis(Dimension::Auto), 400.0, &mut FillAvailable),
             400.0,
         );
+    }
+
+    /// An **unbounded** main axis with a growing item must terminate, and the
+    /// item must take its flex base size.
+    ///
+    /// This is the shape that hung the whole application. An unbounded axis is
+    /// the `max-content` *question*, so there is no free space to distribute; the
+    /// old loop distributed it anyway, growing the item toward `inf`, clamping it
+    /// against an `inf` maximum, and computing the violation as `inf − inf` —
+    /// **NaN**. NaN is false against `== 0`, `> 0` and `< 0` alike, so the sign
+    /// test that decides what to freeze froze nothing, the next pass recomputed
+    /// the identical state, and the frame never returned. The event loop went
+    /// with it: the window stopped drawing and could not even be closed.
+    ///
+    /// It took a squeezed window to reach: a container whose padding exceeds the
+    /// space it is given has no room left, and the block axis is then offered
+    /// unbounded.
+    #[test]
+    fn an_unbounded_main_axis_terminates_and_keeps_the_base_size() {
+        struct Rigid;
+        impl crate::algorithm::ChildMeasurer for Rigid {
+            fn measure_child(&mut self, _index: usize, _constraints: BoxConstraints) -> Size {
+                Size::new(30.0, 10.0)
+            }
+        }
+        let style = container(
+            FlexDirection::Row,
+            JustifyContent::FlexStart,
+            AlignItems::FlexStart,
+            0.0,
+        );
+        let item = LayoutStyle {
+            display: LayoutDisplay::Flex,
+            flex_grow: 8.0,
+            flex_basis: Dimension::Px(30.0),
+            ..LayoutStyle::default()
+        };
+        let children = [LayoutChild::new(NodeId::from_raw(1), item)];
+
+        // The assertion is that this returns at all; the value pins the meaning.
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints {
+                min: Size::ZERO,
+                max: Size::new(f32::INFINITY, 50.0),
+                percent_basis: None,
+            },
+            &mut Rigid,
+        );
+        approx(out.child_boxes()[0].size().width, 30.0);
+    }
+
+    /// The same for the block axis, which is the one a squeezed window actually
+    /// leaves unbounded.
+    #[test]
+    fn an_unbounded_cross_of_a_column_terminates_too() {
+        struct Rigid;
+        impl crate::algorithm::ChildMeasurer for Rigid {
+            fn measure_child(&mut self, _index: usize, _constraints: BoxConstraints) -> Size {
+                Size::new(10.0, 30.0)
+            }
+        }
+        let style = container(
+            FlexDirection::Column,
+            JustifyContent::FlexStart,
+            AlignItems::FlexStart,
+            0.0,
+        );
+        let item = LayoutStyle {
+            display: LayoutDisplay::Flex,
+            flex_grow: 8.0,
+            flex_basis: Dimension::Px(30.0),
+            ..LayoutStyle::default()
+        };
+        let children = [LayoutChild::new(NodeId::from_raw(1), item)];
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints {
+                min: Size::ZERO,
+                max: Size::new(50.0, f32::INFINITY),
+                percent_basis: None,
+            },
+            &mut Rigid,
+        );
+        approx(out.child_boxes()[0].size().height, 30.0);
     }
 
     #[test]
