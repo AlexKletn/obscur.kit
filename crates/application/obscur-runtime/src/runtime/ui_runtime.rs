@@ -26,7 +26,9 @@ use obscur_interaction::command::{
 };
 use obscur_interaction::focus::{FocusScope, FocusScopeId};
 use obscur_interaction::hover::{HoverChain, HoverTransition};
-use obscur_interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind, PointerId};
+use obscur_interaction::pointer::{
+    PointerCaptureRegistry, PointerDevice, PointerEvent, PointerEventKind, PointerId,
+};
 use obscur_interaction::spatial::SpatialIndex;
 use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_layout::model::Dimension;
@@ -353,6 +355,15 @@ pub struct UiRuntime {
     /// A mouse only ever occupies the one [`PointerId::MOUSE`] entry, so its
     /// behaviour is unchanged.
     presses: HashMap<PointerId, Press>,
+    /// Which node, if any, has captured each pointer (spec §2.4: "pointer capture
+    /// is per pointer ID and is released on pointer completion, node removal,
+    /// window close or system loss").
+    ///
+    /// A captured pointer routes to its captor instead of the hit-tested target —
+    /// capture *overrides* hit-testing — which is how a control keeps receiving a
+    /// gesture that has wandered off it: a thumb being dragged, a finger that
+    /// slid past the edge of the row it started on.
+    captures: PointerCaptureRegistry,
     /// The in-flight pointer drag-selection over the focused editable, if any:
     /// `(field node, anchor byte offset)`. Armed by a
     /// [`PointerEventKind::Down`] whose editable ancestor has an active editing
@@ -898,6 +909,7 @@ impl UiRuntime {
             inspect_mode: false,
             focused: None,
             presses: HashMap::new(),
+            captures: PointerCaptureRegistry::new(),
             text_drag: None,
             last_clicks: HashMap::new(),
             click_count: 1,
@@ -4209,8 +4221,16 @@ impl UiRuntime {
         }
 
         // 1. Hit-test: the topmost node whose box contains the point, respecting
-        //    overflow clipping, `border-radius` shape, and stacking order (§4.7).
-        let target = self.resolve_hit(event.position(), screen_point);
+        //    overflow clipping, `border-radius` shape, and stacking order (§4.7) —
+        //    unless this pointer is captured, in which case its captor is the
+        //    target wherever the pointer actually is (§2.4: capture overrides
+        //    hit-testing). That is the whole purpose of capture: a control that has
+        //    claimed a gesture keeps it even when the pointer wanders off, which is
+        //    the difference between a drag that works past the edge of its thumb
+        //    and one that dies there.
+        let target = self
+            .captured_target(event.pointer())
+            .or_else(|| self.resolve_hit(event.position(), screen_point));
 
         // 2. Hover: chain = target + its element ancestors, topmost-first. A
         //    touchscreen contact does not leave a persistent hover (§2): the
@@ -4393,6 +4413,9 @@ impl UiRuntime {
             if held.and_then(|press| press.target).is_some() {
                 press_changed = true;
             }
+            // §2.4: a capture is released on pointer completion. The gesture the
+            // captor claimed is over, so the next one hit-tests normally.
+            self.captures.release(event.pointer());
             // A release ends any in-flight drag-selection: the selection stays
             // wherever the last move left it.
             self.text_drag = None;
@@ -4413,6 +4436,8 @@ impl UiRuntime {
             {
                 press_changed = true;
             }
+            // A cancelled pointer has completed just as surely as a released one.
+            self.captures.release(event.pointer());
             self.text_drag = None;
         }
 
@@ -4431,6 +4456,68 @@ impl UiRuntime {
             current_target,
             event.trust(),
         )
+    }
+
+    /// Captures `pointer` to `node`, so every subsequent event from that pointer
+    /// targets `node` instead of whatever it is over (spec §2.4).
+    ///
+    /// This is how a control keeps a gesture it has claimed: a thumb being
+    /// dragged, a row a finger started on and then slid past. Capture is *per
+    /// pointer*, so capturing one finger leaves every other pointer routing
+    /// normally.
+    ///
+    /// Returns `false` — capturing nothing — for a node that is not in the tree,
+    /// so a stale id cannot silently swallow a pointer's events.
+    ///
+    /// The capture is released when the pointer completes ([`Up`] or [`Cancel`]),
+    /// when `node` leaves the tree, or on
+    /// [`release_pointer_capture`](Self::release_pointer_capture). §2.4 also
+    /// releases on window close and system loss; the runtime has no signal for
+    /// either yet, so those are **not** covered here.
+    ///
+    /// [`Up`]: PointerEventKind::Up
+    /// [`Cancel`]: PointerEventKind::Cancel
+    pub fn capture_pointer(&mut self, pointer: PointerId, node: NodeId) -> bool {
+        if self.tree.get(node).is_none() {
+            return false;
+        }
+        self.captures.capture(pointer, node);
+        true
+    }
+
+    /// Releases any capture held on `pointer`, returning whether one was held
+    /// (spec §2.4).
+    pub fn release_pointer_capture(&mut self, pointer: PointerId) -> bool {
+        self.captures.release(pointer).is_some()
+    }
+
+    /// The node currently capturing `pointer`, if any (spec §2.4).
+    ///
+    /// A capture whose node has left the tree reads as [`None`] here and is
+    /// cleared on the next event for that pointer.
+    #[must_use]
+    pub fn pointer_capture(&self, pointer: PointerId) -> Option<NodeId> {
+        self.captures
+            .target(pointer)
+            .filter(|node| self.tree.get(*node).is_some())
+    }
+
+    /// The live capture target for `pointer`: its captor, or [`None`] when it is
+    /// uncaptured — releasing a capture whose node has since left the tree.
+    ///
+    /// §2.4 releases a capture on node removal. Rather than hook every path that
+    /// can remove a node (reconciliation, portal teardown, an error boundary
+    /// unmounting a subtree), the capture is validated where it is used: a captor
+    /// that is no longer in the tree releases here and the event falls back to
+    /// hit-testing. The observable rule is the same, and it cannot be defeated by
+    /// a removal path nobody remembered to hook.
+    fn captured_target(&mut self, pointer: PointerId) -> Option<NodeId> {
+        let node = self.captures.target(pointer)?;
+        if self.tree.get(node).is_some() {
+            return Some(node);
+        }
+        self.captures.release(pointer);
+        None
     }
 
     /// Registers `target` as a drop site for data drags (spec §6.21).
@@ -12157,6 +12244,152 @@ mod tests {
         let late = runtime.handle_pointer(finger(0, PointerEventKind::Up, 50.0, 25.0));
         assert_eq!(late.command(), None);
         assert!(!ran.get());
+    }
+
+    // ---- Pointer capture (§2.4) ------------------------------------------------
+
+    /// Builds the two-command panel and returns `(runtime, a, b, ran_a, ran_b)`.
+    #[allow(clippy::type_complexity)]
+    fn capture_fixture() -> (UiRuntime, NodeId, NodeId, Rc<Cell<bool>>, Rc<Cell<bool>>) {
+        let cmd_a = InternedSymbol::from_raw(0x0A);
+        let cmd_b = InternedSymbol::from_raw(0x0B);
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let (ran_a, ran_b) = (Rc::new(Cell::new(false)), Rc::new(Cell::new(false)));
+        {
+            let (a, b) = (ran_a.clone(), ran_b.clone());
+            runtime.on_command(cmd_a, move || a.set(true));
+            runtime.on_command(cmd_b, move || b.set(true));
+        }
+        let sheet = interaction_sheet();
+        let _ = runtime.render_now(
+            &two_command_view(cmd_a, cmd_b),
+            std::slice::from_ref(&sheet),
+        );
+        let (_panel, a, b) = panel_nodes(&runtime);
+        (runtime, a, b, ran_a, ran_b)
+    }
+
+    /// Capture overrides hit-testing — the property the whole mechanism exists
+    /// for. The pointer presses and releases squarely over `b`, and `a` gets the
+    /// gesture because `a` captured it.
+    #[test]
+    fn a_captured_pointer_targets_its_captor_and_not_what_it_is_over() {
+        let (mut runtime, a, _b, ran_a, ran_b) = capture_fixture();
+        assert!(runtime.capture_pointer(PointerId::MOUSE, a));
+        assert_eq!(runtime.pointer_capture(PointerId::MOUSE), Some(a));
+
+        // (50, 75) is inside `b` and nowhere near `a`.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0));
+        let dispatch = runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 75.0));
+
+        assert_eq!(dispatch.target(), Some(a), "the captor is the target");
+        assert!(ran_a.get(), "the captor's own handler ran");
+        assert!(
+            !ran_b.get(),
+            "the control actually under the pointer got nothing"
+        );
+    }
+
+    /// §2.4: a capture ends when the pointer completes. Otherwise one drag would
+    /// swallow every gesture that followed it.
+    #[test]
+    fn a_completed_pointer_releases_its_capture() {
+        let (mut runtime, a, _b, _ran_a, ran_b) = capture_fixture();
+        runtime.capture_pointer(PointerId::MOUSE, a);
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0));
+        runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 75.0));
+
+        assert_eq!(
+            runtime.pointer_capture(PointerId::MOUSE),
+            None,
+            "the release ended the capture"
+        );
+
+        // The next gesture hit-tests normally and reaches what it is over.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0));
+        let dispatch = runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 75.0));
+        assert!(ran_b.get(), "the pointer is free again");
+        assert!(dispatch.command().is_some());
+    }
+
+    /// A cancel completes the pointer too — the case that matters for touch,
+    /// where the system takes gestures away routinely.
+    #[test]
+    fn a_cancelled_pointer_releases_its_capture() {
+        let (mut runtime, a, _b, _ran_a, _ran_b) = capture_fixture();
+        runtime.capture_pointer(PointerId::touch(0), a);
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 50.0, 75.0));
+        runtime.handle_pointer(finger(0, PointerEventKind::Cancel, 50.0, 75.0));
+
+        assert_eq!(runtime.pointer_capture(PointerId::touch(0)), None);
+    }
+
+    /// §2.4 releases a capture on node removal, and the runtime enforces it where
+    /// the capture is *used* rather than by hooking every removal path — so a
+    /// captor that leaves the tree cannot keep swallowing a pointer's events.
+    #[test]
+    fn a_capture_dies_with_its_node() {
+        let (mut runtime, a, _b, ran_a, ran_b) = capture_fixture();
+        runtime.capture_pointer(PointerId::MOUSE, a);
+
+        // Re-render without `a`: `b` is the only child left, and it now occupies
+        // the top half where `a` used to be.
+        let cmd_b = InternedSymbol::from_raw(0x0B);
+        let only_b = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(100))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+                .with_children(ViewFragment::from_nodes(vec![
+                    ViewNode::element(ComponentId::from_raw(102))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("b".into())))
+                        .with_event(ViewEventBinding::new(EVENT_CLICK, cmd_b)),
+                ])),
+        ]));
+        let sheet = interaction_sheet();
+        let _ = runtime.render_now(&only_b, std::slice::from_ref(&sheet));
+
+        assert_eq!(
+            runtime.pointer_capture(PointerId::MOUSE),
+            None,
+            "a captor that has left the tree holds nothing"
+        );
+
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 25.0));
+        assert!(!ran_a.get(), "the removed node cannot still be activated");
+        assert!(ran_b.get(), "the pointer hit-tests to what is really there");
+    }
+
+    /// Capturing to a node that is not in the tree captures nothing, rather than
+    /// parking a stale id that would swallow the pointer's events.
+    #[test]
+    fn capturing_an_unknown_node_captures_nothing() {
+        let (mut runtime, _a, _b, _ran_a, ran_b) = capture_fixture();
+        assert!(!runtime.capture_pointer(PointerId::MOUSE, NodeId::from_raw(9_999)));
+        assert_eq!(runtime.pointer_capture(PointerId::MOUSE), None);
+
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 75.0));
+        runtime.handle_pointer(mouse(PointerEventKind::Up, 50.0, 75.0));
+        assert!(ran_b.get(), "routing is untouched");
+    }
+
+    /// Capture is per pointer ID: one captured finger leaves the others routing
+    /// by hit-test.
+    #[test]
+    fn capturing_one_pointer_leaves_the_others_alone() {
+        let (mut runtime, a, _b, ran_a, ran_b) = capture_fixture();
+        runtime.capture_pointer(PointerId::touch(0), a);
+
+        // Both fingers work the same spot over `b`; only the captured one is
+        // diverted to `a`.
+        runtime.handle_pointer(finger(0, PointerEventKind::Down, 50.0, 75.0));
+        runtime.handle_pointer(finger(1, PointerEventKind::Down, 50.0, 75.0));
+        let captured = runtime.handle_pointer(finger(0, PointerEventKind::Up, 50.0, 75.0));
+        let free = runtime.handle_pointer(finger(1, PointerEventKind::Up, 50.0, 75.0));
+
+        assert_eq!(captured.target(), Some(a));
+        assert!(ran_a.get());
+        assert!(free.target().is_some());
+        assert!(ran_b.get(), "the uncaptured finger reached what it was over");
     }
 
     /// The lone child node of the root after a frame (for single-element views).
