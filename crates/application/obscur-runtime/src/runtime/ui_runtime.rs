@@ -4414,6 +4414,15 @@ impl UiRuntime {
                     // the focused editable's text/caret/selection is live for keys
                     // (and step-2 rendering).
                     self.sync_editing_to_focus();
+                    // §6.15 "Focused inputs may be scrolled into view". A field
+                    // half off the edge of its scroller — or behind the on-screen
+                    // keyboard, which is the case that matters on a device with no
+                    // hardware one — is brought into the visible region. A field
+                    // already fully visible does not move.
+                    if let Some(field) = interactive_target.and_then(|t| self.editable_ancestor(t))
+                    {
+                        self.scroll_into_view(field);
+                    }
                 }
                 // Flattened deliberately: "no press outstanding" and "a press on
                 // empty space" are the same *styling* state (nothing is `:active`),
@@ -4645,6 +4654,7 @@ impl UiRuntime {
         if self.environment == environment {
             return false;
         }
+        let keyboard_moved = self.environment.keyboard != environment.keyboard;
         self.environment = environment;
         // Every `env()` in the sheet computes to a different length now, and a
         // computed length is what layout arranges from — so the next frame must
@@ -4652,6 +4662,16 @@ impl UiRuntime {
         // environment, so it declines by itself; this only has to ask for the
         // frame that will notice.
         self.request_frame(FrameReason::WindowChange);
+        // §6.15 "Focused inputs may be scrolled into view". A keyboard that has
+        // just risen over the field the user is typing in is the reason that
+        // sentence is in the spec: nothing about the *focus* changed, so only the
+        // keyboard's arrival can trigger the reveal.
+        if keyboard_moved
+            && let Some(focused) = self.focused
+            && let Some(field) = self.editable_ancestor(focused)
+        {
+            self.scroll_into_view(field);
+        }
         true
     }
 
@@ -4675,6 +4695,73 @@ impl UiRuntime {
     /// anything changed.
     pub fn set_keyboard_insets(&mut self, insets: Insets) -> bool {
         self.set_environment(self.environment.with_keyboard(insets))
+    }
+
+    /// Scrolls `node` into view inside its nearest scrollable ancestor, and
+    /// returns whether anything moved (spec §6.15 "Focused inputs may be scrolled
+    /// into view", §4.8 scroll-into-view).
+    ///
+    /// The visible region is the container's scrollport **minus whatever the
+    /// on-screen keyboard occludes of it**. That subtraction is the whole point
+    /// on a device without a hardware keyboard: the field the user just tapped is
+    /// exactly the one the keyboard slides up over, and a scroll-into-view that
+    /// ignored the keyboard would decide the field was already visible and leave
+    /// it behind the keys.
+    ///
+    /// A node already inside the visible region does not move — this is the
+    /// minimum scroll that reveals it, not a recentre.
+    ///
+    /// # What it cannot do
+    ///
+    /// Only a **scroll container** can scroll, so a field with no scrollable
+    /// ancestor cannot be revealed and this returns `false`. The root viewport is
+    /// not a scroller in this model, so a form laid out directly on the root has
+    /// nowhere to go — which is worth knowing before designing a screen for a
+    /// device whose keyboard covers half of it.
+    pub fn scroll_into_view(&mut self, node: NodeId) -> bool {
+        let Some(target) = self.boxes.get(&node).copied() else {
+            return false;
+        };
+        let ancestors = self.hover_chain_for(Some(node));
+        let containers = scroll_containers(&self.tree, &self.computed, &self.boxes);
+        // Innermost first: `hover_chain_for` is topmost-first, so the first
+        // ancestor that is a scrollable container is the one that owns this node's
+        // scrolling.
+        let Some(container) = ancestors.iter().find_map(|&ancestor| {
+            containers
+                .iter()
+                .find(|c| c.node == ancestor && overflow_scrolls(&self.computed, c.node))
+                .copied()
+        }) else {
+            return false;
+        };
+
+        // Both boxes are in unscrolled layout space, so the node's offset within
+        // the scrollable content is just the difference of their tops.
+        let offset = target.origin().y - container.scrollport.origin.y;
+        let height = target.size().height;
+        let current = self.clamped_scroll_top(container);
+
+        // The keyboard eats the bottom of the scrollport only insofar as the two
+        // overlap: a container that ends above the keyboard loses nothing.
+        let port_bottom = container.scrollport.origin.y + container.scrollport.size.height;
+        let keyboard_top = self.viewport.height - self.environment.keyboard.bottom;
+        let occluded = (port_bottom - keyboard_top).clamp(0.0, container.scrollport.size.height);
+        let visible = (container.scrollport.size.height - occluded).max(0.0);
+
+        let desired = if offset < current {
+            offset
+        } else if offset + height > current + visible {
+            offset + height - visible
+        } else {
+            return false;
+        };
+        let moved = self.scroll_by(container.node, desired - current);
+        if (moved - current).abs() <= f32::EPSILON {
+            return false;
+        }
+        self.request_frame(FrameReason::Input);
+        true
     }
 
     /// Arms a pan for `event`'s pointer if a **direct** contact went down inside
@@ -13191,6 +13278,176 @@ mod tests {
         let scroller = runtime.tree().get(root).unwrap().child_nodes()[0];
         let rows = runtime.tree().get(scroller).unwrap().child_nodes().to_vec();
         (scroller, rows)
+    }
+
+    // ---- Scroll into view (§6.15, §4.8) ----------------------------------------
+
+    /// The 200×120 scroller of six 40px rows, with **row 3** bound as an editable
+    /// field — a field in the middle of a scrolling screen, where there is
+    /// content below it to scroll past. Returns `(runtime, scroller, rows)`.
+    fn reveal_fixture() -> (UiRuntime, NodeId, Vec<NodeId>) {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let rows: Vec<ViewNode> = (0..6)
+            .map(|i| {
+                let row = ViewNode::element(ComponentId::from_raw(200 + i))
+                    .with_prop(ViewProperty::new(CLASS, ViewValue::Text("row".into())));
+                if i == 3 {
+                    row.with_event(ViewEventBinding::new(EVENT_INPUT, CMD_INPUT))
+                } else {
+                    row
+                }
+            })
+            .collect();
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(100))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("scroller".into())))
+                .with_children(ViewFragment::from_nodes(rows)),
+        ]));
+        let sheet = scroller_sheet();
+        let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+        let (scroller, rows) = scroller_nodes(&runtime);
+        (runtime, scroller, rows)
+    }
+
+    #[test]
+    fn revealing_a_node_below_the_fold_scrolls_the_minimum() {
+        let (mut runtime, scroller, rows) = reveal_fixture();
+        // Row 5 spans y 200..240; the scrollport is 120 tall. The least scroll
+        // that shows all of it is 240 − 120 = 120.
+        assert!(runtime.scroll_into_view(rows[5]));
+        assert!(
+            (runtime.scroll_top(scroller) - 120.0).abs() < f32::EPSILON,
+            "got {}",
+            runtime.scroll_top(scroller)
+        );
+    }
+
+    #[test]
+    fn revealing_a_node_already_in_view_moves_nothing() {
+        // The minimum scroll that reveals something already visible is none —
+        // this is a reveal, not a recentre.
+        let (mut runtime, scroller, rows) = reveal_fixture();
+        assert!(!runtime.scroll_into_view(rows[1]));
+        assert!((runtime.scroll_top(scroller) - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn revealing_a_node_above_the_fold_scrolls_back_up() {
+        let (mut runtime, scroller, rows) = reveal_fixture();
+        runtime.scroll_by(scroller, 120.0);
+        assert!(runtime.scroll_into_view(rows[0]));
+        assert!(
+            (runtime.scroll_top(scroller) - 0.0).abs() < f32::EPSILON,
+            "got {}",
+            runtime.scroll_top(scroller)
+        );
+    }
+
+    /// The case §6.15 exists for. The keyboard occludes the bottom of the
+    /// scrollport, so the region a field must be revealed *into* is smaller —
+    /// and a reveal that ignored it would decide the field was already visible
+    /// and leave it behind the keys.
+    #[test]
+    fn the_keyboard_shrinks_the_region_a_field_is_revealed_into() {
+        // Row 3 spans y 120..160. With the whole 120px scrollport visible the
+        // least scroll that shows it is 160 − 120 = 40.
+        let (mut runtime, scroller, rows) = reveal_fixture();
+        runtime.scroll_into_view(rows[3]);
+        let without_keyboard = runtime.scroll_top(scroller);
+        assert!(
+            (without_keyboard - 40.0).abs() < f32::EPSILON,
+            "got {without_keyboard}"
+        );
+
+        // Now a keyboard covering the bottom 240px of the 300px viewport leaves
+        // the scrollport visible only down to y=60 — 60px of it — so the same row
+        // has to come 60px further up: 160 − 60 = 100.
+        let (mut runtime, scroller, rows) = reveal_fixture();
+        runtime.set_keyboard_insets(Insets {
+            top: 0.0,
+            right: 0.0,
+            bottom: 240.0,
+            left: 0.0,
+        });
+        runtime.scroll_into_view(rows[3]);
+        let with_keyboard = runtime.scroll_top(scroller);
+        assert!(
+            (with_keyboard - 100.0).abs() < f32::EPSILON,
+            "got {with_keyboard}"
+        );
+        assert!(
+            with_keyboard > without_keyboard,
+            "the keyboard forced the field further up the scrollport"
+        );
+    }
+
+    #[test]
+    fn a_node_with_no_scrollable_ancestor_cannot_be_revealed() {
+        // Honest `false` rather than a silent no-op that looks like success: a
+        // form laid out on the root has nowhere to go.
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let _ = runtime.render_now(&panel_view(), std::slice::from_ref(&sheet));
+        let (_panel, a, _b) = panel_nodes(&runtime);
+        assert!(!runtime.scroll_into_view(a));
+    }
+
+    /// A keyboard rising over the field the user is already typing in: nothing
+    /// about the focus changed, so only the keyboard's arrival can trigger the
+    /// reveal.
+    #[test]
+    fn a_keyboard_report_reveals_the_field_that_is_already_focused() {
+        let (mut runtime, scroller, rows) = reveal_fixture();
+        // Bring the editable row into view (scroll 40, so it sits at screen
+        // y 80..120) and focus it by pressing on it.
+        runtime.scroll_into_view(rows[3]);
+        let seated = runtime.scroll_top(scroller);
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 100.0));
+        assert_eq!(
+            runtime.focused(),
+            Some(rows[3]),
+            "the press focused the editable row"
+        );
+
+        runtime.set_keyboard_insets(Insets {
+            top: 0.0,
+            right: 0.0,
+            bottom: 240.0,
+            left: 0.0,
+        });
+        assert!(
+            runtime.scroll_top(scroller) > seated,
+            "the field came up out from behind the keyboard: {} → {}",
+            seated,
+            runtime.scroll_top(scroller)
+        );
+    }
+
+    /// The limit of scrolling as an answer to the keyboard, stated as a test
+    /// rather than left to be discovered.
+    ///
+    /// A field at the very bottom of the content cannot be lifted above the
+    /// keyboard, because there is nothing below it to scroll past — the scroll is
+    /// already at its maximum. Revealing it needs the *other* half of §6.15's
+    /// "overlay/resize/pan behavior": the viewport shrinking, or the content
+    /// gaining room, when the keyboard appears. Neither is built, so this is what
+    /// currently happens, and a screen that puts a field flush against the bottom
+    /// of a scroller will have it covered.
+    #[test]
+    fn a_field_at_the_very_bottom_cannot_be_lifted_above_the_keyboard() {
+        let (mut runtime, scroller, rows) = reveal_fixture();
+        runtime.scroll_into_view(rows[5]);
+        let at_end = runtime.scroll_top(scroller);
+        assert!((at_end - 120.0).abs() < f32::EPSILON, "scrolled to the end");
+
+        runtime.set_keyboard_insets(Insets {
+            top: 0.0,
+            right: 0.0,
+            bottom: 240.0,
+            left: 0.0,
+        });
+        assert!(!runtime.scroll_into_view(rows[5]), "there is nowhere to go");
+        assert!((runtime.scroll_top(scroller) - at_end).abs() < f32::EPSILON);
     }
 
     // ---- Touch panning (§6.16 `Pan`) -------------------------------------------
