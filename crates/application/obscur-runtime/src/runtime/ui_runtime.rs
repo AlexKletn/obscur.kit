@@ -200,6 +200,11 @@ struct ActiveHold {
     target: NodeId,
     origin: Point,
     trusted: bool,
+    /// The virtual list and model index the contact went down on, if it landed on
+    /// a realized row. Resolved once, at contact time: the row under the finger
+    /// is the row being held, and the list cannot scroll while that finger is the
+    /// one holding it still.
+    row: Option<(InternedSymbol, usize)>,
 }
 
 /// A pan armed for one pointer: the recognizer deciding whether the contact is a
@@ -702,6 +707,11 @@ pub struct UiRuntime {
     /// one builder shares a single command symbol, so a symbol cannot say *which* row
     /// was hit — only the geometry can, and only the runtime has it.
     virtual_row_click_handlers: HashMap<InternedSymbol, Box<dyn FnMut(usize, u32)>>,
+    /// Long-press handlers for the rows of each virtual list, keyed by list id
+    /// (spec §4.9, §6.16). Same reason the click handlers exist: a realized row
+    /// cannot carry a per-row binding, so only the runtime can say which row a
+    /// held finger is on.
+    virtual_row_hold_handlers: HashMap<InternedSymbol, Box<dyn FnMut(usize)>>,
     /// The domain motion scheduler owning every active timeline (spec §4.17).
     ///
     /// The runtime *owns* the scheduler and its timelines; each frame it samples
@@ -1028,6 +1038,7 @@ impl UiRuntime {
             virtual_row_extent: HashMap::new(),
             virtual_scroll_reset_seen: HashMap::new(),
             virtual_row_click_handlers: HashMap::new(),
+            virtual_row_hold_handlers: HashMap::new(),
             motion: MotionScheduler::new(),
             animations: Vec::new(),
             presentation_overlays: Vec::new(),
@@ -4725,9 +4736,18 @@ impl UiRuntime {
         if self.is_within_disabled(target) {
             return;
         }
-        if self
-            .command_for_event_bubbling(target, EVENT_LONG_PRESS)
-            .is_none()
+        // Two ways to be holdable: a binding in the ancestor chain, or a realized
+        // row of a virtual list whose owner registered a row handler. The second
+        // is not a special case so much as the main one on a tablet — a file
+        // listing's rows are exactly what a user wants to act on, and they are
+        // precisely the nodes that cannot carry a binding.
+        let row = self
+            .virtual_index_at(screen_point)
+            .filter(|(list, _)| self.virtual_row_hold_handlers.contains_key(list));
+        if row.is_none()
+            && self
+                .command_for_event_bubbling(target, EVENT_LONG_PRESS)
+                .is_none()
         {
             return;
         }
@@ -4739,6 +4759,7 @@ impl UiRuntime {
                 target,
                 origin: screen_point,
                 trusted: event.trust().is_trusted(),
+                row,
             },
         );
         // Nothing else will schedule the frames that count the hold down.
@@ -4755,22 +4776,27 @@ impl UiRuntime {
         if self.holds.is_empty() {
             return;
         }
-        let fired: Vec<(PointerId, NodeId, bool)> = self
+        let fired: Vec<(PointerId, ActiveHold)> = self
             .holds
             .iter_mut()
-            .filter_map(|(pointer, hold)| {
-                hold.press
-                    .advance(delta)
-                    .then_some((*pointer, hold.target, hold.trusted))
-            })
+            .filter_map(|(pointer, hold)| hold.press.advance(delta).then_some((*pointer, *hold)))
             .collect();
-        for (pointer, target, trusted) in fired {
+        for (pointer, hold) in fired {
             self.presses.remove(&pointer);
             // §2.3 step 4: the default action runs only for a platform-vouched
             // gesture. An untrusted contact still had its hold counted and
             // observed; it just does not run the handler.
-            if trusted {
-                self.fire_long_press(target);
+            if hold.trusted {
+                match hold.row {
+                    Some((list, index)) => {
+                        if let Some(handler) = self.virtual_row_hold_handlers.get_mut(&list) {
+                            handler(index);
+                        }
+                    }
+                    None => {
+                        self.fire_long_press(hold.target);
+                    }
+                }
             }
             self.request_frame(FrameReason::Input);
         }
@@ -8177,6 +8203,27 @@ impl UiRuntime {
         handler: Box<dyn FnMut(usize, u32)>,
     ) {
         self.virtual_row_click_handlers.insert(id, handler);
+    }
+
+    /// Registers a long-press handler for the rows of virtual list `id` (spec
+    /// §4.9, §6.16).
+    ///
+    /// The touch counterpart to [`on_virtual_row_click`](Self::on_virtual_row_click),
+    /// and it exists for the same reason: a realized row cannot carry a per-row
+    /// binding, so the model index has to come from the geometry the runtime
+    /// owns. Without it, the one gesture that reaches a context action on a
+    /// tablet could reach every element in an application *except* the rows of a
+    /// virtual list — which, in a file manager, is the only thing anyone wants to
+    /// act on.
+    ///
+    /// Called once, when the hold is recognized, while the finger is still down;
+    /// the lift that follows is consumed and is not a click.
+    pub fn on_virtual_row_long_press(
+        &mut self,
+        id: InternedSymbol,
+        handler: Box<dyn FnMut(usize)>,
+    ) {
+        self.virtual_row_hold_handlers.insert(id, handler);
     }
 
     /// Resolves an on-screen point to the virtual list and model index under it, if

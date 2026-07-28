@@ -61,6 +61,7 @@ pub struct App {
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
     virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
     virtual_clicks: Vec<(InternedSymbol, Box<dyn FnMut(usize, u32) + 'static>)>,
+    virtual_holds: Vec<(InternedSymbol, Box<dyn FnMut(usize) + 'static>)>,
 }
 
 impl App {
@@ -77,6 +78,7 @@ impl App {
             scroll: None,
             virtual_lists: Vec::new(),
             virtual_clicks: Vec::new(),
+            virtual_holds: Vec::new(),
         }
     }
 
@@ -165,6 +167,23 @@ impl App {
         self
     }
 
+    /// Registers a **long-press** handler for the rows of virtual list `id`: a
+    /// finger held still on a row calls `handler(model_index)` while it is still
+    /// down, and the lift that follows is not a click.
+    ///
+    /// The touch counterpart to [`on_row_click`](Self::on_row_click), and the only
+    /// way a virtualized row reaches a context action: a touchscreen has one
+    /// button and no modifiers, so a hold is what a secondary click would have
+    /// been — and a realized row cannot carry a per-row binding to receive it.
+    pub fn on_row_long_press(
+        mut self,
+        id: InternedSymbol,
+        handler: impl FnMut(usize) + 'static,
+    ) -> Self {
+        self.virtual_holds.push((id, Box::new(handler)));
+        self
+    }
+
     /// Registers a handler for wheel scrolling the kit did not consume.
     ///
     /// A `overflow: scroll` container inside the kit takes the wheel first; this is
@@ -225,6 +244,7 @@ impl App {
                     self.scroll,
                     self.virtual_lists,
                     self.virtual_clicks,
+                    self.virtual_holds,
                 );
             }
             None => Box::new(View::default),
@@ -239,6 +259,7 @@ impl App {
             self.scroll,
             self.virtual_lists,
             self.virtual_clicks,
+            self.virtual_holds,
         )
     }
 }

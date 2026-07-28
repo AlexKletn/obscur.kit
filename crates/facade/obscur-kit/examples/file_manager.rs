@@ -188,6 +188,22 @@ impl State {
         }
     }
 
+    /// Reports what a held row *would* offer — the stand-in for a context menu,
+    /// which the kit has no popup surface for yet. Selecting first is deliberate:
+    /// a held row must become the selected one, or the action would be about a
+    /// different entry than the one under the finger.
+    fn describe(&mut self, index: usize) {
+        self.select(index);
+        let Some(entry) = self.entries.get(self.selected) else {
+            return;
+        };
+        self.message = if entry.is_dir {
+            format!("{} — directory (held)", entry.name)
+        } else {
+            format!("{} — {} (held)", entry.name, human_size(entry.size))
+        };
+    }
+
     /// Goes to the parent directory, if there is one.
     fn parent(&mut self) {
         if let Some(parent) = self.dir.parent().map(Path::to_path_buf) {
@@ -353,6 +369,7 @@ fn main() -> Result<(), obscur_kit::AppError> {
     let open = state.clone();
     let parent = state.clone();
     let click = state.clone();
+    let hold = state.clone();
 
     App::new("obscur-kit — file manager (.okui)")
         .app_id("obscur-kit-file-manager")
@@ -383,5 +400,10 @@ fn main() -> Result<(), obscur_kit::AppError> {
                 state.open();
             }
         })
+        // Holding a row is what a right click would be: a touchscreen has one
+        // button and no modifiers, so this is the only route to a per-entry
+        // action. It fires while the finger is still down, and the lift that
+        // follows does not also select — the runtime consumes it.
+        .on_row_long_press(FILES, move |index| hold.borrow_mut().describe(index))
         .run()
 }

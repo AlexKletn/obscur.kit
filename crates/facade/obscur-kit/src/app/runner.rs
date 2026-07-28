@@ -111,6 +111,7 @@ pub(super) fn run(
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
     virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
     virtual_clicks: Vec<(InternedSymbol, Box<dyn FnMut(usize, u32) + 'static>)>,
+    virtual_holds: Vec<(InternedSymbol, Box<dyn FnMut(usize) + 'static>)>,
 ) -> Result<(), AppError> {
     run_inner(
         title,
@@ -123,6 +124,7 @@ pub(super) fn run(
         None,
         virtual_lists,
         virtual_clicks,
+        virtual_holds,
     )
 }
 
@@ -143,6 +145,7 @@ pub(super) fn run_with_frame(
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
     virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
     virtual_clicks: Vec<(InternedSymbol, Box<dyn FnMut(usize, u32) + 'static>)>,
+    virtual_holds: Vec<(InternedSymbol, Box<dyn FnMut(usize) + 'static>)>,
 ) -> Result<(), AppError> {
     let info = Rc::new(Cell::new(FrameInfo {
         viewport: Size::new(size.0, size.1),
@@ -161,6 +164,7 @@ pub(super) fn run_with_frame(
         Some(info),
         virtual_lists,
         virtual_clicks,
+        virtual_holds,
     )
 }
 
@@ -176,6 +180,7 @@ fn run_inner(
     frame_info: Option<Rc<Cell<FrameInfo>>>,
     virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
     virtual_clicks: Vec<(InternedSymbol, Box<dyn FnMut(usize, u32) + 'static>)>,
+    virtual_holds: Vec<(InternedSymbol, Box<dyn FnMut(usize) + 'static>)>,
 ) -> Result<(), AppError> {
     let (width, height) = size;
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(width, height));
@@ -192,6 +197,9 @@ fn run_inner(
     }
     for (id, handler) in virtual_clicks {
         runtime.on_virtual_row_click(id, handler);
+    }
+    for (id, handler) in virtual_holds {
+        runtime.on_virtual_row_long_press(id, handler);
     }
 
     let boot = KitBootstrap::new();

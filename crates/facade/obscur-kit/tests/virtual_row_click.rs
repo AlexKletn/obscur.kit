@@ -154,6 +154,117 @@ fn the_resolved_index_follows_the_scroll_offset() {
     );
 }
 
+/// A finger held on a row at `y`, ticked past the long-press threshold.
+fn hold_at(rt: &mut UiRuntime, y: f32) {
+    rt.handle_pointer(
+        PointerEvent::new(
+            PointerId::touch(0),
+            PointerDevice::Touch,
+            PointerEventKind::Down,
+            Point::new(20.0, y),
+        )
+        .as_trusted(),
+    );
+    rt.advance_motion(0.6);
+}
+
+/// A hold on a virtualized row resolves to the same model index a click does.
+///
+/// This is the gesture that reaches a context action on a tablet, and a
+/// virtualized row is exactly the node that cannot carry a binding to receive
+/// it — so without the geometry resolution, a file listing would be the one
+/// place in an application where holding a thing does nothing.
+#[test]
+fn a_long_press_resolves_to_the_row_under_it() {
+    let sheet = compile(SHEET);
+    let clicks = Rc::new(RefCell::new(Vec::new()));
+    let holds = Rc::new(RefCell::new(Vec::new()));
+    let mut rt = runtime(&clicks);
+    let sink = Rc::clone(&holds);
+    rt.on_virtual_row_long_press(LIST, Box::new(move |index| sink.borrow_mut().push(index)));
+    let _ = rt.render_now(&view(), std::slice::from_ref(&sheet));
+
+    hold_at(&mut rt, 50.0);
+
+    assert_eq!(
+        holds.borrow().as_slice(),
+        &[2],
+        "the hold at y=50 over 20px rows is model index 2 — the same row a click \
+         there resolves to"
+    );
+
+    // And the lift that follows is consumed: holding a row and letting go does
+    // one thing, not two.
+    rt.handle_pointer(
+        PointerEvent::new(
+            PointerId::touch(0),
+            PointerDevice::Touch,
+            PointerEventKind::Up,
+            Point::new(20.0, 50.0),
+        )
+        .as_trusted(),
+    );
+    assert!(
+        clicks.borrow().is_empty(),
+        "the release after a hold is not also a row click"
+    );
+}
+
+#[test]
+fn the_held_index_follows_the_scroll_offset() {
+    // The same guard the click path has: the index is the entry's place in the
+    // model, not its screen row.
+    let sheet = compile(SHEET);
+    let clicks = Rc::new(RefCell::new(Vec::new()));
+    let holds = Rc::new(RefCell::new(Vec::new()));
+    let mut rt = runtime(&clicks);
+    let sink = Rc::clone(&holds);
+    rt.on_virtual_row_long_press(LIST, Box::new(move |index| sink.borrow_mut().push(index)));
+    let _ = rt.render_now(&view(), std::slice::from_ref(&sheet));
+
+    let root = rt.tree().root().expect("a root");
+    let scroller = rt.tree().get(root).expect("live").children()[0];
+    rt.scroll_by(scroller, 100.0);
+    let _ = rt.render_now(&view(), std::slice::from_ref(&sheet));
+
+    hold_at(&mut rt, 50.0);
+
+    assert_eq!(
+        holds.borrow().as_slice(),
+        &[7],
+        "at scroll offset 100 a hold at y=50 is model index (50 + 100) / 20 = 7"
+    );
+}
+
+/// A short tap on a row is still a click, not a hold. Without this pair, an
+/// implementation that fired the hold handler on every contact would pass.
+#[test]
+fn a_tap_on_a_row_is_a_click_and_not_a_hold() {
+    let sheet = compile(SHEET);
+    let clicks = Rc::new(RefCell::new(Vec::new()));
+    let holds = Rc::new(RefCell::new(Vec::new()));
+    let mut rt = runtime(&clicks);
+    let sink = Rc::clone(&holds);
+    rt.on_virtual_row_long_press(LIST, Box::new(move |index| sink.borrow_mut().push(index)));
+    let _ = rt.render_now(&view(), std::slice::from_ref(&sheet));
+
+    for kind in [PointerEventKind::Down, PointerEventKind::Up] {
+        rt.handle_pointer(
+            PointerEvent::new(
+                PointerId::touch(0),
+                PointerDevice::Touch,
+                kind,
+                Point::new(20.0, 50.0),
+            )
+            .as_trusted(),
+        );
+    }
+    rt.advance_motion(1.0);
+
+    assert_eq!(clicks.borrow().as_slice(), &[(2, 1)], "the tap clicked row 2");
+    assert!(holds.borrow().is_empty(), "and no hold fired, then or later");
+}
+
 #[test]
 fn a_short_list_that_is_not_a_scroll_container_fires_nothing() {
     // A three-row list fits the viewport whole, so it realizes no spacers and the
