@@ -60,8 +60,8 @@ use crate::cascade::ResolvedDeclarations;
 use crate::computed::absolutize::{absolute_font_size, absolutize_value};
 use crate::computed::{ChMetrics, ComputedStyle, ComputedValue};
 use crate::property::{
-    InheritedProperty, Length, LengthContext, PropertyId, PropertyValue, StyleColor, WritingMode,
-    layout_keyword,
+    EnvironmentValues, InheritedProperty, Length, LengthContext, PropertyId, PropertyValue,
+    StyleColor, WritingMode, layout_keyword,
 };
 use obscur_identity::InternedSymbol;
 use std::collections::{HashMap, HashSet};
@@ -264,6 +264,9 @@ pub struct ResolutionContext<'a> {
     /// one. [`None`] leaves `ch` to the specified fallbacks — see
     /// [`with_metrics`](Self::with_metrics).
     pub metrics: Option<&'a dyn ChMetrics>,
+    /// The host-reported environment values `env()` resolves against (spec
+    /// §6.15). All zeroes unless a host reports insets.
+    pub environment: EnvironmentValues,
 }
 
 impl std::fmt::Debug for ResolutionContext<'_> {
@@ -275,6 +278,7 @@ impl std::fmt::Debug for ResolutionContext<'_> {
             .field("viewport_width", &self.viewport_width)
             .field("viewport_height", &self.viewport_height)
             .field("metrics", &self.metrics.map(|_| "<ChMetrics>"))
+            .field("environment", &self.environment)
             .finish()
     }
 }
@@ -289,6 +293,7 @@ impl<'a> ResolutionContext<'a> {
             viewport_width,
             viewport_height,
             metrics: None,
+            environment: EnvironmentValues::none(),
         }
     }
 
@@ -314,6 +319,15 @@ impl<'a> ResolutionContext<'a> {
     #[must_use]
     pub const fn with_metrics(mut self, metrics: &'a dyn ChMetrics) -> Self {
         self.metrics = Some(metrics);
+        self
+    }
+
+    /// Attaches the host-reported environment values, so `env(safe-area-inset-*)`
+    /// and the keyboard insets resolve to what the host measured rather than to
+    /// the no-cutout default (spec §6.15).
+    #[must_use]
+    pub const fn with_environment(mut self, environment: EnvironmentValues) -> Self {
+        self.environment = environment;
         self
     }
 }
@@ -754,7 +768,8 @@ impl StyleResolver {
             ctx.root_font_size,
             ctx.viewport_width,
             ctx.viewport_height,
-        );
+        )
+        .with_environment(ctx.environment);
 
         // Steps 2–4: compute each property, then absolutize the lengths it
         // carries against the context `font-size` just completed.

@@ -63,11 +63,7 @@ impl View {
     #[must_use]
     pub fn into_single_node(self) -> Option<ViewNode> {
         let mut nodes = self.root.into_nodes();
-        if nodes.len() == 1 {
-            nodes.pop()
-        } else {
-            None
-        }
+        if nodes.len() == 1 { nodes.pop() } else { None }
     }
 }
 

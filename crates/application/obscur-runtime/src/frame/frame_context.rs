@@ -1,6 +1,7 @@
 //! The immutable inputs for one frame: [`FrameContext`].
 
 use obscur_geometry::Size;
+use obscur_style::property::EnvironmentValues;
 
 use super::{FrameId, FrameReason};
 
@@ -19,6 +20,7 @@ pub struct FrameContext {
     id: FrameId,
     reason: FrameReason,
     viewport: Size,
+    environment: EnvironmentValues,
 }
 
 impl FrameContext {
@@ -30,7 +32,27 @@ impl FrameContext {
             id,
             reason,
             viewport,
+            environment: EnvironmentValues::none(),
         }
+    }
+
+    /// Returns this context with the host-reported environment values attached —
+    /// the safe-area and on-screen-keyboard insets `env()` resolves against
+    /// (spec §6.15).
+    ///
+    /// Defaulted rather than a [`new`](Self::new) parameter because a host that
+    /// reports nothing is the common case and its answer (all zeroes) is correct:
+    /// a screen with no cutout and no keyboard genuinely has no insets.
+    #[must_use]
+    pub const fn with_environment(mut self, environment: EnvironmentValues) -> Self {
+        self.environment = environment;
+        self
+    }
+
+    /// The host-reported environment values in force for this frame (spec §6.15).
+    #[must_use]
+    pub const fn environment(self) -> EnvironmentValues {
+        self.environment
     }
 
     /// Returns the identity of this frame.

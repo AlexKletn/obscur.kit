@@ -10,7 +10,7 @@
 use obscur_kit::css::compiler::StylesheetCompiler;
 use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
-use obscur_kit::geometry::Size;
+use obscur_kit::geometry::{Insets, Size};
 use obscur_kit::identity::{ComponentId, NodeId, RuntimeId};
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::matching::Stylesheet;
@@ -43,6 +43,23 @@ pub fn view(nodes: Vec<ViewNode>) -> View {
 pub fn drive(w: f32, h: f32, css: &str, v: &View) -> UiRuntime {
     let sheet = compile(css);
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(w, h));
+    let _ = rt.render_now(v, std::slice::from_ref(&sheet));
+    rt
+}
+
+/// Renders one real frame of `v` under `css` in a fresh `w x h` runtime whose
+/// **host reports `insets`** as its safe area (spec §6.15's typed environment
+/// values).
+///
+/// The setup half of a §6.15 case: the section requires both that a host supply
+/// safe-area insets and that CSS `env()` expose them, and a case asserting the
+/// second has to perform the first. This states no expectation — it only reports
+/// what the case's prose says the host reports.
+#[must_use]
+pub fn drive_with_insets(w: f32, h: f32, css: &str, v: &View, insets: Insets) -> UiRuntime {
+    let sheet = compile(css);
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(w, h));
+    rt.set_safe_area_insets(insets);
     let _ = rt.render_now(v, std::slice::from_ref(&sheet));
     rt
 }

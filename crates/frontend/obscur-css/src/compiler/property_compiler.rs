@@ -26,9 +26,9 @@ use obscur_scene::color::convert;
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{
     BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow,
-    ConicGradient, Corner, CustomProperty, FilterOp, GradientStop, GridAreaTemplate, GridLineValue,
-    GridTrack, GridTrackList, Length, LinearGradient, ObjectFit, PropertyId, PropertyValue,
-    RadialGradient, RadialShape, RadialSize, StyleColor, Transform, TransformOrigin,
+    ConicGradient, Corner, CustomProperty, EnvVar, FilterOp, GradientStop, GridAreaTemplate,
+    GridLineValue, GridTrack, GridTrackList, Length, LinearGradient, ObjectFit, PropertyId,
+    PropertyValue, RadialGradient, RadialShape, RadialSize, StyleColor, Transform, TransformOrigin,
     layout_keyword,
 };
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
@@ -2364,10 +2364,43 @@ fn lower_function(
             _ => None,
         });
     }
+    if name.eq_ignore_ascii_case("env") {
+        return lower_env(args, interner);
+    }
     if let Some(color) = color_from_function(name, args) {
         return Some(PropertyValue::Color(color));
     }
     lower_math_function(name, args).map(PropertyValue::Calc)
+}
+
+/// Lowers `env(<name>)` / `env(<name>, <fallback>)` — a host-reported
+/// environment value such as `safe-area-inset-top` (spec §6.15, css-env-1).
+///
+/// A **modelled** name lowers to [`Length::Env`], which resolves at
+/// computed-value time against whatever the host has reported, so a keyboard
+/// appearing or a device rotating changes the used value without reparsing the
+/// sheet. Its fallback, if written, is accepted and unused: every modelled value
+/// is always set — a screen with no cutout reports zero rather than nothing — so
+/// there is no unset case for a fallback to cover.
+///
+/// An **unmodelled** name is a different matter. CSS says an `env()` naming an
+/// unset variable falls back if a fallback is given and invalidates the
+/// declaration otherwise, and that is exactly right here: `env(titlebar-area-x,
+/// 0px)` should lay out at `0px` rather than dropping the property, while a bare
+/// `env(safe-area-inset-topp)` is a typo that must not silently behave like an
+/// inset that happens to be absent.
+fn lower_env(args: &[ParsedValue], interner: &mut CssSymbolInterner) -> Option<PropertyValue> {
+    let mut components = args.iter().filter(|arg| !matches!(arg, ParsedValue::Comma));
+    let name = match components.next()? {
+        ParsedValue::Keyword(keyword) => keyword.clone(),
+        _ => return None,
+    };
+    if let Some(var) = EnvVar::from_name(&name) {
+        return Some(PropertyValue::Length(Length::Env(var)));
+    }
+    components
+        .next()
+        .and_then(|fallback| lower_component(fallback, interner))
 }
 
 /// Parses `rgb()`/`rgba()` arguments into a [`StyleColor`].

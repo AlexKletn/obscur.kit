@@ -6,6 +6,7 @@ use obscur_geometry::Size;
 use obscur_identity::NodeId;
 use obscur_style::computed::{ChMetrics, ComputedStyle, ResolutionContext, StyleResolver};
 use obscur_style::invalidation::StyleInvalidation;
+use obscur_style::property::EnvironmentValues;
 use obscur_tree::tree::RetainedTree;
 
 use super::StyleInputs;
@@ -82,7 +83,9 @@ impl StyleCoordinator {
     const fn attach<'a>(
         ctx: ResolutionContext<'a>,
         metrics: Option<&'a dyn ChMetrics>,
+        environment: EnvironmentValues,
     ) -> ResolutionContext<'a> {
+        let ctx = ctx.with_environment(environment);
         match metrics {
             Some(metrics) => ctx.with_metrics(metrics),
             None => ctx,
@@ -109,6 +112,7 @@ impl StyleCoordinator {
         tree: &RetainedTree,
         inputs: &StyleInputs,
         viewport: Size,
+        environment: EnvironmentValues,
         metrics: Option<&dyn ChMetrics>,
     ) -> ComputedStyles {
         let Some(root) = tree.root() else {
@@ -122,7 +126,7 @@ impl StyleCoordinator {
             .iter()
             .map(|&(node, _)| node)
             .find(|&node| tree.get(node).is_some_and(|n| n.kind().is_element()));
-        self.resolve_in_order(&order, inputs, viewport, root_element, metrics)
+        self.resolve_in_order(&order, inputs, viewport, environment, root_element, metrics)
     }
 
     /// Re-resolves **only** the nodes `dirty` records, updating `styles` in place
@@ -150,6 +154,7 @@ impl StyleCoordinator {
         tree: &RetainedTree,
         inputs: &StyleInputs,
         viewport: Size,
+        environment: EnvironmentValues,
         dirty: &StyleInvalidation,
         styles: &mut ComputedStyles,
         metrics: Option<&dyn ChMetrics>,
@@ -170,6 +175,7 @@ impl StyleCoordinator {
         let mut ctx = Self::attach(
             ResolutionContext::for_root(viewport.width, viewport.height),
             metrics,
+            environment,
         );
         for &(node, parent) in &order {
             // The `contains_key` arm is a hole guard, not part of the model: the
@@ -206,6 +212,7 @@ impl StyleCoordinator {
                         viewport.height,
                     ),
                     metrics,
+                    environment,
                 );
             }
         }
@@ -270,6 +277,7 @@ impl StyleCoordinator {
         order: &[(NodeId, Option<NodeId>)],
         inputs: &StyleInputs,
         viewport: Size,
+        environment: EnvironmentValues,
         root_element: Option<NodeId>,
         metrics: Option<&dyn ChMetrics>,
     ) -> ComputedStyles {
@@ -277,6 +285,7 @@ impl StyleCoordinator {
         let mut ctx = Self::attach(
             ResolutionContext::for_root(viewport.width, viewport.height),
             metrics,
+            environment,
         );
         for &(node, parent) in order {
             let parent_style = parent.and_then(|p| out.get(&p));
@@ -294,6 +303,7 @@ impl StyleCoordinator {
                         viewport.height,
                     ),
                     metrics,
+                    environment,
                 );
             }
             out.insert(node, computed);
@@ -332,7 +342,7 @@ mod tests {
         let inputs = StyleInputs::new();
         assert!(
             coordinator
-                .resolve(&tree, &inputs, viewport(), None)
+                .resolve(&tree, &inputs, viewport(), EnvironmentValues::none(), None)
                 .is_empty()
         );
     }
@@ -405,7 +415,14 @@ mod tests {
         // child and grandchild have no cascaded inputs of their own.
 
         let coordinator = StyleCoordinator::new();
-        let styles = coordinator.resolve_in_order(&order, &inputs, viewport(), Some(root), None);
+        let styles = coordinator.resolve_in_order(
+            &order,
+            &inputs,
+            viewport(),
+            EnvironmentValues::none(),
+            Some(root),
+            None,
+        );
 
         assert_eq!(color_of(&styles, root), Some(red));
         // Proves parent-first inheritance: descendants inherit the root's color.
@@ -432,8 +449,14 @@ mod tests {
         inputs.set_cascaded(a, a_decls);
         // Child B has no cascaded font-weight of its own.
 
-        let styles =
-            StyleCoordinator::new().resolve_in_order(&order, &inputs, viewport(), Some(root), None);
+        let styles = StyleCoordinator::new().resolve_in_order(
+            &order,
+            &inputs,
+            viewport(),
+            EnvironmentValues::none(),
+            Some(root),
+            None,
+        );
         let weight = |id| match styles
             .get(&id)
             .and_then(|s| s.get(PropertyId::FontWeight))
@@ -456,7 +479,14 @@ mod tests {
         // No inputs at all for any node.
         let inputs = StyleInputs::new();
         let coordinator = StyleCoordinator::new();
-        let styles = coordinator.resolve_in_order(&order, &inputs, viewport(), Some(root), None);
+        let styles = coordinator.resolve_in_order(
+            &order,
+            &inputs,
+            viewport(),
+            EnvironmentValues::none(),
+            Some(root),
+            None,
+        );
 
         // Both nodes are resolved; the child gets defaults/inheritance.
         assert!(styles.contains_key(&child));

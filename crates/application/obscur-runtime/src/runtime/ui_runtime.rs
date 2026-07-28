@@ -17,7 +17,7 @@ use obscur_diagnostics::{
     DiagnosticSubsystem, NullDiagnosticSink, NullTelemetrySink, PerformanceCounter,
     PerformanceSpan, RecoveryAction, TelemetrySink,
 };
-use obscur_geometry::{AffineTransform, Point, Rect, Size};
+use obscur_geometry::{AffineTransform, Insets, Point, Rect, Size};
 use obscur_identity::SignalId;
 use obscur_identity::{InternedSymbol, NodeId, RuntimeId, WindowId};
 use obscur_interaction::command::{
@@ -25,8 +25,8 @@ use obscur_interaction::command::{
     Modifiers, NamedKey, Shortcut,
 };
 use obscur_interaction::focus::{FocusScope, FocusScopeId};
-use obscur_interaction::hover::{HoverChain, HoverTransition};
 use obscur_interaction::gesture::{Fling, LongPressRecognizer, PanRecognizer, RecognizerId};
+use obscur_interaction::hover::{HoverChain, HoverTransition};
 use obscur_interaction::pointer::{
     PointerCaptureRegistry, PointerDevice, PointerEvent, PointerEventKind, PointerId,
 };
@@ -55,7 +55,7 @@ use obscur_scene::scene::{Scene, SceneSnapshot};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::invalidation::StyleInvalidation;
 use obscur_style::matching::{MediaEnvironment, Stylesheet};
-use obscur_style::property::{Length, PropertyId, PropertyValue, Transform};
+use obscur_style::property::{EnvironmentValues, Length, PropertyId, PropertyValue, Transform};
 use obscur_style::selector::{PseudoState, SelectorMatcher};
 use obscur_text::editing::{DeletionUnit, EditCommand, EditDirection, NavigationUnit};
 use obscur_text::font::FontResolver;
@@ -70,9 +70,8 @@ use obscur_view::boundary::ComponentFailure;
 use obscur_view::component::{ComponentRegistration, RegistryError};
 use obscur_view::view::{
     EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, EVENT_LONG_PRESS, VIRTUAL_SPACER, View, ViewNode,
-    has_outlet,
-    has_virtual_collection, project_slots, realize_virtual_collections, realize_virtual_lists,
-    virtual_scroll_resets,
+    has_outlet, has_virtual_collection, project_slots, realize_virtual_collections,
+    realize_virtual_lists, virtual_scroll_resets,
 };
 
 use super::{
@@ -442,6 +441,13 @@ pub struct UiRuntime {
     /// gesture that has wandered off it: a thumb being dragged, a finger that
     /// slid past the edge of the row it started on.
     captures: PointerCaptureRegistry,
+    /// The host-reported environment values in force: safe-area insets and the
+    /// on-screen keyboard's geometry, which `env()` resolves against (spec
+    /// §6.15).
+    ///
+    /// All zeroes until a host reports otherwise, which is the right answer for
+    /// a screen with no cutout and no keyboard rather than a placeholder for one.
+    environment: EnvironmentValues,
     /// The pans armed for each pointer — one per direct contact that went down
     /// inside a user-scrollable container (spec §6.16 `Pan`).
     pans: HashMap<PointerId, ActivePan>,
@@ -1002,6 +1008,7 @@ impl UiRuntime {
             focused: None,
             presses: HashMap::new(),
             captures: PointerCaptureRegistry::new(),
+            environment: EnvironmentValues::none(),
             pans: HashMap::new(),
             flings: HashMap::new(),
             holds: HashMap::new(),
@@ -2259,7 +2266,8 @@ impl UiRuntime {
         // fold their own reason's work into this same frame. Drain the rest so a
         // three-reason window is one frame, not three.
         self.scheduler.coalesce_pending();
-        let ctx = FrameContext::new(self.next_frame, request.reason(), self.viewport);
+        let ctx = FrameContext::new(self.next_frame, request.reason(), self.viewport)
+            .with_environment(self.environment);
         Some(self.run_frame(ctx, DesiredView::Ready(desired), sheets))
     }
 
@@ -2812,7 +2820,8 @@ impl UiRuntime {
         // the frame as a lazy `DesiredView::Build` so it runs AFTER the frame's
         // input-dispatch phase: a click handler that commits state has then
         // already run, and the view is built from the state it left behind.
-        let ctx = FrameContext::new(self.next_frame, FrameReason::UiCommit, self.viewport);
+        let ctx = FrameContext::new(self.next_frame, FrameReason::UiCommit, self.viewport)
+            .with_environment(self.environment);
         let result = self.run_frame(ctx, DesiredView::Build(&mut *builder), &sheets);
 
         self.stylesheets = sheets;
@@ -2829,7 +2838,8 @@ impl UiRuntime {
     /// Two `render_now` calls over the same view + sheets + pseudo-state yield
     /// identical display lists.
     pub fn render_now(&mut self, desired: &View, sheets: &[Stylesheet]) -> FrameResult {
-        let ctx = FrameContext::new(self.next_frame, FrameReason::UiCommit, self.viewport);
+        let ctx = FrameContext::new(self.next_frame, FrameReason::UiCommit, self.viewport)
+            .with_environment(self.environment);
         self.run_frame(ctx, DesiredView::Ready(desired), sheets)
     }
 
@@ -3182,6 +3192,7 @@ impl UiRuntime {
             // frame can tell whether interaction state is all that moved.
             self.last_style = Some(StyleKey {
                 viewport: ctx.viewport(),
+                environment: ctx.environment(),
                 sheets,
                 pseudo: self.pseudo.clone(),
             });
@@ -4613,6 +4624,57 @@ impl UiRuntime {
             current_target,
             event.trust(),
         )
+    }
+
+    /// Reports the host's environment values — the safe-area insets and the
+    /// on-screen keyboard's geometry — which CSS `env()` resolves against (spec
+    /// §6.15). Returns whether anything changed.
+    ///
+    /// This is the channel §6.15's "typed environment values" names, and the one
+    /// the kit did not have: a notch, a rounded corner, a gesture bar and a
+    /// keyboard are facts about the device and the moment, knowable only by the
+    /// layer that owns the window. An application cannot discover them and must
+    /// not guess them; it lays itself out around whatever arrives here.
+    ///
+    /// **Dynamic by design.** These change while the app runs — the keyboard
+    /// comes and goes, the device rotates, a cutout moves from the top edge to
+    /// the side — so a change invalidates style and schedules a frame rather than
+    /// being read once at startup. Reporting the same values again is free and
+    /// schedules nothing.
+    pub fn set_environment(&mut self, environment: EnvironmentValues) -> bool {
+        if self.environment == environment {
+            return false;
+        }
+        self.environment = environment;
+        // Every `env()` in the sheet computes to a different length now, and a
+        // computed length is what layout arranges from — so the next frame must
+        // re-resolve rather than reuse. The retained-style memo is keyed on the
+        // environment, so it declines by itself; this only has to ask for the
+        // frame that will notice.
+        self.request_frame(FrameReason::WindowChange);
+        true
+    }
+
+    /// The environment values currently in force (spec §6.15).
+    #[must_use]
+    pub const fn environment(&self) -> EnvironmentValues {
+        self.environment
+    }
+
+    /// Reports the host's safe-area insets, leaving the keyboard geometry alone
+    /// (spec §6.15). Returns whether anything changed.
+    ///
+    /// The common case on its own, so a host with a notch and no on-screen
+    /// keyboard does not have to construct the whole environment to say so.
+    pub fn set_safe_area_insets(&mut self, insets: Insets) -> bool {
+        self.set_environment(self.environment.with_safe_area(insets))
+    }
+
+    /// Reports the region the on-screen keyboard occludes, as insets from each
+    /// viewport edge; all zeroes when it is hidden (spec §6.15). Returns whether
+    /// anything changed.
+    pub fn set_keyboard_insets(&mut self, insets: Insets) -> bool {
+        self.set_environment(self.environment.with_keyboard(insets))
     }
 
     /// Arms a pan for `event`'s pointer if a **direct** contact went down inside
@@ -7169,7 +7231,10 @@ impl UiRuntime {
             return None;
         }
         let last = self.last_style.as_ref()?;
-        if last.viewport != viewport || last.sheets != sheets {
+        if last.viewport != viewport
+            || last.environment != self.environment
+            || last.sheets != sheets
+        {
             return None;
         }
         // Nothing retained to reuse (no style phase has produced a map yet, or the
@@ -7281,9 +7346,13 @@ impl UiRuntime {
         // measure and compose passes use (disjoint fields, so a legal split
         // borrow), so `ch` and the text it sizes agree on one font.
         let ch_metrics = ShapedChMetrics::new(self.scene_composer.paragraph());
-        let computed = self
-            .style
-            .resolve(&self.tree, &inputs, viewport, Some(&ch_metrics));
+        let computed = self.style.resolve(
+            &self.tree,
+            &inputs,
+            viewport,
+            self.environment,
+            Some(&ch_metrics),
+        );
         self.inputs = inputs;
         // Every node's style is freshly resolved, so nothing in the new map carries
         // a motion sample and the stash of pre-overlay values describes a map that
@@ -7343,6 +7412,7 @@ impl UiRuntime {
             &self.tree,
             &self.inputs,
             viewport,
+            self.environment,
             dirty,
             &mut computed,
             Some(&ch_metrics),
@@ -8958,6 +9028,12 @@ struct StyleKey {
     /// The viewport the media environment and every `vw`/`vh` were resolved
     /// against.
     viewport: Size,
+    /// The host-reported environment values every `env()` was resolved against
+    /// (spec §6.15). Here for exactly the reason `viewport` is: a key that did
+    /// not name it would call the retained styles reusable after a keyboard
+    /// appeared, and the padding that was supposed to move out of its way would
+    /// silently stay where it was.
+    environment: EnvironmentValues,
     /// The sheets that were matched, UA default first — the exact slice
     /// `build_inputs_with_pseudo_env` saw.
     sheets: Vec<Stylesheet>,
@@ -12648,7 +12724,10 @@ mod tests {
 
         let second = runtime.handle_pointer(finger(1, PointerEventKind::Up, 50.0, 75.0));
         assert_eq!(second.command(), Some(cmd_b));
-        assert!(ran_b.get(), "the second finger's control ran its own handler");
+        assert!(
+            ran_b.get(),
+            "the second finger's control ran its own handler"
+        );
     }
 
     /// A cancelled contact activates nothing and leaves nothing held.
@@ -12794,7 +12873,12 @@ mod tests {
         let (mut runtime, _view, _sheet, _a, _b, _clicked, held) = long_press_fixture();
         runtime.handle_pointer(finger(0, PointerEventKind::Down, 50.0, HOLD_TARGET_Y));
         runtime.advance_motion(0.2);
-        runtime.handle_pointer(finger(0, PointerEventKind::Move, 50.0, HOLD_TARGET_Y - 30.0));
+        runtime.handle_pointer(finger(
+            0,
+            PointerEventKind::Move,
+            50.0,
+            HOLD_TARGET_Y - 30.0,
+        ));
         runtime.advance_motion(1.0);
 
         assert!(!held.get(), "the hold was ruled out by the travel");
@@ -13051,7 +13135,10 @@ mod tests {
         assert_eq!(captured.target(), Some(a));
         assert!(ran_a.get());
         assert!(free.target().is_some());
-        assert!(ran_b.get(), "the uncaptured finger reached what it was over");
+        assert!(
+            ran_b.get(),
+            "the uncaptured finger reached what it was over"
+        );
     }
 
     /// The lone child node of the root after a frame (for single-element views).
@@ -13293,13 +13380,8 @@ mod tests {
         assert!(!ran.get(), "the flick itself activated nothing");
 
         runtime.handle_pointer(finger_at(0, PointerEventKind::Down, 100.0, 60.0, 500_000));
-        let dispatch = runtime.handle_pointer(finger_at(
-            0,
-            PointerEventKind::Up,
-            100.0,
-            60.0,
-            560_000,
-        ));
+        let dispatch =
+            runtime.handle_pointer(finger_at(0, PointerEventKind::Up, 100.0, 60.0, 560_000));
 
         assert_eq!(dispatch.command(), None);
         assert!(!ran.get(), "catching a moving list is not tapping a row");
@@ -13311,7 +13393,8 @@ mod tests {
     fn a_tap_on_a_still_list_activates_its_row() {
         let (mut runtime, _scroller, ran) = pan_fixture();
         runtime.handle_pointer(finger_at(0, PointerEventKind::Down, 100.0, 60.0, 0));
-        let dispatch = runtime.handle_pointer(finger_at(0, PointerEventKind::Up, 100.0, 60.0, 50_000));
+        let dispatch =
+            runtime.handle_pointer(finger_at(0, PointerEventKind::Up, 100.0, 60.0, 50_000));
 
         assert!(dispatch.command().is_some());
         assert!(ran.get());

@@ -174,8 +174,12 @@ impl PanRecognizer {
         let instant = ((at.x - self.last.x) / dt, (at.y - self.last.y) / dt);
         self.velocity = if self.sampled {
             (
-                self.velocity.0.mul_add(SMOOTHING, instant.0 * (1.0 - SMOOTHING)),
-                self.velocity.1.mul_add(SMOOTHING, instant.1 * (1.0 - SMOOTHING)),
+                self.velocity
+                    .0
+                    .mul_add(SMOOTHING, instant.0 * (1.0 - SMOOTHING)),
+                self.velocity
+                    .1
+                    .mul_add(SMOOTHING, instant.1 * (1.0 - SMOOTHING)),
             )
         } else {
             instant
@@ -199,12 +203,7 @@ mod tests {
     const SLOP: f32 = 10.0;
 
     fn recognizer() -> PanRecognizer {
-        PanRecognizer::new(
-            RecognizerId::from_raw(1),
-            Point::new(100.0, 100.0),
-            0,
-            SLOP,
-        )
+        PanRecognizer::new(RecognizerId::from_raw(1), Point::new(100.0, 100.0), 0, SLOP)
     }
 
     #[test]
@@ -310,11 +309,17 @@ mod tests {
         let mut pan = recognizer();
         pan.update(Point::new(100.0, 130.0), 30_000);
         pan.update(Point::new(100.0, 160.0), 60_000);
-        assert!(pan.velocity_at(60_000, REST).1 > 0.0, "moving at the sample");
+        assert!(
+            pan.velocity_at(60_000, REST).1 > 0.0,
+            "moving at the sample"
+        );
 
         // Lifted half a second after the last movement.
         let (_, vy) = pan.velocity_at(560_000, REST);
-        assert!((vy - 0.0).abs() < f32::EPSILON, "got {vy} px/s after resting");
+        assert!(
+            (vy - 0.0).abs() < f32::EPSILON,
+            "got {vy} px/s after resting"
+        );
     }
 
     #[test]

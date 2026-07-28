@@ -139,7 +139,10 @@ mod tests {
         press.advance(0.2);
         press.end();
         assert_eq!(press.state(), RecognizerState::Failed);
-        assert!(!press.advance(1.0), "a lifted contact cannot still recognize");
+        assert!(
+            !press.advance(1.0),
+            "a lifted contact cannot still recognize"
+        );
     }
 
     #[test]

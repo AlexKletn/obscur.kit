@@ -9,6 +9,7 @@ use obscur_runtime::orchestration::{
 };
 use obscur_scene::command::DisplayList;
 use obscur_scene::scene::{Scene, SceneSnapshot};
+use obscur_style::property::EnvironmentValues;
 use obscur_tree::tree::{RetainedTree, TreeSnapshot};
 
 use super::{ImageSnapshot, RenderGraphSummary};
@@ -154,7 +155,16 @@ impl PipelineSnapshot {
         // box, rather than reserving space and painting nothing.
         let ch_metrics = ShapedChMetrics::new(scene_coordinator.paragraph());
         let style = StyleCoordinator::new();
-        let computed = style.resolve(tree, inputs, viewport, Some(&ch_metrics));
+        // No environment: this snapshot is a pure function of the tree, the sheets
+        // and the viewport, so a host inset that varied between runs would make it
+        // non-deterministic — which is the one thing it exists to guarantee.
+        let computed = style.resolve(
+            tree,
+            inputs,
+            viewport,
+            EnvironmentValues::none(),
+            Some(&ch_metrics),
+        );
 
         let layout = LayoutCoordinator::new();
         let root_font = root_font_size(&computed, tree.root());

@@ -261,8 +261,15 @@ fn a_tap_on_a_row_is_a_click_and_not_a_hold() {
     }
     rt.advance_motion(1.0);
 
-    assert_eq!(clicks.borrow().as_slice(), &[(2, 1)], "the tap clicked row 2");
-    assert!(holds.borrow().is_empty(), "and no hold fired, then or later");
+    assert_eq!(
+        clicks.borrow().as_slice(),
+        &[(2, 1)],
+        "the tap clicked row 2"
+    );
+    assert!(
+        holds.borrow().is_empty(),
+        "and no hold fired, then or later"
+    );
 }
 
 #[test]

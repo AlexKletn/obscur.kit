@@ -458,8 +458,7 @@ mod tests {
     #[test]
     fn a_cancelled_contact_is_a_cancel_and_not_a_release() {
         let converter = PointerConverter::new();
-        let cancelled =
-            converter.touch(contact(1, winit::event::TouchPhase::Cancelled, 5.0, 5.0));
+        let cancelled = converter.touch(contact(1, winit::event::TouchPhase::Cancelled, 5.0, 5.0));
         let ended = converter.touch(contact(1, winit::event::TouchPhase::Ended, 5.0, 5.0));
 
         assert_eq!(cancelled.kind, PointerEventKind::Cancel);
@@ -494,8 +493,8 @@ mod tests {
 
         // No force reported (this workspace's Wayland target) is the domain's
         // "device without pressure", not a feather-light touch.
-        let plain = PointerConverter::new()
-            .touch(contact(3, winit::event::TouchPhase::Moved, 2.0, 2.0));
+        let plain =
+            PointerConverter::new().touch(contact(3, winit::event::TouchPhase::Moved, 2.0, 2.0));
         assert!((plain.pressure - 0.0).abs() < f32::EPSILON);
     }
 }

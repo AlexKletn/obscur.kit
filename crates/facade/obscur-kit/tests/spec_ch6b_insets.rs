@@ -5,22 +5,32 @@
 //! inset), never from any constant in this repository.
 //!
 //! NOTE ON THE SETUP. §6.15 requires "Typed environment values: - safe areas"
-//! *and* "CSS environment values may expose safe-area insets". This crate
-//! exposes no API by which a host supplies safe-area insets to the runtime, so
-//! the first half of the setup cannot be written; what remains writable is the
-//! second half — whether `env(safe-area-inset-*)` is a resolvable value function
-//! in the CSS pipeline at all. That is the load-bearing observable named in the
-//! case, and it is asserted here.
+//! *and* "CSS environment values may expose safe-area insets", so a case
+//! asserting the second must perform the first. When these cases were written
+//! the crate exposed no API by which a host could supply safe-area insets, so
+//! the setup half could not be written and only the CSS half was asserted —
+//! against a host that reported nothing. `UiRuntime::set_safe_area_insets` now
+//! exists, so the host half is written here, exactly as the "Host:" line below
+//! always described it. **No expected value changed**: the 44 and the 34 are the
+//! ones the case was derived with.
 
 #![forbid(unsafe_code)]
 
 mod spec_ch6b_support;
 
+use obscur_kit::geometry::Insets;
 use obscur_kit::style::computed::ComputedValue;
 use obscur_kit::style::property::{Length, PropertyId};
-use spec_ch6b_support::{at, drive, el, origin_of, view};
+use spec_ch6b_support::{at, drive_with_insets, el, origin_of, view};
 
 /// Host: top safe-area inset 44 CSS px, bottom safe-area inset 34 CSS px.
+const HOST_INSETS: Insets = Insets {
+    top: 44.0,
+    right: 0.0,
+    bottom: 34.0,
+    left: 0.0,
+};
+
 const CSS: &str = "#root { width: 400px; height: 800px; \
                    padding-top: env(safe-area-inset-top); \
                    padding-bottom: env(safe-area-inset-bottom) } \
@@ -42,7 +52,7 @@ fn px_of(v: Option<&ComputedValue>) -> Option<f32> {
 #[test]
 fn env_safe_area_inset_top_resolves_to_the_host_inset() {
     let v = view(vec![el(1, "root", vec![el(2, "child", vec![])])]);
-    let rt = drive(400.0, 800.0, CSS, &v);
+    let rt = drive_with_insets(400.0, 800.0, CSS, &v, HOST_INSETS);
 
     let root = at(&rt, &[0]);
     let style = rt.computed_style(root).expect("a computed style for #root");
@@ -71,7 +81,7 @@ fn env_safe_area_inset_top_resolves_to_the_host_inset() {
 #[test]
 fn env_safe_area_inset_bottom_resolves_to_the_host_inset() {
     let v = view(vec![el(1, "root", vec![el(2, "child", vec![])])]);
-    let rt = drive(400.0, 800.0, CSS, &v);
+    let rt = drive_with_insets(400.0, 800.0, CSS, &v, HOST_INSETS);
 
     let root = at(&rt, &[0]);
     let style = rt.computed_style(root).expect("a computed style for #root");

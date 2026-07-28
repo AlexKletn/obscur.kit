@@ -19,7 +19,7 @@
 //!   a `%` when the caller states its basis. That is a *use*-time operation: only
 //!   layout knows the containing block a percentage resolves against.
 
-use crate::property::LengthContext;
+use crate::property::{EnvVar, LengthContext};
 use obscur_geometry::LogicalPx;
 
 /// A CSS length value.
@@ -89,6 +89,15 @@ pub enum Length {
     /// A container-relative `cqmax` length: this many percent of the larger of
     /// the `cqi` and `cqb` bases.
     Cqmax(f32),
+    /// A CSS environment value — `env(safe-area-inset-top)` and friends — in
+    /// logical pixels (spec §6.15).
+    ///
+    /// Unlike every other term here it is not a coefficient times a base: the
+    /// host reports a distance, and the declaration *is* that distance. It
+    /// resolves from [`LengthContext::environment`], which is all zeroes for a
+    /// host that reports nothing — the correct answer for a screen with no
+    /// cutout and no on-screen keyboard.
+    Env(EnvVar),
 }
 
 impl Length {
@@ -179,6 +188,7 @@ impl Length {
             Self::Cqb(pct) => Some(pct / 100.0 * ctx.container_block()),
             Self::Cqmin(pct) => Some(pct / 100.0 * ctx.container_min()),
             Self::Cqmax(pct) => Some(pct / 100.0 * ctx.container_max()),
+            Self::Env(var) => Some(ctx.environment.get(var)),
             Self::Percent(pct) => ctx.percent_basis.map(|basis| pct / 100.0 * basis),
             Self::Auto => None,
         }

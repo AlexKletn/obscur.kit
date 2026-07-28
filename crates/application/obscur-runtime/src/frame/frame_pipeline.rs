@@ -189,9 +189,13 @@ impl FramePipeline {
         // disjoint fields, so this is a legal split borrow), so a `20ch` box, the
         // text in it, and the pixels for both agree on one font.
         let ch_metrics = ShapedChMetrics::new(self.scene.paragraph());
-        let computed = self
-            .style
-            .resolve(tree, inputs, ctx.viewport(), Some(&ch_metrics));
+        let computed = self.style.resolve(
+            tree,
+            inputs,
+            ctx.viewport(),
+            ctx.environment(),
+            Some(&ch_metrics),
+        );
         let restyled = !computed.is_empty();
 
         // Layout: map styles into layout styles and arrange the tree. The root

@@ -19,6 +19,8 @@
 //!   and a `ch` (it needs [`ch_width`](LengthContext::ch_width), which only a
 //!   caller with a shaper can measure).
 
+use super::EnvironmentValues;
+
 /// The bases a relative length resolves against.
 ///
 /// * `font_size` — the element's own computed `font-size`, in logical pixels;
@@ -54,6 +56,10 @@ pub struct LengthContext {
     pub ch_width: Option<f32>,
     /// The basis a `%` resolves against, if known at resolution time.
     pub percent_basis: Option<f32>,
+    /// The host-reported environment values `env()` reads (spec §6.15). All
+    /// zeroes unless a host set them — which is the right answer for a screen
+    /// with no cutout and no on-screen keyboard, not a placeholder for one.
+    pub environment: EnvironmentValues,
 }
 
 impl LengthContext {
@@ -79,7 +85,20 @@ impl LengthContext {
             viewport_height,
             ch_width: None,
             percent_basis: None,
+            environment: EnvironmentValues::none(),
         }
+    }
+
+    /// Returns a copy of this context with the host-reported `environment` set.
+    ///
+    /// A builder rather than a [`new`](Self::new) parameter for the same reason
+    /// `ch_width` is one: only a caller in touch with the host can answer, and a
+    /// context built without one stays at the no-cutout, no-keyboard default that
+    /// every desktop genuinely has.
+    #[must_use]
+    pub const fn with_environment(mut self, environment: EnvironmentValues) -> Self {
+        self.environment = environment;
+        self
     }
 
     /// Returns a copy of this context with `percent_basis` set to `basis`.
