@@ -192,6 +192,16 @@ required-features = ["full"]
 name = "hello_app"
 required-features = ["full"]
 
+# A touch-first calculator: the gesture stack in something usable with a thumb —
+# taps with `:active` feedback, a held `⌫` that clears everything, a flickable
+# history tape (a kit-owned virtual list, so the runtime drags and coasts it), and
+# a root padded by `env(safe-area-inset-*)`. Its arithmetic is a plain state
+# machine with tests that run display-free: `cargo test -p obscur-kit --features
+# full --example calculator`.
+[[example]]
+name = "calculator"
+required-features = ["full"]
+
 # A minimal file manager authored in `okui!` markup over a real directory listing:
 # `<For>` emits one row per entry, `{row.name}` / `class={row.class}` bind real Rust
 # values, and `std::fs` does the I/O (the kit performs none of its own, §5.15).
