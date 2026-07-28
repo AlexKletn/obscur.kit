@@ -76,6 +76,13 @@ const CMD_CLEAR_ALL: InternedSymbol = InternedSymbol::named("clearAll");
 ///   label ends up several times wider than the key it sits in. A ceiling alone
 ///   keeps type sane on a wall-sized window and lets it vanish gracefully on a
 ///   squeezed one; `overflow: hidden` on the key catches whatever is left.
+/// - **No fixed heights on the rows inside a panel.** The panels are `flex`-sized
+///   and shrink with the window; a row pinned to `52px` inside one does not, so
+///   past a certain size it is pushed out of the panel that is supposed to
+///   contain it — which reads as content drifting out of place. The rows size to
+///   their (already scaling) text instead. `.tape-row` is the one exception and
+///   must stay fixed: it is a virtual-list row, and the runtime sizes its window
+///   and spacers from exactly that number.
 ///
 /// **Transparency is the root's alpha and nothing else.** The window is always
 /// created transparent with a premultiplied composite mode, so the bottom-most
@@ -107,7 +114,8 @@ const CSS: &str = "\
               display: flex; flex-direction: column; gap: 10px; padding: 12px; }\n\
 .tape       { flex: 3; background-color: rgba(20, 25, 38, 0.55); border-radius: 14px; \
               display: flex; flex-direction: column; overflow: scroll; }\n\
-.tape-row   { height: 30px; display: flex; flex-direction: row; \
+.tape-row   { height: 30px; font-size: min(3.4vmin, 18px); white-space: nowrap; \
+              display: flex; flex-direction: row; \
               justify-content: flex-end; align-items: center; \
               padding-left: 14px; padding-right: 14px; overflow: hidden; }\n\
 .tape-row:hover { background-color: rgba(27, 34, 51, 0.75); }\n\
@@ -115,11 +123,14 @@ const CSS: &str = "\
               overflow: hidden; text-overflow: ellipsis; }\n\
 .tape-empty { color: #3f4a66; font-size: min(3.4vmin, 18px); }\n\
 .display    { flex: 2; background-color: rgba(20, 25, 38, 0.55); border-radius: 14px; \
+              overflow: hidden; \
               display: flex; flex-direction: column; justify-content: center; \
               padding-left: 18px; padding-right: 18px; }\n\
-.pending-row{ height: 26px; overflow: hidden; display: flex; flex-direction: row; \
+.pending-row{ overflow: hidden; font-size: min(4vmin, 22px); \
+              display: flex; flex-direction: row; \
               justify-content: flex-end; align-items: center; }\n\
-.value-row  { height: 52px; overflow: hidden; display: flex; flex-direction: row; \
+.value-row  { overflow: hidden; font-size: min(9vmin, 52px); \
+              display: flex; flex-direction: row; \
               justify-content: flex-end; align-items: center; }\n\
 .pending    { color: #6b7799; font-size: min(4vmin, 22px); }\n\
 .value      { color: #f2f5ff; font-size: min(9vmin, 52px); }\n\
