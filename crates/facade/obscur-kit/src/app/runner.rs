@@ -230,6 +230,7 @@ fn run_inner(
         last_frame: None,
         init_failure: None,
         scroll,
+        ime_allowed: false,
         frame_info,
         stats: std::env::var_os("OBSCUR_FRAME_STATS").map(|_| FrameStats::default()),
         fonts: None,
@@ -327,6 +328,11 @@ struct AppRunner {
     init_failure: Option<AppError>,
     /// The app's leftover-wheel handler, if it registered one.
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
+    /// What the window was last told about text entry, so [`sync_ime`] only speaks
+    /// to the platform when the answer actually changed.
+    ///
+    /// [`sync_ime`]: AppRunner::sync_ime
+    ime_allowed: bool,
     /// The viewport snapshot a frame-aware builder reads, refreshed on every
     /// surface change.
     frame_info: Option<Rc<Cell<FrameInfo>>>,
@@ -477,6 +483,34 @@ impl AppRunner {
         }
     }
 
+    /// Offers the platform's text-entry facility to the focused element, and takes
+    /// it back when focus leaves it (spec §5.12; §6.15 on a touch device).
+    ///
+    /// On a desktop this arms the IME. On a tablet it is what raises and drops the
+    /// **on-screen keyboard**, so getting it wrong is not a subtlety: a window that
+    /// claims text entry for its whole life keeps a keyboard over an app with
+    /// nothing to type into, which is what the calculator did on a real tablet.
+    ///
+    /// The runtime owns focus, so it answers *whether* — this only mirrors the
+    /// answer onto the window, and only when it changed, because
+    /// `set_ime_allowed` is a round trip to the compositor and focus is
+    /// recomputed far more often than it moves.
+    ///
+    /// Called after every window event rather than from the places focus can
+    /// change: focus moves on a click, a Tab, a key that dismisses a field, and
+    /// from an app's own command handler during a frame. Enumerating those is a
+    /// list that goes stale; asking once per event cannot.
+    fn sync_ime(&mut self) {
+        let wanted = self.runtime.focus_accepts_text();
+        if wanted == self.ime_allowed {
+            return;
+        }
+        self.ime_allowed = wanted;
+        if let Some(window) = self.window.as_ref() {
+            window.set_ime_allowed(wanted);
+        }
+    }
+
     /// Assembles a domain button [`PointerEvent`] at the tracked cursor, reusing
     /// [`PointerConverter::kind`] to map the winit state (the converter has no
     /// public builder for a button transition *at a position*).
@@ -547,9 +581,12 @@ impl ApplicationHandler for AppRunner {
                 return;
             }
         };
-        // Allow the platform IME to deliver composition events (spec §5.12), so
-        // text input works out of the box; the `WindowEvent::Ime` arm drives it.
-        window.set_ime_allowed(true);
+        // Text entry starts OFF and is offered per focus by `sync_ime` below. It
+        // used to be switched on here, once, for the window's whole life — which
+        // reads as "IME composition works out of the box" on a desktop and as "the
+        // on-screen keyboard covers half the tablet" on a tablet, in an app with
+        // no field to type into.
+        window.set_ime_allowed(false);
 
         let (surface, config, device, queue) = match init_gpu(&window) {
             Ok(gpu) => gpu,
@@ -693,6 +730,7 @@ impl ApplicationHandler for AppRunner {
             WindowEvent::CloseRequested => event_loop.exit(),
             _ => {}
         }
+        self.sync_ime();
     }
 
     /// Polls for landed resource loads each turn: the real blocking executor lands

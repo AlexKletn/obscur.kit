@@ -7877,6 +7877,31 @@ impl UiRuntime {
         self.focused
     }
 
+    /// Whether what currently holds focus can accept typed text — i.e. whether the
+    /// host should be offering its text-entry facility right now (spec §5.12).
+    ///
+    /// # Why a host asks
+    ///
+    /// On a desktop this decides whether an IME is armed, which is invisible when
+    /// the answer is wrong. On a tablet it decides whether **the on-screen
+    /// keyboard covers half the screen**, which is not invisible at all: a host
+    /// that offers text entry unconditionally raises a keyboard over a calculator
+    /// that has no field to type into. That is what this exists to let a host
+    /// avoid, and it is a *question about focus*, so the runtime — which owns
+    /// focus — is what answers it rather than each host guessing.
+    ///
+    /// The test is the same one the editing session uses: a focused node whose
+    /// ancestor chain binds [`EVENT_INPUT`] is a text field, and nothing else is.
+    /// So it follows the real editables automatically — a widget that becomes
+    /// editable, or a field that is replaced by a label, needs no second list to
+    /// be kept in step with this one.
+    #[must_use]
+    pub fn focus_accepts_text(&self) -> bool {
+        self.focused
+            .and_then(|node| self.editable_ancestor(node))
+            .is_some()
+    }
+
     /// Returns the retained tree carried across frames.
     #[must_use]
     pub fn tree(&self) -> &RetainedTree {
@@ -15514,6 +15539,59 @@ mod tests {
             "click still resolves EVENT_CLICK"
         );
         assert_eq!(counter.get(), 1);
+    }
+
+    // ---- Text entry offered per focus (spec §5.12, §6.15) --------------------
+
+    /// The question a host asks before raising an on-screen keyboard: does what
+    /// holds focus actually take typed text?
+    ///
+    /// Worth an explicit test rather than trusting the editing session, because a
+    /// host cannot see the session — it can only see this answer, and a wrong
+    /// `true` is a keyboard covering half a tablet in an app with no field.
+    #[test]
+    fn focus_accepts_text_only_while_an_editable_holds_focus() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&input_reactive_view(""), sheets);
+
+        assert!(
+            !runtime.focus_accepts_text(),
+            "nothing focused: no text entry is wanted"
+        );
+
+        // Press inside the editable `b`, drain the focus frame.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let _ = runtime.run_due_frame(&input_reactive_view(""), sheets);
+        assert!(runtime.focused().is_some(), "the press focused a node");
+        assert!(
+            runtime.focus_accepts_text(),
+            "an editable holds focus: text entry is wanted"
+        );
+    }
+
+    /// The other half, and the case the calculator hit: a focused control that is
+    /// not editable wants no keyboard. A button takes focus like a field does, so
+    /// "something is focused" is not the test — "the focused thing binds
+    /// `EVENT_INPUT`" is.
+    #[test]
+    fn a_focused_button_wants_no_text_entry() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let _ = runtime.render_now(&panel_view(), sheets);
+
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        let _ = runtime.run_due_frame(&panel_view(), sheets);
+        assert!(
+            runtime.focused().is_some(),
+            "the press focused the plain node"
+        );
+        assert!(
+            !runtime.focus_accepts_text(),
+            "a non-editable holds focus: no keyboard"
+        );
     }
 
     // ---- EVENT_INPUT: per-keystroke text input dispatch (this step) ----------
