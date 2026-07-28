@@ -66,6 +66,15 @@ const CMD_CLEAR_ALL: InternedSymbol = InternedSymbol::named("clearAll");
 /// - **No `text-align`.** It parses and computes and the layout ignores it;
 ///   `justify-content` on a flex row is what actually moves text.
 ///
+/// **Transparency is the root's alpha and nothing else.** The window is always
+/// created transparent with a premultiplied composite mode, so the bottom-most
+/// fill decides what the compositor sees: `.safe` at `0.62` lets a blurring
+/// compositor read the wallpaper through the whole app. There is deliberately no
+/// API for it — a flag would be a second source of truth about the same pixel.
+/// The panels and keys are translucent too, a little less so as they go up, so
+/// the blur stays visible through them while the text stays fully opaque and
+/// legible.
+///
 /// `env(safe-area-inset-*)` on `.safe` is this app's whole awareness of the
 /// device it is on: a notched phone pads itself, a desktop window does not.
 ///
@@ -76,7 +85,7 @@ const CMD_CLEAR_ALL: InternedSymbol = InternedSymbol::named("clearAll");
 /// middle of the screen; on a phone-sized window the cap is never reached and it
 /// fills as before.
 const CSS: &str = "\
-.safe       { background-color: #0d1017; width: 100%; height: 100%; \
+.safe       { background-color: rgba(13, 16, 23, 0.62); width: 100%; height: 100%; \
               display: flex; flex-direction: column; \
               justify-content: center; align-items: center; \
               padding-top: env(safe-area-inset-top); \
@@ -85,16 +94,16 @@ const CSS: &str = "\
               padding-right: env(safe-area-inset-right); }\n\
 .app        { flex: 1; max-width: 460px; max-height: 780px; \
               display: flex; flex-direction: column; gap: 10px; padding: 12px; }\n\
-.tape       { flex: 3; background-color: #141926; border-radius: 14px; \
+.tape       { flex: 3; background-color: rgba(20, 25, 38, 0.55); border-radius: 14px; \
               display: flex; flex-direction: column; overflow: scroll; }\n\
 .tape-row   { height: 30px; display: flex; flex-direction: row; \
               justify-content: flex-end; align-items: center; \
               padding-left: 14px; padding-right: 14px; overflow: hidden; }\n\
-.tape-row:hover { background-color: #1b2233; }\n\
+.tape-row:hover { background-color: rgba(27, 34, 51, 0.75); }\n\
 .tape-text  { color: #7c89ad; font-size: 15px; white-space: nowrap; \
               overflow: hidden; text-overflow: ellipsis; }\n\
 .tape-empty { color: #3f4a66; font-size: 15px; }\n\
-.display    { flex: 2; background-color: #141926; border-radius: 14px; \
+.display    { flex: 2; background-color: rgba(20, 25, 38, 0.55); border-radius: 14px; \
               display: flex; flex-direction: column; justify-content: center; \
               padding-left: 18px; padding-right: 18px; }\n\
 .pending-row{ height: 26px; display: flex; flex-direction: row; \
@@ -105,18 +114,18 @@ const CSS: &str = "\
 .value      { color: #f2f5ff; font-size: 40px; }\n\
 .pad        { flex: 8; display: flex; flex-direction: column; gap: 10px; }\n\
 .krow       { flex: 1; display: flex; flex-direction: row; gap: 10px; }\n\
-.key        { flex: 1; background-color: #1c2233; border-radius: 14px; \
+.key        { flex: 1; background-color: rgba(28, 34, 51, 0.72); border-radius: 14px; \
               color: #eef2ff; font-size: 26px; \
               display: flex; justify-content: center; align-items: center; }\n\
-.key:hover  { background-color: #262e45; }\n\
-.key:active { background-color: #43507a; }\n\
+.key:hover  { background-color: rgba(38, 46, 69, 0.85); }\n\
+.key:active { background-color: rgba(67, 80, 122, 0.95); }\n\
 .wide       { flex: 2; }\n\
-.fn         { background-color: #161b29; color: #b9c4e0; font-size: 20px; }\n\
-.fn:active  { background-color: #333d5c; }\n\
-.op         { background-color: #232c49; color: #cfe0ff; }\n\
-.op:active  { background-color: #46598f; }\n\
-.eq         { background-color: #3462c4; color: #ffffff; }\n\
-.eq:active  { background-color: #5b86e8; }\n\
+.fn         { background-color: rgba(22, 27, 41, 0.66); color: #b9c4e0; font-size: 20px; }\n\
+.fn:active  { background-color: rgba(51, 61, 92, 0.95); }\n\
+.op         { background-color: rgba(35, 44, 73, 0.78); color: #cfe0ff; }\n\
+.op:active  { background-color: rgba(70, 89, 143, 0.95); }\n\
+.eq         { background-color: rgba(52, 98, 196, 0.88); color: #ffffff; }\n\
+.eq:active  { background-color: rgba(91, 134, 232, 0.97); }\n\
 ";
 
 /// What a key does. The label and the command name live beside it in [`KEYS`],
