@@ -12,6 +12,10 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PointerId(u64);
 
+/// The bit that marks a touch contact's id, keeping the platform's contact
+/// numbering clear of [`PointerId::MOUSE`] and of any host-minted handle.
+const TOUCH_NAMESPACE: u64 = 1 << 63;
+
 impl PointerId {
     /// The conventional identity for the system mouse pointer (raw `0`).
     pub const MOUSE: Self = Self::from_raw(0);
@@ -20,6 +24,27 @@ impl PointerId {
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
+    }
+
+    /// The identity of touchscreen `contact`, minted in a namespace disjoint from
+    /// [`MOUSE`](Self::MOUSE).
+    ///
+    /// A platform numbers its contacts from zero, so passing a raw contact id
+    /// through [`from_raw`](Self::from_raw) would make **the first finger down**
+    /// indistinguishable from the mouse — the one collision that is guaranteed to
+    /// happen rather than merely possible. Lifting the contact into the high
+    /// namespace keeps the two apart for the whole u64 range a platform can
+    /// realistically number contacts in, and it does so without the adapter
+    /// having to keep a mapping table (which would make an otherwise pure
+    /// converter stateful).
+    ///
+    /// The namespace is a *convention*, not an enforced type: a host that mints
+    /// its own ids through `from_raw` with the top bit set can still collide, and
+    /// nothing here detects that. The device a contact came from is answered by
+    /// [`PointerDevice`](super::PointerDevice) on the event, not by this id.
+    #[must_use]
+    pub const fn touch(contact: u64) -> Self {
+        Self(contact | TOUCH_NAMESPACE)
     }
 
     /// Returns the raw handle value backing this identifier.
@@ -44,6 +69,36 @@ mod tests {
     fn mouse_is_raw_zero() {
         assert_eq!(PointerId::MOUSE, PointerId::from_raw(0));
         assert_eq!(PointerId::MOUSE.raw(), 0);
+    }
+
+    #[test]
+    fn the_first_touch_contact_is_not_the_mouse() {
+        // The collision that is certain rather than possible: a platform numbers
+        // its contacts from zero, and the mouse is raw zero.
+        assert_ne!(PointerId::touch(0), PointerId::MOUSE);
+    }
+
+    #[test]
+    fn touch_contacts_stay_distinct_from_each_other() {
+        // Two fingers must remain two pointers — the namespace must not fold the
+        // contact number away.
+        assert_ne!(PointerId::touch(0), PointerId::touch(1));
+        assert_ne!(PointerId::touch(1), PointerId::touch(2));
+    }
+
+    #[test]
+    fn a_touch_contact_never_aliases_a_low_range_host_handle() {
+        // A host minting ids the obvious way (0, 1, 2, …) can never land on a
+        // contact, so the two id spaces coexist without coordination.
+        for host in 0..64_u64 {
+            for contact in 0..64_u64 {
+                assert_ne!(
+                    PointerId::from_raw(host),
+                    PointerId::touch(contact),
+                    "host {host} aliased contact {contact}"
+                );
+            }
+        }
     }
 
     #[test]

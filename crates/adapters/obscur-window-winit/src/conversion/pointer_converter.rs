@@ -119,13 +119,91 @@ impl PointerConverter {
             .with_buttons(buttons)
     }
 
+    /// Converts one winit touch `contact` into the domain [`PointerEvent`] for
+    /// that finger (spec §2.4 "the pointer model supports mouse, touch, pen and
+    /// trackpad-like sources", §4.7).
+    ///
+    /// This is the whole of the touchscreen's path into the kit. Everything above
+    /// it — hit-testing, hover, focus, activation, capture — is already
+    /// device-agnostic and already reads [`PointerDevice`], so a finger needs no
+    /// parallel pipeline; it needs this conversion and nothing else.
+    ///
+    /// The mapping:
+    ///
+    /// - **Phase → kind.** `Started`/`Moved`/`Ended` are the pointer's
+    ///   `Down`/`Move`/`Up`. `Cancelled` is [`Cancel`](PointerEventKind::Cancel),
+    ///   *not* `Up`: the system took the sequence away (a gesture won it, the
+    ///   window lost the contact), and a cancelled contact must not activate what
+    ///   it happened to be over.
+    /// - **Contact → [`PointerId::touch`]**, so several fingers stay several
+    ///   pointers and the first one is not mistaken for the mouse.
+    /// - **Contact → the primary button held.** A finger has no buttons, but the
+    ///   pointer model's whole point is that device-agnostic code works, and such
+    ///   code asks whether the primary button is down to mean "is this pointer
+    ///   engaged". Contact is that engagement, so it is reported as the primary
+    ///   button — the pointer-events convention — and released on `Ended` and
+    ///   `Cancelled` alike.
+    /// - **Force → pressure**, normalized to `0.0..=1.0`. A platform that does not
+    ///   report force (winit gives it on iOS/Windows/Web/Android only, so not on
+    ///   this workspace's Wayland target) leaves pressure `0.0`, which the domain
+    ///   already defines as "a device without pressure" — it is not a claim of a
+    ///   feather-light touch.
+    ///
+    /// Like the mouse builders, the event is marked [trusted](Self::pressed): it
+    /// came from the compositor for a real contact.
+    #[must_use]
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn touch(&self, contact: winit::event::Touch) -> PointerEvent {
+        use winit::event::TouchPhase;
+
+        let kind = match contact.phase {
+            TouchPhase::Started => PointerEventKind::Down,
+            TouchPhase::Moved => PointerEventKind::Move,
+            TouchPhase::Ended => PointerEventKind::Up,
+            TouchPhase::Cancelled => PointerEventKind::Cancel,
+        };
+        let mut held = PointerButtons::new();
+        if matches!(kind, PointerEventKind::Down | PointerEventKind::Move) {
+            held.press(PointerButton::Primary);
+        }
+        let pressure = contact.force.map_or(0.0, |force| force.normalized() as f32);
+
+        self.event_of(
+            PointerDevice::Touch,
+            PointerId::touch(contact.id),
+            kind,
+            contact.location,
+        )
+        .with_buttons(held)
+        .with_pressure(pressure)
+    }
+
     /// Assembles a mouse pointer event of `kind` at `position` with no held
-    /// buttons — the shared body of the per-event builders above.
+    /// buttons — the shared body of the mouse builders above, and
+    /// [`event_of`](Self::event_of) fixed to [`PointerDevice::Mouse`].
     ///
     /// Takes `&self` for symmetry with the public builders (spec: converter
     /// methods take `&self`); it needs no instance state.
+    #[allow(clippy::trivially_copy_pass_by_ref)]
+    fn event(
+        &self,
+        id: PointerId,
+        kind: PointerEventKind,
+        position: winit::dpi::PhysicalPosition<f64>,
+    ) -> PointerEvent {
+        self.event_of(PointerDevice::Mouse, id, kind, position)
+    }
+
+    /// Assembles a trusted pointer event of `kind` from `device` at `position`
+    /// with no held buttons — the body [`event`](Self::event) and
+    /// [`touch`](Self::touch) share.
     ///
-    /// # This is where trust enters the runtime
+    /// The device is a parameter rather than a constant because trust is decided
+    /// here, once, for everything the compositor delivered: a finger is exactly as
+    /// real a gesture as a click, and routing touch around this function to keep
+    /// trust mouse-only would have re-created the disjoint sets described below.
+    ///
+    /// # Where trust enters the runtime
     ///
     /// Every event built here descends from a `winit::event::WindowEvent` the
     /// compositor delivered for an actual device, so this converter — and, in this
@@ -145,15 +223,21 @@ impl PointerConverter {
         clippy::unused_self,
         clippy::trivially_copy_pass_by_ref
     )]
-    fn event(
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::unused_self,
+        clippy::trivially_copy_pass_by_ref
+    )]
+    fn event_of(
         &self,
+        device: PointerDevice,
         id: PointerId,
         kind: PointerEventKind,
         position: winit::dpi::PhysicalPosition<f64>,
     ) -> PointerEvent {
         PointerEvent::new(
             id,
-            PointerDevice::Mouse,
+            device,
             kind,
             Point::new(position.x as f32, position.y as f32),
         )
@@ -326,5 +410,92 @@ mod tests {
             !bare.is_trusted(),
             "PointerEvent::new must fail closed; trust is conferred, never default"
         );
+    }
+
+    /// Builds the winit touch event for `contact` in `phase` at `(x, y)`, with no
+    /// force reported — the shape a Wayland touchscreen actually delivers.
+    fn contact(id: u64, phase: winit::event::TouchPhase, x: f64, y: f64) -> winit::event::Touch {
+        winit::event::Touch {
+            device_id: winit::event::DeviceId::dummy(),
+            phase,
+            location: PhysicalPosition::new(x, y),
+            force: None,
+            id,
+        }
+    }
+
+    #[test]
+    fn a_contact_becomes_a_trusted_touch_pointer_at_its_location() {
+        let event = PointerConverter::new().touch(contact(
+            7,
+            winit::event::TouchPhase::Started,
+            12.0,
+            34.0,
+        ));
+
+        assert_eq!(event.kind, PointerEventKind::Down);
+        assert_eq!(event.device, PointerDevice::Touch);
+        assert_eq!(event.pointer, PointerId::touch(7));
+        assert_eq!(event.position, Point::new(12.0, 34.0));
+        assert!(
+            event.buttons.contains(PointerButton::Primary),
+            "a contact is the engagement device-agnostic code tests for"
+        );
+        assert!(
+            event.is_trusted(),
+            "a finger the compositor delivered is as real a gesture as a click"
+        );
+    }
+
+    /// The distinction the whole conversion turns on: the system taking a
+    /// sequence away is **not** a release.
+    ///
+    /// They are one phase apart in winit and worlds apart downstream — an `Up` on
+    /// the pressed node activates it (runs the bound command), a `Cancel` does
+    /// not. Mapping `Cancelled` to `Up` would make an interrupted gesture — a
+    /// system edge-swipe stealing the sequence — press whatever button the finger
+    /// happened to be resting on.
+    #[test]
+    fn a_cancelled_contact_is_a_cancel_and_not_a_release() {
+        let converter = PointerConverter::new();
+        let cancelled =
+            converter.touch(contact(1, winit::event::TouchPhase::Cancelled, 5.0, 5.0));
+        let ended = converter.touch(contact(1, winit::event::TouchPhase::Ended, 5.0, 5.0));
+
+        assert_eq!(cancelled.kind, PointerEventKind::Cancel);
+        assert_eq!(ended.kind, PointerEventKind::Up);
+        assert_ne!(cancelled.kind, ended.kind);
+        // Both end the contact, so neither leaves the primary button held.
+        assert!(cancelled.buttons.is_empty());
+        assert!(ended.buttons.is_empty());
+    }
+
+    #[test]
+    fn two_fingers_are_two_pointers_and_neither_is_the_mouse() {
+        let converter = PointerConverter::new();
+        let first = converter.touch(contact(0, winit::event::TouchPhase::Started, 1.0, 1.0));
+        let second = converter.touch(contact(1, winit::event::TouchPhase::Started, 9.0, 9.0));
+
+        assert_ne!(first.pointer, second.pointer);
+        assert_ne!(
+            first.pointer,
+            PointerId::MOUSE,
+            "contact 0 must not be the mouse, or the first finger down steals the \
+             cursor's identity"
+        );
+    }
+
+    #[test]
+    fn a_reported_force_becomes_the_contact_pressure() {
+        let mut heavy = contact(3, winit::event::TouchPhase::Moved, 2.0, 2.0);
+        heavy.force = Some(winit::event::Force::Normalized(0.5));
+        let event = PointerConverter::new().touch(heavy);
+        assert!((event.pressure - 0.5).abs() < f32::EPSILON);
+
+        // No force reported (this workspace's Wayland target) is the domain's
+        // "device without pressure", not a feather-light touch.
+        let plain = PointerConverter::new()
+            .touch(contact(3, winit::event::TouchPhase::Moved, 2.0, 2.0));
+        assert!((plain.pressure - 0.0).abs() < f32::EPSILON);
     }
 }

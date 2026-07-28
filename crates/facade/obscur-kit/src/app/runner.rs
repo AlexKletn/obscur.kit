@@ -538,6 +538,19 @@ impl ApplicationHandler for AppRunner {
                 self.runtime.handle_pointer(event);
                 self.request_redraw();
             }
+            WindowEvent::Touch(contact) => {
+                // A finger enters through the same door as the mouse: the runtime's
+                // hit-testing, hover, focus and activation are device-agnostic and
+                // already read `PointerDevice`, so touch needs the conversion and
+                // nothing else. The contact carries its own location, so — unlike
+                // `MouseInput`, which carries none — it never consults or updates
+                // the tracked cursor; a tap must not teleport the wheel's target.
+                let event = PointerConverter::new()
+                    .touch(contact)
+                    .with_timestamp(self.now_micros());
+                self.runtime.handle_pointer(event);
+                self.request_redraw();
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 // A wheel notch scrolls the `overflow: scroll` container under the
                 // cursor. winit reports whole lines or raw pixels; normalize both to
