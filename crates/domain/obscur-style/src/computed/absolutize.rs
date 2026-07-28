@@ -24,8 +24,8 @@
 
 use crate::property::{
     BackgroundLayer, BackgroundPosition, BackgroundSize, BoxShadow, ConicGradient, FilterOp,
-    GridTrack, GridTrackList, Length, LengthContext, PropertyValue, RadialGradient, RadialSize,
-    TransformOrigin,
+    GridTrack, GridTrackList, Length, LengthContext, LengthExpr, PropertyValue, RadialGradient,
+    RadialSize, TransformOrigin,
 };
 
 /// Returns `value` with every [`Length`] it carries absolutized against `ctx`.
@@ -36,7 +36,7 @@ use crate::property::{
 pub(super) fn absolutize_value(value: PropertyValue, ctx: &LengthContext) -> PropertyValue {
     match value {
         PropertyValue::Length(length) => PropertyValue::Length(length.absolutize(ctx)),
-        PropertyValue::Calc(expr) => PropertyValue::Calc(expr.absolutize(ctx)),
+        PropertyValue::Calc(expr) => collapse_calc(expr.absolutize(ctx), ctx),
         PropertyValue::BoxShadow(shadows) => {
             PropertyValue::BoxShadow(shadows.iter().map(|s| absolutize_shadow(s, ctx)).collect())
         }
@@ -91,6 +91,34 @@ pub(super) fn absolutize_value(value: PropertyValue, ctx: &LengthContext) -> Pro
         | PropertyValue::Inherit
         | PropertyValue::Initial
         | PropertyValue::Unset => value,
+    }
+}
+
+/// Collapses an already-absolutized math function to the plain `px` length it is
+/// worth, when it has one.
+///
+/// CSS Values 4 §10.1: a math function is valid *wherever* its resolved type is,
+/// and one that no longer depends on anything unknown computes to the equivalent
+/// plain value. That is not a nicety here — it is the difference between a
+/// property working and being dropped. Downstream readers ask a computed value
+/// for its [`Length`]; a `Calc` is not one, so every reader that does not itself
+/// know how to fold an expression silently contributes zero. `border-radius:
+/// min(3vmin, 14px)` painted square corners for exactly that reason, and so would
+/// `border-width`, `outline-offset`, and every other property whose consumer
+/// reads a length rather than an expression.
+///
+/// Collapsing here fixes all of them at once, because it happens at the
+/// computed-value step every property already passes through.
+///
+/// An expression that still depends on something unknown stays an expression:
+/// [`LengthExpr::resolve`] returns [`None`] for a percentage with no basis (this
+/// context deliberately carries none — a `%` resolves against a containing block
+/// only layout knows), for `auto`, and for an unmeasured `ch`. Those keep the
+/// symbolic form the later passes need, so `calc(50% - 2em)` is untouched.
+fn collapse_calc(expr: LengthExpr, ctx: &LengthContext) -> PropertyValue {
+    match expr.resolve(ctx) {
+        Some(px) => PropertyValue::Length(Length::px(px)),
+        None => PropertyValue::Calc(expr),
     }
 }
 
@@ -298,6 +326,37 @@ mod tests {
                 Box::new(LengthExpr::leaf(Length::Percent(50.0))),
             ))
         );
+    }
+
+    /// The other half of the rule above: once nothing in the expression is
+    /// unknown, it *is* a length and must say so. A `Calc` that stays a `Calc`
+    /// here is dropped by every consumer that reads a length — which is what made
+    /// `border-radius: min(3vmin, 14px)` paint square corners.
+    #[test]
+    fn a_calc_with_nothing_left_unknown_becomes_a_plain_length() {
+        // min(3vmin, 14px) against a 800×600 viewport: vmin = 6, so 18px vs 14px.
+        let expr = LengthExpr::Min(vec![
+            LengthExpr::leaf(Length::Vmin(3.0)),
+            LengthExpr::leaf(Length::px(14.0)),
+        ]);
+        assert_eq!(
+            absolutize_value(PropertyValue::Calc(expr), &ctx()),
+            PropertyValue::Length(Length::px(14.0))
+        );
+    }
+
+    /// `auto` has no number at computed-value time either, so it keeps the
+    /// expression alive exactly as a percentage does.
+    #[test]
+    fn a_calc_over_auto_stays_an_expression() {
+        let expr = LengthExpr::Max(vec![
+            LengthExpr::leaf(Length::Auto),
+            LengthExpr::leaf(Length::px(4.0)),
+        ]);
+        assert!(matches!(
+            absolutize_value(PropertyValue::Calc(expr), &ctx()),
+            PropertyValue::Calc(_)
+        ));
     }
 
     #[test]

@@ -1279,7 +1279,12 @@ fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Opt
         return Some(PropertyValue::Length(Length::px(0.0)));
     }
     match lower_component(value, interner) {
-        Some(length @ PropertyValue::Length(_)) => Some(length),
+        // A math function is accepted wherever a `<length>` is (CSS Values 4
+        // §10.1), and these shorthands are no exception: rejecting it here does
+        // not degrade one corner, it degrades the WHOLE declaration to
+        // `Unsupported`, so `border-radius: min(3vmin, 14px)` used to leave four
+        // square corners rather than four clamped ones.
+        Some(length @ (PropertyValue::Length(_) | PropertyValue::Calc(_))) => Some(length),
         _ => None,
     }
 }
@@ -5510,6 +5515,34 @@ mod tests {
                 (PropertyId::BorderLeftColor, green),
             ]
         );
+    }
+
+    /// A math function is a `<length>` (CSS Values 4 §10.1), so a box shorthand
+    /// takes one. It used to reject the component, which does not degrade one
+    /// corner — it degrades the whole declaration, leaving square corners with no
+    /// diagnostic anywhere.
+    #[test]
+    fn a_box_shorthand_takes_a_math_function_per_side() {
+        let compiled = pairs(&compile_all("border-radius: min(3vmin, 14px)"));
+        assert_eq!(compiled.len(), 4, "all four corners are emitted");
+        assert!(
+            compiled
+                .iter()
+                .all(|(_, value)| matches!(value, PropertyValue::Calc(_))),
+            "each corner carries the expression, not a dropped declaration"
+        );
+    }
+
+    /// The same for the box-model shorthands, which share the component rule.
+    #[test]
+    fn padding_takes_a_math_function_per_side() {
+        let compiled = pairs(&compile_all("padding: calc(2px + 1em) 4px"));
+        assert_eq!(compiled.len(), 4);
+        assert!(matches!(compiled[0].1, PropertyValue::Calc(_)));
+        assert!(matches!(
+            compiled[1].1,
+            PropertyValue::Length(Length::Px(_))
+        ));
     }
 
     #[test]
