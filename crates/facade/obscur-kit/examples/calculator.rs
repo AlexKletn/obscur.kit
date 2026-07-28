@@ -10,7 +10,7 @@
 //!   and light `:active` while held. The runtime's press state is per-pointer, so
 //!   resting one thumb on a key and pressing another with the other hand lights
 //!   both and fires both.
-//! - **A held key means something else.** `⌫` deletes one digit on a tap and
+//! - **A held key means something else.** `DEL` removes one digit on a tap and
 //!   clears everything when held — a touchscreen has one button and no
 //!   modifiers, so holding is the only "other" gesture a key has. It fires while
 //!   the finger is still down, and the lift is consumed rather than also
@@ -50,43 +50,73 @@ const TAPE: InternedSymbol = InternedSymbol::named("tape");
 /// its window and spacers from this.
 const TAPE_ROW: f32 = 28.0;
 
-/// Held `⌫` clears everything; tapped, it deletes one digit.
+/// Held `DEL` clears everything; tapped, it deletes one digit.
 const CMD_CLEAR_ALL: InternedSymbol = InternedSymbol::named("clearAll");
 
-/// The styling. `env(safe-area-inset-*)` on the root is the whole of this app's
-/// awareness of the device it is on: a notched phone pads itself, a desktop
-/// window does not.
+/// The styling.
+///
+/// Two rules it follows, both learned from what the kit actually does rather
+/// than from what CSS says:
+///
+/// - **No `width: 100%` on anything with padding.** A percentage width inside a
+///   percentage-width padded parent resolves against the parent's *border* box
+///   here, so each nesting level grows by its parent's padding and the content
+///   spills out of the window. Flex stretches a child across the cross axis
+///   anyway, so stating no width at all is both shorter and exact.
+/// - **No `text-align`.** It parses and computes and the layout ignores it;
+///   `justify-content` on a flex row is what actually moves text.
+///
+/// `env(safe-area-inset-*)` on `.safe` is this app's whole awareness of the
+/// device it is on: a notched phone pads itself, a desktop window does not.
+///
+/// The body is capped and centred rather than stretched. A tiling compositor
+/// hands this window whatever it likes — the owner's first run of it got roughly
+/// 1200×1500 — and a keypad that grew to fill that has 440px keys, which reads as
+/// a bug rather than as a design. Capped, it is a calculator sitting in the
+/// middle of the screen; on a phone-sized window the cap is never reached and it
+/// fills as before.
 const CSS: &str = "\
-.app        { background-color: #11151f; width: 100%; height: 100%; \
-              display: flex; flex-direction: column; gap: 8px; \
+.safe       { background-color: #0d1017; width: 100%; height: 100%; \
+              display: flex; flex-direction: column; \
+              justify-content: center; align-items: center; \
               padding-top: env(safe-area-inset-top); \
               padding-bottom: env(safe-area-inset-bottom); \
               padding-left: env(safe-area-inset-left); \
               padding-right: env(safe-area-inset-right); }\n\
-.tape       { background-color: #161b28; width: 344px; height: 140px; \
+.app        { flex: 1; max-width: 460px; max-height: 780px; \
+              display: flex; flex-direction: column; gap: 10px; padding: 12px; }\n\
+.tape       { flex: 3; background-color: #141926; border-radius: 14px; \
               display: flex; flex-direction: column; overflow: scroll; }\n\
-.tape-row   { width: 344px; height: 28px; display: flex; flex-direction: row; \
-              overflow: hidden; }\n\
-.tape-text  { color: #7f8db0; width: 336px; height: 22px; \
-              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n\
-.tape-empty { color: #46506b; width: 336px; height: 22px; }\n\
-.display    { background-color: #161b28; width: 344px; height: 72px; \
-              display: flex; flex-direction: column; }\n\
-.value      { color: #e9edf7; width: 336px; height: 40px; text-align: right; }\n\
-.pending    { color: #6f7ea6; width: 336px; height: 20px; text-align: right; }\n\
-.krow       { width: 344px; height: 68px; display: flex; flex-direction: row; \
-              gap: 8px; }\n\
-.key        { background-color: #232b3d; width: 80px; height: 68px; color: #e9edf7; \
+.tape-row   { height: 30px; display: flex; flex-direction: row; \
+              justify-content: flex-end; align-items: center; \
+              padding-left: 14px; padding-right: 14px; overflow: hidden; }\n\
+.tape-row:hover { background-color: #1b2233; }\n\
+.tape-text  { color: #7c89ad; font-size: 15px; white-space: nowrap; \
+              overflow: hidden; text-overflow: ellipsis; }\n\
+.tape-empty { color: #3f4a66; font-size: 15px; }\n\
+.display    { flex: 2; background-color: #141926; border-radius: 14px; \
+              display: flex; flex-direction: column; justify-content: center; \
+              padding-left: 18px; padding-right: 18px; }\n\
+.pending-row{ height: 26px; display: flex; flex-direction: row; \
+              justify-content: flex-end; align-items: center; }\n\
+.value-row  { height: 52px; display: flex; flex-direction: row; \
+              justify-content: flex-end; align-items: center; }\n\
+.pending    { color: #6b7799; font-size: 18px; }\n\
+.value      { color: #f2f5ff; font-size: 40px; }\n\
+.pad        { flex: 8; display: flex; flex-direction: column; gap: 10px; }\n\
+.krow       { flex: 1; display: flex; flex-direction: row; gap: 10px; }\n\
+.key        { flex: 1; background-color: #1c2233; border-radius: 14px; \
+              color: #eef2ff; font-size: 26px; \
               display: flex; justify-content: center; align-items: center; }\n\
-.key:hover  { background-color: #2c3550; }\n\
-.key:active { background-color: #4a5878; }\n\
-.wide       { width: 168px; }\n\
-.op         { background-color: #2a3352; }\n\
-.op:active  { background-color: #55659a; }\n\
-.eq         { background-color: #3b6ea5; }\n\
-.eq:active  { background-color: #5b93cf; }\n\
-.fn         { background-color: #1d2434; }\n\
-.fn:active  { background-color: #3c4762; }\n\
+.key:hover  { background-color: #262e45; }\n\
+.key:active { background-color: #43507a; }\n\
+.wide       { flex: 2; }\n\
+.fn         { background-color: #161b29; color: #b9c4e0; font-size: 20px; }\n\
+.fn:active  { background-color: #333d5c; }\n\
+.op         { background-color: #232c49; color: #cfe0ff; }\n\
+.op:active  { background-color: #46598f; }\n\
+.eq         { background-color: #3462c4; color: #ffffff; }\n\
+.eq:active  { background-color: #5b86e8; }\n\
 ";
 
 /// What a key does. The label and the command name live beside it in [`KEYS`],
@@ -135,7 +165,7 @@ impl Key {
 
 /// Every key: `(command name, label, key, extra classes)`.
 const KEYS: &[(&str, &str, Key, &str)] = &[
-    ("back", "⌫", Key::Back, "fn"),
+    ("back", "DEL", Key::Back, "fn"),
     ("sign", "±", Key::Sign, "fn"),
     ("pct", "%", Key::Percent, "fn"),
     ("div", "÷", Key::Div, "op"),
@@ -310,7 +340,7 @@ impl Calc {
         });
     }
 
-    /// Held `⌫`: back to nothing at all.
+    /// Held `DEL`: back to nothing at all.
     fn clear_all(&mut self) {
         "0".clone_into(&mut self.entry);
         self.acc = None;
@@ -373,15 +403,28 @@ fn main() -> Result<(), obscur_kit::AppError> {
     app.run()
 }
 
-/// The whole screen: tape, display, keypad.
+/// The whole screen: tape, display, keypad — every band sized by `flex`, so the
+/// window's size is the only thing that decides how big anything is.
+///
+/// The outer `.safe` wrapper carries nothing but the `env()` padding. Keeping it
+/// separate from `.app`'s own 12px means the two do not have to be added
+/// together in CSS, which `padding` has no way to express.
 fn build_view(state: &Calc) -> View {
-    let root = Container::new()
+    let app = Container::new()
         .child(tape(state))
         .child(display(state))
-        .with_children(ROWS.iter().map(|row| key_row(row)).collect::<Vec<_>>())
+        .child(keypad())
         .into_view_node()
         .class("app");
-    View::single(root)
+    View::single(Container::new().child(app).into_view_node().class("safe"))
+}
+
+/// The five key rows, in their own column so the keypad scales as one block.
+fn keypad() -> ViewNode {
+    Container::new()
+        .with_children(ROWS.iter().map(|row| key_row(row)).collect::<Vec<_>>())
+        .into_view_node()
+        .class("pad")
 }
 
 /// The scrolling history. Empty, it says so; otherwise it carries the virtual
@@ -413,14 +456,20 @@ fn tape_row(state: &Calc, index: usize) -> ViewNode {
 }
 
 /// The current entry, with the pending left-hand side above it.
+///
+/// Each line is a flex row that justifies its text to the end, because
+/// `text-align` does not move text in this kit (the property parses and computes
+/// and the layout ignores it) — flex justification is what actually aligns.
 fn display(state: &Calc) -> ViewNode {
+    let line = |class: &str, row: &str, text: String| {
+        Container::new()
+            .child(Text::new(text).into_view_node().class(class.to_owned()))
+            .into_view_node()
+            .class(row.to_owned())
+    };
     Container::new()
-        .child(Text::new(state.pending()).into_view_node().class("pending"))
-        .child(
-            Text::new(state.entry.clone())
-                .into_view_node()
-                .class("value"),
-        )
+        .child(line("pending", "pending-row", state.pending()))
+        .child(line("value", "value-row", state.entry.clone()))
         .into_view_node()
         .class("display")
 }
@@ -436,7 +485,7 @@ fn key_row(row: &[usize]) -> ViewNode {
 /// One key: a real [`Button`] bound to its command, with the sizing class on the
 /// button's own node so the tap resolves to it.
 ///
-/// `⌫` additionally binds `EVENT_LONG_PRESS`, which is what makes a held key a
+/// `DEL` additionally binds `EVENT_LONG_PRESS`, which is what makes a held key a
 /// different action rather than a slow tap.
 fn key(index: usize) -> ViewNode {
     let (name, label, key, extra) = KEYS[index];
@@ -565,7 +614,7 @@ mod tests {
         assert_eq!(c.entry, "0", "it bottoms out rather than emptying");
     }
 
-    /// The pair to the test above, and the reason `⌫` binds a long press: held,
+    /// The pair to the test above, and the reason `DEL` binds a long press: held,
     /// it is a different action, not a faster one.
     #[test]
     fn clear_all_forgets_the_pending_operation_too() {
