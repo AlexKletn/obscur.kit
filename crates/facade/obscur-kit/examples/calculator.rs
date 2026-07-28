@@ -83,6 +83,17 @@ const CMD_CLEAR_ALL: InternedSymbol = InternedSymbol::named("clearAll");
 ///   their (already scaling) text instead. `.tape-row` is the one exception and
 ///   must stay fixed: it is a virtual-list row, and the runtime sizes its window
 ///   and spacers from exactly that number.
+/// - **A styled `button` resets the UA `padding` and `border`.** Every key here
+///   is a real [`Button`], so the kit's default sheet gives it `padding: 11px
+///   20px` — 40px of horizontal padding, which a 30px-wide key does not have.
+///   The content box collapses, `overflow: hidden` clips what is left, and the
+///   key renders as an empty pill. That is the browser contract (a `<button>`
+///   carries UA padding until an author says otherwise) and it bites exactly
+///   where a demo is least likely to look: on a small window, at a display scale
+///   of 2, where the *logical* viewport is half the pixels on screen.
+/// - **Corner radii scale like type does.** `border-radius: 14px` on a 30px key
+///   is a pill, not a rounded key. `min(3vmin, 14px)` keeps the intended shape at
+///   every size.
 ///
 /// **Transparency is the root's alpha and nothing else.** The window is always
 /// created transparent with a premultiplied composite mode, so the bottom-most
@@ -112,7 +123,7 @@ const CSS: &str = "\
               padding-right: env(safe-area-inset-right); }\n\
 .app        { flex: 1; max-width: 460px; max-height: 780px; \
               display: flex; flex-direction: column; gap: 10px; padding: 12px; }\n\
-.tape       { flex: 3; background-color: rgba(20, 25, 38, 0.55); border-radius: 14px; \
+.tape       { flex: 3; background-color: rgba(20, 25, 38, 0.55); border-radius: min(3vmin, 14px); \
               display: flex; flex-direction: column; overflow: scroll; }\n\
 .tape-row   { height: 30px; font-size: min(3.4vmin, 18px); white-space: nowrap; \
               display: flex; flex-direction: row; \
@@ -122,7 +133,7 @@ const CSS: &str = "\
 .tape-text  { color: #7c89ad; font-size: min(3.4vmin, 18px); white-space: nowrap; \
               overflow: hidden; text-overflow: ellipsis; }\n\
 .tape-empty { color: #3f4a66; font-size: min(3.4vmin, 18px); }\n\
-.display    { flex: 2; background-color: rgba(20, 25, 38, 0.55); border-radius: 14px; \
+.display    { flex: 2; background-color: rgba(20, 25, 38, 0.55); border-radius: min(3vmin, 14px); \
               overflow: hidden; \
               display: flex; flex-direction: column; justify-content: center; \
               padding-left: 18px; padding-right: 18px; }\n\
@@ -136,8 +147,8 @@ const CSS: &str = "\
 .value      { color: #f2f5ff; font-size: min(9vmin, 52px); }\n\
 .pad        { flex: 8; display: flex; flex-direction: column; gap: 10px; }\n\
 .krow       { flex: 1; display: flex; flex-direction: row; gap: 10px; }\n\
-.key        { flex: 1; background-color: rgba(28, 34, 51, 0.72); border-radius: 14px; \
-              overflow: hidden; \
+.key        { flex: 1; background-color: rgba(28, 34, 51, 0.72); border-radius: min(3vmin, 14px); \
+              padding: 0; border: 0; overflow: hidden; \
               color: #eef2ff; font-size: min(6vmin, 34px); \
               display: flex; justify-content: center; align-items: center; }\n\
 .key:hover  { background-color: rgba(38, 46, 69, 0.85); }\n\
