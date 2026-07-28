@@ -6331,6 +6331,7 @@ impl UiRuntime {
         Some(self.scene_composer.caret_offset_at_point(
             &self.tree,
             &self.computed,
+            &self.boxes,
             text_node,
             session.text(),
             text_box.size().width,
@@ -6552,6 +6553,7 @@ impl UiRuntime {
             .caret_line_move(
                 &self.tree,
                 &self.computed,
+                &self.boxes,
                 text_node,
                 content,
                 text_box.size().width,
@@ -6660,6 +6662,7 @@ impl UiRuntime {
         Some(self.scene_composer.caret_visual_line_bound(
             &self.tree,
             &self.computed,
+            &self.boxes,
             text_node,
             content,
             text_box.size().width,
@@ -6935,6 +6938,7 @@ impl UiRuntime {
             self.scene_composer.caret_line_scroll_geometry(
                 &self.tree,
                 &self.computed,
+                &self.boxes,
                 text_node,
                 session.text(),
                 text_box.size().width,

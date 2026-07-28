@@ -1567,6 +1567,32 @@ impl ParagraphLayout {
         }
     }
 
+    /// Returns this paragraph with every line re-aligned inside `width`.
+    ///
+    /// Wrapping and alignment answer to **different widths**, and conflating them
+    /// is why `text-align` used to do nothing. A text box is shrink-wrapped to its
+    /// longest line, so aligning inside *it* can only ever produce a zero offset —
+    /// there is no slack to distribute. What CSS aligns within is the containing
+    /// block, which is wider. So the paragraph wraps to the width it was measured
+    /// against and is then re-aligned inside the width it is actually laid out in.
+    ///
+    /// A no-op for `start`/`left` in LTR (offset `0` either way), which is what
+    /// keeps every existing paint byte-identical.
+    #[must_use]
+    pub fn aligned_to(self, width: f32) -> Self {
+        let alignment = self.alignment;
+        let overflow = self.overflow;
+        let lines = self
+            .lines
+            .into_iter()
+            .map(|line| {
+                let offset = alignment.x_offset(line.width(), width, line.direction());
+                line.with_x_offset(offset)
+            })
+            .collect();
+        Self::new(lines, alignment, overflow)
+    }
+
     /// Returns the laid-out lines, top to bottom.
     #[must_use]
     pub fn lines(&self) -> &[ParagraphLine] {

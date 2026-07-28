@@ -1,6 +1,7 @@
 //! One laid-out visual line of a multi-font paragraph (spec §5.10).
 
 use crate::shaping::ShapedRun;
+use crate::shaping::TextDirection;
 use crate::span::TextRange;
 
 /// A single laid-out visual line of a multi-font paragraph: the font-tagged
@@ -99,6 +100,20 @@ impl ParagraphLine {
     #[must_use]
     pub const fn x_offset(&self) -> f32 {
         self.x_offset
+    }
+
+    /// The line's base direction, taken from its first segment (LTR when the
+    /// line is empty).
+    ///
+    /// Alignment needs it: `start` and `end` are direction-relative, so a line of
+    /// Arabic aligned to `start` sits at the *right* edge.
+    #[must_use]
+    pub fn direction(&self) -> TextDirection {
+        self.segments
+            .first()
+            .map_or(TextDirection::LeftToRight, |segment| {
+                segment.run().direction()
+            })
     }
 
     /// Returns the line's total advance width: the sum of every segment's run

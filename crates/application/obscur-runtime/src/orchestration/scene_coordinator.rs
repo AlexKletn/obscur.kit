@@ -892,10 +892,57 @@ impl SceneCoordinator {
     /// (spec §5.10) — so a caret / hit-test resolved against this layout lands on
     /// the same line the glyphs paint on. The runtime uses it for vertical caret
     /// motion and 2D click→byte hit-testing over the live editing text.
+    /// The width `text-align` aligns `node`'s lines within: its containing
+    /// block's content width (CSS Text 3 §7.1).
+    ///
+    /// **Not the text box's own width**, which is where this used to look and why
+    /// `text-align` did nothing at all. A text node is shrink-wrapped to its
+    /// longest line, so there is never any slack inside it to distribute — the
+    /// offset came out `0` however the property was set. CSS aligns line boxes
+    /// within the containing block, and that is the parent's content box.
+    ///
+    /// Never narrower than the box itself, so a missing or smaller parent box
+    /// leaves the previous behaviour exactly in place. A percentage padding is
+    /// read as `0`: percentages resolve against the containing block during
+    /// layout, which this pass does not redo — every other unit has already been
+    /// folded to pixels by the computed-value pass.
+    fn align_width_for(
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+        boxes: &LayoutBoxes,
+        node: NodeId,
+        box_width: f32,
+    ) -> f32 {
+        let Some(parent) = tree.get(node).and_then(|n| n.logical_parent().parent()) else {
+            return box_width;
+        };
+        let Some(parent_box) = boxes.get(&parent) else {
+            return box_width;
+        };
+        let style = computed.get(&parent);
+        let px = |property: PropertyId| -> f32 {
+            style
+                .and_then(|style| style.get(property))
+                .and_then(ComputedValue::as_length)
+                .and_then(|length| match length {
+                    Length::Px(px) => Some(px.0),
+                    _ => None,
+                })
+                .unwrap_or(0.0)
+        };
+        let content = parent_box.size().width
+            - px(PropertyId::PaddingLeft)
+            - px(PropertyId::PaddingRight)
+            - px(PropertyId::BorderLeftWidth)
+            - px(PropertyId::BorderRightWidth);
+        content.max(box_width)
+    }
+
     pub(crate) fn shape_text_lines(
         &self,
         tree: &RetainedTree,
         computed: &ComputedStyles,
+        boxes: &LayoutBoxes,
         node: NodeId,
         content: &str,
         box_width: f32,
@@ -906,7 +953,7 @@ impl SceneCoordinator {
         // §5.1.1); `em` / `%` resolve against this node's `font_size`. Resolved
         // identically to the layout phase so caret/hit-test lines match the box.
         let root_font = root_font_size(computed, tree.root());
-        self.shape_lines(
+        let layout = self.shape_lines(
             content,
             &families_for(style),
             &attributes_for(style),
@@ -922,7 +969,26 @@ impl SceneCoordinator {
             letter_spacing_for(style, font_size, root_font),
             word_spacing_for(style, font_size, root_font),
             tab_size_for(style, font_size, root_font),
-        )
+        );
+        // Wrapping answered to the box; alignment answers to the containing
+        // block. Only an explicitly non-default alignment re-aligns, so a
+        // `start`-aligned paragraph — which is every paragraph until an author
+        // says otherwise, in either direction — takes the identical path it
+        // always did.
+        let alignment = alignment_for(style);
+        if matches!(
+            alignment,
+            TextAlignment::Center
+                | TextAlignment::Right
+                | TextAlignment::End
+                | TextAlignment::Justify
+        ) {
+            let width = Self::align_width_for(tree, computed, boxes, node, box_width);
+            if width > box_width {
+                return layout.aligned_to(width);
+            }
+        }
+        layout
     }
 
     /// Paints one §4.16 generated run (`::before` / `::after` content or the
@@ -940,6 +1006,7 @@ impl SceneCoordinator {
         node_paint: &mut DisplayListBuilder,
         tree: &RetainedTree,
         computed: &ComputedStyles,
+        boxes: &LayoutBoxes,
         node: NodeId,
         origin: Point,
         box_width: f32,
@@ -950,7 +1017,7 @@ impl SceneCoordinator {
             .map_or_else(|| text_color_of(computed, node), scene_color_from);
         let brush = Brush::solid(color);
         let font_size = font_size_of(computed, node);
-        let layout = self.shape_text_lines(tree, computed, node, &run.text, box_width);
+        let layout = self.shape_text_lines(tree, computed, boxes, node, &run.text, box_width);
         for line in layout.lines() {
             if line.segments().is_empty() {
                 continue;
@@ -988,6 +1055,7 @@ impl SceneCoordinator {
         &self,
         tree: &RetainedTree,
         computed: &ComputedStyles,
+        boxes: &LayoutBoxes,
         node: NodeId,
         content: &str,
         box_width: f32,
@@ -995,7 +1063,7 @@ impl SceneCoordinator {
         local_y: f32,
     ) -> usize {
         let style = computed.get(&node);
-        let layout = self.shape_text_lines(tree, computed, node, content, box_width);
+        let layout = self.shape_text_lines(tree, computed, boxes, node, content, box_width);
         let lines = layout.lines();
         if lines.is_empty() {
             return self.caret_offset_at_x(content, style, local_x);
@@ -1063,6 +1131,7 @@ impl SceneCoordinator {
         &self,
         tree: &RetainedTree,
         computed: &ComputedStyles,
+        boxes: &LayoutBoxes,
         node: NodeId,
         content: &str,
         box_width: f32,
@@ -1070,7 +1139,7 @@ impl SceneCoordinator {
         down: bool,
     ) -> Option<usize> {
         let style = computed.get(&node);
-        let layout = self.shape_text_lines(tree, computed, node, content, box_width);
+        let layout = self.shape_text_lines(tree, computed, boxes, node, content, box_width);
         let cur = Self::line_of_byte(&layout, index);
         let target = if down {
             let next = cur + 1;
@@ -1110,13 +1179,14 @@ impl SceneCoordinator {
         &self,
         tree: &RetainedTree,
         computed: &ComputedStyles,
+        boxes: &LayoutBoxes,
         node: NodeId,
         content: &str,
         box_width: f32,
         index: usize,
         to_end: bool,
     ) -> usize {
-        let layout = self.shape_text_lines(tree, computed, node, content, box_width);
+        let layout = self.shape_text_lines(tree, computed, boxes, node, content, box_width);
         let li = Self::line_of_byte(&layout, index);
         if to_end {
             layout
@@ -1145,13 +1215,14 @@ impl SceneCoordinator {
         &self,
         tree: &RetainedTree,
         computed: &ComputedStyles,
+        boxes: &LayoutBoxes,
         node: NodeId,
         content: &str,
         box_width: f32,
         index: usize,
     ) -> (f32, f32, f32) {
         let font_size = font_size_of(computed, node);
-        let layout = self.shape_text_lines(tree, computed, node, content, box_width);
+        let layout = self.shape_text_lines(tree, computed, boxes, node, content, box_width);
         let (top, height, _x_offset, _x) = self.caret_line_geometry(&layout, font_size, index);
         // The scrollable content height is the bottom-most wrapped line's edge
         // (never less than the caret's own line, so a single line is exact).
@@ -1740,6 +1811,7 @@ impl SceneCoordinator {
                         &mut node_paint,
                         tree,
                         computed,
+                        boxes,
                         node,
                         layout_box.origin(),
                         layout_box.size().width,
@@ -1887,6 +1959,28 @@ impl SceneCoordinator {
                         word_spacing_for(computed.get(&node), font_size, root_font),
                         tab_size_for(computed.get(&node), font_size, root_font),
                     );
+                    // Wrapping answered to the box, alignment answers to the
+                    // containing block — see `align_width_for`. The caret and the
+                    // selection below resolve against THIS layout, so re-aligning
+                    // here keeps all three on one set of line offsets.
+                    let layout = if matches!(
+                        alignment,
+                        TextAlignment::Center
+                            | TextAlignment::Right
+                            | TextAlignment::End
+                            | TextAlignment::Justify
+                    ) {
+                        let width = Self::align_width_for(
+                            tree,
+                            computed,
+                            boxes,
+                            node,
+                            layout_box.size().width,
+                        );
+                        layout.aligned_to(width)
+                    } else {
+                        layout
+                    };
                     // Selection highlight, painted BEHIND the glyphs (emitted before
                     // the runs so the text shows over it): the documented
                     // semi-transparent selection color. A span over the wrapped
@@ -8493,7 +8587,14 @@ mod tests {
             .collect();
 
         // The painted rects equal the domain geometry over the same wrapped layout.
-        let layout = coordinator.shape_text_lines(&tree, &computed, text, "aaaa bbbb cccc", 50.0);
+        let layout = coordinator.shape_text_lines(
+            &tree,
+            &computed,
+            &LayoutBoxes::new(),
+            text,
+            "aaaa bbbb cccc",
+            50.0,
+        );
         let expected = SelectionGeometry::from_paragraph(&layout, 2, 12);
         assert_eq!(
             expected.len(),
@@ -8537,7 +8638,14 @@ mod tests {
         // its used pen width).
         let coordinator = SceneCoordinator::new();
         let (tree, computed, boxes, text) = wrapped_editing_fixture("aaaa bbbb cccc", 50.0, 48.0);
-        let layout = coordinator.shape_text_lines(&tree, &computed, text, "aaaa bbbb cccc", 50.0);
+        let layout = coordinator.shape_text_lines(
+            &tree,
+            &computed,
+            &LayoutBoxes::new(),
+            text,
+            "aaaa bbbb cccc",
+            50.0,
+        );
 
         // Downstream (default affinity) → start of line 1.
         let down = EditingView::new(text, "aaaa bbbb cccc", TextSelection::caret(5));
@@ -8768,8 +8876,16 @@ mod tests {
             advance * 4.0,
         );
         // The click at the caret x is the exact inverse: it resolves to text.len().
-        let byte =
-            coordinator.caret_offset_at_point(&tree, &computed, text, "abcd", 200.0, caret_x, 8.0);
+        let byte = coordinator.caret_offset_at_point(
+            &tree,
+            &computed,
+            &LayoutBoxes::new(),
+            text,
+            "abcd",
+            200.0,
+            caret_x,
+            8.0,
+        );
         assert_eq!(byte, 4, "click at the end caret x returns text.len()");
         // A caret at a middle boundary and its click are also exact inverses.
         let (tree2, computed2, boxes2, text2) = styled_editing_fixture("abcd", 200.0, author);
@@ -8786,7 +8902,16 @@ mod tests {
             (advance + ls) * 2.0,
         );
         assert_eq!(
-            coordinator.caret_offset_at_point(&tree2, &computed2, text2, "abcd", 200.0, mid_x, 8.0),
+            coordinator.caret_offset_at_point(
+                &tree2,
+                &computed2,
+                &LayoutBoxes::new(),
+                text2,
+                "abcd",
+                200.0,
+                mid_x,
+                8.0
+            ),
             2,
             "click at the byte-2 caret x returns 2",
         );
@@ -8818,7 +8943,16 @@ mod tests {
             "right-aligned end caret sits at the box right edge {box_w}, got {caret_x}",
         );
         assert_eq!(
-            coordinator.caret_offset_at_point(&tree, &computed, text, "abcd", box_w, caret_x, 8.0),
+            coordinator.caret_offset_at_point(
+                &tree,
+                &computed,
+                &LayoutBoxes::new(),
+                text,
+                "abcd",
+                box_w,
+                caret_x,
+                8.0
+            ),
             4,
             "click at the right-aligned end caret x returns text.len()",
         );
@@ -8838,7 +8972,16 @@ mod tests {
             x_offset + advance,
         );
         assert_eq!(
-            coordinator.caret_offset_at_point(&t1, &c1, n1, "abcd", box_w, mid_x, 8.0),
+            coordinator.caret_offset_at_point(
+                &t1,
+                &c1,
+                &LayoutBoxes::new(),
+                n1,
+                "abcd",
+                box_w,
+                mid_x,
+                8.0
+            ),
             1,
             "click at the right-aligned byte-1 caret x returns 1",
         );
@@ -8870,7 +9013,16 @@ mod tests {
             "centered end caret is x_offset + run width ~{expected}, got {caret_x}",
         );
         assert_eq!(
-            coordinator.caret_offset_at_point(&tree, &computed, text, "abcd", box_w, caret_x, 8.0),
+            coordinator.caret_offset_at_point(
+                &tree,
+                &computed,
+                &LayoutBoxes::new(),
+                text,
+                "abcd",
+                box_w,
+                caret_x,
+                8.0
+            ),
             4,
             "click at the centered end caret x returns text.len()",
         );
@@ -8896,8 +9048,16 @@ mod tests {
                 "plain field caret at {index} is index·advance {expected}, got {caret_x}",
             );
             assert_eq!(
-                coordinator
-                    .caret_offset_at_point(&tree, &computed, text, "abcd", 200.0, caret_x, 8.0,),
+                coordinator.caret_offset_at_point(
+                    &tree,
+                    &computed,
+                    &LayoutBoxes::new(),
+                    text,
+                    "abcd",
+                    200.0,
+                    caret_x,
+                    8.0,
+                ),
                 index,
                 "plain field click at the byte-{index} caret x returns {index}",
             );
