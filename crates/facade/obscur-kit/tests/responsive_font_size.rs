@@ -110,3 +110,29 @@ fn a_plain_length_is_unaffected() {
         Some(26.0)
     );
 }
+
+/// A **floor** is what makes type stop following the window: below it the label
+/// keeps its size while the box around it carries on shrinking, and ends up
+/// several times wider than the key it sits in.
+///
+/// Measured on the demo's own shape, this was 18px of label inside a 1.5px key.
+/// A ceiling alone — `min(<vmin>, <px>)` — keeps type sane on a wall-sized
+/// window and lets it shrink the whole way on a squeezed one.
+#[test]
+fn a_ceiling_only_size_keeps_shrinking_where_a_floor_would_stop() {
+    let ceiling = ".box { font-size: min(6vmin, 34px) }";
+    let floored = ".box { font-size: clamp(18px, 6vmin, 34px) }";
+
+    // Both agree while the window is roomy enough that neither bound bites.
+    assert_eq!(
+        font_size(ceiling, 400.0, 600.0),
+        font_size(floored, 400.0, 600.0)
+    );
+
+    // Squeezed, the floor stops and the ceiling keeps going.
+    assert_eq!(font_size(floored, 100.0, 160.0), Some(18.0));
+    assert_eq!(font_size(ceiling, 100.0, 160.0), Some(6.0));
+
+    // And the ceiling still holds at the other end.
+    assert_eq!(font_size(ceiling, 1200.0, 1500.0), Some(34.0));
+}
