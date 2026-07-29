@@ -1,6 +1,6 @@
 //! What a layer surface reports back to its host.
 
-use obscur_geometry::Size;
+use obscur_geometry::{Point, Size};
 use obscur_interaction::pointer::PointerEvent;
 
 /// One thing that happened to a layer surface, in the host's own vocabulary.
@@ -29,17 +29,23 @@ pub enum LayerEvent {
     Closed,
     /// A pointer, touch or pen event, already in the kit's model.
     Pointer(PointerEvent),
-    /// A scroll of `delta_y` logical pixels at the pointer's position.
+    /// A scroll of `delta_y` pixels at the pointer's position.
+    ///
+    /// The position travels with the delta because scrolling is routed to the
+    /// container *under the pointer*, and a host that had to guess it — from the
+    /// hovered node's box, say — would send the notch to the wrong place the
+    /// moment the pointer sat over a child.
     Scroll {
         /// Pixels to scroll; positive reveals content further down.
         delta_y: f32,
+        /// Where the pointer was, in physical pixels.
+        at: Point,
     },
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use obscur_geometry::Point;
     use obscur_interaction::pointer::{PointerDevice, PointerEventKind, PointerId};
 
     #[test]

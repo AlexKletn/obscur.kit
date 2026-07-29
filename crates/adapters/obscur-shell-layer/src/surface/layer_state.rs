@@ -266,8 +266,7 @@ impl PointerHandler for LayerState {
         events: &[SctkPointerEvent],
     ) {
         for event in events {
-            #[allow(clippy::cast_possible_truncation)]
-            let at = Point::new(event.position.0 as f32, event.position.1 as f32);
+            let at = point_of(event.position, self.scale);
             match event.kind {
                 SctkPointerKind::Enter { .. } => {
                     self.cursor = at;
@@ -307,7 +306,10 @@ impl PointerHandler for LayerState {
                         vertical.absolute as f32
                     };
                     if delta != 0.0 {
-                        self.events.push(LayerEvent::Scroll { delta_y: delta });
+                        self.events.push(LayerEvent::Scroll {
+                            delta_y: delta * self.scale,
+                            at: self.cursor,
+                        });
                     }
                 }
             }
@@ -341,7 +343,7 @@ impl TouchHandler for LayerState {
         id: i32,
         position: (f64, f64),
     ) {
-        let at = point_of(position);
+        let at = point_of(position, self.scale);
         self.touch_positions.insert(id, at);
         self.push_touch(id, PointerEventKind::Down, at, time, true);
     }
@@ -374,7 +376,7 @@ impl TouchHandler for LayerState {
         id: i32,
         position: (f64, f64),
     ) {
-        let at = point_of(position);
+        let at = point_of(position, self.scale);
         self.touch_positions.insert(id, at);
         self.push_touch(id, PointerEventKind::Move, at, time, true);
     }
@@ -410,10 +412,21 @@ impl TouchHandler for LayerState {
     }
 }
 
-/// A surface-local Wayland position as a kit point.
-fn point_of(position: (f64, f64)) -> Point {
+/// A surface-local Wayland position as a kit point, in **physical** pixels.
+///
+/// Wayland reports pointer and touch positions in *surface-local logical*
+/// coordinates — already divided by the buffer scale. The kit's runtime expects
+/// the opposite: `handle_pointer` divides what it is given by the device scale,
+/// because the windowed path feeds it winit's physical positions.
+///
+/// Handing over logical coordinates therefore halves every click on a 2× display
+/// — a press near the right edge lands in the middle of the surface, and the
+/// controls that live there are never hit. Multiplying here keeps both windowing
+/// paths in one coordinate space, which is the only way the runtime can stay
+/// unaware of which one it is on.
+fn point_of(position: (f64, f64), scale: f32) -> Point {
     #[allow(clippy::cast_possible_truncation)]
-    Point::new(position.0 as f32, position.1 as f32)
+    Point::new(position.0 as f32 * scale, position.1 as f32 * scale)
 }
 
 impl LayerState {
@@ -450,3 +463,27 @@ delegate_seat!(LayerState);
 delegate_pointer!(LayerState);
 delegate_touch!(LayerState);
 smithay_client_toolkit::delegate_layer!(LayerState);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The conversion that decides whether a click lands where the finger did.
+    /// Wayland speaks logical surface coordinates; the runtime divides by the
+    /// device scale, so the adapter must hand it physical ones.
+    #[test]
+    fn a_wayland_position_is_scaled_into_physical_pixels() {
+        assert_eq!(point_of((100.0, 20.0), 2.0), Point::new(200.0, 40.0));
+        assert_eq!(point_of((100.0, 20.0), 1.0), Point::new(100.0, 20.0));
+    }
+
+    #[test]
+    fn only_the_three_named_buttons_map_to_a_kit_button() {
+        assert_eq!(button_of(BTN_LEFT), Some(PointerButton::Primary));
+        assert_eq!(button_of(BTN_RIGHT), Some(PointerButton::Secondary));
+        assert_eq!(button_of(BTN_MIDDLE), Some(PointerButton::Middle));
+        // An extra thumb button is dropped rather than mapped onto one that
+        // already means something else.
+        assert_eq!(button_of(0x116), None);
+    }
+}

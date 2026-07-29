@@ -103,14 +103,9 @@ pub(super) fn run(
                 LayerEvent::Pointer(pointer) => {
                     runtime.handle_pointer(pointer);
                 }
-                LayerEvent::Scroll { delta_y } => {
-                    // Route to whatever scroll container is under the pointer;
-                    // an unconsumed notch is simply dropped, as in a window with
-                    // no leftover-scroll handler.
-                    let at = runtime
-                        .hovered()
-                        .and_then(|node| runtime.layout_boxes().get(&node).map(|b| b.bounds.origin))
-                        .unwrap_or_default();
+                LayerEvent::Scroll { delta_y, at } => {
+                    // Routed to the container under the pointer; an unconsumed
+                    // notch is dropped, as in a window with no leftover handler.
                     runtime.handle_scroll(delta_y, at);
                 }
             }

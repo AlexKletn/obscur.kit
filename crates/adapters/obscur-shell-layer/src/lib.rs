@@ -21,6 +21,9 @@
 //!
 //! # What is here and what is not
 //!
+//! `OBSCUR_LAYER_DEBUG=1` prints every converted pointer event and what it
+//! resolved to, which is how the coordinate-space defect below was found.
+//!
 //! Pointer and touch are converted into the kit's own
 //! [`PointerEvent`](obscur_interaction::pointer::PointerEvent), so hit-testing,
 //! hover, gestures and capture work exactly as in a window. **Keyboard is not
