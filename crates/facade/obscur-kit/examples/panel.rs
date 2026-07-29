@@ -26,10 +26,11 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use obscur_kit::geometry::Size;
 use obscur_kit::identity::InternedSymbol;
-use obscur_kit::layer::{LayerApp, LayerHandle};
+use obscur_kit::layer::{LayerApp, LayerHandle, LayerWaker};
 use obscur_kit::primitives::{Container, Text};
 use obscur_kit::view::view::{View, ViewNode};
 use obscur_kit::widgets::button::Button;
@@ -61,6 +62,7 @@ const CSS: &str = "\
 .title  { color: #8fa3d8; font-size: 15px; white-space: nowrap; }\n\
 .spacer { flex: 1; }\n\
 .count  { color: #ffffff; font-size: 15px; white-space: nowrap; }\n\
+.clock  { color: #b9c6ea; font-size: 15px; white-space: nowrap; }\n\
 .key    { flex: 0 0 auto; width: 88px; white-space: nowrap; \
           padding: 4px 12px; border: 0; border-radius: 8px; \
           background-color: rgba(38, 46, 69, 0.9); color: #dfe6ff; \
@@ -70,12 +72,21 @@ const CSS: &str = "\
 .key:active { background-color: rgba(84, 104, 160, 1.0); }\n\
 ";
 
+/// The clock text a background thread keeps current, and the panel reads.
+///
+/// This is the point of the waker: nothing the compositor does makes a clock
+/// tick, so without a way to reach the loop from outside it, the time would only
+/// ever change when something else happened to wake it.
+type Clock = Arc<Mutex<String>>;
+
 /// The panel's whole state.
 struct Panel {
     /// How many times a button has been tapped.
     taps: u32,
     /// Whether the bar currently reserves screen space, or floats over it.
     reserving: bool,
+    /// The clock, as of the last time the loop was woken.
+    clock: String,
 }
 
 impl Panel {
@@ -84,6 +95,7 @@ impl Panel {
         Self {
             taps: 0,
             reserving: true,
+            clock: String::new(),
         }
     }
 
@@ -125,6 +137,11 @@ fn view(state: &Panel) -> View {
         .child(Text::new("obscur.kit").into_view_node().class("title"))
         .child(Container::new().into_view_node().class("spacer"))
         .child(
+            Text::new(state.clock.clone())
+                .into_view_node()
+                .class("clock"),
+        )
+        .child(
             Text::new(format!("taps: {}", state.taps))
                 .into_view_node()
                 .class("count"),
@@ -150,6 +167,28 @@ fn key(command: &str, label: &str) -> ViewNode {
 fn main() -> Result<(), obscur_kit::layer::LayerAppError> {
     let state = Rc::new(RefCell::new(Panel::new()));
 
+    // A clock, and the thread that keeps it current. The thread never touches the
+    // interface — it writes a string and rings the waker, and the loop rebuilds
+    // the view from whatever it finds. That separation is the whole reason the
+    // waker exists: a worker needs no access to the UI, only a way to say
+    // "something changed".
+    let clock: Clock = Arc::new(Mutex::new(now()));
+    let waker = LayerWaker::new().expect("a waker");
+    {
+        let clock = Arc::clone(&clock);
+        let waker = waker.clone();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                if let Ok(mut text) = clock.lock() {
+                    *text = now();
+                }
+                waker.wake();
+            }
+        });
+    }
+    let view_clock = Arc::clone(&clock);
+
     let view_state = state.clone();
     let tap_state = state.clone();
     let reset_state = state.clone();
@@ -170,7 +209,14 @@ fn main() -> Result<(), obscur_kit::layer::LayerAppError> {
     LayerApp::top_bar("obscur-kit-panel", BAR_HEIGHT)
         .output(output)
         .stylesheet(CSS)
-        .view(move || view(&view_state.borrow()))
+        .view(move || {
+            // Read the clock at build time, so the frame a wake caused shows the
+            // value that caused it.
+            if let Ok(text) = view_clock.lock() {
+                view_state.borrow_mut().clock = text.clone();
+            }
+            view(&view_state.borrow())
+        })
         .on_command(InternedSymbol::named("tap"), move || {
             tap_state.borrow_mut().tap();
         })
@@ -184,5 +230,16 @@ fn main() -> Result<(), obscur_kit::layer::LayerAppError> {
             float_handle.reconfigure(config);
         })
         .handle(handle)
+        .waker(waker)
         .run()
+}
+
+/// The wall clock as `HH:MM:SS`, without pulling in a date library: seconds since
+/// the epoch, folded into a day.
+fn now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let day = secs % 86_400;
+    format!("{:02}:{:02}:{:02}", day / 3600, (day % 3600) / 60, day % 60)
 }

@@ -23,6 +23,7 @@ pub struct LayerApp {
     root: Option<Box<dyn FnMut() -> View + 'static>>,
     commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
     handle: Option<super::LayerHandle>,
+    waker: Option<crate::shell_layer::surface::LayerWaker>,
 }
 
 /// Why a layer-surface application could not run.
@@ -78,6 +79,7 @@ impl LayerApp {
             root: None,
             commands: Vec::new(),
             handle: None,
+            waker: None,
         }
     }
 
@@ -169,6 +171,19 @@ impl LayerApp {
         self
     }
 
+    /// Attaches a [`LayerWaker`](crate::shell_layer::surface::LayerWaker) the
+    /// loop will answer to.
+    ///
+    /// The loop sleeps on the compositor's socket, so nothing else can make it
+    /// turn — not a worker thread, not a timer, and not a second Wayland
+    /// connection belonging to some other protocol. Give it a waker and any of
+    /// them can.
+    #[must_use]
+    pub fn waker(mut self, waker: crate::shell_layer::surface::LayerWaker) -> Self {
+        self.waker = Some(waker);
+        self
+    }
+
     /// Sets the root view builder, re-invoked each frame.
     #[must_use]
     pub fn view(mut self, builder: impl FnMut() -> View + 'static) -> Self {
@@ -199,6 +214,7 @@ impl LayerApp {
             root,
             self.commands,
             self.handle.unwrap_or_default(),
+            self.waker,
         )
     }
 }

@@ -1860,6 +1860,8 @@ dependencies = [
 name = "obscur-shell-layer"
 version = "0.0.0"
 dependencies = [
+ "calloop",
+ "calloop-wayland-source",
  "obscur-geometry",
  "obscur-identity",
  "obscur-interaction",

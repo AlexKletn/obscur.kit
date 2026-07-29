@@ -9,7 +9,7 @@ use crate::render_vello::renderer::{VelloDevice, VelloRenderer, VelloSurface};
 use crate::runtime::UiRuntime;
 use crate::runtime::frame::FrameReason;
 use crate::shell_layer::event::LayerEvent;
-use crate::shell_layer::surface::LayerWindow;
+use crate::shell_layer::surface::{LayerWaker, LayerWindow};
 use crate::view::view::View;
 use crate::windowing::layer::{LayerSurfaceConfig, LayerSurfaceState};
 
@@ -32,14 +32,15 @@ pub(super) fn run(
     mut root: Box<dyn FnMut() -> View + 'static>,
     commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
     handle: LayerHandle,
+    waker: Option<LayerWaker>,
 ) -> Result<(), LayerAppError> {
-    let mut window = LayerWindow::open(&config)?;
+    let mut window = LayerWindow::open_with(&config, waker.as_ref())?;
 
     // The protocol requires an initial commit with no buffer; the compositor
     // answers with the real size. Drawing before that is a protocol error, not a
     // race, so the first frame waits here.
     while !window.is_configured() && !window.is_closed() {
-        window.dispatch()?;
+        window.dispatch(None)?;
     }
     if window.is_closed() {
         handle.publish(window.size(), window.scale(), LayerSurfaceState::Closed);
@@ -81,13 +82,13 @@ pub(super) fn run(
     while !window.is_closed() && !handle.close_requested() {
         // Idle blocks in the kernel; animating polls, so a running transition is
         // not held hostage by an input-quiet compositor.
-        let animating = runtime.has_pending_frame();
-        let events = if animating {
-            std::thread::sleep(std::time::Duration::from_millis(ANIMATION_STEP_MS));
-            window.dispatch_pending()?
-        } else {
-            window.dispatch()?
-        };
+        // Idle sleeps until the compositor — or a `LayerWaker` — has something
+        // to say. Animating bounds the wait, so a frame happens whether or not
+        // anything arrived. The loop turns for both without a thread to spare.
+        let timeout = runtime
+            .has_pending_frame()
+            .then(|| std::time::Duration::from_millis(ANIMATION_STEP_MS));
+        let events = window.dispatch(timeout)?;
 
         let mut resized = false;
         for event in events {
@@ -96,6 +97,11 @@ pub(super) fn run(
                     window.sync_scale();
                     runtime.set_surface(window.physical_size(), window.scale());
                     resized = true;
+                }
+                LayerEvent::Woken => {
+                    // Whoever rang the waker wants the interface reconsidered;
+                    // that is the only thing a wake can mean.
+                    runtime.request_frame(FrameReason::UiCommit);
                 }
                 LayerEvent::Closed => break,
                 LayerEvent::Pointer(pointer) => {

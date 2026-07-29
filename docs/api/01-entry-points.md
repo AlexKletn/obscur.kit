@@ -1,10 +1,11 @@
 # 01 — Entry points
 
-Three ways in, in increasing order of how much you own yourself.
+Four ways in, in increasing order of how much you own yourself.
 
 | | You supply | You own | Feature |
 |---|---|---|---|
 | [`App`](#app) | a view builder and handlers | nothing | `window-winit` + `render-vello` |
+| [`LayerApp`](#layerapp) | the same, plus where the surface sits | nothing | `shell-layer` + `render-vello` |
 | [`UiRuntime`](#embedding-a-uiruntime) | the window and the loop | everything around a frame | any |
 | [`HeadlessHost`](#headless) | nothing | a deterministic driver | any |
 
@@ -84,6 +85,98 @@ Two environment variables it reads:
 
 - `OBSCUR_FRAME_STATS=1` — per-phase frame timings every 60 presented frames
 - `OBSCUR_NO_VSYNC=1` — see [08 — Rendering](08-rendering.md)
+
+---
+
+## `LayerApp`
+
+`obscur_kit::layer::LayerApp` — the same one-call entry, for a surface that is
+part of the **desktop** rather than an application window: a panel, a dock, a
+wallpaper, a notification, an on-screen keyboard. It has no title, no
+decorations and no place in the window stack; it is anchored to screen edges,
+sits in one of four depth bands, and can reserve space that maximised windows
+then keep clear of.
+
+```rust
+use obscur_kit::layer::LayerApp;
+
+LayerApp::top_bar("panel", 36)
+    .stylesheet(CSS)
+    .view(|| bar(&state.borrow()))
+    .run()?
+```
+
+Everything above the surface is the toolkit you already know — same `View`, same
+CSS, same runtime, same touch and gesture handling.
+
+| Method | |
+|---|---|
+| `top_bar(namespace, height)` / `bottom_bar(…)` | a bar reserving exactly its own height |
+| `overlay(namespace)` | full-output, above everything, reserving nothing |
+| `new(LayerSurfaceConfig)` | anything the named constructors do not cover |
+| `layer(LayerKind)` | `Background` · `Bottom` · `Top` · `Overlay` |
+| `anchor(LayerAnchor)` | anchoring both edges of an axis **stretches** and overrides the size on it |
+| `exclusive_zone(LayerExclusiveZone)` | `None` · `Reserve(px)` · `Ignore` |
+| `margin(Margins)` · `output(LayerOutput)` · `keyboard(LayerKeyboardInteractivity)` | |
+| `stylesheet` · `view` · `on_command` | as on `App` |
+| `handle(LayerHandle)` · `waker(LayerWaker)` | see below |
+| `run()` | `Result<(), LayerAppError>` |
+
+### Reconfiguring a running surface
+
+The loop owns the surface and your handlers run inside it, so they cannot hold a
+reference to it. A `LayerHandle` is how they reach it: a handler leaves a
+request, the loop applies it at a defined point in the frame.
+
+```rust
+let handle = LayerHandle::new();
+let mine = handle.clone();
+LayerApp::top_bar("panel", 36)
+    .on_command(FLOAT, move || mine.reconfigure(floating_config()))
+    .handle(handle)
+    .run()?
+```
+
+It also reports the surface's real `size()`, `scale()` and
+`state()` (`Configuring` → `Ready` → `Closed`).
+
+**No placement change needs a new surface.** Band, anchor, exclusive zone,
+margin and size are all live requests, which is why there is no "recreate".
+
+### Waking the loop from outside
+
+The loop sleeps on the compositor's socket. Nothing else can make it turn — not
+a worker thread, not a timer, not a second Wayland connection belonging to some
+other protocol. A `LayerWaker` is the way in, and it is `Send`:
+
+```rust
+let waker = LayerWaker::new()?;
+let ticker = waker.clone();
+std::thread::spawn(move || loop {
+    std::thread::sleep(Duration::from_secs(1));
+    update_shared_state();
+    ticker.wake();          // the loop turns and rebuilds the view
+});
+```
+
+A wake means "reconsider the interface" and nothing finer — the waker does not
+know why it was rung.
+
+For sources that belong on the same loop — timers, other file descriptors —
+`LayerWindow::loop_handle()` hands out the calloop handle directly.
+
+### Where it runs
+
+`wlr-layer-shell` is implemented by wlroots compositors (Sway, Hyprland, river,
+Wayfire) and KDE. **GNOME has declined it**, and there `run` returns
+`LayerAppError::Unsupported` — a capability answer to branch on, not a crash.
+
+### Scale
+
+Fractional scaling is used where the compositor offers `wp_fractional_scale_v1`
+and `wp_viewporter`: the buffer is rendered at the true scale (1.6, not 2) and a
+viewport maps it onto the logical size. Without both, the integer path applies
+and a fractional output rounds up.
 
 ---
 

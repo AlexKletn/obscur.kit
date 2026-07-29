@@ -23,7 +23,7 @@ obscur-kit = { version = "…", features = ["full"] }
 | Set | Contents |
 |---|---|
 | `default` | `resource-fs` `resource-decode` `cache-fs` `task-smol` `render-cpu` `text-harfrust` `text-unicode` `font-fontconfig` |
-| `full` | the above plus `task-tokio` `render-vello` `window-winit` `accesskit` |
+| `full` | the above plus `task-tokio` `render-vello` `window-winit` `shell-layer` `accesskit` |
 
 The real text shaper is in `default` on purpose. It used to sit behind a feature
 nothing turned on, so the out-of-the-box shaper was the *mock* and every host
@@ -74,6 +74,7 @@ let installed = boot.install_text_stack(&mut rt, &boot.system_font_set().unwrap_
 | Render (CPU) | `obscur-render-cpu` | `render-cpu` |
 | Render (GPU) | `obscur-render-vello` | `render-vello` |
 | Window | `obscur-window-winit` | `window-winit` |
+| Layer shell (panels, docks, overlays) | `obscur-shell-layer` | `shell-layer` |
 | Text shaping | `obscur-text-harfrust` | `text-harfrust` |
 | Unicode | `obscur-text-unicode` | `text-unicode` |
 | Hyphenation | `obscur-text-hyphenation` | |

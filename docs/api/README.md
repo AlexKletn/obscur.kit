@@ -38,7 +38,7 @@ An unmarked API is **wired**. Anything marked otherwise says what is missing.
 
 | | |
 |---|---|
-| [01 — Entry points](01-entry-points.md) | `App`, embedding a `UiRuntime`, headless |
+| [01 — Entry points](01-entry-points.md) | `App`, `LayerApp`, embedding a `UiRuntime`, headless |
 | [02 — The view model](02-view-model.md) | `View`, `ViewNode`, props, events, virtual lists |
 | [03 — The runtime](03-runtime.md) | every `UiRuntime` method, grouped by task |
 | [04 — Styling](04-styling.md) | the CSS pipeline and what CSS actually does |

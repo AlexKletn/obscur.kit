@@ -20,7 +20,7 @@ path to the outside is that file is exported, compiles, and is called by nothing
 | Crate | Depended on by | Verdict |
 |---|---|---|
 | `obscur-routing` | the facade barrel only | **unwired** — no runtime consumer |
-| `obscur-windowing` | the winit adapter + the barrel | **unwired on the app path** — `App` uses winit's own window types, not `Window` / `WindowProperties` |
+| `obscur-windowing` | the winit and layer adapters + the barrel | **partly wired** — its `layer` module is what `LayerApp` is configured with. The older `Window` / `WindowProperties` still have no consumer: `App` uses winit's own types |
 | `obscur-system` | the four platform adapters + the barrel | **host-wired** — `KitBootstrap::system_shell_provider()` hands one over; nothing in the runtime calls it |
 | `obscur-testkit` | **nothing at all**, and not re-exported | **unreachable by construction** |
 
@@ -45,6 +45,9 @@ path to the outside is that file is exported, compiles, and is called by nothing
 | **`@container`** | parses, then lowers to `RuleCondition::Never`. Fails closed — the rule never matches. Container query *units* resolve against the viewport |
 | **`::before` / `::after`** | parse, then reported unsupported. Generate nothing, fail closed |
 | **`ch` units** | layout measures them; paint-side properties read absolute px, so a `ch` that reaches one contributes `0` |
+| **Layer-shell keyboard** | `set_keyboard_interactivity` is sent, but no keys are delivered: there is no keysym→`PhysicalKey` table, and an approximate one would put *wrong* keys into an application. `Exclusive` is therefore worse than useless today — it takes the desktop's focus and forwards nothing |
+| **Layer-shell popups** | `get_popup` is not exposed; a panel cannot open a menu. Needs xdg-popup alongside |
+| **Layer-shell v5** | `set_exclusive_edge` is unreachable — SCTK 0.19 binds versions 1–4 |
 | **Font enumeration** | Linux only. macOS and Windows have providers with no enumeration |
 | **Font fallback** | per *run*, not per character; `.ttf`/`.otf` only, no `.ttc` collections |
 | **Localization** | CLDR plural categories are real, with one production consumer (the shaper's language hint). Dates, numbers, currencies and the RTL frame path are open |

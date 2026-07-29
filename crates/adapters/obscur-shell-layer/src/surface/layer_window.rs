@@ -2,6 +2,8 @@
 
 use core::ptr::NonNull;
 
+use calloop::EventLoop;
+use calloop_wayland_source::WaylandSource;
 use obscur_geometry::Size;
 use obscur_windowing::layer::{
     LayerAnchor, LayerKeyboardInteractivity, LayerKind, LayerSurfaceConfig,
@@ -15,7 +17,7 @@ use smithay_client_toolkit::shell::wlr_layer::{
     Anchor, KeyboardInteractivity, Layer, LayerShell, LayerSurface,
 };
 use wayland_client::globals::registry_queue_init;
-use wayland_client::{Connection, EventQueue, Proxy};
+use wayland_client::{Connection, Proxy};
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 
@@ -23,6 +25,7 @@ use crate::error::LayerShellError;
 use crate::event::LayerEvent;
 
 use super::layer_state::LayerState;
+use super::layer_waker::LayerWaker;
 use super::layer_window_target::LayerWindowTarget;
 
 /// A live layer surface: the Wayland connection, the surface, and the queue that
@@ -53,7 +56,7 @@ use super::layer_window_target::LayerWindowTarget;
 /// has its own timer or frame source.
 pub struct LayerWindow {
     connection: Connection,
-    queue: EventQueue<LayerState>,
+    event_loop: EventLoop<'static, LayerState>,
     state: LayerState,
     /// The compositor global must outlive the surface made from it.
     _compositor: CompositorState,
@@ -76,6 +79,19 @@ impl LayerWindow {
     /// rather than a failure — and [`LayerShellError::MissingGlobal`] when a
     /// required global is absent.
     pub fn open(config: &LayerSurfaceConfig) -> Result<Self, LayerShellError> {
+        Self::open_with(config, None)
+    }
+
+    /// [`open`](Self::open), plus a [`LayerWaker`] the loop will answer to.
+    ///
+    /// # Errors
+    ///
+    /// The same as [`open`](Self::open), plus [`LayerShellError::Dispatch`] if
+    /// the waker's source cannot be inserted into the loop.
+    pub fn open_with(
+        config: &LayerSurfaceConfig,
+        waker: Option<&LayerWaker>,
+    ) -> Result<Self, LayerShellError> {
         let connection = Connection::connect_to_env()
             .map_err(|error| LayerShellError::NoDisplay(error.to_string()))?;
         let (globals, queue) = registry_queue_init::<LayerState>(&connection)
@@ -133,9 +149,28 @@ impl LayerWindow {
         layer.commit();
         state.layer = Some(layer);
 
+        // The loop is built only after the roundtrip above, because a
+        // `WaylandSource` consumes the queue and the outputs must be enumerated
+        // first.
+        let mut event_loop: EventLoop<'static, LayerState> =
+            EventLoop::try_new().map_err(|error| LayerShellError::Dispatch(error.to_string()))?;
+        WaylandSource::new(connection.clone(), queue)
+            .insert(event_loop.handle())
+            .map_err(|error| LayerShellError::Dispatch(error.to_string()))?;
+        if let Some(source) = waker.and_then(LayerWaker::take_source) {
+            event_loop
+                .handle()
+                .insert_source(source, |(), (), state: &mut LayerState| {
+                    // The turn alone is not enough: a host renders when it has a
+                    // reason to, so the wake has to become one.
+                    state.events.push(LayerEvent::Woken);
+                })
+                .map_err(|error| LayerShellError::Dispatch(error.to_string()))?;
+        }
+
         Ok(Self {
             connection,
-            queue,
+            event_loop,
             state,
             _compositor: compositor,
             _fractional_manager: fractional_manager,
@@ -143,29 +178,35 @@ impl LayerWindow {
         })
     }
 
-    /// Blocks until the compositor sends something, then returns everything that
-    /// happened.
+    /// Runs the loop until something happens, or until `timeout` elapses, and
+    /// returns everything that did.
+    ///
+    /// `None` sleeps until woken — by the compositor, or by a
+    /// [`LayerWaker`] given at open time. A duration bounds the wait, which is
+    /// what an animating host wants: it needs a turn per frame whether or not
+    /// anything arrived.
     ///
     /// # Errors
     ///
-    /// [`LayerShellError::Dispatch`] when the connection fails.
-    pub fn dispatch(&mut self) -> Result<Vec<LayerEvent>, LayerShellError> {
-        self.queue
-            .blocking_dispatch(&mut self.state)
+    /// [`LayerShellError::Dispatch`] when the connection or the loop fails.
+    pub fn dispatch(
+        &mut self,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<Vec<LayerEvent>, LayerShellError> {
+        self.event_loop
+            .dispatch(timeout, &mut self.state)
             .map_err(|error| LayerShellError::Dispatch(error.to_string()))?;
         Ok(core::mem::take(&mut self.state.events))
     }
 
-    /// Returns whatever has already arrived, without blocking.
+    /// A handle for inserting further sources — timers, other file descriptors —
+    /// into the same loop the surface runs on.
     ///
-    /// # Errors
-    ///
-    /// [`LayerShellError::Dispatch`] when the connection fails.
-    pub fn dispatch_pending(&mut self) -> Result<Vec<LayerEvent>, LayerShellError> {
-        self.queue
-            .roundtrip(&mut self.state)
-            .map_err(|error| LayerShellError::Dispatch(error.to_string()))?;
-        Ok(core::mem::take(&mut self.state.events))
+    /// This is what keeps a host from needing a second thread to own a timer: one
+    /// loop, one place events come from.
+    #[must_use]
+    pub fn loop_handle(&self) -> calloop::LoopHandle<'static, LayerState> {
+        self.event_loop.handle()
     }
 
     /// Flushes queued requests to the compositor.
