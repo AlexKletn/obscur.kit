@@ -8,7 +8,8 @@
 //! height**, so a maximised window stops at the bar rather than sliding under it.
 //!
 //! ```sh
-//! cargo run -p obscur-kit --features full --example panel
+//! cargo run -p obscur-kit --features full --example panel          # compositor picks the output
+//! cargo run -p obscur-kit --features full --example panel -- eDP-1 # pinned to a connector
 //! ```
 //!
 //! Needs a compositor that implements `wlr-layer-shell` — Sway, Hyprland, river,
@@ -31,6 +32,7 @@ use obscur_kit::layer::LayerApp;
 use obscur_kit::primitives::{Container, Text};
 use obscur_kit::view::view::{View, ViewNode};
 use obscur_kit::widgets::button::Button;
+use obscur_kit::windowing::layer::LayerOutput;
 
 /// The bar's height in logical pixels. It is also what the bar reserves, which is
 /// what makes it a panel rather than a strip windows slide beneath.
@@ -115,7 +117,15 @@ fn main() -> Result<(), obscur_kit::layer::LayerAppError> {
     let tap_state = state.clone();
     let reset_state = state.clone();
 
+    // `panel eDP-1` pins the bar to that connector; with no argument the
+    // compositor chooses, which on a multi-head desktop means "wherever the
+    // focus happens to be" — rarely what a panel wants.
+    let output = std::env::args()
+        .nth(1)
+        .map_or(LayerOutput::Compositor, |name| LayerOutput::Named(name));
+
     LayerApp::top_bar("obscur-kit-panel", BAR_HEIGHT)
+        .output(output)
         .stylesheet(CSS)
         .view(move || view(&view_state.borrow()))
         .on_command(InternedSymbol::named("tap"), move || {

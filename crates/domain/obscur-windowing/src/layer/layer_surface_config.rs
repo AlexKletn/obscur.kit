@@ -2,7 +2,7 @@
 
 use obscur_geometry::Size;
 
-use super::{LayerAnchor, LayerExclusiveZone, LayerKeyboardInteractivity, LayerKind};
+use super::{LayerAnchor, LayerExclusiveZone, LayerKeyboardInteractivity, LayerKind, LayerOutput};
 
 /// Everything a compositor needs to place a layer surface, as plain data.
 ///
@@ -40,6 +40,8 @@ pub struct LayerSurfaceConfig {
     pub margin: Margins,
     /// Whether the surface takes keyboard focus.
     pub keyboard_interactivity: LayerKeyboardInteractivity,
+    /// Which output to place the surface on.
+    pub output: LayerOutput,
 }
 
 /// Per-edge gaps between a layer surface and the edges it is anchored to.
@@ -89,6 +91,7 @@ impl LayerSurfaceConfig {
             exclusive_zone: LayerExclusiveZone::default(),
             margin: Margins::default(),
             keyboard_interactivity: LayerKeyboardInteractivity::default(),
+            output: LayerOutput::default(),
         }
     }
 
@@ -165,6 +168,17 @@ impl LayerSurfaceConfig {
     #[must_use]
     pub const fn with_margin(mut self, margin: Margins) -> Self {
         self.margin = margin;
+        self
+    }
+
+    /// Places the surface on a particular output, by connector name.
+    ///
+    /// A name that matches nothing connected falls back to the compositor's
+    /// choice rather than failing — a panel must still appear when a monitor is
+    /// unplugged.
+    #[must_use]
+    pub fn with_output(mut self, output: LayerOutput) -> Self {
+        self.output = output;
         self
     }
 
@@ -251,6 +265,14 @@ mod tests {
             (0, 0),
             "anchored to all four edges"
         );
+    }
+
+    #[test]
+    fn an_output_choice_defaults_to_the_compositors() {
+        let config = LayerSurfaceConfig::new("panel");
+        assert!(config.output.is_compositor_choice());
+        let pinned = config.with_output(LayerOutput::Named("eDP-1".to_owned()));
+        assert_eq!(pinned.output.name(), Some("eDP-1"));
     }
 
     #[test]

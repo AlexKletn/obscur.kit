@@ -42,7 +42,7 @@ pub(super) struct LayerState {
     pub(super) registry_state: RegistryState,
     pub(super) seat_state: SeatState,
     pub(super) output_state: OutputState,
-    pub(super) layer: LayerSurface,
+    pub(super) layer: Option<LayerSurface>,
     /// Events produced since the host last drained.
     pub(super) events: Vec<LayerEvent>,
     /// The size the compositor last configured, in logical pixels.
@@ -71,14 +71,13 @@ impl LayerState {
         registry_state: RegistryState,
         seat_state: SeatState,
         output_state: OutputState,
-        layer: LayerSurface,
         size: Size,
     ) -> Self {
         Self {
             registry_state,
             seat_state,
             output_state,
-            layer,
+            layer: None,
             events: Vec::new(),
             size,
             scale: 1.0,
@@ -90,6 +89,36 @@ impl LayerState {
             held: PointerButtons::new(),
             cursor: Point::new(0.0, 0.0),
         }
+    }
+
+    /// The layer surface, once created.
+    ///
+    /// It is absent only between connecting and creating the surface — a window
+    /// that exists always has one, because outputs must be enumerated *before*
+    /// the surface can name the one it wants.
+    pub(super) fn layer(&self) -> &LayerSurface {
+        self.layer
+            .as_ref()
+            .expect("a layer surface, created before the window was handed out")
+    }
+
+    /// The connector names of every output the compositor has announced.
+    pub(super) fn output_names(&self) -> Vec<String> {
+        self.output_state
+            .outputs()
+            .filter_map(|output| self.output_state.info(&output))
+            .filter_map(|info| info.name)
+            .collect()
+    }
+
+    /// The `wl_output` whose connector is `name`, if it is connected.
+    pub(super) fn output_named(&self, name: &str) -> Option<wl_output::WlOutput> {
+        self.output_state.outputs().find(|output| {
+            self.output_state
+                .info(output)
+                .and_then(|info| info.name)
+                .is_some_and(|connector| connector == name)
+        })
     }
 
     /// Pushes a converted pointer event, stamped with `time_ms` in microseconds.

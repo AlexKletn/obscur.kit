@@ -8,5 +8,7 @@ mod layer_keyboard_interactivity;
 pub use layer_keyboard_interactivity::LayerKeyboardInteractivity;
 mod layer_kind;
 pub use layer_kind::LayerKind;
+mod layer_output;
+pub use layer_output::LayerOutput;
 mod layer_surface_config;
 pub use layer_surface_config::{LayerSurfaceConfig, Margins};

@@ -6,8 +6,8 @@ use crate::identity::InternedSymbol;
 use crate::shell_layer::error::LayerShellError;
 use crate::view::view::View;
 use crate::windowing::layer::{
-    LayerAnchor, LayerExclusiveZone, LayerKeyboardInteractivity, LayerKind, LayerSurfaceConfig,
-    Margins,
+    LayerAnchor, LayerExclusiveZone, LayerKeyboardInteractivity, LayerKind, LayerOutput,
+    LayerSurfaceConfig, Margins,
 };
 
 /// A desktop surface — panel, dock, bar, wallpaper or overlay — described the
@@ -128,6 +128,17 @@ impl LayerApp {
         self
     }
 
+    /// Places the surface on a particular output, by connector name
+    /// (`"eDP-1"`, `"DP-2"`, …). The default is the compositor's choice.
+    ///
+    /// A name matching nothing connected falls back to that default rather than
+    /// failing: unplugging a monitor must not stop a panel from appearing.
+    #[must_use]
+    pub fn output(mut self, output: LayerOutput) -> Self {
+        self.config.output = output;
+        self
+    }
+
     /// Sets whether the surface takes keyboard focus. The default is never.
     #[must_use]
     pub fn keyboard(mut self, interactivity: LayerKeyboardInteractivity) -> Self {
@@ -191,6 +202,12 @@ mod tests {
         let app = LayerApp::overlay("lock");
         assert_eq!(app.config.layer, LayerKind::Overlay);
         assert_eq!(app.config.exclusive_zone, LayerExclusiveZone::Ignore);
+    }
+
+    #[test]
+    fn an_output_can_be_pinned_by_connector_name() {
+        let app = LayerApp::top_bar("panel", 24).output(LayerOutput::Named("DP-2".to_owned()));
+        assert_eq!(app.config.output.name(), Some("DP-2"));
     }
 
     #[test]

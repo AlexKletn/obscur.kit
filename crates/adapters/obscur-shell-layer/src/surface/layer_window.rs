@@ -79,26 +79,38 @@ impl LayerWindow {
             .map_err(|_| LayerShellError::MissingGlobal("wl_compositor".to_owned()))?;
         let shell = LayerShell::bind(&globals, &qh).map_err(|_| LayerShellError::Unsupported)?;
 
+        // Outputs must be enumerated before the surface can name one, so the
+        // state exists first and the surface is created into it. One roundtrip
+        // is what turns the registry's bare globals into named connectors.
+        let mut state = LayerState::new(
+            RegistryState::new(&globals),
+            SeatState::new(&globals, &qh),
+            OutputState::new(&globals, &qh),
+            config.size,
+        );
+        let mut queue = queue;
+        queue
+            .roundtrip(&mut state)
+            .map_err(|error| LayerShellError::Dispatch(error.to_string()))?;
+
+        let chosen = config
+            .output
+            .name()
+            .and_then(|name| state.output_named(name));
+
         let surface = compositor.create_surface(&qh);
         let layer = shell.create_layer_surface(
             &qh,
             surface,
             layer_of(config.layer),
             Some(config.namespace.clone()),
-            None,
+            chosen.as_ref(),
         );
         apply(&layer, config);
 
         // The initial commit with no buffer is what asks for the first configure.
         layer.commit();
-
-        let state = LayerState::new(
-            RegistryState::new(&globals),
-            SeatState::new(&globals, &qh),
-            OutputState::new(&globals, &qh),
-            layer,
-            config.size,
-        );
+        state.layer = Some(layer);
 
         Ok(Self {
             connection,
@@ -179,8 +191,19 @@ impl LayerWindow {
     /// resulting [`LayerEvent::Configured`](crate::event::LayerEvent::Configured)
     /// as the new size rather than assuming the request was honoured verbatim.
     pub fn reconfigure(&self, config: &LayerSurfaceConfig) {
-        apply(&self.state.layer, config);
-        self.state.layer.commit();
+        apply(self.state.layer(), config);
+        self.state.layer().commit();
+    }
+
+    /// Every output the compositor has announced, by connector name.
+    ///
+    /// A host reports this as its multi-output capability and offers it as the
+    /// choice a user makes; it is the same set
+    /// [`LayerOutput::Named`](obscur_windowing::layer::LayerOutput::Named)
+    /// is matched against.
+    #[must_use]
+    pub fn outputs(&self) -> Vec<String> {
+        self.state.output_names()
     }
 
     /// Tells the compositor how many buffer pixels make one logical pixel.
@@ -198,8 +221,11 @@ impl LayerWindow {
     /// the fraction exactly needs `wp_fractional_scale_v1`, which this adapter
     /// does not bind.
     pub fn set_buffer_scale(&self, scale: i32) {
-        self.state.layer.wl_surface().set_buffer_scale(scale.max(1));
-        self.state.layer.commit();
+        self.state
+            .layer()
+            .wl_surface()
+            .set_buffer_scale(scale.max(1));
+        self.state.layer().commit();
     }
 
     /// The raw handles a `wgpu::Surface` is built from.
@@ -212,7 +238,7 @@ impl LayerWindow {
     pub fn target(&self) -> LayerWindowTarget {
         let display = NonNull::new(self.connection.backend().display_ptr().cast())
             .expect("a live wayland display pointer");
-        let surface = NonNull::new(self.state.layer.wl_surface().id().as_ptr().cast())
+        let surface = NonNull::new(self.state.layer().wl_surface().id().as_ptr().cast())
             .expect("a live wl_surface pointer");
         // SAFETY: both pointers name objects this `LayerWindow` owns, and the
         // target's contract is that it must not outlive it.
