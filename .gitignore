@@ -2,3 +2,7 @@
 Cargo.lock.orig
 *.rs.bk
 .DS_Store
+
+# The out-of-workspace consumer fixture builds into its own directory.
+/checks/*/target
+/checks/*/Cargo.lock

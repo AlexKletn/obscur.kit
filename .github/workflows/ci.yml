@@ -69,6 +69,10 @@ jobs:
       - run: cargo build -p obscur-kit --features full
       # The windowed example is compile-only in CI (no display/GPU).
       - run: cargo build -p obscur-kit --example windowed_counter --features full
+      # An application's view of the facade: a crate outside the workspace whose
+      # only dependency is `obscur-kit`. The one place a defect in what the
+      # authoring surfaces *emit* is visible (audit finding 1-A).
+      - run: cargo run -p xtask -- consumer
 
   # ---- Periodic-only jobs (spec §5.10 "периодически") ----------------------
   advisories:

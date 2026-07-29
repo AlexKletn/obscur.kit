@@ -16,7 +16,7 @@
 
 #![forbid(unsafe_code)]
 
-use obscur_kit::okui_compiler::codegen::ViewCodegen;
+use obscur_kit::okui_compiler::codegen::{CodegenRoot, ViewCodegen};
 use obscur_kit::okui_compiler::compile::Compiler;
 use obscur_kit::okui_syntax::ast::Document;
 use obscur_kit::okui_syntax::parser::Parser;
@@ -54,7 +54,11 @@ fn generated(source: &str) -> String {
         "unexpected diagnostics: {:?}",
         result.diagnostics()
     );
-    ViewCodegen::document_to_view_fn(result.document().expect("a lowered document"), "view")
+    ViewCodegen::document_to_view_fn(
+        result.document().expect("a lowered document"),
+        "view",
+        &CodegenRoot::facade(),
+    )
 }
 
 #[test]

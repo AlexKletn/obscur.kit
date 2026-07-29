@@ -27,7 +27,7 @@ use obscur_kit::css::source::CssSource;
 use obscur_kit::geometry::Size;
 use obscur_kit::identity::RuntimeId;
 use obscur_kit::okui_compiler::bridge::UiIrViewBridge;
-use obscur_kit::okui_compiler::codegen::ViewCodegen;
+use obscur_kit::okui_compiler::codegen::{CodegenRoot, ViewCodegen};
 use obscur_kit::okui_compiler::compile::Compiler;
 use obscur_kit::okui_syntax::ast::Document;
 use obscur_kit::okui_syntax::parser::Parser;
@@ -71,7 +71,7 @@ fn compile_okui(source: &str) -> (View, String) {
     );
     let ir = result.document().expect("a lowered UI IR document");
     let view = UiIrViewBridge::document_to_view(ir);
-    let generated = ViewCodegen::document_to_view_fn(ir, "view");
+    let generated = ViewCodegen::document_to_view_fn(ir, "view", &CodegenRoot::facade());
     (view, generated)
 }
 

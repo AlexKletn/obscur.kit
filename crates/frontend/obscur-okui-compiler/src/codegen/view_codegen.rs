@@ -15,15 +15,16 @@
 //! function
 //!
 //! ```ignore
-//! pub fn <name>() -> ::obscur_view::view::View { <expr> }
+//! pub fn <name>() -> ::obscur_kit::view::view::View { <expr> }
 //! ```
 //!
 //! whose body is the fully-qualified [`View`] expression from
 //! [`document_to_view_expr`](ViewCodegen::document_to_view_expr). Every path is
-//! written with a leading `::` so the generated code needs no `use` items; it
-//! only requires the consuming crate to have `obscur-view` and `obscur-identity`
-//! as dependencies (the facade re-exports both, so its examples compile the
-//! output directly).
+//! written with a leading `::` so the generated code needs no `use` items, and
+//! every one of them is written through the [`CodegenRoot`] the caller passes —
+//! by default the `obscur-kit` facade, the one crate an application depends on.
+//! See [`CodegenRoot`] for why that root is an argument rather than the fixed
+//! `::obscur_view` / `::obscur_identity` literals it used to be.
 //!
 //! # Name binding
 //!
@@ -113,6 +114,8 @@ use std::fmt::Write as _;
 use obscur_ui_ir::document::{UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrValue};
 use obscur_ui_ir::name_binding::{self, TagPosition};
 
+use crate::codegen::CodegenRoot;
+
 /// Emits ordinary Rust source building a [`View`](obscur_view::view::View) from
 /// a compiled [`UiIrDocument`].
 #[derive(Debug, Clone, Copy, Default)]
@@ -120,28 +123,37 @@ pub struct ViewCodegen;
 
 impl ViewCodegen {
     /// Emits a `pub fn <fn_name>() -> View { … }` whose body constructs the
-    /// [`View`](obscur_view::view::View) equivalent to `document`.
+    /// [`View`](obscur_view::view::View) equivalent to `document`, naming every
+    /// engine type through `root`.
     ///
     /// The function is self-contained (fully-qualified paths, no `use` items);
-    /// drop it into a generated module the consumer `include!`s.
+    /// drop it into a generated module the consumer `include!`s. `root` must be
+    /// the one that resolves in *that* crate — [`CodegenRoot::facade`] for an
+    /// application.
     #[must_use]
-    pub fn document_to_view_fn(document: &UiIrDocument, fn_name: &str) -> String {
-        let expr = Self::document_to_view_expr(document);
+    pub fn document_to_view_fn(
+        document: &UiIrDocument,
+        fn_name: &str,
+        root: &CodegenRoot,
+    ) -> String {
+        let expr = Self::document_to_view_expr(document, root);
+        let view = root.view();
         format!(
             "/// Generated from a `.okui` document by `obscur-okui-compiler`.\n\
              /// Do not edit by hand.\n\
-             pub fn {fn_name}() -> ::obscur_view::view::View {{\n{expr}\n}}\n"
+             pub fn {fn_name}() -> {view}::View {{\n{expr}\n}}\n"
         )
     }
 
     /// Emits just the [`View`](obscur_view::view::View) expression (no enclosing
     /// function), indented for embedding.
     #[must_use]
-    pub fn document_to_view_expr(document: &UiIrDocument) -> String {
-        let nodes = emit_nodes_block(std::slice::from_ref(&document.root()), 1);
+    pub fn document_to_view_expr(document: &UiIrDocument, root: &CodegenRoot) -> String {
+        let nodes = emit_nodes_block(std::slice::from_ref(&document.root()), 1, root);
+        let view = root.view();
         format!(
-            "    ::obscur_view::view::View::from_fragment(\n\
-             \x20       ::obscur_view::view::ViewFragment::from_nodes({nodes}),\n\
+            "    {view}::View::from_fragment(\n\
+             \x20       {view}::ViewFragment::from_nodes({nodes}),\n\
              \x20   )"
         )
     }
@@ -154,17 +166,17 @@ impl ViewCodegen {
 /// conditional emits a real `if` — a statement, which no list literal can hold.
 /// Each block declares its own sink, so a nested fragment's pushes cannot reach
 /// an outer one.
-fn emit_nodes_block(nodes: &[&UiIrNode], indent: usize) -> String {
+fn emit_nodes_block(nodes: &[&UiIrNode], indent: usize, root: &CodegenRoot) -> String {
     let pad = indentation(indent);
     let inner = indentation(indent + 1);
+    let view = root.view();
     let mut out = String::new();
     out.push_str("{\n");
     let _ = writeln!(
         out,
-        "{inner}let mut __nodes: ::std::vec::Vec<::obscur_view::view::ViewNode> = \
-         ::std::vec::Vec::new();"
+        "{inner}let mut __nodes: ::std::vec::Vec<{view}::ViewNode> = ::std::vec::Vec::new();"
     );
-    emit_into(nodes, &mut out, indent + 1, None);
+    emit_into(nodes, &mut out, indent + 1, None, root);
     let _ = writeln!(out, "{inner}__nodes");
     let _ = write!(out, "{pad}}}");
     out
@@ -194,17 +206,23 @@ fn emit_nodes_block(nodes: &[&UiIrNode], indent: usize) -> String {
 /// under a conditional: `<For><If cond={x}><Row/></If></For>` must still key the
 /// `Row`. A node with a key of its own keeps it; `None` outside a loop leaves
 /// every node exactly as before.
-fn emit_into(nodes: &[&UiIrNode], out: &mut String, indent: usize, key: Option<&UiIrExpression>) {
+fn emit_into(
+    nodes: &[&UiIrNode],
+    out: &mut String,
+    indent: usize,
+    key: Option<&UiIrExpression>,
+    root: &CodegenRoot,
+) {
     let mut index = 0;
     while index < nodes.len() {
         let node = nodes[index];
         if is_chain_head(node) {
             let end = chain_end(nodes, index);
-            emit_conditional_chain(&nodes[index..end], out, indent, key);
+            emit_conditional_chain(&nodes[index..end], out, indent, key, root);
             index = end;
             continue;
         }
-        emit_node(node, out, indent, key);
+        emit_node(node, out, indent, key, root);
         index += 1;
     }
 }
@@ -253,13 +271,13 @@ fn loop_slot(tag: &str) -> bool {
 /// iterator), and a caller passing a slice is not doing anything unusual.
 /// `.iter()` reads the same on a `Vec`, a slice, an array and a borrow of any of
 /// them.
-fn emit_loop(node: &UiIrNode, out: &mut String, indent: usize) {
+fn emit_loop(node: &UiIrNode, out: &mut String, indent: usize, root: &CodegenRoot) {
     // A `<VirtualFor>` is not a `<For>`: it does not walk the collection at all.
     // It emits a virtual-collection marker the runtime realizes into a
     // viewport-bounded window (spec §4.9), so it is handled apart from the
     // per-item `for` below.
     if node.tag() == "VirtualFor" {
-        emit_virtual_collection(node, out, indent);
+        emit_virtual_collection(node, out, indent, root);
         return;
     }
 
@@ -279,7 +297,7 @@ fn emit_loop(node: &UiIrNode, out: &mut String, indent: usize) {
         // else.
         if let Some(empty) = empty {
             let children: Vec<&UiIrNode> = empty.children().iter().collect();
-            emit_into(&children, out, indent, None);
+            emit_into(&children, out, indent, None, root);
         }
         return;
     };
@@ -294,19 +312,19 @@ fn emit_loop(node: &UiIrNode, out: &mut String, indent: usize) {
     if let Some(separator) = separator {
         let _ = writeln!(out, "{inner}if !__first {{");
         let children: Vec<&UiIrNode> = separator.children().iter().collect();
-        emit_into(&children, out, indent + 2, None);
+        emit_into(&children, out, indent + 2, None, root);
         let _ = writeln!(out, "{inner}}}");
     }
     if needs_flag {
         let _ = writeln!(out, "{inner}__first = false;");
     }
-    emit_into(&body, out, indent + 1, node.key());
+    emit_into(&body, out, indent + 1, node.key(), root);
     let _ = writeln!(out, "{pad}}}");
 
     if let Some(empty) = empty {
         let _ = writeln!(out, "{pad}if __first {{");
         let children: Vec<&UiIrNode> = empty.children().iter().collect();
-        emit_into(&children, out, indent + 1, None);
+        emit_into(&children, out, indent + 1, None, root);
         let _ = writeln!(out, "{pad}}}");
     }
 }
@@ -327,29 +345,24 @@ fn emit_loop(node: &UiIrNode, out: &mut String, indent: usize) {
 /// `<VirtualFor>` body reads no `item`. Its `empty`/`separator` slots — a `<For>`
 /// affordance about iteration — are not part of a window template and are
 /// dropped.
-fn emit_virtual_collection(node: &UiIrNode, out: &mut String, indent: usize) {
+fn emit_virtual_collection(node: &UiIrNode, out: &mut String, indent: usize, root: &CodegenRoot) {
     let pad = indentation(indent);
     let inner = indentation(indent + 1);
+    let view = root.view();
 
     let body: Vec<&UiIrNode> = node
         .children()
         .iter()
         .filter(|child| !loop_slot(child.tag()))
         .collect();
-    let template = emit_nodes_block(&body, indent + 1);
+    let template = emit_nodes_block(&body, indent + 1, root);
 
     let _ = writeln!(
         out,
-        "{pad}__nodes.push(::obscur_view::view::ViewNode::virtual_collection("
+        "{pad}__nodes.push({view}::ViewNode::virtual_collection("
     );
-    let _ = writeln!(
-        out,
-        "{inner}::obscur_view::view::DEFAULT_VIRTUAL_ROW_EXTENT,"
-    );
-    let _ = writeln!(
-        out,
-        "{inner}::obscur_view::view::ViewFragment::from_nodes({template}),"
-    );
+    let _ = writeln!(out, "{inner}{view}::DEFAULT_VIRTUAL_ROW_EXTENT,");
+    let _ = writeln!(out, "{inner}{view}::ViewFragment::from_nodes({template}),");
     let _ = writeln!(out, "{pad}));");
 }
 
@@ -381,6 +394,7 @@ fn emit_conditional_chain(
     out: &mut String,
     indent: usize,
     key: Option<&UiIrExpression>,
+    root: &CodegenRoot,
 ) {
     let pad = indentation(indent);
     let _ = write!(out, "{pad}");
@@ -395,7 +409,7 @@ fn emit_conditional_chain(
         out.push_str(&head);
         out.push_str("{\n");
         let children: Vec<&UiIrNode> = branch.children().iter().collect();
-        emit_into(&children, out, indent + 1, key);
+        emit_into(&children, out, indent + 1, key, root);
         let _ = write!(out, "{pad}}}");
     }
     out.push('\n');
@@ -432,22 +446,32 @@ fn emit_condition(expression: &UiIrExpression) -> String {
 /// A transparent fragment and a (still-spliced) loop push their children instead
 /// of a node of their own. An [interpolation](UiIrNode::interpolation) pushes a
 /// **text** node — it is a body `{expr}`, and its content is the expression.
-fn emit_node(node: &UiIrNode, out: &mut String, indent: usize, key: Option<&UiIrExpression>) {
+fn emit_node(
+    node: &UiIrNode,
+    out: &mut String,
+    indent: usize,
+    key: Option<&UiIrExpression>,
+    root: &CodegenRoot,
+) {
     if let Some(value) = node.interpolated_value() {
-        emit_text(node, out, indent, key, &emit_text_content(value));
+        emit_text(node, out, indent, key, &emit_text_content(value), root);
         return;
     }
     match node.kind() {
         UiIrNodeKind::Text => {
             let content = string_literal(node.content());
-            emit_text(node, out, indent, key, &content);
+            emit_text(node, out, indent, key, &content, root);
         }
-        UiIrNodeKind::Element => emit_element(node, out, indent, key, TagPosition::Element),
-        UiIrNodeKind::Component => emit_element(node, out, indent, key, TagPosition::Component),
-        UiIrNodeKind::Loop => emit_loop(node, out, indent),
+        UiIrNodeKind::Element => {
+            emit_element(node, out, indent, key, TagPosition::Element, root);
+        }
+        UiIrNodeKind::Component => {
+            emit_element(node, out, indent, key, TagPosition::Component, root);
+        }
+        UiIrNodeKind::Loop => emit_loop(node, out, indent, root),
         UiIrNodeKind::Fragment | UiIrNodeKind::Conditional => {
             let children: Vec<&UiIrNode> = node.children().iter().collect();
-            emit_into(&children, out, indent, key);
+            emit_into(&children, out, indent, key, root);
         }
     }
 }
@@ -460,13 +484,12 @@ fn emit_text(
     indent: usize,
     key: Option<&UiIrExpression>,
     content: &str,
+    root: &CodegenRoot,
 ) {
     let pad = indentation(indent);
-    let _ = write!(
-        out,
-        "{pad}__nodes.push(::obscur_view::view::ViewNode::text({content})"
-    );
-    emit_key(node, out, key);
+    let view = root.view();
+    let _ = write!(out, "{pad}__nodes.push({view}::ViewNode::text({content})");
+    emit_key(node, out, key, root);
     out.push_str(");\n");
 }
 
@@ -520,13 +543,16 @@ fn emit_element(
     indent: usize,
     key: Option<&UiIrExpression>,
     position: TagPosition,
+    root: &CodegenRoot,
 ) {
     let pad = indentation(indent);
     let inner = indentation(indent + 1);
+    let view = root.view();
+    let identity = root.identity();
     let component = name_binding::component_id_for(node.tag(), position).raw();
     let _ = writeln!(
         out,
-        "{pad}__nodes.push(::obscur_view::view::ViewNode::element(::obscur_identity::ComponentId::from_raw({component:#x}))"
+        "{pad}__nodes.push({view}::ViewNode::element({identity}::ComponentId::from_raw({component:#x}))"
     );
 
     for property in node.properties() {
@@ -535,10 +561,10 @@ fn emit_element(
         // runtime bridge makes the identical call, which is what keeps an
         // interpreted document and a compiled one the same outlet.
         let symbol = name_binding::attr_symbol_on(node.tag(), property.name()).raw();
-        let value = emit_value(property.value());
+        let value = emit_value(property.value(), root);
         let _ = writeln!(
             out,
-            "{inner}.with_prop(::obscur_view::view::ViewProperty::new(::obscur_identity::InternedSymbol::from_raw({symbol:#x}), {value}))"
+            "{inner}.with_prop({view}::ViewProperty::new({identity}::InternedSymbol::from_raw({symbol:#x}), {value}))"
         );
     }
 
@@ -547,43 +573,43 @@ fn emit_element(
         let command = name_binding::fallback_symbol(event.handler()).raw();
         let _ = writeln!(
             out,
-            "{inner}.with_event(::obscur_view::view::ViewEventBinding::new(::obscur_identity::InternedSymbol::from_raw({event_symbol:#x}), ::obscur_identity::InternedSymbol::from_raw({command:#x})))"
+            "{inner}.with_event({view}::ViewEventBinding::new({identity}::InternedSymbol::from_raw({event_symbol:#x}), {identity}::InternedSymbol::from_raw({command:#x})))"
         );
     }
 
     let children: Vec<&UiIrNode> = node.children().iter().collect();
     if !children.is_empty() {
-        let block = emit_nodes_block(&children, indent + 1);
+        let block = emit_nodes_block(&children, indent + 1, root);
         let _ = writeln!(
             out,
-            "{inner}.with_children(::obscur_view::view::ViewFragment::from_nodes({block}))"
+            "{inner}.with_children({view}::ViewFragment::from_nodes({block}))"
         );
     }
 
     // The key modifier (if any) closes the builder chain before the comma.
     let _ = write!(out, "{inner}");
-    emit_key(node, out, key);
+    emit_key(node, out, key, root);
     out.push_str(");\n");
 }
 
 /// Appends a `.with_key(…)` modifier for `node`'s key, if it has one; a no-op
 /// otherwise. Mirrors the runtime bridge's key lowering.
-fn emit_key(node: &UiIrNode, out: &mut String, inherited: Option<&UiIrExpression>) {
+fn emit_key(
+    node: &UiIrNode,
+    out: &mut String,
+    inherited: Option<&UiIrExpression>,
+    root: &CodegenRoot,
+) {
     let Some(key) = node.key().or(inherited) else {
         return;
     };
+    let view = root.view();
     let key_expr = match key {
         UiIrExpression::Literal(UiIrValue::Int(number)) => {
-            format!(
-                "::obscur_view::view::ViewKey::from({}u64)",
-                number.cast_unsigned()
-            )
+            format!("{view}::ViewKey::from({}u64)", number.cast_unsigned())
         }
         UiIrExpression::Literal(UiIrValue::Text(text)) => {
-            format!(
-                "::obscur_view::view::ViewKey::from({})",
-                string_literal(text)
-            )
+            format!("{view}::ViewKey::from({})", string_literal(text))
         }
         // The key's Rust path, exactly like any other binding: `key={item.id}` is
         // `ViewKey::from(item.id.clone())`. It used to emit the path's spelling,
@@ -591,26 +617,23 @@ fn emit_key(node: &UiIrNode, out: &mut String, inherited: Option<&UiIrExpression
         // the whole collection, which is the opposite of what §2.11's mandatory
         // stable key is for.
         UiIrExpression::Binding(path) => {
-            format!("::obscur_view::view::ViewKey::from({path}.clone())")
+            format!("{view}::ViewKey::from({path}.clone())")
         }
         UiIrExpression::Literal(UiIrValue::Bool(flag)) => format!(
-            "::obscur_view::view::ViewKey::from({:?})",
+            "{view}::ViewKey::from({:?})",
             if *flag { "true" } else { "false" }
         ),
         UiIrExpression::Literal(UiIrValue::Float(number)) => {
             format!(
-                "::obscur_view::view::ViewKey::from({})",
+                "{view}::ViewKey::from({})",
                 string_literal(&number.to_string())
             )
         }
         UiIrExpression::Literal(UiIrValue::Null) => {
-            "::obscur_view::view::ViewKey::from(\"null\")".to_owned()
+            format!("{view}::ViewKey::from(\"null\")")
         }
         UiIrExpression::Call { name, .. } => {
-            format!(
-                "::obscur_view::view::ViewKey::from({})",
-                string_literal(name)
-            )
+            format!("{view}::ViewKey::from({})", string_literal(name))
         }
     };
     let _ = write!(out, ".with_key({key_expr})");
@@ -636,28 +659,27 @@ fn emit_key(node: &UiIrNode, out: &mut String, inherited: Option<&UiIrExpression
 /// A call still emits `Null`: §2.10 allows "explicitly exported pure functions",
 /// but nothing yet decides which functions those are, and emitting an arbitrary
 /// call would be exactly the unconstrained invocation §2.10 forbids.
-fn emit_value(expression: &UiIrExpression) -> String {
+fn emit_value(expression: &UiIrExpression, root: &CodegenRoot) -> String {
+    let view = root.view();
     match expression {
-        UiIrExpression::Literal(value) => emit_literal(value),
+        UiIrExpression::Literal(value) => emit_literal(value, root),
         UiIrExpression::Binding(path) => {
-            format!("::obscur_view::view::ViewValue::from({path}.clone())")
+            format!("{view}::ViewValue::from({path}.clone())")
         }
-        UiIrExpression::Call { .. } => "::obscur_view::view::ViewValue::Null".to_owned(),
+        UiIrExpression::Call { .. } => format!("{view}::ViewValue::Null"),
     }
 }
 
 /// Emits the `ViewValue` expression for a literal.
-fn emit_literal(value: &UiIrValue) -> String {
+fn emit_literal(value: &UiIrValue, root: &CodegenRoot) -> String {
+    let view = root.view();
     match value {
-        UiIrValue::Null => "::obscur_view::view::ViewValue::Null".to_owned(),
-        UiIrValue::Bool(flag) => format!("::obscur_view::view::ViewValue::Bool({flag})"),
-        UiIrValue::Int(number) => format!("::obscur_view::view::ViewValue::Int({number})"),
-        UiIrValue::Float(number) => format!("::obscur_view::view::ViewValue::Float({number:?})"),
+        UiIrValue::Null => format!("{view}::ViewValue::Null"),
+        UiIrValue::Bool(flag) => format!("{view}::ViewValue::Bool({flag})"),
+        UiIrValue::Int(number) => format!("{view}::ViewValue::Int({number})"),
+        UiIrValue::Float(number) => format!("{view}::ViewValue::Float({number:?})"),
         UiIrValue::Text(text) => {
-            format!(
-                "::obscur_view::view::ViewValue::Text({}.into())",
-                string_literal(text)
-            )
+            format!("{view}::ViewValue::Text({}.into())", string_literal(text))
         }
     }
 }
@@ -678,8 +700,9 @@ mod tests {
     use super::*;
     use obscur_ui_ir::document::{UiIrEvent, UiIrProperty};
 
-    fn expr(root: UiIrNode) -> String {
-        ViewCodegen::document_to_view_expr(&UiIrDocument::new(root))
+    /// The emitted expression for `node`, through the root an application gets.
+    fn expr(node: UiIrNode) -> String {
+        ViewCodegen::document_to_view_expr(&UiIrDocument::new(node), &CodegenRoot::facade())
     }
 
     #[test]
@@ -780,11 +803,85 @@ mod tests {
         let src = ViewCodegen::document_to_view_fn(
             &UiIrDocument::new(UiIrNode::element(0, "div")),
             "app_view",
+            &CodegenRoot::facade(),
+        );
+        assert!(
+            src.contains("pub fn app_view() -> ::obscur_kit::view::view::View {"),
+            "{src}"
+        );
+        assert!(src.trim_end().ends_with('}'), "{src}");
+    }
+
+    #[test]
+    fn the_facade_root_names_no_internal_crate() {
+        // THE 1-A regression. Every emitted path has to resolve in a crate whose
+        // only dependency is the facade, so `::obscur_view` / `::obscur_identity`
+        // — which live in no application's extern prelude — must not appear at
+        // all: not in the signature, not in the `Vec<ViewNode>` annotation, not in
+        // a property, an event, a key or a value.
+        let src = ViewCodegen::document_to_view_fn(
+            &UiIrDocument::new(
+                UiIrNode::element(0, "div")
+                    .with_property(UiIrProperty::text("class", "row"))
+                    .with_event(UiIrEvent::new("click", "save"))
+                    .with_child(UiIrNode::component(1, "Button"))
+                    .with_child(UiIrNode::text(2, "hi")),
+            ),
+            "app_view",
+            &CodegenRoot::facade(),
+        );
+        assert!(!src.contains("::obscur_view"), "{src}");
+        assert!(!src.contains("::obscur_identity"), "{src}");
+        assert!(
+            src.contains("::obscur_kit::view::view::ViewNode::element"),
+            "{src}"
+        );
+        assert!(
+            src.contains("::obscur_kit::identity::ComponentId::from_raw"),
+            "{src}"
+        );
+        assert!(
+            src.contains("::obscur_kit::identity::InternedSymbol::from_raw"),
+            "{src}"
+        );
+    }
+
+    #[test]
+    fn the_internal_root_still_names_the_crates_directly() {
+        // The other half of the same claim: a crate that *does* depend on both
+        // internal crates gets the paths that resolve there, and nothing about
+        // the facade leaks into them.
+        let src = ViewCodegen::document_to_view_fn(
+            &UiIrDocument::new(UiIrNode::element(0, "div")),
+            "app_view",
+            &CodegenRoot::internal(),
         );
         assert!(
             src.contains("pub fn app_view() -> ::obscur_view::view::View {"),
             "{src}"
         );
-        assert!(src.trim_end().ends_with('}'), "{src}");
+        assert!(!src.contains("obscur_kit"), "{src}");
+    }
+
+    #[test]
+    fn a_custom_root_reaches_every_emitted_path() {
+        // A root nobody ships, so any path the threading missed shows up as a
+        // leftover `obscur_` spelling rather than as a silent default.
+        let src = ViewCodegen::document_to_view_fn(
+            &UiIrDocument::new(
+                UiIrNode::element(0, "div")
+                    .with_property(UiIrProperty::literal("count", UiIrValue::Int(1)))
+                    .with_event(UiIrEvent::new("click", "save"))
+                    .with_child(
+                        UiIrNode::text(1, "hi")
+                            .with_key(UiIrExpression::Literal(UiIrValue::Text("k".into()))),
+                    ),
+            ),
+            "app_view",
+            &CodegenRoot::new("::k::v", "::k::i"),
+        );
+        assert!(!src.contains("obscur_"), "{src}");
+        assert!(src.contains("::k::v::ViewKey::from"), "{src}");
+        assert!(src.contains("::k::i::InternedSymbol::from_raw"), "{src}");
     }
 }

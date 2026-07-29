@@ -12,7 +12,7 @@
 
 use std::path::Path;
 
-use obscur_okui_compiler::codegen::ViewCodegen;
+use obscur_okui_compiler::codegen::{CodegenRoot, ViewCodegen};
 use obscur_okui_compiler::compile::Compiler;
 use obscur_okui_syntax::ast::Document;
 use obscur_okui_syntax::parser::Parser;
@@ -47,8 +47,12 @@ fn main() {
 
     let ir = result.document().expect("a lowered UI IR document");
 
-    // Emit ordinary Rust building the identical `View`.
-    let generated = ViewCodegen::document_to_view_fn(ir, "showcase_view");
+    // Emit ordinary Rust building the identical `View`, naming its types through
+    // the facade — the root an application's own `build.rs` must also pass, and
+    // the one that makes the generated file compile in a crate whose only
+    // dependency is `obscur-kit`. The example that `include!`s this output is a
+    // separate crate linking `obscur_kit` by name, so the same paths resolve here.
+    let generated = ViewCodegen::document_to_view_fn(ir, "showcase_view", &CodegenRoot::facade());
 
     let out_path = Path::new(&out_dir).join("showcase_okui_view.rs");
     std::fs::write(&out_path, generated).expect("write generated view");

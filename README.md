@@ -46,6 +46,9 @@ Source layout follows the spec's rules: one main entity per file; `mod.rs` and
 cargo run -p xtask -- check      # architecture rules hold (mod.rs/lib.rs
                                  # layout, banned file names, unsafe boundary,
                                  # pure-crate dependency direction)
+cargo run -p xtask -- consumer   # checks/facade-consumer builds: a crate whose
+                                 # only dependency is the facade, which is the
+                                 # only place an emitted-path defect shows up
 cargo build --workspace
 cargo test --workspace           # the suite is the oracle
 cargo fmt --all --check

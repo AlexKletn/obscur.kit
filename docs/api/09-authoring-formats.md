@@ -30,6 +30,21 @@ let view = okui! {
 Also exported: `#[derive(Contract)]`, which emits a component's
 `contract_surface()` for §2.13 validation.
 
+**What your crate needs:** `obscur-kit`, and nothing else. The expansion is
+self-contained — every path in it is absolute and written through the facade
+(`::obscur_kit::view::view::…`, `::obscur_kit::identity::…`), so no `use` item and
+no second dependency is required. Until `c9f7368` this was untrue: the expansion
+named `::obscur_view` and `::obscur_identity`, which resolve only in a crate that
+depends on them *directly*, so the first `okui!` in an application failed with
+`error[E0433]: cannot find obscur_view in the crate root`. A build step chooses
+the same root explicitly — `ViewCodegen::document_to_view_fn(ir, name,
+&CodegenRoot::facade())`.
+
+`checks/facade-consumer` is a crate outside the workspace whose only dependency
+is the facade; `cargo run -p xtask -- consumer` builds it. It exists because no
+in-repo consumer stands on that side of the boundary, which is why the defect
+above survived as long as it did.
+
 ## `.okui` files
 
 ```rust

@@ -6,5 +6,7 @@
 //! [`UiIrDocument`](obscur_ui_ir::document::UiIrDocument) once into Rust source
 //! constructing the identical [`View`](obscur_view::view::View), so a `.okui`
 //! document compiles to plain code with no frontend machinery left at runtime.
+mod codegen_root;
 mod view_codegen;
+pub use codegen_root::CodegenRoot;
 pub use view_codegen::ViewCodegen;

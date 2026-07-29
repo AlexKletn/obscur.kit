@@ -21,7 +21,7 @@ mod dsl;
 
 use proc_macro::TokenStream;
 
-use obscur_okui_compiler::codegen::ViewCodegen;
+use obscur_okui_compiler::codegen::{CodegenRoot, ViewCodegen};
 
 use crate::derive::ContractDerive;
 use crate::dsl::DslMacro;
@@ -43,8 +43,13 @@ use crate::dsl::DslMacro;
 /// module's docs for the full grammar.
 ///
 /// The expansion is an expression and needs no `use` items — every emitted path
-/// is absolute. The calling crate must depend on `obscur-view` and
-/// `obscur-identity` (the `obscur-kit` facade re-exports both).
+/// is absolute, and written through the `obscur-kit` facade
+/// (`::obscur_kit::view::view::…`, `::obscur_kit::identity::…`). So the calling
+/// crate needs exactly the one dependency an application already has, and no
+/// internal crate: that is [`CodegenRoot::facade`], and the emitted paths used
+/// to be `::obscur_view` / `::obscur_identity` — which resolve only inside this
+/// workspace, because a `::`-prefixed path is looked up in the crate's *direct*
+/// dependencies.
 ///
 /// Malformed input (an unclosed or mismatched tag, a non-expression `{...}`) is
 /// reported as a compile error at the offending span.
@@ -56,7 +61,9 @@ pub fn okui(input: TokenStream) -> TokenStream {
         Err(error) => return error.to_compile_error().into(),
     };
     // ...then emit the `View` expression itself, so no IR survives to runtime.
-    let expr = ViewCodegen::document_to_view_expr(&document);
+    // Through the facade: an application depends on `obscur-kit` alone, and that
+    // is the only root that resolves in its crate root (see `CodegenRoot`).
+    let expr = ViewCodegen::document_to_view_expr(&document, &CodegenRoot::facade());
     match expr.parse() {
         Ok(tokens) => tokens,
         // `ViewCodegen` emits Rust we control, so this is unreachable in

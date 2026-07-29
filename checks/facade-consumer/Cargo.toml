@@ -1,0 +1,32 @@
+# The workspace's missing consumer: a crate that stands on the far side of the
+# facade boundary.
+#
+# It is deliberately NOT a workspace member. Two reasons, and the second is the
+# one that matters:
+#
+#  - `xtask`'s facade-dependency rule forbids any workspace crate from depending
+#    on `obscur-kit`, and rightly: the facade is the apex of the graph.
+#  - Every in-repo consumer of the toolkit lives *inside* `obscur-kit`, where all
+#    internal crates are direct dependencies — so an emitted `::obscur_view::…`
+#    path resolves there and nowhere else. That is why `okui!` could ship for
+#    months while failing on the first line of any real application (audit 1-A).
+#    A crate whose extern prelude holds `obscur_kit` and nothing else is the only
+#    place that class of defect is visible.
+#
+# Run it: `cargo run -p xtask -- consumer` (or `cargo test` in this directory).
+[package]
+name = "facade-consumer"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.90"
+publish = false
+
+# Its own workspace root, so the repository's workspace does not adopt it and the
+# facade ban keeps holding.
+[workspace]
+
+[dependencies]
+# The ONE dependency. Nothing internal may be added here — adding
+# `obscur-view`/`obscur-identity` to make something compile is the workaround
+# this fixture exists to make impossible.
+obscur-kit = { path = "../../crates/facade/obscur-kit" }

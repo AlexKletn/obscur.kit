@@ -66,7 +66,7 @@
 use obscur_kit::geometry::Size;
 use obscur_kit::identity::{ComponentId, RuntimeId};
 use obscur_kit::okui_compiler::bridge::UiIrViewBridge;
-use obscur_kit::okui_compiler::codegen::ViewCodegen;
+use obscur_kit::okui_compiler::codegen::{CodegenRoot, ViewCodegen};
 use obscur_kit::okui_compiler::compile::Compiler;
 use obscur_kit::okui_syntax::ast::Document;
 use obscur_kit::okui_syntax::parser::Parser;
@@ -319,7 +319,7 @@ fn the_codegen_path_emits_the_components_real_id() {
     // checked without a second `rustc`: the emitted source must carry Card's real
     // handle and not the Container constant.
     let ir = compile(r#"<Card title="Hi"/>"#);
-    let generated = ViewCodegen::document_to_view_expr(&ir);
+    let generated = ViewCodegen::document_to_view_expr(&ir, &CodegenRoot::facade());
 
     let card = CardProps::contract().id.raw();
     assert!(
