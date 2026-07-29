@@ -1642,8 +1642,9 @@ fn padding_box(border_box: Rect, border: Insets) -> Rect {
 /// collapsing the redundant re-measurement (and text reshaping) the
 /// measure/arrange walk would otherwise do — `arrange(parent)` measures a subtree,
 /// then `arrange(child)` re-measures it under the same constraints, and so on down
-/// the depth. Keyed by the node and the constraint's four `f32` bit patterns
-/// (exact, no hashing/collisions). `RefCell` allows the short borrow for a
+/// the depth. Keyed by the node and the constraint's `f32` bit patterns — the four
+/// range bounds *and* the percentage basis (exact, no hashing/collisions).
+/// `RefCell` allows the short borrow for a
 /// lookup/insert to nest inside the recursive algorithm call that happens between
 /// them.
 ///
@@ -1671,7 +1672,9 @@ pub struct MeasureCache {
     measured: std::cell::RefCell<Vec<NodeId>>,
 }
 
-type MeasureKey = (NodeId, u32, u32, u32, u32);
+/// The node, the four range bounds, and the two percentage-basis components — each
+/// `f32` as its exact bit pattern. See [`measure_key`].
+type MeasureKey = (NodeId, u32, u32, u32, u32, u32, u32);
 
 impl MeasureCache {
     /// Creates an empty cache.
@@ -2125,13 +2128,26 @@ fn invalidated_layout(tree: &RetainedTree, dirty: &LayoutInvalidation) -> Option
 }
 
 /// The exact cache key for `measure(node, constraints)`.
+///
+/// The **percentage basis** is part of the key because it is part of the answer: the
+/// same node, offered the same space, resolves `height: 50%` to a different size
+/// under a different containing block — and since `FlowLayout` states a basis when
+/// its own block size is definite (css-sizing-3 §5.1), two calls really can differ
+/// in nothing else. A key that ignored it would serve one containing block's answer
+/// for another's. `NaN` stands in for "no basis stated"; its bit pattern is a
+/// constant, so two unstated bases compare equal here even though `NaN != NaN`.
 fn measure_key(node: NodeId, constraints: BoxConstraints) -> MeasureKey {
+    let basis = constraints
+        .percent_basis
+        .unwrap_or(Size::new(f32::NAN, f32::NAN));
     (
         node,
         constraints.min.width.to_bits(),
         constraints.min.height.to_bits(),
         constraints.max.width.to_bits(),
         constraints.max.height.to_bits(),
+        basis.width.to_bits(),
+        basis.height.to_bits(),
     )
 }
 

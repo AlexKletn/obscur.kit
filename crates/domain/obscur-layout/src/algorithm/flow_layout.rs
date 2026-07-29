@@ -16,9 +16,11 @@ use super::{
 ///
 /// # Rules
 ///
-/// * **Content width** — resolves `style.width` against the constraint's max
-///   width; if `Auto`, uses the available content width (`constraints.max.width`
-///   minus horizontal border + padding). Clamped to be non-negative.
+/// * **Content width** — resolves `style.width` against the containing block the
+///   caller stated ([`BoxConstraints::percent_width`], which falls back to the
+///   constraint's max width); if `Auto`, uses the available content width
+///   (`constraints.max.width` minus horizontal border + padding). Clamped to be
+///   non-negative.
 /// * **Intrinsic width (CSS Sizing 3 §4.1)** — `min-content` / `max-content` /
 ///   `fit-content` are answered by *measuring* the children rather than by
 ///   arithmetic: the children are re-measured under a no-space (`min-content`) or
@@ -36,7 +38,9 @@ use super::{
 /// * **Child stacking** — each child is measured with
 ///   [`BoxConstraints::loose`] up to `(content_width − its inline margins,
 ///   remaining_height)`, placed at the content-box left edge **plus its
-///   `margin-left`**, with its top at the running `y` offset.
+///   `margin-left`**, with its top at the running `y` offset. When this box's own
+///   block size is definite, that offer carries this box's **content box** as the
+///   child's percentage basis — a separate quantity from the offer, see below.
 /// * **Inline margins (CSS 2.1 §10.3.3)** — a child's *fixed* `margin-left` /
 ///   `margin-right` take from the inline space it is offered, so a `width: auto`
 ///   child fills what is left, and `margin-left` offsets it. An over-constrained
@@ -68,9 +72,10 @@ use super::{
 ///   *adjoining*, so it **collapses through**: the open collapsing set spans
 ///   across it and a run of such empties between two siblings collapses into a
 ///   single margin.
-/// * **Content height** — resolves `style.height` if set, otherwise the last
-///   child's collapsed bottom edge (the trailing collapsing set is contained,
-///   see below). Clamped to be non-negative.
+/// * **Content height** — resolves `style.height` if set — against the containing
+///   block ([`BoxConstraints::percent_height`]), not against the space this box was
+///   offered — otherwise the last child's collapsed bottom edge (the trailing
+///   collapsing set is contained, see below). Clamped to be non-negative.
 /// * **Border box** — content size plus border and padding, then clamped into
 ///   the incoming `constraints`.
 ///
@@ -100,6 +105,38 @@ use super::{
 /// content, so resolving a block-axis percentage against it would be circular. CSS
 /// breaks the cycle by picking one axis, and the inline one is the axis that is
 /// definite by the time children are laid out.
+///
+/// # A percentage *size* resolves against the containing block, not the space left
+///
+/// The offer a child is measured under and the basis its percentages resolve
+/// against are two different quantities, and this algorithm used to have only one.
+/// Each child was offered the block extent *remaining* below its predecessors and
+/// resolved `height: 50%` against that offer, so in a 240px-tall container the
+/// first child was right (120) and every sibling after it compounded the error —
+/// the second `50%` took half of the 120 that remained (60), the second `30%` of
+/// two came back 50, `20%`/`80%` came back 48/154, and a second `height: 100%`
+/// computed to **zero** and disappeared with nothing to say why.
+///
+/// css-sizing-3.txt:1027 is unambiguous, and it also settles what should happen
+/// instead of the clamping:
+///
+/// > Otherwise, the percentage is resolved against the containing block's size.
+/// > (The containing block's size is not re-resolved based on the resulting size of
+/// > the box; the contents might thus **overflow** or underflow the containing
+/// > block.)
+///
+/// So the remaining extent keeps its job — the room left for the next sibling, and
+/// the space an `auto`/stretch size fills — while the containing block's content box
+/// travels alongside it as [`BoxConstraints::percent_basis`]. Two children at
+/// `height: 100%` are now 240 each and the second one starts at the container's
+/// bottom edge; the container stays 240 and the overflow is the specified outcome,
+/// not a defect to clamp away.
+///
+/// The basis is attached only when this box's block size is **definite**. Against an
+/// indefinite one a percentage should compute to `auto`; it instead still resolves
+/// against the space available, which is the pre-existing (and separately recorded)
+/// gap — that behaviour is deliberately left exactly as it was rather than half-changed
+/// here.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FlowLayout;
 
@@ -251,7 +288,9 @@ impl LayoutAlgorithm for FlowLayout {
         // probe, so `min-width: min-content` floors the box at the run it cannot
         // break, whatever the `width` said. `intrinsic_inline_size` answers `None`
         // for a bound that is not a keyword without measuring anything, so a
-        // non-intrinsic bound costs nothing.
+        // non-intrinsic bound costs nothing. A *percentage* bound resolves against
+        // the containing block, the same basis `explicit` used above — `max.width` is
+        // the space offered, and the two coincide when no caller stated a basis.
         let min_width_measured = intrinsic_inline_size(
             style.min_width,
             children,
@@ -270,10 +309,65 @@ impl LayoutAlgorithm for FlowLayout {
             content_width,
             (style.min_width, min_width_measured),
             (style.max_width, max_width_measured),
-            constraints.max.width,
+            constraints.percent_width(),
             bp_x,
             style.box_sizing,
         );
+
+        // This box's **definite** content block size, if it has one: the basis a
+        // child's percentage block size resolves against (css-sizing-3.txt:1027 —
+        // "the percentage is resolved against the containing block's size").
+        // Resolved before the children are touched, because that is the whole
+        // point: the containing block's size does not depend on them.
+        //
+        // The min/max clamp is applied here too, so the basis is the *used* content
+        // height rather than the authored one (`height: 50%; max-height: 100px`
+        // gives descendants 100, not 120). An intrinsic bound cannot be measured
+        // yet — it is the height the children stack to — so it imposes no limit on
+        // the basis; the same clamp runs again below with the intrinsic bounds
+        // measured, and re-applying an already-applied numeric bound is inert.
+        //
+        // [`None`] when `height` is `auto` (or a percentage against an indefinite
+        // basis): the block size is **indefinite**, and this deliberately does not
+        // try to invent one. That is the separate known gap — a percentage against
+        // an indefinite basis should compute to `auto` and here still resolves
+        // against the space available.
+        let definite_content_height = style.height.resolve(constraints.percent_height()).map(|h| {
+            let content = style.box_sizing.content_extent(h, bp_y).max(0.0);
+            clamp_content(
+                content,
+                style.min_height,
+                style.max_height,
+                constraints.percent_height(),
+                bp_y,
+                style.box_sizing,
+            )
+        });
+        // The percentage basis handed to every child: this box's content box.
+        //
+        // # Why this is not `remaining_height`
+        //
+        // Flow used to offer each child the block space *left over* below its
+        // predecessors and let the child resolve its percentage against that offer,
+        // so the first child of a 240px-tall box was right (`50%` → 120) and every
+        // subsequent sibling compounded the error: the second `50%` read 50% of the
+        // 120 that remained (→ 60), a second `height: 100%` computed to zero and
+        // vanished. The two quantities have to be separate, because they answer
+        // different questions: the remaining extent is how much room is left (for
+        // placing the next sibling and for `auto`/stretch sizing, unchanged below),
+        // while the percentage basis is the containing block's size — which
+        // css-sizing-3.txt:1027 is explicit is *not* re-resolved from what the
+        // earlier boxes used, "the contents might thus overflow or underflow the
+        // containing block".
+        //
+        // [`BoxConstraints::percent_basis`] is a single [`Size`], so it is attached
+        // only when the block axis is definite. Leaving it unset keeps an
+        // indefinite containing block indefinite (percentages fall back to
+        // resolving against `max`, exactly as before). The inline component is the
+        // containing block's content width either way — the offer differs from it
+        // only by the child's own inline margins, which a percentage does not
+        // subtract (CSS 2.1 §10.2).
+        let percent_basis = definite_content_height.map(|h| Size::new(content_width, h));
 
         let mut child_boxes = Vec::with_capacity(children.len());
         // `y` is the collapsed bottom edge of the last placed *real* (non
@@ -314,9 +408,15 @@ impl LayoutAlgorithm for FlowLayout {
             let fixed_inline = child_style.margin.left.resolve(content_width)
                 + child_style.margin.right.resolve(content_width);
             let child_width = (content_width - fixed_inline).max(0.0);
+            // The offer is the space available; the basis (when this box has one) is
+            // what a percentage resolves against. See `percent_basis` above for why
+            // conflating the two made every sibling after the first wrong.
+            let child_constraints = BoxConstraints::loose(Size::new(child_width, remaining_height));
             let child_size = measurer.measure_child(
                 index,
-                BoxConstraints::loose(Size::new(child_width, remaining_height)),
+                percent_basis.map_or(child_constraints, |basis| {
+                    child_constraints.with_percent_basis(basis)
+                }),
             );
             // …and the leading margin offsets it — §10.3.3's inline solve, now that
             // the child's used width is known:
@@ -407,15 +507,19 @@ impl LayoutAlgorithm for FlowLayout {
         // exactly `y`, byte-identical to a gap-only stack.
         let children_content_height = y + pending.solve();
 
-        // Content height: explicit height (mapped through `box-sizing`) else the
-        // accumulated children height. `border-box` subtracts the vertical border
-        // + padding so the box ends up at its authored size.
-        let content_height = style
-            .height
-            .resolve(constraints.max.height)
-            .map_or(children_content_height, |h| {
-                style.box_sizing.content_extent(h, bp_y)
-            })
+        // Content height: the definite height resolved above (already mapped through
+        // `box-sizing`, which under `border-box` subtracts the vertical border +
+        // padding so the box ends up at its authored size) else the accumulated
+        // children height.
+        //
+        // It is resolved against [`BoxConstraints::percent_height`] — the containing
+        // block the caller stated — and no longer against `max.height`, which is the
+        // space this box was *offered*. The two coincide whenever no caller stated a
+        // basis, so this is inert for every existing caller and correct for the new
+        // one: a `height: 50%` block nested in a `height: 50%` block now halves its
+        // containing block instead of halving whatever room its siblings left.
+        let content_height = definite_content_height
+            .unwrap_or(children_content_height)
             .max(0.0);
         // Clamp the content height into the authored min/max-height (spec §4.2) —
         // e.g. `min-height: 100vh` fills a tall viewport even when the content is
@@ -425,13 +529,17 @@ impl LayoutAlgorithm for FlowLayout {
         // reflow vertically, so `min-content`, `max-content` and `fit-content` all
         // coincide with the height the children already stacked to (the same
         // reason `height: max-content` is `height: auto` here — see the type docs).
+        //
+        // A *percentage* bound resolves against the containing block, like the
+        // `height` above and for the same reason: `min-height: 100%` on the second
+        // of two siblings used to read the room the first left over.
         let block_intrinsic =
             |bound: Dimension| bound.is_intrinsic().then_some(children_content_height);
         let content_height = clamp_content_measured(
             content_height,
             (style.min_height, block_intrinsic(style.min_height)),
             (style.max_height, block_intrinsic(style.max_height)),
-            constraints.max.height,
+            constraints.percent_height(),
             bp_y,
             style.box_sizing,
         );
@@ -483,6 +591,13 @@ struct VerticalPlacement {
 /// The inline (vertical) axis carries each child's used height and its top/bottom
 /// margins, resolved as the §10.3.3 inline solve on the vertical axis.
 ///
+/// Percentage *sizes* resolve against the containing block on both axes, exactly as
+/// in the horizontal path and for the same reason — see [`FlowLayout`]'s note on why
+/// that is not the remaining extent. Here the axis that used to compound across
+/// siblings is the physical **width**: two `width: 50%` children of a 480-wide
+/// `vertical-lr` container are 240 each, where the second used to read half of the
+/// 240 that remained.
+///
 /// # Modelled to the point the block-progression is correct
 ///
 /// Intrinsic inline sizing along the vertical axis (`height: max-content` on a
@@ -509,17 +624,24 @@ fn layout_vertical(
     // else a stretch to the inline space offered (the vertical analogue of a
     // `width: auto` block stretching), clamped into min/max-height. Intrinsic
     // bounds degrade to `auto` (no vertical-axis probe).
+    //
+    // A percentage `height` — and a percentage min/max-height — resolves against
+    // [`BoxConstraints::percent_height`], the containing block the caller stated,
+    // not against the space this box was offered; the two coincide when no caller
+    // stated a basis. This is the vertical mirror of the horizontal path's block
+    // axis, and matters for the same reason: a vertical container's children are
+    // measured under a *shrinking* block offer.
     let inline_avail = (constraints.max.height - bp_y).max(0.0);
     let content_inline = style
         .height
-        .resolve(constraints.max.height)
+        .resolve(constraints.percent_height())
         .map_or(inline_avail, |h| style.box_sizing.content_extent(h, bp_y))
         .max(0.0);
     let content_inline = clamp_content(
         content_inline,
         style.min_height,
         style.max_height,
-        constraints.max.height,
+        constraints.percent_height(),
         bp_y,
         style.box_sizing,
     );
@@ -531,6 +653,24 @@ fn layout_vertical(
         .width
         .resolve(constraints.percent_width())
         .map(|w| style.box_sizing.content_extent(w, bp_x).max(0.0));
+    // This box's **definite** content block size — here the physical *width* —
+    // clamped into min/max-width so it is the used size, and the basis a child's
+    // percentage block size resolves against (css-sizing-3.txt:1027). See the
+    // horizontal path's `percent_basis`: the block axis is rotated, the defect and
+    // its fix are identical. `None` (an `auto` width that shrink-wraps its
+    // children) keeps the block size indefinite and leaves percentages resolving
+    // against the offer, exactly as before.
+    let definite_content_block = explicit_block.map(|b| {
+        clamp_content(
+            b,
+            style.min_width,
+            style.max_width,
+            constraints.percent_width(),
+            bp_x,
+            style.box_sizing,
+        )
+    });
+    let percent_basis = definite_content_block.map(|b| Size::new(b, content_inline));
 
     // Which physical edges the block-start / block-end sides map to under this
     // mode (§6.2): `vertical-rl` block-start = right, `vertical-lr` = left.
@@ -569,10 +709,16 @@ fn layout_vertical(
         let fixed_inline =
             cs.margin.top.resolve(content_inline) + cs.margin.bottom.resolve(content_inline);
         let child_inline = (content_inline - fixed_inline).max(0.0);
-        // Physical constraint: width = block offer, height = inline offer.
+        // Physical constraint: width = block offer, height = inline offer — plus the
+        // containing block's content box as the percentage basis when this box has a
+        // definite block size, so a child's `width: 50%` reads half of *this* box
+        // and not half of the room its predecessors left (see `percent_basis`).
+        let child_constraints = BoxConstraints::loose(Size::new(remaining_block, child_inline));
         let size = measurer.measure_child(
             index,
-            BoxConstraints::loose(Size::new(remaining_block, child_inline)),
+            percent_basis.map_or(child_constraints, |basis| {
+                child_constraints.with_percent_basis(basis)
+            }),
         );
 
         // Inline placement (the top offset) — §10.3.3's inline solve on the
@@ -628,12 +774,15 @@ fn layout_vertical(
     }
     let children_block = b + pending.solve();
 
-    let content_block = explicit_block.unwrap_or(children_block).max(0.0);
+    // The used block extent: the definite one resolved (and clamped) above, else
+    // the children's shrink-wrap — which is clamped here for the first time. A
+    // percentage bound resolves against the containing block, like the `width`.
+    let content_block = definite_content_block.unwrap_or(children_block).max(0.0);
     let content_block = clamp_content(
         content_block,
         style.min_width,
         style.max_width,
-        constraints.max.width,
+        constraints.percent_width(),
         bp_x,
         style.box_sizing,
     );
@@ -1208,5 +1357,236 @@ mod tests {
         );
         // block-start (left) offset 0, inline (top) offset 30.
         assert_eq!(out.child_boxes()[0].origin(), Point::new(0.0, 30.0));
+    }
+
+    // ---- percentage block sizes (css-sizing-3 §5.1) -------------------------
+
+    /// Children that are themselves blocks: measuring one runs [`FlowLayout`]
+    /// under the constraints the container offered it.
+    ///
+    /// [`FixedChildMeasurer`] cannot be used for these tests: it answers a fixed
+    /// natural size and only *clamps* it into the constraints, so a percentage in
+    /// the child is never resolved and the defect is invisible. This measurer is
+    /// the real pipeline in miniature — the runtime's `RecMeasurer` recurses into
+    /// the child's own algorithm in exactly this way.
+    struct NestedBlocks(Vec<LayoutStyle>);
+
+    impl crate::algorithm::ChildMeasurer for NestedBlocks {
+        fn measure_child(&mut self, index: usize, constraints: BoxConstraints) -> Size {
+            let style = self.0.get(index).copied().unwrap_or_default();
+            FlowLayout
+                .layout(&style, &[], constraints, &mut FixedChildMeasurer::default())
+                .size()
+        }
+    }
+
+    /// A block with a percentage height and a `100%` width — one of the two
+    /// siblings of the table below.
+    fn percent_height_child(percent: f32) -> LayoutStyle {
+        LayoutStyle {
+            width: Dimension::Percent(100.0),
+            height: Dimension::Percent(percent),
+            ..LayoutStyle::default()
+        }
+    }
+
+    /// `.app { width: 100%; height: 100% }` in a 480×240 viewport with two block
+    /// children at the given percentage heights; yields their used heights.
+    fn sibling_percent_heights(first: f32, second: f32) -> (f32, f32) {
+        let app = LayoutStyle {
+            width: Dimension::Percent(100.0),
+            height: Dimension::Percent(100.0),
+            ..LayoutStyle::default()
+        };
+        let out = FlowLayout.layout(
+            &app,
+            &[child(1), child(2)],
+            BoxConstraints::tight(Size::new(480.0, 240.0)),
+            &mut NestedBlocks(vec![
+                percent_height_child(first),
+                percent_height_child(second),
+            ]),
+        );
+        let boxes = out.child_boxes();
+        (boxes[0].size().height, boxes[1].size().height)
+    }
+
+    /// Every sibling resolves its percentage block size against the *containing
+    /// block*, not against the room its predecessors left.
+    ///
+    /// The four rows are the measured table from the external-consumer audit. Flow
+    /// used to hand each child the *remaining* block extent as its available size
+    /// and let the percentage resolve against that, so only the first child was
+    /// right and every one after it compounded the error down the chain: the
+    /// second `50%` came back 60 (50% of the 120 that remained), the second `30%`
+    /// came back 50, the `80%` came back 154 — and a second `height: 100%`
+    /// computed to **zero** and disappeared with no diagnostic.
+    #[test]
+    fn a_percentage_block_size_resolves_against_the_containing_block() {
+        assert_eq!(sibling_percent_heights(50.0, 50.0), (120.0, 120.0));
+        assert_eq!(sibling_percent_heights(30.0, 30.0), (72.0, 72.0));
+        assert_eq!(sibling_percent_heights(20.0, 80.0), (48.0, 192.0));
+        assert_eq!(sibling_percent_heights(100.0, 100.0), (240.0, 240.0));
+    }
+
+    /// css-sizing-3.txt:1027, quoted: "Otherwise, the percentage is resolved
+    /// against the containing block's size. (The containing block's size is **not
+    /// re-resolved** based on the resulting size of the box; the contents might
+    /// thus **overflow** or underflow the containing block)."
+    ///
+    /// Two children at `height: 100%` of a 240px containing block are 240 each, so
+    /// they stack to 480 and the second one starts at the container's bottom edge.
+    /// The container stays 240: the overflow is the specified outcome, and nothing
+    /// re-resolves the basis from what the first child used (which is what made the
+    /// second child zero) nor clamps the children back into the parent.
+    #[test]
+    fn the_containing_block_is_not_re_resolved_from_a_childs_used_size() {
+        let app = LayoutStyle {
+            width: Dimension::Percent(100.0),
+            height: Dimension::Percent(100.0),
+            ..LayoutStyle::default()
+        };
+        let out = FlowLayout.layout(
+            &app,
+            &[child(1), child(2)],
+            BoxConstraints::tight(Size::new(480.0, 240.0)),
+            &mut NestedBlocks(vec![
+                percent_height_child(100.0),
+                percent_height_child(100.0),
+            ]),
+        );
+        let boxes = out.child_boxes();
+        assert_eq!(boxes[0].origin(), Point::new(0.0, 0.0));
+        assert_eq!(boxes[0].size().height, 240.0);
+        // The second child overflows: it begins where the container ends.
+        assert_eq!(boxes[1].origin(), Point::new(0.0, 240.0));
+        assert_eq!(boxes[1].size().height, 240.0);
+        // The containing block itself is untouched by that overflow.
+        assert_eq!(out.size(), Size::new(480.0, 240.0));
+    }
+
+    /// A measurer that records the block-axis *offer* and the block-axis
+    /// *percentage basis* each child received, and reports a fixed 100px height.
+    #[derive(Default)]
+    struct RecordBlockAxis(Vec<(f32, f32)>);
+
+    impl crate::algorithm::ChildMeasurer for RecordBlockAxis {
+        fn measure_child(&mut self, _index: usize, constraints: BoxConstraints) -> Size {
+            self.0
+                .push((constraints.max.height, constraints.percent_height()));
+            Size::new(constraints.max.width, 100.0)
+        }
+    }
+
+    /// The two quantities that were conflated are now separate, and both still do
+    /// their own job: the *offer* shrinks down the sibling chain (it is the room
+    /// left for the next sibling, and what an `auto`/stretch size fills), while the
+    /// *percentage basis* stays the containing block's content height throughout.
+    ///
+    /// The offer is unchanged in every respect, including that it starts from the
+    /// space this box was *offered* (`constraints.max.height`) rather than from its
+    /// own used height — which is why this test states them equal, at 240.
+    #[test]
+    fn the_remaining_extent_still_shrinks_while_the_percentage_basis_does_not() {
+        let app = LayoutStyle::default().with_height(Dimension::Px(240.0));
+        let mut measurer = RecordBlockAxis::default();
+        FlowLayout.layout(
+            &app,
+            &[child(1), child(2)],
+            BoxConstraints::tight(Size::new(480.0, 240.0)),
+            &mut measurer,
+        );
+        assert_eq!(
+            measurer.0,
+            vec![(240.0, 240.0), (140.0, 240.0)],
+            "offer 240 → 140 as the first child takes 100; basis 240 both times"
+        );
+    }
+
+    /// An **indefinite** containing block stays indefinite, and a percentage keeps
+    /// behaving exactly as it did — the separate known gap recorded in
+    /// `docs/api/12-reality.md` ("percentages should resolve only against a
+    /// definite size"), deliberately NOT closed here.
+    ///
+    /// The container's `height: auto` means there is no basis to state, so the
+    /// child still resolves against the space available and the old compounding is
+    /// still observable (120 then 60). Per CSS both would be `auto` — a change to
+    /// the constraint model, not to this algorithm. This test exists so that fixing
+    /// the definite case did not quietly move the indefinite one.
+    #[test]
+    fn an_indefinite_containing_block_leaves_a_percentage_as_it_was() {
+        let app = LayoutStyle::default(); // height: auto
+        let out = FlowLayout.layout(
+            &app,
+            &[child(1), child(2)],
+            BoxConstraints::loose(Size::new(480.0, 240.0)),
+            &mut NestedBlocks(vec![percent_height_child(50.0), percent_height_child(50.0)]),
+        );
+        let boxes = out.child_boxes();
+        assert_eq!(
+            (boxes[0].size().height, boxes[1].size().height),
+            (120.0, 60.0)
+        );
+    }
+
+    /// A percentage `min-height` resolves against the containing block too: the
+    /// bound used to be resolved against the space the child was offered, so it
+    /// compounded down the sibling chain exactly like the `height` did.
+    #[test]
+    fn a_percentage_min_height_bound_resolves_against_the_containing_block() {
+        let app = LayoutStyle {
+            width: Dimension::Percent(100.0),
+            height: Dimension::Percent(100.0),
+            ..LayoutStyle::default()
+        };
+        let floored = LayoutStyle {
+            min_height: Dimension::Percent(50.0),
+            ..LayoutStyle::default()
+        };
+        let out = FlowLayout.layout(
+            &app,
+            &[child(1), child(2)],
+            BoxConstraints::tight(Size::new(480.0, 240.0)),
+            &mut NestedBlocks(vec![floored, floored]),
+        );
+        let boxes = out.child_boxes();
+        // 50% of 240 for BOTH, not 50% of what the first one left over.
+        assert_eq!(
+            (boxes[0].size().height, boxes[1].size().height),
+            (120.0, 120.0)
+        );
+    }
+
+    /// The mirrored path: in a vertical writing mode the block axis is physical
+    /// **width**, so it is `width: 50%` that used to compound across siblings.
+    ///
+    /// A `vertical-lr` container 480 wide with two `width: 50%` children gives 240
+    /// each — the second child starting where the first ends and touching the
+    /// container's block-end edge. Before the fix the second read 50% of the 240
+    /// that remained (120).
+    #[test]
+    fn vertical_percentage_block_size_resolves_against_the_containing_block() {
+        let app = LayoutStyle {
+            writing_mode: WritingMode::VerticalLr,
+            width: Dimension::Px(480.0),
+            height: Dimension::Px(240.0),
+            ..LayoutStyle::default()
+        };
+        let half = LayoutStyle {
+            width: Dimension::Percent(50.0),
+            height: Dimension::Percent(100.0),
+            ..LayoutStyle::default()
+        };
+        let out = FlowLayout.layout(
+            &app,
+            &[child(1), child(2)],
+            BoxConstraints::tight(Size::new(480.0, 240.0)),
+            &mut NestedBlocks(vec![half, half]),
+        );
+        let boxes = out.child_boxes();
+        assert_eq!(boxes[0].origin(), Point::new(0.0, 0.0));
+        assert_eq!(boxes[0].size(), Size::new(240.0, 240.0));
+        assert_eq!(boxes[1].origin(), Point::new(240.0, 0.0));
+        assert_eq!(boxes[1].size(), Size::new(240.0, 240.0));
     }
 }
