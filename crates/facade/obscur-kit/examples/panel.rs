@@ -48,13 +48,12 @@ const BAR_HEIGHT_PX: f32 = 36.0;
 /// The styling. `100%` height rather than a fixed one, because the compositor —
 /// not this sheet — decides the surface's real extent.
 ///
-/// The buttons carry an explicit `width` they should not need. `flex: 0 0 auto`
-/// ought to size them to their label, and in this kit it does not: an auto-basis
-/// item with no `flex-grow` absorbs the row's free space and starves the items
-/// that asked to grow. Measured on a 800px row — a plain text item took 700px
-/// while a sibling `flex: 1` got 0. Remove the widths once that is fixed.
+/// No `width` at all, deliberately: a `width: 100%` beside horizontal padding
+/// makes the border box 28px wider than the surface, and the right padding ends
+/// up off-screen with the last control pressed against the edge. The root fills
+/// its surface anyway.
 const CSS: &str = "\
-.bar    { width: 100%; height: 100%; \
+.bar    { height: 100%; \
           background-color: rgba(18, 22, 33, 0.82); \
           color: #dfe6ff; font-size: 15px; \
           display: flex; flex-direction: row; align-items: center; \
@@ -63,7 +62,7 @@ const CSS: &str = "\
 .spacer { flex: 1; }\n\
 .count  { color: #ffffff; font-size: 15px; white-space: nowrap; }\n\
 .clock  { color: #b9c6ea; font-size: 15px; white-space: nowrap; }\n\
-.key    { flex: 0 0 auto; width: 88px; white-space: nowrap; \
+.key    { flex: 0 0 auto; white-space: nowrap; \
           padding: 4px 12px; border: 0; border-radius: 8px; \
           background-color: rgba(38, 46, 69, 0.9); color: #dfe6ff; \
           font-size: 15px; \

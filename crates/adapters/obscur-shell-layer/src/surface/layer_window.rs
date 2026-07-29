@@ -152,7 +152,7 @@ impl LayerWindow {
         // The loop is built only after the roundtrip above, because a
         // `WaylandSource` consumes the queue and the outputs must be enumerated
         // first.
-        let mut event_loop: EventLoop<'static, LayerState> =
+        let event_loop: EventLoop<'static, LayerState> =
             EventLoop::try_new().map_err(|error| LayerShellError::Dispatch(error.to_string()))?;
         WaylandSource::new(connection.clone(), queue)
             .insert(event_loop.handle())

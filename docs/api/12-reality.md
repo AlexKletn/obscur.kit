@@ -66,7 +66,7 @@ path to the outside is that file is exported, compiles, and is called by nothing
 
 | | |
 |---|---|
-| **Flex clamps its own border box** | a flex container clamps rather than overflowing, so `width: 100%` + padding gives a different used width under flex than under block. The chain `[1000, 1020, 960]` is internally inconsistent |
+| **Flex clamps its own border box** | a flex container clamps rather than overflowing, so `width: 100%` + padding gives a different used width under flex than under block. The chain `[1000, 1020, 960]` is internally inconsistent. Related and *fixed*: an `auto` basis now resolves to max-content, so a plain item no longer eats the free space its growing siblings asked for |
 | **Indefinite axes and percentages** | percentages should resolve only against a definite size; the constraint model does not carry the distinction everywhere |
 | **No real min/max-content pair** | intrinsic sizing computes one number where the algorithm wants two |
 

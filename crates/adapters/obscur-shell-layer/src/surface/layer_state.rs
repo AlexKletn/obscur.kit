@@ -45,7 +45,7 @@ const BTN_MIDDLE: u32 = 0x112;
 /// the kit's own vocabulary and push onto [`events`](Self::events), and nothing
 /// here draws, lays out or blocks. The host drains the queue after each
 /// dispatch, so a slow frame cannot stall the connection.
-pub(super) struct LayerState {
+pub struct LayerState {
     pub(super) registry_state: RegistryState,
     pub(super) seat_state: SeatState,
     pub(super) output_state: OutputState,

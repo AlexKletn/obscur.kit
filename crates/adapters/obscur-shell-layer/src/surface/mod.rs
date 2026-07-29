@@ -1,5 +1,6 @@
 //! Surface module.
 mod layer_state;
+pub use layer_state::LayerState;
 mod layer_waker;
 pub use layer_waker::LayerWaker;
 mod layer_window;

@@ -333,6 +333,23 @@ impl LayoutAlgorithm for FlexLayout {
                 style.box_sizing.content_extent(h, bp_y)
             })
             .max(0.0);
+        // An **unbounded** main axis is the max-content *question*, and the honest
+        // answer is what the items need — not the infinity they were offered.
+        // `content_width` is `constraints.max.width - bp` for a `width: auto`
+        // container, which is the *block* answer: "as much as I was given". A flex
+        // container answering that under an infinite offer reports an infinite
+        // max-content, and every caller asking how wide it wants to be gets a
+        // number it cannot use — which is how a nested flex item came to swallow a
+        // whole flex line.
+        //
+        // The answer must be summed from the items, never read off their placed
+        // positions: `justify-content` has already spread them across the infinite
+        // line, so the rightmost edge is infinity too.
+        let main_unbounded = if is_row {
+            constraints.max.width.is_infinite()
+        } else {
+            constraints.max.height.is_infinite()
+        };
         let (container_main, container_cross) = if is_row {
             (content_width, content_height)
         } else {
@@ -469,16 +486,33 @@ impl LayoutAlgorithm for FlexLayout {
             } else if let Some(explicit) = main_dim.resolve(container_main) {
                 explicit_main(explicit)
             } else {
-                let measured = measurer.measure_child(
-                    index,
-                    BoxConstraints::loose(Size::new(content_width, content_height)),
-                );
-                if is_row {
-                    measured.width
+                // §9.2.3 step E: an `auto` basis with no definite main size
+                // resolves to the item's **max-content** size — what it needs,
+                // not what it was offered.
+                //
+                // Offering the container's content box instead is the same
+                // question a block child answers by *stretching*, so every plain
+                // item came back the width of the line. One such item then
+                // consumed the whole free space and starved the siblings that
+                // had declared `flex-grow`, which is the inverse of what those
+                // declarations mean.
+                //
+                // A fill-available item has no finite max-content; the line's
+                // own extent is the only honest answer for it, and grow/shrink
+                // then distribute from there as before.
+                let max_content = content_max_main(&mut *measurer, index, is_row, container_cross);
+                if max_content.is_finite() {
+                    max_content
                 } else {
-                    measured.height
+                    container_main
                 }
             };
+            if std::env::var_os("ZZ_FLEX").is_some() {
+                eprintln!(
+                    "[flex]   item {index}: base={base} grow={} basis={:?}",
+                    child.style.flex_grow, child.style.flex_basis
+                );
+            }
             let (min_main, max_main) = main_bounds(&child.style, is_row);
             let fb = base.max(0.0);
             let max_val = max_main.resolve(container_main).unwrap_or(f32::INFINITY);
@@ -608,8 +642,18 @@ impl LayoutAlgorithm for FlexLayout {
 
             // Clamp the container's OWN box into its authored min/max (spec §4.2)
             // — e.g. `min-height: 100vh` on a flex column fills a tall viewport.
+            // Same rule as the multi-line tail below: an unbounded main axis is
+            // asking what the content needs, and `content_main` — the items' base
+            // sizes plus gaps and margins — is exactly that answer.
+            let own_main = if main_unbounded {
+                content_main.max(0.0)
+            } else if is_row {
+                content_width
+            } else {
+                final_content_height
+            };
             let own_w = clamp_content(
-                content_width,
+                if is_row { own_main } else { content_width },
                 style.min_width,
                 style.max_width,
                 constraints.max.width,
@@ -617,7 +661,11 @@ impl LayoutAlgorithm for FlexLayout {
                 style.box_sizing,
             );
             let own_h = clamp_content(
-                final_content_height,
+                if is_row {
+                    final_content_height
+                } else {
+                    own_main
+                },
                 style.min_height,
                 style.max_height,
                 constraints.max.height,
@@ -779,20 +827,35 @@ impl LayoutAlgorithm for FlexLayout {
             cross_offset += line_cross;
             total_cross += line_cross;
         }
+        let main_content = if main_unbounded {
+            // Nothing wraps on an unbounded axis, so this is one line's worth —
+            // computed the same way the single-line path computes it.
+            let gap_span = gap * (count.saturating_sub(1) as f32);
+            let sum_base: f32 = base_main.iter().sum();
+            let sum_margin_main: f32 = main_lead
+                .iter()
+                .zip(main_trail.iter())
+                .map(|(l, t)| reserved(*l) + reserved(*t))
+                .sum();
+            (sum_base + gap_span + sum_margin_main).max(0.0)
+        } else {
+            container_main
+        };
+
         let (final_content_width, final_content_height) = if is_row {
             let h = if cross_is_auto {
                 total_cross
             } else {
                 content_height
             };
-            (content_width, h)
+            (main_content, h)
         } else {
             let w = if cross_is_auto {
                 total_cross
             } else {
                 content_width
             };
-            (w, content_height)
+            (w, main_content)
         };
 
         // Clamp the container's OWN box into its authored min/max (spec §4.2).
@@ -2764,9 +2827,13 @@ mod tests {
     #[test]
     fn flex_basis_max_content_measures_rather_than_degrading_to_auto() {
         // A 100px row holding an item whose content wants 200 on one line.
-        // `flex-basis: max-content` is 200 and overflows; `auto` would have taken
-        // the 100 it was offered — which is what the keyword silently did before,
-        // because `Dimension::resolve` answers `None` for it exactly as for `auto`.
+        // `flex-basis: max-content` is 200 and overflows.
+        //
+        // `auto` is 200 as well, and that is the point of §9.2.3 step E: an auto
+        // basis with no definite main size resolves to the item's max-content
+        // size, not to the space it was offered. This line used to assert `100` —
+        // the offer — and that assertion was the defect: a rigid item that took
+        // the whole line left nothing for the siblings that had asked to grow.
         let mut m = Paragraph {
             min: 30.0,
             max: 200.0,
@@ -2777,7 +2844,7 @@ mod tests {
         );
         approx(
             base_width_of(rigid_basis(Dimension::Auto), 100.0, &mut m),
-            100.0,
+            200.0,
         );
     }
 
@@ -2819,8 +2886,12 @@ mod tests {
         // The item is a nested `width: auto` block: it fills whatever it is
         // offered, and reports its own 200-wide content only when the offer is
         // unbounded. `fit-content` = min(max-content 200, max(min-content 0,
-        // stretch 400)) = 200 — the content. `auto` fills the 400px row, which is
-        // the answer `fit-content` degraded to before.
+        // stretch 400)) = 200 — the content.
+        //
+        // `auto` is 200 too. A flex item is content-sized along the main axis
+        // unless it asks to grow; filling the 400px row — which this line used to
+        // assert — is what a *block* child does, and answering the block question
+        // here is what starved growing siblings.
         struct FillAvailable;
         impl crate::algorithm::ChildMeasurer for FillAvailable {
             fn measure_child(&mut self, _index: usize, constraints: BoxConstraints) -> Size {
@@ -2842,7 +2913,7 @@ mod tests {
         );
         approx(
             base_width_of(rigid_basis(Dimension::Auto), 400.0, &mut FillAvailable),
-            400.0,
+            200.0,
         );
     }
 
