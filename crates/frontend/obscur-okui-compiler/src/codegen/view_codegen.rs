@@ -36,6 +36,13 @@
 //! symbols. The emitted handles are raw values (`from_raw(0x…)`) resolved from
 //! the registry at generation time.
 //!
+//! An **element** tag is emitted twice over: as the component id above, and as the
+//! reserved `TYPE` property carrying the tag as the node's *local name*, so a
+//! `button { … }` type selector matches an authored `<button>` (spec §4.13). Both
+//! halves come from the registry — [`name_binding::local_name_for`] owns the
+//! policy, including the rule that an authored `type="…"` wins the same slot — and
+//! the runtime bridge emits the identical property from the identical call.
+//!
 //! A tag naming **no** built-in resolves by the node's kind: a `<div>` is the
 //! `Container` box, and a `<Card>` is
 //! [`user_component_id("Card")`](name_binding::user_component_id) — the id
@@ -111,7 +118,9 @@
 
 use std::fmt::Write as _;
 
-use obscur_ui_ir::document::{UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrValue};
+use obscur_ui_ir::document::{
+    UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrProperty, UiIrValue,
+};
 use obscur_ui_ir::name_binding::{self, TagPosition};
 
 use crate::codegen::CodegenRoot;
@@ -534,9 +543,11 @@ fn emit_text_content(expression: &UiIrExpression) -> String {
 /// Appends the statement pushing a single `ViewNode::Element` for `node`.
 ///
 /// `position` comes from the caller's [`UiIrNodeKind`], which is where the front
-/// ends already recorded their component-vs-element verdict; it decides only what
-/// an unrecognised tag falls back to (a `Container` box, or the component's own
-/// name-derived id — see [`name_binding::component_id_for`]).
+/// ends already recorded their component-vs-element verdict; it decides what an
+/// unrecognised tag falls back to (a `Container` box, or the component's own
+/// name-derived id — see [`name_binding::component_id_for`]) **and** whether the
+/// tag is also emitted as the node's local name (see
+/// [`name_binding::local_name_for`]): an element is its tag, a component is not.
 fn emit_element(
     node: &UiIrNode,
     out: &mut String,
@@ -562,6 +573,29 @@ fn emit_element(
         // interpreted document and a compiled one the same outlet.
         let symbol = name_binding::attr_symbol_on(node.tag(), property.name()).raw();
         let value = emit_value(property.value(), root);
+        let _ = writeln!(
+            out,
+            "{inner}.with_prop({view}::ViewProperty::new({identity}::InternedSymbol::from_raw({symbol:#x}), {value}))"
+        );
+    }
+
+    // The tag itself, as the reserved TYPE property — the element's local name, so
+    // a `button { … }` / `td { … }` type selector matches what the author wrote
+    // (spec §4.13). Emitted *after* the authored properties, so every authored one
+    // keeps the index it was written at; skipped entirely when the author bound
+    // `type` themselves, which is `local_name_for`'s author-wins rule rather than
+    // this call site's. The runtime bridge emits the same property from the same
+    // call, which is what keeps an interpreted document and a compiled one the same
+    // element.
+    if let Some(local_name) = name_binding::local_name_for(
+        node.tag(),
+        position,
+        node.properties().iter().map(UiIrProperty::name),
+    ) {
+        let symbol = name_binding::TYPE.raw();
+        // Through `emit_literal`, so the implicit local name is spelled exactly as
+        // an authored `type="button"` would be — one shape for the one symbol.
+        let value = emit_literal(&UiIrValue::Text(local_name.into()), root);
         let _ = writeln!(
             out,
             "{inner}.with_prop({view}::ViewProperty::new({identity}::InternedSymbol::from_raw({symbol:#x}), {value}))"
@@ -730,6 +764,68 @@ mod tests {
             out.contains(r#"ViewValue::Text("logo.png".into())"#),
             "{out}"
         );
+    }
+
+    #[test]
+    fn an_element_tag_emits_its_local_name_under_the_type_symbol() {
+        // The generated code carries the element's own name, so the `button { … }`
+        // rules in the UA sheet (and an author's) match what the author wrote.
+        // TYPE symbol == 0x3; Button::COMPONENT_ID == 0x00D0_0001, because a
+        // lowercase `button` is the same control as `<Button/>`.
+        let out = expr(UiIrNode::element(0, "button"));
+        assert!(out.contains("ComponentId::from_raw(0xd00001)"), "{out}");
+        assert!(
+            out.contains(r#"InternedSymbol::from_raw(0x3), ::obscur_kit::view::view::ViewValue::Text("button".into())"#),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn an_authored_type_replaces_the_implicit_local_name() {
+        // One property under the shared symbol, carrying the author's value:
+        // `<button type="submit">` is HTML's spelling and the author owns the slot.
+        let out = expr(
+            UiIrNode::element(0, "button").with_property(UiIrProperty::text("type", "submit")),
+        );
+        assert_eq!(
+            out.matches("InternedSymbol::from_raw(0x3)").count(),
+            1,
+            "{out}"
+        );
+        assert!(out.contains(r#"ViewValue::Text("submit".into())"#), "{out}");
+        assert!(
+            !out.contains(r#"ViewValue::Text("button".into())"#),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn a_component_tag_emits_no_local_name() {
+        let out = expr(UiIrNode::component(0, "Card"));
+        assert!(!out.contains("InternedSymbol::from_raw(0x3)"), "{out}");
+    }
+
+    #[test]
+    fn the_emitted_local_name_is_what_the_runtime_bridge_lowers() {
+        // The two paths must stay byte-for-byte equivalent, and this property is the
+        // newest thing they both invent: an interpreted document and a compiled one
+        // would otherwise be styleable by type in only one of them. Compared through
+        // the *values*, since one path emits Rust text and the other a `ViewNode`.
+        for tag in ["button", "div", "td"] {
+            let node = UiIrNode::element(0, tag);
+            let view =
+                crate::bridge::UiIrViewBridge::document_to_view(&UiIrDocument::new(node.clone()));
+            let obscur_view::view::ViewNode::Element { props, .. } = &view.root().nodes()[0] else {
+                panic!("element");
+            };
+            let bridged = obscur_view::view::StyleAttributes::extract(props);
+            let out = expr(node);
+            assert_eq!(bridged.local_name(), Some(tag), "bridge: {tag}");
+            assert!(
+                out.contains(&format!(r#"ViewValue::Text("{tag}".into())"#)),
+                "codegen: {out}"
+            );
+        }
     }
 
     #[test]

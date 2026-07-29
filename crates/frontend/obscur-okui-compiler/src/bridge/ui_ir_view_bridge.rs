@@ -1,7 +1,9 @@
 //! `UiIrViewBridge`: lowers compiled UI IR into a desired-view [`View`]
 //! (spec §2.15, §2.11).
 
-use obscur_ui_ir::document::{UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrValue};
+use obscur_ui_ir::document::{
+    UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrProperty, UiIrValue,
+};
 use obscur_ui_ir::name_binding::{self, TagPosition};
 use obscur_view::view::{
     View, ViewEventBinding, ViewFragment, ViewKey, ViewNode, ViewProperty, ViewValue,
@@ -28,7 +30,11 @@ use obscur_view::view::{
 ///   deterministically hashed). IR [`events`](UiIrNode::events) become
 ///   [`ViewEventBinding`]s (`click`/`input`/`change` bind to the reserved
 ///   `EVENT_*` symbols the runtime dispatcher resolves) and the node's optional
-///   [`key`](UiIrNode::key) becomes a [`ViewKey`].
+///   [`key`](UiIrNode::key) becomes a [`ViewKey`]. An **element** tag additionally
+///   becomes the node's *local name* — the reserved `TYPE` property a §4.13 type
+///   selector matches, so `button { … }` styles an authored `<button>` — under
+///   [`name_binding::local_name_for`], which also decides that an authored
+///   `type="…"` wins that slot and that a component tag contributes no name.
 /// - **Text** → a [`ViewNode::Text`] carrying the literal content (and key, if
 ///   any).
 /// - **Fragment** → its children spliced into the surrounding fragment (a
@@ -102,6 +108,10 @@ impl UiIrViewBridge {
 /// `obscur-view` symbols the reconciler/matcher/dispatcher read, and the handler
 /// command resolves to a deterministic hashed symbol.
 ///
+/// An element tag is *also* the node's local name (the §4.13 type selector's
+/// input), which is what makes `<button>` a base element rather than an anonymous
+/// box; see [`name_binding::local_name_for`].
+///
 /// `position` comes from the caller's [`UiIrNodeKind`] rather than from the tag's
 /// spelling: the front ends already decided component-vs-element and recorded it
 /// on the node, and re-deriving it here would be a second copy of their rule.
@@ -115,6 +125,22 @@ fn lower_element(node: &UiIrNode, position: TagPosition) -> ViewNode {
             // already threading the node's position from it.
             name_binding::attr_symbol_on(node.tag(), property.name()),
             lower_value(property.value()),
+        ));
+    }
+    // The tag itself, as the reserved TYPE property — the element's local name, so
+    // an authored `<button>` is what a `button { … }` type selector matches (spec
+    // §4.13). Appended after the authored properties so each of those keeps its
+    // authored position, and skipped when the author bound `type` themselves; both
+    // rules live in `local_name_for`, which the code generator calls with the same
+    // arguments to emit the same property.
+    if let Some(local_name) = name_binding::local_name_for(
+        node.tag(),
+        position,
+        node.properties().iter().map(UiIrProperty::name),
+    ) {
+        view = view.with_prop(ViewProperty::new(
+            name_binding::TYPE,
+            ViewValue::Text(local_name.into()),
         ));
     }
     for event in node.events() {
@@ -198,7 +224,7 @@ mod tests {
     use super::*;
     use obscur_identity::ComponentId;
     use obscur_ui_ir::document::{UiIrEvent, UiIrProperty};
-    use obscur_view::view::{CLASS, EVENT_CLICK, ID, SRC};
+    use obscur_view::view::{CLASS, EVENT_CLICK, ID, SRC, TYPE};
 
     #[test]
     fn element_text_event_and_key_map_to_view_nodes() {
@@ -312,6 +338,75 @@ mod tests {
             .with_child(UiIrNode::element(3, "b"));
         let doc = UiIrDocument::new(root);
         assert_eq!(UiIrViewBridge::document_to_view(&doc).root().len(), 2);
+    }
+
+    /// The value of `symbol` on the single root element of the view `node` lowers
+    /// to, or `None` when the property is absent.
+    fn root_prop(node: UiIrNode, symbol: obscur_identity::InternedSymbol) -> Option<ViewValue> {
+        let view = UiIrViewBridge::document_to_view(&UiIrDocument::new(node));
+        let ViewNode::Element { props, .. } = &view.root().nodes()[0] else {
+            panic!("element");
+        };
+        props
+            .iter()
+            .find(|prop| prop.name() == symbol)
+            .map(|prop| prop.value().clone())
+    }
+
+    #[test]
+    fn an_authored_button_carries_button_as_its_local_name() {
+        // The two halves of "a base element, as in HTML": the shipped widget's id,
+        // and the local name a `button { … }` type selector matches (§4.13). The
+        // node used to have neither — a `<button>` was an anonymous `div`.
+        let view =
+            UiIrViewBridge::document_to_view(&UiIrDocument::new(UiIrNode::element(1, "button")));
+        let ViewNode::Element {
+            component, props, ..
+        } = &view.root().nodes()[0]
+        else {
+            panic!("element");
+        };
+        assert_eq!(*component, ComponentId::from_raw(0x00D0_0001));
+        let attributes = obscur_view::view::StyleAttributes::extract(props);
+        assert_eq!(attributes.local_name(), Some("button"));
+    }
+
+    #[test]
+    fn every_element_tag_reaches_the_tree_with_its_name() {
+        // Not a button feature: the whole element vocabulary was anonymous.
+        for tag in ["div", "span", "td", "img"] {
+            assert_eq!(
+                root_prop(UiIrNode::element(1, tag), TYPE),
+                Some(ViewValue::Text(tag.into())),
+                "{tag}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_authored_type_wins_over_the_implicit_local_name() {
+        // `<button type="submit">` is HTML's own spelling, and TYPE is the one symbol
+        // both channels share: the author's value is the only one on the node.
+        let node =
+            UiIrNode::element(1, "button").with_property(UiIrProperty::text("type", "submit"));
+        let view = UiIrViewBridge::document_to_view(&UiIrDocument::new(node));
+        let ViewNode::Element { props, .. } = &view.root().nodes()[0] else {
+            panic!("element");
+        };
+        let types: Vec<&ViewValue> = props
+            .iter()
+            .filter(|prop| prop.name() == TYPE)
+            .map(ViewProperty::value)
+            .collect();
+        assert_eq!(types, vec![&ViewValue::Text("submit".into())]);
+    }
+
+    #[test]
+    fn a_component_tag_gets_no_local_name() {
+        // A `<Card/>` node is a seam, not a box an author styles by type; the
+        // elements its render produces carry their own names.
+        assert_eq!(root_prop(UiIrNode::component(1, "Card"), TYPE), None);
+        assert_eq!(root_prop(UiIrNode::component(1, "Button"), TYPE), None);
     }
 
     #[test]

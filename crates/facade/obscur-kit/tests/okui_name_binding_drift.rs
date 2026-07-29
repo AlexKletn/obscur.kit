@@ -123,12 +123,48 @@ fn resolved_tags_bind_to_the_real_component_ids() {
         name_binding::component_id_for("img", TagPosition::Element),
         Image::COMPONENT_ID
     );
+    // The lowercase base-element spelling is the same widget as the component one:
+    // HTML has a `<button>`, and so does this. It used to name no built-in, so it
+    // fell through to `Container`.
+    assert_eq!(
+        name_binding::component_id_for("button", TagPosition::Element),
+        Button::COMPONENT_ID
+    );
     assert_eq!(
         name_binding::component_id_for("div", TagPosition::Element),
         Container::COMPONENT_ID
     );
     assert_eq!(name_binding::attr_symbol("src"), view::SRC);
     assert_eq!(name_binding::event_symbol("click"), view::EVENT_CLICK);
+}
+
+#[test]
+fn an_authored_element_and_the_rust_widget_share_one_css_type() {
+    // The local name `name_binding::local_name_for` gives an authored `<button>`
+    // must be the SAME string `obscur_widgets::Button::view` sets under the
+    // reserved TYPE symbol — that is the whole reason `button { … }` can be written
+    // once and style both. Drift here splits the UA stylesheet in two: the rule
+    // would reach the Rust widget and not the markup, or the reverse, and nothing
+    // else in either crate would notice.
+    let node = Button::new("OK", obscur_kit::identity::InternedSymbol::named("save"))
+        .view()
+        .into_fragment()
+        .nodes()
+        .to_vec()
+        .remove(0);
+    let view::ViewNode::Element { props, .. } = &node else {
+        panic!("a button's view is an element");
+    };
+    let widget_type = view::StyleAttributes::extract(props)
+        .local_name()
+        .map(str::to_owned);
+    assert_eq!(widget_type.as_deref(), Some("button"));
+    assert_eq!(
+        name_binding::local_name_for("button", TagPosition::Element, [] as [&str; 0]),
+        widget_type.as_deref()
+    );
+    // And the symbol the frontend emits it under is the one the matcher reads.
+    assert_eq!(name_binding::TYPE, view::TYPE);
 }
 
 // ---- widget contract drift (§2.13) ---------------------------------------

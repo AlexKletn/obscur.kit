@@ -68,8 +68,10 @@ style a `List` or a `Table`, use classes.
 
 That cuts both ways: the UA sheet also carries `table`, `th`, `td`, `a`,
 `fieldset` and `img` rules, and **nothing in the widget or primitive tier sets
-those types**. They match only a node an application types by hand with the
-`TYPE` property.
+those types**. They match a node an application types by hand with the `TYPE`
+property — and, since `name_binding::local_name_for`, every element tag written in
+markup: an authored `<td>` is typed `td` by its tag alone, so those rules reach
+`.okui` / `okui!` markup without an application naming anything.
 
 ### The trap worth knowing before you style one
 

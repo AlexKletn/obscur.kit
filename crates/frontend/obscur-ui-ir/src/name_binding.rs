@@ -22,6 +22,11 @@
 //!   primitive, so it is a real, styleable box; a *component* tag (`Card`) maps
 //!   to [`user_component_id`], the id `#[derive(Contract)]` computes for the very
 //!   same name.
+//! - **Tags → a local name (CSS *type*)**: an *element* tag is also the node's
+//!   own **local name**, the string a §4.13 type selector matches — `<button>`
+//!   is what `button { … }` styles, exactly as in HTML. [`local_name_for`] is
+//!   that policy, and it is the reason both lowering paths emit a [`TYPE`]
+//!   property nobody authored.
 //! - **Attribute names → [`InternedSymbol`]**: the CSS/reserved attributes
 //!   (`class`, `id`, `type`, `src`, `disabled`, `checked`) map to the reserved
 //!   `obscur-view` symbols the reconciler and matcher read; any other name is
@@ -48,6 +53,24 @@
 //! fallback it wants, so the wrong one can no longer be picked by omission —
 //! though it remains perfectly spellable, and only the call sites' agreement
 //! with their node's kind keeps it right.
+//!
+//! # Why an element tag is also a name
+//!
+//! It was not. A tag resolved to a [`ComponentId`] and to nothing else, and a
+//! `ComponentId` is not a selector input — no part of matching reads one. So
+//! every authored element reached the tree **anonymous**: `<button>`, `<div>` and
+//! `<td>` were three nodes with no local name, and `button { … }`, `div { … }`,
+//! `td { … }` — including the rules the facade's own UA stylesheet is written
+//! entirely in — matched none of them. Only the hand-written widgets styled
+//! themselves, by setting the reserved [`TYPE`] property in Rust
+//! (`obscur_widgets::Button::view`). Authored markup could be styled by class and
+//! by id, and by type never.
+//!
+//! [`local_name_for`] is the missing half: an element tag is the node's local
+//! name as well as its id, so a `.okui`/`okui!` `<button>` is a real base element
+//! in the HTML sense — the UA sheet's `button { … }` reaches it, and so does an
+//! author's. Both lowering paths call it, and neither may open-code the rule: the
+//! bytes they emit have to stay identical, which is what this module is for.
 //!
 //! # The id of a component nobody here can see
 //!
@@ -239,8 +262,9 @@ pub enum TagPosition {
 /// no built-in.
 ///
 /// Built-in widgets and non-container primitives resolve to their stable
-/// `COMPONENT_ID`; the lowercase `img`/`canvas`/… element spellings resolve to
-/// the same primitive as their PascalCase component spelling.
+/// `COMPONENT_ID`; the lowercase `button`/`img`/`canvas`/… element spellings
+/// resolve to the same widget or primitive as their PascalCase component
+/// spelling.
 ///
 /// [`OUTLET_TAG`] is the one entry here that is not a component at all: nothing is
 /// ever registered under [`SLOT_OUTLET`], and no node ever retains it — projection
@@ -253,8 +277,14 @@ pub fn builtin_component_id(tag: &str) -> Option<ComponentId> {
     let id = match tag {
         // The §2.12 slot outlet — a position, not a component (see above).
         OUTLET_TAG => SLOT_OUTLET,
+        // The one widget with a **base-element** spelling as well as a component
+        // one: HTML has a `<button>`, so this toolkit has one too, and it is the
+        // same control either way — `<button>` is not a user component that
+        // happens to be called that, and not a `div` (which is what it used to
+        // resolve to, by falling through to `CONTAINER`). Same "one handle, two
+        // spellings" rule the `Image`/`img` pairs below already follow.
+        "Button" | "button" => BUTTON,
         // Widgets (PascalCase component spelling).
-        "Button" => BUTTON,
         "Input" => INPUT,
         "Checkbox" => CHECKBOX,
         "Select" => SELECT,
@@ -284,11 +314,11 @@ pub fn builtin_component_id(tag: &str) -> Option<ComponentId> {
 /// to.
 ///
 /// A built-in's **id** always wins: `<Button/>` resolves to the shipped widget's
-/// `COMPONENT_ID` rather than to a hash of the string, and `img`/`Image` are the
-/// same primitive. That is a claim about the handle, not about what renders — a
-/// host that registers its own factory under `Button::COMPONENT_ID` (which is
-/// what `#[contract(name = "Button")]` derives) takes the tag over, and this
-/// function neither knows nor prevents it.
+/// `COMPONENT_ID` rather than to a hash of the string, and `img`/`Image`,
+/// `button`/`Button` are one handle each. That is a claim about the handle, not
+/// about what renders — a host that registers its own factory under
+/// `Button::COMPONENT_ID` (which is what `#[contract(name = "Button")]` derives)
+/// takes the tag over, and this function neither knows nor prevents it.
 ///
 /// Otherwise the fallback follows the position — an element tag is the generic
 /// [`CONTAINER`] box, a component tag is its own [`user_component_id`].
@@ -301,6 +331,72 @@ pub fn component_id_for(tag: &str, position: TagPosition) -> ComponentId {
         TagPosition::Element => CONTAINER,
         TagPosition::Component => user_component_id(tag),
     }
+}
+
+/// The **local name** (CSS *type*) the tag contributes to the node it lowers to,
+/// or [`None`] when it contributes none.
+///
+/// This is the whole of "a base element, as in HTML": a `<button>` an author
+/// wrote must be what a `button { … }` type selector matches (spec §4.13, "type,
+/// class, id, attribute, descendant/child/sibling combinators"), and the matcher
+/// reads an element's local name from the reserved [`TYPE`] property — nothing
+/// else. So both lowering paths append a `TYPE` property nobody authored, and
+/// this function is the single definition of when and to what, because the two
+/// paths must emit the same bytes.
+///
+/// # `type` is two channels, and the author owns it
+///
+/// [`TYPE`] is overloaded, and honestly so: it is *both* the element's local name
+/// (this function's implicit value) *and* the reserved symbol an authored
+/// `type="…"` attribute binds to — and HTML really does write
+/// `<button type="submit">`, so the collision is not hypothetical. There is one
+/// slot and two writers, so the rule is that the **author wins**: given any
+/// authored attribute that binds to `TYPE`, this returns [`None`] and the node
+/// carries the authored value alone. `<button type="submit">` is therefore an
+/// element whose CSS type is `submit`, which is the price of the overload and not
+/// a thing to paper over: an author who wants both spellings out of one node has
+/// to say so with a class. (`authored_attributes` is asked for by *name*, not by
+/// resolved symbol, so the caller cannot forget to route it through
+/// [`attr_symbol_on`] — this function does that itself, on the same tag.)
+///
+/// # A component tag gets none
+///
+/// `<Card/>` is not an element; it names a component, whose own render produces
+/// the elements — and each of *those* carries its own local name (that is exactly
+/// what `obscur_widgets::Button::view` sets `TYPE` for). Naming the *host* node
+/// `Card` would invent a CSS type no vocabulary has, and a costly one: a type
+/// selector is matched ASCII-case-**insensitively**
+/// (`SelectorMatcher::matches_simple`), so a `<Card/>` and a hypothetical `<card>`
+/// element would be indistinguishable to the cascade. A component's node
+/// therefore stays anonymous to type selectors and is styled by class, by id, or
+/// by whatever its render emits — the same rule §2.12 slot projection already
+/// implies, where the host node is a seam rather than a box the author styles.
+///
+/// # And so does the outlet
+///
+/// [`OUTLET_TAG`] is written in element position but is not an element either: it
+/// is a *position marker*, substituted away by `project_slots` before the tree is
+/// reconciled (and reported as stray if it is not), so no retained node ever
+/// carries `slot` as its type and no type selector could ever match one. Naming it
+/// would be dead weight — and worse than dead: an authored `<slot name="header"/>`
+/// must be **the same node** a component's own `ViewNode::slot("header")` builds,
+/// "one outlet, two spellings, not two outlets"
+/// (`okui_slot_projection.rs::an_authored_slot_tag_is_the_outlet_on_the_macro_front_end`
+/// asserts that equality outright). An extra property on one of the two spellings
+/// would split them.
+#[must_use]
+pub fn local_name_for<'tag, 'attr>(
+    tag: &'tag str,
+    position: TagPosition,
+    authored_attributes: impl IntoIterator<Item = &'attr str>,
+) -> Option<&'tag str> {
+    if position != TagPosition::Element || tag == OUTLET_TAG {
+        return None;
+    }
+    let authored_type = authored_attributes
+        .into_iter()
+        .any(|name| attr_symbol_on(tag, name) == TYPE);
+    (!authored_type).then_some(tag)
 }
 
 /// The [`ComponentId`] a **user** component tag binds to: FNV-1a 64 of the name,
@@ -464,6 +560,20 @@ mod tests {
     }
 
     #[test]
+    fn the_lowercase_button_tag_is_the_same_control_as_the_pascalcase_one() {
+        // HTML has a `<button>`; so does this. The lowercase spelling used to name
+        // no built-in at all, so it fell through to CONTAINER — an authored
+        // `<button>` was a `div`.
+        assert_eq!(builtin_component_id("button"), Some(BUTTON));
+        assert_eq!(component_id_for("button", TagPosition::Element), BUTTON);
+        assert_eq!(
+            component_id_for("button", TagPosition::Element),
+            component_id_for("Button", TagPosition::Component)
+        );
+        assert_ne!(component_id_for("button", TagPosition::Element), CONTAINER);
+    }
+
+    #[test]
     fn image_element_and_component_spellings_agree() {
         assert_eq!(component_id_for("img", TagPosition::Element), IMAGE);
         assert_eq!(component_id_for("Image", TagPosition::Component), IMAGE);
@@ -525,6 +635,74 @@ mod tests {
     #[test]
     fn user_component_ids_are_deterministic() {
         assert_eq!(user_component_id("Card"), user_component_id("Card"));
+    }
+
+    #[test]
+    fn an_element_tag_is_its_own_local_name() {
+        // The defect this function exists for: an authored element reached the tree
+        // with a ComponentId and nothing else, so no type selector could match it —
+        // `button { … }`, and the whole UA stylesheet with it, styled nothing an
+        // author wrote.
+        for tag in ["button", "div", "span", "td", "img", "something-custom"] {
+            assert_eq!(
+                local_name_for(tag, TagPosition::Element, [] as [&str; 0]),
+                Some(tag),
+                "{tag}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_component_tag_has_no_local_name() {
+        // A component names a component; the elements its render produces carry
+        // their own names. And a type selector matches ASCII-case-insensitively, so
+        // a local name `Card` would be indistinguishable from a `<card>` element.
+        assert_eq!(
+            local_name_for("Card", TagPosition::Component, [] as [&str; 0]),
+            None
+        );
+        assert_eq!(
+            local_name_for("Button", TagPosition::Component, [] as [&str; 0]),
+            None
+        );
+    }
+
+    #[test]
+    fn an_authored_type_attribute_wins_the_local_name_slot() {
+        // TYPE is two channels through one symbol — the CSS local name and HTML's
+        // own `<button type="submit">`. The author owns it: given an authored
+        // binding, the implicit name stands down rather than emitting a second
+        // property under the same symbol.
+        assert_eq!(
+            local_name_for("button", TagPosition::Element, ["type"]),
+            None
+        );
+        assert_eq!(
+            local_name_for("button", TagPosition::Element, ["class", "type", "id"]),
+            None
+        );
+        // Only that one attribute: everything else leaves the name in place.
+        assert_eq!(
+            local_name_for("button", TagPosition::Element, ["class", "id", "test-id"]),
+            Some("button")
+        );
+    }
+
+    #[test]
+    fn the_outlet_tag_has_no_local_name_either() {
+        // A §2.12 outlet is a position marker that projection substitutes away, so
+        // no retained node ever carries `slot` as a type — and an authored
+        // `<slot name="header"/>` has to stay *the same node* a component's own
+        // `ViewNode::slot("header")` builds. A property on one spelling and not the
+        // other would be two outlets.
+        assert_eq!(
+            local_name_for(OUTLET_TAG, TagPosition::Element, [] as [&str; 0]),
+            None
+        );
+        assert_eq!(
+            local_name_for(OUTLET_TAG, TagPosition::Element, ["name"]),
+            None
+        );
     }
 
     #[test]
