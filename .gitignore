@@ -6,3 +6,6 @@ Cargo.lock.orig
 # The out-of-workspace consumer fixture builds into its own directory.
 /checks/*/target
 /checks/*/Cargo.lock
+
+# Machine-local cargo settings (job caps etc.), never the project's.
+/.cargo/
