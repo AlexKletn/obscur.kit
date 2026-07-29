@@ -24,6 +24,7 @@ use obscur_interaction::command::{
     Command, CommandRegistry, CommandRouter, CommandState, KeyEvent, LogicalKey, Modifier,
     Modifiers, NamedKey, Shortcut,
 };
+use obscur_interaction::event::{EventDispatcher, EventOrigin, EventPhase, ListenerPhase, UiEvent};
 use obscur_interaction::focus::{FocusScope, FocusScopeId};
 use obscur_interaction::gesture::{Fling, LongPressRecognizer, PanRecognizer, RecognizerId};
 use obscur_interaction::hover::{HoverChain, HoverTransition};
@@ -75,8 +76,8 @@ use obscur_view::view::{
 };
 
 use super::{
-    AppCommands, CommandTarget, FrameBudget, FramePlan, KeyDispatch, PointerDispatch,
-    SemanticTreeBuilder, TextEditSession,
+    AppCommands, CommandHandler, CommandTarget, EventListener, FrameBudget, FramePlan,
+    IntoCommandHandler, KeyDispatch, PointerDispatch, SemanticTreeBuilder, TextEditSession,
 };
 use crate::frame::{FrameContext, FrameId, FrameReason, FrameResult};
 use crate::invalidation::{Invalidation, InvalidationReason, InvalidationRouter, RestyleScope};
@@ -533,11 +534,13 @@ pub struct UiRuntime {
     /// View (via [`ViewEventBinding`](obscur_view::view::ViewEventBinding)) and
     /// registers the *same* symbol here via
     /// [`on_command`](Self::on_command); the runtime only *compares* symbols, so
-    /// no interner coherence is needed. A handler is a `FnMut()` that typically
-    /// captures app state through an `Rc<RefCell<_>>`/`Rc<Cell<_>>`. Exactly one
-    /// handler per command (a later registration replaces an earlier one), so
-    /// this link is a deterministic single lookup — no iteration order observed.
-    handlers: HashMap<InternedSymbol, Box<dyn FnMut()>>,
+    /// no interner coherence is needed. A handler takes either shape
+    /// [`IntoCommandHandler`] accepts — nothing, or the propagating
+    /// [`UiEvent`] — and typically captures app state through an
+    /// `Rc<RefCell<_>>`/`Rc<Cell<_>>`. Exactly one handler per command (a later
+    /// registration replaces an earlier one), so this link is a deterministic
+    /// single lookup — no iteration order observed.
+    handlers: HashMap<InternedSymbol, CommandHandler>,
     /// The **per-node** command-handler registry — links 1 and 3 of §2.6's
     /// routing chain: the focused node's own handlers and its ancestors'.
     ///
@@ -554,7 +557,25 @@ pub struct UiRuntime {
     /// that keeps its node. A registration whose node is gone is unreachable
     /// (the route can never name it) but is not automatically reaped; see
     /// [`clear_node_commands`](Self::clear_node_commands).
-    node_handlers: HashMap<(NodeId, InternedSymbol), Box<dyn FnMut()>>,
+    node_handlers: HashMap<(NodeId, InternedSymbol), CommandHandler>,
+    /// The **per-node event listeners** — §2.3's capture and bubble phases, keyed
+    /// by `(node, command)` and held in registration order.
+    ///
+    /// Distinct from [`node_handlers`](Self::node_handlers) in both cardinality
+    /// and purpose, and the distinction is §2.3's rather than this
+    /// implementation's: a *handler* is the single piece of logic that **claims** a
+    /// command on §2.6's chain, whereas a *listener* observes and steers a command
+    /// as it propagates and never claims anything. §2.3's
+    /// `stop_immediate_propagation` — "skip the remaining handlers on the current
+    /// node" — presupposes that a node can carry more than one, which is why this
+    /// is a `Vec` while `node_handlers` is a single slot.
+    ///
+    /// Populated by [`add_event_listener`](Self::add_event_listener), walked by
+    /// [`propagate`](Self::propagate). Empty for every application that has not
+    /// asked for a listener, which is why introducing the phases changed no
+    /// existing behaviour: with no listeners the walk visits the same nodes and
+    /// calls nothing.
+    listeners: HashMap<(NodeId, InternedSymbol), Vec<EventListener>>,
     /// The open [`FocusScope`]s, outermost first — a stack, since dialogs and
     /// menus nest (spec §7.1). Pushed by
     /// [`open_focus_scope`](Self::open_focus_scope), popped by
@@ -571,7 +592,7 @@ pub struct UiRuntime {
     /// §2.6 places the focus scope *before* the ancestors, so a scope's handler
     /// beats that of any container between the focused node and the scope — an
     /// open dialog's Escape/Save wins over an intervening layout wrapper's.
-    scope_handlers: HashMap<(FocusScopeId, InternedSymbol), Box<dyn FnMut()>>,
+    scope_handlers: HashMap<(FocusScopeId, InternedSymbol), CommandHandler>,
     /// The **application** fallback — link 5, the chain's last: a shared handle,
     /// so every window's runtime can be given the *same* registry (spec §2.6).
     /// Empty by default; installed with
@@ -1052,6 +1073,7 @@ impl UiRuntime {
             click_count: 1,
             handlers: HashMap::new(),
             node_handlers: HashMap::new(),
+            listeners: HashMap::new(),
             scopes: Vec::new(),
             scope_handlers: HashMap::new(),
             app_commands: AppCommands::new(),
@@ -4583,7 +4605,10 @@ impl UiRuntime {
                     command = Some(resolved);
                     current_target = Some(bound);
                 }
-                self.activate(pressed);
+                // The activating event travels with the command: §2.4's payload
+                // (pointer id, device, buttons, position, pressure) and §2.3's
+                // trust reach the handler because this envelope carries them.
+                self.activate(pressed, UiEvent::from_pointer(event));
                 // A click on a virtualized row: resolve it to the model index and run
                 // the list's row-click handler. This is independent of command
                 // activation — the row carries no per-row binding, since one symbol
@@ -4978,7 +5003,7 @@ impl UiRuntime {
                         }
                     }
                     None => {
-                        self.fire_long_press(hold.target);
+                        self.fire_long_press(hold.target, hold.trusted);
                     }
                 }
             }
@@ -4992,9 +5017,26 @@ impl UiRuntime {
 
     /// Dispatches the `EVENT_LONG_PRESS` command bound at or above `node`.
     /// Returns whether a handler ran.
-    fn fire_long_press(&mut self, node: NodeId) -> bool {
+    ///
+    /// The envelope reports [`EventOrigin::Gesture`], not `Pointer`: a long press
+    /// is what a **recognizer** concluded from a contact that stayed put, and §2.4
+    /// treats recognized gestures as their own source ("Competing recognizers use a
+    /// gesture arena"). It carries no pointer payload for the same reason — the
+    /// event that fires this one is the *passage of time*, not a pointer event, so
+    /// there is no position to report that the contact is still at. `trusted`
+    /// follows the contact that armed the hold: a recognizer cannot vouch for a
+    /// gesture the platform never reported.
+    fn fire_long_press(&mut self, node: NodeId, trusted: bool) -> bool {
+        let envelope = {
+            let envelope = UiEvent::detached(EventOrigin::Gesture);
+            if trusted {
+                envelope.as_trusted()
+            } else {
+                envelope
+            }
+        };
         match self.command_for_event_bubbling(node, EVENT_LONG_PRESS) {
-            Some((_bound, command)) => self.dispatch_command_from(Some(node), command),
+            Some((_bound, command)) => self.dispatch_command_event(Some(node), command, envelope),
             None => false,
         }
     }
@@ -5340,8 +5382,9 @@ impl UiRuntime {
 
     /// Activates the control at `node`: dispatches its
     /// [`activation_command_for`](Self::activation_command_for) command
-    /// (`EVENT_CLICK` else `EVENT_CHANGE`), running the registered handler.
-    /// Returns whether a handler actually ran.
+    /// (`EVENT_CLICK` else `EVENT_CHANGE`) as a §2.3 propagation carrying
+    /// `envelope`, running the registered handler. Returns whether a handler
+    /// actually ran.
     ///
     /// This is the shared entry point for both a pointer click (in
     /// [`handle_pointer`](Self::handle_pointer)) and an Enter/Space keypress on
@@ -5349,7 +5392,14 @@ impl UiRuntime {
     /// activation binding in the node's ancestor chain — or no handler
     /// registered for the resolved command — it is a harmless no-op that returns
     /// `false` and never panics.
-    fn activate(&mut self, node: NodeId) -> bool {
+    ///
+    /// `envelope` is the *device* event that caused the activation, built by
+    /// [`UiEvent::from_pointer`] or [`UiEvent::from_key`] at the call site. It is
+    /// what carries §2.4's payload — the pointer's id, position, button, device
+    /// and pressure, or the key — through to the handler. Before it, activation
+    /// dispatched a command symbol and nothing else, so a handler could not tell
+    /// a click from an Enter, let alone read where the click landed.
+    fn activate(&mut self, node: NodeId, envelope: UiEvent) -> bool {
         // A disabled control is inert: it fires no activation command, whether the
         // activation came from a pointer click or an Enter/Space keypress.
         if self.is_within_disabled(node) {
@@ -5361,7 +5411,9 @@ impl UiRuntime {
             // the control the user hit (§2.6's chain, rooted at the origin). For
             // an Enter/Space activation `node` *is* the focused node, so both
             // callers get the spec's route.
-            Some((_current_target, command)) => self.dispatch_command_from(Some(node), command),
+            Some((_current_target, command)) => {
+                self.dispatch_command_event(Some(node), command, envelope)
+            }
             None => false,
         }
     }
@@ -5381,12 +5433,37 @@ impl UiRuntime {
     /// The `command` symbol is app-owned and must be the **same** symbol the
     /// application binds its `on-click` event to in the View (via
     /// [`ViewEventBinding`](obscur_view::view::ViewEventBinding)); the runtime
-    /// only compares symbols, so no interner is shared. The handler is a
-    /// `FnMut()` that typically captures mutable app state through an
-    /// `Rc<RefCell<_>>`/`Rc<Cell<_>>`. Registering does not itself schedule a
-    /// frame.
-    pub fn on_command(&mut self, command: InternedSymbol, handler: impl FnMut() + 'static) {
-        self.handlers.insert(command, Box::new(handler));
+    /// only compares symbols, so no interner is shared. The handler typically
+    /// captures mutable app state through an `Rc<RefCell<_>>`/`Rc<Cell<_>>`.
+    /// Registering does not itself schedule a frame.
+    ///
+    /// # Two accepted shapes (spec §2.3)
+    ///
+    /// `handler` may be either
+    ///
+    /// ```ignore
+    /// rt.on_command(SAVE, || save());                        // takes nothing
+    /// rt.on_command(PICK, |e: &mut UiEvent| pick(e));        // takes the event
+    /// ```
+    ///
+    /// because [`IntoCommandHandler`] converts both into one stored shape. The
+    /// event form is how §2.3's API becomes reachable: `e.target()` is the node
+    /// that was hit, `e.current_target()` the node whose binding resolved,
+    /// `e.pointer()` / `e.key()` the §2.4 payload, `e.is_trusted()` the
+    /// trusted/untrusted origin, and `e.stop_propagation()` /
+    /// `e.prevent_default()` the steering. **All of it was unreachable before**:
+    /// this method used to take `impl FnMut()`, a closure given nothing, so a
+    /// handler could not learn which of two nodes bound to the same command had
+    /// been clicked — and the only escapes were the bespoke per-case signatures
+    /// (`on_row_click`, `on_scroll`) carved out one interaction at a time.
+    ///
+    /// The zero-argument form is not deprecated and is still the right shape for
+    /// most handlers; a one-argument closure needs its parameter annotated
+    /// (`|e: &mut UiEvent|`) because inference cannot pick the marker and the
+    /// closure signature simultaneously.
+    pub fn on_command<M>(&mut self, command: InternedSymbol, handler: impl IntoCommandHandler<M>) {
+        self.handlers
+            .insert(command, handler.into_command_handler());
     }
 
     /// Returns whether a handler is registered for `command`.
@@ -5402,10 +5479,9 @@ impl UiRuntime {
     ///
     /// This is the chain's keyboard/semantic-command entry point: the origin is
     /// [`focused`](Self::focused), exactly as §2.6 specifies. A *pointer*
-    /// activation instead originates at the node the user clicked, so
-    /// [`activate`](Self::activate) calls
-    /// [`dispatch_command_from`](Self::dispatch_command_from) with that node —
-    /// routing a click from wherever focus happened to be would be wrong.
+    /// activation instead originates at the node the user clicked, so the
+    /// internal activation path dispatches from *that* node — routing a click
+    /// from wherever focus happened to be would be wrong.
     ///
     /// With no link claiming the command this is a no-op that returns `false`
     /// and schedules no frame, so an unbound command (or one whose handler the
@@ -5418,44 +5494,238 @@ impl UiRuntime {
     /// through here, so one state governs every surface (spec §6.7). A symbol
     /// with no registered command is unconstrained, so applications routing raw
     /// symbols without a descriptor are unaffected.
-    fn dispatch_command(&mut self, command: InternedSymbol) -> bool {
+    ///
+    /// This is also the surface a **menu item or a toolbar button** dispatches
+    /// through: §2.6's input layers end in "semantic command", and a command
+    /// invoked from a menu has no device event behind it, so the event that
+    /// propagates reports [`EventOrigin::Synthetic`] and an empty payload rather
+    /// than a fabricated click.
+    pub fn dispatch_command(&mut self, command: InternedSymbol) -> bool {
         self.dispatch_command_from(self.focused, command)
     }
 
-    /// Routes `command` down §2.6's chain starting at `origin`, gated by the
-    /// command's registered [`CommandState`], requesting an input frame when a
-    /// link claimed it. Returns whether a handler ran.
+    /// Routes `command` down §2.6's chain starting at `origin` with **no device
+    /// payload**, gated by the command's registered [`CommandState`], requesting
+    /// an input frame when a link claimed it. Returns whether a handler ran.
     ///
     /// `origin` is the node the command *came from*: the focused node for a
     /// keyboard shortcut, the clicked node for a pointer activation. `None`
     /// leaves only the non-positional links (window, application) — which is the
     /// honest route when nothing is focused and nothing was clicked.
+    ///
+    /// The envelope this builds reports [`EventOrigin::Synthetic`] and carries
+    /// [`EventPayload::Empty`](obscur_interaction::event::EventPayload::Empty),
+    /// because a caller reaching in through this path *is* a programmatic
+    /// dispatch (§7.4): there is no device state to report, and inventing a
+    /// pointer at the origin would hand a handler a position no finger was ever
+    /// at. A dispatch that does have a device behind it goes through
+    /// [`dispatch_command_event`](Self::dispatch_command_event) with that device's
+    /// event instead.
     fn dispatch_command_from(&mut self, origin: Option<NodeId>, command: InternedSymbol) -> bool {
+        self.dispatch_command_event(origin, command, UiEvent::detached(EventOrigin::Synthetic))
+    }
+
+    /// Dispatches `command` from `origin` as a full §2.3 propagation, carrying
+    /// `envelope`'s origin, trust, timestamp and device payload. Returns whether a
+    /// §2.6 link claimed the command.
+    ///
+    /// This is the one place the §2.3 event model and §2.6's routing chain meet,
+    /// and it runs the spec's four steps in order:
+    ///
+    /// > Event propagation:
+    /// >
+    /// > 1. capture;
+    /// > 2. target;
+    /// > 3. bubble;
+    /// > 4. default action.
+    ///
+    /// Steps 1–3 are [`propagate`](Self::propagate): the event descends the node
+    /// path to `origin`, fires at it, and ascends, running the listeners
+    /// registered with [`add_event_listener`](Self::add_event_listener) and
+    /// updating [`UiEvent::current_target`] at every step while
+    /// [`UiEvent::target`] stays put. Step 4 is
+    /// [`route_command`](Self::route_command): §2.6's chain, offering the command
+    /// to *focused node → focus scope → ancestors → window → application* and
+    /// stopping at the first link with a handler.
+    ///
+    /// # Why the §2.6 chain is step 4
+    ///
+    /// Because running the node's bound handler is what a click's default action
+    /// *is* — the same reading [`handle_pointer`](Self::handle_pointer) already
+    /// takes where it gates activation on trust ("§2.3 propagation step 4, the
+    /// **default action**"). Two consequences follow, and both are observable:
+    ///
+    /// - a listener calling [`UiEvent::prevent_default`] suppresses the command's
+    ///   handler entirely, while leaving the rest of the listener walk running;
+    /// - a listener calling [`UiEvent::stop_propagation`] halts the walk *and*
+    ///   the chain, because the chain is the remainder of the propagation rather
+    ///   than a separate mechanism bolted beside it.
+    ///
+    /// # Gates and frames
+    ///
+    /// A command whose [`CommandState`] forbids dispatch is inert before any of
+    /// this: no listener sees it either, since a disabled command is not an event
+    /// that happened. A frame is requested when anything ran — a listener or a
+    /// handler — because either may have mutated application state.
+    fn dispatch_command_event(
+        &mut self,
+        origin: Option<NodeId>,
+        command: InternedSymbol,
+        envelope: UiEvent,
+    ) -> bool {
         if !self.command_registry.permits_dispatch(command) {
             return false;
         }
-        let ran = self.route_command(origin, command);
-        if ran {
+        let mut event = match origin {
+            Some(node) => envelope.at_target(node),
+            None => envelope,
+        };
+        // §2.3 steps 1-3: capture, target, bubble.
+        let listeners_run = self.propagate(origin, command, &mut event);
+        // §2.3 step 4: the default action — §2.6's routing chain.
+        let claimed = if event.is_default_prevented() {
+            false
+        } else {
+            self.route_command(origin, command, &mut event)
+        };
+        if claimed || listeners_run > 0 {
             self.request_frame(FrameReason::Input);
         }
-        ran
+        claimed
+    }
+
+    /// Runs §2.3's steps 1–3 — capture, target, bubble — over the node path from
+    /// the root down to `origin`, returning how many listeners ran.
+    ///
+    /// The path itself is computed by the **domain**
+    /// [`EventDispatcher`](obscur_interaction::event::EventDispatcher) rather than
+    /// here: it is the type that already knows a path is "a `Capture` step per
+    /// ancestor, then `Target`, then a `Bubble` step per ancestor in reverse", and
+    /// it is already covered by the §2.3 spec test. Until this method existed,
+    /// nothing in the workspace called it — the model was exported and driven by
+    /// nobody.
+    ///
+    /// At every step [`UiEvent::current_target`] moves to the node being visited
+    /// while [`UiEvent::target`] stays at `origin`; that pair is what lets an
+    /// ancestor's listener tell "what was hit" from "what I am attached to". The
+    /// walk stops as soon as [`UiEvent::is_stopped`] holds, so
+    /// `stop_propagation` on the target keeps an ancestor's bubble listener from
+    /// running at all.
+    ///
+    /// With `origin = None` there is no node path — §2.6's window and application
+    /// links are not tree positions — so nothing propagates and only step 4 can
+    /// run.
+    fn propagate(
+        &mut self,
+        origin: Option<NodeId>,
+        command: InternedSymbol,
+        event: &mut UiEvent,
+    ) -> usize {
+        // With no listener registered anywhere there is nothing to run, and
+        // computing a path to hand to nobody would cost two allocations per
+        // click. This is also what makes the phases free for an application that
+        // never asks for them: the walk is skipped, not merely empty.
+        let Some(target) = origin.filter(|_| !self.listeners.is_empty()) else {
+            return 0;
+        };
+        // `hover_chain_for` yields the node first and the root last; the
+        // dispatcher wants root → target, which is the reverse.
+        let mut root_to_target = self.hover_chain_for(Some(target));
+        root_to_target.reverse();
+
+        let mut run = 0;
+        for step in EventDispatcher::new().path(&root_to_target) {
+            if event.is_stopped() {
+                break;
+            }
+            event.phase = step.phase;
+            event.current_target = Some(step.node);
+            run += self.run_listeners(step.node, command, step.phase, event);
+        }
+        run
+    }
+
+    /// Runs the listeners registered on `node` for `command` that apply in
+    /// `phase`, in registration order, returning how many ran.
+    ///
+    /// Honors [`UiEvent::stop_immediate_propagation`] *within* the node: the
+    /// remaining listeners on this same node are skipped, which is the one thing
+    /// distinguishing it from the ordinary stop. A listener that does not apply to
+    /// this phase is skipped without counting — it is not this event's listener.
+    ///
+    /// Holding a mutable borrow of the listener table across the call is sound for
+    /// the same reason [`AppCommands::dispatch`] documents: a handler is a closure
+    /// over application state with no handle to the runtime, so it cannot re-enter
+    /// this table.
+    fn run_listeners(
+        &mut self,
+        node: NodeId,
+        command: InternedSymbol,
+        phase: EventPhase,
+        event: &mut UiEvent,
+    ) -> usize {
+        let Some(listeners) = self.listeners.get_mut(&(node, command)) else {
+            return 0;
+        };
+        let mut run = 0;
+        for listener in listeners.iter_mut() {
+            if event.is_immediate_stopped() {
+                break;
+            }
+            if !listener.runs_in(phase) {
+                continue;
+            }
+            listener.handler_mut().call(event);
+            run += 1;
+        }
+        run
     }
 
     /// Offers `command` to each link of the route from `origin` in §2.6 order
     /// and stops at the first link with a handler registered for it. Returns
     /// whether a link claimed the command.
     ///
-    /// Ungated and frame-free — [`dispatch_command_from`](Self::dispatch_command_from)
-    /// owns the [`CommandState`] gate and the frame request.
-    fn route_command(&mut self, origin: Option<NodeId>, command: InternedSymbol) -> bool {
+    /// Ungated and frame-free — [`dispatch_command_event`](Self::dispatch_command_event)
+    /// owns the [`CommandState`] gate, the `prevent_default` check and the frame
+    /// request.
+    ///
+    /// The handler is called with `event`, so it can read §2.4's payload and
+    /// §2.3's `target` / `current_target` / trust. `current_target` is set per
+    /// link: the visited node for a [`CommandTarget::Node`], and `None` for a
+    /// [`Scope`](CommandTarget::Scope), [`Window`](CommandTarget::Window) or
+    /// [`App`](CommandTarget::App) link — those are levels of the routing chain,
+    /// not positions in the tree, so there is no node to name. The phase is
+    /// [`Target`](EventPhase::Target) for the first link (the origin node itself)
+    /// and [`Bubble`](EventPhase::Bubble) for every link beyond it, which is what
+    /// those links are: the event travelling outward.
+    fn route_command(
+        &mut self,
+        origin: Option<NodeId>,
+        command: InternedSymbol,
+        event: &mut UiEvent,
+    ) -> bool {
         // The route is materialised first: building it borrows the tree and the
         // scope stack immutably, while running a handler needs a mutable borrow
         // of one handler table.
-        for target in self.command_route(origin) {
+        for (index, target) in self.command_route(origin).into_iter().enumerate() {
+            // A listener that stopped propagation stops the chain too: the chain
+            // is the outward leg of the same propagation, not a second mechanism.
+            if event.is_stopped() {
+                return false;
+            }
+            event.phase = if index == 0 && matches!(target, CommandTarget::Node(_)) {
+                EventPhase::Target
+            } else {
+                EventPhase::Bubble
+            };
+            event.current_target = match target {
+                CommandTarget::Node(node) => Some(node),
+                _ => None,
+            };
             let claimed = match target {
                 CommandTarget::Node(node) => match self.node_handlers.get_mut(&(node, command)) {
                     Some(handler) => {
-                        handler();
+                        handler.call(event);
                         true
                     }
                     None => false,
@@ -5463,7 +5733,7 @@ impl UiRuntime {
                 CommandTarget::Scope(scope) => {
                     match self.scope_handlers.get_mut(&(scope, command)) {
                         Some(handler) => {
-                            handler();
+                            handler.call(event);
                             true
                         }
                         None => false,
@@ -5471,12 +5741,12 @@ impl UiRuntime {
                 }
                 CommandTarget::Window => match self.handlers.get_mut(&command) {
                     Some(handler) => {
-                        handler();
+                        handler.call(event);
                         true
                     }
                     None => false,
                 },
-                CommandTarget::App => self.app_commands.dispatch(command),
+                CommandTarget::App => self.app_commands.dispatch(command, event),
             };
             if claimed {
                 return true;
@@ -5545,14 +5815,63 @@ impl UiRuntime {
     /// [`tree`](Self::tree) after a frame has built it (the same way a node is
     /// resolved from a stable id). A registration survives every frame that
     /// keeps its node, and becomes unreachable if the node is removed.
-    pub fn on_command_at(
+    ///
+    /// Like [`on_command`](Self::on_command), `handler` may take nothing or take
+    /// the propagating [`UiEvent`] (see [`IntoCommandHandler`]).
+    pub fn on_command_at<M>(
         &mut self,
         node: NodeId,
         command: InternedSymbol,
-        handler: impl FnMut() + 'static,
+        handler: impl IntoCommandHandler<M>,
     ) {
         self.node_handlers
-            .insert((node, command), Box::new(handler));
+            .insert((node, command), handler.into_command_handler());
+    }
+
+    /// Registers a §2.3 **listener** for `command` on `node`, running in `phase`
+    /// (spec §2.3).
+    ///
+    /// This is the other half of §2.3, the one no API reached before: a listener
+    /// *observes and steers* a command as it propagates, where
+    /// [`on_command_at`](Self::on_command_at) registers the single handler that
+    /// **claims** it on §2.6's chain. Concretely, a listener can
+    ///
+    /// - see a command aimed at a **descendant** — with
+    ///   [`ListenerPhase::Capture`] it sees it *before* the target does, which is
+    ///   how an overlay or a gesture arbiter takes an interaction away;
+    /// - read [`UiEvent::target`] to learn which descendant was hit while
+    ///   [`UiEvent::current_target`] says where the listener itself sits;
+    /// - call [`UiEvent::stop_propagation`] to keep the command from travelling
+    ///   further, or [`UiEvent::prevent_default`] to let it travel while
+    ///   suppressing the handler that would have run;
+    /// - call [`UiEvent::stop_immediate_propagation`] to skip the *remaining
+    ///   listeners on this same node* — which is why several listeners per node
+    ///   are allowed at all.
+    ///
+    /// Unlike a handler, a listener never replaces an earlier one: each call adds
+    /// one, and they run in registration order. Registering does not schedule a
+    /// frame; a dispatch that actually runs one does.
+    ///
+    /// Listeners on a removed node are unreachable but not reaped automatically,
+    /// for the same reason per-node handlers are not — see
+    /// [`clear_node_commands`](Self::clear_node_commands), which clears both.
+    pub fn add_event_listener<M>(
+        &mut self,
+        node: NodeId,
+        command: InternedSymbol,
+        phase: ListenerPhase,
+        listener: impl IntoCommandHandler<M>,
+    ) {
+        self.listeners
+            .entry((node, command))
+            .or_default()
+            .push(EventListener::new(phase, listener.into_command_handler()));
+    }
+
+    /// Returns how many §2.3 listeners are registered for `command` on `node`.
+    #[must_use]
+    pub fn event_listener_count(&self, node: NodeId, command: InternedSymbol) -> usize {
+        self.listeners.get(&(node, command)).map_or(0, Vec::len)
     }
 
     /// Returns whether a handler is registered for `command` at `node`.
@@ -5561,8 +5880,8 @@ impl UiRuntime {
         self.node_handlers.contains_key(&(node, command))
     }
 
-    /// Removes every per-node handler registered at `node`, returning how many
-    /// were removed.
+    /// Removes every per-node handler **and** every §2.3 listener registered at
+    /// `node`, returning how many registrations were removed in total.
     ///
     /// A node's registrations are not reaped automatically when it leaves the
     /// tree — the runtime does not know whether the app means to re-register on
@@ -5570,10 +5889,25 @@ impl UiRuntime {
     /// churning subtree calls this when it tears the subtree down. Leaving them
     /// is safe but unbounded: an unreachable entry can never fire, because the
     /// route can only name nodes reachable from the origin.
+    ///
+    /// Listeners are counted per listener, not per `(node, command)` key: a node
+    /// carrying three listeners for one command reports three, because three
+    /// closures were dropped.
     pub fn clear_node_commands(&mut self, node: NodeId) -> usize {
         let before = self.node_handlers.len();
         self.node_handlers.retain(|(at, _), _| *at != node);
-        before - self.node_handlers.len()
+        let handlers = before - self.node_handlers.len();
+
+        let mut listeners = 0;
+        self.listeners.retain(|(at, _), registered| {
+            if *at == node {
+                listeners += registered.len();
+                false
+            } else {
+                true
+            }
+        });
+        handlers + listeners
     }
 
     /// Opens `scope` as a focus-containment scope (spec §7.1), pushing it as the
@@ -5626,13 +5960,16 @@ impl UiRuntime {
     /// ([`close_focus_scope`](Self::close_focus_scope)). Registering for a scope
     /// that is not open is harmless: the route can never name it, so the handler
     /// simply never fires until that scope opens.
-    pub fn on_scope_command(
+    /// Like [`on_command`](Self::on_command), `handler` may take nothing or take
+    /// the propagating [`UiEvent`] (see [`IntoCommandHandler`]).
+    pub fn on_scope_command<M>(
         &mut self,
         id: FocusScopeId,
         command: InternedSymbol,
-        handler: impl FnMut() + 'static,
+        handler: impl IntoCommandHandler<M>,
     ) {
-        self.scope_handlers.insert((id, command), Box::new(handler));
+        self.scope_handlers
+            .insert((id, command), handler.into_command_handler());
     }
 
     /// Returns whether a handler is registered for `command` on scope `id`.
@@ -7204,14 +7541,25 @@ impl UiRuntime {
                     .logical()
                     .and_then(|key| self.commands.resolve(key, self.modifiers));
                 if let Some(command) = resolved {
-                    self.dispatch_command(command);
+                    // The key travels with the command, so a shortcut handler can
+                    // read which chord fired it (§2.6's "logical key/text" layer)
+                    // rather than only that *something* did. `handle_key` is the
+                    // platform adapter's door — the OS key event is on the other
+                    // side of it and there is no key-injection path — so the
+                    // envelope is trusted here, at the boundary, exactly as
+                    // `PointerEvent::as_trusted` is called in the winit converter.
+                    self.dispatch_command_event(
+                        self.focused,
+                        command,
+                        UiEvent::from_key(event).as_trusted(),
+                    );
                 }
                 // 3b. Enter/Space activates the focused control regardless of any
                 //     bound shortcut: a button fires its click command, a checkbox
                 //     its change command. Both the shortcut above and this
                 //     activation can fire on the same keypress.
                 if is_activation_key(event.logical()) {
-                    self.activate(target);
+                    self.activate(target, UiEvent::from_key(event).as_trusted());
                 }
                 resolved
             }
@@ -15368,6 +15716,457 @@ mod tests {
             runtime.command_route(None),
             vec![CommandTarget::Window, CommandTarget::App]
         );
+    }
+
+    // ---- §2.3 the event model, driven ---------------------------------------
+    //
+    // "Event propagation: 1. capture; 2. target; 3. bubble; 4. default action."
+    // "Event API includes: target; current_target; stop_propagation;
+    //  stop_immediate_propagation; prevent_default; trusted/untrusted origin."
+    //
+    // Every case below was unreachable before the runtime drove this model: a
+    // handler was an `impl FnMut()` given nothing at all, and `UiEvent` /
+    // `EventDispatcher` were called by no code in the workspace.
+
+    /// One command symbol, bound by BOTH rows of [`two_row_view`].
+    const CMD_PICK: InternedSymbol = InternedSymbol::from_raw(0x9E11);
+
+    use obscur_interaction::event::EventTrust;
+
+    /// What the phase-order case records per step: the phase, `current_target`,
+    /// and `target` — the last of which must never change.
+    type PhaseLog = Rc<RefCell<Vec<(EventPhase, Option<NodeId>, Option<NodeId>)>>>;
+
+    /// What the keyboard-activation case records: the key, the origin, and
+    /// whether the event was trusted.
+    type KeySeen = Rc<Cell<Option<(Option<KeyEvent>, EventOrigin, bool)>>>;
+
+    /// A `panel` (100x100) holding `a` (y∈[0,50)) and `b` (y∈[50,100)), **both**
+    /// binding `on-click → CMD_PICK`.
+    ///
+    /// One symbol on two nodes is the shape that used to be inexpressible: a
+    /// zero-argument handler is told only *that* the command fired, so the only
+    /// way to learn *which* row it came from was a bespoke signature
+    /// (`on_row_click(id, FnMut(usize, u32))`), carved out for the one case that
+    /// forced it. With the event delivered, `e.target()` answers it for every
+    /// case.
+    fn two_row_view() -> View {
+        let row = |component: u64, class: &str| {
+            ViewNode::element(ComponentId::from_raw(component))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
+                .with_event(ViewEventBinding::new(EVENT_CLICK, CMD_PICK))
+        };
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(400))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+                .with_children(ViewFragment::from_nodes(vec![row(401, "a"), row(402, "b")])),
+        ]))
+    }
+
+    /// A runtime with [`two_row_view`] rendered; returns `(runtime, panel, a, b)`.
+    fn two_rows(sheets: &[Stylesheet]) -> (UiRuntime, NodeId, NodeId, NodeId) {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let _ = runtime.render_now(&two_row_view(), sheets);
+        let (panel, a, b) = panel_nodes(&runtime);
+        (runtime, panel, a, b)
+    }
+
+    /// Drives a trusted press-and-release at `(x, y)` — a real click.
+    fn click_at(runtime: &mut UiRuntime, x: f32, y: f32) {
+        runtime.handle_pointer(mouse(PointerEventKind::Down, x, y));
+        runtime.handle_pointer(mouse(PointerEventKind::Up, x, y));
+    }
+
+    /// §2.3 "- `target`;". **The case that was impossible.** One command symbol
+    /// is bound by two sibling nodes; a single handler learns which one the user
+    /// hit, from the event.
+    #[test]
+    fn one_symbol_on_two_nodes_and_the_handler_learns_which_was_hit() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let (mut runtime, _panel, a, b) = two_rows(sheets);
+
+        let hit = Rc::new(Cell::new(None));
+        {
+            let sink = Rc::clone(&hit);
+            runtime.on_command(CMD_PICK, move |e: &mut UiEvent| sink.set(e.target()));
+        }
+
+        click_at(&mut runtime, 50.0, 25.0);
+        assert_eq!(hit.get(), Some(a), "the click on the first row reports `a`");
+
+        click_at(&mut runtime, 50.0, 75.0);
+        assert_eq!(
+            hit.get(),
+            Some(b),
+            "the SAME handler, the SAME symbol, and a different target — which no \
+             zero-argument handler could have distinguished"
+        );
+    }
+
+    /// §2.4: the payload a pointer event must carry reaches the handler —
+    /// "pointer ID; device type; buttons; logical position and delta; pressure;
+    /// tilt; rotation; primary-pointer status; hover capability."
+    #[test]
+    fn a_handler_reads_the_pointer_payload_the_platform_reported() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let (mut runtime, _panel, _a, _b) = two_rows(sheets);
+
+        let seen: Rc<Cell<Option<PointerEvent>>> = Rc::new(Cell::new(None));
+        {
+            let sink = Rc::clone(&seen);
+            runtime.on_command(CMD_PICK, move |e: &mut UiEvent| sink.set(e.pointer()));
+        }
+
+        click_at(&mut runtime, 50.0, 75.0);
+
+        let payload = seen.get().expect("the click delivered its pointer payload");
+        assert_eq!(payload.pointer(), PointerId::MOUSE, "pointer ID");
+        assert_eq!(payload.device(), PointerDevice::Mouse, "device type");
+        assert_eq!(
+            payload.kind(),
+            PointerEventKind::Up,
+            "a click is completed by the release, so that is the event delivered"
+        );
+        assert_eq!(payload.position(), Point::new(50.0, 75.0), "position");
+        assert_eq!(payload.pressure(), 0.0, "a mouse reports no pressure");
+        assert!(payload.is_primary(), "primary-pointer status");
+        assert!(payload.hover_capable(), "a mouse hovers");
+        assert!(payload.delta().is_zero(), "a release moved nothing");
+    }
+
+    /// §2.3 "- trusted/untrusted origin.": platform input arrives trusted, and
+    /// the handler can read it.
+    #[test]
+    fn a_handler_can_read_that_the_gesture_was_trusted() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let (mut runtime, _panel, _a, _b) = two_rows(sheets);
+
+        let trust = Rc::new(Cell::new(None));
+        {
+            let sink = Rc::clone(&trust);
+            runtime.on_command(CMD_PICK, move |e: &mut UiEvent| sink.set(Some(e.trust())));
+        }
+
+        click_at(&mut runtime, 50.0, 25.0);
+
+        assert_eq!(
+            trust.get(),
+            Some(EventTrust::Trusted),
+            "a platform-vouched gesture reports trusted = true to the handler"
+        );
+    }
+
+    /// §2.3: "Event propagation: 1. capture; 2. target; 3. bubble" — and
+    /// "- `target`; - `current_target`;": the phases run outermost-first then
+    /// innermost-first, `current_target` moves at every step, and `target` never
+    /// does.
+    #[test]
+    fn the_phases_run_in_order_and_only_current_target_moves() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let (mut runtime, panel, a, _b) = two_rows(sheets);
+        let root = runtime.tree().root().expect("root after a frame");
+
+        let log: PhaseLog = Rc::new(RefCell::new(Vec::new()));
+        let recorder = |log: &PhaseLog| {
+            let sink = Rc::clone(log);
+            move |e: &mut UiEvent| {
+                sink.borrow_mut()
+                    .push((e.phase(), e.current_target(), e.target()));
+            }
+        };
+        for node in [root, panel, a] {
+            for phase in [ListenerPhase::Capture, ListenerPhase::Bubble] {
+                runtime.add_event_listener(node, CMD_PICK, phase, recorder(&log));
+            }
+        }
+
+        click_at(&mut runtime, 50.0, 25.0);
+
+        let steps: Vec<(EventPhase, Option<NodeId>)> = log
+            .borrow()
+            .iter()
+            .map(|(phase, current, _)| (*phase, *current))
+            .collect();
+        assert_eq!(
+            steps,
+            vec![
+                (EventPhase::Capture, Some(root)),
+                (EventPhase::Capture, Some(panel)),
+                // At the target BOTH of its listeners run, in registration
+                // order, whichever direction they asked for — the registration
+                // choice stops mattering once the event has arrived.
+                (EventPhase::Target, Some(a)),
+                (EventPhase::Target, Some(a)),
+                (EventPhase::Bubble, Some(panel)),
+                (EventPhase::Bubble, Some(root)),
+            ],
+            "capture strictly outermost-first, then the target, then bubble \
+             strictly innermost-first"
+        );
+        assert!(
+            log.borrow().iter().all(|(_, _, target)| *target == Some(a)),
+            "`target` is the node that was hit and does not move while the event \
+             propagates — which is the whole reason it is a second value"
+        );
+    }
+
+    /// §2.3 "- `stop_propagation`;": the ancestor's bubble listener does not run,
+    /// and neither does the default action, because §2.6's chain is the outward
+    /// leg of the same propagation.
+    #[test]
+    fn stop_propagation_at_the_target_keeps_an_ancestor_from_running() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let (mut runtime, panel, a, _b) = two_rows(sheets);
+
+        let (ancestor_ran, ancestor) = counting_handler();
+        runtime.add_event_listener(panel, CMD_PICK, ListenerPhase::Bubble, ancestor);
+        let (handler_ran, handler) = counting_handler();
+        runtime.on_command(CMD_PICK, handler);
+
+        // Baseline: with nothing stopping it, both run.
+        click_at(&mut runtime, 50.0, 25.0);
+        assert_eq!((ancestor_ran.get(), handler_ran.get()), (1, 1));
+
+        // Now the target stops propagation.
+        runtime.add_event_listener(a, CMD_PICK, ListenerPhase::Bubble, |e: &mut UiEvent| {
+            e.stop_propagation();
+        });
+        click_at(&mut runtime, 50.0, 25.0);
+        assert_eq!(
+            (ancestor_ran.get(), handler_ran.get()),
+            (1, 1),
+            "neither the ancestor's listener nor the command's handler saw the \
+             second click"
+        );
+    }
+
+    /// §2.3 "- `stop_immediate_propagation`;": the *remaining listeners on the
+    /// same node* are skipped — the one thing that distinguishes it from the
+    /// ordinary stop, and the reason a node may carry more than one listener.
+    #[test]
+    fn stop_immediate_propagation_skips_a_sibling_listener_on_the_same_node() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let (mut runtime, _panel, a, _b) = two_rows(sheets);
+
+        // An ordinary stop first: the second listener on the same node still runs.
+        let (ordinary_ran, ordinary) = counting_handler();
+        runtime.add_event_listener(a, CMD_PICK, ListenerPhase::Bubble, |e: &mut UiEvent| {
+            e.stop_propagation();
+        });
+        runtime.add_event_listener(a, CMD_PICK, ListenerPhase::Bubble, ordinary);
+        click_at(&mut runtime, 50.0, 25.0);
+        assert_eq!(
+            ordinary_ran.get(),
+            1,
+            "`stop_propagation` leaves same-node listeners running"
+        );
+
+        // The immediate form, on a fresh runtime: it does not.
+        let (mut runtime, _panel, a, _b) = two_rows(sheets);
+        let (immediate_ran, immediate) = counting_handler();
+        runtime.add_event_listener(a, CMD_PICK, ListenerPhase::Bubble, |e: &mut UiEvent| {
+            e.stop_immediate_propagation();
+        });
+        runtime.add_event_listener(a, CMD_PICK, ListenerPhase::Bubble, immediate);
+        click_at(&mut runtime, 50.0, 25.0);
+        assert_eq!(
+            immediate_ran.get(),
+            0,
+            "`stop_immediate_propagation` skips the rest of this node's listeners"
+        );
+    }
+
+    /// §2.3: "Event propagation: … 4. default action." and "- `prevent_default`;"
+    ///
+    /// The default action of an activation is running the node's bound command
+    /// handler — the reading `handle_pointer` already takes where it gates that
+    /// step on trust. So `prevent_default` suppresses the handler while leaving
+    /// the listener walk intact, which is exactly what separates it from a stop.
+    #[test]
+    fn prevent_default_suppresses_the_default_action_but_not_the_walk() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let (mut runtime, panel, a, _b) = two_rows(sheets);
+
+        let (handler_ran, handler) = counting_handler();
+        runtime.on_command(CMD_PICK, handler);
+        let (ancestor_ran, ancestor) = counting_handler();
+        runtime.add_event_listener(panel, CMD_PICK, ListenerPhase::Bubble, ancestor);
+        runtime.add_event_listener(a, CMD_PICK, ListenerPhase::Bubble, |e: &mut UiEvent| {
+            e.prevent_default();
+        });
+
+        click_at(&mut runtime, 50.0, 25.0);
+
+        assert_eq!(
+            handler_ran.get(),
+            0,
+            "the default action — the bound command's handler — did not run"
+        );
+        assert_eq!(
+            ancestor_ran.get(),
+            1,
+            "but propagation continued: preventing a default is not stopping a \
+             propagation"
+        );
+    }
+
+    /// A capture listener sees a command aimed at a **descendant** before the
+    /// descendant does, and can take the interaction away from it. This is what
+    /// §2.3's capture phase is *for*, and nothing could express it before.
+    #[test]
+    fn a_capture_listener_can_take_the_interaction_from_its_descendant() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let (mut runtime, panel, a, _b) = two_rows(sheets);
+
+        let order = Rc::new(RefCell::new(Vec::new()));
+        {
+            let sink = Rc::clone(&order);
+            runtime.add_event_listener(
+                panel,
+                CMD_PICK,
+                ListenerPhase::Capture,
+                move |e: &mut UiEvent| {
+                    sink.borrow_mut().push("capture");
+                    e.stop_propagation();
+                },
+            );
+        }
+        {
+            let sink = Rc::clone(&order);
+            runtime.add_event_listener(a, CMD_PICK, ListenerPhase::Bubble, move || {
+                sink.borrow_mut().push("target");
+            });
+        }
+        let (handler_ran, handler) = counting_handler();
+        runtime.on_command(CMD_PICK, handler);
+
+        click_at(&mut runtime, 50.0, 25.0);
+
+        assert_eq!(
+            *order.borrow(),
+            vec!["capture"],
+            "the ancestor ran first and the target never ran"
+        );
+        assert_eq!(handler_ran.get(), 0, "and no handler claimed the command");
+    }
+
+    /// The zero-argument shape is a convenience, not a legacy: it still
+    /// registers, still runs, and coexists with the event-taking shape on the
+    /// same runtime and the same symbol.
+    #[test]
+    fn the_zero_argument_handler_shape_still_works() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let (mut runtime, panel, a, _b) = two_rows(sheets);
+
+        // A zero-argument LISTENER, an event-taking listener, and a
+        // zero-argument HANDLER, all for one symbol.
+        let (plain_listener_ran, plain_listener) = counting_handler();
+        runtime.add_event_listener(a, CMD_PICK, ListenerPhase::Bubble, plain_listener);
+        let saw_target = Rc::new(Cell::new(None));
+        {
+            let sink = Rc::clone(&saw_target);
+            runtime.add_event_listener(
+                panel,
+                CMD_PICK,
+                ListenerPhase::Bubble,
+                move |e: &mut UiEvent| sink.set(e.target()),
+            );
+        }
+        let (plain_handler_ran, plain_handler) = counting_handler();
+        runtime.on_command(CMD_PICK, plain_handler);
+
+        click_at(&mut runtime, 50.0, 25.0);
+
+        assert_eq!(plain_listener_ran.get(), 1);
+        assert_eq!(plain_handler_ran.get(), 1);
+        assert_eq!(saw_target.get(), Some(a));
+    }
+
+    /// §2.6's keyboard leg carries its own payload: an Enter activation delivers
+    /// the key that caused it, and `handle_key` is the platform boundary, so the
+    /// event is trusted there.
+    #[test]
+    fn an_enter_activation_delivers_the_key_that_caused_it() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let (mut runtime, _panel, a, _b) = two_rows(sheets);
+
+        let seen: KeySeen = Rc::new(Cell::new(None));
+        {
+            let sink = Rc::clone(&seen);
+            runtime.on_command(CMD_PICK, move |e: &mut UiEvent| {
+                sink.set(Some((e.key(), e.origin(), e.is_trusted())));
+            });
+        }
+
+        // A press seats focus on `a` without completing a click.
+        runtime.handle_pointer(mouse(PointerEventKind::Down, 50.0, 25.0));
+        assert_eq!(runtime.focused(), Some(a));
+        let enter = KeyEvent::press(PhysicalKey::Enter, Some(LogicalKey::named(NamedKey::Enter)));
+        runtime.handle_key(enter);
+
+        let (key, origin, trusted) = seen.get().expect("the Enter activation ran the handler");
+        assert_eq!(
+            key,
+            Some(enter),
+            "the handler reads the key, not just that one arrived"
+        );
+        assert_eq!(origin, EventOrigin::Keyboard);
+        assert!(trusted, "handle_key is the platform adapter's door");
+    }
+
+    /// A programmatic [`UiRuntime::dispatch_command`] has no device behind it, so
+    /// it reports an empty payload and a synthetic origin rather than a
+    /// fabricated click at (0, 0).
+    #[test]
+    fn a_programmatic_dispatch_reports_a_synthetic_origin_and_no_payload() {
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        let seen: Rc<Cell<Option<(EventOrigin, bool, bool)>>> = Rc::new(Cell::new(None));
+        {
+            let sink = Rc::clone(&seen);
+            runtime.on_command(CMD_PICK, move |e: &mut UiEvent| {
+                sink.set(Some((e.origin(), e.payload().is_empty(), e.is_trusted())));
+            });
+        }
+
+        assert!(runtime.dispatch_command(CMD_PICK));
+
+        assert_eq!(
+            seen.get(),
+            Some((EventOrigin::Synthetic, true, false)),
+            "no device, no payload, and no trust conferred by omission"
+        );
+    }
+
+    /// `clear_node_commands` reaps a node's listeners along with its handler —
+    /// otherwise a churning subtree would leak one closure per rebuilt row.
+    #[test]
+    fn clearing_a_nodes_commands_also_clears_its_listeners() {
+        let sheet = interaction_sheet();
+        let sheets = std::slice::from_ref(&sheet);
+        let (mut runtime, _panel, a, _b) = two_rows(sheets);
+
+        runtime.on_command_at(a, CMD_PICK, || {});
+        runtime.add_event_listener(a, CMD_PICK, ListenerPhase::Capture, || {});
+        runtime.add_event_listener(a, CMD_PICK, ListenerPhase::Bubble, || {});
+        assert_eq!(runtime.event_listener_count(a, CMD_PICK), 2);
+
+        assert_eq!(
+            runtime.clear_node_commands(a),
+            3,
+            "one handler and two listeners"
+        );
+        assert_eq!(runtime.event_listener_count(a, CMD_PICK), 0);
+        assert!(!runtime.has_node_command_handler(a, CMD_PICK));
     }
 
     #[test]

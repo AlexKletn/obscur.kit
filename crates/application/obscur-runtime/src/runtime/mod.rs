@@ -11,9 +11,21 @@ mod app_commands;
 
 pub use app_commands::AppCommands;
 
+mod command_handler;
+
+pub use command_handler::CommandHandler;
+
 mod command_target;
 
 pub use command_target::CommandTarget;
+
+mod event_listener;
+
+pub(crate) use event_listener::EventListener;
+
+mod into_command_handler;
+
+pub use into_command_handler::{IntoCommandHandler, WithEvent, WithoutEvent};
 
 mod text_edit_session;
 
