@@ -2,12 +2,19 @@
 
 Rust-native, platform-independent retained-mode UI toolkit.
 
-This repository contains the **full target workspace skeleton**: every crate
-from the crate-architecture spec (§2.1) and the per-crate source layout (§3),
-materialised as compiling stubs, plus the Phase 0 enforcement layer (workspace,
-lints, architecture `xtask`).
+It runs: an application opens a window, styles itself with real CSS, lays out
+flow / flex / grid, shapes and paints text through HarfRust, and renders on the
+GPU through Vello — or on the CPU, with no display, into a PNG.
 
-See [`specs/`](specs/) for the full design.
+- [`docs/api/`](docs/api/) — **the API documentation**: what the kit offers, in
+  the order an application meets it, with an explicit line between what is wired
+  end-to-end and what merely compiles.
+- `cargo doc --no-deps -p obscur-kit --features full` — the exhaustive per-item
+  reference. Every public item is documented; `missing_docs` is clean across the
+  workspace with all features on.
+- [`specs/`](specs/) — the design the implementation is measured against.
+- [`docs/conformance-audit.md`](docs/conformance-audit.md) — a spec-by-spec audit
+  (dated; read it with its own caveat about decay).
 
 ## Layout (spec §2.1)
 
@@ -39,16 +46,27 @@ Source layout follows the spec's rules: one main entity per file; `mod.rs` and
 cargo run -p xtask -- check      # architecture rules hold (mod.rs/lib.rs
                                  # layout, banned file names, unsafe boundary,
                                  # pure-crate dependency direction)
-cargo build --workspace          # compiles (stubs emit expected warnings)
+cargo build --workspace
+cargo test --workspace           # the suite is the oracle
 cargo fmt --all --check
 cargo clippy --workspace --all-targets
 ```
 
 ## Status
 
-Structure-complete, behaviour-empty. Most entity files are placeholder stubs
-(`pub struct <Name>;`) that materialise the target layout; foundation crates
-(`obscur-identity`, `-geometry`, `-capability`, `-task`, `-diagnostics`) and the
-first vertical-slice types carry real starter content. The Phase 1 pipeline
-`component -> desired tree -> retained tree -> style -> layout -> scene`
-(spec §5.13) is the next fill-in step.
+Working, and uneven — which is stated here rather than left to be discovered.
+
+**Real end-to-end:** the frame pipeline (component → desired tree → retained tree
+→ style → layout → scene → paint), the CSS cascade over 119 longhands, flow /
+flex / grid layout, the text stack with system-font fallback, pointer and
+**multi-touch** input with pan / fling / long-press, virtual lists the runtime
+windows, CSS motion, `env()` safe-area insets, and both render backends.
+
+**Not wired:** several crates compile, pass their tests, and are called by
+nothing — routing, the windowing domain types, the testkit, the plugin tier. A
+type existing here is not evidence that anything invokes it. The list is
+[`docs/api/12-reality.md`](docs/api/12-reality.md), with the grep that produced
+each entry.
+
+The developed platform is **Linux** (X11 and Wayland, including a real tablet
+target); macOS and Windows have honest placeholder providers.

@@ -84,6 +84,14 @@ pub const VIRTUAL_ROW_EXTENT: InternedSymbol = InternedSymbol::from_raw(0x0000_0
 /// list rather than only the part that happens to exist.
 pub const VIRTUAL_SPACER: ComponentId = ComponentId::from_raw(0x00B0_0003);
 
+/// Reserved symbol for a virtual list's **name** — the handle that ties a marker
+/// node in the view to the row builder the host registered (spec §4.9).
+///
+/// The same symbol is passed to
+/// [`register_virtual_list`](../../../obscur_runtime/runtime/struct.UiRuntime.html#method.register_virtual_list)
+/// and carried on the node, which is what lets one runtime drive several
+/// independent lists: the marker says *which* list it is, and the runtime looks
+/// up the builder, the realized window and the scroll offset under that name.
 pub const VIRTUAL_LIST_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0303);
 
 /// Reserved symbol for a virtual list's **item count** — how many items exist,

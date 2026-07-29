@@ -293,6 +293,41 @@ enum DesiredView<'a> {
     Build(&'a mut dyn FnMut() -> View),
 }
 
+/// The embeddable UI runtime: everything the toolkit does, minus the window.
+///
+/// It holds the retained tree, the computed styles, the arranged boxes, the
+/// scene, focus and hover, the motion timelines, the command registry and the
+/// scheduler — and it owns none of the platform. There is no event loop here, no
+/// surface, and **no clock**: a host hands it input as data, hands it elapsed
+/// time as a number ([`advance_motion`](Self::advance_motion)), and takes a
+/// [`SceneSnapshot`](Self::snapshot) back out to draw. That is what makes the
+/// same runtime drive a winit window, a headless test, and a PNG.
+///
+/// # The shape of a host
+///
+/// Construct with [`new`](Self::new), install the ports you want (text stack,
+/// resources, diagnostics — see [`KitBootstrap`] for the batteries-included
+/// version), then drive frames:
+///
+/// - [`render_now`](Self::render_now) — one frame, ignoring the scheduler. The
+///   simplest thing that works, and what tests use.
+/// - [`run_due_frame`](Self::run_due_frame) — one frame *if* one was requested,
+///   against a view the caller builds.
+/// - [`run_due_frame_reactive`](Self::run_due_frame_reactive) — the same, but the
+///   runtime rebuilds the view itself from the builder installed with
+///   [`set_root_view`](Self::set_root_view). This is the loop
+///   [`App`](../../../obscur_kit/app/struct.App.html) runs.
+///
+/// # What it does not do
+///
+/// It never opens a window, never talks to a GPU, never reads the system clock,
+/// and never spawns a thread of its own. Every one of those is a port a host
+/// installs, and each is optional: a runtime with nothing installed still lays
+/// out and still produces a scene — text measures on a deterministic mock shaper
+/// and paints no glyphs, images resolve to nothing. Nothing panics for want of a
+/// host.
+///
+/// [`KitBootstrap`]: ../../../obscur_kit/bootstrap/struct.KitBootstrap.html
 pub struct UiRuntime {
     /// Identity of this runtime.
     id: RuntimeId,
@@ -1115,18 +1150,6 @@ impl UiRuntime {
         self.unresolved_reported.clear();
     }
 
-    /// Installs the port that parses **vector** sources (spec §5.17), replacing
-    /// any previous one and dropping the parsed-document cache.
-    ///
-    /// Separate from [`set_resource_providers`](Self::set_resource_providers)
-    /// because a vector decoder is a genuinely different capability: a raster
-    /// decoder yields pixels, this yields geometry with `currentColor` still
-    /// deferred. A host may install either, both, or neither; with none installed
-    /// an SVG `src` resolves to nothing and paints nothing, exactly as an
-    /// unloadable bitmap does — never a crash, and never a rasterized fallback
-    /// that would silently break §5.17's vector guarantee.
-    ///
-    /// A [`ResourceLoader`] is still required to fetch the bytes.
     /// Installs the blocking-work facility resource loads run on (spec §3.3).
     ///
     /// Explicit and capability-dependent by design: without it the runtime is
@@ -1432,6 +1455,18 @@ impl UiRuntime {
         }
     }
 
+    /// Installs the port that parses **vector** sources (spec §5.17), replacing
+    /// any previous one and dropping the parsed-document cache.
+    ///
+    /// Separate from [`set_resource_providers`](Self::set_resource_providers)
+    /// because a vector decoder is a genuinely different capability: a raster
+    /// decoder yields pixels, this yields geometry with `currentColor` still
+    /// deferred. A host may install either, both, or neither; with none installed
+    /// an SVG `src` resolves to nothing and paints nothing, exactly as an
+    /// unloadable bitmap does — never a crash, and never a rasterized fallback
+    /// that would silently break §5.17's vector guarantee.
+    ///
+    /// A [`ResourceLoader`] is still required to fetch the bytes.
     pub fn set_vector_decoder(&mut self, decoder: Arc<dyn VectorDecoder + Send + Sync>) {
         self.vector_decoder = Some(decoder);
         self.vector_cache.clear();
@@ -8478,6 +8513,12 @@ impl UiRuntime {
         self.virtual_windows.get(&id).cloned()
     }
 
+    /// The scroll container `node`'s current vertical scroll position in logical
+    /// CSS pixels, clamped to what its content actually allows.
+    ///
+    /// Returns `0.0` for a node that is not a scroll container, so a caller need
+    /// not check first — an unscrollable box is at the top by definition.
+    #[must_use]
     pub fn scroll_top(&self, node: NodeId) -> f32 {
         let containers = scroll_containers(&self.tree, &self.computed, &self.boxes);
         containers

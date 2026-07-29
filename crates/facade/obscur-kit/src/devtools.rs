@@ -1,7 +1,7 @@
 //! Bridging a live [`UiRuntime`] into the external DevTools endpoint (spec §7.6).
 //!
 //! The DevTools server serves inspect requests from an
-//! [`InspectSource`](obscur_devtools_server::bridge::InspectSource) the host
+//! [`crate::devtools_server::bridge::InspectSource`] the host
 //! provides; [`inspect_source_from`] builds one from a runtime's
 //! [`inspect_snapshot`](crate::runtime::UiRuntime::inspect_snapshot), so an
 //! external agent connecting over the socket sees the *real* tree, layout and
@@ -16,7 +16,7 @@
 //! [`RuntimeEventPublisher`] are the producers that give a subscription
 //! something to deliver — they turn the runtime's real diagnostics, tree commits
 //! and focus changes into protocol events on an
-//! [`EventQueue`](obscur_devtools_server::transport::EventQueue) that
+//! [`crate::devtools_server::transport::EventQueue`] that
 //! [`SocketTransport::serve_with_events`](obscur_devtools_server::transport::SocketTransport::serve_with_events)
 //! fans out. A host that serves with plain
 //! [`serve`](obscur_devtools_server::transport::SocketTransport::serve) instead
@@ -216,7 +216,7 @@ fn node_label(raw: Option<u64>) -> String {
 /// builds is a user gesture. Each event is left at
 /// [`EventTrust::Untrusted`](obscur_interaction::event::EventTrust::Untrusted) —
 /// [`PointerEvent::new`]'s default — and the runtime reports that out through
-/// [`PointerDispatch::trust`](obscur_runtime::runtime::PointerDispatch::trust),
+/// [`PointerDispatch::trust`](crate::runtime::PointerDispatch::trust),
 /// which is what lets an application distinguish a driven click from a real one.
 ///
 /// **Never call `PointerEvent::as_trusted` here.** That method exists for a

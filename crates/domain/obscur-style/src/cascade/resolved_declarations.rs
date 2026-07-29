@@ -78,6 +78,13 @@ impl ResolvedDeclarations {
         self.priorities.get(&property).copied()
     }
 
+    /// Records `value` as the cascade winner for `property`, returning whatever it
+    /// displaced.
+    ///
+    /// The priority-less twin of
+    /// [`insert_with_priority`](Self::insert_with_priority): use it where the
+    /// origin and specificity that won are not being tracked, and nothing will ask
+    /// [`priority_of`](Self::priority_of) about this property afterwards.
     pub fn insert(&mut self, property: PropertyId, value: PropertyValue) -> Option<PropertyValue> {
         self.values.insert(property, value)
     }

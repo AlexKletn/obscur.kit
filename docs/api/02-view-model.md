@@ -1,0 +1,182 @@
+# 02 — The view model
+
+A frame's input is a `View`: a plain, owned description of what should be on
+screen. It carries no state, no callbacks and no identity of its own — the
+runtime reconciles it against the retained tree and keeps identity there.
+
+The consequence worth internalising: **you rebuild the whole view every frame**
+and the runtime works out what changed. Building a view is cheap by design.
+
+```rust
+use obscur_kit::view::view::{View, ViewNode, ViewFragment, ViewEventBinding, EVENT_CLICK};
+use obscur_kit::identity::{ComponentId, InternedSymbol};
+
+View::single(
+    ViewNode::element(ComponentId::from_raw(1))
+        .class("row")
+        .with_event(ViewEventBinding::new(EVENT_CLICK, InternedSymbol::named("save")))
+        .with_children(ViewFragment::from_nodes(vec![ViewNode::text("Save")])),
+)
+```
+
+---
+
+## `View`
+
+```rust
+pub const fn empty() -> Self
+pub fn single(node: ViewNode) -> Self
+pub fn from_fragment(root: ViewFragment) -> Self
+pub const fn root(&self) -> &ViewFragment
+pub fn into_fragment(self) -> ViewFragment
+pub fn into_single_node(self) -> Option<ViewNode>
+```
+
+A view is a fragment at the root, so it may hold several top-level nodes.
+`into_single_node` returns `None` when it holds anything but exactly one.
+
+## `ViewFragment`
+
+An ordered list of siblings.
+
+```rust
+pub const fn new() -> Self
+pub fn from_nodes(nodes: Vec<ViewNode>) -> Self
+pub fn push(&mut self, node: ViewNode)
+pub fn iter(&self) -> Iter<'_, ViewNode>
+pub fn nodes(&self) -> &[ViewNode]
+pub fn into_nodes(self) -> Vec<ViewNode>
+pub fn len(&self) -> usize
+pub fn is_empty(&self) -> bool
+```
+
+## `ViewNode`
+
+```rust
+pub fn element(component: ComponentId) -> Self
+pub fn text(content: impl Into<Box<str>>) -> Self
+pub fn slot(name: impl Into<Box<str>>) -> Self
+pub fn virtual_list(list_id: InternedSymbol, count: usize, row_extent: f32) -> Self
+pub fn virtual_collection(row_extent: f32, template: ViewFragment) -> Self
+```
+
+Builders, each returning `Self`:
+
+```rust
+pub fn class(self, class: impl Into<Box<str>>) -> Self
+pub fn with_key(self, new_key: impl Into<ViewKey>) -> Self
+pub fn with_prop(self, prop: ViewProperty) -> Self
+pub fn with_event(self, event: ViewEventBinding) -> Self
+pub fn with_children(self, new_children: ViewFragment) -> Self
+pub fn with_virtual_scroll_reset(self, token: u64) -> Self
+pub fn key(&self) -> Option<&ViewKey>
+```
+
+`class` is the shorthand you will use constantly; it is `with_prop` against the
+reserved `CLASS` symbol. Several classes go in one string, space-separated, as in
+CSS: `.class("key fn")`.
+
+### Keys
+
+`with_key` is how reconciliation keeps identity across reorders. Without one,
+siblings match by position — fine for a static list, wrong for a list that
+reorders, where the retained state (focus, an editing session, a running
+animation) follows the position rather than the item.
+
+Duplicate keys under one parent are recorded and reported rather than silently
+resolved; see `ReconciliationPlan::duplicate_keys`.
+
+## Properties
+
+```rust
+ViewProperty::new(name: InternedSymbol, value: ViewValue)
+```
+
+`ViewValue` is `Null | Bool(bool) | Int(i64) | Float(f64) | Text(Box<str>)`.
+
+Reserved property names, all in `obscur_kit::view::view`:
+
+| Symbol | Meaning |
+|---|---|
+| `CLASS` | CSS classes, space-separated |
+| `ID` | CSS `#id` |
+| `TYPE` | the CSS *type* selector — `button`, `input`, `textarea`, … |
+| `SRC` | image or vector source |
+| `DISABLED`, `CHECKED`, `READONLY` | control state, matched by `:disabled` / `:checked` |
+| `VALUE` | a control's value |
+| `PLACEHOLDER` | a field's placeholder |
+| `TEST_ID`, `AUTOMATION_ID` | stable selectors for tests and automation |
+
+`TYPE` is what makes the UA stylesheet apply: a node with type `button` picks up
+the UA button rule, padding and border included. See [04 — Styling](04-styling.md).
+
+## Events
+
+```rust
+ViewEventBinding::new(event: InternedSymbol, command: InternedSymbol)
+```
+
+A binding names an event and the **command** it invokes. Events flow down; the
+command flows up to whatever handler the routing chain finds — the view never
+holds a closure.
+
+Reserved event names:
+
+| Symbol | Fires |
+|---|---|
+| `EVENT_CLICK` | a click (or tap) resolves on the node |
+| `EVENT_INPUT` | per keystroke, on an editable |
+| `EVENT_CHANGE` | once, when an editable commits |
+| `EVENT_LONG_PRESS` | a held press, after 0.5 s |
+
+**Binding `EVENT_INPUT` is what makes a node a text field.** The runtime has no
+other notion of editability: the editing session, caret rendering, IME routing
+and [`focus_accepts_text`](03-runtime.md#focus) all key off it.
+
+Handlers are registered on the runtime, not the view — `on_command`,
+`on_command_at`, `on_text_input`, `on_change` — or on `App` via `on_command`.
+
+## Virtual lists
+
+Two mechanisms with different owners.
+
+**`ViewNode::virtual_list(id, count, row_extent)`** — the runtime owns the
+windowing. It builds only the rows that fit through the builder registered under
+`id`, sizes the container from `count × row_extent` so the scrollbar is
+proportioned honestly, and maps clicks back to model indices.
+
+```rust
+app.virtual_list(TAPE, move |index| row(index))
+   .on_row_click(TAPE, move |index, _clicks| select(index))
+```
+
+`with_virtual_scroll_reset(token)` — change the token when the content is
+*replaced* rather than appended, and the list returns to the top instead of
+holding a scroll offset into different data.
+
+**`ViewNode::virtual_collection(row_extent, template)`** — the template form.
+
+> **unwired** — `<VirtualFor>` is refused on both authoring front ends; §4.9
+> windowing from markup is not implemented. Use the runtime-registered form.
+
+Reserved symbols behind both: `VIRTUAL_LIST_ID`, `VIRTUAL_ITEM_COUNT`,
+`VIRTUAL_ROW_EXTENT`, `VIRTUAL_SCROLL_RESET`, `VIRTUAL_COLLECTION`,
+`VIRTUAL_SPACER`, with `DEFAULT_VIRTUAL_ROW_EXTENT = 24.0`.
+
+## Slots
+
+`ViewNode::slot(name)` marks a projection outlet; a component spells
+`<slot name="…"/>` in its own render and the runtime projects authored children
+into it. A stray outlet — one with nothing to project — is refused by the
+reconciler and reported.
+
+> **partial** — slots are declared and enforced on both front ends, but **no
+> user component can be authored in either front end yet**, so the only slots in
+> practice are the built-ins'.
+
+## Building views in practice
+
+You will rarely spell `ViewNode::element(ComponentId::from_raw(…))` by hand.
+[05 — Components](05-components.md) covers `Container`, `Text`, `Image`,
+`Scroll` and the widget tier, which are thin builders over exactly these calls
+and return `ViewNode` through `into_view_node()`.
