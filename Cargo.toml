@@ -109,6 +109,7 @@ obscur-task-tokio = { path = "crates/adapters/obscur-task-tokio" }
 obscur-render-cpu = { path = "crates/adapters/obscur-render-cpu" }
 obscur-render-vello = { path = "crates/adapters/obscur-render-vello" }
 obscur-window-winit = { path = "crates/adapters/obscur-window-winit" }
+obscur-shell-layer = { path = "crates/adapters/obscur-shell-layer" }
 obscur-accessibility-accesskit = { path = "crates/adapters/obscur-accessibility-accesskit" }
 obscur-system-linux = { path = "crates/adapters/obscur-system-linux" }
 obscur-system-web = { path = "crates/adapters/obscur-system-web" }

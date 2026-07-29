@@ -28,6 +28,8 @@
 pub mod app;
 pub mod bootstrap;
 pub mod default_stylesheet;
+#[cfg(all(feature = "shell-layer", feature = "render-vello"))]
+pub mod layer;
 pub mod prelude;
 
 #[cfg(all(feature = "window-winit", feature = "render-vello"))]
@@ -96,6 +98,8 @@ pub use obscur_render_vello as render_vello;
 pub use obscur_resource_decode as resource_decode;
 #[cfg(feature = "resource-fs")]
 pub use obscur_resource_fs as resource_fs;
+#[cfg(feature = "shell-layer")]
+pub use obscur_shell_layer as shell_layer;
 #[cfg(feature = "task-smol")]
 pub use obscur_task_smol as task_smol;
 #[cfg(feature = "task-tokio")]

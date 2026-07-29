@@ -4,6 +4,7 @@
 
 pub mod chrome;
 pub mod display;
+pub mod layer;
 pub mod port;
 pub mod presentation;
 pub mod request;

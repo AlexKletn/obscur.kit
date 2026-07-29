@@ -51,6 +51,7 @@ full = [
     "render-cpu",
     "render-vello",
     "window-winit",
+    "shell-layer",
     "accesskit",
     "text-harfrust",
     "text-unicode",
@@ -67,6 +68,9 @@ render-cpu = ["dep:obscur-render-cpu"]
 # the event loop + converters. Together they gate the `app` module.
 render-vello = ["dep:obscur-render-vello", "dep:wgpu", "dep:pollster"]
 window-winit = ["dep:obscur-window-winit", "dep:winit"]
+# `wlr-layer-shell` surfaces (panels, docks, overlays). Linux/Wayland only; the
+# adapter answers `Unsupported` rather than failing where the protocol is absent.
+shell-layer = ["dep:obscur-shell-layer"]
 accesskit = ["dep:obscur-accessibility-accesskit"]
 text-harfrust = ["dep:obscur-text-harfrust"]
 text-unicode = ["dep:obscur-text-unicode"]
@@ -124,6 +128,7 @@ obscur-task-tokio = { workspace = true, optional = true }
 obscur-render-cpu = { workspace = true, optional = true }
 obscur-render-vello = { workspace = true, optional = true }
 obscur-window-winit = { workspace = true, optional = true }
+obscur-shell-layer = { workspace = true, optional = true }
 obscur-accessibility-accesskit = { workspace = true, optional = true }
 obscur-text-harfrust = { workspace = true, optional = true }
 obscur-text-unicode = { workspace = true, optional = true }
@@ -657,3 +662,9 @@ required-features = ["render-cpu", "text-harfrust", "text-unicode"]
 [[example]]
 name = "textarea_vscroll_proof"
 required-features = ["render-cpu", "text-harfrust", "text-unicode"]
+
+# A desktop panel on `wlr-layer-shell`: the same toolkit, anchored to the top of
+# the output and reserving its own height (spec §6.5).
+[[example]]
+name = "panel"
+required-features = ["full"]
