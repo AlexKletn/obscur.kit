@@ -21,7 +21,14 @@ use smithay_client_toolkit::{
 };
 use std::collections::HashMap;
 use wayland_client::protocol::{wl_output, wl_pointer, wl_seat, wl_surface, wl_touch};
-use wayland_client::{Connection, QueueHandle};
+use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
+use wayland_protocols::wp::fractional_scale::v1::client::{
+    wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
+    wp_fractional_scale_v1::{self, WpFractionalScaleV1},
+};
+use wayland_protocols::wp::viewporter::client::{
+    wp_viewport::WpViewport, wp_viewporter::WpViewporter,
+};
 
 use crate::event::LayerEvent;
 
@@ -64,6 +71,12 @@ pub(super) struct LayerState {
     /// The last pointer position, so a button press reports where it happened
     /// (`wl_pointer.button` carries no coordinates either).
     cursor: Point,
+    /// The fractional-scale object for this surface, when the compositor offers
+    /// the protocol. Its presence is what decides whether [`scale`](Self::scale)
+    /// can be non-integral.
+    pub(super) fractional: Option<WpFractionalScaleV1>,
+    /// The viewport that maps the fractional buffer onto the logical size.
+    pub(super) viewport: Option<WpViewport>,
 }
 
 impl LayerState {
@@ -88,6 +101,8 @@ impl LayerState {
             touch_positions: HashMap::new(),
             held: PointerButtons::new(),
             cursor: Point::new(0.0, 0.0),
+            fractional: None,
+            viewport: None,
         }
     }
 
@@ -147,6 +162,12 @@ impl CompositorHandler for LayerState {
         _surface: &wl_surface::WlSurface,
         new_factor: i32,
     ) {
+        // A surface with a fractional-scale object gets its scale from there;
+        // the integer event still arrives and would round 1.5 up to 2, undoing
+        // the whole point of binding the protocol.
+        if self.fractional.is_some() {
+            return;
+        }
         #[allow(clippy::cast_precision_loss)]
         let scale = new_factor.max(1) as f32;
         self.scale = scale;
@@ -475,6 +496,69 @@ impl LayerState {
             .with_timestamp(u64::from(time_ms) * 1_000)
             .as_trusted();
         self.push_pointer(event);
+    }
+}
+
+/// The denominator `wp_fractional_scale_v1` reports its scale in: the event
+/// carries `scale × 120`, so 1.5 arrives as 180.
+const FRACTIONAL_DENOMINATOR: f32 = 120.0;
+
+impl Dispatch<WpFractionalScaleV1, ()> for LayerState {
+    fn event(
+        state: &mut Self,
+        _proxy: &WpFractionalScaleV1,
+        event: wp_fractional_scale_v1::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        if let wp_fractional_scale_v1::Event::PreferredScale { scale } = event {
+            #[allow(clippy::cast_precision_loss)]
+            let scale = scale as f32 / FRACTIONAL_DENOMINATOR;
+            if scale > 0.0 && (scale - state.scale).abs() > f32::EPSILON {
+                state.scale = scale;
+                state.events.push(LayerEvent::ScaleChanged { scale });
+            }
+        }
+    }
+}
+
+impl Dispatch<WpFractionalScaleManagerV1, ()> for LayerState {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WpFractionalScaleManagerV1,
+        _event: <WpFractionalScaleManagerV1 as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        // The manager has no events.
+    }
+}
+
+impl Dispatch<WpViewporter, ()> for LayerState {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WpViewporter,
+        _event: <WpViewporter as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        // The viewporter has no events.
+    }
+}
+
+impl Dispatch<WpViewport, ()> for LayerState {
+    fn event(
+        _state: &mut Self,
+        _proxy: &WpViewport,
+        _event: <WpViewport as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        // A viewport has no events.
     }
 }
 

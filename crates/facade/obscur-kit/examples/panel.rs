@@ -27,16 +27,22 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use obscur_kit::geometry::Size;
 use obscur_kit::identity::InternedSymbol;
-use obscur_kit::layer::LayerApp;
+use obscur_kit::layer::{LayerApp, LayerHandle};
 use obscur_kit::primitives::{Container, Text};
 use obscur_kit::view::view::{View, ViewNode};
 use obscur_kit::widgets::button::Button;
-use obscur_kit::windowing::layer::LayerOutput;
+use obscur_kit::windowing::layer::{
+    LayerAnchor, LayerExclusiveZone, LayerOutput, LayerSurfaceConfig, Margins,
+};
 
 /// The bar's height in logical pixels. It is also what the bar reserves, which is
 /// what makes it a panel rather than a strip windows slide beneath.
 const BAR_HEIGHT: u32 = 36;
+
+/// The same height as a float, for the places a `Size` is wanted.
+const BAR_HEIGHT_PX: f32 = 36.0;
 
 /// The styling. `100%` height rather than a fixed one, because the compositor —
 /// not this sheet — decides the surface's real extent.
@@ -68,12 +74,17 @@ const CSS: &str = "\
 struct Panel {
     /// How many times a button has been tapped.
     taps: u32,
+    /// Whether the bar currently reserves screen space, or floats over it.
+    reserving: bool,
 }
 
 impl Panel {
     /// A panel that has seen nothing yet.
     const fn new() -> Self {
-        Self { taps: 0 }
+        Self {
+            taps: 0,
+            reserving: true,
+        }
     }
 
     /// Counts one tap.
@@ -84,6 +95,28 @@ impl Panel {
     /// Forgets every tap.
     const fn reset(&mut self) {
         self.taps = 0;
+    }
+
+    /// Flips between reserving screen space and floating over it, and returns
+    /// the surface configuration that now applies.
+    ///
+    /// This is a live reconfiguration: no surface is destroyed and none is
+    /// created. Layer-shell's placement properties — band, anchor, exclusive
+    /// zone, margin, size — are all requests on the existing surface.
+    fn toggle_presentation(&mut self, namespace: &str) -> LayerSurfaceConfig {
+        self.reserving = !self.reserving;
+        if self.reserving {
+            LayerSurfaceConfig::top_bar(namespace, BAR_HEIGHT)
+        } else {
+            LayerSurfaceConfig::new(namespace)
+                .with_anchor(LayerAnchor::TOP_BAR)
+                .with_size(obscur_kit::geometry::Size::new(
+                    0.0,
+                    f32::from(u16::try_from(BAR_HEIGHT).unwrap_or(36)),
+                ))
+                .with_exclusive_zone(LayerExclusiveZone::None)
+                .with_margin(Margins::uniform(12))
+        }
     }
 }
 
@@ -97,6 +130,10 @@ fn view(state: &Panel) -> View {
                 .class("count"),
         )
         .child(key("tap", "Tap me"))
+        .child(key(
+            "float",
+            if state.reserving { "Float" } else { "Reserve" },
+        ))
         .child(key("reset", "Reset"))
         .into_view_node()
         .class("bar");
@@ -116,6 +153,12 @@ fn main() -> Result<(), obscur_kit::layer::LayerAppError> {
     let view_state = state.clone();
     let tap_state = state.clone();
     let reset_state = state.clone();
+    let float_state = state.clone();
+
+    // The handle is how a handler reaches the live surface: the loop owns it, so
+    // a handler leaves a request and the loop applies it on its next turn.
+    let handle = LayerHandle::new();
+    let float_handle = handle.clone();
 
     // `panel eDP-1` pins the bar to that connector; with no argument the
     // compositor chooses, which on a multi-head desktop means "wherever the
@@ -134,5 +177,12 @@ fn main() -> Result<(), obscur_kit::layer::LayerAppError> {
         .on_command(InternedSymbol::named("reset"), move || {
             reset_state.borrow_mut().reset();
         })
+        .on_command(InternedSymbol::named("float"), move || {
+            let config = float_state
+                .borrow_mut()
+                .toggle_presentation("obscur-kit-panel");
+            float_handle.reconfigure(config);
+        })
+        .handle(handle)
         .run()
 }

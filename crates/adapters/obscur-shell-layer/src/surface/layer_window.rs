@@ -16,6 +16,8 @@ use smithay_client_toolkit::shell::wlr_layer::{
 };
 use wayland_client::globals::registry_queue_init;
 use wayland_client::{Connection, EventQueue, Proxy};
+use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
+use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 
 use crate::error::LayerShellError;
 use crate::event::LayerEvent;
@@ -55,6 +57,11 @@ pub struct LayerWindow {
     state: LayerState,
     /// The compositor global must outlive the surface made from it.
     _compositor: CompositorState,
+    /// Kept alive for the same reason; absent where the compositor does not
+    /// offer fractional scaling, which is what makes the integer path a
+    /// fallback rather than a mode.
+    _fractional_manager: Option<WpFractionalScaleManagerV1>,
+    _viewporter: Option<WpViewporter>,
 }
 
 impl LayerWindow {
@@ -108,6 +115,20 @@ impl LayerWindow {
         );
         apply(&layer, config);
 
+        // Fractional scaling, where the compositor offers it. Both halves are
+        // needed: the fractional-scale object reports a scale in 120ths, and the
+        // viewport is what maps a buffer rendered at that scale back onto the
+        // logical size. With only one of the two the surface would be the wrong
+        // size, so it is both or neither.
+        let fractional_manager = globals
+            .bind::<WpFractionalScaleManagerV1, _, _>(&qh, 1..=1, ())
+            .ok();
+        let viewporter = globals.bind::<WpViewporter, _, _>(&qh, 1..=1, ()).ok();
+        if let (Some(manager), Some(viewporter)) = (&fractional_manager, &viewporter) {
+            state.fractional = Some(manager.get_fractional_scale(layer.wl_surface(), &qh, ()));
+            state.viewport = Some(viewporter.get_viewport(layer.wl_surface(), &qh, ()));
+        }
+
         // The initial commit with no buffer is what asks for the first configure.
         layer.commit();
         state.layer = Some(layer);
@@ -117,6 +138,8 @@ impl LayerWindow {
             queue,
             state,
             _compositor: compositor,
+            _fractional_manager: fractional_manager,
+            _viewporter: viewporter,
         })
     }
 
@@ -206,26 +229,56 @@ impl LayerWindow {
         self.state.output_names()
     }
 
-    /// Tells the compositor how many buffer pixels make one logical pixel.
+    /// Tells the compositor how the buffer relates to logical pixels, by
+    /// whichever mechanism this surface has.
     ///
     /// Without this a HiDPI surface is **twice the size it should be**: Wayland
     /// measures a surface in logical units as `buffer_size / buffer_scale`, so a
     /// buffer rendered at 2× and never declared as such is read as a surface
-    /// twice as wide and twice as tall. The symptom is a panel that overflows its
-    /// own reservation with everything drawn at double size — which is exactly
-    /// what happens if this is forgotten.
+    /// twice as wide and twice as tall.
     ///
-    /// Only integer scales can be expressed here. A fractional-scaled output
-    /// (1.25, 1.5, …) reports the next integer up, so the surface is rendered
-    /// slightly larger than needed and downscaled by the compositor; expressing
-    /// the fraction exactly needs `wp_fractional_scale_v1`, which this adapter
-    /// does not bind.
-    pub fn set_buffer_scale(&self, scale: i32) {
-        self.state
-            .layer()
-            .wl_surface()
-            .set_buffer_scale(scale.max(1));
+    /// Two mechanisms, and the caller should not have to know which is live:
+    ///
+    /// * **Fractional** — the buffer stays at scale `1` and a viewport maps it
+    ///   onto the logical size. This is the only way to express 1.5, and it is
+    ///   what avoids rendering a 1.6× display at 2× and letting the compositor
+    ///   soften it back down.
+    /// * **Integer** — `set_buffer_scale`, where fractional scaling is absent.
+    ///   A fractional output then rounds up, as it always did.
+    pub fn sync_scale(&self) {
+        let logical = self.state.size;
+        if let Some(viewport) = self.state.viewport.as_ref() {
+            self.state.layer().wl_surface().set_buffer_scale(1);
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            viewport.set_destination(
+                (logical.width.round() as i32).max(1),
+                (logical.height.round() as i32).max(1),
+            );
+        } else {
+            #[allow(clippy::cast_possible_truncation)]
+            let integer = (self.state.scale.round() as i32).max(1);
+            self.state.layer().wl_surface().set_buffer_scale(integer);
+        }
         self.state.layer().commit();
+    }
+
+    /// The buffer extent to render at, in physical pixels.
+    ///
+    /// This is the logical size times the surface's scale, rounded — the one
+    /// place the two spaces are related, so a host never multiplies by hand.
+    #[must_use]
+    pub fn physical_size(&self) -> Size {
+        Size::new(
+            (self.state.size.width * self.state.scale).round(),
+            (self.state.size.height * self.state.scale).round(),
+        )
+    }
+
+    /// Whether the surface's scale can be fractional, i.e. whether the
+    /// compositor offered `wp_fractional_scale_v1` **and** `wp_viewporter`.
+    #[must_use]
+    pub const fn has_fractional_scale(&self) -> bool {
+        self.state.viewport.is_some()
     }
 
     /// The raw handles a `wgpu::Surface` is built from.

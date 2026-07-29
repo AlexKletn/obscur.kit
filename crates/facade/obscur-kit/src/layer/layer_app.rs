@@ -22,6 +22,7 @@ pub struct LayerApp {
     stylesheets: Vec<String>,
     root: Option<Box<dyn FnMut() -> View + 'static>>,
     commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
+    handle: Option<super::LayerHandle>,
 }
 
 /// Why a layer-surface application could not run.
@@ -76,6 +77,7 @@ impl LayerApp {
             stylesheets: Vec::new(),
             root: None,
             commands: Vec::new(),
+            handle: None,
         }
     }
 
@@ -154,6 +156,19 @@ impl LayerApp {
         self
     }
 
+    /// Attaches a [`LayerHandle`](super::LayerHandle) the running loop publishes
+    /// to and reads requests from.
+    ///
+    /// Build the handle first, clone it into whatever handlers need it, then give
+    /// one to this. It is how an application reconfigures the surface, reads its
+    /// real size and scale, and asks the loop to stop — none of which it can do
+    /// through a `&mut` it cannot have while the loop owns the surface.
+    #[must_use]
+    pub fn handle(mut self, handle: super::LayerHandle) -> Self {
+        self.handle = Some(handle);
+        self
+    }
+
     /// Sets the root view builder, re-invoked each frame.
     #[must_use]
     pub fn view(mut self, builder: impl FnMut() -> View + 'static) -> Self {
@@ -178,7 +193,13 @@ impl LayerApp {
     /// [`LayerAppError::NoRoot`] when no root view was set.
     pub fn run(self) -> Result<(), LayerAppError> {
         let root = self.root.ok_or(LayerAppError::NoRoot)?;
-        super::runner::run(self.config, self.stylesheets, root, self.commands)
+        super::runner::run(
+            self.config,
+            self.stylesheets,
+            root,
+            self.commands,
+            self.handle.unwrap_or_default(),
+        )
     }
 }
 

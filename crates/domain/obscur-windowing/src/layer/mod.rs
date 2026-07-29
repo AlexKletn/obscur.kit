@@ -12,3 +12,5 @@ mod layer_output;
 pub use layer_output::LayerOutput;
 mod layer_surface_config;
 pub use layer_surface_config::{LayerSurfaceConfig, Margins};
+mod layer_surface_state;
+pub use layer_surface_state::LayerSurfaceState;

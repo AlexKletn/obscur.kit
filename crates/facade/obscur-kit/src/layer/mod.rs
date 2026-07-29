@@ -22,5 +22,7 @@
 //! [`LayerAppError::Unsupported`] — a capability answer a host can branch on,
 //! not a crash.
 mod layer_app;
+mod layer_handle;
 pub use layer_app::{LayerApp, LayerAppError};
+pub use layer_handle::LayerHandle;
 mod runner;

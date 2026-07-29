@@ -2,7 +2,6 @@
 
 use crate::bootstrap::{CssPipeline, KitBootstrap};
 use crate::css::source::CssSource;
-use crate::geometry::Size;
 use crate::identity::{InternedSymbol, RuntimeId};
 use crate::render::frame::{FrameSubmission, RenderFrame};
 use crate::render::renderer::RendererId;
@@ -12,7 +11,9 @@ use crate::runtime::frame::FrameReason;
 use crate::shell_layer::event::LayerEvent;
 use crate::shell_layer::surface::LayerWindow;
 use crate::view::view::View;
-use crate::windowing::layer::LayerSurfaceConfig;
+use crate::windowing::layer::{LayerSurfaceConfig, LayerSurfaceState};
+
+use super::LayerHandle;
 
 use super::LayerAppError;
 
@@ -30,6 +31,7 @@ pub(super) fn run(
     stylesheets: Vec<String>,
     mut root: Box<dyn FnMut() -> View + 'static>,
     commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
+    handle: LayerHandle,
 ) -> Result<(), LayerAppError> {
     let mut window = LayerWindow::open(&config)?;
 
@@ -40,8 +42,10 @@ pub(super) fn run(
         window.dispatch()?;
     }
     if window.is_closed() {
+        handle.publish(window.size(), window.scale(), LayerSurfaceState::Closed);
         return Ok(());
     }
+    handle.publish(window.size(), window.scale(), LayerSurfaceState::Ready);
 
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), window.size());
     let boot = KitBootstrap::new();
@@ -66,16 +70,15 @@ pub(super) fn run(
         renderer.register_font(handle, bytes.to_vec());
     }
 
-    // Declare the buffer scale before the first frame, or the compositor reads
-    // the physical buffer as a logical size and the panel comes out at double
-    // extent with everything drawn twice as large.
-    #[allow(clippy::cast_possible_truncation)]
-    window.set_buffer_scale(window.scale() as i32);
-    runtime.set_surface(physical(window.size(), window.scale()), window.scale());
+    // Declare how the buffer relates to logical pixels before the first frame,
+    // or the compositor reads the physical buffer as a logical size and the
+    // panel comes out at double extent with everything drawn twice as large.
+    window.sync_scale();
+    runtime.set_surface(window.physical_size(), window.scale());
     runtime.request_frame(FrameReason::UiCommit);
 
     let mut last_frame: Option<std::time::Instant> = None;
-    while !window.is_closed() {
+    while !window.is_closed() && !handle.close_requested() {
         // Idle blocks in the kernel; animating polls, so a running transition is
         // not held hostage by an input-quiet compositor.
         let animating = runtime.has_pending_frame();
@@ -89,14 +92,9 @@ pub(super) fn run(
         let mut resized = false;
         for event in events {
             match event {
-                LayerEvent::Configured { size } => {
-                    runtime.set_surface(physical(size, window.scale()), window.scale());
-                    resized = true;
-                }
-                LayerEvent::ScaleChanged { scale } => {
-                    #[allow(clippy::cast_possible_truncation)]
-                    window.set_buffer_scale(scale as i32);
-                    runtime.set_surface(physical(window.size(), scale), scale);
+                LayerEvent::Configured { .. } | LayerEvent::ScaleChanged { .. } => {
+                    window.sync_scale();
+                    runtime.set_surface(window.physical_size(), window.scale());
                     resized = true;
                 }
                 LayerEvent::Closed => break,
@@ -111,7 +109,7 @@ pub(super) fn run(
             }
         }
         if resized {
-            let extent = physical(window.size(), window.scale());
+            let extent = window.physical_size();
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             surface.resize(&device, extent.width as u32, extent.height as u32);
             runtime.request_frame(FrameReason::WindowChange);
@@ -134,22 +132,25 @@ pub(super) fn run(
                 for (handle, bytes) in installed.take_discovered() {
                     renderer.register_font(handle, bytes.to_vec());
                 }
-                let extent = physical(window.size(), window.scale());
-                let frame = RenderFrame::new(runtime.snapshot(), extent);
+                let frame = RenderFrame::new(runtime.snapshot(), window.physical_size());
                 let submission = FrameSubmission::new(frame);
                 if renderer.present_to_surface(&submission, &surface).is_err() {
                     surface.configure(&device);
                 }
             }
         }
+        // Applied here rather than at the top of the turn, because the handlers
+        // that ask for it run *during* the frame above — waiting for the next
+        // input event would leave the request sitting on an idle surface.
+        if let Some(config) = handle.take_pending() {
+            window.reconfigure(&config);
+            runtime.request_frame(FrameReason::WindowChange);
+        }
+        handle.publish(window.size(), window.scale(), LayerSurfaceState::Ready);
         window.flush()?;
     }
+    handle.publish(window.size(), window.scale(), LayerSurfaceState::Closed);
     Ok(())
-}
-
-/// The physical extent of a logical `size` at `scale`.
-fn physical(size: Size, scale: f32) -> Size {
-    Size::new(size.width * scale, size.height * scale)
 }
 
 /// Acquires a GPU device and a swapchain for the layer surface.
@@ -173,7 +174,7 @@ fn init_gpu(
         pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
             .map_err(|error| LayerAppError::Gpu(error.to_string()))?;
 
-    let extent = physical(window.size(), window.scale());
+    let extent = window.physical_size();
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let (width, height) = ((extent.width as u32).max(1), (extent.height as u32).max(1));
     let mut config = surface
