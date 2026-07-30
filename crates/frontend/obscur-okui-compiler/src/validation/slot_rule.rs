@@ -19,8 +19,13 @@ use obscur_view::contract::SlotCardinality;
 /// is the whole reason both exist, but they must not disagree about how many
 /// children a slot takes.
 ///
-/// `allowed_children` is empty when the slot admits any child, mirroring
-/// [`ComponentContract::allowed_children`](crate::validation::ComponentContract::allowed_children).
+/// `allowed_children` is empty when the slot admits any child. A **component**'s
+/// child surface is no longer a list like this one — it is a three-state
+/// [`ChildPolicy`](crate::validation::ChildPolicy), because a component had to be
+/// able to say it takes *no* children (§2.13) and an empty list already meant
+/// "any". A slot needs no third state: a slot admitting nothing is a slot nothing
+/// may be assigned to, which its [`cardinality`](Self::cardinality) states
+/// directly.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlotRule {
     name: Box<str>,

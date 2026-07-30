@@ -14,6 +14,7 @@ use std::path::Path;
 
 use obscur_okui_compiler::codegen::{CodegenRoot, ViewCodegen};
 use obscur_okui_compiler::compile::Compiler;
+use obscur_okui_compiler::validation::CommandSurface;
 use obscur_okui_syntax::ast::Document;
 use obscur_okui_syntax::parser::Parser;
 
@@ -31,7 +32,16 @@ fn main() {
     // uses, run once ahead of time instead of every frame).
     let parsed = Parser::new().parse(&source);
     let document = Document::cast(parsed.tree().root().clone()).expect("root casts to a Document");
-    let result = Compiler::new("showcase.okui").compile(&document);
+    // The command surface is declared **empty**, and that is a claim rather than a
+    // default: the example that renders this document (`showcase_okui_codegen_png`)
+    // registers no handler at all, so any `on:click=…` written into the markup
+    // would hash to a command nothing dispatches — the silent no-op §2.13's "string
+    // method names are compile errors" rules out. Saying "no commands" here turns
+    // that into a build failure naming the handler. Add the name to this list at
+    // the same time as the registration, never before.
+    let result = Compiler::new("showcase.okui")
+        .with_commands(CommandSurface::declared(Vec::<&str>::new()))
+        .compile(&document);
 
     // Lowering does not stop at a diagnostic — a rejected document still produces
     // IR — so a build that reads `document()` without asking `has_errors()` first

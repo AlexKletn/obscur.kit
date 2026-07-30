@@ -5,11 +5,12 @@ use obscur_okui_syntax::ast::{Attribute, Element};
 use obscur_okui_syntax::syntax::SyntaxKind;
 use obscur_view::contract::PropTypeSurface;
 
+use crate::lowering::event_local_name;
 use crate::validation::contract_rule::{
     AttributeUse, ElementUse, MemberArity, MemberUse, SlotUse, ViolationAnchor, check_contract,
     is_reserved_attribute,
 };
-use crate::validation::{SlotRule, ValidationDiagnostic};
+use crate::validation::{ChildPolicy, SlotRule, ValidationDiagnostic};
 
 /// The usage contract of a component: what an instance of it must and may carry
 /// (spec §2.13).
@@ -24,14 +25,17 @@ use crate::validation::{SlotRule, ValidationDiagnostic};
 ///   attribute, or is an `on:*` event (events are governed by `allowed_events`);
 ///   every other attribute is an unknown-attribute violation. A contract that
 ///   declares **no** props at all leaves the surface *open* (any attribute is
-///   accepted, mirroring an empty `allowed_children`);
+///   accepted);
 /// - `allowed_events` — the `on:<event>` names an instance may bind; an
 ///   **empty** list means *no event restriction*. A non-empty list closes the
 ///   event surface: an `on:<event>` binding is permitted only if `<event>` is
 ///   listed;
-/// - `allowed_children` — the child element tags permitted inside an instance;
-///   an **empty** list means *any* child element is allowed (the contract does
-///   not restrict children);
+/// - `children` — which children an instance may hold, as a [`ChildPolicy`]:
+///   [`Any`](ChildPolicy::Any), [`None`](ChildPolicy::None) (a leaf — see
+///   [`no_children`](Self::no_children)) or [`Only`](ChildPolicy::Only) the listed
+///   tags. This is the one surface that is **not** governed by emptiness: it used
+///   to be a `Vec` whose empty state meant "any child", which left "no children"
+///   inexpressible for every component that synthesises its own content;
 /// - `slots` — the named slots the component declares (§2.12). An **empty** list
 ///   closes the slot surface rather than opening it: a `slot="…"` on a child of
 ///   a component that declares none names nothing, and there is no permissive
@@ -54,7 +58,7 @@ pub struct ComponentContract {
     required_props: Vec<Box<str>>,
     allowed_props: Vec<Box<str>>,
     allowed_events: Vec<Box<str>>,
-    allowed_children: Vec<Box<str>>,
+    children: ChildPolicy,
     prop_types: Vec<(Box<str>, PropTypeSurface)>,
     slots: Vec<SlotRule>,
 }
@@ -69,7 +73,7 @@ impl ComponentContract {
             required_props: Vec::new(),
             allowed_props: Vec::new(),
             allowed_events: Vec::new(),
-            allowed_children: Vec::new(),
+            children: ChildPolicy::Any,
             prop_types: Vec::new(),
             slots: Vec::new(),
         }
@@ -126,13 +130,32 @@ impl ComponentContract {
         self
     }
 
-    /// Adds `tag` to the contract's allowed child tags (fluent).
+    /// Adds `tag` to the contract's allowed child tags (fluent), switching the
+    /// [`ChildPolicy`] to [`Only`](ChildPolicy::Only).
     ///
-    /// Adding any allowed child turns on child restriction: once the list is
-    /// non-empty, only the listed tags are permitted.
+    /// Naming an allowed child is what turns child restriction on: from then on
+    /// only the listed tags are permitted.
     #[must_use]
     pub fn allowing_child(mut self, tag: impl Into<Box<str>>) -> Self {
-        self.allowed_children.push(tag.into());
+        self.children.allow(tag);
+        self
+    }
+
+    /// Declares that the component takes **no children at all** (fluent) — the
+    /// [`ChildPolicy::None`] leaf state.
+    ///
+    /// This is the §2.13 "allowed children" case the contract could not express:
+    /// an empty allowed-children list already meant *any* child, so a component
+    /// whose content is synthesised from its own model — every shipped widget
+    /// except `Dialog` — had no way to refuse the children an author wrote, and
+    /// `<Button>OK</Button>` compiled into a text run that nothing ever mounts.
+    ///
+    /// It forbids element children *and* text/`{expr}` content: the claim is that
+    /// the position is a leaf, and text renders nowhere in a leaf exactly as an
+    /// element does.
+    #[must_use]
+    pub fn no_children(mut self) -> Self {
+        self.children = ChildPolicy::None;
         self
     }
 
@@ -186,11 +209,16 @@ impl ComponentContract {
         &self.allowed_events
     }
 
-    /// Returns the allowed child tags; an empty slice means any child is
-    /// allowed.
+    /// Returns which children the contract admits (spec §2.13).
+    ///
+    /// This replaced an `allowed_children() -> &[Box<str>]` accessor whose empty
+    /// slice meant "any child": there was no answer it could give for a leaf, and
+    /// every caller that read emptiness as permission was reading the bug. Ask the
+    /// [`ChildPolicy`] instead — [`admits`](ChildPolicy::admits) for an element
+    /// tag, [`admits_content`](ChildPolicy::admits_content) for text.
     #[must_use]
-    pub fn allowed_children(&self) -> &[Box<str>] {
-        &self.allowed_children
+    pub const fn children(&self) -> &ChildPolicy {
+        &self.children
     }
 
     /// Returns whether `name` is an accepted attribute: a required prop, an
@@ -246,10 +274,11 @@ impl ContractValidator {
     ///   ([`allowed_events`](ComponentContract::allowed_events) non-empty),
     ///   every `on:<event>` binding's event must be listed; an unrecognised one
     ///   yields `"unknown event '<e>' on component '<c>'"`;
-    /// - **allowed children** — if
-    ///   [`allowed_children`](ComponentContract::allowed_children) is non-empty,
-    ///   every child *element*'s tag must be listed; a disallowed tag yields
-    ///   `"'<tag>' is not an allowed child of '<c>'"`;
+    /// - **allowed children** — under [`ChildPolicy::Only`] every child
+    ///   *element*'s tag must be listed; a disallowed tag yields
+    ///   `"'<tag>' is not an allowed child of '<c>'"`. Under
+    ///   [`ChildPolicy::None`] no child is admitted at all, element or text, and
+    ///   each one yields `"component '<c>' takes no children: …"`;
     /// - **slots** (§2.12) — a child's `slot="…"` must name a slot the contract
     ///   declares and satisfy that slot's own child rule, and every declared
     ///   slot's cardinality must hold.
@@ -346,7 +375,7 @@ impl ContractValidator {
     ) {
         for attribute in element.attributes() {
             if attribute.is_event() && attribute.string_value().is_some() {
-                let event = event_name(&attribute);
+                let event = event_local_name(&attribute);
                 let offset = attribute.syntax().offset().unwrap_or(element_offset);
                 diagnostics.push(ValidationDiagnostic::new(
                     format!(
@@ -374,6 +403,9 @@ struct AstInstance {
     attribute_offsets: Vec<u32>,
     members: Vec<(String, Option<Slot>, MemberArity)>,
     member_offsets: Vec<u32>,
+    /// Whether a text child or an `{expr}` interpolation reaches this instance —
+    /// the content a member list cannot record, since neither has a tag.
+    content: bool,
 }
 
 /// A member's slot assignment, owned. The borrowed
@@ -396,11 +428,12 @@ impl AstInstance {
             attribute_offsets: Vec::new(),
             members: Vec::new(),
             member_offsets: Vec::new(),
+            content: false,
         };
         for attribute in element.attributes() {
             let event = attribute.is_event();
             let name = if event {
-                event_name(&attribute)
+                event_local_name(&attribute)
             } else {
                 attribute.name().unwrap_or_default()
             };
@@ -420,8 +453,19 @@ impl AstInstance {
     /// `<Empty>` / `<Separator>` inside a `<For>` are looked through for the same
     /// reason: they are §2.11 slots whose *bodies* reach the loop's parent, not
     /// nodes of their own.
+    ///
+    /// The same walk records [`content`](Self::content): a text child or an
+    /// `{expr}` reaching this instance, from here or from inside the control flow
+    /// that splices into it. Whitespace-only text is not content — the lowering
+    /// trims it away and emits no node, so refusing it would reject the
+    /// indentation of every multi-line document.
     fn collect_members(&mut self, element: &Element, arity: MemberArity, offset: u32) {
         for child in element.children() {
+            if matches!(child.kind(), SyntaxKind::Expression)
+                || (child.kind() == SyntaxKind::TextNode && !child.text().trim().is_empty())
+            {
+                self.content = true;
+            }
             let Some(child) = Element::cast(child) else {
                 continue;
             };
@@ -477,6 +521,7 @@ impl AstInstance {
                     arity: *arity,
                 })
                 .collect(),
+            content: self.content,
         }
     }
 
@@ -609,21 +654,6 @@ fn describe_value_type(ty: AttributeValueType) -> &'static str {
     }
 }
 
-/// Returns an event attribute's local event name — the identifier after the
-/// `:` in `on:click` (`"click"`), falling back to the attribute's own name when
-/// no trailing identifier is present. Mirrors the lowering pass's convention.
-fn event_name(attribute: &Attribute) -> String {
-    let mut seen_colon = false;
-    for token in attribute.syntax().tokens() {
-        match token.kind() {
-            SyntaxKind::Colon => seen_colon = true,
-            SyntaxKind::Ident if seen_colon => return token.text().to_owned(),
-            _ => {}
-        }
-    }
-    attribute.name().unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -642,7 +672,7 @@ mod tests {
             .allowing_child("Tab");
         assert_eq!(contract.component(), "Tabs");
         assert_eq!(contract.required_props(), &["selected".into()]);
-        assert_eq!(contract.allowed_children(), &["Tab".into()]);
+        assert_eq!(contract.children().tags(), &["Tab".into()]);
     }
 
     #[test]

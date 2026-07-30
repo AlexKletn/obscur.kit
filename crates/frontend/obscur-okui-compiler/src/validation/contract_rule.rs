@@ -29,7 +29,7 @@
 
 use obscur_view::contract::SlotCardinality;
 
-use crate::validation::{ComponentContract, SlotRule};
+use crate::validation::{ChildPolicy, ComponentContract, SlotRule};
 
 /// How many nodes one member of an [`ElementUse`] contributes to its parent's
 /// child list.
@@ -89,6 +89,17 @@ pub struct ElementUse<'a> {
     pub attributes: Vec<AttributeUse<'a>>,
     /// Its members, in source order (see the module docs).
     pub members: Vec<MemberUse<'a>>,
+    /// Whether the instance holds **content** that is not a member: a text child
+    /// or an `{expr}` interpolation.
+    ///
+    /// Not a [`MemberUse`], because content has no tag — and the allowed-children
+    /// surface is a list of tags. It is recorded at all because
+    /// [`ChildPolicy::None`](crate::validation::ChildPolicy::None) is a claim about
+    /// the *position* rather than about names: `<Button>OK</Button>`, the case that
+    /// made "no children" worth expressing, has no element child to catch it by.
+    /// Collected through the same look-through as the members, so text inside an
+    /// `<If>` counts for the component the `<If>` splices into.
+    pub content: bool,
 }
 
 /// Where a [`ContractViolation`] should be reported, as an index into the
@@ -136,6 +147,25 @@ pub enum ContractViolation {
     DisallowedChild {
         /// The offending child's tag.
         tag: Box<str>,
+        /// Where to report it.
+        anchor: ViolationAnchor,
+    },
+    /// A child element written inside a component that admits **no** children
+    /// ([`ChildPolicy::None`](crate::validation::ChildPolicy::None)).
+    ///
+    /// Distinct from [`DisallowedChild`](Self::DisallowedChild) because the fault
+    /// is different and so is the fix: there is no allowed tag to reach for, and
+    /// the diagnostic must say so instead of implying a list the author could
+    /// consult.
+    ForbiddenChild {
+        /// The offending child's tag.
+        tag: Box<str>,
+        /// Where to report it.
+        anchor: ViolationAnchor,
+    },
+    /// Text or `{expr}` content written inside a component that admits **no**
+    /// children.
+    ForbiddenContent {
         /// Where to report it.
         anchor: ViolationAnchor,
     },
@@ -196,6 +226,8 @@ impl ContractViolation {
             | Self::UnknownAttribute { anchor, .. }
             | Self::UnknownEvent { anchor, .. }
             | Self::DisallowedChild { anchor, .. }
+            | Self::ForbiddenChild { anchor, .. }
+            | Self::ForbiddenContent { anchor }
             | Self::NoSuchSlotSurface { anchor, .. }
             | Self::UnknownSlot { anchor, .. }
             | Self::DisallowedSlotChild { anchor, .. }
@@ -221,6 +253,14 @@ impl ContractViolation {
             Self::DisallowedChild { tag, .. } => {
                 format!("'{tag}' is not an allowed child of '{component}'")
             }
+            Self::ForbiddenChild { tag, .. } => format!(
+                "component '{component}' takes no children, so the '{tag}' written \
+                 inside it can never render"
+            ),
+            Self::ForbiddenContent { .. } => format!(
+                "component '{component}' takes no children, so the content written \
+                 inside it can never render"
+            ),
             Self::NoSuchSlotSurface { slot, .. } => {
                 format!(
                     "component '{component}' declares no slots, so 'slot=\"{slot}\"' names nothing"
@@ -280,7 +320,8 @@ pub fn is_reserved_attribute(name: &str) -> bool {
 /// - **unknown events** — when the event surface is closed, every `on:<event>`
 ///   must be declared;
 /// - **allowed children** — when the contract restricts children, every member's
-///   tag must be listed;
+///   tag must be listed, and a contract declaring [`ChildPolicy::None`] refuses
+///   members and content alike;
 /// - **slots** (§2.12) — every member's `slot="…"` must name a declared slot and
 ///   satisfy that slot's own child restriction, and each slot's
 ///   [`SlotCardinality`] must hold.
@@ -336,26 +377,53 @@ fn check_props(
     }
 }
 
-/// Appends the allowed-children violations.
+/// Appends the allowed-children violations (spec §2.13).
+///
+/// The three [`ChildPolicy`] states are three different verdicts, which is why
+/// the policy is an enum rather than a list whose emptiness had to mean two
+/// things:
+///
+/// - [`Any`](ChildPolicy::Any) — nothing to check;
+/// - [`Only`](ChildPolicy::Only) — each member's tag must be listed; content is
+///   left alone, since a list of tags says nothing about a text run;
+/// - [`None`](ChildPolicy::None) — every member *and* any content is refused,
+///   because the component's own `view()` builds its children and an authored one
+///   reaches no tree.
+///
+/// A member's [`MemberArity`] is deliberately not consulted, exactly as it is not
+/// for [`DisallowedChild`](ContractViolation::DisallowedChild). Arity exists so a
+/// *count* is never asserted beyond what is certain (see
+/// [`check_cardinality`]); a forbidden child is not a count. `<Button><If
+/// cond={x}><span/></If></Button>` may contribute zero nodes at runtime, and is
+/// still markup whose only possible effect is nothing.
 fn check_children(
     element: &ElementUse<'_>,
     contract: &ComponentContract,
     violations: &mut Vec<ContractViolation>,
 ) {
-    if contract.allowed_children().is_empty() {
+    let policy = contract.children();
+    if matches!(policy, ChildPolicy::Any) {
         return;
     }
     for (index, member) in element.members.iter().enumerate() {
-        if !contract
-            .allowed_children()
-            .iter()
-            .any(|allowed| allowed.as_ref() == member.tag)
-        {
-            violations.push(ContractViolation::DisallowedChild {
-                tag: member.tag.into(),
-                anchor: ViolationAnchor::Member(index),
-            });
+        if policy.admits(member.tag) {
+            continue;
         }
+        let anchor = ViolationAnchor::Member(index);
+        let tag: Box<str> = member.tag.into();
+        violations.push(if policy.is_none() {
+            ContractViolation::ForbiddenChild { tag, anchor }
+        } else {
+            ContractViolation::DisallowedChild { tag, anchor }
+        });
+    }
+    if element.content && !policy.admits_content() {
+        violations.push(ContractViolation::ForbiddenContent {
+            // The instance itself: neither front end records where a text child
+            // sits (the members carry the positions, and content is not a member),
+            // and pointing at the tag the author wrote is the honest resolution.
+            anchor: ViolationAnchor::Element,
+        });
     }
 }
 
@@ -475,6 +543,7 @@ mod tests {
             tag: "Card",
             attributes: Vec::new(),
             members,
+            content: false,
         }
     }
 
@@ -507,6 +576,7 @@ mod tests {
             tag: "Button",
             attributes: Vec::new(),
             members: vec![member("h1", Some("header"), MemberArity::Once)],
+            content: false,
         };
         let violations = check_contract(&element, &ComponentContract::new("Button"));
         assert!(
@@ -618,6 +688,7 @@ mod tests {
                 },
             ],
             members: Vec::new(),
+            content: false,
         };
         let contract = ComponentContract::new("Button").requiring_prop("label");
         assert_eq!(check_contract(&element, &contract), Vec::new());
@@ -640,6 +711,98 @@ mod tests {
     }
 
     #[test]
+    fn a_contract_that_takes_no_children_refuses_an_element_and_text_alike() {
+        // The `<Button>OK</Button>` case: the text has no tag, so only a claim
+        // about the *position* can catch it.
+        let contract = ComponentContract::new("Button")
+            .requiring_prop("label")
+            .no_children();
+        let text = ElementUse {
+            tag: "Button",
+            attributes: vec![AttributeUse {
+                name: "label",
+                event: false,
+            }],
+            members: Vec::new(),
+            content: true,
+        };
+        assert!(
+            matches!(
+                check_contract(&text, &contract).as_slice(),
+                [ContractViolation::ForbiddenContent { .. }]
+            ),
+            "{:?}",
+            check_contract(&text, &contract)
+        );
+
+        let element = ElementUse {
+            tag: "Button",
+            attributes: vec![AttributeUse {
+                name: "label",
+                event: false,
+            }],
+            members: vec![member("span", None, MemberArity::Once)],
+            content: false,
+        };
+        let violations = check_contract(&element, &contract);
+        assert!(
+            matches!(
+                violations.as_slice(),
+                [ContractViolation::ForbiddenChild { tag, .. }] if tag.as_ref() == "span"
+            ),
+            "{violations:?}"
+        );
+        assert_eq!(
+            violations[0].message("Button"),
+            "component 'Button' takes no children, so the 'span' written inside it \
+             can never render",
+            "the diagnostic names the tag and says what is wrong"
+        );
+    }
+
+    #[test]
+    fn a_forbidden_child_is_reported_even_behind_a_conditional() {
+        // Unlike a cardinality bound, this is not a claim about a count: the
+        // markup's only possible effect is nothing, whether the branch is taken or
+        // not.
+        let contract = ComponentContract::new("Button").no_children();
+        let element = ElementUse {
+            tag: "Button",
+            attributes: Vec::new(),
+            members: vec![member("span", None, MemberArity::AtMostOnce)],
+            content: false,
+        };
+        assert!(
+            check_contract(&element, &contract)
+                .iter()
+                .any(|v| matches!(v, ContractViolation::ForbiddenChild { .. })),
+        );
+    }
+
+    #[test]
+    fn a_tag_list_restricts_tags_and_leaves_content_alone() {
+        // `Only` is a list of names, and a text run has none — so the two child
+        // states report differently, which is why they are two violations.
+        let contract = ComponentContract::new("Tabs").allowing_child("Tab");
+        let element = ElementUse {
+            tag: "Tabs",
+            attributes: Vec::new(),
+            members: vec![member("Tab", None, MemberArity::Once)],
+            content: true,
+        };
+        assert_eq!(check_contract(&element, &contract), Vec::new());
+    }
+
+    #[test]
+    fn content_under_an_unrestricted_contract_is_still_fine() {
+        // The regression guard for every ordinary `<div>text</div>`: recording
+        // content must not make an open contract start refusing it.
+        let mut element = use_of(vec![member("h1", Some("header"), MemberArity::Once)]);
+        element.content = true;
+        assert_eq!(check_contract(&element, &card()), Vec::new());
+    }
+
+    #[test]
     fn violations_anchor_to_the_part_that_caused_them() {
         let element = ElementUse {
             tag: "Card",
@@ -648,6 +811,7 @@ mod tests {
                 event: false,
             }],
             members: vec![member("h1", Some("nope"), MemberArity::Once)],
+            content: false,
         };
         let contract = ComponentContract::new("Card")
             .allowing_prop("title")

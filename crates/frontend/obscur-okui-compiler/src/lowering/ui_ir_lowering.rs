@@ -324,7 +324,12 @@ fn starts_uppercase(tag: &str) -> bool {
 
 /// Returns an event attribute's local name — the identifier after the `:` in
 /// `on:click` (`"click"`), falling back to the attribute's own name.
-fn event_local_name(attribute: &Attribute) -> String {
+///
+/// `pub(crate)` because the validators must name an event exactly as the IR does:
+/// a diagnostic about `on:clik` has to quote the string the binding was built
+/// from, and the `ContractValidator` used to keep a byte-identical private copy of
+/// this function to do it.
+pub(crate) fn event_local_name(attribute: &Attribute) -> String {
     let mut seen_colon = false;
     for token in attribute.syntax().tokens() {
         match token.kind() {
@@ -339,7 +344,14 @@ fn event_local_name(attribute: &Attribute) -> String {
 /// Extracts an attribute's value as raw text: a quoted string's inner text, a
 /// dynamic expression's source, or a bare `AttributeValue` token's text (as in
 /// `on:click=submit`). Returns `None` when the attribute has no value.
-fn attribute_value_text(attribute: &Attribute) -> Option<String> {
+///
+/// `pub(crate)` because for an **event** attribute this string *is* the handler
+/// reference — the name `name_binding::fallback_symbol` hashes into the command
+/// symbol the runtime dispatches on. A checker that re-derived it would be
+/// checking a name the IR might not carry, and a validator that admits one string
+/// while the IR emits another is worse than no validator at all. One extraction,
+/// so the checked name and the hashed name cannot drift.
+pub(crate) fn attribute_value_text(attribute: &Attribute) -> Option<String> {
     if let Some(literal) = attribute.string_value() {
         return Some(literal);
     }

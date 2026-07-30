@@ -543,6 +543,9 @@ struct DslInstance<'a> {
     attribute_spans: Vec<Span>,
     members: Vec<(&'a str, Option<SlotUse<'a>>, MemberArity)>,
     member_spans: Vec<Span>,
+    /// Whether a text or `{expr}` child reaches this instance — content, which is
+    /// not a member because it carries no tag.
+    content: bool,
 }
 
 impl<'a> DslInstance<'a> {
@@ -554,6 +557,7 @@ impl<'a> DslInstance<'a> {
             attribute_spans: Vec::new(),
             members: Vec::new(),
             member_spans: Vec::new(),
+            content: false,
         };
         for attr in &element.attrs {
             let (name, event, span) = match attr {
@@ -570,9 +574,17 @@ impl<'a> DslInstance<'a> {
     /// Appends `element`'s members, looking through the control flow that
     /// splices into it — the same walk the file front end makes, because the
     /// emitter makes no distinction between the two front ends' output.
+    ///
+    /// The same walk records [`ElementUse::content`]: a `"text"` child or a
+    /// `{expr}` interpolation, which is not a member because it has no tag to be
+    /// checked against an allowed-children list. A contract declaring *no*
+    /// children refuses it all the same — that is what makes
+    /// `okui! { <Button label="x">"OK"</Button> }` a compile error rather than a
+    /// text run nothing mounts.
     fn collect_members(&mut self, element: &'a DslElement, arity: MemberArity) {
         for child in &element.children {
             let DslNode::Element(child) = child else {
+                self.content = true;
                 continue;
             };
             if is_conditional_tag(&child.tag) {
@@ -616,6 +628,7 @@ impl<'a> DslInstance<'a> {
                     arity: *arity,
                 })
                 .collect(),
+            content: self.content,
         }
     }
 
@@ -959,14 +972,19 @@ mod tests {
 
     #[test]
     fn component_with_property_event_and_text_child() {
+        // `Dialog` rather than `Button`: this authors a text child, and `Button`'s
+        // contract now declares §2.13's "no children" — it builds its label from
+        // its own props, so an authored one reached no tree. `Dialog` is the one
+        // shipped widget whose children ARE its content, which makes it the honest
+        // subject for "a component with a property, an event and a text child".
         let document = doc(quote! {
-            <Button label="OK" on:click={on_ok}>"OK"</Button>
+            <Dialog title="OK" on:click={on_ok}>"OK"</Dialog>
         });
         let root = document.root();
         assert_eq!(root.kind(), UiIrNodeKind::Component);
-        assert_eq!(root.tag(), "Button");
+        assert_eq!(root.tag(), "Dialog");
         assert_eq!(
-            prop(root, "label"),
+            prop(root, "title"),
             &UiIrExpression::Literal(UiIrValue::Text("OK".into()))
         );
         assert_eq!(root.events()[0].handler(), "on_ok");
@@ -1063,6 +1081,39 @@ mod tests {
         assert!(
             rejection(quote! { <Image/> }).contains("requires prop 'src'"),
             "and so is an omitted required prop"
+        );
+    }
+
+    #[test]
+    fn a_widget_that_synthesises_its_children_refuses_authored_ones() {
+        // §2.13's "allowed children" third state, on the primary surface. Both
+        // spellings of the mistake are caught, and the text one is why the rule
+        // needed content and not just members: `<Button>OK</Button>` — the audit's
+        // own example — has no child ELEMENT to be caught by.
+        let text = rejection(quote! { <Button label="OK">"OK"</Button> });
+        assert!(
+            text.contains("takes no children") && text.contains("content"),
+            "got: {text}"
+        );
+        let element = rejection(quote! { <Button label="OK"><span/></Button> });
+        assert!(
+            element.contains("takes no children") && element.contains("'span'"),
+            "the diagnostic names the tag; got: {element}"
+        );
+
+        // The other side of the line: a lowercase `<button>` is a base element
+        // whose authored children are the only thing that renders (nothing mounts
+        // the widget's view for it), so the rule must not touch it. Contracts are
+        // keyed by the authored tag, which is what keeps the two apart.
+        assert!(
+            DslMacro::to_document(quote! { <button class="btn"><span>"press"</span></button> })
+                .is_ok(),
+            "the base element keeps its children"
+        );
+        // And `Dialog`, the one widget whose children ARE its content.
+        assert!(
+            DslMacro::to_document(quote! { <Dialog title="Hi"><span/></Dialog> }).is_ok(),
+            "`Dialog` accepts authored children"
         );
     }
 

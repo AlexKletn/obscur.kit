@@ -8,6 +8,12 @@
 //!   assignment, mutation, I/O, async or forbidden keywords in an `{expr}`.
 //! - [`CapabilityValidator`] checks that each element's declared required
 //!   capability is granted (§2.13).
+//! - [`CommandValidator`] checks that every `on:<event>` handler reference names a
+//!   command somebody claims (§2.13's "string method names"), against the
+//!   [`CommandSurface`] the caller declared. A handler is matched by a hash of its
+//!   name, so an unclaimed one used to be a silent no-op — a button that does
+//!   nothing, with no diagnostic anywhere. Only the *file* front end can run this:
+//!   see [`CommandSurface`] for why the `okui!` macro cannot, and must not guess.
 //! - [`CollectionValidator`] applies the §2.11 collection rule
 //!   ([`check_collection`], shared with the macro front end): both `<For>` and
 //!   `<VirtualFor>` are honoured — the latter lowers to a virtual-collection
@@ -15,8 +21,9 @@
 //!   rule accepts them, and the walk is the seam a future collection constraint
 //!   would live in. See [`collection_rule`]'s docs.
 //! - [`ContractValidator`] checks a component instance against a
-//!   [`ComponentContract`] — required props, allowed children and the §2.12
-//!   slots — on the **file** front end.
+//!   [`ComponentContract`] — required props, allowed children (a three-state
+//!   [`ChildPolicy`], so a contract can say *no* children and not only *which*)
+//!   and the §2.12 slots — on the **file** front end.
 //! - [`check_contract`] is that same rule, stated over plain data, so the
 //!   `okui!` macro reaches the same verdict from `syn` tokens; see the
 //!   [`contract_rule`] module docs for why the rule is not written against
@@ -31,6 +38,12 @@ mod builtin_contracts;
 pub use builtin_contracts::{builtin_contracts, widget_contracts};
 mod capability_validator;
 pub use capability_validator::CapabilityValidator;
+mod child_policy;
+pub use child_policy::ChildPolicy;
+mod command_surface;
+pub use command_surface::CommandSurface;
+mod command_validator;
+pub use command_validator::CommandValidator;
 pub mod collection_rule;
 pub use collection_rule::check_collection;
 mod collection_validator;

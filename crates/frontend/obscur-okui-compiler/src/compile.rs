@@ -19,9 +19,9 @@ use crate::resolution::{NameResolver, ResolutionError};
 use crate::symbol::{Symbol, SymbolKind, SymbolTable};
 use crate::typing::TypeError;
 use crate::validation::{
-    CapabilityValidator, CollectionValidator, ComponentContract, ContractValidator,
-    ExpressionValidator, OutletValidator, ValidationDiagnostic, builtin_contracts,
-    widget_contracts,
+    CapabilityValidator, CollectionValidator, CommandSurface, CommandValidator, ComponentContract,
+    ContractValidator, ExpressionValidator, OutletValidator, ValidationDiagnostic,
+    builtin_contracts, widget_contracts,
 };
 
 /// A lookup from component/tag name to its [`ComponentContract`], so the
@@ -267,13 +267,16 @@ impl CompileResult {
 ///
 /// The compiler is configured fluently with the component contracts
 /// ([`with_registry`](Self::with_registry)), the granted capabilities
-/// ([`granting`](Self::granting)) and the props/state symbols in scope
-/// ([`defining`](Self::defining)) before [`compile`](Self::compile) is called.
+/// ([`granting`](Self::granting)), the commands a handler may name
+/// ([`claiming_command`](Self::claiming_command)) and the props/state symbols in
+/// scope ([`defining`](Self::defining)) before [`compile`](Self::compile) is
+/// called.
 #[derive(Debug, Clone, Default)]
 pub struct Compiler {
     source_name: Box<str>,
     registry: ContractRegistry,
     granted: Vec<CapabilityId>,
+    commands: CommandSurface,
     symbols: Vec<Symbol>,
 }
 
@@ -309,6 +312,37 @@ impl Compiler {
         self
     }
 
+    /// Declares that `name` is a command a handler in this document may bind
+    /// (fluent; spec §2.13).
+    ///
+    /// Declaring the first command **closes** the command surface: from then on an
+    /// `on:<event>=<handler>` naming anything undeclared is a
+    /// [`Validation`](CompileDiagnostic::Validation) diagnostic instead of the
+    /// silent no-op it used to be. Declare every command the application
+    /// registers, or none — a partial list reports the rest as unknown.
+    ///
+    /// This is the same shape as [`granting`](Self::granting), and for the same
+    /// reason: a command is claimed by a *runtime registration*
+    /// (`UiRuntime::on_command`, `App::on_command`), which is a value that exists
+    /// only once the application runs, so no pass over the document can discover
+    /// it. The caller knows; the compiler is told. See [`CommandSurface`] for why
+    /// the default is "unchecked" rather than "nothing is claimed", and for the
+    /// half of the problem the `okui!` macro cannot reach.
+    #[must_use]
+    pub fn claiming_command(mut self, name: impl Into<Box<str>>) -> Self {
+        self.commands.claim(name);
+        self
+    }
+
+    /// Sets the whole [`CommandSurface`] at once (fluent) — for a caller that has
+    /// the set in hand rather than one name at a time, and the only way to declare
+    /// the empty surface ("this document binds no handler").
+    #[must_use]
+    pub fn with_commands(mut self, commands: CommandSurface) -> Self {
+        self.commands = commands;
+        self
+    }
+
     /// Defines `symbol` (a prop or state binding) in the document's root scope so
     /// its expressions may reference it (fluent).
     #[must_use]
@@ -330,7 +364,10 @@ impl Compiler {
     ///    [`Type`](CompileDiagnostic::Type) variant reserves its place in the
     ///    diagnostic sum for when that pass lands.
     /// 3. **Validation** — expression restrictions (§2.10), capability grants
-    ///    (§2.13), the §2.11 collection rule (a `<VirtualFor>` is refused, see
+    ///    (§2.13), the handler references against the declared
+    ///    [`CommandSurface`] (§2.13's "string method names", silent until a caller
+    ///    declares one — see [`claiming_command`](Self::claiming_command)), the
+    ///    §2.11 collection rule (a `<VirtualFor>` is refused, see
     ///    [`CollectionValidator`]), the §2.12 outlet rule (an authored
     ///    `<slot name="…"/>` carries a literal name and nothing else, see
     ///    [`OutletValidator`]) and, for every element whose tag has a registered
@@ -372,6 +409,9 @@ impl Compiler {
         }
         let capability_validator = CapabilityValidator::new(self.granted.iter().cloned());
         for diagnostic in capability_validator.validate(document) {
+            diagnostics.push(CompileDiagnostic::Validation(diagnostic));
+        }
+        for diagnostic in CommandValidator::new(self.commands.clone()).validate(document) {
             diagnostics.push(CompileDiagnostic::Validation(diagnostic));
         }
         for diagnostic in CollectionValidator::new().validate(document) {
@@ -909,6 +949,111 @@ mod tests {
             result.diagnostics()
         );
         assert!(result.document().is_some());
+    }
+
+    // --- audit 2-C: a handler reference is checked against the declared commands ---
+
+    #[test]
+    fn a_declared_command_surface_catches_a_misspelled_handler() {
+        // The silent no-op, made loud: `on:click=incrment` used to compile clean
+        // and produce a button that does nothing, because the name was hashed and
+        // matched against whatever the application happened to register.
+        let doc = document("<button class=\"btn\" on:click=incrment/>");
+        let result = Compiler::new("app.okui")
+            .claiming_command("increment")
+            .compile(&doc);
+        assert!(
+            result.diagnostics().iter().any(|d| matches!(
+                d,
+                CompileDiagnostic::Validation(v)
+                    if v.message().contains("unknown command 'incrment'")
+                        && v.message().contains("did you mean 'increment'?")
+            )),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
+    }
+
+    #[test]
+    fn the_declared_command_itself_compiles_clean() {
+        // The disjoint half: the check must refuse the typo and nothing else.
+        let doc = document("<button class=\"btn\" on:click=increment/>");
+        let result = Compiler::new("app.okui")
+            .claiming_command("increment")
+            .compile(&doc);
+        assert!(
+            !result.has_errors(),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
+    }
+
+    #[test]
+    fn a_compiler_told_nothing_about_commands_judges_nothing() {
+        // The default has to stay silent: a false "unknown command" is worse than
+        // the no-op, and every document written before this check existed still
+        // compiles.
+        let doc = document("<button on:click=whatever_nobody_declared/>");
+        let result = Compiler::new("app.okui").compile(&doc);
+        assert!(
+            !result.has_errors(),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
+    }
+
+    // --- audit 2-E: a contract can say "no children" ---
+
+    #[test]
+    fn the_default_registry_refuses_children_under_a_widget_that_synthesises_them() {
+        // `<Button>OK</Button>` is meaningless — the widget builds its label from
+        // its own props — and it used to compile, because an empty
+        // allowed-children list meant "any child".
+        let text = Compiler::new("app.okui").compile(&document("<Button label=\"x\">OK</Button>"));
+        assert!(
+            text.diagnostics().iter().any(|d| matches!(
+                d,
+                CompileDiagnostic::Validation(v) if v.message().contains("takes no children")
+            )),
+            "diagnostics: {:?}",
+            text.diagnostics()
+        );
+
+        let element = Compiler::new("app.okui").compile(&document("<Tabs><Tab/></Tabs>"));
+        assert!(
+            element.diagnostics().iter().any(|d| matches!(
+                d,
+                CompileDiagnostic::Validation(v)
+                    if v.message().contains("takes no children") && v.message().contains("'Tab'")
+            )),
+            "an invented child vocabulary is named, not silently mounted as nothing: {:?}",
+            element.diagnostics()
+        );
+    }
+
+    #[test]
+    fn the_base_element_spelling_keeps_its_children() {
+        // The line that matters: `<button>` is a base element whose authored
+        // children are the only thing that renders, and it shares the widget's
+        // `ComponentId` — but not its contract, which is keyed by the authored tag.
+        // Forbidding children on `<Button/>` must not touch it.
+        let result = Compiler::new("app.okui").compile(&document(
+            "<button class=\"btn\"><span>press</span></button>",
+        ));
+        assert!(
+            !result.has_errors(),
+            "diagnostics: {:?}",
+            result.diagnostics()
+        );
+
+        // …and `Dialog`, the one widget whose children ARE its content.
+        let dialog =
+            Compiler::new("app.okui").compile(&document("<Dialog title=\"Hi\"><p/></Dialog>"));
+        assert!(
+            !dialog.has_errors(),
+            "diagnostics: {:?}",
+            dialog.diagnostics()
+        );
     }
 
     #[test]

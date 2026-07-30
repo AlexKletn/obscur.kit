@@ -12,17 +12,31 @@
 //! The mapping is one-to-one with the string contract's semantics: each
 //! required prop becomes [`requiring_prop`](ComponentContract::requiring_prop),
 //! each allowed prop [`allowing_prop`](ComponentContract::allowing_prop), each
-//! event [`allowing_event`](ComponentContract::allowing_event). For children,
-//! [`ChildrenSurface::Only`] maps to one
-//! [`allowing_child`](ComponentContract::allowing_child) per tag; both
-//! [`ChildrenSurface::Any`] and [`ChildrenSurface::None`] leave children
-//! unrestricted, because the string contract cannot express a leaf position (an
-//! empty allowed-children list already means "any child").
+//! event [`allowing_event`](ComponentContract::allowing_event). Children cross
+//! whole, case for case, into the [`ChildPolicy`] that mirrors this very enum:
+//! [`Only`](ChildrenSurface::Only) to
+//! [`Only`](crate::validation::ChildPolicy::Only),
+//! [`Any`](ChildrenSurface::Any) to [`Any`](crate::validation::ChildPolicy::Any),
+//! and [`None`](ChildrenSurface::None) to
+//! [`no_children`](ComponentContract::no_children).
+//!
+//! That last case used to be **flattened into `Any`**: the string contract had a
+//! `Vec` whose empty state already meant "any child", so a derived
+//! `#[contract]` declaring a leaf component crossed this boundary and came out
+//! unrestricted, and `<MyIcon>text</MyIcon>` compiled clean against a contract
+//! that had said the opposite. The declaration was not lost in the derive or on
+//! the domain surface — only here, on the last hop before the checker. With
+//! [`ChildPolicy`] carrying all three states, the bridge is lossless.
 //!
 //! Each declared [`SlotSurface`] becomes one [`SlotRule`] (§2.12), carrying its
 //! name, its [`SlotCardinality`](obscur_view::contract::SlotCardinality) — the
-//! very same type, not a re-spelling — and its own child rule under the same
-//! `Only`-maps, `Any`/`None`-do-not mapping.
+//! very same type, not a re-spelling — and its own child rule. A **slot's**
+//! children are still `Only`-maps-and-nothing-else, because [`SlotRule`] keeps a
+//! tag list of its own: a slot with no declared children is a slot that admits
+//! any, and a slot declaring `None` is a slot nothing may be assigned to, which
+//! the cardinality already expresses better.
+//!
+//! [`ChildPolicy`]: crate::validation::ChildPolicy
 
 use obscur_view::contract::{ChildrenSurface, ComponentSurface, SlotSurface};
 
@@ -43,10 +57,16 @@ impl From<&ComponentSurface> for ComponentContract {
         for (name, ty) in surface.prop_types() {
             contract = contract.with_prop_type(*name, *ty);
         }
-        if let ChildrenSurface::Only(tags) = surface.children() {
-            for tag in tags {
-                contract = contract.allowing_child(*tag);
+        match surface.children() {
+            ChildrenSurface::Only(tags) => {
+                for tag in tags {
+                    contract = contract.allowing_child(*tag);
+                }
             }
+            ChildrenSurface::None => contract = contract.no_children(),
+            // The contract's own default; matched rather than defaulted so a new
+            // case on the domain surface has to be answered here.
+            ChildrenSurface::Any => {}
         }
         for slot in surface.slots() {
             contract = contract.with_slot(slot.into());
@@ -83,15 +103,19 @@ mod tests {
         assert_eq!(contract.required_props(), &["selected".into()]);
         assert_eq!(contract.allowed_props(), &["orientation".into()]);
         assert_eq!(contract.allowed_events(), &["change".into()]);
-        assert_eq!(contract.allowed_children(), &["Tab".into()]);
+        assert_eq!(contract.children().tags(), &["Tab".into()]);
     }
 
     #[test]
-    fn any_and_none_children_leave_children_unrestricted() {
+    fn a_declared_leaf_crosses_as_a_leaf() {
+        // The lossy hop, pinned: `None` used to arrive as `Any`, so a derived leaf
+        // component accepted children its own contract had refused.
+        use crate::validation::ChildPolicy;
+
         let any = ComponentContract::from(&ComponentSurface::new("A").any_children());
-        assert!(any.allowed_children().is_empty());
+        assert_eq!(any.children(), &ChildPolicy::Any);
         let none = ComponentContract::from(&ComponentSurface::new("B").no_children());
-        assert!(none.allowed_children().is_empty());
+        assert_eq!(none.children(), &ChildPolicy::None);
     }
 
     #[test]

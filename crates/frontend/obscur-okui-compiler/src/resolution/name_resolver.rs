@@ -14,6 +14,15 @@ use crate::symbol::{Symbol, SymbolTable};
 /// tree, checking that every attribute expression's leading reference resolves
 /// to a defined symbol.
 ///
+/// ## What is not a value reference
+///
+/// An `on:<event>` binding is skipped. Its value is a **handler name** that the
+/// lowering hashes into a command symbol, not an expression anything evaluates, so
+/// a symbol table of props and state has no opinion worth reporting about it — see
+/// the note in `resolve_element`. Those names are checked by
+/// [`CommandValidator`](crate::validation::CommandValidator) against the commands
+/// the caller declared (spec §2.13).
+///
 /// ## Scoping conventions
 ///
 /// A `<For>` loop opens a child scope for its body and binds two loop-local
@@ -61,6 +70,20 @@ impl NameResolver {
         // check is performed for it. This covers `each`/`key`/`cond` alongside
         // ordinary attributes, all resolved in the current (enclosing) scope.
         for attribute in element.attributes() {
+            // An `on:<event>` value is NOT a value expression: the lowering takes
+            // its raw text as the handler *name* and hashes it into a command
+            // symbol, so resolving it against the props/state table asks the wrong
+            // question and answers it misleadingly — `on:click={increment}` was
+            // reported as an unknown *name*, whose only remedy is to declare a state
+            // value called `increment`, which no handler ever reads. It also split
+            // the two spellings of one reference: `on:click=increment` was checked by
+            // nothing while `on:click={increment}` had to be a declared value.
+            // Handler names belong to
+            // [`CommandValidator`](crate::validation::CommandValidator), which judges
+            // both spellings against the commands the caller declared (§2.13).
+            if attribute.is_event() {
+                continue;
+            }
             let Some(expression) = attribute.value_expression() else {
                 continue;
             };
@@ -195,6 +218,19 @@ mod tests {
         assert!(errors.is_empty(), "unexpected errors: {errors:?}");
         // The loop-local is no longer visible after the walk pops its scope.
         assert!(!table.is_defined("item"));
+    }
+
+    #[test]
+    fn an_event_handler_is_not_resolved_as_a_value_reference() {
+        // The two spellings of one handler reference must be judged alike, and by
+        // the pass that knows what a command is. Before, the bare word was checked
+        // by nothing and the braced form had to name a declared *value* — so the
+        // advice for `on:click={increment}` was "declare a state called increment",
+        // which no handler ever reads.
+        let mut table = SymbolTable::new();
+        let doc = document("<button on:click={increment}/><button on:click=increment/>");
+        let errors = NameResolver::new().resolve(&doc, &mut table);
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
     }
 
     #[test]

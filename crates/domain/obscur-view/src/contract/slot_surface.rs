@@ -20,9 +20,11 @@ use crate::contract::{ChildrenSurface, SlotCardinality};
 /// - `name` — the value a child's `slot="…"` must match;
 /// - `cardinality` — how many children may carry that name (see
 ///   [`SlotCardinality`]);
-/// - `children` — which child tags the slot admits (see [`ChildrenSurface`];
-///   `Any` and `None` both leave the slot's membership unrestricted, because the
-///   string contract cannot express a leaf position).
+/// - `children` — which child tags the slot admits (see [`ChildrenSurface`]; only
+///   `Only` restricts a **slot's** membership — `Any` and `None` both leave it
+///   unrestricted, because a slot that admits nothing is a slot with nothing to
+///   assign to it, which its `cardinality` states better. A *component's* `None`
+///   does now cross into the `.okui` compiler as a real leaf; a slot's does not).
 ///
 /// ```
 /// use obscur_view::contract::{ChildrenSurface, SlotCardinality, SlotSurface};

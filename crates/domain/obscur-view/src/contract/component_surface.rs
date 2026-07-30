@@ -15,10 +15,12 @@ use crate::contract::SlotSurface;
 ///
 /// - [`Any`](ChildrenSurface::Any) — any child element is allowed (no
 ///   restriction);
-/// - [`None`](ChildrenSurface::None) — a leaf: no children. The string contract
-///   model the `.okui` compiler consumes cannot express leaf-ness (an empty
-///   allowed-children list means "any child"), so a bridge treats `None` the
-///   same as `Any`; it is retained here only to mirror `ChildContract`;
+/// - [`None`](ChildrenSurface::None) — a leaf: no children. This used to be
+///   *unenforceable*: the string contract the `.okui` compiler consumed held
+///   children in a list whose empty state already meant "any child", so the bridge
+///   into it had to flatten `None` into `Any` and a declared leaf accepted children
+///   anyway. The compiler's contract now names the three states, and the
+///   declaration crosses intact;
 /// - [`Only`](ChildrenSurface::Only) — only the listed child tags are allowed.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ChildrenSurface {
