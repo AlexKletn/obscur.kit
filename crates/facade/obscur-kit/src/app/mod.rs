@@ -25,6 +25,40 @@
 //!     .unwrap();
 //! ```
 //!
+//! # Reaching the runtime from an application
+//!
+//! Three of the runtime's capabilities are *positional* or *live*, so they cannot be
+//! configured by a plain builder call: a handler at one node (§2.6's links 1–3) needs
+//! a `NodeId` that only exists after a frame, and replacing the stylesheets (§4.12)
+//! happens while the loop runs. An `App` reaches them by **name** and by **queue**:
+//!
+//! ```no_run
+//! use obscur_kit::App;
+//! use obscur_kit::headless::input::SelectorTarget;
+//! use obscur_kit::identity::InternedSymbol;
+//! use obscur_kit::interaction::event::UiEvent;
+//! # use obscur_kit::view::view::View;
+//! const PICK: InternedSymbol = InternedSymbol::named("pick");
+//!
+//! let app = App::new("Editor").screen(r#"<div test-id="row" on:click=pick/>"#);
+//! let control = app.control();
+//! app
+//!     // §2.3's payload: which node was hit, where, with what device.
+//!     .on_command(PICK, |e: &mut UiEvent| { let _ = e.target(); })
+//!     // §2.6 link 1: the same symbol, different logic, at one element.
+//!     .on_command_at(SelectorTarget::test_id("row"), PICK, || {})
+//!     // §4.12: the authored set, replaced while running.
+//!     .on_command(InternedSymbol::named("dark"), move || {
+//!         control.set_stylesheet(":root { background-color: #101010 }");
+//!     })
+//!     .run()
+//!     .unwrap();
+//! ```
+//!
+//! A handler never receives the runtime: it runs *inside* §2.3's propagation, so a
+//! request is recorded and applied at the frame boundary. See
+//! [`AppControl`](crate::control::AppControl) for that contract.
+//!
 //! What it turns on for you, honestly (§3.3, §5.18): the real text-shaping stack
 //! over the system fonts (bundled last-resort fallback appended), the UA default
 //! stylesheet plus your authored CSS through the motion-aware

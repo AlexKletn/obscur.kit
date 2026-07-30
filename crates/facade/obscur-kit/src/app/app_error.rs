@@ -1,5 +1,7 @@
 //! [`AppError`] — why [`App::run`](super::App::run) could not start or complete.
 
+use crate::screen::ScreenError;
+
 /// Why [`App::run`](super::App::run) could not start or complete.
 #[derive(Debug)]
 pub enum AppError {
@@ -38,3 +40,29 @@ impl std::fmt::Display for AppError {
 }
 
 impl std::error::Error for AppError {}
+
+impl From<ScreenError> for AppError {
+    /// Carries a screen front-end failure into the one error type a windowed
+    /// application sees, keeping the parse/compile split (and the diagnostics)
+    /// intact — the `.okui` front end is display-free and has its own error type, so
+    /// this is the only place the two meet.
+    fn from(error: ScreenError) -> Self {
+        match error {
+            ScreenError::Parse(messages) => Self::ScreenParse(messages),
+            ScreenError::Compile(messages) => Self::ScreenCompile(messages),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AppError, ScreenError};
+
+    #[test]
+    fn a_screen_failure_keeps_its_half_and_its_diagnostics() {
+        let parse: AppError = ScreenError::Parse(vec!["unexpected `<`".to_owned()]).into();
+        assert!(matches!(parse, AppError::ScreenParse(messages) if messages.len() == 1));
+        let compile: AppError = ScreenError::Compile(vec!["no slot name".to_owned()]).into();
+        assert!(matches!(compile, AppError::ScreenCompile(messages) if messages.len() == 1));
+    }
+}

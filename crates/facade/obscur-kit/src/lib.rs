@@ -27,14 +27,22 @@
 #[cfg(all(feature = "window-winit", feature = "render-vello"))]
 pub mod app;
 pub mod bootstrap;
+// Live control of a running runtime (§2.6 positional commands, §2.3 listeners,
+// §4.12 stylesheet invalidation) and the run-time `.okui` front end. Both are
+// display-free on purpose: `App` composes them for a standalone window, and a guest
+// host that embeds a `UiRuntime` itself uses the same types.
+pub mod control;
 pub mod default_stylesheet;
 #[cfg(all(feature = "shell-layer", feature = "render-vello"))]
 pub mod layer;
 pub mod prelude;
+pub mod screen;
 
 #[cfg(all(feature = "window-winit", feature = "render-vello"))]
 pub use app::{App, AppError, FrameInfo};
+pub use control::AppControl;
 pub use default_stylesheet::{ua_css, ua_stylesheet};
+pub use screen::{OkuiScreen, ScreenData, ScreenError};
 
 // --- foundation ---
 pub use obscur_capability as capability;

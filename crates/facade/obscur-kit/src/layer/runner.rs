@@ -3,11 +3,12 @@
 use crate::bootstrap::{CssPipeline, KitBootstrap};
 use crate::css::source::CssSource;
 use crate::identity::{InternedSymbol, RuntimeId};
+use crate::interaction::event::UiEvent;
 use crate::render::frame::{FrameSubmission, RenderFrame};
 use crate::render::renderer::RendererId;
 use crate::render_vello::renderer::{VelloDevice, VelloRenderer, VelloSurface};
-use crate::runtime::UiRuntime;
 use crate::runtime::frame::FrameReason;
+use crate::runtime::{CommandHandler, UiRuntime};
 use crate::shell_layer::event::LayerEvent;
 use crate::shell_layer::surface::{LayerWaker, LayerWindow};
 use crate::view::view::View;
@@ -30,7 +31,7 @@ pub(super) fn run(
     config: LayerSurfaceConfig,
     stylesheets: Vec<String>,
     mut root: Box<dyn FnMut() -> View + 'static>,
-    commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
+    commands: Vec<(InternedSymbol, CommandHandler)>,
     handle: LayerHandle,
     waker: Option<LayerWaker>,
 ) -> Result<(), LayerAppError> {
@@ -59,8 +60,10 @@ pub(super) fn run(
     let sources: Vec<CssSource> = stylesheets.into_iter().map(CssSource::anonymous).collect();
     css.install(&mut runtime, &sources);
 
-    for (command, handler) in commands {
-        runtime.on_command(command, handler);
+    for (command, mut handler) in commands {
+        // Already normalized by the builder, whichever shape the app registered; the
+        // trampoline hands the propagating event through (see `LayerApp::on_command`).
+        runtime.on_command(command, move |event: &mut UiEvent| handler.call(event));
     }
     runtime.set_root_view(move || root());
 

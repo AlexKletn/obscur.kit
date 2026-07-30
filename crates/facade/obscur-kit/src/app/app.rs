@@ -2,12 +2,13 @@
 
 use super::app_error::AppError;
 use super::runner;
+use crate::control::AppControl;
 use crate::geometry::Size;
+use crate::headless::input::SelectorTarget;
 use crate::identity::InternedSymbol;
-use crate::okui_compiler::bridge::UiIrViewBridge;
-use crate::okui_compiler::compile::Compiler;
-use crate::okui_syntax::ast::Document;
-use crate::okui_syntax::parser::Parser;
+use crate::interaction::event::ListenerPhase;
+use crate::runtime::{CommandHandler, IntoCommandHandler};
+use crate::screen::{OkuiScreen, ScreenData};
 use crate::view::view::{View, ViewNode};
 
 /// The default logical window size, in CSS pixels.
@@ -37,8 +38,9 @@ enum Root {
     /// A reactive builder re-invoked each frame — the same shape
     /// [`UiRuntime::set_root_view`](crate::runtime::UiRuntime::set_root_view) holds.
     View(Box<dyn FnMut() -> View + 'static>),
-    /// An `.okui` source, compiled to a `View` when [`App::run`] is called (a
-    /// compile failure surfaces as an [`AppError`] from `run`).
+    /// An `.okui` source, compiled to UI IR when [`App::run`] is called (a compile
+    /// failure surfaces as an [`AppError`] from `run`) and lowered to a `View` on
+    /// every frame through [`OkuiScreen`].
     Screen(String),
     /// A builder that additionally reads the frame's [`FrameInfo`].
     ViewWith(Box<dyn FnMut(&FrameInfo) -> View + 'static>),
@@ -57,7 +59,13 @@ pub struct App {
     size: (f32, f32),
     stylesheets: Vec<String>,
     root: Option<Root>,
-    commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
+    commands: Vec<(InternedSymbol, CommandHandler)>,
+    /// The handle positional registrations, stylesheet replacements and queued
+    /// runtime actions travel on; clones of it are handed to the application by
+    /// [`App::control`].
+    control: AppControl,
+    /// The values an `.okui` [`screen`](App::screen)'s `{bindings}` read.
+    screen_data: ScreenData,
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
     virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
     virtual_clicks: Vec<(InternedSymbol, Box<dyn FnMut(usize, u32) + 'static>)>,
@@ -75,6 +83,8 @@ impl App {
             stylesheets: Vec::new(),
             root: None,
             commands: Vec::new(),
+            control: AppControl::new(),
+            screen_data: ScreenData::new(),
             scroll: None,
             virtual_lists: Vec::new(),
             virtual_clicks: Vec::new(),
@@ -106,6 +116,13 @@ impl App {
     /// installed (below the UA default sheet) through the motion-aware
     /// [`CssPipeline`](crate::bootstrap::CssPipeline), so `@keyframes`/`transition`
     /// work and CSS errors reach the diagnostics channel.
+    ///
+    /// This is the *initial* set. To replace it while the application runs — a theme
+    /// switch, a re-read from disk — call
+    /// [`AppControl::set_stylesheets`](crate::control::AppControl::set_stylesheets) on
+    /// a [`control`](Self::control) handle: §4.12's explicit invalidation, which used
+    /// to be unreachable because the sheets were collected once and nothing ever
+    /// re-supplied them.
     pub fn stylesheet(mut self, css: &str) -> Self {
         self.stylesheets.push(css.to_owned());
         self
@@ -158,6 +175,17 @@ impl App {
     /// *interactive* list: a per-row `on:click` cannot, because every row a builder
     /// emits shares one command symbol, so only the runtime's geometry can say which
     /// row was hit.
+    ///
+    /// # Still outside §2.3's model
+    ///
+    /// Now that [`on_command`](Self::on_command) delivers the event, "a handler is
+    /// given nothing" is no longer the reason this signature exists — the *model
+    /// index* is. But the payload does not reach here: the runtime calls a virtual-row
+    /// handler directly from its pointer path rather than dispatching a command
+    /// through §2.3's capture → target → bubble walk, so a row click carries no
+    /// [`UiEvent`](crate::interaction::event::UiEvent), no listener on an ancestor can
+    /// observe it, and `prevent_default` cannot suppress it. An application that needs
+    /// the pointer's position, button or device on a row still cannot have it.
     pub fn on_row_click(
         mut self,
         id: InternedSymbol,
@@ -175,6 +203,11 @@ impl App {
     /// way a virtualized row reaches a context action: a touchscreen has one
     /// button and no modifiers, so a hold is what a secondary click would have
     /// been — and a realized row cannot carry a per-row binding to receive it.
+    ///
+    /// Outside §2.3's propagation for the same reason as
+    /// [`on_row_click`](Self::on_row_click): the hold is recognised on the runtime's
+    /// pointer path and calls this directly, so no event is delivered and no listener
+    /// sees it.
     pub fn on_row_long_press(
         mut self,
         id: InternedSymbol,
@@ -190,26 +223,168 @@ impl App {
     /// what is left over, in logical pixels, positive when the content should move
     /// down. An app that windows its own list owns its scroll position and needs
     /// this to move it.
+    ///
+    /// Not a §2.3 event either: a wheel notch no container consumed is offered to this
+    /// closure by the window runner, not dispatched as a command, so there is nothing
+    /// to observe or prevent. It stays an `FnMut(f32)` because that is the whole
+    /// payload it has — leftover pixels along the block axis.
     pub fn on_scroll(mut self, handler: impl FnMut(f32) + 'static) -> Self {
         self.scroll = Some(Box::new(handler));
         self
     }
 
-    /// Sets the root to an `.okui` screen, compiled (parse → compile → bridge) to a
-    /// static [`View`] when [`run`](Self::run) is called; a compile failure makes
-    /// `run` return an [`AppError`] carrying the diagnostics. Overrides any previous
-    /// [`view`](Self::view) / [`screen`](Self::screen).
+    /// Sets the root to an `.okui` screen: parsed and compiled to UI IR when
+    /// [`run`](Self::run) is called, then lowered to a [`View`] on **every frame**,
+    /// with `{bindings}` resolved against [`screen_data`](Self::screen_data). A
+    /// compile failure makes `run` return an [`AppError`] carrying the diagnostics.
+    /// Overrides any previous [`view`](Self::view) / [`screen`](Self::screen).
+    ///
+    /// # What state can and cannot reach it
+    ///
+    /// This used to materialise the screen **once** and hand the runtime a builder
+    /// that returned that one `View` for the application's whole life, so no state
+    /// change could reach it at all. Now the compiled IR is kept and re-lowered per
+    /// frame (nothing re-parses), which means:
+    ///
+    /// - **values do reach it**: a body `{count}` and a bound attribute
+    ///   (`class={theme}`) read [`ScreenData`], so writing that table between frames
+    ///   changes what the screen shows. A name an *attribute* binds must be bound in
+    ///   [`screen_data`](Self::screen_data) **before** `run`, because that is what
+    ///   declares it to the compiler — an undeclared name is a §2.13 error from `run`
+    ///   rather than a value that silently never arrives;
+    /// - **shape does not**: `<If>`/`<For>` are statically materialised by the
+    ///   bridge on this route, so the *structure* is fixed at compile time, and a
+    ///   `{binding}` inside a `<VirtualFor>` keeps its placeholder (per-row data
+    ///   comes from [`virtual_list`](Self::virtual_list), which is told the row's
+    ///   model index);
+    /// - **contracts are validated here, not at compile time**: §2.9 asks for
+    ///   compile-time contract validation, and a source that is a string until `run`
+    ///   cannot have it. Use the **build-time** route for that — a `build.rs` that
+    ///   emits through
+    ///   [`CodegenRoot::facade`](crate::okui_compiler::codegen::CodegenRoot::facade),
+    ///   or the inline `okui!` macro — where the markup becomes ordinary Rust,
+    ///   `{count}` reads the application's own binding, and a contract error is a
+    ///   compile error. Pass the generated function to [`view`](Self::view).
+    ///
+    /// See [`OkuiScreen`] for the whole comparison between the two routes.
     pub fn screen(mut self, okui_src: &str) -> Self {
         self.root = Some(Root::Screen(okui_src.to_owned()));
         self
     }
 
-    /// Registers `handler` for `command`, forwarded verbatim into the runtime's
-    /// [`on_command`](crate::runtime::UiRuntime::on_command) before the loop starts.
-    /// The handler type is identical to the runtime's: an `FnMut()` that typically
-    /// captures app state through an `Rc<RefCell<_>>` / `Rc<Cell<_>>`.
-    pub fn on_command(mut self, command: InternedSymbol, handler: impl FnMut() + 'static) -> Self {
-        self.commands.push((command, Box::new(handler)));
+    /// The table an `.okui` [`screen`](Self::screen)'s `{bindings}` read, as a handle
+    /// application code keeps.
+    ///
+    /// Write it before `run` for the initial values and from a command handler for
+    /// every change afterwards; the next frame's lowering reads what is there. It is
+    /// plain application state — no runtime is involved — so a write is immediate and
+    /// needs no deferral, unlike [`control`](Self::control)'s requests.
+    ///
+    /// Returns a clone of one shared table, so several handlers may each hold one.
+    #[must_use]
+    pub fn screen_data(&self) -> ScreenData {
+        self.screen_data.clone()
+    }
+
+    /// The handle onto this application's own running runtime: positional command
+    /// handlers, §2.3 listeners, stylesheet invalidation, and a queued
+    /// [`with_runtime`](AppControl::with_runtime) escape hatch.
+    ///
+    /// Returns a clone of the one handle the runner applies, so a command handler may
+    /// capture it. Read [`AppControl`] for **when** a queued request takes effect — at
+    /// the next frame boundary, never inside the handler that asked — and for why
+    /// nothing hands out a `&mut UiRuntime`.
+    #[must_use]
+    pub fn control(&self) -> AppControl {
+        self.control.clone()
+    }
+
+    /// Registers `handler` for `command` at the **window** level — link 4 of §2.6's
+    /// routing chain, and the right level for a command that means the same thing
+    /// anywhere in this window.
+    ///
+    /// # Two accepted shapes (spec §2.3)
+    ///
+    /// ```ignore
+    /// .on_command(SAVE, || save())                          // takes nothing
+    /// .on_command(PICK, |e: &mut UiEvent| pick(e.target()))  // takes the event
+    /// ```
+    ///
+    /// The event form is how §2.3's model reaches an application: `e.target()` is the
+    /// node that was hit, `e.current_target()` where the binding resolved,
+    /// `e.pointer()` / `e.key()` §2.4's payload, `e.trust()` the trusted/untrusted
+    /// origin, and `e.stop_propagation()` / `e.prevent_default()` the steering. Until
+    /// this widened, the handler was an `FnMut()` given nothing, so none of it was
+    /// reachable and a handler had to *capture* everything it might need.
+    ///
+    /// A one-argument closure needs its parameter annotated (`|e: &mut UiEvent|`) —
+    /// inference cannot pick the marker and the closure's signature at once. The
+    /// zero-argument form is unchanged and is still right for most handlers.
+    ///
+    /// For a handler that must mean different things in different places, register it
+    /// at the node instead: [`on_command_at`](Self::on_command_at).
+    pub fn on_command<M>(
+        mut self,
+        command: InternedSymbol,
+        handler: impl IntoCommandHandler<M>,
+    ) -> Self {
+        self.commands
+            .push((command, handler.into_command_handler()));
+        self
+    }
+
+    /// Registers `handler` for `command` **at the node** `target` names — links 1 and
+    /// 3 of §2.6's routing chain, where the same symbol runs different logic
+    /// depending on where the command came from.
+    ///
+    /// `target` is a §7.5 stable identifier: write `test-id="save"` on the element
+    /// (in `.okui` markup, or as a `TEST_ID` property in a Rust view) and name it
+    /// here with [`SelectorTarget::test_id`]. A [`NodeId`](crate::identity::NodeId)
+    /// works too, for a node an application already read back from the tree — but a
+    /// name is what an application configuring itself before `run` can have, since no
+    /// node id exists until a frame has built the tree.
+    ///
+    /// The name is resolved after the first commit, and resolved again whenever the
+    /// element it was bound to stops carrying it — so the registration follows the
+    /// **name**, across a rebuilt subtree. A name that matches nothing stays unbound and
+    /// never fires; ask [`AppControl::bound_node`] instead of guessing.
+    ///
+    /// A handler here **claims** the command and stops the chain: no ancestor, no
+    /// window handler ([`on_command`](Self::on_command)) and no application fallback
+    /// sees it. Both handler shapes are accepted, as in `on_command`.
+    pub fn on_command_at<M>(
+        self,
+        target: SelectorTarget,
+        command: InternedSymbol,
+        handler: impl IntoCommandHandler<M>,
+    ) -> Self {
+        self.control.on_command_at(target, command, handler);
+        self
+    }
+
+    /// Registers a §2.3 **listener** for `command` on the node `target` names, running
+    /// in `phase`.
+    ///
+    /// A listener observes and steers a command as it propagates, where a handler
+    /// claims it. With [`ListenerPhase::Capture`] it sees a command aimed at a
+    /// *descendant* before the target does — an overlay or a gesture arbiter taking
+    /// the interaction away — and it can call
+    /// [`stop_propagation`](crate::interaction::event::UiEvent::stop_propagation) to
+    /// end the propagation or
+    /// [`prevent_default`](crate::interaction::event::UiEvent::prevent_default) to let
+    /// it continue with the command's handler suppressed. Several listeners per node
+    /// are allowed and run in registration order.
+    ///
+    /// Same targeting rules as [`on_command_at`](Self::on_command_at).
+    pub fn add_event_listener<M>(
+        self,
+        target: SelectorTarget,
+        command: InternedSymbol,
+        phase: ListenerPhase,
+        listener: impl IntoCommandHandler<M>,
+    ) -> Self {
+        self.control
+            .add_event_listener(target, command, phase, listener);
         self
     }
 
@@ -222,14 +397,19 @@ impl App {
     /// compile, the event loop cannot be built, the window cannot be created, or no
     /// usable GPU adapter/device/surface is available.
     pub fn run(mut self) -> Result<(), AppError> {
-        // Resolve the root into a `FnMut` builder the runtime can hold. A `.screen`
-        // is materialized once here (static v1 materialization); a compile failure
-        // is surfaced before any window is opened.
+        // Resolve the root into a `FnMut` builder the runtime can hold. A `.screen` is
+        // compiled to IR here — once, before any window is opened, so a compile
+        // failure is an error rather than a blank window — and the builder lowers that
+        // IR every frame, which is what lets `ScreenData` reach it.
         let builder: Box<dyn FnMut() -> View + 'static> = match self.root.take() {
             Some(Root::View(builder)) => builder,
             Some(Root::Screen(src)) => {
-                let view = compile_screen(&src)?;
-                Box::new(move || view.clone())
+                // Compiled against the table, so the names the application bound
+                // before `run` are declared to the compiler and a reference to
+                // anything else is a §2.13 diagnostic here rather than a value that
+                // never arrives.
+                let screen = OkuiScreen::compile_with(&src, self.screen_data.clone())?;
+                Box::new(move || screen.view())
             }
             // The frame-aware builder is wrapped by the runner, which owns the
             // window and therefore the only authoritative viewport.
@@ -241,6 +421,7 @@ impl App {
                     self.stylesheets,
                     builder,
                     self.commands,
+                    self.control,
                     self.scroll,
                     self.virtual_lists,
                     self.virtual_clicks,
@@ -256,6 +437,7 @@ impl App {
             self.stylesheets,
             builder,
             self.commands,
+            self.control,
             self.scroll,
             self.virtual_lists,
             self.virtual_clicks,
@@ -264,60 +446,15 @@ impl App {
     }
 }
 
-/// Compiles an `.okui` source string to a [`View`] through the real frontend
-/// pipeline (parse → compile → [`UiIrViewBridge`]), mapping any failure to an
-/// [`AppError`] that carries the diagnostics.
-fn compile_screen(src: &str) -> Result<View, AppError> {
-    let parsed = Parser::new().parse(src);
-    if !parsed.errors().is_empty() {
-        return Err(AppError::ScreenParse(
-            parsed.errors().iter().map(ToString::to_string).collect(),
-        ));
-    }
-    let document = Document::cast(parsed.tree().root().clone()).ok_or_else(|| {
-        AppError::ScreenParse(vec!["the `.okui` root is not a document".to_owned()])
-    })?;
-    let result = Compiler::new("screen.okui").compile(&document);
-    if result.has_errors() {
-        return Err(AppError::ScreenCompile(
-            result
-                .diagnostics()
-                .iter()
-                .map(ToString::to_string)
-                .collect(),
-        ));
-    }
-    let document = result
-        .document()
-        .ok_or_else(|| AppError::ScreenCompile(vec!["no document was produced".to_owned()]))?;
-    Ok(UiIrViewBridge::document_to_view(document))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{App, AppError, Root, View, compile_screen};
+    use super::{App, Root, ScreenData, View};
+    use crate::headless::input::SelectorTarget;
+    use crate::identity::InternedSymbol;
+    use crate::interaction::event::{ListenerPhase, UiEvent};
 
-    #[test]
-    fn a_valid_okui_screen_compiles_to_a_root_view() {
-        // The exact frontend path `.screen` + `run` take, exercised without a loop.
-        let view = compile_screen(r#"<div class="counter"><span>0</span></div>"#)
-            .expect("a well-formed .okui screen compiles");
-        assert_eq!(view.root().len(), 1, "one root element bridged");
-    }
-
-    #[test]
-    fn an_invalid_okui_screen_surfaces_an_apperror_with_diagnostics() {
-        // `<slot/>` without a `name` is a §2.12 compile error: it parses but the
-        // compile reports it, so `.screen` must surface it as an `AppError`.
-        let error = compile_screen("<div><slot/></div>")
-            .expect_err("a malformed .okui screen is an error, not a silent empty view");
-        match error {
-            AppError::ScreenCompile(diagnostics) => {
-                assert!(!diagnostics.is_empty(), "the diagnostics are carried");
-            }
-            other => panic!("expected a ScreenCompile error, got {other:?}"),
-        }
-    }
+    /// A command symbol the builder cases below register against.
+    const PICK: InternedSymbol = InternedSymbol::from_raw(0x5A01);
 
     #[test]
     fn stylesheets_accumulate_in_order() {
@@ -333,5 +470,45 @@ mod tests {
         // Both set the root; the last call wins, so a later `.view` clears a screen.
         let app = App::new("t").screen("<div/>").view(View::default);
         assert!(matches!(app.root, Some(Root::View(_))));
+    }
+
+    #[test]
+    fn both_handler_shapes_register_through_the_builder() {
+        // The 1-C widening, at the builder: the zero-argument form still compiles and
+        // the event-taking form now does too. Registration is what is checked here;
+        // delivery is `tests/event_model_delivery.rs`.
+        let app = App::new("t")
+            .on_command(PICK, || {})
+            .on_command(PICK, |_e: &mut UiEvent| {});
+        assert_eq!(app.commands.len(), 2);
+    }
+
+    #[test]
+    fn positional_registrations_travel_on_the_control_handle() {
+        // They cannot be resolved yet — no frame has run — so what the builder does is
+        // record them where the runner will bind them after the first commit.
+        let app = App::new("t")
+            .on_command_at(SelectorTarget::test_id("save"), PICK, || {})
+            .add_event_listener(
+                SelectorTarget::test_id("list"),
+                PICK,
+                ListenerPhase::Capture,
+                |_e: &mut UiEvent| {},
+            );
+        let control = app.control();
+        assert_eq!(control.binding_count(), 2);
+        assert_eq!(
+            control.bound_node(&SelectorTarget::test_id("save")),
+            None,
+            "a name resolves against a tree, and there is none before `run`"
+        );
+    }
+
+    #[test]
+    fn the_screen_data_handle_is_the_one_the_screen_will_read() {
+        let app = App::new("t").screen("<div>{count}</div>");
+        let data: ScreenData = app.screen_data();
+        data.set("count", 7_i64);
+        assert_eq!(app.screen_data.int("count"), 7, "one table, two handles");
     }
 }

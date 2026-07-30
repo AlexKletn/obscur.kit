@@ -19,16 +19,17 @@ use winit::window::{Window, WindowAttributes, WindowId};
 use super::AppError;
 use super::app::FrameInfo;
 use crate::bootstrap::{CssPipeline, KitBootstrap};
-use crate::css::source::CssSource;
+use crate::control::AppControl;
 use crate::geometry::{Point, Size};
 use crate::identity::{InternedSymbol, RuntimeId};
 use crate::interaction::command::KeyEvent;
+use crate::interaction::event::UiEvent;
 use crate::interaction::pointer::{PointerButtons, PointerEvent, PointerId};
 use crate::render::frame::{FrameSubmission, RenderFrame};
 use crate::render::renderer::RendererId;
 use crate::render_vello::renderer::{VelloDevice, VelloRenderer, VelloSurface};
-use crate::runtime::UiRuntime;
 use crate::runtime::frame::FrameReason;
+use crate::runtime::{CommandHandler, UiRuntime};
 use crate::text::ime::{CompositionEvent, Preedit};
 use crate::view::view::{View, ViewNode};
 use crate::window_winit::conversion::{KeyboardConverter, PointerConverter};
@@ -107,7 +108,8 @@ pub(super) fn run(
     size: (f32, f32),
     stylesheets: Vec<String>,
     builder: Box<dyn FnMut() -> View + 'static>,
-    commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
+    commands: Vec<(InternedSymbol, CommandHandler)>,
+    control: AppControl,
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
     virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
     virtual_clicks: Vec<(InternedSymbol, Box<dyn FnMut(usize, u32) + 'static>)>,
@@ -120,6 +122,7 @@ pub(super) fn run(
         stylesheets,
         builder,
         commands,
+        control,
         scroll,
         None,
         virtual_lists,
@@ -141,7 +144,8 @@ pub(super) fn run_with_frame(
     size: (f32, f32),
     stylesheets: Vec<String>,
     mut builder: Box<dyn FnMut(&FrameInfo) -> View + 'static>,
-    commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
+    commands: Vec<(InternedSymbol, CommandHandler)>,
+    control: AppControl,
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
     virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
     virtual_clicks: Vec<(InternedSymbol, Box<dyn FnMut(usize, u32) + 'static>)>,
@@ -160,6 +164,7 @@ pub(super) fn run_with_frame(
         stylesheets,
         wrapped,
         commands,
+        control,
         scroll,
         Some(info),
         virtual_lists,
@@ -175,7 +180,8 @@ fn run_inner(
     size: (f32, f32),
     stylesheets: Vec<String>,
     builder: Box<dyn FnMut() -> View + 'static>,
-    commands: Vec<(InternedSymbol, Box<dyn FnMut() + 'static>)>,
+    commands: Vec<(InternedSymbol, CommandHandler)>,
+    control: AppControl,
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
     frame_info: Option<Rc<Cell<FrameInfo>>>,
     virtual_lists: Vec<(InternedSymbol, Box<dyn FnMut(usize) -> ViewNode + 'static>)>,
@@ -189,8 +195,12 @@ fn run_inner(
     // into the runtime verbatim (the same shapes `set_root_view` / `on_command`
     // take). A `Box<dyn FnMut() -> View>` is itself `FnMut() -> View`.
     runtime.set_root_view(builder);
-    for (command, handler) in commands {
-        runtime.on_command(command, handler);
+    for (command, mut handler) in commands {
+        // The handler was already normalized by the builder (an app may register a
+        // zero-argument closure or an event-taking one, and `App::on_command` folded
+        // both into this one shape), so what is forwarded is a trampoline that hands
+        // the propagating event straight through.
+        runtime.on_command(command, move |event: &mut UiEvent| handler.call(event));
     }
     for (id, build) in virtual_lists {
         runtime.register_virtual_list(id, build);
@@ -210,8 +220,14 @@ fn run_inner(
     // a standalone window — it is not a headless host).
     boot.install_default_stylesheet(&mut runtime);
     let mut css = CssPipeline::new();
-    let sources: Vec<CssSource> = stylesheets.into_iter().map(CssSource::anonymous).collect();
-    css.install(&mut runtime, &sources);
+    // The authored set goes in through the same handle a later replacement uses, so
+    // the identity and revision each source is stamped with (§4.12's cache key) is
+    // decided in exactly one place — and the first install is not a special case.
+    // Queued last, so `App::stylesheet` wins over a replacement an application asked
+    // for before `run`: those sheets are the initial set by definition, and the
+    // application's own replacement belongs to the loop that has not started yet.
+    control.set_stylesheets(stylesheets);
+    control.apply(&mut runtime, &mut css);
     install_resources(&boot, &mut runtime);
 
     let mut app = AppRunner {
@@ -219,7 +235,8 @@ fn run_inner(
         app_id,
         size,
         runtime,
-        _css: css,
+        css,
+        control,
         window: None,
         surface: None,
         device: None,
@@ -305,9 +322,14 @@ struct AppRunner {
     app_id: String,
     size: (f32, f32),
     runtime: UiRuntime,
-    /// The CSS pipeline is kept alive for the app's lifetime (it owns the §4.12
-    /// parse cache); it is installed once in [`run`] and retained here.
-    _css: CssPipeline,
+    /// The CSS pipeline, alive for the app's lifetime because it owns the §4.12 parse
+    /// cache: a replacement through [`AppControl::set_stylesheets`] re-parses only what
+    /// changed identity, and a fresh pipeline per install would throw that away.
+    css: CssPipeline,
+    /// The application's handle onto this runtime. Everything it queued is applied
+    /// once per committed frame — see [`AppRunner::render_frame`] for where, and
+    /// [`AppControl`] for why it is a queue rather than an accessor.
+    control: AppControl,
     window: Option<Arc<Window>>,
     surface: Option<VelloSurface>,
     device: Option<wgpu::Device>,
@@ -422,6 +444,13 @@ impl AppRunner {
         if delta > 0.0 {
             self.runtime.advance_motion(delta);
         }
+        // A request queued since the last frame — a replaced stylesheet, a queued
+        // runtime action — reaches the frame that is about to be built rather than the
+        // one after it. Guarded because the steady state is "nothing queued", and this
+        // runs on every redraw.
+        if self.control.has_pending() {
+            self.control.apply(&mut self.runtime, &mut self.css);
+        }
         if self.runtime.run_due_frame_reactive().is_none() {
             // Nothing was due, but the tick above may have scheduled the *next*
             // animation frame; without asking for it the loop would sleep and the
@@ -432,6 +461,12 @@ impl AppRunner {
             return;
         }
         let built = started.elapsed();
+        // The one point in the frame where application code may touch the runtime
+        // (spec §2.6, §4.12): the frame has committed, so the tree exists and a
+        // `test-id` can resolve to a real node, and the next frame has not started, so
+        // nothing is mid-propagation. A no-op with nothing queued and every name
+        // already bound, which is the steady state.
+        self.control.apply(&mut self.runtime, &mut self.css);
         let snapshot_at = std::time::Instant::now();
         let snapshot = self.runtime.snapshot();
         let snapshotted = snapshot_at.elapsed();
@@ -738,6 +773,16 @@ impl ApplicationHandler for AppRunner {
     /// arrives (spec §1.5 / §3.3).
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         if self.runtime.poll_resource_tasks() > 0 {
+            self.runtime.request_frame(FrameReason::UiCommit);
+            self.request_redraw();
+        }
+        // A request queued from outside the input path — a stylesheet replaced when a
+        // timer fired, or a background task's result — has to reach the runtime even
+        // though no event arrived, and `apply` runs inside a frame. So an idle loop
+        // owes a turn exactly when something is queued. Deliberately not "when a
+        // registration is still unresolved": a name that matches nothing never
+        // resolves, and waking for that would spin forever over one typo.
+        if self.control.has_pending() {
             self.runtime.request_frame(FrameReason::UiCommit);
             self.request_redraw();
         }
