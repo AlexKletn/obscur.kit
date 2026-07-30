@@ -33,6 +33,32 @@
 
 ---
 
+## Status — what this audit produced
+
+Closed by the campaign of 2026-07-30, and this table is the ledger: a finding is
+"closed" only where an implementation, a test and a green suite exist. What each
+one left behind is stated under the finding itself, not rounded away here.
+
+| # | Status | Commit |
+|---|---|---|
+| 1-A | closed | `191d79e` — the emitted root is an argument (`CodegenRoot`), and `checks/facade-consumer` is the consumer this repository lacked |
+| 1-B | closed | `4455624` — a percentage resolves against the containing block, both writing axes |
+| 1-C | closed | `86e90dc` (runtime: the model is driven) + `087a3cf` (facade: it reaches an application) |
+| 2-A | closed for values | `087a3cf` — the compiled IR is kept and re-lowered per frame; structure stays static |
+| 2-B | closed | `087a3cf` — `App::on_command_at` names its target by §7.5 `test-id`/`automation-id` |
+| 2-C | half closed | `9f4b235` — checked on the file front end; the `okui!` half is a residue *by construction* |
+| 2-D | closed | `087a3cf` — `AppControl::set_stylesheets`, over identified versioned sources |
+| 2-E | closed | `9f4b235` — `ChildPolicy` distinguishes "none" from "anything" |
+| 3-A…3-D | closed | `e238817` — and the rest of the drift the page had accumulated |
+| `<button>` | closed | `445b6bd` — the owner's request, plus the local name every element was missing |
+
+The line numbers this document cites are the ones it was written against
+(`c9f7368`); after the campaign most of them have moved. The file:line evidence is
+kept as written rather than refreshed, because an audit that edits its own evidence
+to match the fix stops being a record of anything.
+
+---
+
 ## Why this audit exists
 
 `docs/api/12-reality.md` is an unusually honest gap list, and this document is
@@ -66,6 +92,15 @@ The third is the most serious, and is this document's counterpart to the
 ## Tier-1 — actively wrong or blocking
 
 ### 1-A. `okui!` does not compile outside the workspace ⛔
+
+**Closed in `191d79e`.** The emitted root became an argument — `CodegenRoot::facade()`
+for anything an application compiles, `internal()` for a crate that really does
+depend on both. The fix directions below were right about the first; the third —
+re-exporting under the expected names — could not have worked, because a
+`::`-prefixed path resolves in the extern prelude, which no re-export reaches.
+The structural half is closed too: `checks/facade-consumer` is a crate outside the
+workspace whose only dependency is the facade, built by `cargo run -p xtask --
+consumer` and in CI.
 
 The primary authoring surface (`docs/api/09-authoring-formats.md:11`) is
 unusable by any crate that depends on the facade alone. First use:
@@ -110,6 +145,13 @@ fails the same way. Verified by reading; not separately reproduced.
 
 ### 1-B. Percentage block-size resolves against remaining space, not the containing block
 
+**Closed in `4455624`.** The offer and the percentage basis were one value; they are
+now separate, on both writing axes, and the overflow css-sizing-3 permits is no
+longer clamped away. Still open, and deliberately: a percentage against an
+*indefinite* containing block behaves exactly as before — that is
+`12-reality.md`'s own entry, it needs the constraint model to carry definiteness,
+and a test pins it so the definite fix cannot quietly move it.
+
 In block flow, the **first** child resolves a percentage height correctly and
 every subsequent sibling resolves it against what is left over, compounding down
 the sibling chain.
@@ -153,6 +195,15 @@ described.
 `width: 100%` on both children yields full width for both.
 
 ### 1-C. The §2.3 event model is exported, tested, and called by nothing; handlers receive nothing
+
+**Closed in `86e90dc` + `087a3cf`.** The model is driven (capture → target → bubble →
+default action, through the domain dispatcher that had no caller) and it reaches an
+application: `App::on_command` takes `impl IntoCommandHandler<M>`, so a handler may
+take `&mut UiEvent` and read the target, the phase, the pointer payload §2.4
+specifies, and the trust flag — and may stop propagation or prevent the default
+action. The fix direction guessed below is what was built. Residue: the three
+bespoke signatures still bypass the walk, so a row click carries no event and no
+ancestor can observe it.
 
 This is the finding with the widest effect on how an application has to be
 written, so it is stated at length.
@@ -249,6 +300,13 @@ lopsided.
 
 ### 2-A. `App::screen` materialises a `.okui` screen once (§2.9)
 
+**Closed for values in `087a3cf`.** `.screen()` keeps the compiled IR rather than the
+built `View` and re-lowers it per frame against a `ScreenData` table — 6.0–6.4µs
+per frame unoptimized, no re-parse, no re-compile. Structure is still materialised
+once (`<If>`/`<For>` are fixed), which is now stated on the method. The
+"mutually exclusive" claim below is void: `build.rs` is open since 1-A, and the
+run-time route now carries state.
+
 ```rust
 Some(Root::Screen(src)) => {
     let view = compile_screen(&src)?;
@@ -274,6 +332,12 @@ route is blocked by 1-A. Markup over changing data means the inline `okui!` macr
 and only that.
 
 ### 2-B. `App` exposes one of the five command-routing links (§2.6)
+
+**Closed in `087a3cf`.** `App::on_command_at` and `App::add_event_listener` name their
+target with a §7.5 `SelectorTarget` — a `test-id`/`automation-id` authored on the
+markup — resolved after each commit, so a NodeId is genuinely obtainable and a
+registration follows the *name* across rebuilds. §2.6's focus-scope link has no
+first-class method and goes through `AppControl::with_runtime`.
 
 §2.6 specifies routing verbatim: focused node → focus scope → ancestors → window
 → application fallback. `UiRuntime` implements it, including per-node
@@ -302,6 +366,16 @@ validation and payload compose into one problem.
 
 ### 2-C. Command names are never checked (§2.13)
 
+**Half closed in `9f4b235`, and the other half is a residue by construction.**
+`CommandSurface` / `Compiler::claiming_command` check the file front end, with
+`obscur-kit`'s own `build.rs` as the production caller. The `okui!` macro cannot be
+checked: it expands while the application crate is still compiling, so the
+registrations do not exist yet, and a false "unknown command" would be worse than
+the silent no-op. Two wires remain: `App` does not declare its commands to the
+run-time `.screen()` route, and the runtime could warn once when a command reaches
+the end of §2.6's chain with no handler anywhere — the only place the true set is
+known.
+
 §2.13: "Unknown attributes, events and **string method names** are compile
 errors." The handler reference in `on:click=increment` is exactly such a string
 reference: it is hashed to a symbol (`ui_ir_view_bridge.rs:123`) and matched
@@ -314,6 +388,11 @@ same high-bit mask, pinned equal by a drift test. The gap is that nothing
 verifies a name is *claimed* by anybody.
 
 ### 2-D. No path to explicit stylesheet invalidation through `App` (§4.12)
+
+**Closed in `087a3cf`.** `AppControl::set_stylesheets` reinstalls the authored set
+through the retained pipeline, and the set is handed over as identified, versioned
+sources instead of the anonymous ones §4.12's cache cannot key. Granularity is
+coarse: a replacement stamps a new revision on every sheet in the set.
 
 §4.12 requires that "CSS parsing is cached per unique source/version and
 invalidated **explicitly**". The mechanism exists: `CssSource` carries a
@@ -328,6 +407,12 @@ Same shape as 2-B, same one-line remedy: let `App` hand out the `UiRuntime`.
 
 ### 2-E. A contract cannot express "no children" (§2.13, §2.12)
 
+**Closed in `9f4b235`.** `ChildPolicy` distinguishes the three states the empty list
+conflated, and text content counts — a `"text"` child carries no tag, which is how
+this document's own `<Button>OK</Button>` escaped the check. The claim is about the
+component spelling: `445b6bd` made lowercase `<button>` a base element whose
+authored children are what renders.
+
 §2.13 requires a contract to carry `allowed children`; §2.12 adds slot
 cardinality. `validation/builtin_contracts.rs:99` states the shortfall plainly:
 an empty `allowed_children` means *any* child, and the type has no way to say
@@ -340,6 +425,12 @@ an empty `allowed_children` means *any* child, and the type has no way to say
 
 All four are in `docs/api/09-authoring-formats.md`, which is otherwise the page an
 author relies on most.
+
+**All four closed in `e238817`**, together with the drift the page had accumulated
+beyond them: it now opens with four *routes* rather than three ways, because a
+`.okui` file has two and they are not equivalent. One correction to 3-A's own
+wording: `<Tabs/>` with a child is a compile error since `9f4b235`; bare `<Tabs/>`
+is still silent.
 
 ### 3-A. The reason given for collection widgets being Rust-only is wrong (`:69`)
 
@@ -413,8 +504,11 @@ Recorded because a reader should be able to see what was rejected.
 The audit application is a separate crate outside the workspace, depending on
 `obscur-kit` with `window-winit` + `render-vello`.
 
-The measurement harness is worth lifting into the kit regardless of these
-findings — it answers layout questions with numbers instead of argument, needs no
+The measurement harness was lifted into the repository — it is
+`checks/facade-consumer/src/measure.rs`, in the out-of-workspace consumer crate
+`191d79e` added, so the vantage point this audit was written from is now permanent
+rather than a thing someone has to rebuild. It was worth lifting regardless of
+these findings — it answers layout questions with numbers instead of argument, needs no
 display or GPU, and is about forty lines:
 
 ```rust
