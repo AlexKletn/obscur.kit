@@ -12,6 +12,9 @@
 //! - Tag naming (TSX convention): an UPPERCASE-initial identifier (`Button`) is
 //!   a component, a lowercase-initial identifier (`div`) is an element.
 //! - Attributes:
+//!   - An attribute (or event) **name** is `ident ('-' ident)*`, joined into one
+//!     hyphenated string — see [`parse_dashed_name`] for why the join is a parse
+//!     step and not a lexical one.
 //!   - `name="literal"` → [`UiIrProperty::text`](::obscur_ui_ir::document::UiIrProperty).
 //!   - `name={expr}` → a literal when `expr` is a literal, a
 //!     [`binding`](::obscur_ui_ir::document::UiIrProperty::binding) when it is a
@@ -371,26 +374,92 @@ impl Parse for DslElement {
     }
 }
 
+/// Parses an attribute (or event) name: `ident ('-' ident)*`, joined into the one
+/// hyphenated string both front ends spell a reserved §7.5 identifier with.
+///
+/// # Why the join has to happen at all
+///
+/// `okui!` is a proc-macro over **Rust** tokens, where `-` is punctuation and can
+/// never be part of an identifier, so `test-id="a"` arrived here as three tokens
+/// and died on `Ident::parse_any` with `expected ident`. The `.okui` file front
+/// end has its own lexer, whose identifier rule admits `-`
+/// (`obscur_okui_syntax`'s `is_ident_continue`), so it accepted the very same
+/// markup. The two front ends therefore disagreed about what an attribute may be
+/// *called* — and §7.5's `test-id` / `automation-id`, which
+/// `App::on_command_at` and `App::add_event_listener` name their target with,
+/// were authorable from the fallback front end only. `data-*` and every future
+/// hyphenated reserved name were unreachable the same way.
+///
+/// # Why joining here is safe and joining anywhere else would not be
+///
+/// The join is confined to **name position**: at the head of an attribute inside
+/// an opening tag, and immediately after `on:`. No expression can appear in
+/// either place, so a `-` there has no other meaning to steal. Subtraction lives
+/// inside `{ … }`, which arrives as a single brace group that `syn::Expr` parses
+/// and this function never looks into, so `{a - b}` means exactly what it meant
+/// before (pinned by `subtraction_is_still_subtraction_everywhere`).
+///
+/// A **tag** is deliberately not joined. The file lexer would admit `<my-tag>`
+/// the same way it admits `my-attr`, but a hyphenated tag names no primitive, no
+/// widget and no component — it would hash to a component id nothing registers —
+/// so widening this front end to accept one would buy a second spelling for
+/// "unmounted box". It is recorded rather than closed; see
+/// `the_names_only_the_file_front_end_admits_are_recorded_not_imagined` in
+/// `obscur-kit`'s `okui_macro.rs` for the rest of that ledger.
+///
+/// # Why adjacency is not checked
+///
+/// It cannot be, from here. `Punct::spacing()` reports `Joint` only when the
+/// *next character is itself punctuation* (`proc_macro2`'s `parse::punct`), so
+/// the `-` in `test-id` and the one in `test - id` are both `Alone`: spacing
+/// distinguishes `-=` from `-`, not `a-b` from `a - b`. `Span::source_text()`
+/// could see the difference in a real expansion but answers `None` under
+/// `quote!`, i.e. in every unit test below. Nothing is lost by not checking:
+/// the grammar position is unambiguous, and a name a stray space produced is
+/// still a name that has to match a reserved spelling or a contract to mean
+/// anything.
+fn parse_dashed_name(input: ParseStream) -> syn::Result<(String, Span)> {
+    let head = Ident::parse_any(input)?;
+    let span = head.span();
+    let mut name = head.to_string();
+    while input.peek(Token![-]) {
+        let dash = input.parse::<Token![-]>()?;
+        let segment = Ident::parse_any(input).map_err(|_| {
+            syn::Error::new(
+                dash.spans[0],
+                format!(
+                    "expected an identifier after `-` in the attribute name `{name}-`: \
+                     a hyphenated name is `ident-ident`, as in `test-id`"
+                ),
+            )
+        })?;
+        name.push('-');
+        name.push_str(&segment.to_string());
+    }
+    Ok((name, span))
+}
+
 /// Parses a single attribute (property or `on:` event) from `input`.
 fn parse_attr(input: ParseStream) -> syn::Result<DslAttr> {
-    let name_ident = Ident::parse_any(input)?;
+    let (name, span) = parse_dashed_name(input)?;
 
-    if name_ident == "on" && input.peek(Token![:]) {
+    if name == "on" && input.peek(Token![:]) {
         input.parse::<Token![:]>()?;
-        let event_ident = Ident::parse_any(input)?;
+        // The event name goes through the same join: the `.okui` lexer makes one
+        // Ident of `on:pointer-down`, so this front end must too or the pair
+        // disagree about a spelling again.
+        let (event, event_span) = parse_dashed_name(input)?;
         input.parse::<Token![=]>()?;
         let content;
         braced!(content in input);
         let handler: Expr = content.parse()?;
         return Ok(DslAttr::Event {
-            event: event_ident.to_string(),
-            span: event_ident.span(),
+            event,
+            span: event_span,
             handler: binding_or_string(&handler),
         });
     }
 
-    let name = name_ident.to_string();
-    let span = name_ident.span();
     if input.peek(Token![=]) {
         input.parse::<Token![=]>()?;
         if input.peek(LitStr) {
@@ -872,6 +941,94 @@ mod tests {
         assert_eq!(
             prop(root, "value"),
             &UiIrExpression::Binding("count".into())
+        );
+    }
+
+    #[test]
+    fn a_hyphenated_attribute_name_is_one_name() {
+        // Audit 2-3. `test-id` used to be `expected ident` here, because `-` is
+        // Rust punctuation — so §7.5's stable identifier, the thing
+        // `App::on_command_at` names its target with, could not be written on the
+        // front end §2.8 calls primary.
+        let document = doc(quote! { <div test-id="row-a" automation-id="row"/> });
+        let root = document.root();
+        assert_eq!(
+            prop(root, "test-id"),
+            &UiIrExpression::Literal(UiIrValue::Text("row-a".into())),
+            "the three tokens `test`, `-`, `id` are one attribute name"
+        );
+        assert_eq!(
+            prop(root, "automation-id"),
+            &UiIrExpression::Literal(UiIrValue::Text("row".into()))
+        );
+    }
+
+    #[test]
+    fn every_hyphen_in_a_name_joins_not_just_the_first() {
+        // `data-*` is open-ended and nothing bounds it at two segments.
+        let document = doc(quote! { <div data-row-index="3" aria-label={caption}/> });
+        assert_eq!(
+            prop(document.root(), "data-row-index"),
+            &UiIrExpression::Literal(UiIrValue::Text("3".into()))
+        );
+        assert_eq!(
+            prop(document.root(), "aria-label"),
+            &UiIrExpression::Binding("caption".into()),
+            "a hyphenated name binds like any other"
+        );
+    }
+
+    #[test]
+    fn a_bare_hyphenated_attribute_is_boolean_true() {
+        // The value-less form has to survive the join too: the name ends at `/`,
+        // not at an `=`.
+        let document = doc(quote! { <div data-loading/> });
+        assert_eq!(
+            prop(document.root(), "data-loading"),
+            &UiIrExpression::Literal(UiIrValue::Bool(true))
+        );
+    }
+
+    #[test]
+    fn subtraction_is_still_subtraction_everywhere() {
+        // The other half of the join, and the reason it is confined to *name*
+        // position: every `-` that means minus lives inside a brace group this
+        // parser hands to `syn::Expr` whole, so none of them changed.
+        let document = doc(quote! { <div title={count - 1}>{left - right}</div> });
+        assert_eq!(
+            prop(document.root(), "title"),
+            &UiIrExpression::Binding("count - 1".into()),
+            "an attribute value is an expression, not a name"
+        );
+        assert_eq!(
+            document.root().children()[0].interpolated_value(),
+            Some(&UiIrExpression::Binding("left - right".into())),
+            "and so is a body interpolation"
+        );
+    }
+
+    #[test]
+    fn a_dangling_hyphen_in_a_name_is_a_diagnostic_not_a_panic() {
+        // The one place the two front ends genuinely differ: the `.okui` lexer
+        // admits a trailing `-` inside an identifier, and nothing here can invent
+        // the missing segment. It reports rather than swallowing the `/`.
+        let error = DslMacro::to_document(quote! { <div test-/> })
+            .expect_err("a name cannot end on a hyphen");
+        assert!(
+            error.to_string().contains("after `-`"),
+            "the message names the hyphen: {error}"
+        );
+    }
+
+    #[test]
+    fn a_hyphenated_event_name_joins_like_an_attribute_name() {
+        // The `.okui` lexer makes ONE ident of the part after `on:`, hyphens and
+        // all, so this front end must too. `slot` takes no events, so the outlet
+        // rule quotes the authored spelling back — which is the whole name.
+        let message = rejection(quote! { <slot name="header" on:pointer-down={go}/> });
+        assert!(
+            message.contains("'on:pointer-down'"),
+            "the event name survived the join: {message}"
         );
     }
 

@@ -35,6 +35,7 @@ use obscur_kit::interaction::pointer::{PointerDevice, PointerEvent, PointerEvent
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::runtime::frame::FrameReason;
 use obscur_kit::screen::OkuiScreen;
+use obscur_kit::ui_macros::okui;
 use obscur_kit::view::view::{
     CLASS, EVENT_CLICK, TEST_ID, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty,
     ViewValue,
@@ -123,6 +124,26 @@ fn screen_host() -> Host {
     Host::new(move || screen.view())
 }
 
+/// The same two rows as [`SCREEN`], authored with the **macro** front end.
+///
+/// Audit 2-3: this function could not be written. `okui!` is a proc-macro over
+/// Rust tokens, where `-` is punctuation, so `test-id="a"` was `expected ident`
+/// — and the identifier this whole file is built on was authorable only in the
+/// front end `docs/api/09-authoring-formats.md` calls the *fallback*. The
+/// documented workaround (put the id on the authored component tag in a `.okui`
+/// file and let the handler catch the command as an ancestor on §2.6 link 3) is a
+/// different feature: it fires for every descendant, not for the node.
+fn macro_host() -> Host {
+    Host::new(|| {
+        okui! {
+            <div class="panel">
+                <div class="row" test-id="a" on:click={pick}/>
+                <div class="row" test-id="b" on:click={pick}/>
+            </div>
+        }
+    })
+}
+
 /// **The case that was unreachable.** One command symbol, two elements, two
 /// handlers — and each click runs the handler belonging to the element it landed on.
 #[test]
@@ -153,6 +174,44 @@ fn a_positional_handler_runs_for_its_own_node_and_not_the_other() {
         *log.borrow(),
         vec!["a", "b", "a"],
         "one symbol, two positions, and the position decides which logic runs"
+    );
+}
+
+/// The same claim through the **primary** authoring surface: a `test-id` written
+/// in `okui!` markup resolves to the node that carries it, and one command symbol
+/// still means two things in two places.
+///
+/// Nothing about the routing changed to make this pass — [`macro_host`] is the
+/// only difference from the case above, and it is a difference of front end. That
+/// is the point: §7.5's identifier is now spellable on both, so positional
+/// routing is a feature of the toolkit rather than of one file format.
+#[test]
+fn a_test_id_authored_in_the_macro_routes_to_its_own_node() {
+    let log: Rc<RefCell<Vec<&'static str>>> = Rc::new(RefCell::new(Vec::new()));
+    let mut host = macro_host();
+    for name in ["a", "b"] {
+        let sink = Rc::clone(&log);
+        host.control
+            .on_command_at(SelectorTarget::test_id(name), PICK, move || {
+                sink.borrow_mut().push(name);
+            });
+    }
+    host.frame();
+
+    assert_ne!(
+        host.bound("a"),
+        None,
+        "the macro's `test-id` reached the reserved TEST_ID symbol the resolver reads"
+    );
+    assert_ne!(host.bound("a"), host.bound("b"), "two distinct elements");
+
+    host.click(10.0, 75.0);
+    host.click(10.0, 10.0);
+
+    assert_eq!(
+        *log.borrow(),
+        vec!["b", "a"],
+        "each click ran the handler belonging to the row it landed on"
     );
 }
 

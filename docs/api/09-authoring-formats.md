@@ -196,6 +196,49 @@ Two more are structural rather than properties: `key` (a `<For>` child's identit
 (the §2.13 capability declaration). Both are always permitted by a closed
 contract.
 
+### What an attribute may be called
+
+Both front ends accept a hyphenated name, and they accept it in the same shape:
+one or more identifier segments joined by `-`. This is not a detail — two of the
+nine reserved names above are hyphenated, and they are the two an application
+*must* be able to write, because `App::on_command_at` and
+`App::add_event_listener` name their target with `SelectorTarget::test_id` /
+`::automation_id`, an identifier that has to exist before the tree does.
+
+Until the fix for audit finding 2-3, `test-id="a"` was a **parse error** in
+`okui!` and accepted in a `.okui` file. `okui!` is a proc-macro over Rust tokens,
+where `-` is punctuation, and its parser had no hyphen handling; the file front
+end has its own lexer whose identifier rule admits `-`. So §7.5's identifiers —
+and `data-*`, and any future hyphenated reserved name — were authorable on the
+*fallback* route only, on a page that calls the macro primary.
+
+| Spelling | `okui!` | `.okui` file |
+|---|---|---|
+| `class="row"` | accepted | accepted |
+| `test-id="a"`, `automation-id="a"`, `data-row-index="3"` | accepted — joined in name position | accepted |
+| `on:pointer-down={go}` | accepted — the event name joins the same way | accepted |
+| `test-` (a trailing hyphen) | an error naming the hyphen | accepted by the lexer as an identifier |
+| `data-1` (a segment starting with a digit) | a parse error — Rust hands the macro a *literal*, not an identifier | accepted |
+| `a.b` (a dot inside a name) | a parse error | accepted |
+| `<my-tag/>` (a hyphenated **tag**) | a parse error | accepted |
+
+The last four rows are the exact width of the disagreement that remains, and it
+is one-directional: the file lexer is looser. Its identifier rule is shared with
+*value* position, where `value=item.name` has to lex as one token, so the dot and
+the digit-initial segment are admitted there incidentally rather than designed;
+none of them spells a reserved attribute, and none is reachable through Rust's
+tokenizer without inventing a syntax the file front end does not have. The
+hyphenated tag is admitted for the same lexical reason and means nothing on
+either front end — it names no primitive, no widget and no component, so it
+hashes to an id nothing registers and mounts an empty box.
+`crates/facade/obscur-kit/tests/okui_macro.rs` measures all four rather than
+inferring them.
+
+Joining happens only in **name** position — after `<Tag`, between attributes, and
+after `on:`. Nowhere else could it: a `-` inside `{ … }` is subtraction, and a
+brace group reaches `syn::Expr` whole, so `<div title={count - 1}/>` means what it
+says.
+
 ### `type` is two channels through one symbol
 
 Since `445b6bd` every authored **element** carries its tag as the reserved `TYPE`
