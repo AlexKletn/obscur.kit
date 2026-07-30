@@ -31,6 +31,17 @@ impl NodeFlags {
     /// on every frame. The runtime sets this when it mounts an instance and
     /// clears it when it unmounts one.
     pub const COMPONENT_HOST: Self = Self(1 << 4);
+    /// Set alongside [`COMPONENT_HOST`](Self::COMPONENT_HOST) when the mounted
+    /// component declared an **open** style scope (spec §4.15 "explicitly
+    /// open/global scopes are possible").
+    ///
+    /// Style scoping is decided by walking a node's ancestors for the nearest
+    /// component host, and an open host is transparent to that walk: the
+    /// elements it rendered are matched by the document's ordinary selectors
+    /// exactly as authored elements are. Meaningless on a node that is not a
+    /// component host; the runtime sets it from the contract at mount and
+    /// clears it at unmount, together with `COMPONENT_HOST`.
+    pub const OPEN_STYLE_SCOPE: Self = Self(1 << 5);
 
     /// Returns an empty flag set.
     #[must_use]

@@ -3,6 +3,9 @@ mod component_contract;
 
 pub use component_contract::ComponentContract;
 
+mod style_scope;
+pub use style_scope::StyleScope;
+
 mod component;
 pub use component::Component;
 mod component_context;

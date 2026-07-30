@@ -2,7 +2,7 @@
 //! per-node cascade inputs: [`StyleMatchingCoordinator`].
 
 use obscur_identity::NodeId;
-use obscur_style::cascade::{Cascade, Declaration, ResolvedDeclarations};
+use obscur_style::cascade::{Cascade, CascadeOrigin, Declaration, ResolvedDeclarations};
 use obscur_style::invalidation::StyleInvalidation;
 use obscur_style::matching::{MediaEnvironment, StyleMatcher, Stylesheet};
 use obscur_style::selector::{MatchElement, SelectorMatcher};
@@ -233,7 +233,14 @@ impl StyleMatchingCoordinator {
 /// **component-internal** node is *scoped by default*: the outside sheets' plain
 /// selectors do not reach it, and only an exported style part
 /// (`Component::part(name)` targeting a class the internal element carries, with
-/// the `Component` half matching the host) crosses the boundary.
+/// the `Component` half matching the host) crosses the boundary — plus the
+/// system default sheet, which is not an author sheet and is never scoped (see
+/// [`scoped_internal_declarations`]).
+///
+/// "Component-internal" is [`component_host`]'s answer, and a component that
+/// declared [`StyleScope::Open`](obscur_view::component::StyleScope::Open)
+/// (§4.15) is not a boundary to it: everything such a component renders takes
+/// the top-level path above, which is what makes its output stylable at all.
 fn resolved_for_node(
     matcher: &StyleMatcher,
     sheets: &[Stylesheet],
@@ -249,8 +256,23 @@ fn resolved_for_node(
     }
 }
 
-/// The cascade for a component-internal `node`: only `::part()` rules the host
-/// exports cross the scope boundary; every ordinary selector is contained.
+/// The cascade for a component-internal `node`: the system default (UA) sheet
+/// applies in full, only `::part()` rules the host exports cross from any other
+/// origin, and every other ordinary selector is contained.
+///
+/// # Why [`CascadeOrigin::SystemDefault`] is not scoped
+///
+/// §4.15 scopes *stylesheets an author wrote* — that is what "internal classes
+/// do not need global uniqueness" and "components may export style parts" are
+/// about. The system default sheet is not one of those: it is the built-in
+/// definition of what a `<button>`, an `<input>` or an `<a>` **is**, and it sits
+/// at the lowest cascade origin (§4.14), below every author declaration. Scoping
+/// it out does not encapsulate anything — nothing outside authored it, so
+/// nothing outside can be leaking in — it merely means a base element rendered
+/// by a component is not that element any more. The external consumer audit's
+/// finding 2-1 caught exactly this shape: a `<button>` inside a component
+/// computed `color: rgb(0,0,0)`, the initial value, where the same `<button>`
+/// outside got the UA sheet's ink.
 ///
 /// The `source_order` counter advances over **every** encountered declaration
 /// (matching or not), exactly as [`StyleMatcher::match_element_in`] does, so
@@ -269,23 +291,30 @@ fn scoped_internal_declarations(
     let mut source_order: u32 = 0;
     for sheet in sheets {
         let origin = sheet.origin();
+        // The built-in definition of the base elements is not an author sheet and
+        // is not scoped: it matches an internal element exactly as it matches an
+        // authored one (see the doc comment above).
+        let is_system_default = origin == CascadeOrigin::SystemDefault;
         for rule in sheet.rules() {
             // The one door through the boundary: a `::part(name)` selector whose
             // exported name is a class this internal element carries and whose
             // host half matches the component host. Take the highest specificity
             // among the list's crossing selectors.
-            let specificity = rule
-                .selectors()
-                .selectors()
-                .iter()
-                .filter_map(|selector| {
-                    let want = subject_part_name(selector)?;
-                    element
-                        .has_class(want)
-                        .then(|| part_specificity_for(selector, want, &host_cursor))
-                        .flatten()
-                })
-                .max();
+            let specificity = if is_system_default {
+                SelectorMatcher::matches_list(rule.selectors(), &element)
+            } else {
+                rule.selectors()
+                    .selectors()
+                    .iter()
+                    .filter_map(|selector| {
+                        let want = subject_part_name(selector)?;
+                        element
+                            .has_class(want)
+                            .then(|| part_specificity_for(selector, want, &host_cursor))
+                            .flatten()
+                    })
+                    .max()
+            };
             let condition_holds = rule
                 .condition()
                 .is_none_or(|condition| condition.holds(environment));

@@ -7,6 +7,17 @@
 //! which matches an internal element the component exports under `name` while
 //! the rest of the compound matches the component **host**.
 //!
+//! §4.15 has a second half, and it lives here too: "*explicitly open/global
+//! scopes are possible*". A component whose contract declares
+//! [`StyleScope::Open`](obscur_view::component::StyleScope::Open) is mounted with
+//! [`NodeFlags::OPEN_STYLE_SCOPE`] and closes no boundary at all, so everything
+//! it renders is matched exactly as authored content is. Until that existed a
+//! component's output could be styled by nothing whatsoever — there is no
+//! producer for the `ComponentModule` cascade origin yet, so `::part()` was the
+//! only route to any declaration reaching an internal element, and the external
+//! consumer audit's finding 2-1 recorded the consequence: "a component-rendered
+//! subtree is matched by no selector".
+//!
 //! The pure `obscur-style` matcher cannot decide this: it has no view of the
 //! component-host boundary, which lives on the retained tree
 //! ([`NodeFlags::COMPONENT_HOST`]). These helpers supply that view so the
@@ -24,20 +35,33 @@ use obscur_identity::NodeId;
 
 use super::TreeElement;
 
-/// Returns the nearest **strict** ancestor of `node` that is a component host
-/// (`NodeFlags::COMPONENT_HOST`), or [`None`] when `node` is not inside any
-/// component's render output.
+/// Returns the nearest **strict** ancestor of `node` that is a *scoping*
+/// component host (`NodeFlags::COMPONENT_HOST` without
+/// `NodeFlags::OPEN_STYLE_SCOPE`), or [`None`] when nothing between `node` and
+/// the root closes a scope over it.
 ///
 /// The host itself is not its own ancestor, so a bare component host reports
 /// [`None`] (it is authored content, not internal to a component). Its rendered
 /// children — and their descendants — report the host: they are the scoped
 /// output the boundary contains.
+///
+/// # An open host is transparent, not terminal
+///
+/// A component that declared [`StyleScope::Open`](obscur_view::component::StyleScope::Open)
+/// (§4.15 "explicitly open/global scopes are possible") does not close a
+/// boundary, so the walk **continues past it** rather than stopping and
+/// reporting `None`. That distinction is the whole composition rule: an open
+/// component used inside a scoped one is still inside the scoped one — opening
+/// yourself lets the document reach you, it does not let you punch a hole
+/// through somebody else's encapsulation.
 #[must_use]
 pub(crate) fn component_host(tree: &RetainedTree, node: NodeId) -> Option<NodeId> {
     let mut current = tree.get(node)?.logical_parent().parent();
     while let Some(id) = current {
         let record = tree.get(id)?;
-        if record.flags().contains(NodeFlags::COMPONENT_HOST) {
+        if record.flags().contains(NodeFlags::COMPONENT_HOST)
+            && !record.flags().contains(NodeFlags::OPEN_STYLE_SCOPE)
+        {
             return Some(id);
         }
         current = record.logical_parent().parent();

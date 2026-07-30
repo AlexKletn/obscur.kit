@@ -61,6 +61,19 @@
 //!   `authored_children_under_a_component_that_declares_no_slot_are_dropped` pins
 //!   it; `okui_slot_projection.rs` is where a component that *does* declare one
 //!   receives its content.
+//!
+//! # Why there are computed-style assertions here now
+//!
+//! Because every test in this file asserted on rendered **text**, and text is
+//! exactly the half of "a component works" that cannot fail when its output is
+//! invisible to the cascade. The external consumer audit's finding 2-1 —
+//! "a component-rendered subtree is matched by no selector" — went straight
+//! through this file: `Card` mounts, `Card` renders, `card:Hi` appears, and the
+//! author's `.card { … }` reaches nothing. `component_output_is_styled.rs` is
+//! the dedicated pin on §4.15's two halves; the two tests at the end of this
+//! file are the habit itself, on the front ends, so a future front-end change
+//! that quietly stops a component's output from reaching the style pass fails
+//! *here* rather than in an external application.
 #![forbid(unsafe_code)]
 
 use obscur_kit::geometry::Size;
@@ -77,7 +90,7 @@ use obscur_kit::view::component::{
     Component, ComponentContext, ComponentContract, ComponentFactory, ComponentInstance,
     ComponentRegistration, ComponentVersion, ErasedComponent, InstanceId,
 };
-use obscur_kit::view::view::{View, ViewFragment, ViewNode};
+use obscur_kit::view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 use obscur_kit::widgets::button::Button;
 
 // --- The author's component: a props struct, a component, a factory. ---
@@ -389,5 +402,154 @@ fn authored_children_under_a_component_that_declares_no_slot_are_dropped() {
         runtime.tree().get(card).expect("live").child_nodes().len(),
         1,
         "a component declaring no slot has nowhere to put an authored child"
+    );
+}
+
+// --- The other half of "a component works": it can be styled. -----------
+
+/// A `Panel` that renders a **classed element**, not a bare text node, and
+/// declares §4.15's explicitly-open style scope so the application's sheets
+/// reach it.
+///
+/// `Card` above cannot carry these assertions: it renders one text node, and a
+/// text node has no CSS identity at all. That is not an accident of the fixture
+/// — it is the reason the finding survived this file.
+#[derive(Contract)]
+#[contract(name = "Panel")]
+#[contract(style_scope = open)]
+struct PanelProps {
+    /// A required prop, decoded from the authored `title="…"`.
+    title: String,
+}
+
+struct Panel;
+
+impl Component for Panel {
+    type Props = PanelProps;
+
+    fn render(&mut self, _ctx: &mut ComponentContext<'_>, props: &Self::Props) -> View {
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(name_binding::CONTAINER)
+                .with_prop(ViewProperty::new(
+                    obscur_kit::view::view::CLASS,
+                    ViewValue::Text("panel-body".into()),
+                ))
+                .with_children(ViewFragment::from_nodes(vec![ViewNode::text(format!(
+                    "panel:{}",
+                    props.title
+                ))])),
+        ]))
+    }
+}
+
+#[derive(Debug)]
+struct PanelFactory;
+
+impl ComponentFactory for PanelFactory {
+    fn component_id(&self) -> ComponentId {
+        PanelProps::contract().id
+    }
+    fn contract(&self) -> ComponentContract {
+        PanelProps::contract()
+    }
+    fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
+        ComponentInstance::new(instance, PanelProps::contract().id)
+    }
+    fn create_component(&self) -> Box<dyn ErasedComponent> {
+        Box::new(Panel)
+    }
+}
+
+/// A headless runtime with `Panel` registered.
+fn runtime_with_panel() -> UiRuntime {
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 200.0));
+    runtime
+        .register_component(ComponentRegistration::new(
+            Box::new(PanelFactory),
+            ComponentVersion::INITIAL,
+        ))
+        .expect("Panel registers");
+    runtime
+}
+
+/// `.panel-body { background-color: rgb(30, 38, 54) }` — one class, one
+/// declaration, one authored sheet.
+const PANEL_CSS: &str = ".panel-body { background-color: rgb(30, 38, 54); }";
+/// What [`PANEL_CSS`] paints.
+const PANEL_FILL: (f32, f32, f32) = (30.0 / 255.0, 38.0 / 255.0, 54.0 / 255.0);
+
+/// Renders one frame of `view` under [`PANEL_CSS`] and returns the computed
+/// `background-color` of the element the component rendered beneath the node at
+/// `path`.
+fn component_output_fill(runtime: &mut UiRuntime, view: &View, path: &[usize]) -> (f32, f32, f32) {
+    let mut css = obscur_kit::bootstrap::CssPipeline::new();
+    css.install(
+        runtime,
+        &[obscur_kit::css::source::CssSource::anonymous(PANEL_CSS)],
+    );
+    let sheets = css.sheets().to_vec();
+    runtime.render_now(view, &sheets);
+
+    let mut node = runtime.tree().root().expect("a root");
+    for &index in path {
+        node = runtime.tree().get(node).expect("a live node").child_nodes()[index];
+    }
+    runtime
+        .computed_style(node)
+        .and_then(|style| style.get(obscur_kit::style::property::PropertyId::BackgroundColor))
+        .and_then(|value| value.as_color())
+        .map(|c| (c.r, c.g, c.b))
+        .expect("an element node resolves a computed background colour")
+}
+
+#[test]
+fn the_macro_renders_a_component_whose_output_the_document_styles() {
+    // The habit, on the inline front end. `<span class="panel-body"/>` is the
+    // control: the same class, authored inline, one frame, one sheet. Provenance
+    // must not decide whether a rule applies.
+    let mut runtime = runtime_with_panel();
+    let view: View = okui! {
+        <div>
+            <Panel title="Hi"/>
+            <span class="panel-body"/>
+        </div>
+    };
+
+    // The component's own element is the first child of the `<Panel/>` node.
+    assert_eq!(
+        component_output_fill(&mut runtime, &view, &[0, 0, 0]),
+        PANEL_FILL,
+        "`.panel-body` must reach the element the component rendered"
+    );
+    assert_eq!(
+        component_output_fill(&mut runtime, &view, &[0, 1]),
+        PANEL_FILL,
+        "...the same value the authored control computes"
+    );
+    assert_eq!(
+        rendered_text_at(&runtime, &[0, 0, 0]).as_deref(),
+        Some("panel:Hi"),
+        "and the component still rendered — a styled empty box is not the claim"
+    );
+}
+
+#[test]
+fn the_file_front_end_renders_a_component_whose_output_the_document_styles() {
+    // The same property through the real parse → compile → lower → bridge
+    // pipeline, because both front ends gained the change together and a
+    // regression in either is a regression in the tier.
+    let ir = compile(r#"<div><Panel title="Hi"/><span class="panel-body"/></div>"#);
+    let view = UiIrViewBridge::document_to_view(&ir);
+    let mut runtime = runtime_with_panel();
+
+    assert_eq!(
+        component_output_fill(&mut runtime, &view, &[0, 0, 0]),
+        PANEL_FILL,
+        "`.panel-body` must reach the element the component rendered"
+    );
+    assert_eq!(
+        component_output_fill(&mut runtime, &view, &[0, 1]),
+        PANEL_FILL,
+        "...the same value the authored control computes"
     );
 }

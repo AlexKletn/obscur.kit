@@ -3,6 +3,7 @@
 use obscur_diagnostics::DiagnosticSubsystem;
 use obscur_identity::{ComponentId, InternedSymbol};
 
+use crate::component::StyleScope;
 use crate::contract::{
     CapabilityContract, ChildContract, EventContract, PropContract, SlotContract, StylePartContract,
 };
@@ -36,6 +37,12 @@ pub struct ComponentContract {
     pub allowed_children: ChildContract,
     /// The style parts (and their states) this component exports.
     pub style_parts: Vec<StylePartContract>,
+    /// Whether the document's ordinary selectors reach this component's
+    /// rendered output (§4.15). [`StyleScope::Scoped`] by default — the spec's
+    /// "component stylesheets are scoped by default" — and
+    /// [`StyleScope::Open`] for its "explicitly open/global scopes are
+    /// possible".
+    pub style_scope: StyleScope,
     /// The capabilities this component depends on.
     pub capabilities: Vec<CapabilityContract>,
     /// The subsystem failures in this component are attributed to.
@@ -59,6 +66,7 @@ impl ComponentContract {
             slots: Vec::new(),
             allowed_children: ChildContract::None,
             style_parts: Vec::new(),
+            style_scope: StyleScope::Scoped,
             capabilities: Vec::new(),
             subsystem: DiagnosticSubsystem::View,
         }
@@ -96,6 +104,18 @@ impl ComponentContract {
     #[must_use]
     pub fn with_style_part(mut self, style_part: StylePartContract) -> Self {
         self.style_parts.push(style_part);
+        self
+    }
+
+    /// Declares whether the document's ordinary selectors reach this
+    /// component's rendered output (§4.15).
+    ///
+    /// Unstated it is [`StyleScope::Scoped`], so an existing contract's
+    /// encapsulation is unchanged; a component that wants to be styled by the
+    /// application's sheets says so here.
+    #[must_use]
+    pub fn with_style_scope(mut self, style_scope: StyleScope) -> Self {
+        self.style_scope = style_scope;
         self
     }
 

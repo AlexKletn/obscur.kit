@@ -202,8 +202,16 @@ impl ComponentStore {
         // Tell reconciliation that this node's children now belong to the
         // component: without the flag, the next root reconcile would see the
         // desired node's (empty) children and delete the component's output.
+        //
+        // The same place records the contract's §4.15 style scope, because the
+        // style pass decides scoping by walking the tree and the registry is not
+        // reachable from there. Scoped is the default, so the flag is only ever
+        // *added* by a component that explicitly opened itself.
         if let Some(retained) = tree.get_mut(node) {
             retained.flags.insert(NodeFlags::COMPONENT_HOST);
+            if registration.contract().style_scope.is_open() {
+                retained.flags.insert(NodeFlags::OPEN_STYLE_SCOPE);
+            }
         }
     }
 
@@ -219,7 +227,9 @@ impl ComponentStore {
         // dropped it), but clear the flag defensively for any caller that
         // unmounts a still-live node.
         if let Some(retained) = tree.get_mut(node) {
-            retained.flags.remove(NodeFlags::COMPONENT_HOST);
+            retained
+                .flags
+                .remove(NodeFlags::COMPONENT_HOST.union(NodeFlags::OPEN_STYLE_SCOPE));
         }
     }
 }

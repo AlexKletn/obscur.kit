@@ -527,3 +527,157 @@ for node in runtime.inspect_snapshot().nodes {
 `examples/showcase_inspect.rs` is the in-repo ancestor of this; the difference is
 only that the version above takes the stylesheet from a file, which is what made
 the 1-B experiment table cheap to produce.
+
+---
+
+# Second pass — 2026-07-30, after the fix campaign
+
+Same vantage point, same method, re-run against `49a6d6e` while restructuring the
+consumer application into one directory per component. The campaign closed what
+the ledger says it closed; these are new, and two of them are residues of fixes
+rather than untouched ground.
+
+## 2-1. A component-rendered subtree is matched by no selector ⛔ Tier-1
+
+**Closed, and one of its eliminations was wrong.** The observation reproduces
+exactly as written — `crates/facade/obscur-kit/tests/component_output_is_styled.rs`
+is the control experiment below, in-repo, and it failed on the first run with
+`rgba(0,0,0,0)` against `rgb(30,38,54)`. But matching is not broken: §4.15 style
+scoping **does** exist and was doing precisely what it was written to do. It
+lives in `crates/application/obscur-runtime/src/orchestration/style_scoping.rs`
+and `style_matching_coordinator.rs`, not under
+`crates/domain/obscur-style/src/matching/` where the elimination grepped — the
+component-host boundary is a *retained-tree* fact (`NodeFlags::COMPONENT_HOST`)
+and the pure matcher deliberately cannot see it. `spec_ch2_contracts.rs::an_exported_style_part_crosses_the_scope_boundary_and_an_unexported_one_does_not`
+is the spec test that pins the containment.
+
+What was genuinely missing is everything that containment implies but nothing
+supplied, which is why the *consequence* the finding states is right even though
+the cause is not:
+
+- §4.15's other bullet — "explicitly open/global scopes are possible" — had **no
+  implementation at all**, so no component could opt out;
+- there is no producer for the `ComponentModule` cascade origin, so a component
+  cannot ship a scoped sheet of its own either;
+- the system default sheet was scoped out along with the author sheets, so the
+  `button.press` observation below is a real defect on its own terms: a
+  `<button>` a component rendered was not a button.
+
+Closed by `StyleScope::{Scoped, Open}` on `ComponentContract` (declared as
+`#[contract(style_scope = open)]`, stamped onto the host at mount as
+`NodeFlags::OPEN_STYLE_SCOPE`, and read by the scope walk), plus the system
+default origin crossing unconditionally. The default is untouched: a component
+that says nothing is still encapsulated. `checks/facade-consumer` now declares
+one and asserts from outside that the application's sheet reaches the subtree its
+component rendered.
+
+**What it does not close.** A component still cannot attach a stylesheet of its
+own — the `ComponentModule` origin has no producer — so an open component is
+styled by the *document* and a scoped one by `::part()` alone. §4.15's "CSS
+module mode" is therefore still unimplemented, and a component author who wants
+private styling has only inline props (which do not exist either) or an export.
+
+Register a component, author its tag, and nothing beneath it is styled — not by
+the application's sheets, not by the UA sheet, by no selector of any kind.
+
+**Control experiment.** One screen, one stylesheet, one frame, two nodes that are
+identical apart from where they come from:
+
+```html
+<div class="shell">
+  <Counter class="cell" label={label}/>   <!-- renders <div class="counter">…  -->
+  <div class="counter">контроль</div>     <!-- the same class, authored inline -->
+</div>
+```
+
+with `.counter { background-color: #1e2636ee }` in an ordinary authored sheet:
+
+| Node | Computed `background-color` |
+|---|---|
+| `div.counter` **inside the component** | `rgba(0,0,0,0)` — nothing matched |
+| `div.counter` as a plain sibling | `#1e2636ee` — the rule applied |
+
+**Ruled out.**
+
+- *Frame ordering.* Rendering 1, 2 and 3 frames before the snapshot gives the
+  same result; it is not "styled one frame late".
+- *Style scoping.* §4.15 permits global sheets explicitly ("global stylesheets are
+  allowed"; it is *component* sheets that are scoped by default), and no scoping
+  exists to be at fault — `grep -rn scope crates/domain/obscur-style/src/matching/`
+  is empty.
+- *A missing class.* The inspector prints the node as `div.counter`, and the same
+  class matches on the sibling.
+- *Selector kind.* A type selector (`div`), a class selector (`.counter`) and a
+  descendant selector (`.cell span`) all fail equally.
+- *Author sheets only.* `button.press` inside a component computes
+  `color: rgb(0,0,0)` — the initial value — where the same `<button>` outside one
+  gets the UA sheet's ink. The UA sheet does not reach in either.
+
+**Why this is a defect and not a policy.** The frame pipeline says the opposite of
+what happens. `ui_runtime.rs:3163-3166`:
+
+> 1c. Render every mounted component and reconcile its output into its own
+> children, **so a component-backed node's subtree exists before style/layout read
+> the tree.**
+
+and the very next lines widen the restyle to the whole tree (`roots = None`)
+precisely because a component sub-reconcile edits through a plan this frame cannot
+see. The intent is unambiguous; the result contradicts it.
+
+**Consequence.** The component tier is unusable for anything visual. `445b6bd`
+and the `okui_user_component.rs` end-to-end tests establish that a component
+*mounts* and *renders* — both true, and both verified here — but a component whose
+output cannot be styled cannot be a UI component. The existing tests do not catch
+it because they assert on rendered **text**, never on a computed style.
+
+## 2-2. `#[derive(Contract)]` still emits internal crate paths — 1-A's residue ⛔ Tier-1
+
+`191d79e` made the emitted root an argument (`CodegenRoot`) for `ViewCodegen`, and
+`checks/facade-consumer` now guards the `okui!` path. The **derive** was not
+changed and has no such argument: `derive/contract_derive.rs:123`, `:150-152`,
+`:154`, `:169-170`, `:177-182`, `:288`, `:292` all emit `::obscur_view::…` and
+`::obscur_identity::…` literally.
+
+Since `#[derive(Contract)]` is how a component's contract is declared — the whole
+mechanism `445b6bd` opened up — an application that authors a component is pushed
+straight back onto the two `publish = false` crates:
+
+```
+error[E0433]: cannot find `obscur_view` in the crate root
+error[E0433]: cannot find `obscur_identity` in the crate root
+```
+
+`checks/facade-consumer` does not author a component, which is why the guard
+crate did not catch the gap the guard crate exists to catch. Adding one component
+to it closes that hole permanently.
+
+## 2-3. `okui!` cannot express a hyphenated attribute, so §7.5 ids are macro-unreachable
+
+`test-id` in macro markup is a parse error (`expected ident`): `okui!` is a
+proc-macro over Rust tokens, where `-` is punctuation, and its DSL parser has no
+hyphen handling at all (`grep -rn "hyphen\|'-'" crates/frontend/obscur-ui-macros/src/dsl/`
+is empty). The file front end has its own lexer and accepts it.
+
+This collides with 2-B's fix. `App::on_command_at` and `App::add_event_listener`
+name their target with a §7.5 `SelectorTarget::test_id`, and `test-id` is exactly
+what an author must write to use them — but not from the front end
+`09-authoring-formats.md:11` calls primary. The workaround is to put the
+identifier on the *authored tag* in a `.okui` file instead, which binds the
+handler to the component's own node and relies on it catching the command as an
+ancestor on link 3 rather than at the target.
+
+`automation-id`, and any future hyphenated reserved attribute, are unreachable the
+same way.
+
+## Verified and not a defect
+
+- **A reserved attribute on a component tag passes its contract.**
+  `<Counter class="cell" label={label}/>` compiles and the class reaches the
+  component node, even though the derived contract declares only `label` and
+  therefore closes its prop surface.
+- **Percentage block-size (1-B) is genuinely fixed.** Two block siblings at 50%
+  each now measure 120/120 where they measured 120/60, and at 100% each they
+  measure 240/240 where the second measured 0. A larger border box under
+  `content-box` (a button's UA padding added to a percentage-sized content box) is
+  correct CSS, not a regression: with `box-sizing: border-box` both come out at
+  exactly 480×120.
