@@ -195,11 +195,24 @@ fn auto_placement_wraps_to_second_row() {
 //    single column, a in the 50px row, b in the 80px row below it, and the
 //    container is its authored 200px tall (not the 130px its tracks occupy nor the
 //    400px viewport).
+//
+//    The two children deliberately differ. `.a` declares `height: 10px`, so its
+//    block axis is NOT stretched — `stretch` sets a used size only "When the box's
+//    computed width/height (as appropriate to the axis) is auto", and otherwise
+//    "falls back to flex-start" (`specs/w3c/css-align-3.txt:1377`): `.a` keeps its
+//    10 and sits at the row's start. `.b` leaves `height` alone and so does fill
+//    its 80px row. Between them the row block is pinned twice over: `b.y = 50` is
+//    row 0's height measured from the *outside* (a 10px-tall child cannot fake it)
+//    and `b.height = 80` is row 1's, measured from the inside.
+//
+//    `.a` asserted 50 here until the `stretch` precondition was implemented, which
+//    is what an item filling a track it was never told to fill looks like from the
+//    outside (`docs/external-consumer-audit.md`, 2-4 (b)).
 #[test]
 fn explicit_fixed_rows_and_container_height() {
     let (rt, k) = drive(
         ".grid{display:grid;height:200px;grid-template-columns:1fr;grid-template-rows:50px 80px} \
-         .a{height:10px} .b{height:10px}",
+         .a{height:10px}",
         2,
         300.0,
         400.0,
@@ -212,10 +225,14 @@ fn explicit_fixed_rows_and_container_height() {
     let (_, ay, aw, ah) = geom(&rt, k[0]);
     let (_, by, _, bh) = geom(&rt, k[1]);
     approx(ay, 0.0, "a.y (row0 at top)");
-    approx(ah, 50.0, "a.height (50px row track)");
+    approx(ah, 10.0, "a.height (its declared 10px, not the 50px row)");
     approx(aw, 300.0, "a.width (single 1fr column)");
     approx(by, 50.0, "b.y (row1, below the 50px row0)");
-    approx(bh, 80.0, "b.height (80px row track)");
+    approx(
+        bh,
+        80.0,
+        "b.height (`height:auto` does stretch: the 80px row)",
+    );
 }
 
 // 5. auto column: `auto 1fr` where a has an intrinsic (fixed) width -> the auto
@@ -283,12 +300,21 @@ fn auto_fill_columns_from_container_width() {
 
 // 9. `grid-auto-rows: 40px` sizes the IMPLICIT wrapped rows: `1fr 1fr` columns
 //    with 4 children wraps c,d to row 1, and that implicit row is a fixed 40px
-//    (NOT sized to the 10px children), so c.y = d.y = 40 and both are 40px tall.
+//    (NOT sized to the 10px children), so c.y = d.y = 40.
+//
+//    The children keep their declared `height: 10px` — a declared size takes the
+//    block axis out of `stretch` and falls back to flex-start, so each child is
+//    10 tall at the top of its 40px row (`specs/w3c/css-align-3.txt:1377`). That
+//    makes the row's size a *stronger* claim than it was when the children filled
+//    it: `c.y = 40` is the height of row 0 seen from outside it, and only the
+//    authored `grid-auto-rows` can put it there — the 10px children certainly
+//    cannot. `d` is the one child left with an `auto` height, so the stretched
+//    case is still covered and its 40 reads the row from the inside.
 #[test]
 fn grid_auto_rows_sizes_wrapped_rows() {
     let (rt, k) = drive(
         ".grid{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:40px} \
-         .a{height:10px} .b{height:10px} .c{height:10px} .d{height:10px}",
+         .a{height:10px} .b{height:10px} .c{height:10px}",
         4,
         300.0,
         200.0,
@@ -305,8 +331,8 @@ fn grid_auto_rows_sizes_wrapped_rows() {
         "c.y (row1 — the 40px implicit auto-row, not the 10px content)",
     );
     approx(dy, 40.0, "d.y (row1)");
-    approx(ch, 40.0, "c.height (fills the 40px implicit row)");
-    approx(dh, 40.0, "d.height (fills the 40px implicit row)");
+    approx(ch, 10.0, "c.height (its declared 10px, at the row's start)");
+    approx(dh, 40.0, "d.height (`height:auto` fills the 40px row)");
 }
 
 // 8. percentage + fr columns resolve against the container's OWN content width:
@@ -361,12 +387,18 @@ fn justify_content_center_centers_the_column_block() {
 //     `50px` rows (100px total) in a `200px`-tall container leave a 100px leftover,
 //     so the whole row block is pushed to the bottom — the stacked children land at
 //     y = 100/150 (not 0/50).
+//
+//     Both children leave `height` at `auto` and so genuinely fill their rows;
+//     `align-content` distributes free space between *tracks*, which is a separate
+//     question from how an item is sized inside one, and this test is about the
+//     former. (`.a` carried a `height: 10px` that it was nonetheless asserted to
+//     stretch off — see `explicit_fixed_rows_and_container_height` for what that
+//     was hiding.)
 #[test]
 fn align_content_end_pushes_the_row_block_to_the_bottom() {
     let (rt, k) = drive(
         ".grid{display:grid;height:200px;grid-template-columns:1fr;\
-         grid-template-rows:50px 50px;align-content:end} \
-         .a{height:10px} .b{height:10px}",
+         grid-template-rows:50px 50px;align-content:end}",
         2,
         300.0,
         400.0,

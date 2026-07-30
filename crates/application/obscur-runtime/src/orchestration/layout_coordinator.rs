@@ -1775,6 +1775,18 @@ struct ArrangeKey {
     /// The absolute origin the box was written at.
     origin: (u32, u32),
     /// `min.width`, `min.height`, `max.width`, `max.height`.
+    ///
+    /// The constraint's **percentage basis** is deliberately NOT part of this key,
+    /// where [`measure_key`]'s twin does carry it. A node's basis is its parent's
+    /// content box (or, for a grid item, its grid area), and it moves whenever the
+    /// parent's own size moves — so keying on it would re-arrange every clean
+    /// child of every node that merely got taller, which is exactly the O(nodes)
+    /// walk this cache exists to avoid (`a_dirty_leaf_rearranges_its_ancestors_
+    /// but_not_the_siblings_above_it` measures it). The basis only changes an
+    /// arranged subtree through the node's own percentage size, and that size
+    /// lands in `constraints` — the node is arranged under a *tight* range — so in
+    /// practice a basis that matters has already moved the key. Where it has not,
+    /// the served subtree is stale; that gap is recorded rather than paid for.
     constraints: (u32, u32, u32, u32),
     /// The containing block rect: `x`, `y`, `width`, `height`.
     containing_block: (u32, u32, u32, u32),
@@ -2552,6 +2564,13 @@ fn arrange(
     // is what stops the child from re-resolving `width: 100%` against its own
     // arranged size and coming back one padding wider at every level (CSS 2.1
     // §10.2; Servo's `SizeConstraint::Definite`).
+    //
+    // This is the containing block for a block child and for a flex item, but NOT
+    // for every formatting context — a grid item is contained by its grid area
+    // (`specs/w3c/css-grid-2.txt:712`), a rectangle only the grid algorithm knows.
+    // So this is the **fallback**: where the algorithm stated a basis of its own
+    // for a child (`LayoutOutput::child_percent_basis`, per axis), that wins, and
+    // this fills in the axes it left alone.
     let percent_basis = Size::new(
         (containing.width
             - style.padding.left
@@ -2581,9 +2600,16 @@ fn arrange(
         ),
         viewport.size,
     );
-    for (child, child_rel) in children.iter().zip(out.child_boxes().iter()) {
+    for (index, (child, child_rel)) in children.iter().zip(out.child_boxes().iter()).enumerate() {
         let rel = child_rel.origin();
         let child_style = style_of(styles, child.node());
+        // What THIS child's percentages resolve against: the algorithm's own
+        // statement where it made one, this node's content box everywhere else.
+        // For a grid item the statement is its grid area's inline size, and it is
+        // the whole of the fix for the audit's 2-4 (a): the item's used width came
+        // from its track, so its subtree has to inherit the track — not the grid
+        // container's content box, a containing block the item never had.
+        let child_basis = out.child_percent_basis(index).resolve(percent_basis);
         // The static (normal-flow) absolute origin the algorithm computed for this
         // child, before any positioning offset.
         let static_origin = Point::new(origin.x + rel.x, origin.y + rel.y);
@@ -2614,7 +2640,7 @@ fn arrange(
             grid_templates,
             child.node(),
             child_origin,
-            BoxConstraints::tight(child_rel.size()).with_percent_basis(percent_basis),
+            BoxConstraints::tight(child_rel.size()).with_percent_basis(child_basis),
             boxes,
             paragraph,
             hyphenator,
@@ -3860,6 +3886,129 @@ mod tests {
         assert_eq!(boxes[&child_b].origin().x, 100.0);
         assert_eq!(boxes[&child_b].size().width, 50.0);
         assert_eq!(boxes[&child_a].origin().y, boxes[&child_b].origin().y);
+    }
+
+    /// One row of the external-consumer audit's 2-4 table, laid out through the
+    /// whole coordinator exactly as the headless inspector measured it.
+    ///
+    /// The shell: `width/height: 100%`, `box-sizing: border-box`, `padding: 24px`,
+    /// `display: grid`, `grid-template-columns: 1fr 1fr`, `gap: 10px`, in a
+    /// 480×240 viewport — so the grid container's content box is 432 and each
+    /// track is (432 − 10) / 2 = 211. One item, carrying `item_width`, with one
+    /// child at `width: 50%`. Returns `(the item's used width, the child's)`.
+    fn audit_grid_row(item_width: Length) -> (f32, f32) {
+        use obscur_style::property::{GridTrack, PropertyValue};
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let item = add_child(&mut tree, root, 70);
+        let grandchild = add_child(&mut tree, item, 71);
+
+        let mut computed = ComputedStyles::new();
+        let mut shell = ComputedStyle::new();
+        shell.set(
+            PropertyId::Display,
+            ComputedValue::keyword(layout_keyword::DISPLAY_GRID),
+        );
+        shell.set(
+            PropertyId::BoxSizing,
+            ComputedValue::keyword(layout_keyword::BOX_SIZING_BORDER_BOX),
+        );
+        shell.set(
+            PropertyId::Width,
+            ComputedValue::length(Length::Percent(100.0)),
+        );
+        shell.set(
+            PropertyId::Height,
+            ComputedValue::length(Length::Percent(100.0)),
+        );
+        for edge in [
+            PropertyId::PaddingTop,
+            PropertyId::PaddingRight,
+            PropertyId::PaddingBottom,
+            PropertyId::PaddingLeft,
+        ] {
+            shell.set(edge, ComputedValue::length(Length::px(24.0)));
+        }
+        shell.set(PropertyId::Gap, ComputedValue::length(Length::px(10.0)));
+        shell.set(
+            PropertyId::GridTemplateColumns,
+            ComputedValue::from_concrete(PropertyValue::grid_tracks([
+                GridTrack::Fr(1.0),
+                GridTrack::Fr(1.0),
+            ]))
+            .expect("concrete"),
+        );
+        computed.insert(root, shell);
+
+        let mut item_style = ComputedStyle::new();
+        item_style.set(PropertyId::Width, ComputedValue::length(item_width));
+        computed.insert(item, item_style);
+
+        let mut kid = ComputedStyle::new();
+        kid.set(
+            PropertyId::Width,
+            ComputedValue::length(Length::Percent(50.0)),
+        );
+        computed.insert(grandchild, kid);
+
+        let coordinator = LayoutCoordinator::new();
+        let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
+        let templates =
+            coordinator.grid_templates_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
+        let boxes = coordinator.layout(
+            &tree,
+            &styles,
+            &computed,
+            &templates,
+            Size::new(480.0, 240.0),
+            (0.0, 0.0),
+            &test_paragraph(),
+        );
+        (boxes[&item].size().width, boxes[&grandchild].size().width)
+    }
+
+    /// A grid item's children resolve their percentages against the **item's**
+    /// box, not against the grid container's content box.
+    ///
+    /// `specs/w3c/css-grid-2.txt:712`, vendored here: "A grid item's grid area
+    /// forms the containing block into which it is laid out." The arrange walk
+    /// used to hand every child of a node the same percentage basis — that node's
+    /// content box — which is the containing block for a block child and a flex
+    /// item but not for a grid item. So in the `100%` row the item's own used
+    /// width was right (211, its track) while its child measured **216**: the
+    /// item's `100%` had been resolved against the grid container's 432, and that
+    /// number — a containing block the item never had — is what the subtree
+    /// inherited. The item's used size and the size its children saw disagreed.
+    ///
+    /// The `auto` row is the control: it never went through the item's own
+    /// percentage, and it read 105.5 before this fix and reads 105.5 after.
+    ///
+    /// The `50px` row was the audit's **second**, separate defect (2-4 (b)): the
+    /// item was stretched to its whole track (211) even though `stretch` applies
+    /// only to a box whose size is `auto` (`specs/w3c/css-align-3.txt:1377`), and
+    /// otherwise "falls back to flex-start". It now keeps the declared 50, and its
+    /// child at 25 is half of *that* — the child of this row was always
+    /// arithmetically consistent with the declared width, which is why the two
+    /// defects had to be pinned apart before either was repaired: they fail in
+    /// opposite directions and each could have masked the other.
+    #[test]
+    fn a_grid_items_children_resolve_against_the_item_not_the_grid_container() {
+        assert_eq!(
+            audit_grid_row(Length::Auto),
+            (211.0, 105.5),
+            "control: an `auto` item was always right"
+        );
+        assert_eq!(
+            audit_grid_row(Length::Percent(100.0)),
+            (211.0, 105.5),
+            "the defect: the child measured 216 — 50% of the container's 432"
+        );
+        assert_eq!(
+            audit_grid_row(Length::px(50.0)),
+            (50.0, 25.0),
+            "was (211, 25): `stretch` had run over the item's declared width"
+        );
     }
 
     /// Allocates a text node carrying `content` under `parent`, wiring the child

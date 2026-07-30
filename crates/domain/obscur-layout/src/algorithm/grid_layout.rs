@@ -2,10 +2,12 @@
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
-use crate::model::{AlignItems, JustifyContent, LayoutBox, LayoutStyle};
+use crate::model::{AlignItems, Dimension, JustifyContent, LayoutBox, LayoutStyle};
 
 use super::grid::{GridTemplate, TrackSize};
-use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput, clamp_content};
+use super::{
+    ChildMeasurer, ChildPercentBasis, LayoutAlgorithm, LayoutChild, LayoutOutput, clamp_content,
+};
 
 /// CSS-grid layout with real per-track sizing (spec §4.1, §4.2).
 ///
@@ -1287,6 +1289,61 @@ const fn cell_align(align: AlignItems) -> CellAlign {
     }
 }
 
+/// The alignment a grid item actually gets on one axis, after `stretch` has been
+/// tested against the precondition the keyword carries.
+///
+/// `specs/w3c/css-align-3.txt:1377` defines the value, not merely its effect:
+///
+/// > **stretch** — When the box's computed width/height (as appropriate to the
+/// > axis) **is auto** and neither of its margins (in the appropriate axis) are
+/// > auto, sets the box's used size to the length necessary to make its outer
+/// > size as close to filling the alignment container as possible … Unless
+/// > otherwise specified, this value falls back to **flex-start** generally.
+///
+/// So `stretch` is conditional, and `size` — the item's computed size on *this*
+/// axis — is the condition. A box that has a size of its own is not stretched at
+/// all: the keyword falls back to `flex-start`, which keeps the declared size and
+/// puts the box at the start of its grid area. The kit used to stretch
+/// regardless, so a `width: 50px` item in a 211px track came out 211 wide,
+/// silently discarding the author's length — while `justify-self: start` on the
+/// same rule gave 50, which is how the external-consumer audit knew the declared
+/// value was understood and the *alignment* was overriding it
+/// (`docs/external-consumer-audit.md`, 2-4 (b)). Both axes are tested, because
+/// the spec's condition is written "as appropriate to the axis".
+///
+/// The test is on the box's COMPUTED size, not on how the alignment value was
+/// arrived at. An author writing `justify-self: stretch` on a `width: 50px` item
+/// gets exactly the same fallback as one who wrote nothing and inherited the
+/// container's `stretch` default: the keyword means the same thing either way.
+///
+/// An intrinsic keyword is not `auto` either, so `width: min-content` also falls
+/// back — correctly, since the closing line of the same definition ("Values other
+/// than stretch cause a width/height of auto to be treated as fit-content") is
+/// what makes the fallback path measure the item shrink-to-fit rather than at the
+/// area extent.
+///
+/// # The half of the condition this does not test, and why
+///
+/// "neither of its margins (in the appropriate axis) are auto" is deliberately
+/// left out: this algorithm does not read item margins at all — `margin` does not
+/// appear anywhere else in this file — so an `auto` margin on a grid item moves
+/// nothing today. That clause exists so an `auto` margin can absorb the area's
+/// free space instead of the box growing into it (css-grid-2 §10.2, "Aligning
+/// with auto margins"). Honouring half of that pair would swap one wrong answer
+/// for another: a `width: auto; margin-left: auto` item would stop stretching and
+/// then sit at the *start* of its area, when the entire point of the margin is to
+/// push it to the end. It keeps stretching — wrong in the direction it was
+/// already wrong — until grid consumes item margins, and this is the line that
+/// then gains the second half of the test.
+const fn item_axis_align(align: AlignItems, size: Dimension) -> CellAlign {
+    let resolved = cell_align(align);
+    if matches!(resolved, CellAlign::Stretch) && !size.is_auto() {
+        CellAlign::Start
+    } else {
+        resolved
+    }
+}
+
 /// The offset of an `item`-sized box within a `cell`-sized extent for `align`.
 /// `Stretch` and `Start` sit at the cell start; `End` at `cell − item`; `Center`
 /// halves the slack.
@@ -1538,16 +1595,55 @@ impl LayoutAlgorithm for GridLayout {
             }
         }
 
+        // How each item is aligned inside its own grid area, on both axes: a
+        // per-item `justify-self` / `align-self` (when not `auto`) overrides the
+        // container's `justify-items` / `align-items` default, and `stretch` is
+        // then tested against the item's computed size (see `item_axis_align`).
+        // Resolved once, here, because two passes need the same answer: the
+        // measure below has to offer an item the inline size it will actually be
+        // laid out at, and the arrangement further down has to place it there.
+        // When those two disagreed, an item whose size kept it out of the stretch
+        // was measured at the full track anyway, so a content-sized row was
+        // sized from a reflow that never happens.
+        let item_align: Vec<(CellAlign, CellAlign)> = children
+            .iter()
+            .map(|c| {
+                let cs = c.style();
+                (
+                    item_axis_align(cs.justify_self.resolve(style.justify_items), cs.width),
+                    item_axis_align(cs.align_self.resolve(style.align_items), cs.height),
+                )
+            })
+            .collect();
+
         // Measure each item with its width fixed to its spanned columns (spanned
         // track widths + interior column gaps), height loose; this feeds both
-        // content-sized row heights and the placed item boxes.
+        // content-sized row heights and the placed item boxes. "Fixed" only for
+        // an item the inline axis really does stretch: one that falls back to
+        // flex-start keeps its own width, so it is offered the area as an upper
+        // bound and left to shrink to fit.
+        //
+        // No `percent_basis` is stated, and it would change nothing if it were:
+        // `max.width` IS `w`, the item's grid area along the inline axis, so a
+        // percentage inline size already resolves against the area
+        // (`BoxConstraints::percent_width` falls back to `max.width`). The block
+        // axis has no area size to state yet — the rows are sized in step 3,
+        // *from* these measurements — so the fallback to `max.height`, this
+        // container's content height, is the only number in existence. What the
+        // item is OFFERED is unchanged either way; the arranging caller is where
+        // the item's area had to be said out loud (see `child_bases` below).
         let mut item_size = vec![Size::ZERO; count];
         for i in 0..count {
             let w = span_extent(&col_sizes, place_col[i], col_span[i], self.column_gap);
+            let min_w = if item_align[i].0 == CellAlign::Stretch {
+                w
+            } else {
+                0.0
+            };
             item_size[i] = measurer.measure_child(
                 i,
                 BoxConstraints {
-                    min: Size::new(w, 0.0),
+                    min: Size::new(min_w, 0.0),
                     max: Size::new(w, content_height),
                     percent_basis: None,
                 },
@@ -1632,6 +1728,14 @@ impl LayoutAlgorithm for GridLayout {
         );
 
         let mut child_boxes = Vec::with_capacity(count);
+        // The containing block each item's percentages resolve against — its GRID
+        // AREA, not this container's content box (`specs/w3c/css-grid-2.txt:712`:
+        // "A grid item's grid area forms the containing block into which it is laid
+        // out"; §6.2 at `:1042`: "A grid item is sized within the containing block
+        // defined by its grid area"). Filled in alongside `child_boxes` below,
+        // where the area is known; see the note there for why only the inline axis
+        // is stated.
+        let mut child_bases = Vec::with_capacity(count);
         // Bounding box of placed children; starts at the padding origin so an
         // empty grid sizes to its padding only.
         let mut max_right = padding.left;
@@ -1650,13 +1754,13 @@ impl LayoutAlgorithm for GridLayout {
                 span_extent(&row_sizes, r0, rspan, self.row_gap)
             };
 
-            // Resolve this item's effective alignment on each axis: a per-item
-            // `justify-self` / `align-self` (if not `auto`) overrides the
-            // container's `justify-items` / `align-items` default. The inline axis
-            // is the column (x) axis; the block axis is the row (y) axis.
-            let cs = children[i].style();
-            let inline = cell_align(cs.justify_self.resolve(style.justify_items));
-            let block = cell_align(cs.align_self.resolve(style.align_items));
+            // This item's effective alignment on each axis, resolved above: the
+            // inline axis is the column (x) axis, the block axis is the row (y)
+            // axis. An axis that is not `Stretch` — either because the author
+            // aligned it, or because the item has a computed size of its own and
+            // `stretch` therefore fell back to flex-start — goes down the
+            // measure-and-place path below.
+            let (inline, block) = item_align[i];
 
             let (x, y, w, h) = if inline == CellAlign::Stretch && block == CellAlign::Stretch {
                 // Default: the item fills its cell — byte-identical to before.
@@ -1665,6 +1769,13 @@ impl LayoutAlgorithm for GridLayout {
                 // At least one axis aligns the item within its cell. Re-measure
                 // the natural size: an axis that still stretches keeps a size
                 // fixed to the cell extent, an aligned axis is loose up to it.
+                //
+                // `percent_basis` stays unstated here for the same reason as the
+                // measure above: `max` is `(cell_w, cell_h)` — the grid area on
+                // both axes — so a percentage size already resolves against the
+                // area through the fallback, and stating it would only add a
+                // distinct key to the caller's measure memoization for an
+                // identical answer.
                 let natural = measurer.measure_child(
                     i,
                     BoxConstraints {
@@ -1702,6 +1813,29 @@ impl LayoutAlgorithm for GridLayout {
                 )
             };
             child_boxes.push(LayoutBox::new(Rect::new(Point::new(x, y), Size::new(w, h))));
+            // This item's containing block, for its own percentages and therefore
+            // for everything its subtree inherits. `cell_w` is the item's grid area
+            // along the inline axis — and it is *precisely* the number the item's
+            // own used inline size was resolved against a few lines above, where
+            // every item is measured with `min.width == max.width == span_extent`.
+            // Stating it here is what makes the caller's second, arranging pass
+            // agree with that measure: without it the caller falls back to this
+            // grid container's content box, so an item at `width: 100%` came out
+            // 211 (its track) while its children resolved `50%` against 432 (the
+            // container) — a containing block the item itself never had
+            // (`docs/external-consumer-audit.md`, 2-4 (a)).
+            //
+            // The BLOCK axis is deliberately left unstated. The number the item's
+            // block size was measured against is this container's content height,
+            // which is exactly what the caller falls back to — so leaving it alone
+            // keeps the measure and the arrange agreeing there too, and changes
+            // nothing. `cell_h` would be the wrong thing to state anyway: for a
+            // content-sized row it *is* the item's own measured height, and a box
+            // cannot be its own containing block. (A definite row is a genuinely
+            // definite block basis; stating it needs the row's definiteness carried
+            // out of the track-sizing step, and would move the block axis — a
+            // separate change from the inline defect this closes.)
+            child_bases.push(ChildPercentBasis::with_width(cell_w));
             // The grid's own extent is defined by its tracks (the cell), not by
             // where an aligned item sits inside it, so the bounding box grows by
             // the cell — byte-identical to the fill case.
@@ -1751,7 +1885,7 @@ impl LayoutAlgorithm for GridLayout {
         let border_box = Size::new(own_w + pad_x, own_h + pad_y);
         let size = constraints.constrain(border_box);
 
-        LayoutOutput::new(size, child_boxes)
+        LayoutOutput::new(size, child_boxes).with_child_percent_bases(child_bases)
     }
 }
 
@@ -1759,10 +1893,10 @@ impl LayoutAlgorithm for GridLayout {
 mod tests {
     use super::{GridLayout, GridTemplate, TrackSize};
     use crate::algorithm::{
-        AutoRepeat, AutoRepeatMode, FixedChildMeasurer, GridAutoFlow, GridLine, GridPlacement,
-        LayoutAlgorithm, LayoutChild, TrackList,
+        AutoRepeat, AutoRepeatMode, ChildMeasurer, ChildPercentBasis, FixedChildMeasurer,
+        FlowLayout, GridAutoFlow, GridLine, GridPlacement, LayoutAlgorithm, LayoutChild, TrackList,
     };
-    use crate::model::{Dimension, JustifyContent, LayoutStyle};
+    use crate::model::{BoxSizing, Dimension, JustifyContent, LayoutStyle};
     use obscur_geometry::{BoxConstraints, Insets, Point, Size};
     use obscur_identity::NodeId;
 
@@ -3139,6 +3273,184 @@ mod tests {
         );
     }
 
+    // ---- `stretch` against an item that has a size of its own ----------------
+    //
+    // `specs/w3c/css-align-3.txt:1377`: `stretch` sets the used size only "when
+    // the box's computed width/height (as appropriate to the axis) is auto", and
+    // otherwise "falls back to flex-start generally". Every case below used to
+    // come back `(0, 0, 100, 100)` — the whole cell — with the declared size
+    // thrown away (`docs/external-consumer-audit.md`, 2-4 (b)).
+
+    /// As [`aligned_in_cell`], but the item declares a size of its own on one or
+    /// both axes. The natural size stays `40×30`, so a declared `40`/`30` is
+    /// exactly what a flex-start fallback should leave the box at, and the old
+    /// full-cell `100` is exactly what it should no longer be.
+    fn sized_in_cell(
+        width: Dimension,
+        height: Dimension,
+        justify: AlignSelf,
+        align: AlignSelf,
+    ) -> (f32, f32, f32, f32) {
+        let child = LayoutChild::new(
+            NodeId::from_raw(1),
+            LayoutStyle::default()
+                .with_width(width)
+                .with_height(height)
+                .with_justify_self(justify)
+                .with_align_self(align),
+        );
+        let mut measurer = FixedChildMeasurer::new(vec![Size::new(40.0, 30.0)]);
+        let out = grid(
+            vec![TrackSize::Fixed(100.0)],
+            vec![TrackSize::Fixed(100.0)],
+            0.0,
+            0.0,
+        )
+        .layout(
+            &LayoutStyle::default(),
+            &[child],
+            BoxConstraints::loose(Size::new(100.0, 100.0)),
+            &mut measurer,
+        );
+        let b = out.child_boxes()[0];
+        (b.origin().x, b.origin().y, b.size().width, b.size().height)
+    }
+
+    /// A definite **width** takes the inline axis out of `stretch`: the item keeps
+    /// its 40 and sits at the cell's inline start. The block axis is untouched —
+    /// `height` is still `auto`, so it still stretches to the full 100.
+    #[test]
+    fn a_definite_width_falls_back_to_flex_start_on_the_inline_axis_only() {
+        assert_eq!(
+            sized_in_cell(
+                Dimension::Px(40.0),
+                Dimension::Auto,
+                AlignSelf::Auto,
+                AlignSelf::Auto
+            ),
+            (0.0, 0.0, 40.0, 100.0)
+        );
+    }
+
+    /// And symmetrically on the block axis — the spec's condition is written "as
+    /// appropriate to the axis", so a definite `height` must be honoured the same
+    /// way a definite `width` is. The inline axis keeps stretching.
+    #[test]
+    fn a_definite_height_falls_back_to_flex_start_on_the_block_axis_only() {
+        assert_eq!(
+            sized_in_cell(
+                Dimension::Auto,
+                Dimension::Px(30.0),
+                AlignSelf::Auto,
+                AlignSelf::Auto
+            ),
+            (0.0, 0.0, 100.0, 30.0)
+        );
+    }
+
+    /// An author who writes `justify-self: stretch` / `align-self: stretch` by
+    /// hand on a sized item gets exactly what the inherited default gives: the
+    /// spec's condition is about the box's computed size, not about how the
+    /// alignment value was arrived at. Writing the keyword out loud does not buy a
+    /// stretch the keyword is not defined to perform.
+    #[test]
+    fn an_authored_stretch_on_a_sized_item_falls_back_the_same_way() {
+        assert_eq!(
+            sized_in_cell(
+                Dimension::Px(40.0),
+                Dimension::Px(30.0),
+                AlignSelf::Stretch,
+                AlignSelf::Stretch
+            ),
+            (0.0, 0.0, 40.0, 30.0),
+            "an authored `stretch`"
+        );
+        assert_eq!(
+            sized_in_cell(
+                Dimension::Px(40.0),
+                Dimension::Px(30.0),
+                AlignSelf::Auto,
+                AlignSelf::Auto
+            ),
+            (0.0, 0.0, 40.0, 30.0),
+            "and the inherited default — the same box"
+        );
+    }
+
+    /// An intrinsic keyword is not `auto` either, so it falls back too. That is
+    /// the right answer and not an accident: `width: min-content` asks for the
+    /// content's size, which is precisely what a stretch would overwrite.
+    #[test]
+    fn an_intrinsic_size_is_not_auto_and_so_is_not_stretched() {
+        assert_eq!(
+            sized_in_cell(
+                Dimension::MinContent,
+                Dimension::Auto,
+                AlignSelf::Auto,
+                AlignSelf::Auto
+            ),
+            (0.0, 0.0, 40.0, 100.0)
+        );
+    }
+
+    /// A sized item that is *aligned* rather than stretched is unmoved by any of
+    /// this: `end` still puts its declared 40×30 at the cell end. The fallback
+    /// only ever replaces `stretch`.
+    #[test]
+    fn an_explicit_alignment_on_a_sized_item_is_untouched() {
+        assert_eq!(
+            sized_in_cell(
+                Dimension::Px(40.0),
+                Dimension::Px(30.0),
+                AlignSelf::End,
+                AlignSelf::End
+            ),
+            (60.0, 70.0, 40.0, 30.0)
+        );
+    }
+
+    /// The fallback reaches the *measure* pass too, not just the placement.
+    ///
+    /// Row sizing feeds on each item's measured height, and that measurement is
+    /// only meaningful at the inline size the item will actually be laid out at.
+    /// While `stretch` was unconditional the two agreed by luck — every item was
+    /// measured at the full track and placed at the full track. A definite width
+    /// breaks that tie, so the offer has to follow: a stretched item is still
+    /// offered a tight `min.width == max.width == track`, and one that falls back
+    /// to flex-start is offered `min.width == 0` and left to be its own width.
+    #[test]
+    fn a_flex_start_fallback_is_offered_a_loose_inline_axis_to_measure_in() {
+        #[derive(Default)]
+        struct RecordOffer(Vec<BoxConstraints>);
+        impl ChildMeasurer for RecordOffer {
+            fn measure_child(&mut self, _index: usize, constraints: BoxConstraints) -> Size {
+                self.0.push(constraints);
+                Size::new(40.0, 30.0)
+            }
+        }
+        let sized = |width: Dimension| {
+            let mut measurer = RecordOffer::default();
+            grid(
+                vec![TrackSize::Fixed(100.0)],
+                vec![TrackSize::Fixed(100.0)],
+                0.0,
+                0.0,
+            )
+            .layout(
+                &LayoutStyle::default(),
+                &[LayoutChild::new(
+                    NodeId::from_raw(1),
+                    LayoutStyle::default().with_width(width),
+                )],
+                BoxConstraints::loose(Size::new(100.0, 100.0)),
+                &mut measurer,
+            );
+            measurer.0[0].min.width
+        };
+        assert_eq!(sized(Dimension::Auto), 100.0, "still stretched: tight");
+        assert_eq!(sized(Dimension::Px(40.0)), 0.0, "flex-start: shrink to fit");
+    }
+
     // A per-item `justify-self` overrides the container `justify-items` default.
     #[test]
     fn self_overrides_container_items_default() {
@@ -3586,5 +3898,205 @@ mod tests {
             },
         );
         assert_eq!(out.child_boxes()[0].size().height, 10.0);
+    }
+
+    // ---- the containing block a grid item hands to its children -------------
+
+    /// A `width: 50%` block — the child the external-consumer audit measured
+    /// inside every row of its table.
+    fn half_width() -> LayoutStyle {
+        LayoutStyle {
+            width: Dimension::Percent(50.0),
+            ..LayoutStyle::default()
+        }
+    }
+
+    /// Lays one nested block flow box out under whatever constraints it is handed
+    /// — the leaf of the audit's shell.
+    struct NestedBlock(LayoutStyle);
+
+    impl ChildMeasurer for NestedBlock {
+        fn measure_child(&mut self, _index: usize, constraints: BoxConstraints) -> Size {
+            FlowLayout
+                .layout(
+                    &self.0,
+                    &[],
+                    constraints,
+                    &mut FixedChildMeasurer::default(),
+                )
+                .size()
+        }
+    }
+
+    /// Measures a grid item that is a block flow box carrying one `width: 50%`
+    /// child, so the item really does have a subtree to hand a containing block to.
+    struct GridItem(LayoutStyle);
+
+    impl ChildMeasurer for GridItem {
+        fn measure_child(&mut self, _index: usize, constraints: BoxConstraints) -> Size {
+            FlowLayout
+                .layout(
+                    &self.0,
+                    &[LayoutChild::new(NodeId::from_raw(9), half_width())],
+                    constraints,
+                    &mut NestedBlock(half_width()),
+                )
+                .size()
+        }
+    }
+
+    /// The audit's shell, laid out directly: `width/height: 100%`,
+    /// `box-sizing: border-box`, `padding: 24px`, `grid-template-columns: 1fr 1fr`,
+    /// `gap: 10px` at 480×240 — a 432-wide content box and two 211 tracks.
+    fn audit_shell() -> LayoutStyle {
+        LayoutStyle {
+            width: Dimension::Percent(100.0),
+            height: Dimension::Percent(100.0),
+            box_sizing: BoxSizing::BorderBox,
+            padding: Insets::uniform(24.0),
+            ..LayoutStyle::default()
+        }
+    }
+
+    /// One row of the audit's table, run through the two passes the runtime runs:
+    /// the grid arranges its item, then the item is laid out again at the box the
+    /// grid gave it, under the containing block the grid **stated**. Returns
+    /// `(the item's used width, its child's)`.
+    fn audit_row(item_width: Dimension) -> (f32, f32) {
+        let item_style = LayoutStyle {
+            width: item_width,
+            ..LayoutStyle::default()
+        };
+        let out = grid(
+            vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)],
+            vec![],
+            10.0,
+            10.0,
+        )
+        .layout(
+            &audit_shell(),
+            // The item's style reaches the algorithm through its `LayoutChild`,
+            // exactly as the runtime hands it over (`children_of` in the layout
+            // coordinator resolves each child's style into the descriptor). The
+            // measurer carries the same style because it is the same box: the
+            // algorithm reads the declared width from the descriptor, and the
+            // measure re-lays it out.
+            &[LayoutChild::new(NodeId::from_raw(1), item_style)],
+            BoxConstraints::tight(Size::new(480.0, 240.0)),
+            &mut GridItem(item_style),
+        );
+        let item_box = out.child_boxes()[0].size();
+        // The caller's fallback basis is the grid container's own content box —
+        // 480×240 border-box less 24px of padding on each edge.
+        let basis = out.child_percent_basis(0).resolve(Size::new(432.0, 192.0));
+        let item_out = FlowLayout.layout(
+            &item_style,
+            &[LayoutChild::new(NodeId::from_raw(9), half_width())],
+            BoxConstraints::tight(item_box).with_percent_basis(basis),
+            &mut NestedBlock(half_width()),
+        );
+        (item_box.width, item_out.child_boxes()[0].size().width)
+    }
+
+    /// Every item is handed its **grid area** as its inline percentage basis, and
+    /// nothing on the block axis.
+    ///
+    /// `specs/w3c/css-grid-2.txt:712`: "A grid item's grid area forms the
+    /// containing block into which it is laid out." Two `1fr` columns in a 432
+    /// content box with a 10px gap are 211 each, so both items say 211 — not the
+    /// 432 the container would otherwise hand down. The block component stays
+    /// `None`: these items sit in a content-sized row, whose extent is the items'
+    /// own measured height, and a box cannot be its own containing block.
+    #[test]
+    fn each_item_states_its_grid_area_as_its_inline_percentage_basis() {
+        let out = grid(
+            vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)],
+            vec![],
+            10.0,
+            10.0,
+        )
+        .layout(
+            &audit_shell(),
+            &[child(1), child(2)],
+            BoxConstraints::tight(Size::new(480.0, 240.0)),
+            &mut FixedChildMeasurer::new(vec![Size::new(10.0, 10.0), Size::new(10.0, 10.0)]),
+        );
+        assert_eq!(
+            out.child_percent_basis(0),
+            ChildPercentBasis::with_width(211.0)
+        );
+        assert_eq!(
+            out.child_percent_basis(1),
+            ChildPercentBasis::with_width(211.0)
+        );
+        assert_eq!(out.child_percent_basis(0).height, None);
+    }
+
+    /// The external-consumer audit's 2-4 table, reproduced on the algorithms
+    /// themselves.
+    ///
+    /// The `100%` row is the defect: the item's used width was right (211, its
+    /// track) while its child came back **216** — 50% of 432, the grid
+    /// *container's* content box, a containing block the item never had. The
+    /// `auto` row is the control and never moved.
+    ///
+    /// The `50px` row was the audit's other, separate defect (2-4 (b)): the item
+    /// was stretched to the whole track although `stretch` applies only when the
+    /// box's computed size "is auto" (`specs/w3c/css-align-3.txt:1377`). It now
+    /// keeps its declared 50 and sits at the start of its area, which is what
+    /// "falls back to flex-start" means; its child, `50%` of that, is 25.
+    ///
+    /// The audit's own "child should be" column reads 105.5 on all three rows,
+    /// which is right for the two rows whose item is a whole track wide and is a
+    /// column heading carried down on the third: an item that is genuinely 50px
+    /// wide cannot hand a `50%` child anything but 25. The audit's prose says the
+    /// same — in the `50px` row "the child is arithmetically consistent with the
+    /// declared width while the item is not". So the row's oracle is (50, 25).
+    #[test]
+    fn a_grid_items_children_resolve_against_the_items_grid_area() {
+        assert_eq!(audit_row(Dimension::Auto), (211.0, 105.5), "the control");
+        assert_eq!(
+            audit_row(Dimension::Percent(100.0)),
+            (211.0, 105.5),
+            "was (211, 216): the child had resolved against the container's 432"
+        );
+        assert_eq!(
+            audit_row(Dimension::Px(50.0)),
+            (50.0, 25.0),
+            "was (211, 25): `stretch` had run over the item's declared width"
+        );
+    }
+
+    /// Stating the item's containing block did not change what the item is
+    /// **offered**: the measure pass still hands every item its track width as a
+    /// tight inline range and the container's content height as the block bound.
+    /// The two are separate facts, and only the second one moved.
+    #[test]
+    fn stating_the_basis_did_not_change_the_offer() {
+        #[derive(Default)]
+        struct RecordOffer(Vec<BoxConstraints>);
+        impl ChildMeasurer for RecordOffer {
+            fn measure_child(&mut self, _index: usize, constraints: BoxConstraints) -> Size {
+                self.0.push(constraints);
+                Size::new(constraints.max.width, 10.0)
+            }
+        }
+        let mut measurer = RecordOffer::default();
+        grid(
+            vec![TrackSize::Fr(1.0), TrackSize::Fr(1.0)],
+            vec![],
+            10.0,
+            10.0,
+        )
+        .layout(
+            &audit_shell(),
+            &[child(1)],
+            BoxConstraints::tight(Size::new(480.0, 240.0)),
+            &mut measurer,
+        );
+        let sizing = measurer.0.last().expect("the item was measured");
+        assert_eq!(sizing.min, Size::new(211.0, 0.0));
+        assert_eq!(sizing.max, Size::new(211.0, 192.0));
+        assert_eq!(sizing.percent_basis, None);
     }
 }

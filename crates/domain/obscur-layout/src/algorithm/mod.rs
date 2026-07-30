@@ -1,6 +1,8 @@
 //! Algorithm module.
 mod child_measurer;
 pub use child_measurer::ChildMeasurer;
+mod child_percent_basis;
+pub use child_percent_basis::ChildPercentBasis;
 mod constraint_layout;
 pub use constraint_layout::ConstraintLayout;
 mod custom_layout;

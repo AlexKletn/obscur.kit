@@ -169,11 +169,17 @@ fn explicit_column_line_and_auto_flows_around() {
 
 // 4. explicit row: `.a{grid-row: 2}` with `grid-template-rows: 50px 60px` puts
 //    `.a` on row 1 at y=50; the row-1 track is 60px tall.
+//
+//    `.a` states no `height`, which is what lets its height report the track at
+//    all: `stretch` sizes a box only "When the box's computed width/height (as
+//    appropriate to the axis) is auto" (`specs/w3c/css-align-3.txt:1377`). It used
+//    to carry a `height: 10px` and be asserted at 60 anyway — the row was read
+//    through an item that should have kept its 10.
 #[test]
 fn explicit_row_line_places_on_second_row() {
     let (rt, k) = drive(
         ".grid{display:grid;width:300px;grid-template-columns:100px 100px 100px;\
-         grid-template-rows:50px 60px} .a{grid-row:2;height:10px}",
+         grid-template-rows:50px 60px} .a{grid-row:2}",
         1,
         400.0,
         300.0,
@@ -324,10 +330,15 @@ fn grid_area_shorthand_spans_row_via_lines() {
 //     rows tall), `.y` at (col1,row0), `.z` at (col1,row1).
 #[test]
 fn named_grid_areas_place_children_by_name() {
-    // Two 100px columns; two implicit rows sized by the 10px children.
+    // Two 100px columns; two implicit rows sized by the 10px children `.b`/`.c`.
+    // `.x` states no `height` on purpose: only a box whose computed height is
+    // `auto` is stretched (`specs/w3c/css-align-3.txt:1377`), and its height is
+    // this test's evidence that area `a` spans both rows. It carried a
+    // `height: 10px` and was asserted at 20 regardless, which read the span through
+    // a box that should have kept its 10.
     let css = ".grid{display:grid;width:200px;grid-template-columns:100px 100px;\
                grid-template-areas:\"a b\" \"a c\"} \
-               .a{grid-area:a;height:10px} .b{grid-area:b;height:10px} \
+               .a{grid-area:a} .b{grid-area:b;height:10px} \
                .c{grid-area:c;height:10px}";
     let (rt, k) = drive(css, 3, 400.0, 200.0);
     let (xx, xy, xw, xh) = geom(&rt, k[0]);
@@ -418,7 +429,11 @@ fn place_self_shorthand_positions_item_within_cell() {
 #[test]
 fn container_justify_items_default_centers_auto_item() {
     let (rt, k) = drive(
-        &format!("{ONE_CELL} .grid{{justify-items:center}} .a{{width:40px;height:30px}}"),
+        // No `height`: the block axis is the one this test wants stretched, and a
+        // declared height would take it out of `stretch` altogether
+        // (`specs/w3c/css-align-3.txt:1377`). The inline axis is centred by the
+        // container regardless of the declared `width`.
+        &format!("{ONE_CELL} .grid{{justify-items:center}} .a{{width:40px}}"),
         1,
         400.0,
         200.0,
@@ -434,10 +449,31 @@ fn container_justify_items_default_centers_auto_item() {
     );
 }
 
-// Regression: with no alignment authored, an item fills its whole cell exactly
-// as before this feature (default `stretch` on both axes).
+// Regression: with no alignment authored, an item whose size is `auto` on both
+// axes fills its whole cell (the default `stretch` on both axes).
 #[test]
 fn default_grid_item_still_fills_its_cell() {
+    let (rt, k) = drive(&format!("{ONE_CELL} .a{{}}"), 1, 400.0, 200.0);
+    let (ax, ay, aw, ah) = geom(&rt, k[0]);
+    approx(ax, 0.0, "a.x (cell origin)");
+    approx(ay, 0.0, "a.y (cell origin)");
+    approx(aw, 100.0, "a.width (stretched to the 100px cell)");
+    approx(ah, 100.0, "a.height (stretched to the 100px cell)");
+}
+
+// …and an item that declares a size does NOT, with the very same (absent)
+// alignment. `specs/w3c/css-align-3.txt:1377` gives `stretch` a precondition:
+// it sets a used size "When the box's computed width/height (as appropriate to
+// the axis) is auto and neither of its margins (in the appropriate axis) are
+// auto", and "Unless otherwise specified, this value falls back to flex-start
+// generally". So the declared 40×30 survives and the box sits at the cell's
+// start corner — a real flex-start, position and size together.
+//
+// This test above used to author `width:40px;height:30px` and assert 100×100:
+// the engine stretched a box it was not allowed to stretch, and the author's
+// lengths vanished (`docs/external-consumer-audit.md`, 2-4 (b)).
+#[test]
+fn a_declared_size_survives_the_default_stretch() {
     let (rt, k) = drive(
         &format!("{ONE_CELL} .a{{width:40px;height:30px}}"),
         1,
@@ -445,8 +481,27 @@ fn default_grid_item_still_fills_its_cell() {
         200.0,
     );
     let (ax, ay, aw, ah) = geom(&rt, k[0]);
-    approx(ax, 0.0, "a.x (cell origin)");
-    approx(ay, 0.0, "a.y (cell origin)");
-    approx(aw, 100.0, "a.width (stretched to the 100px cell)");
-    approx(ah, 100.0, "a.height (stretched to the 100px cell)");
+    approx(ax, 0.0, "a.x (flex-start fallback → cell origin)");
+    approx(ay, 0.0, "a.y (flex-start fallback → cell origin)");
+    approx(aw, 40.0, "a.width (its declared 40px, not the 100px cell)");
+    approx(ah, 30.0, "a.height (its declared 30px, not the 100px cell)");
+}
+
+// The same box, with `place-self: stretch` written out by hand: identical. The
+// spec's condition is on the box's computed size, not on how the alignment value
+// was arrived at, so asking for the stretch out loud buys nothing the keyword is
+// not defined to give.
+#[test]
+fn an_authored_stretch_does_not_beat_a_declared_size() {
+    let (rt, k) = drive(
+        &format!("{ONE_CELL} .a{{width:40px;height:30px;place-self:stretch}}"),
+        1,
+        400.0,
+        200.0,
+    );
+    let (ax, ay, aw, ah) = geom(&rt, k[0]);
+    approx(ax, 0.0, "a.x");
+    approx(ay, 0.0, "a.y");
+    approx(aw, 40.0, "a.width (authored `stretch` still falls back)");
+    approx(ah, 30.0, "a.height (authored `stretch` still falls back)");
 }
