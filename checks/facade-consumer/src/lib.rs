@@ -10,5 +10,6 @@
 //! structural `lib.rs`) so `xtask`'s rules can be run over this directory too.
 #![forbid(unsafe_code)]
 
+pub mod badge;
 pub mod counter;
 pub mod measure;

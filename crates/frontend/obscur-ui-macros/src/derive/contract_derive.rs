@@ -2,14 +2,40 @@
 //!
 //! This module turns a props struct into an inherent `impl` exposing a
 //! `contract()` associated function that builds a fully-typed
-//! [`::obscur_view::component::ComponentContract`]. The macro crate emits
-//! leading-`::` paths as tokens, so the *generated* code depends on
-//! `obscur-view`/`obscur-identity` while this crate does not.
+//! `ComponentContract`. The macro crate emits leading-`::` paths as tokens, so
+//! the *generated* code names obscur-view's and obscur-identity's types while
+//! this crate depends on neither.
+//!
+//! # Which crate the generated paths name
+//!
+//! Through the `obscur-kit` facade — `::obscur_kit::view::…` and
+//! `::obscur_kit::identity::…` — for the reason
+//! [`CodegenRoot`](obscur_okui_compiler::codegen::CodegenRoot) spells out for the
+//! *other* macro: a `::`-prefixed path resolves in the extern prelude, which
+//! holds the calling crate's **direct** dependencies, and an application's only
+//! direct dependency is the facade. This derive emitted `::obscur_view::…` and
+//! `::obscur_identity::…` until it was found from outside the workspace (audit
+//! finding 2-2, the residue of 1-A): every `#[derive(Contract)]` in this
+//! repository lives in `obscur-kit`'s own test targets, where both crates are
+//! reachable, so the failing path was never taken here and `#[derive(Contract)]`
+//! — the whole way a component declares its contract — could not be used by an
+//! application at all.
+//!
+//! Unlike `ViewCodegen`'s, this root is **not** an argument, and deliberately so:
+//! there is no caller who could pass a different one. `obscur-ui-macros` is
+//! `publish = false` and only `obscur-kit` depends on it, so the sole way to
+//! reach this derive is through the facade's re-export
+//! (`obscur_kit::ui_macros::Contract`) — a crate naming the derive necessarily
+//! has `obscur_kit` in its extern prelude. A `#[contract(crate = …)]` key would
+//! therefore be a knob with no possible turner. A crate that genuinely wants to
+//! stand on `obscur-view` alone does not use the derive: it writes the two
+//! builders by hand (`ComponentContract::new(…).with_prop(…)`,
+//! `ComponentSurface::new(…)`) plus its own `FromProps`, which is public API and
+//! is exactly what obscur-view's own tests do.
 //!
 //! # Stable-id scheme
 //!
-//! [`::obscur_identity::InternedSymbol`] and
-//! [`::obscur_identity::ComponentId`] are opaque `from_raw` handles, and there
+//! `InternedSymbol` and `ComponentId` are opaque `from_raw` handles, and there
 //! is no compile-time interner available during derive expansion, so every id is
 //! computed at expansion time and only the resulting integer literal is emitted.
 //!
@@ -38,13 +64,23 @@
 //! `many`) and a repeatable `child = "Tag"` restricts what the slot admits.
 //!
 //! Both views are emitted from the one declaration, and only one of them is read
-//! today: [`contract_surface`] is what the `.okui` compiler and the `okui!` macro
-//! check a document against, while the typed `contract()`'s `slots` field has no
-//! production reader — as is true of its props and events. Emitting it anyway is
-//! not decoration: a component that declares a slot and whose typed contract
-//! reports `slots: []` would be *wrong*, and an unread field beats a lying one.
+//! today: the generated `contract_surface()` (a `ComponentSurface`) is what the
+//! `.okui` compiler and the `okui!` macro check a document against, while the
+//! typed `contract()`'s `slots` field has no production reader — as is true of
+//! its props and events. Emitting it anyway is not decoration: a component that
+//! declares a slot and whose typed contract reports `slots: []` would be *wrong*,
+//! and an unread field beats a lying one.
 //!
-//! [`contract_surface`]: ::obscur_view::contract::ComponentSurface
+//! # Style scope (§4.15)
+//!
+//! A struct-level `#[contract(style_scope = open)]` declares that the document's
+//! ordinary selectors reach the elements this component renders; `scoped` (the
+//! default, and what an unstated attribute means) keeps them out, so only an
+//! exported `::part()` crosses. This one *is* read in production — the runtime
+//! reads it at mount and stamps `NodeFlags::OPEN_STYLE_SCOPE` on the host, which
+//! is what the style pass's scope walk consults. Without it a component's output
+//! could be styled by nothing at all, which is what the external consumer audit
+//! recorded as finding 2-1.
 
 use proc_macro2::{Literal, Span, TokenStream};
 use quote::{ToTokens, quote};
@@ -59,7 +95,8 @@ pub(crate) struct ContractDerive;
 
 impl ContractDerive {
     /// Expands `#[derive(Contract)]` on a props struct into an inherent impl
-    /// producing an obscur-view [`::obscur_view::component::ComponentContract`].
+    /// producing an obscur-view `ComponentContract`, named through the facade as
+    /// `::obscur_kit::view::component::ComponentContract` (see the module docs).
     ///
     /// Only structs with named fields are supported; enums, unions and
     /// tuple/unit structs produce a [`syn::Error`] at the input span. Unknown
@@ -120,7 +157,7 @@ impl ContractDerive {
                 ChildrenKind::None => quote!(None),
             };
             quote! {
-                .allowing_children(::obscur_view::contract::ChildContract::#variant)
+                .allowing_children(::obscur_kit::view::contract::ChildContract::#variant)
             }
         });
 
@@ -142,19 +179,33 @@ impl ContractDerive {
             .map(SlotModel::surface_tokens)
             .collect();
 
+        // §4.15's style scope. Only emitted when the author stated one, so a
+        // contract that says nothing keeps the type's own `Scoped` default and
+        // the generated source stays byte-identical to what it was.
+        let style_scope_tokens = struct_attrs.style_scope.map(|kind| {
+            let variant = match kind {
+                StyleScopeKind::Scoped => quote!(Scoped),
+                StyleScopeKind::Open => quote!(Open),
+            };
+            quote! {
+                .with_style_scope(::obscur_kit::view::component::StyleScope::#variant)
+            }
+        });
+
         Ok(quote! {
             impl #impl_generics #struct_ident #ty_generics #where_clause {
                 /// Returns the typed component contract for this props struct,
                 /// generated by `#[derive(Contract)]`.
                 #[must_use]
-                pub fn contract() -> ::obscur_view::component::ComponentContract {
-                    ::obscur_view::component::ComponentContract::new(
-                        ::obscur_identity::ComponentId::from_raw(#component_id)
+                pub fn contract() -> ::obscur_kit::view::component::ComponentContract {
+                    ::obscur_kit::view::component::ComponentContract::new(
+                        ::obscur_kit::identity::ComponentId::from_raw(#component_id)
                     )
-                    .with_name(::obscur_identity::InternedSymbol::from_raw(#name_sym))
+                    .with_name(::obscur_kit::identity::InternedSymbol::from_raw(#name_sym))
                     #entries
                     #children_tokens
                     #slot_tokens
+                    #style_scope_tokens
                 }
 
                 /// Returns the string-keyed tooling surface for this props
@@ -166,20 +217,20 @@ impl ContractDerive {
                 /// typed [`contract`](Self::contract) remains the symbol-keyed
                 /// runtime view.
                 #[must_use]
-                pub fn contract_surface() -> ::obscur_view::contract::ComponentSurface {
-                    ::obscur_view::contract::ComponentSurface::new(#component_name_literal)
+                pub fn contract_surface() -> ::obscur_kit::view::contract::ComponentSurface {
+                    ::obscur_kit::view::contract::ComponentSurface::new(#component_name_literal)
                     #surface_entries
                     #surface_children_tokens
                     #surface_slot_tokens
                 }
             }
 
-            impl #impl_generics ::obscur_view::component::FromProps
+            impl #impl_generics ::obscur_kit::view::component::FromProps
                 for #struct_ident #ty_generics #where_clause
             {
                 fn from_props(
-                    props: &[::obscur_view::view::ViewProperty],
-                ) -> ::core::result::Result<Self, ::obscur_view::component::PropsError> {
+                    props: &[::obscur_kit::view::view::ViewProperty],
+                ) -> ::core::result::Result<Self, ::obscur_kit::view::component::PropsError> {
                     ::core::result::Result::Ok(Self { #field_inits })
                 }
             }
@@ -285,20 +336,20 @@ impl SlotModel {
         let name_sym = Literal::u32_unsuffixed(fnv32(&self.name));
         let cardinality = self.cardinality.variant();
         let children = if self.children.is_empty() {
-            quote!(::obscur_view::contract::ChildContract::Any)
+            quote!(::obscur_kit::view::contract::ChildContract::Any)
         } else {
             let ids = self.children.iter().map(|tag| {
                 let id = Literal::u64_unsuffixed(component_id(tag));
-                quote!(::obscur_identity::ComponentId::from_raw(#id))
+                quote!(::obscur_kit::identity::ComponentId::from_raw(#id))
             });
-            quote!(::obscur_view::contract::ChildContract::Only(
+            quote!(::obscur_kit::view::contract::ChildContract::Only(
                 ::std::vec![#(#ids),*]
             ))
         };
         quote! {
-            .with_slot(::obscur_view::contract::SlotContract::new(
-                ::obscur_identity::InternedSymbol::from_raw(#name_sym),
-                ::obscur_view::contract::SlotCardinality::#cardinality,
+            .with_slot(::obscur_kit::view::contract::SlotContract::new(
+                ::obscur_kit::identity::InternedSymbol::from_raw(#name_sym),
+                ::obscur_kit::view::contract::SlotCardinality::#cardinality,
                 #children,
             ))
         }
@@ -316,9 +367,9 @@ impl SlotModel {
         });
         quote! {
             .with_slot(
-                ::obscur_view::contract::SlotSurface::new(
+                ::obscur_kit::view::contract::SlotSurface::new(
                     #name,
-                    ::obscur_view::contract::SlotCardinality::#cardinality,
+                    ::obscur_kit::view::contract::SlotCardinality::#cardinality,
                 )
                 #(#children)*
             )
@@ -335,6 +386,19 @@ struct StructAttrs {
     children: Option<ChildrenKind>,
     /// The declared named slots, in declaration order (spec §2.12).
     slots: Vec<SlotModel>,
+    /// The declared §4.15 style scope, if the author stated one.
+    style_scope: Option<StyleScopeKind>,
+}
+
+/// Which `StyleScope` variant a `#[contract(style_scope = ...)]` selects
+/// (spec §4.15).
+#[derive(Debug, Clone, Copy)]
+enum StyleScopeKind {
+    /// The default: the document's ordinary selectors stop at the host.
+    Scoped,
+    /// "Explicitly open/global scopes are possible": the component's rendered
+    /// elements are styled by the document's sheets like authored ones.
+    Open,
 }
 
 impl StructAttrs {
@@ -366,6 +430,20 @@ impl StructAttrs {
                     Ok(())
                 } else if meta.path.is_ident("slot") {
                     out.slots.push(SlotModel::parse(&meta)?);
+                    Ok(())
+                } else if meta.path.is_ident("style_scope") {
+                    let value = meta.value()?;
+                    let lit: syn::Ident = value.parse()?;
+                    out.style_scope = Some(match lit.to_string().as_str() {
+                        "scoped" => StyleScopeKind::Scoped,
+                        "open" => StyleScopeKind::Open,
+                        other => {
+                            return Err(meta.error(format!(
+                                "unknown `style_scope` value `{other}` (expected `scoped` or \
+                                 `open`)"
+                            )));
+                        }
+                    });
                     Ok(())
                 } else {
                     Err(meta.error("unknown `contract` attribute on struct"))
@@ -446,7 +524,7 @@ impl FieldModel {
     /// The target type is never named: it is inferred from the field being
     /// initialised, so no `Option<T>` inner-type extraction is needed.
     ///
-    /// [`FromProps`]: ::obscur_view::component::FromProps
+    /// [`FromProps`]: obscur_view::component::FromProps
     /// [`Default`]: ::core::default::Default
     fn from_props_tokens(&self) -> TokenStream {
         let ident = &self.ident;
@@ -456,28 +534,28 @@ impl FieldModel {
         }
 
         let name_sym = Literal::u32_unsuffixed(name_symbol(&self.name));
-        let symbol = quote! { ::obscur_identity::InternedSymbol::from_raw(#name_sym) };
+        let symbol = quote! { ::obscur_kit::identity::InternedSymbol::from_raw(#name_sym) };
 
         if self.is_option {
             return quote! {
-                #ident: ::obscur_view::component::decode_optional(props, #symbol)?,
+                #ident: ::obscur_kit::view::component::decode_optional(props, #symbol)?,
             };
         }
         if self.attrs.default {
             return quote! {
-                #ident: match ::obscur_view::component::prop_value(props, #symbol) {
+                #ident: match ::obscur_kit::view::component::prop_value(props, #symbol) {
                     ::core::option::Option::None
-                    | ::core::option::Option::Some(::obscur_view::view::ViewValue::Null) => {
+                    | ::core::option::Option::Some(::obscur_kit::view::view::ViewValue::Null) => {
                         ::core::default::Default::default()
                     }
                     ::core::option::Option::Some(value) => {
-                        ::obscur_view::component::decode_value(value, #symbol)?
+                        ::obscur_kit::view::component::decode_value(value, #symbol)?
                     }
                 },
             };
         }
         quote! {
-            #ident: ::obscur_view::component::decode_required(props, #symbol)?,
+            #ident: ::obscur_kit::view::component::decode_required(props, #symbol)?,
         }
     }
 
@@ -497,9 +575,9 @@ impl FieldModel {
         if self.attrs.event {
             let name_sym = Literal::u32_unsuffixed(event_name_symbol(&self.name));
             let mut event = quote! {
-                ::obscur_view::contract::EventContract::new(
-                    ::obscur_identity::InternedSymbol::from_raw(#name_sym),
-                    ::obscur_identity::InternedSymbol::from_raw(#type_sym),
+                ::obscur_kit::view::contract::EventContract::new(
+                    ::obscur_kit::identity::InternedSymbol::from_raw(#name_sym),
+                    ::obscur_kit::identity::InternedSymbol::from_raw(#type_sym),
                 )
             };
             if self.attrs.bubbles {
@@ -516,9 +594,9 @@ impl FieldModel {
         let name_sym = Literal::u32_unsuffixed(name_symbol(&self.name));
         let optional = self.is_option || self.attrs.default;
         let prop = quote! {
-            ::obscur_view::contract::PropContract::new(
-                ::obscur_identity::InternedSymbol::from_raw(#name_sym),
-                ::obscur_identity::InternedSymbol::from_raw(#type_sym),
+            ::obscur_kit::view::contract::PropContract::new(
+                ::obscur_kit::identity::InternedSymbol::from_raw(#name_sym),
+                ::obscur_kit::identity::InternedSymbol::from_raw(#type_sym),
             )
         };
         let prop = if optional {
@@ -560,7 +638,7 @@ impl FieldModel {
         // and is left unchecked rather than guessed at.
         let variant = syn::Ident::new(classify_prop_type(&self.type_string), Span::call_site());
         Some(quote! {
-            #prop.with_prop_type(#name, ::obscur_view::contract::PropTypeSurface::#variant)
+            #prop.with_prop_type(#name, ::obscur_kit::view::contract::PropTypeSurface::#variant)
         })
     }
 }
@@ -723,6 +801,7 @@ fn component_id(name: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{ContractDerive, component_id, event_name_symbol, fnv32, name_symbol};
+    use obscur_okui_compiler::codegen::CodegenRoot;
     use quote::quote;
 
     /// Collapses generated tokens to a single-spaced string for tolerant
@@ -731,6 +810,52 @@ mod tests {
         ContractDerive::expand(input)
             .expect("expansion should succeed")
             .to_string()
+    }
+
+    #[test]
+    fn every_emitted_path_is_named_through_the_facade() {
+        // Audit finding 2-2, pinned. The generated code lands in the *caller's*
+        // crate, whose extern prelude holds `obscur_kit` and nothing else, so a
+        // `:: obscur_view` path there is not a style question — it is
+        // `error[E0433]: cannot find `obscur_view` in the crate root`, which is
+        // what an application got for every component it tried to declare.
+        //
+        // The input exercises every emission site at once: the typed contract,
+        // the string surface, a slot on both, and all four `FromProps` shapes
+        // (required, `Option`, `#[contract(default)]`, event).
+        let generated = expand_to_string(quote! {
+            #[contract(name = "Card", children = none, slot(name = "header", child = "Button"))]
+            struct CardProps {
+                title: String,
+                hint: Option<String>,
+                #[contract(default)]
+                count: u32,
+                #[contract(event)]
+                click: u32,
+            }
+        });
+        assert!(!generated.contains(":: obscur_view"), "{generated}");
+        assert!(!generated.contains(":: obscur_identity"), "{generated}");
+
+        // And it is the *same* root the other macro emits, asked of the one type
+        // that owns the answer rather than of a second copy of the strings —
+        // this derive and `okui!` land side by side in one crate, so a facade
+        // that renamed a re-export must break both here, not one in the field.
+        let root = CodegenRoot::facade();
+        assert!(generated.contains(&as_tokens(root.view())), "{generated}");
+        assert!(
+            generated.contains(&as_tokens(root.identity())),
+            "{generated}"
+        );
+    }
+
+    /// A path as `TokenStream::to_string` renders it: `::a::b` prints `:: a :: b`.
+    fn as_tokens(path: &str) -> String {
+        path.split("::")
+            .collect::<Vec<_>>()
+            .join(" :: ")
+            .trim()
+            .to_owned()
     }
 
     #[test]

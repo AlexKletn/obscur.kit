@@ -23,6 +23,12 @@ pub struct MeasuredNode {
     pub local_name: String,
     /// Depth below the root.
     pub depth: u32,
+    /// The literal content, for a text node — empty for every other node.
+    ///
+    /// Text is the only evidence that survives a *component* render: what a
+    /// component puts on screen is a subtree the application never authored, so
+    /// "did it run?" can only be asked of its output. `src/badge.rs` asks it.
+    pub text: String,
     /// Border-box width in logical pixels, or `0` if the node was not laid out.
     pub width: f32,
     /// Border-box height in logical pixels, or `0` if the node was not laid out.
@@ -37,11 +43,29 @@ pub fn stylesheet(css: &str) -> Stylesheet {
     StylesheetCompiler::new().compile(&parsed).matchable
 }
 
+/// A headless runtime of `width`×`height`, the one [`measure`] uses.
+///
+/// Exposed on its own because a host that registers components has to hold the
+/// runtime itself: registration happens before the first render and outlives it
+/// (§2.14). [`measure_in`] is then the same measurement against that runtime.
+#[must_use]
+pub fn runtime(width: f32, height: f32) -> UiRuntime {
+    UiRuntime::new(RuntimeId::from_raw(1), Size::new(width, height))
+}
+
 /// Lays `view` out at `width`×`height` under `css` and returns the boxes.
 #[must_use]
 pub fn measure(view: &View, css: &str, width: f32, height: f32) -> Vec<MeasuredNode> {
+    measure_in(&mut runtime(width, height), view, css)
+}
+
+/// Lays `view` out in an existing `runtime` under `css` and returns the boxes.
+///
+/// The runtime is the caller's so it can carry state a single render cannot: a
+/// registered component, and the mount count that says whether it ran.
+#[must_use]
+pub fn measure_in(runtime: &mut UiRuntime, view: &View, css: &str) -> Vec<MeasuredNode> {
     let authored = stylesheet(css);
-    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(width, height));
     runtime.render_now(view, &[ua_stylesheet(), authored]);
     runtime
         .inspect_snapshot()
@@ -51,6 +75,7 @@ pub fn measure(view: &View, css: &str, width: f32, height: f32) -> Vec<MeasuredN
             class: node.classes.join(" "),
             local_name: node.local_name.unwrap_or_default(),
             depth: node.depth,
+            text: node.text.unwrap_or_default(),
             width: node.bounds.map_or(0.0, |rect| rect.size.width),
             height: node.bounds.map_or(0.0, |rect| rect.size.height),
         })
