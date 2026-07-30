@@ -123,6 +123,24 @@ impl LayoutAlgorithm for DockingLayout {
 
         for (index, _child) in children.iter().enumerate() {
             let side = self.sides.get(index).copied().unwrap_or(DockSide::Fill);
+            // None of the four arms below states a `percent_basis`, and it would
+            // change nothing if they did: every arm's `max` IS `remaining.size`,
+            // and `remaining` is the rectangle this child is docked into and
+            // arranged within, so a percentage size already resolves against that
+            // rectangle through `BoxConstraints::percent_width`'s fallback to
+            // `max`. The offer and the containing block are the same number here,
+            // which is exactly the case the field exists to tell apart when they
+            // are not (see `BoxConstraints::percent_basis`).
+            //
+            // The open question is not "which value" but "which rectangle": a
+            // dock band's containing block could equally be defended as the
+            // container's whole content box, which never shrinks, the way a CSS
+            // containing block never shrinks for a later sibling. Docking is a
+            // `DockPanel` (spec §4.1) with no vendored CSS text behind it and no
+            // `display` value routing to it, so nothing decides that today and
+            // `remaining` is the algorithm's own answer — it is already what the
+            // band's cross extent is forced to. Whoever maps docking onto a
+            // `display` value owes this a spec sentence first.
             let (origin, size) = match side {
                 DockSide::Top => {
                     let cc = BoxConstraints {

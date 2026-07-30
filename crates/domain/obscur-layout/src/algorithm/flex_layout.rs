@@ -82,6 +82,24 @@ fn probe_main(
     } else {
         Size::new(container_cross, main_offer)
     };
+    // No `percent_basis`, and unlike the cross measure in [`cross_item_size`]
+    // that is not an omission. Per axis:
+    //
+    // * **cross** — `max` is already `container_cross`, the flex container's
+    //   content extent on that axis, so the fallback resolves a percentage
+    //   against precisely the containing block it should. Stating it would be a
+    //   no-op that costs the caller's measure memoization a distinct key.
+    // * **main** — `main_offer` is `0` or infinity *on purpose*: this is the
+    //   min-content / max-content question, and the whole point is that no
+    //   definite main size is offered. There is no basis to state, and the
+    //   answer CSS gives for a percentage against an indefinite size is not "use
+    //   the container's" but "behave as auto" (`specs/w3c/css-sizing-3.txt:554`:
+    //   "block percentage heights resolving against an indefinite size … the
+    //   property is said to behave as auto"). This engine has no "behave as
+    //   auto", so such a percentage folds against the offer instead — the known,
+    //   separate indefinite-basis gap recorded in `docs/api/12-reality.md`, not
+    //   the audit's 2-4 (a). Inventing `container_main` here would paper over it
+    //   with a number the spec does not ask for.
     let measured = measurer.measure_child(
         index,
         BoxConstraints {
@@ -623,6 +641,7 @@ impl LayoutAlgorithm for FlexLayout {
                 // pre-stretch measurement so the definite path stays identical.
                 content_cross_needed: height_indefinite && is_row,
                 line_cross_stretch: None,
+                percent_basis: Size::new(content_width, content_height),
                 measurer: &mut *measurer,
                 child_boxes: &mut child_boxes,
             });
@@ -756,6 +775,7 @@ impl LayoutAlgorithm for FlexLayout {
                 cross_offset,
                 content_cross_needed: false,
                 line_cross_stretch,
+                percent_basis: Size::new(content_width, content_height),
                 measurer,
                 child_boxes: boxes,
             })
@@ -959,6 +979,26 @@ struct LineArgs<'a, 'm> {
     /// The container's cross extent (the measurement bound and, for the
     /// single-line path, the alignment reference).
     container_cross: f32,
+    /// The flex container's **content box** — the containing block every item's
+    /// percentage size resolves against (`specs/w3c/css-flexbox-1.txt:640`,
+    /// vendored here: "Flex containers form a containing block for their contents
+    /// exactly like block containers do", and `:2389` for the sizing corollary:
+    /// "percentage values of flex-basis are resolved against the flex item's
+    /// containing block (i.e. its flex container)").
+    ///
+    /// Carried separately from `line_main` / `container_cross` because it answers
+    /// a different question: those two are how much space there is *to give*,
+    /// this is what a percentage *means*. The cross measure below hands an item a
+    /// tight main axis — its already-flexed used size — and without this the item
+    /// re-read that number as its own containing block.
+    ///
+    /// An axis of this may be **infinite**, for a container that is itself being
+    /// asked its max-content size. That is deliberate and it is the honest answer:
+    /// [`Dimension::resolve`] gives [`None`] for a non-finite base, so a
+    /// percentage against an indefinite containing block behaves as `auto`
+    /// (`specs/w3c/css-sizing-3.txt:554`) instead of quietly resolving against the
+    /// probe's own offer.
+    percent_basis: Size,
     /// Content-box origin offsets.
     bp_left: f32,
     bp_top: f32,
@@ -1025,6 +1065,7 @@ fn place_line(args: LineArgs) -> PlacedLine {
         cross_offset,
         content_cross_needed,
         line_cross_stretch,
+        percent_basis,
         measurer,
         child_boxes,
     } = args;
@@ -1099,6 +1140,7 @@ fn place_line(args: LineArgs) -> PlacedLine {
                     is_row,
                     final_main[pos],
                     container_cross,
+                    percent_basis,
                     i,
                     &mut *measurer,
                 );
@@ -1116,6 +1158,7 @@ fn place_line(args: LineArgs) -> PlacedLine {
                         is_row,
                         final_main[pos],
                         container_cross,
+                        percent_basis,
                         i,
                         &mut *measurer,
                     );
@@ -1136,6 +1179,7 @@ fn place_line(args: LineArgs) -> PlacedLine {
                     is_row,
                     final_main[pos],
                     container_cross,
+                    percent_basis,
                     i,
                     &mut *measurer,
                 );
@@ -1492,6 +1536,31 @@ fn resolve_flexible_lengths(
 /// explicit cross-axis size (which wins, expanded to its border-box extent).
 /// Otherwise the item's cross size is measured with its final main size fixed and
 /// a loose cross axis bounded by `container_cross`.
+///
+/// # Why the measure states a percentage basis
+///
+/// The measure below fixes the main axis to `main`, the item's **used** main size
+/// after flexing. That is the right thing to offer — the item must report the
+/// cross size it takes at the width it will actually be laid out at — but it is
+/// not the item's containing block, and the two travelled as one value: an item
+/// at `width: 50%` in a 400-wide row was measured with `max.width == 200`, read
+/// *that* back as its basis, and laid its own content out at 100. Anything whose
+/// block size depends on its inline size then answered for the wrong box — a
+/// wrapping inner row reported two lines where its arranged self has one, so the
+/// item's measured height and its arranged content disagreed.
+///
+/// `percent_basis` is the flex container's content box, which is what a flex
+/// item's percentages resolve against: `specs/w3c/css-flexbox-1.txt:640`,
+/// vendored here — "Flex containers form a containing block for their contents
+/// exactly like block containers do" — and `:2389`, "percentage values of
+/// flex-basis are resolved against the flex item's containing block (i.e. its
+/// flex container)". It is also, exactly, the number this algorithm already
+/// resolved the item's own main size against (`main_dim.resolve(container_main)`
+/// above), so stating it is what makes the item's two passes agree.
+///
+/// This is the flex sibling of the audit's grid finding 2-4 (a)
+/// (`docs/external-consumer-audit.md`): the same defect — a caller that knows the
+/// containing block and does not say it — in a different algorithm's clothes.
 #[allow(clippy::too_many_arguments)]
 fn cross_item_size(
     stretch: bool,
@@ -1500,6 +1569,7 @@ fn cross_item_size(
     is_row: bool,
     main: f32,
     container_cross: f32,
+    percent_basis: Size,
     index: usize,
     measurer: &mut dyn ChildMeasurer,
 ) -> f32 {
@@ -1521,13 +1591,13 @@ fn cross_item_size(
             BoxConstraints {
                 min: Size::new(main, 0.0),
                 max: Size::new(main, container_cross),
-                percent_basis: None,
+                percent_basis: Some(percent_basis),
             }
         } else {
             BoxConstraints {
                 min: Size::new(0.0, main),
                 max: Size::new(container_cross, main),
-                percent_basis: None,
+                percent_basis: Some(percent_basis),
             }
         };
         let measured = measurer.measure_child(index, item_constraints);
@@ -2958,6 +3028,10 @@ mod tests {
         let out = FlexLayout.layout(
             &style,
             &children,
+            // A test's own container constraints, not a measure of a child: no
+            // style in this fixture authors a percentage, so there is nothing for
+            // a basis to change. Written out longhand only because
+            // `BoxConstraints::loose` cannot express a half-infinite `max`.
             BoxConstraints {
                 min: Size::ZERO,
                 max: Size::new(f32::INFINITY, 50.0),
@@ -2994,6 +3068,7 @@ mod tests {
         let out = FlexLayout.layout(
             &style,
             &children,
+            // As above: the fixture's own constraints, no percentage in sight.
             BoxConstraints {
                 min: Size::ZERO,
                 max: Size::new(50.0, f32::INFINITY),
@@ -3026,5 +3101,72 @@ mod tests {
             &mut measurer,
         );
         assert_eq!(measurer.calls, 2, "one base measure per item, no probes");
+    }
+
+    /// An item that is itself a **wrapping flex row** of two rigid 60x60 boxes,
+    /// laid out under exactly the constraints the outer container hands it.
+    ///
+    /// The one thing [`FixedChildMeasurer`] cannot do and this must: couple the
+    /// item's block size to its inline size. Two 60-wide boxes fit on one line at
+    /// 200 (height 60) and wrap at 100 (height 120), so the height that comes back
+    /// says out loud which inline size the item believed it had.
+    struct WrappingRow {
+        /// The item's own style, re-laid-out on every measure.
+        style: LayoutStyle,
+    }
+
+    impl crate::algorithm::ChildMeasurer for WrappingRow {
+        fn measure_child(&mut self, _index: usize, constraints: BoxConstraints) -> Size {
+            let box_style = LayoutStyle {
+                display: LayoutDisplay::Flex,
+                width: Dimension::Px(60.0),
+                height: Dimension::Px(60.0),
+                flex_grow: 0.0,
+                flex_shrink: 0.0,
+                ..LayoutStyle::default()
+            };
+            let kids = [
+                LayoutChild::new(NodeId::from_raw(11), box_style),
+                LayoutChild::new(NodeId::from_raw(12), box_style),
+            ];
+            let mut inner =
+                FixedChildMeasurer::new(vec![Size::new(60.0, 60.0), Size::new(60.0, 60.0)]);
+            FlexLayout
+                .layout(&self.style, &kids, constraints, &mut inner)
+                .size()
+        }
+    }
+
+    #[test]
+    fn a_percentage_item_is_measured_against_the_container_not_against_itself() {
+        // A 400-wide row, one `width: 50%` item, `align-items: flex-start` so the
+        // item's cross size is MEASURED rather than stretched.
+        let style = container(
+            FlexDirection::Row,
+            JustifyContent::FlexStart,
+            AlignItems::FlexStart,
+            0.0,
+        );
+        let item_style = LayoutStyle {
+            display: LayoutDisplay::Flex,
+            width: Dimension::Percent(50.0),
+            flex_wrap: FlexWrap::Wrap,
+            flex_grow: 0.0,
+            flex_shrink: 0.0,
+            ..LayoutStyle::default()
+        };
+        let children = [LayoutChild::new(NodeId::from_raw(1), item_style)];
+        let out = FlexLayout.layout(
+            &style,
+            &children,
+            BoxConstraints::tight(Size::new(400.0, 200.0)),
+            &mut WrappingRow { style: item_style },
+        );
+        let item = out.child_boxes()[0].size();
+        approx(item.width, 200.0);
+        // 60 = one line. Before the fix this was 120: the cross measure handed the
+        // item a tight main axis and no basis, so the item re-resolved its own
+        // `width: 50%` against its own 200 and laid its content out at 100.
+        approx(item.height, 60.0);
     }
 }
