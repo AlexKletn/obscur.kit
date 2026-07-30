@@ -68,9 +68,16 @@ Every claim here is checkable against the workspace:
 
 ```sh
 cargo run -p xtask -- check       # layer boundaries
+cargo run -p xtask -- consumer    # the facade boundary, from outside the workspace
 cargo test --workspace            # 5,766 tests
 cargo doc --no-deps -p obscur-kit --features full
 ```
+
+`consumer` builds and tests `checks/facade-consumer`, a crate outside this
+workspace whose only dependency is `obscur-kit` — the vantage point from which
+"one dependency" is a claim rather than an aspiration. Every other consumer of the
+toolkit in this repository lives *inside* `obscur-kit`, where the internal crates
+are direct dependencies, and a whole class of defect is invisible from there.
 
 Where a page says "no production caller", the check is a grep for the symbol
 outside its own crate and outside tests. That is the same method the conformance

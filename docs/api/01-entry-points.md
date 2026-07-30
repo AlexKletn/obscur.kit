@@ -39,11 +39,15 @@ Every method is a consuming builder returning `Self`, except `run`.
 | `App::new(title: impl Into<String>) -> Self` | starts at **800×600** logical, app id `"obscur-kit"`, no styling, no root |
 | `app_id(impl Into<String>) -> Self` | the Wayland `app_id` / X11 `WM_CLASS`. This — not the title — is what a compositor rule, a taskbar entry and a `.desktop` file match on. Give every app a distinct one |
 | `with_size(f32, f32) -> Self` | initial size in **logical** pixels; the window stays resizable |
-| `stylesheet(&str) -> Self` | appends a sheet. Callable repeatedly; later sheets cascade over earlier ones |
+| `stylesheet(&str) -> Self` | appends a sheet. Callable repeatedly; later sheets cascade over earlier ones. This is the *initial* set — to replace it while running, see `control()` |
 | `view(impl Fn() -> View + 'static) -> Self` | the root builder, re-invoked per frame |
 | `view_with(impl FnMut(&FrameInfo) -> View + 'static) -> Self` | the root builder, given the live viewport and scale |
-| `screen(&str) -> Self` | the root as `.okui` markup, compiled at `run` |
-| `on_command(InternedSymbol, impl FnMut() + 'static) -> Self` | a handler for a command name bound in the view or the sheet |
+| `screen(&str) -> Self` | the root as `.okui` markup: compiled to UI IR at `run`, then re-lowered every frame against `screen_data()` |
+| `screen_data() -> ScreenData` | the table a `screen`'s `{bindings}` read. Plain application state — write it before `run` and from a handler |
+| `control() -> AppControl` | the handle onto this app's running runtime: positional handlers, listeners, `set_stylesheets`, a queued `with_runtime` escape hatch |
+| `on_command(InternedSymbol, handler) -> Self` | a handler for a command name bound in the view or the sheet, at the **window** level (§2.6 link 4) |
+| `on_command_at(SelectorTarget, InternedSymbol, handler) -> Self` | the same, **at a node** named by `test-id` (§2.6 links 1 and 3). Claims the command and stops the chain |
+| `add_event_listener(SelectorTarget, InternedSymbol, ListenerPhase, listener) -> Self` | a §2.3 listener that observes and steers a command in `Capture` or `Bubble` |
 | `on_scroll(impl FnMut(f32) + 'static) -> Self` | wheel deltas **no `overflow: scroll` container consumed** |
 | `virtual_list(InternedSymbol, impl FnMut(usize) -> ViewNode + 'static) -> Self` | the row builder for a list the runtime windows |
 | `on_row_click(InternedSymbol, impl FnMut(usize, u32) + 'static) -> Self` | `(model index, click count)` for a row of that list |
@@ -51,6 +55,45 @@ Every method is a consuming builder returning `Self`, except `run`.
 | `run(self) -> Result<(), AppError>` | opens the window and runs to completion |
 
 `view`, `view_with` and `screen` set the same slot: **the last one called wins.**
+
+### A handler takes nothing, or takes the event
+
+`on_command`, `on_command_at` and `add_event_listener` accept either shape
+(`IntoCommandHandler`):
+
+```rust
+.on_command(SAVE, || save())                              // takes nothing
+.on_command(PICK, |e: &mut UiEvent| pick(e.target()))     // takes the event
+```
+
+The event form is how §2.3's model reaches an application: `target()`,
+`current_target()`, `pointer()` / `key()`, `trust()`, and
+`stop_propagation()` / `prevent_default()`. A one-argument closure needs its
+parameter annotated — inference cannot pick the marker and the signature at once.
+Until this widened, the handler was an `FnMut()` given nothing, so a handler had
+to *capture* everything it might need.
+
+`on_row_click`, `on_row_long_press` and `on_scroll` stay outside that model: the
+runtime calls them straight from its pointer path rather than dispatching a
+command, so no event is delivered and no listener sees them.
+
+### Reaching the running runtime
+
+The loop owns the runtime and your handlers run inside it, so nothing hands out a
+`&mut UiRuntime`. `App::control()` is the way in — a cloneable handle a handler can
+capture, whose requests the runner applies at the next frame boundary:
+
+```rust
+let control = app.control();
+control.set_stylesheets(vec![theme_css()]);   // §4.12 explicit invalidation
+control.with_runtime(|rt| rt.scroll_into_view(node)); // no wrapper of its own
+control.bound_node(&SelectorTarget::test_id("save")); // did that name resolve?
+```
+
+`set_stylesheets` is the reason a theme switch no longer costs a rebuild: `App`
+used to collect the authored sheets once and never re-supply them, and never yield
+the runtime, so §4.12's "invalidated **explicitly**" was unreachable from a
+standalone application.
 
 ### `FrameInfo`
 

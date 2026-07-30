@@ -53,9 +53,9 @@ path to the outside is that file is exported, compiles, and is called by nothing
 | **Localization** | CLDR plural categories are real, with one production consumer (the shaper's language hint). Dates, numbers, currencies and the RTL frame path are open |
 | **Accessibility** | outbound only, behind the non-default `accesskit` feature. Inbound (an AT driving the app) is not built |
 | **§6.7 action model** | seven surfaces named; two exist (shortcuts, `Menu`). Custom context menus are required and unbuilt |
-| **Components** | `register_component` is real; **no user component can be authored in either front end**, so the component tier is the built-ins |
-| **`<VirtualFor>`** | refused on both front ends. Markup-level windowing is unimplemented; the runtime-registered form is the way |
-| **Slots** | declared and enforced on both front ends, projected by the runtime — but with no user components, only the built-ins can have them |
+| **Components** | authorable now: `<Card/>` binds to the id `#[derive(Contract)]` computes for that name, and `register_component` mounts a factory under it. What stops is the *checking* — an unregistered or misspelled tag mounts nothing with no diagnostic, and the `okui!` macro cannot ever check it (the registry is a runtime value of trait objects; the macro runs while that crate compiles) |
+| **`<VirtualFor>`** | compiles on both front ends and emits the §4.9 marker the runtime windows. The template carries **no item binding**, so every realized row is identical; per-item rows still need `register_virtual_list` |
+| **Slots** | declared, enforced and projected — but an outlet's name is checked against nothing, so a component rendering `<slot name="hedaer"/>` receives nothing. No shipped component declares a slot: no shipped widget is a `Component` |
 | **Telemetry** | `PerformanceSpan` carries no duration; the DevTools protocol has no timing field. `OBSCUR_FRAME_STATS` is the honest profiler |
 | **Diagnostics** | several producers construct a `Diagnostic` and drop it into the null sink. Reachable, not reached |
 | **Invalidation** | per-node on the style phase; a boolean per phase everywhere else. The phases take no dirty set |
@@ -67,7 +67,7 @@ path to the outside is that file is exported, compiles, and is called by nothing
 | | |
 |---|---|
 | **Flex clamps its own border box** | a flex container clamps rather than overflowing, so `width: 100%` + padding gives a different used width under flex than under block. The chain `[1000, 1020, 960]` is internally inconsistent. Related and *fixed*: an `auto` basis now resolves to max-content, so a plain item no longer eats the free space its growing siblings asked for |
-| **Indefinite axes and percentages** | percentages should resolve only against a definite size; the constraint model does not carry the distinction everywhere |
+| **Indefinite axes and percentages** | percentages should resolve only against a definite size; the constraint model does not carry the distinction everywhere. Related and *fixed*: a percentage block-size resolved against the space a child's *siblings* had left over, compounding down the chain (two `height: 100%` siblings measured 240/0). Flow now attaches the containing block's own definite content size as `BoxConstraints::percent_basis`, separately from the offer |
 | **No real min/max-content pair** | intrinsic sizing computes one number where the algorithm wants two |
 
 ## What this page is not

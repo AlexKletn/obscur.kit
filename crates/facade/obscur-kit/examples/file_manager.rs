@@ -8,9 +8,10 @@
 //!   file name, `class={row.class}` drives the selection highlight, and
 //!   `<For each={rows}>` emits one node per directory entry — a real Rust loop,
 //!   not a template materialized once. (A standalone `.okui` *file* cannot do
-//!   this today: the runtime bridge lowers a binding to its path's spelling and
-//!   materializes `<For>` once. The inline macro resolves bindings in *this*
-//!   function's scope, which is why the markup lives here.)
+//!   this today: `App::screen` resolves a binding against a `ScreenData` table
+//!   rather than against Rust scope, and its `<For>` is materialized once, so the
+//!   file route reaches *values* and not shape. The inline macro resolves bindings
+//!   in *this* function's scope, which is why the markup lives here.)
 //! * The kit performs no I/O of its own (§5.15): `std::fs` reads the directory,
 //!   the kit only renders. No network, no new dependency.
 //!
@@ -260,9 +261,14 @@ fn human_size(bytes: u64) -> String {
     }
 }
 
-/// Builds the whole UI from the current state. Every `{…}` below reads a real
-/// local of this function — that is what the inline macro buys over a compiled
-/// `.okui` file.
+/// Builds the whole UI from the current state. Every `{…}` in **body** position
+/// below reads a real local of this function — `{path}`, `{status}` — and that is
+/// what the inline macro buys over a compiled `.okui` file.
+///
+/// A `{…}` in an `on:` attribute is the other thing the same syntax means: a
+/// command *name*, hashed into the symbol the runtime dispatches on. `goParent`
+/// below is not a binding and there is no Rust item of that name anywhere — only
+/// the `command("goParent")` registration in `main`.
 fn build_view(state: &State) -> View {
     let path = maybe(state.dir.display().to_string());
     let status = maybe(state.message.clone());
@@ -291,8 +297,11 @@ fn build_view(state: &State) -> View {
         </div>
     };
     // Splice the virtual list between the toolbar and the status bar. The macro
-    // cannot emit the marker itself yet — that is the remaining `<VirtualFor>` work
-    // — so the shell is authored and the list is placed.
+    // *can* emit a marker now — a `<VirtualFor>` lowers to one — but its row
+    // template is emitted once with no item binding, so every realized row would be
+    // identical. These rows are a function of the entry at a model index, which is
+    // what the registered `virtual_list` builder is handed, so the shell is authored
+    // and the list is placed.
     splice_list(shell, list)
 }
 
@@ -358,8 +367,9 @@ fn main() -> Result<(), obscur_kit::AppError> {
     }));
     state.borrow_mut().load(start);
 
-    // `on:click="name"` in the markup lowers to the same named symbol, so the
-    // handler registered here under that name is the one it reaches.
+    // `on:click={name}` in the markup lowers to the same named symbol — the brace
+    // holds a command name, not an expression — so the handler registered here under
+    // that name is the one it reaches.
     let command = InternedSymbol::named;
 
     let view_state = state.clone();

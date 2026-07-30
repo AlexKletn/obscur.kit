@@ -174,6 +174,12 @@ Three worth knowing before they cost you an afternoon:
    against the parent's *border* box, so each nesting level grew by its parent's
    padding. Now carried explicitly as a percentage basis through the constraint —
    but if a box comes out wider than you expect, this is the first thing to check.
+   The block axis had the sibling version of the same confusion: the offer and the
+   percentage basis were one value, so the *second* child of a block resolved its
+   `height: %` against what its predecessors had left over (two `height: 100%`
+   siblings measured 240 and **0**, the second vanishing with no diagnostic). Both
+   axes now resolve against the containing block, and may overflow it, as
+   `css-sizing-3` says they should.
 2. **A flex container clamps its own border box** rather than overflowing, so a
    `width: 100%` plus padding gives a different answer under flex than under
    block. Unfixed.

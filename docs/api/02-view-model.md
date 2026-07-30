@@ -110,6 +110,11 @@ Reserved property names, all in `obscur_kit::view::view`:
 `TYPE` is what makes the UA stylesheet apply: a node with type `button` picks up
 the UA button rule, padding and border included. See [04 — Styling](04-styling.md).
 
+A view built by hand sets `TYPE` explicitly; markup does not have to — every
+authored element tag becomes its own `TYPE` (its CSS local name), so `<td>` is
+typed `td`. An authored `type="…"` wins that slot when both apply. See
+[09 — Authoring formats](09-authoring-formats.md#type-is-two-channels-through-one-symbol).
+
 ## Events
 
 ```rust
@@ -134,7 +139,10 @@ other notion of editability: the editing session, caret rendering, IME routing
 and [`focus_accepts_text`](03-runtime.md#focus) all key off it.
 
 Handlers are registered on the runtime, not the view — `on_command`,
-`on_command_at`, `on_text_input`, `on_change` — or on `App` via `on_command`.
+`on_command_at`, `on_scope_command`, `add_event_listener`, `on_text_input`,
+`on_change` — or on `App`, which now exposes the first three. A command handler
+takes nothing or takes the `&mut UiEvent` §2.3 dispatches; see
+[03 — The runtime](03-runtime.md#commands).
 
 ## Virtual lists
 
@@ -154,10 +162,12 @@ app.virtual_list(TAPE, move |index| row(index))
 *replaced* rather than appended, and the list returns to the top instead of
 holding a scroll offset into different data.
 
-**`ViewNode::virtual_collection(row_extent, template)`** — the template form.
+**`ViewNode::virtual_collection(row_extent, template)`** — the template form, and
+what a markup `<VirtualFor>` emits on both front ends.
 
-> **unwired** — `<VirtualFor>` is refused on both authoring front ends; §4.9
-> windowing from markup is not implemented. Use the runtime-registered form.
+> **partial** — the emitted template carries **no item binding**, so every
+> realized row is identical. For rows that differ per item, use the
+> runtime-registered form above: it is told each row's model index.
 
 Reserved symbols behind both: `VIRTUAL_LIST_ID`, `VIRTUAL_ITEM_COUNT`,
 `VIRTUAL_ROW_EXTENT`, `VIRTUAL_SCROLL_RESET`, `VIRTUAL_COLLECTION`,
@@ -170,9 +180,11 @@ Reserved symbols behind both: `VIRTUAL_LIST_ID`, `VIRTUAL_ITEM_COUNT`,
 into it. A stray outlet — one with nothing to project — is refused by the
 reconciler and reported.
 
-> **partial** — slots are declared and enforced on both front ends, but **no
-> user component can be authored in either front end yet**, so the only slots in
-> practice are the built-ins'.
+> **partial** — a user component authored as `<Card/>` in either front end does
+> mount and does receive its projected children. What is missing is checking: an
+> outlet's name is not verified against the component's own declaration, so a
+> `<slot name="hedaer"/>` silently receives nothing. No *shipped* component
+> declares a slot, because no shipped widget is a `Component`.
 
 ## Building views in practice
 

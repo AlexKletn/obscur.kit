@@ -116,14 +116,15 @@ focus scope → ancestors → window → application fallback.**
 
 | Method | Link |
 |---|---|
-| `on_command_at(NodeId, InternedSymbol, impl FnMut())` | 1 and 3 |
+| `on_command_at(NodeId, InternedSymbol, handler)` | 1 and 3 |
 | `has_node_command_handler(NodeId, InternedSymbol) -> bool` | |
 | `clear_node_commands(NodeId) -> usize` | |
-| `on_scope_command(FocusScopeId, InternedSymbol, impl FnMut())` | 2 |
+| `on_scope_command(FocusScopeId, InternedSymbol, handler)` | 2 |
 | `has_scope_command_handler(FocusScopeId, InternedSymbol) -> bool` | |
-| `on_command(InternedSymbol, impl FnMut())` | 4 — window level; this is the one an app usually wants |
+| `on_command(InternedSymbol, handler)` | 4 — window level; this is the one an app usually wants |
 | `has_command_handler(InternedSymbol) -> bool` | |
 | `set_app_commands(AppCommands)` / `app_commands() -> AppCommands` | 5 |
+| `add_event_listener(NodeId, InternedSymbol, ListenerPhase, listener)` | a §2.3 listener on a node, in `Capture` or `Bubble` |
 | `command_route(Option<NodeId>) -> Vec<CommandTarget>` | the chain itself, for inspection |
 
 | Shortcuts and descriptors | |
@@ -137,6 +138,27 @@ focus scope → ancestors → window → application fallback.**
 > **partial** — §6.7's action model names seven surfaces a `Command` should
 > drive. Two exist: keyboard shortcuts and `Menu`. Custom context menus are not
 > built.
+
+### The event a handler receives (§2.3)
+
+Every `handler` above is an `IntoCommandHandler`: either `impl FnMut()` or
+`impl FnMut(&mut UiEvent)`. A one-argument closure needs its parameter annotated
+(`|e: &mut UiEvent|`) — inference cannot pick the marker and the closure's
+signature at once.
+
+Dispatch runs §2.3's four phases in order — capture, target, bubble, default
+action — through the domain `EventDispatcher`, honouring `stop_propagation`,
+`stop_immediate_propagation` and `prevent_default`. A `UiEvent` carries `target`,
+`current_target`, `trust` and a typed payload; a pointer payload carries §2.4's
+pointer id, device, buttons, logical position, `delta`, pressure, `tilt`,
+`rotation`, primary-pointer status and hover capability.
+
+Until this was driven, the model existed as domain types with a spec test and no
+caller at all: an application handler was an `FnMut()` given nothing, selected by
+an FNV-1a hash of a name — which is the one mechanism §2.3 rules out by name.
+Handler *names* are still hashed. That half is closed by the compiler rather than
+the runtime, and only on the `.okui` build path (see
+[09](09-authoring-formats.md#validation)).
 
 ## Text editing and IME
 

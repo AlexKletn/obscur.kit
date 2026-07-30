@@ -111,9 +111,12 @@ values a stylesheet reads. See [04 — Styling](04-styling.md#themes).
 
 ## What is not here
 
-- **No user-authored components.** §2.14 registration exists on the runtime
-  (`register_component`), but no component can be authored in either front end
-  yet, so the component tier is the built-ins.
+- **No user-authored components *here*.** The tier this page documents is the
+  built-ins. Authoring your own works — `#[derive(Contract)]`, `<Card/>` in either
+  front end, `register_component` on the runtime, and §2.12 slot projection — but
+  this repository ships none, so nothing below is one. See
+  [09 — Authoring formats](09-authoring-formats.md#user-components-and-slots) for
+  what is and is not checked about the tag.
 - **No context menus.** §6.7 requires custom context menus; `Menu` is a menu
   surface, not a context menu.
 - **Docking is structure only** — panels are described and laid out; dragging one
