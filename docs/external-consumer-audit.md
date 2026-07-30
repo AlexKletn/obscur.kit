@@ -52,6 +52,23 @@ one left behind is stated under the finding itself, not rounded away here.
 | 3-A…3-D | closed | `e238817` — and the rest of the drift the page had accumulated |
 | `<button>` | closed | `445b6bd` — the owner's request, plus the local name every element was missing |
 
+The second pass, re-run against `49a6d6e` and `14d2f3b`, has its own ledger:
+
+| # | Status | Commit |
+|---|---|---|
+| 2-1 | closed, and one of its eliminations was wrong | `14d2f3b` — §4.15 scoping existed and had no door; `StyleScope::Open` is the door, and the UA sheet now crosses unconditionally |
+| 2-2 | closed | `6176bb6` — the derive emits through the facade too, and the guard crate now authors a component |
+| 2-3 | closed | `6a24c73` — `okui!` reads `ident ('-' ident)*`, so §7.5 ids reach the primary front end |
+| 2-4 | closed, both halves | `406182f` — the grid states each item's area as its children's basis, and `stretch` asks whether the size is `auto` |
+| — | opened by 2-4's inventory, then closed | `c45fc2a` — a flex item's cross measure stated no basis, so an item re-read its own used width as its containing block |
+
+Three findings of the second pass are residues of the first pass's fixes, and two
+of its diagnoses were wrong about the mechanism while right about the consequence
+(2-1, 2-4a). Both corrections are recorded under the findings themselves rather
+than smoothed away, because which of those two an audit gets wrong is the useful
+signal: the symptom is what an outside observer can see, and the cause is what only
+the code can tell you.
+
 The line numbers this document cites are the ones it was written against
 (`c9f7368`); after the campaign most of them have moved. The file:line evidence is
 kept as written rather than refreshed, because an audit that edits its own evidence
@@ -681,3 +698,93 @@ same way.
   `content-box` (a button's UA padding added to a percentage-sized content box) is
   correct CSS, not a regression: with `box-sizing: border-box` both come out at
   exactly 480×120.
+
+## 2-4. A grid item's children see a containing block the item does not have
+
+Measured with the headless inspector. Shell: `width/height: 100%`,
+`box-sizing: border-box`, `padding: 24px`, `display: grid`,
+`grid-template-columns: 1fr 1fr`, `gap: 10px` at a 480×240 viewport — so the grid
+container's content box is **432** and each track is **(432 − 10) / 2 = 211**. One
+item, one child, the child always `width: 50%`:
+
+| item `width` | item's used width | child | child should be | the child resolved against |
+|---|---|---|---|---|
+| `auto` | 211 | **106** ✓ | 105.5 | 211 — the item, correct |
+| `100%` | 211 | **216** ✗ | 105.5 | **432** — the grid *container's* content box |
+| `50px` | 211 ✗ | 25 | 105.5 | 50 — the declared value |
+
+Two distinct defects fall out of that table.
+
+**(a) A percentage width on a grid item is resolved against the wrong box when
+establishing the containing block for its children.** In the `100%` row the item's
+own used width is right (211 = the track), but its children get 432 — the item's
+`100%` was resolved against the grid container's content box instead of its grid
+area, and *that* value, which the item never has, is what the subtree inherits as
+its containing block. The item's used size and the size its children see disagree.
+
+This is what first surfaced it: an ordinary `<span>` inside a `width: 100%` grid
+item reported 432 while its parent was 211, and the number tracked the shell's
+padding exactly (padding 0 → 480, 24 → 432, 50 → 380) rather than the parent's
+width (235 / 211 / 185).
+
+**Not a general defect** — block flow and flex both resolve correctly. A parent at
+`width: 100px` with a `50%` child gives 50 under `display: block` and under
+`display: flex`. Only grid gets it wrong.
+
+**(b) `stretch` is applied to an item whose size is not `auto`.** In the `50px`
+row the item is laid out at 211, the full track, discarding its definite width.
+`justify-self: start` on the same rule gives 100 for a `width: 100px` item, so the
+declared value is understood — the default alignment overrides it.
+
+`specs/w3c/css-align-3.txt:1377`, vendored here, scopes the value precisely:
+
+> **stretch** — When the box's computed width/height (as appropriate to the axis)
+> **is auto** and neither of its margins (in the appropriate axis) are auto, sets
+> the box's used size to the length necessary to make its outer size as close to
+> filling the alignment container as possible … Unless otherwise specified, this
+> value falls back to **flex-start** generally.
+
+A non-`auto` size must therefore fall back to `flex-start` and keep its declared
+width. The kit stretches regardless.
+
+**Why (a) and (b) are worth separating.** They fail in opposite directions and can
+mask each other: in the `50px` row the *child* is arithmetically consistent with
+the declared width while the *item* is not, and in the `100%` row the *item* is
+right while the child is not. A fix for either alone leaves the other's row wrong.
+
+**Both closed, in that order.** (a) first: the grid algorithm now states each
+item's **grid area** as the percentage basis its subtree inherits
+(`LayoutOutput::child_percent_basis`), so a `width: 100%` item and its children
+finally agree on one containing block. Then (b): `stretch` is tested against the
+item's computed size on each axis before it is applied, and falls back to a real
+flex-start — the declared size kept, the box at the start of its area — exactly as
+`css-align-3` scopes the keyword. Re-measured through the facade
+(`crates/facade/obscur-kit/tests/percentage_in_grid_item.rs`):
+
+| item `width` | item's used width | child | the child resolved against |
+|---|---|---|---|
+| `auto` | 211 | **105.5** ✓ | 211 — the item |
+| `100%` | 211 | **105.5** ✓ | 211 — the item, no longer the container's 432 |
+| `50px` | **50** ✓ | **25** ✓ | 50 — the declared value |
+
+The audit's "child should be" column read 105.5 on all three rows; on the `50px`
+row that is the heading carried down rather than the CSS answer, and the audit's
+own prose says so ("the child is arithmetically consistent with the declared
+width"). An item that is genuinely 50 wide can only give a `50%` child 25.
+
+**What (b) deliberately left undone.** The `stretch` definition has a second
+condition — "neither of its margins (in the appropriate axis) are auto" — and it
+is not implemented, because grid does not read item margins at all yet: an `auto`
+margin on a grid item moves nothing, so suppressing stretch for one would leave a
+`width: auto; margin-left: auto` box shrink-wrapped at the *start* of its area
+when the margin exists to push it to the end (css-grid-2 §10.2). It stays
+stretched, wrong in the direction it already was, until item margins land.
+
+**Flex does not share (b), and has a narrower cousin.** Checked, not assumed:
+`FlexLayout` already resolves an item's cross size before stretching it, so in a
+row flex container a `height: 30px` item measures 30 and a `height: 50%` item
+measures 50 of the container's 100 — only `height: auto` fills. But
+`height: min-content` measures 100: the test is "does this resolve to a length",
+and an intrinsic keyword resolves to none, so it is treated as `auto`. css-flexbox
+scopes its own stretch to "its computed cross size property is auto", which
+`min-content` is not. Separate finding, separate spec sentence, left alone.
